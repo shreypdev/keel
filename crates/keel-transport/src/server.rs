@@ -16,6 +16,7 @@ use parking_lot::{Condvar, Mutex};
 use crate::bridge::Bridge;
 use crate::conn::Conn;
 use crate::error::ServeError;
+use crate::origin::OriginPolicy;
 use crate::session;
 use crate::ws::close;
 
@@ -50,6 +51,9 @@ pub struct ServerConfig {
     /// Release the objects a client's constructors made when it disconnects (its observations
     /// and open calls are always ended). Default `true`.
     pub release_on_disconnect: bool,
+    /// Which web pages may connect. Default: pages on this machine or a private network (see
+    /// [`OriginPolicy`]); native clients always may.
+    pub origin_policy: OriginPolicy,
 }
 
 impl Default for ServerConfig {
@@ -63,6 +67,7 @@ impl Default for ServerConfig {
             max_queued_bytes: 64 << 20,
             max_connections: 16,
             release_on_disconnect: true,
+            origin_policy: OriginPolicy::default(),
         }
     }
 }

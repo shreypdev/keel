@@ -37,6 +37,8 @@ use keel_wire::payload::{
 use keel_wire::{Envelope, Kind, Reader, WireError, Writer};
 use tungstenite::Message;
 use tungstenite::error::{Error, ProtocolError};
+use tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tungstenite::http::StatusCode;
 
 use crate::bridge::{Bridge, ClientInfo};
 use crate::conn::{Conn, Item};
@@ -373,6 +375,8 @@ fn serve(shared: &Arc<Shared>, id: u64, tcp: TcpStream) {
 }
 
 /// Upgrades the socket and runs the read loop. On return the caller tears the session down.
+// The upgrade callback's error type (`http::Response`) is fixed by tungstenite.
+#[allow(clippy::result_large_err)]
 fn session_loop(
     shared: &Shared,
     session: &Session,
@@ -392,7 +396,23 @@ fn session_loop(
             return;
         }
     };
-    let mut socket = match tungstenite::accept_with_config(half, Some(ws_config)) {
+    let origin_check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
+        let origin = request.headers().get("Origin").map(|value| value.to_str());
+        let allowed = match origin {
+            None => config.origin_policy.allows(None),
+            Some(Ok(origin)) => config.origin_policy.allows(Some(origin)),
+            Some(Err(_)) => false,
+        };
+        if allowed {
+            return Ok(response);
+        }
+        let shown = origin.and_then(Result::ok).unwrap_or("(not text)");
+        session.note(WARN, &format!("refused a page from origin {shown}: see OriginPolicy"));
+        let mut refusal = ErrorResponse::new(Some("origin not allowed".to_owned()));
+        *refusal.status_mut() = StatusCode::FORBIDDEN;
+        Err(refusal)
+    };
+    let mut socket = match tungstenite::accept_hdr_with_config(half, origin_check, Some(ws_config)) {
         Ok(socket) => socket,
         Err(e) => {
             // Not a WebSocket client, or one that stalled: nothing to say to it.
@@ -517,5 +537,131 @@ fn drain(tcp: &TcpStream, limit: Duration) {
             Ok(0) | Err(_) => return,
             Ok(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc::Receiver;
+
+    use keel_runtime::RuntimeConfig;
+    use keel_runtime::testing::call_payload;
+    use keel_wire::payload::{Reply, ReplyStatus};
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// A runtime with the bridge as its host, a connection attached to it, and its session.
+    struct Rig {
+        rt: Arc<Runtime>,
+        session: Session,
+        queue: parking_lot::Mutex<Receiver<Item>>,
+    }
+
+    impl Rig {
+        fn new() -> Rig {
+            let bridge = Bridge::new();
+            let rt = Runtime::new(
+                RuntimeConfig {
+                    core_threads: 1,
+                    log_level: 0,
+                    ..RuntimeConfig::default()
+                },
+                bridge.clone(),
+            )
+            .expect("the runtime starts");
+            let (conn, queue) = Conn::new(1, rt.schema_hash(), usize::MAX, None);
+            let conn = Arc::new(conn);
+            assert!(bridge.claim(&conn, Duration::ZERO));
+            let session = Session::new(rt.clone(), bridge, conn, &ServerConfig::default());
+            Rig {
+                rt,
+                session,
+                queue: parking_lot::Mutex::new(queue),
+            }
+        }
+
+        fn frame(&self, kind: Kind, payload: &[u8]) -> Vec<u8> {
+            let mut w = Writer::new();
+            Envelope::write(&mut w, kind, 0, self.rt.schema_hash(), payload);
+            w.into_vec()
+        }
+
+        /// The replies queued for the client so far.
+        fn replies(&self) -> Vec<(u32, ReplyStatus)> {
+            let mut out = Vec::new();
+            while let Ok(item) = self.queue.lock().try_recv() {
+                if let Item::Frame(bytes) = item {
+                    let env = Envelope::parse(&bytes).expect("the server writes valid envelopes");
+                    if env.kind == Kind::Reply {
+                        let reply = Reply::decode(&mut Reader::new(env.payload)).unwrap();
+                        out.push((reply.call_id, reply.status));
+                    }
+                }
+            }
+            out
+        }
+    }
+
+    #[test]
+    fn a_call_through_the_session_is_answered_and_tracked() {
+        let rig = Rig::new();
+        let payload = call_payload(CallTarget::Function { method_id: 0xdead }, 5, &[]);
+        rig.session
+            .on_frame(&rig.frame(Kind::Call, &payload))
+            .expect("a well-formed call is not a violation");
+        assert_eq!(rig.replies(), [(5, ReplyStatus::BadRequest)]);
+        assert_eq!(rig.session.conn.drain().calls, Vec::<u32>::new(), "answered, so not open");
+    }
+
+    #[test]
+    fn a_schema_mismatch_is_a_policy_violation_naming_both_hashes() {
+        let rig = Rig::new();
+        let mut w = Writer::new();
+        Envelope::write(&mut w, Kind::Cancel, 0, 0x1234, &[1, 0, 0, 0]);
+        let violation = rig.session.on_frame(w.as_slice()).unwrap_err();
+        assert_eq!(violation.code, close::POLICY_VIOLATION);
+        assert!(violation.reason.contains("0x0000000000001234"), "{}", violation.reason);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1500))]
+
+        /// Random bytes are a violation or ignored; never a panic.
+        #[test]
+        fn random_bytes_never_panic_the_session(bytes in proptest::collection::vec(any::<u8>(), 0..300)) {
+            let rig = rig();
+            match rig.session.on_frame(&bytes) {
+                Ok(()) => {}
+                Err(v) => prop_assert!(v.code == close::PROTOCOL_ERROR || v.code == close::POLICY_VIOLATION),
+            }
+            let _ = rig.session.on_hello(&bytes);
+        }
+
+        /// A valid header with the right schema and a random kind and payload: the payload
+        /// decoders and the runtime see arbitrary bytes and must survive them.
+        #[test]
+        fn valid_headers_with_random_payloads_never_panic(
+            kind in 1_u8..=16,
+            payload in proptest::collection::vec(any::<u8>(), 0..120),
+        ) {
+            let rig = rig();
+            let kind = Kind::from_u8(kind).unwrap();
+            match rig.session.on_frame(&rig.frame(kind, &payload)) {
+                Ok(()) => {}
+                Err(v) => prop_assert_eq!(v.code, close::PROTOCOL_ERROR),
+            }
+            // The core is still there afterwards.
+            let probe = call_payload(CallTarget::Function { method_id: 1 }, 0xfff0, &[]);
+            let _ = rig.rt.call_sync(&probe);
+            prop_assert!(!rig.rt.is_shut_down());
+        }
+    }
+
+    /// One shared rig per test binary keeps the property tests fast: they only need a live
+    /// runtime, not a fresh one.
+    fn rig() -> &'static Rig {
+        static RIG: std::sync::OnceLock<Rig> = std::sync::OnceLock::new();
+        RIG.get_or_init(Rig::new)
     }
 }

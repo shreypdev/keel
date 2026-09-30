@@ -63,6 +63,7 @@ native_server! {
     mod bridge;
     mod conn;
     mod error;
+    mod origin;
     mod server;
     mod session;
     mod tracker;
@@ -71,6 +72,7 @@ native_server! {
 
     pub use bridge::{Bridge, ClientInfo, LogSink};
     pub use error::ServeError;
+    pub use origin::OriginPolicy;
     pub use server::{Server, ServerConfig};
     pub use session::KEEL_VERSION;
     pub use ws::close;

@@ -396,12 +396,24 @@ pub struct TestClient {
 impl TestClient {
     /// Connects the socket only: no Hello.
     pub fn connect_raw(url: &str, schema: u64) -> TestClient {
+        TestClient::connect_with_origin(url, schema, None)
+    }
+
+    /// Like [`connect_raw`](TestClient::connect_raw), presenting `origin` as a browser would.
+    pub fn connect_with_origin(url: &str, schema: u64, origin: Option<&str>) -> TestClient {
+        use tungstenite::client::IntoClientRequest;
         let host = url.trim_start_matches("ws://");
         let tcp = TcpStream::connect(host).expect("the server accepts");
         tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         tcp.set_nodelay(true).unwrap();
+        let mut request = url.into_client_request().unwrap();
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert("Origin", origin.parse().unwrap());
+        }
         let (ws, _response) =
-            tungstenite::client(url, tcp).expect("the WebSocket upgrade succeeds");
+            tungstenite::client(request, tcp).expect("the WebSocket upgrade succeeds");
         TestClient {
             ws,
             schema,
@@ -705,12 +717,24 @@ pub struct RawFrame {
 impl RawWs {
     /// Connects and performs the upgrade; panics unless the server answers `101`.
     pub fn connect(addr: std::net::SocketAddr) -> RawWs {
+        let (ws, head) = RawWs::upgrade(addr, &[]);
+        assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+        ws
+    }
+
+    /// Sends the upgrade request with `headers` added and returns the server's answer (the
+    /// status line and headers, whatever the status is).
+    pub fn upgrade(addr: std::net::SocketAddr, headers: &[(&str, &str)]) -> (RawWs, String) {
         let mut ws = RawWs::connect_socket(addr);
+        let extra: String = headers
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}\r\n"))
+            .collect();
         ws.tcp
             .write_all(
                 format!(
                     "GET / HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
-                     Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                     Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n{extra}\r\n"
                 )
                 .as_bytes(),
             )
@@ -721,9 +745,7 @@ impl RawWs {
             ws.tcp.read_exact(&mut byte).expect("the upgrade response");
             head.push(byte[0]);
         }
-        let head = String::from_utf8_lossy(&head).into_owned();
-        assert!(head.starts_with("HTTP/1.1 101"), "{head}");
-        ws
+        (ws, String::from_utf8_lossy(&head).into_owned())
     }
 
     /// Connects the socket without upgrading.

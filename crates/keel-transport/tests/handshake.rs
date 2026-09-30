@@ -67,7 +67,7 @@ fn a_schema_mismatch_is_reported_from_the_servers_hello_and_then_closed() {
 
     // The server carries on: a client with the right hash is served.
     let mut good = f.client();
-    assert_eq!(good.new_counter(3) > 0, true);
+    assert!(good.new_counter(3) > 0);
 }
 
 #[test]
