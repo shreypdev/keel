@@ -6,7 +6,7 @@
 [![Benchmarks](https://github.com/shreypdev/keel/actions/workflows/bench.yml/badge.svg)](https://github.com/shreypdev/keel/actions/workflows/bench.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-**[keel.dev docs & site → shreypdev.github.io/keel](https://shreypdev.github.io/keel/)**
+**[Docs & site → shreypdev.github.io/keel](https://shreypdev.github.io/keel/)**
 
 Keel owns everything **under the pixels** of your iOS, Android and web apps — domain
 logic, reactive state, the data layer, persistence, and the dev loop — while the UI stays
