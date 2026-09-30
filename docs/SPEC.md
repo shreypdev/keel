@@ -484,7 +484,7 @@ Swift calls the C ABI through a module map (`KeelFFI` C module inside the XCFram
 
 For **sync** ports the host must fill `out_reply` with a PortReply payload and return 0 before returning. For **async** ports the host returns 1 and later calls `keel_port_reply`. Returning 2 fails the call with `PortError::Unavailable`. A port that is not registered behaves as 2.
 
-`out_reply` memory rule (the one buffer a host allocates): on returning 0 the host stores a block from the C allocator (`malloc`) with `len` set and **`cap = 0`**; ownership passes to the core, which copies the bytes and releases the block with `free`, never `keel_buf_free`. A non-zero `cap` marks a `KeelBuf` this library itself produced (a Rust embedder reusing one); the core reclaims it as a `Vec`. On wasm (§7) a sync port must call `keel_port_reply` *before* returning 0 from the `port_call` import; returning 0 without having replied fails that call instead of leaving it pending.
+`out_reply` memory rule (the one buffer a host allocates): on returning 0 the host stores a block from the C allocator (`malloc`) with `len` set; ownership passes to the core, which copies the bytes and **always** releases the block with `free`, never `keel_buf_free` and never as a Rust allocation. `cap` is reserved: the host sets it to 0 and the core ignores it (a host-written `cap` used to select a Rust deallocator, which a `malloc`ed block with `cap = len` turned into allocator-mismatch undefined behaviour, review M1). On wasm (§7) a sync port must call `keel_port_reply` *before* returning 0 from the `port_call` import; returning 0 without having replied fails that call instead of leaving it pending.
 
 ---
 

@@ -49,12 +49,13 @@ pub type KeelStreamCb =
 /// * `2` (or anything else): the port is unavailable.
 ///
 /// **Host reply memory rule** (the one place where the host, not the core, allocates a
-/// buffer): on `0` the host stores in `*out_reply` a block from the C allocator
-/// (`malloc(n)`) with `len = n` and **`cap = 0`**. Ownership passes to the core when the callback
-/// returns: it copies the bytes at once and releases the block with `free`, never with
-/// `keel_buf_free`. A non-zero `cap` marks a buffer that this crate allocated (a Rust embedder
-/// reusing a [`KeelBuf`]); the core then reclaims it as a `Vec`. For `1` and `2` the host leaves
-/// `*out_reply` untouched.
+/// buffer): on `0` the host stores in `*out_reply` a block from the C allocator (`malloc(n)`)
+/// with `len = n`. **The block is always released with `free`**, by the core, once it has copied
+/// the bytes: never with `keel_buf_free`, never as a Rust `Vec`, whatever the other fields say.
+/// `cap` is reserved and ignored: set it to `0`. (An earlier draft let a non-zero `cap` mark a
+/// Rust-allocated buffer; a host that filled `cap` with the natural meaning of the word then
+/// made the core free a C block with Rust's allocator, which is undefined behaviour, so the
+/// branch is gone.) For `1` and `2` the host leaves `*out_reply` untouched.
 pub type KeelPortCb = unsafe extern "C" fn(
     user: *mut c_void,
     port_id: u32,
@@ -66,7 +67,7 @@ pub type KeelPortCb = unsafe extern "C" fn(
 ) -> u8;
 
 unsafe extern "C" {
-    /// The C allocator's `free`, for host-allocated port replies (`cap == 0`).
+    /// The C allocator's `free`, for host-allocated port replies (always `malloc`ed).
     fn free(ptr: *mut c_void);
 }
 
@@ -97,10 +98,14 @@ fn c_len(payload: &[u8]) -> Option<u32> {
 
 /// Reads and releases the reply a synchronous port callback left in `out`.
 ///
+/// The block is the host's `malloc`ed memory and is released with `free`, always: `out.cap` is
+/// reserved and never looked at (see [`KeelPortCb`]).
+///
 /// # Safety
 ///
 /// `out` must be what the host stored on returning `0` from the port callback, following the
-/// memory rule of [`KeelPortCb`].
+/// memory rule of [`KeelPortCb`]: null, or `len` readable bytes in a block from the C allocator
+/// that the host hands over.
 unsafe fn take_host_reply(out: KeelBuf) -> Option<Vec<u8>> {
     if out.ptr.is_null() {
         return None;
@@ -112,14 +117,8 @@ unsafe fn take_host_reply(out: KeelBuf) -> Option<Vec<u8>> {
         // callback's caller (us) releases the block below.
         Some(unsafe { core::slice::from_raw_parts(out.ptr, out.len as usize) }.to_vec())
     };
-    if out.cap == 0 {
-        // SAFETY: `cap == 0` means a block from the C allocator that the host handed over.
-        unsafe { free(out.ptr.cast()) };
-    } else {
-        // SAFETY: a non-zero `cap` means a buffer built by `KeelBuf::from_vec`, which
-        // `KeelBuf::free` reclaims exactly once.
-        unsafe { out.free() };
-    }
+    // SAFETY: the memory rule makes `ptr` a block from the C allocator that the host handed over.
+    unsafe { free(out.ptr.cast()) };
     bytes
 }
 
@@ -463,4 +462,53 @@ pub extern "C" fn keel_stats_json() -> KeelBuf {
 pub unsafe extern "C" fn keel_buf_free(buf: KeelBuf) {
     // SAFETY: the caller guarantees `buf` came from this library and is freed once.
     unsafe { buf.free() };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" {
+        fn malloc(size: usize) -> *mut c_void;
+    }
+
+    /// A reply the way a C host leaves it: `malloc`ed, `len` set, and whatever it put in `cap`.
+    fn host_reply(bytes: &[u8], cap: u32) -> KeelBuf {
+        // SAFETY: `malloc` of a non-zero size; the block is filled before it is used.
+        let block = unsafe { malloc(bytes.len().max(1)) }.cast::<u8>();
+        assert!(!block.is_null());
+        // SAFETY: `block` is valid for `bytes.len()` bytes and does not overlap `bytes`.
+        unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), block, bytes.len()) };
+        KeelBuf {
+            ptr: block,
+            len: u32::try_from(bytes.len()).expect("small"),
+            cap,
+        }
+    }
+
+    /// M1: `cap` is reserved. Whatever a host writes there, the block is released with `free`
+    /// (Miri: a mismatched deallocator is undefined behaviour it reports).
+    #[test]
+    fn a_host_reply_is_released_with_free_whatever_cap_says() {
+        for cap in [0, 5, 4096, u32::MAX] {
+            let reply = host_reply(&[1, 2, 3, 4, 5], cap);
+            // SAFETY: `reply` follows the memory rule of `KeelPortCb`.
+            let taken = unsafe { take_host_reply(reply) };
+            assert_eq!(taken, Some(vec![1, 2, 3, 4, 5]), "cap = {cap}");
+        }
+    }
+
+    #[test]
+    fn an_empty_or_missing_host_reply_is_unavailable_and_still_freed() {
+        // A block with `len == 0` (the host allocated and wrote nothing): freed, no bytes.
+        let empty = KeelBuf {
+            len: 0,
+            ..host_reply(&[9], 7)
+        };
+        // SAFETY: `empty` follows the memory rule (a `malloc`ed block, handed over).
+        assert_eq!(unsafe { take_host_reply(empty) }, None);
+        // The host returned 0 without storing anything: `out_reply` is still the empty buffer.
+        // SAFETY: a null `ptr` is always acceptable.
+        assert_eq!(unsafe { take_host_reply(KeelBuf::EMPTY) }, None);
+    }
 }

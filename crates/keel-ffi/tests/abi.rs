@@ -44,7 +44,7 @@ unsafe extern "C" {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PortMode {
-    /// Answer inline through `out_reply` (malloc'd, `cap == 0`).
+    /// Answer inline through `out_reply` (malloc'd, `cap` reserved).
     Sync,
     /// Return 1 and let the test call `keel_port_reply`.
     Async,
@@ -215,7 +215,11 @@ extern "C" fn on_stream(user: *mut c_void, call_id: u32, ptr: *const u8, len: u3
     cap.with(|inner| inner.stream_items.push((call_id, bytes)));
 }
 
-/// Hands `payload` to the core as a host-allocated reply: `malloc`ed, `cap == 0`.
+/// What `answer_sync` writes into `out_reply.cap`: `0` as `keel.h` asks, or (set by a test) the
+/// block's length, the way a host that took "cap" to mean "capacity" would fill it (review M1).
+static REPLY_CAP_IS_LEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hands `payload` to the core as a host-allocated reply: `malloc`ed, `cap` reserved (0).
 ///
 /// # Safety
 ///
@@ -228,10 +232,15 @@ unsafe fn answer_sync(out: *mut KeelBuf, payload: &[u8]) {
     unsafe { std::ptr::copy_nonoverlapping(payload.as_ptr(), block, payload.len()) };
     // SAFETY: `out` is valid per the caller's contract; ownership of `block` passes to the core.
     unsafe {
+        let len = u32::try_from(payload.len()).expect("small");
         *out = KeelBuf {
             ptr: block,
-            len: u32::try_from(payload.len()).expect("small"),
-            cap: 0,
+            len,
+            cap: if REPLY_CAP_IS_LEN.load(Ordering::Acquire) {
+                len
+            } else {
+                0
+            },
         };
     }
 }
@@ -1006,6 +1015,26 @@ fn sync_port_answers_through_out_reply_and_the_core_frees_it() {
         assert_eq!(call.method_id, ids::port_method_id("Sum", "add"));
         assert_eq!(call.args, args);
     });
+}
+
+/// M1: a host that fills `cap` (the natural reading of the field) on its `malloc`ed reply must
+/// not make the core free a C block with Rust's allocator: `out_reply` is always `free`d. Under
+/// Miri a mismatched deallocator is reported as undefined behaviour, so this is the test
+/// `cargo +nightly miri test -p keel-ffi --test abi -- cap_set` runs.
+#[test]
+fn a_host_that_sets_cap_on_its_malloc_block_is_still_freed_with_free() {
+    let host = Embedder::start();
+    let calc = host.calculator(0);
+    let args: Vec<u8> = [20_u32.encode_to_vec(), 22_u32.encode_to_vec()].concat();
+    REPLY_CAP_IS_LEN.store(true, Ordering::Release);
+    for _ in 0..10 {
+        let (status, body) = host.sync(method(calc, "Calculator", "sum_on_host"), &args);
+        assert_eq!(
+            (status, u32::decode_exact(&body).unwrap()),
+            (ReplyStatus::Ok, 42)
+        );
+    }
+    REPLY_CAP_IS_LEN.store(false, Ordering::Release);
 }
 
 #[test]
