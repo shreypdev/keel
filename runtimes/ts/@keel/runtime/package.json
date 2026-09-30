@@ -10,7 +10,7 @@
   },
   "type": "module",
   "sideEffects": false,
-  "//": "SPEC section 13 also lists the subpath exports ./react, ./vue, ./svelte, ./solid, ./worker and ./node. They are added by the later work that implements those modules; only . and ./wire exist so far, because no export may point at a stub.",
+  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.'), and no export may point at a stub. The framework packages are optional peer dependencies: @keel/runtime itself imports none of them, each adapter imports only its own.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,6 +19,26 @@
     "./wire": {
       "types": "./dist/wire/index.d.ts",
       "default": "./dist/wire/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./vue": {
+      "types": "./dist/vue.d.ts",
+      "default": "./dist/vue.js"
+    },
+    "./svelte": {
+      "types": "./dist/svelte.d.ts",
+      "default": "./dist/svelte.js"
+    },
+    "./solid": {
+      "types": "./dist/solid.d.ts",
+      "default": "./dist/solid.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
     },
     "./package.json": "./package.json"
   },
@@ -30,6 +50,26 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "solid-js": ">=1.6",
+    "svelte": ">=4",
+    "vue": ">=3.3"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -44,8 +84,11 @@
     "jsdom": "^30.1.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "solid-js": "^1.9.15",
+    "svelte": "^5.57.1",
     "typescript": "^5.9.3",
     "vitest": "^5.0.2",
+    "vue": "^3.5.43",
     "wabt": "^1.0.39"
   }
 }
