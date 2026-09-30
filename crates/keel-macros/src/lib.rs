@@ -23,7 +23,8 @@
 //! what is wrong, why the rule exists, how to fix it and a docs link. After a diagnostic the
 //! original item is still emitted (with its helper attributes removed), so the user sees the
 //! Keel errors and no cascade; a failed `#[keel::store]` also keeps the hidden field and the
-//! members its impl block uses.
+//! members its impl block uses, and a failed record, enum or error keeps behaviour-free
+//! `Encode`/`Decode`/`KEEL_TYPE_ID` impls so its users do not fail as well.
 //!
 //! What the macros cannot see from syntax, they check at compile time in the user's crate: that a
 //! spelled type is the type the schema names (`Bytes`, `use a::Item as Todo`; E0060, E0061), that

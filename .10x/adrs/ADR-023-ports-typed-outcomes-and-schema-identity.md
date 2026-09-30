@@ -85,7 +85,9 @@ knows why they moved.
   KeelObject`, forwarding to hidden inherent members (`__keel_cell_ref`, `__keel_restore`) of the
   struct. A store without its impl block gets the branded `E0011` instead of four unsatisfied
   `KeelObject` bounds, and a failed `#[keel::store]` still defines the hidden field and stub members
-  so its impl block adds no errors.
+  so its impl block adds no errors. A record, enum or error that fails to expand likewise keeps
+  behaviour-free `Encode`, `Decode` and `KEEL_TYPE_ID` (and `Display`/`Error` for an error), so the
+  new identity checks do not repeat the one real error at every use of the type.
 * Generated locals that sit next to user parameter names are positional (`__keel_a0`, ..) or carry
   the `__keel_` prefix, so a parameter called `__r`, `__w` or `__ctx` no longer collides.
 * A port whose snake-case name is a keyword gets a raw accessor (`r#match`); `self`, `super` and
