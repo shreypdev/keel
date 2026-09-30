@@ -13,6 +13,13 @@ export interface MirrorOptions {
   readonly schedule?: (fn: () => void) => void;
 }
 
+/**
+ * Rounds one flush runs before it hands the rest to a later flush: a subscriber whose core call
+ * changes a signal it is subscribed to would otherwise keep one flush going forever. The same
+ * bound as the core's commit (docs/SPEC.md section 16.1).
+ */
+const MAX_ROUNDS = 1000;
+
 interface Waiter {
   readonly signalId: number;
   readonly resolve: () => void;
@@ -129,13 +136,17 @@ export class Mirror {
     this.#changeSets++;
     if (entries.length === 0) return;
     for (const entry of entries) this.#queue.push(entry);
-    if (!this.#scheduled && !this.#flushing) {
-      this.#scheduled = true;
-      this.#schedule(() => {
-        this.#scheduled = false;
-        this.flush();
-      });
-    }
+    // A running flush applies what arrives while it runs (see `flush`), so it needs no second one.
+    if (!this.#flushing) this.#scheduleFlush();
+  }
+
+  #scheduleFlush(): void {
+    if (this.#scheduled) return;
+    this.#scheduled = true;
+    this.#schedule(() => {
+      this.#scheduled = false;
+      this.flush();
+    });
   }
 
   /**
@@ -143,23 +154,42 @@ export class Mirror {
    * {@link batch}, then resolves the {@link Mirror.whenObserved} promises the
    * entries satisfied. Called by the scheduled flush; the runtime also calls
    * it directly when a core delivers output synchronously (`observe` in
-   * process). Entries queued while flushing are applied by the same flush.
-   * A nested call returns at once.
+   * process). A nested call returns at once.
+   *
+   * Entries queued while flushing are applied by the same flush, in further
+   * rounds: the subscribers of a batch are notified when it ends, and one
+   * that makes a synchronous core call (every synchronous method in
+   * `wasm-main`) queues the change-set of that call after the round's queue
+   * ran dry. Each round is its own batch, so a signal is announced once per
+   * round. After 1000 rounds the rest is left to a later flush.
    */
   flush(): void {
     if (this.#flushing || this.#queue.length === 0) return;
     this.#flushing = true;
     const satisfied: Waiter[] = [];
     try {
-      batch(() => {
-        while (this.#queue.length > 0) {
-          const entries = this.#queue;
-          this.#queue = [];
-          for (const entry of entries) this.#apply(entry, satisfied);
+      for (let round = 0; this.#queue.length > 0; round++) {
+        if (round === MAX_ROUNDS) {
+          this.#onError(
+            new KeelError(
+              "state",
+              `the mirror applied ${MAX_ROUNDS} rounds of change-sets in one flush: a signal subscriber keeps causing changes to a store it observes`,
+            ),
+          );
+          break;
         }
-      });
+        batch(() => {
+          while (this.#queue.length > 0) {
+            const entries = this.#queue;
+            this.#queue = [];
+            for (const entry of entries) this.#apply(entry, satisfied);
+          }
+        });
+      }
     } finally {
       this.#flushing = false;
+      // Left over by the round cap or by an error that unwound the loop: flushed later, never stranded.
+      if (this.#queue.length > 0) this.#scheduleFlush();
     }
     for (const waiter of satisfied) this.#settle(waiter, undefined);
   }
