@@ -786,6 +786,11 @@ fn sync_method_and_free_function() {
     // Malformed arguments are a bad request, not a crash.
     let reply = core.sync(method(calc, "Calculator", "add"), &[1, 2, 3]);
     assert_eq!(reply.status, ReplyStatus::BadRequest);
+    let reason: String = decode(&reply.body);
+    assert!(
+        reason.contains("cannot decode argument `a` of `Calculator.add`"),
+        "{reason}"
+    );
     // An async method cannot be called synchronously.
     let reply = core.sync(
         method(calc, "Calculator", "slow_add"),

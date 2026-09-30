@@ -72,6 +72,12 @@ fn __keel_dispatch_Calculator(
     fn __keel_unknown() -> ::keel::meta::DispatchOutcome {
         __keel_out(::keel::runtime::DispatchResult::Unknown)
     }
+    #[allow(dead_code)]
+    fn __keel_bad_request(
+        __reason: ::std::string::String,
+    ) -> ::keel::meta::DispatchOutcome {
+        __keel_out(::keel::runtime::DispatchResult::BadRequest(__reason))
+    }
     fn __keel_assert_send<T: ::core::marker::Send>(_: &T) {}
     struct __KeelMap<S>(::core::pin::Pin<::std::boxed::Box<S>>);
     impl<S> ::keel::runtime::Stream for __KeelMap<S>
@@ -124,10 +130,21 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let base: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "base",
+                            "Calculator.new", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Calculator.new", __e
+                    ),
+                );
             }
             let __ctx = __rt.ctx();
             __keel_out({
@@ -146,10 +163,21 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let path: String = match <String as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "path",
+                            "Calculator.open", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Calculator.open", __e
+                    ),
+                );
             }
             __keel_out(
                 match Calculator::open(path) {
@@ -176,18 +204,40 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "a",
+                            "Calculator.add", __e
+                        ),
+                    );
+                }
             };
             let b: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "b",
+                            "Calculator.add", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Calculator.add", __e
+                    ),
+                );
             }
             let __obj = match __rt.object::<Calculator>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!("cannot call `{}`: {}", "Calculator.add", __e),
+                    );
+                }
             };
             __keel_out({
                 let __out = Calculator::add(&*__obj, a, b);
@@ -202,18 +252,41 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "a",
+                            "Calculator.divide", __e
+                        ),
+                    );
+                }
             };
             let b: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "b",
+                            "Calculator.divide", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Calculator.divide",
+                        __e
+                    ),
+                );
             }
             let __obj = match __rt.object::<Calculator>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!("cannot call `{}`: {}", "Calculator.divide", __e),
+                    );
+                }
             };
             __keel_out(
                 match Calculator::divide(&*__obj, a, b) {
@@ -238,14 +311,32 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "a",
+                            "Calculator.slow_add", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Calculator.slow_add",
+                        __e
+                    ),
+                );
             }
             let __obj = match __rt.object::<Calculator>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot call `{}`: {}", "Calculator.slow_add", __e
+                        ),
+                    );
+                }
             };
             __keel_out({
                 let __fut = async move {
@@ -263,18 +354,43 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "a",
+                            "Calculator.slow_divide", __e
+                        ),
+                    );
+                }
             };
             let b: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "b",
+                            "Calculator.slow_divide", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}",
+                        "Calculator.slow_divide", __e
+                    ),
+                );
             }
             let __obj = match __rt.object::<Calculator>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot call `{}`: {}", "Calculator.slow_divide", __e
+                        ),
+                    );
+                }
             };
             __keel_out({
                 let __fut = async move {
@@ -301,14 +417,30 @@ fn __keel_dispatch_Calculator(
             let mut __r = ::keel::wire::Reader::new(__call.args);
             let up_to: u32 = match <u32 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "up_to",
+                            "Calculator.counts", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Calculator.counts",
+                        __e
+                    ),
+                );
             }
             let __obj = match __rt.object::<Calculator>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!("cannot call `{}`: {}", "Calculator.counts", __e),
+                    );
+                }
             };
             __keel_out({
                 let __stream = __KeelMap(
