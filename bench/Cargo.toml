@@ -3,6 +3,7 @@ name = "keel-bench"
 version.workspace = true
 edition.workspace = true
 publish = false
+description = "Keel's benchmark harness: criterion benches for humans, the budgets test for CI (constitution R9)."
 
 [dependencies]
 keel = { workspace = true }
@@ -14,6 +15,24 @@ keel-wire = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true, features = ["cargo_bench_support"] }
 
+# Every bench target is listed: with one explicit `[[bench]]`, cargo would otherwise pick up the
+# rest of `benches/` with the default (libtest) harness.
 [[bench]]
 name = "query"
+harness = false
+
+[[bench]]
+name = "wire"
+harness = false
+
+[[bench]]
+name = "dispatch"
+harness = false
+
+[[bench]]
+name = "signals"
+harness = false
+
+[[bench]]
+name = "snapshot"
 harness = false
