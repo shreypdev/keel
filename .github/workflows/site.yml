@@ -1,0 +1,43 @@
+name: Site
+
+# Publishes the static site in `site/` to GitHub Pages (https://shreypdev.github.io/keel/).
+# There is no build step: `site/` is plain HTML, CSS and JS and is uploaded as is.
+#
+# One-time repository setting: Settings > Pages > Build and deployment > Source = "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+# `id-token: write` is what deploy-pages needs to prove the deployment's origin (OIDC);
+# it grants no write access to the repository.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-flight deployment finish; a newer push waits its turn instead of cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
