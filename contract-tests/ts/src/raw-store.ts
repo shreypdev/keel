@@ -72,11 +72,6 @@ export class RawStore {
     return this.core.call({ target: CallTarget.ObjectMethod, handle: this.handle }, methodId, args, signal);
   }
 
-  /** Calls a method and decodes its result with `codec`. */
-  async callDecoded<T>(methodId: number, codec: Codec<T>, args: Uint8Array = NO_ARGS): Promise<T> {
-    return decodeValue(codec, await this.call(methodId, args));
-  }
-
   /** Calls a method with `args` encoded by `codec`, for methods with one argument. */
   callWith<A>(methodId: number, codec: Codec<A>, arg: A): Promise<Uint8Array> {
     return this.call(methodId, encodeValue(codec, arg));

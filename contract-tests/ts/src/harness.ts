@@ -68,11 +68,18 @@ export interface BootOptions extends Partial<World> {
   readonly expectedSchemaHash?: bigint;
 }
 
-const cores: KeelCore[] = [];
+const booted: Booted[] = [];
 
-// A scenario never closes its cores itself: whatever it booted is closed after it, pass or fail.
+// A scenario never closes its cores itself: whatever it booted is closed after it, pass or fail. And a
+// failure the runtime could not hand to any caller (a change-set that did not decode, a store that threw
+// while applying one, a port that failed) is a failure of the scenario, reported here.
 afterEach(() => {
-  for (const core of cores.splice(0)) core.close();
+  const all = booted.splice(0);
+  for (const { core } of all) core.close();
+  const reported = all.flatMap((b) => b.runtimeErrors);
+  if (reported.length > 0) {
+    throw new Error(`the runtime reported ${reported.length} failure(s) with no caller to reject: ${reported.map(String).join("; ")}`);
+  }
 });
 
 function worldOf(options: BootOptions): World {
@@ -121,8 +128,9 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
     },
   };
   const core = await KeelCore.load(load);
-  cores.push(core);
-  return { ...world, core, closed, runtimeErrors };
+  const loaded: Booted = { ...world, core, closed, runtimeErrors };
+  booted.push(loaded);
+  return loaded;
 }
 
 /**
@@ -154,6 +162,7 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
       runtimeErrors.push(error);
     },
   });
-  cores.push(core);
-  return { ...world, core, closed, runtimeErrors, transport };
+  const loaded: BootedRaw = { ...world, core, closed, runtimeErrors, transport };
+  booted.push(loaded);
+  return loaded;
 }
