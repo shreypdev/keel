@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: Rust (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: wasm32 build (core crates)
+        run: |
+          for p in keel-meta keel-wire keel-signals keel-runtime keel-ports keel-query keel-ffi keel; do
+            cargo build -p $p --target wasm32-unknown-unknown
+          done
+
+  ts:
+    name: TypeScript runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test
+        working-directory: runtimes/ts/@keel/runtime
+        run: |
+          npm ci
+          npm test
+
+  kotlin:
+    name: Kotlin runtime (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install kotlinc
+        run: |
+          curl -sSfL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q kotlinc.zip -d "$HOME/kotlin"
+          echo "$HOME/kotlin/kotlinc/bin" >> "$GITHUB_PATH"
+      - name: Fetch kotlinx-coroutines
+        run: |
+          mkdir -p "$HOME/lib"
+          curl -sSfLo "$HOME/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" \
+            https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the JNI library
+        run: cargo build -p keel-ffi --features jni
+      - name: Test (incl. JNI smoke against the real library)
+        env:
+          KEEL_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+          KEEL_NATIVE_LIB_DIR: ${{ github.workspace }}/target/debug
+          KEEL_NATIVE_NAME: keel_ffi
+        run: runtimes/kotlin/keel-runtime/scripts/test-local.sh
+
+  wasm-ffi:
+    name: wasm ABI (real module, TS runtime)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: wasm acceptance (raw host + TS runtime)
+        run: bash crates/keel-ffi/tests/wasm/run.sh
+
+  macos:
+    name: Swift runtime + C ABI (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Swift tests
+        working-directory: runtimes/swift/KeelRuntime
+        run: swift test
+      - name: Swift-over-C-ABI acceptance
+        run: bash crates/keel-ffi/tests/swift/run.sh
+      - name: iOS cross-build (device + simulator)
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          cargo check -p keel-ffi --target aarch64-apple-ios
+          cargo check -p keel-ffi --target aarch64-apple-ios-sim
+
+  android:
+    name: Android cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+      - name: Build the JNI library for both ABIs
+        run: cargo ndk -t arm64-v8a -t x86_64 build -p keel-ffi --features jni
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+
+  ffi-sanitizers:
+    name: keel-ffi under Miri and ASan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: Miri (unit tests; FFI-callback tests excluded)
+        run: cargo +nightly miri test -p keel-ffi --lib
+      - name: AddressSanitizer
+        run: |
+          RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p keel-ffi \
+            --target x86_64-unknown-linux-gnu --tests
