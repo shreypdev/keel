@@ -6,6 +6,35 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel: transport crate (stub, to be implemented)"
+description = "Keel transport: the WebSocket server that serves one core Runtime to a remote platform runtime (keel dev)"
+readme = "README.md"
+keywords = ["keel", "websocket", "dev-server", "cross-platform"]
+categories = ["development-tools", "network-programming"]
 
-[dependencies]
+[[example]]
+name = "serve"
+required-features = ["server"]
+
+[features]
+default = ["server"]
+# The WebSocket server: tungstenite over std::net, threads, no async runtime. Without it (and
+# on wasm targets, where the server is not built at all) the crate is empty and always builds.
+server = ["dep:tungstenite", "dep:keel-runtime", "dep:keel-wire", "dep:parking_lot"]
+
+# The server is host-side plumbing for native processes. Declaring its dependencies for
+# non-wasm targets only keeps `cargo build --target wasm32-unknown-unknown` (default features
+# included) from compiling tungstenite and its randomness source.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+keel-runtime = { workspace = true, optional = true }
+keel-wire = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+tungstenite = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The tests and the README example define a core with the real macros, exactly as an app does.
+keel = { workspace = true }
+keel-macros = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }
+# The tests speak to the server with tungstenite's client, as a raw stand-in for a platform.
+tungstenite = { workspace = true }
