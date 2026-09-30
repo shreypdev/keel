@@ -484,7 +484,13 @@ fn every_problem_is_reported() {
     s.records.push(record(
         "R",
         "",
-        vec![field("a_b", TypeRef::U8), field("aB", TypeRef::Unit)],
+        vec![field("a_b", TypeRef::U8), field("aB", TypeRef::U8)],
+    ));
+    // (A `()` field would be rejected by `Schema::validate`, which stops the other checks;
+    // a keyed signal that is not a list is only bindgen's business.)
+    s.objects.push(store(
+        object("S", "", vec![ctor("S", "new", vec![], false)], vec![]),
+        vec![("n", TypeRef::U32, false, Some("id"))],
     ));
     let found = codes(&s);
     assert!(
