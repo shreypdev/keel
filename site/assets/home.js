@@ -1,55 +1,10 @@
-/* Keel site, landing page only: the typed terminal and the live demo.
-   Both are progressive enhancement. With JS off, or with prefers-reduced-motion, the terminal shows its
-   final state and the demo links to the playground. */
+/* Keel site, landing page only: the live demo. Progressive enhancement: with JS off the demo links to the playground. */
 (function () {
   "use strict";
   var doc = document;
-  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   var $ = function (sel, ctx) { return (ctx || doc).querySelector(sel); };
   var $$ = function (sel, ctx) { return Array.prototype.slice.call((ctx || doc).querySelectorAll(sel)); };
   var canObserve = "IntersectionObserver" in window;
-
-  /* ---------- the terminal: real commands, typed once when it scrolls into view ---------- */
-  var term = $("[data-term]");
-  if (term) {
-    var body = $(".term-body code", term), lines = $$(".ln", term), replay = $("[data-term-replay]", term);
-    var timers = [], running = false;
-    var later = function (fn, ms) { timers.push(setTimeout(fn, ms)); };
-    var showAll = function () {
-      timers.forEach(clearTimeout); timers = []; running = false;
-      lines.forEach(function (l) { l.classList.remove("p"); if (l.dataset.html !== undefined) l.innerHTML = l.dataset.html; });
-    };
-    var play = function () {
-      showAll();
-      if (reduce) return;
-      running = true;
-      var pre = body.parentNode; pre.style.minHeight = pre.offsetHeight + "px"; // no layout shift while it types
-      lines.forEach(function (l) { l.dataset.html = l.innerHTML; l.classList.add("p"); });
-      var i = 0;
-      (function next() {
-        if (!running || i >= lines.length) { running = false; return; }
-        var l = lines[i++];
-        if (!l.classList.contains("c")) { l.classList.remove("p"); later(next, 70); return; }
-        var text = l.textContent, n = 0;
-        l.classList.remove("p"); l.textContent = "";
-        var typed = doc.createTextNode(""), caret = doc.createElement("span");
-        caret.className = "caret"; l.appendChild(typed); l.appendChild(caret);
-        (function type() {
-          if (!running) return;
-          n += 1; typed.nodeValue = text.slice(0, n);
-          if (n < text.length) { later(type, 32 + Math.random() * 28); return; }
-          later(function () { l.innerHTML = l.dataset.html; later(next, 380); }, 260);
-        })();
-      })();
-    };
-    if (replay) { replay.hidden = false; replay.addEventListener("click", play); }
-    if (canObserve && !reduce) {
-      var to = new IntersectionObserver(function (es) {
-        if (es[0].isIntersecting) { to.disconnect(); play(); }
-      }, { threshold: 0.35 });
-      to.observe(term);
-    }
-  }
 
   /* ---------- the live demo: the real playground, mounted when scrolled into view ---------- */
   var live = $("[data-live]");
@@ -79,7 +34,8 @@
     };
     window.addEventListener("message", function (e) {
       var d = e.data;
-      if (!frame || e.source !== frame.contentWindow || e.origin !== location.origin || !d || d.type !== "keel-stats") return;
+      // "undra-stats" is the name; the pre-rename spelling is accepted too so a half-merged tree keeps working.
+      if (!frame || e.source !== frame.contentWindow || e.origin !== location.origin || !d || (d.type !== "undra-stats" && d.type !== "keel-stats")) return;
       var r = Number(d.changeSetsPerSec), a = Number(d.applyP50Us), b = Number(d.applyP99Us);
       if (!isFinite(r) || !isFinite(a) || !isFinite(b)) return;
       if (!gotStats) { gotStats = true; clearTimeout(giveUp); if (note) note.hidden = true; }
@@ -87,7 +43,8 @@
       stat.rate.textContent = r.toFixed(1); stat.p50.textContent = fmt(a); stat.p99.textContent = fmt(b);
     });
     doc.addEventListener("keel:theme", function (e) {
-      if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type: "keel-theme", theme: e.detail }, location.origin);
+      if (!frame || !frame.contentWindow) return;
+      ["undra-theme", "keel-theme"].forEach(function (type) { frame.contentWindow.postMessage({ type: type, theme: e.detail }, location.origin); });
     });
     if (pushBtn) pushBtn.addEventListener("click", function () { open("stress"); pushBtn.disabled = true; });
     if (src && canObserve) {

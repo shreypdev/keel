@@ -12,9 +12,27 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, relative, sep, posix } from "node:path";
 import { spawnSync } from "node:child_process";
-import { SITE, ORIGIN, htmlFiles, read, titleOf, metaOf, canonicalOf, jsonLd } from "./lib.mjs";
+import { SITE, ORIGIN, htmlFiles, read, titleOf, metaOf, canonicalOf, jsonLd, stripElements, decode } from "./lib.mjs";
+
+/** The landing page is for scanning, not reading: at most this many words of visible prose. */
+export const LANDING_WORD_BUDGET = 350;
+
+/** Words of visible prose on the landing page: everything except the site header and footer, code blocks,
+ *  the install blocks, the numbers grid, diagrams, scripts, and what a closed <details> hides. */
+export function landingWords(html) {
+  let h = html.slice(html.indexOf("<body"));
+  for (const open of [/<header class="site-header"[^>]*>/, /<footer class="site-footer"[^>]*>/, /<script\b[^>]*>/, /<style\b[^>]*>/, /<svg\b[^>]*>/, /<noscript\b[^>]*>/, /<pre\b[^>]*>/, /<div class="stats"[^>]*>/, /<div class="install"[^>]*>/, /<a class="skip"[^>]*>/, /<ul class="seg-key"[^>]*>/, /<div class="grid51"[^>]*>/, /<button\b[^>]*\bhidden\b[^>]*>/]) h = stripElements(h, open);
+  h = h.replace(/<details\b[^>]*>\s*(<summary\b[^>]*>[\s\S]*?<\/summary>)[\s\S]*?<\/details>/g, "$1");
+  return decode(h.replace(/<[^>]+>/g, " ")).split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w));
+}
 
 const args = process.argv.slice(2);
+if (args.includes("--words")) {
+  const words = landingWords(read(join(SITE, "index.html")));
+  console.log(`landing prose: ${words.length} words (budget ${LANDING_WORD_BUDGET})`);
+  if (args.includes("--show")) console.log(words.join(" "));
+  process.exit(words.length > LANDING_WORD_BUDGET ? 1 : 0);
+}
 const rootArg = args.indexOf("--root");
 const ROOT = rootArg >= 0 ? resolve(args[rootArg + 1]) : SITE;
 const failures = [], notes = [];
@@ -91,6 +109,7 @@ for (const f of files) {
   const blocks = (html.match(/<script type="application\/ld\+json">/g) || []).length;
   if (blocks !== 1) fail(page, `${blocks} JSON-LD blocks (need exactly 1)`);
   else { try { jsonLd(html); } catch (e) { fail(page, `invalid JSON-LD: ${e.message}`); } }
+  if (page === "index.html") { const n = landingWords(html).length; if (n > LANDING_WORD_BUDGET) fail(page, `the landing page has ${n} words of visible prose (budget ${LANDING_WORD_BUDGET}); cut text, do not raise the budget`); }
   if (/italic/i.test(html.replace(/<script[\s\S]*?<\/script>/g, ""))) fail(page, "mentions italic in markup");
   for (const m of html.matchAll(/<img\b[^>]*>/g)) if (!/\balt="/.test(m[0])) fail(page, "an <img> has no alt");
 }

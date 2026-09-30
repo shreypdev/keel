@@ -92,3 +92,19 @@ export function textOf(fragment) {
   const blocks = drop.replace(/<\/?(?:p|div|li|ul|ol|h[1-6]|tr|td|th|table|thead|tbody|pre|br|section|article|nav|header|footer|figure|figcaption|blockquote|aside|dd|dt|dl|details|summary)\b[^>]*>/gi, " ");
   return decode(blocks.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 }
+
+/** `html` without every element whose opening tag matches `open` (a regex for the tag), tags balanced. */
+export function stripElements(html, open) {
+  const re = new RegExp(open.source, open.flags.replace("g", "") + "g");
+  let out = "", last = 0, m;
+  while ((m = re.exec(html))) {
+    if (m.index < last) continue;
+    const tag = /^<(\w+)/.exec(m[0])[1];
+    const scan = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi"); scan.lastIndex = m.index + m[0].length;
+    let depth = 1, x, end = html.length;
+    while ((x = scan.exec(html))) { depth += x[1] ? -1 : 1; if (!depth) { end = x.index + x[0].length; break; } }
+    out += html.slice(last, m.index) + " ";
+    last = end; re.lastIndex = end;
+  }
+  return out + html.slice(last);
+}
