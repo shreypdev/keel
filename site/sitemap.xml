@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://shreypdev.github.io/keel/</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/getting-started.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/concepts.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/queries.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/ports.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/cli.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/architecture.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/api-swift.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/api-kotlin.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/api-typescript.html</loc></url>
+</urlset>
