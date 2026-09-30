@@ -124,9 +124,9 @@ fn wire_types(halves: bool) -> Vec<Workload> {
 }
 
 /// The keyed patch (`keel-wire`) on its own, for a 10,000-row list that gains one row in the
-/// middle: the diff with a cheap key and `PartialEq` (what is left of `signals/keyed_10k/insert`
-/// once the generated key function and the encoded comparison are taken out), the patch's own
-/// round trip, and the host-side replay.
+/// middle: the diff with a cheap key and `PartialEq` (the fallback that a raw `set` / `update`
+/// takes, see `signals/keyed_10k/raw_update_diff`; recorded list operations do not run it), the
+/// patch's own round trip, and the host-side replay.
 fn keyed_patch() -> Vec<Workload> {
     const ROWS: u32 = 10_000;
     fn rows() -> Vec<Item> {
@@ -341,6 +341,11 @@ pub fn signals() -> Vec<Workload> {
             keyed(10_000, KeyedOp::Update)
         }),
         Workload::new("signals/keyed_10k/move", || keyed(10_000, KeyedOp::Move)),
+        // The fallback: the same one-row edit written with the raw `update`, which the commit
+        // finds by diffing the list against what the host has (O(list)).
+        Workload::new("signals/keyed_10k/raw_update_diff", || {
+            keyed(10_000, KeyedOp::RawUpdate)
+        }),
         // The same insert on shorter lists: how the cost scales with the list, not the change.
         Workload::new("signals/keyed_1k/insert", || keyed(1_000, KeyedOp::Insert)),
         Workload::new("signals/keyed_100/insert", || keyed(100, KeyedOp::Insert)),
@@ -484,10 +489,14 @@ enum KeyedOp {
     Insert,
     Update,
     Move,
+    /// An update through the raw `Signal::update`: the diff path.
+    RawUpdate,
 }
 
-/// A keyed list of `rows` rows, observed, changed by one insert, one update or one move. Through
-/// the runtime: dispatch, argument decode, the write, the patch, the host callback.
+/// A keyed list of `rows` rows, observed, changed by one insert, one update or one move written
+/// with the recorded list operations (what generated store code does, ADR-027), or by one update
+/// through the raw `Signal::update`, which takes the diff path. Through the runtime: dispatch,
+/// argument decode, the write, the patch, the host callback.
 fn keyed(rows: u32, op: KeyedOp) -> Box<dyn Bench> {
     let (rt, host) = runtime();
     let (middle, low, high) = (rows / 2, rows / 10, rows / 10 * 9);
@@ -535,6 +544,19 @@ fn keyed(rows: u32, op: KeyedOp) -> Box<dyn Bench> {
         KeyedOp::Move => (
             at("move_item", 3, [enc(&low), enc(&high)].concat()),
             at("move_item", 4, [enc(&high), enc(&low)].concat()),
+            false,
+        ),
+        KeyedOp::RawUpdate => (
+            at(
+                "rename_raw",
+                3,
+                [enc(&middle), enc(&"first title".to_owned())].concat(),
+            ),
+            at(
+                "rename_raw",
+                4,
+                [enc(&middle), enc(&"second title".to_owned())].concat(),
+            ),
             false,
         ),
     };

@@ -188,29 +188,32 @@ impl Feed {
         self.items.set(rows);
     }
 
-    /// Inserts `item` so it ends up at `index`.
+    /// Inserts `item` so it ends up at `index`. A recorded list operation: one `Insert` op, however
+    /// long the list is (ADR-027). This is what store code written against the recorded API does.
     pub fn insert_at(&self, index: u32, item: Item) {
-        self.items.update(|rows| rows.insert(index as usize, item));
+        self.items.insert(index as usize, item);
     }
 
-    /// Removes the row at `index`.
+    /// Removes the row at `index`. Recorded.
     pub fn remove_at(&self, index: u32) {
-        self.items.update(|rows| {
-            rows.remove(index as usize);
-        });
+        self.items.remove(index as usize);
     }
 
-    /// Changes the title of the row at `index`.
+    /// Changes the title of the row at `index`. Recorded: one `Update` op.
     pub fn rename(&self, index: u32, title: String) {
-        self.items.update(|rows| rows[index as usize].title = title);
+        self.items
+            .update_at(index as usize, |row| row.title = title);
     }
 
-    /// Moves the row at `from` so it ends up at `to`.
+    /// Moves the row at `from` so it ends up at `to`. Recorded: one `Move` op.
     pub fn move_item(&self, from: u32, to: u32) {
-        self.items.update(|rows| {
-            let row = rows.remove(from as usize);
-            rows.insert(to as usize, row);
-        });
+        self.items.move_item(from as usize, to as usize);
+    }
+
+    /// `rename` through the raw `update`: the list is compared with what the host has (O(list)),
+    /// the path for edits no recorded operation can express.
+    pub fn rename_raw(&self, index: u32, title: String) {
+        self.items.update(|rows| rows[index as usize].title = title);
     }
 }
 
