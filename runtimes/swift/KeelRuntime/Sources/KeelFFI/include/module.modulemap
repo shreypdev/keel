@@ -1,0 +1,4 @@
+module KeelFFI {
+    header "keel.h"
+    export *
+}
