@@ -89,7 +89,7 @@ section { position: relative; }
 
 .dg { width: 100%; height: auto; overflow: visible; user-select: none; }
 .dg-narrow { display: none; }
-@media (max-width: 819px) { .dg-wide { display: none; } .dg-narrow { display: block; max-width: 460px; margin-inline: auto; } }
+@media (max-width: 999px) { .dg-wide { display: none; } .dg-narrow { display: block; max-width: 520px; margin-inline: auto; } }
 .dg text { font-family: var(--font-body); }
 .dg .mono { font-family: var(--font-mono); }
 .dg .serif { font-family: var(--font-display); }
@@ -159,7 +159,7 @@ section { position: relative; }
 .steps li.on b { color: var(--text); }
 .steps li.on::before { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .legend { list-style: none; margin: 14px 0 0; padding: 0; display: none; gap: 6px; font-size: 0.86rem; color: var(--text-2); }
-@media (max-width: 819px) { .legend { display: grid; } }
+@media (max-width: 999px) { .legend { display: grid; max-width: 520px; margin-inline: auto; } }
 .legend li { display: flex; gap: 10px; align-items: baseline; }
 .legend i { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-style: normal; font-size: 0.7rem; font-weight: 700; display: grid; place-items: center; transform: translateY(-1px); }
 

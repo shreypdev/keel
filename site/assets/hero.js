@@ -10,7 +10,7 @@
   const NS = "http://www.w3.org/2000/svg";
   const LOOP = 8;
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const mqNarrow = window.matchMedia("(max-width: 819px)");
+  const mqNarrow = window.matchMedia("(max-width: 999px)");
   const steps = Array.from(stage.querySelectorAll(".steps li"));
   const toggle = stage.querySelector("[data-dg-toggle]");
 
