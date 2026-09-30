@@ -858,7 +858,7 @@ impl Runtime {
     pub fn init(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError>;   // executor, object/port/dispatch tables, change sink, init hooks, `keel-core` thread (unless core_threads == 0)
     pub fn new(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError>;    // same, not global
     pub fn global() -> Option<Arc<Runtime>>;
-    pub fn shutdown(&self);                          // breaks the runtime <-> Ctx reference cycles; joins threads
+    pub fn shutdown(&self);                          // §5.1 Shutdown: answers in-flight calls (status 3) and ends open streams, joins threads, clears subscribers and port bindings, breaks the runtime <-> Ctx reference cycles; not from the core or a host callback (debug assertion)
     pub fn call(&self, payload: &[u8]) -> u32;       // §3.3; 0 accepted / 5 bad request; replies through Host::reply
     pub fn call_sync(&self, payload: &[u8]) -> Vec<u8>;   // §3.4 reply payload
     pub fn cancel(&self, call_id: u32);              // status 3 exactly once for a plain call
@@ -870,7 +870,7 @@ impl Runtime {
     pub fn timer_fired(&self, timer_id: u32);
     pub fn poll(&self);                              // drive the executor (wasm and manual runtimes); run_pending() runs until idle
     pub fn snapshot(&self) -> Vec<u8>;
-    pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;   // all or nothing
+    pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;   // all or nothing; cancels in-flight calls on replaced receivers (§5.9); resumes the generation counter above the snapshot's floor (ADR-022)
     pub fn stats_json(&self) -> String;
     pub fn schema(&self) -> &keel_meta::Schema; pub fn schema_hash(&self) -> u64;
     pub fn ctx(&self) -> Ctx;
@@ -887,7 +887,7 @@ impl Runtime {
 #[derive(Clone)] pub struct Ctx(..);   // §5.3; an Arc<Runtime>. `Ctx::current()` / `try_current()` read a thread-local set by dispatch, by the executor while polling and by `Ctx::enter()`
 impl Ctx {
     pub fn txn<R>(&self, f: impl FnOnce() -> R) -> R;                       // one transaction, delivered through this runtime
-    pub fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) -> TaskId;   pub fn cancel_task(&self, id: TaskId);
+    pub fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) -> TaskId;   pub fn cancel_task(&self, id: TaskId);   // the cancelled future is dropped on the core (core lock held, or queued for the core's next turn); after shutdown spawn/sleep/port_call/event are logged no-ops
     pub fn spawn_blocking<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> BlockingTask<T>;
     pub fn sleep(&self, d: Duration) -> Sleep;                              // through the host's timer or the internal one
     pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&[u8]) + Send + Sync>) -> Subscription
@@ -926,12 +926,12 @@ pub enum PortDispatch { Sync(Vec<u8>), Async(Pin<Box<dyn Future<Output = Vec<u8>
 pub struct PortFuture;    // Future<Output = Result<Vec<u8>, PortError>>; dropping it abandons the call
 pub fn port_call_sync(rt: &Runtime, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
 pub enum PortError { Unavailable, Cancelled, Decode(keel_wire::WireError), Failed(Vec<u8> /* encoded E */) }   // Clone + Debug + Display + Error
-pub enum RestoreError { Decode(WireError), UnknownStoreType { type_id: u32 }, Store { type_id: u32, source: WireError }, Panicked { type_id: u32, message: String }, BadHandle { handle: u64 }, ShutDown, Reentrant }
+pub enum RestoreError { Decode(WireError), UnknownStoreType { type_id: u32 }, Store { type_id: u32, source: WireError }, Panicked { type_id: u32, message: String }, BadHandle { handle: u64 } /* null, duplicate, generation 0 or u32::MAX, index too far */, GenerationFloor { floor: u32 } /* floor == u32::MAX */, ShutDown, Reentrant }
 pub struct InitHook { pub name: &'static str, pub run: fn(&Ctx) }   // submitted by layered crates, run for every new runtime
 pub mod object_table;     // ObjectTable, BadHandle, BadHandleReason: generation-tagged slots; Handle issue/lookup/release
 pub mod log;              // level constants TRACE..FATAL and `log::log(level, target, msg)`
 pub mod executor;         // spawn, spawn_blocking, sleep, cancel, yield_now, Notify, TaskId
-pub mod testing;          // TestRuntime: a real Runtime with no threads, a manual clock and a RecordingHost;
+pub mod testing;          // TestRuntime: a real Runtime with no core or timer thread, a manual clock, the real blocking pool (run_pending/run_until/advance wait for its closures), a private generation counter and a RecordingHost; unchecked_writes(f) lifts the debug write check on one thread, drive_from_this_thread() marks a harness thread a driver;
                           // call / call_sync / run_pending / run_until(fut) / advance(Duration) / take_replies; host(): take_decoded_change_sets, take_stream_items,
                           // take_port_calls, take_timeline, take_logs, script_port*(port_id, method_id, ..); helpers call_payload, decode_reply, port_reply, port_reply_ok, sync_ok
 ```

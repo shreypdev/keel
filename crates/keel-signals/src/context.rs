@@ -16,8 +16,9 @@ static INSTALLED: AtomicBool = AtomicBool::new(false);
 /// runtime at init.
 ///
 /// `f` answers "may the calling thread write signals right now?": `true` on the core (a
-/// dispatched call, a task poll, an explicit runtime scope), `false` on threads that must not
-/// mutate state, such as the blocking pool. In **debug builds** every write to a signal that is
+/// dispatched call, a task poll), `false` on threads that must not mutate state: the blocking
+/// pool, and, for the runtime's own checker, every thread that does not hold its core lock
+/// (an allowlist since ADR-023). In **debug builds** every write to a signal that is
 /// attached to a store, or that has dependents, asserts `f()` before it changes anything, so a
 /// write from the wrong thread fails fast in tests instead of racing with the core: two threads
 /// that write one store are not one transaction, and a write can be delivered with another
