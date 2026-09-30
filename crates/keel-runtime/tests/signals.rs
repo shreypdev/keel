@@ -61,6 +61,26 @@ fn observing_one_signal_delivers_only_that_signal() {
     assert_eq!(single(&t).entries, [entry(h, LABEL_SIGNAL, enc("five"))]);
 }
 
+/// Review finding L2: an unknown signal id is host input, so it must not assert or poison.
+#[test]
+fn l2_observing_an_unknown_signal_id_is_ignored_quietly() {
+    let t = TestRuntime::new();
+    let h = new_counter(&t, 5, "five");
+    t.host().take_logs();
+    t.runtime().observe(h.0, 99, true);
+    t.runtime().observe(h.0, 99, false);
+    assert_eq!(t.host().change_set_count(), 0);
+    assert!(
+        t.host().take_logs().iter().all(|l| l.level < 3),
+        "no warning or error is logged for it"
+    );
+    // The store is healthy: it is not poisoned and a snapshot/restore keeps working.
+    assert_eq!(get(&t, h), 5);
+    let snapshot = t.runtime().snapshot();
+    t.runtime().restore(&snapshot).unwrap();
+    assert_eq!(get(&t, h), 5);
+}
+
 #[test]
 fn unobserving_delivers_nothing_and_stops_further_writes() {
     let t = TestRuntime::new();
