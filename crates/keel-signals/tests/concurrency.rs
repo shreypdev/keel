@@ -295,3 +295,165 @@ fn a_computed_over_signals_written_by_several_threads_converges() {
         "the computed was delivered"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Recorded list operations from several threads (ADR-027)
+// ---------------------------------------------------------------------------------------------
+
+/// A host for one keyed list: applies every change-set it is handed, failing on a patch that does
+/// not apply to what it has. It is the sink, so it runs under the store's delivery lock.
+struct ListHost {
+    list: Mutex<Vec<Todo>>,
+    patches: AtomicUsize,
+    fulls: AtomicUsize,
+}
+
+impl ListHost {
+    fn new() -> Arc<ListHost> {
+        Arc::new(ListHost {
+            list: Mutex::new(Vec::new()),
+            patches: AtomicUsize::new(0),
+            fulls: AtomicUsize::new(0),
+        })
+    }
+}
+
+impl ChangeSink for ListHost {
+    fn deliver(&self, change_set: &[u8]) {
+        use keel_wire::payload::ChangeOp;
+        let set = decode(change_set).expect("every change-set must decode");
+        let mut list = self.list.lock();
+        for e in &set.entries {
+            match e.op {
+                ChangeOp::Full => {
+                    *list = value_of(e);
+                    self.fulls.fetch_add(1, Ordering::SeqCst);
+                }
+                ChangeOp::KeyedPatch => {
+                    patch_of::<Todo>(e)
+                        .apply(&mut list)
+                        .expect("a delivered patch applies to what the host has");
+                    self.patches.fetch_add(1, Ordering::SeqCst);
+                }
+                other => panic!("unexpected op {other:?}"),
+            }
+        }
+    }
+}
+
+/// A list of 60 items at signal 0 of a fresh store, observed, with the host holding it.
+fn list_store() -> (Arc<StoreCell>, Signal<Vec<Todo>>, Arc<ListHost>) {
+    let cell = StoreCell::new(0xBEE5);
+    cell.set_handle(HANDLE);
+    let list = Signal::new(todos(60));
+    cell.attach_keyed(&list, 0, todo_key).unwrap();
+    let host = ListHost::new();
+    cell.observe_and_deliver(&[0], |payload| host.deliver(payload));
+    (cell, list, host)
+}
+
+/// Rounds of `hammer` per thread: `KEEL_SIGNALS_STRESS_ROUNDS` for a longer soak, 400 otherwise.
+fn stress_rounds() -> u32 {
+    std::env::var("KEEL_SIGNALS_STRESS_ROUNDS")
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or(400)
+}
+
+/// One thread's share of the work: recorded operations of every kind, a raw write and a
+/// multi-operation transaction now and then. The list never drops below 12 items (at most 40
+/// removals in total against 60 to start with), so the fixed indices are always in range.
+fn hammer(list: &Signal<Vec<Todo>>, thread: u32, rounds: u32) {
+    let mut removals = 0;
+    for n in 0..rounds {
+        let id = 1_000 + thread * 1_000_000 + n;
+        match n % 8 {
+            0 => list.push(todo(id, "p", false)),
+            1 => list.insert(0, todo(id, "i", true)),
+            2 => list.update_at((n % 9) as usize, |t| t.done = !t.done),
+            3 => list.move_item(1, 10),
+            4 if removals < 10 => {
+                removals += 1;
+                drop(list.remove((n % 9) as usize));
+            }
+            4 => list.push(todo(id, "p", false)),
+            5 => list.update(|l| l[2].title.push('r')),
+            6 => txn(|| {
+                list.push(todo(id, "t", false));
+                list.move_item(0, 3);
+                list.update_at(1, |t| t.title.push('x'));
+            }),
+            _ => list.move_item(11, 2),
+        }
+    }
+}
+
+#[test]
+fn recorded_operations_from_four_threads_replay_to_the_cores_list() {
+    let _x = exclusive();
+    let (_cell, list, host) = list_store();
+    set_sink(host.clone());
+    std::thread::scope(|scope| {
+        for thread in 0..4 {
+            let list = list.clone();
+            scope.spawn(move || hammer(&list, thread, stress_rounds()));
+        }
+    });
+    assert_eq!(
+        *host.list.lock(),
+        list.get(),
+        "every op some commit took was sent, in order, exactly once"
+    );
+    assert!(host.patches.load(Ordering::SeqCst) > 0);
+    assert_eq!(
+        host.fulls.load(Ordering::SeqCst),
+        1,
+        "only the initial observe sent the list in full: the rest were patches"
+    );
+}
+
+#[test]
+fn recorded_operations_while_another_thread_observes_and_unobserves() {
+    let _x = exclusive();
+    let (cell, list, host) = list_store();
+    set_sink(host.clone());
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    std::thread::scope(|scope| {
+        let (flag, cell) = (done.clone(), cell.clone());
+        let observer_host = host.clone();
+        scope.spawn(move || {
+            let mut round = 0_u32;
+            while !flag.load(Ordering::SeqCst) {
+                round += 1;
+                if round % 3 == 0 {
+                    cell.observe(0, false, &mut Writer::new());
+                }
+                // Observing is a resynchronisation: the host gets the full value, under the
+                // delivery lock, so no commit can put an older list after it.
+                cell.observe_and_deliver(&[0], |payload| observer_host.deliver(payload));
+            }
+        });
+        let writers: Vec<_> = (0..3)
+            .map(|thread| {
+                let list = list.clone();
+                scope.spawn(move || hammer(&list, thread, stress_rounds()))
+            })
+            .collect();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        done.store(true, Ordering::SeqCst);
+    });
+
+    // Whatever the interleaving was, the core and the host are at a state from which patches
+    // keep working: resynchronise once more, write some more, compare.
+    cell.observe_and_deliver(&[0], |payload| host.deliver(payload));
+    assert_eq!(*host.list.lock(), list.get());
+    let patches_before = host.patches.load(Ordering::SeqCst);
+    hammer(&list, 9, 64);
+    assert_eq!(*host.list.lock(), list.get());
+    assert!(
+        host.patches.load(Ordering::SeqCst) > patches_before,
+        "and the writes after the chaos are patches again"
+    );
+}

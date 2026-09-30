@@ -34,7 +34,7 @@ iOS target.
 | 1 KB record, round trip (codec) | `wire/record1k/roundtrip` | 228.0 ns | ≤ 3 µs | 0.08x | within |
 | 1 KB record, round trip (through a call) | `dispatch/call_sync/echo_record1k` | 279.1 ns | ≤ 3 µs | 0.09x | within |
 | Change-set, 100 dirty signals (core side: write, build, deliver) | `signals/changeset_100/runtime` | 2.30 µs | ≤ 100 µs | 0.02x | within |
-| Keyed patch on 10,000 items, one insert | `signals/keyed_10k/insert` | 536.16 µs | ≤ 20 µs | 26.81x | **MISS** |
+| Keyed patch on 10,000 items, one insert (recorded list operation) | `signals/keyed_10k/insert` | 6.31 µs | ≤ 20 µs | 0.32x | within |
 | Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 70.87 µs | ≤ 3 ms | 0.02x | within |
 | Core cold start, including the `keel-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 79.70 µs | ≤ 3 ms | 0.03x | within |
 | Web crash recovery, 1 MB state (restore) | `snapshot/restore_1mb` | 270.31 µs | ≤ 100 ms | 0.003x | within |
@@ -51,32 +51,42 @@ Also measured, not a row: the same handle method call through the C ABI (`keel_c
 
 ## Findings
 
-### 1. A keyed patch costs O(list), not O(change): the 10,000-row insert misses its row by ~27x
+### 1. A keyed patch was O(list), not O(change); with recorded list operations it is O(change) (resolved, ADR-027)
 
-The blueprint row says lists must be "O(change), not O(list)". Measured, the cost is linear in the list and
-independent of the change:
+The blueprint row says lists must be "O(change), not O(list)". It was not: the cost was linear in the list and
+independent of the change, and the 10,000-row insert missed its row by ~27x. Before and after, the same
+operation through the runtime (`signals/keyed_*`, criterion medians):
 
-| Rows | One insert | One update | One move | Per row |
+| Rows | One insert | One update | One move | Per row (insert) |
 |---|---|---|---|---|
-| 100 | 6.28 µs | | | 63 ns |
-| 1,000 | 55.74 µs | | | 56 ns |
-| 10,000 | 536.16 µs | 532.32 µs | 702.95 µs | 54 ns |
+| 100, before | 6.28 µs | | | 63 ns |
+| 1,000, before | 55.74 µs | | | 56 ns |
+| 10,000, before | 536.16 µs | 532.32 µs | 702.95 µs | 54 ns |
+| 100, recorded | 359.1 ns | | | |
+| 1,000, recorded | 769.7 ns | | | |
+| **10,000, recorded** | **6.31 µs** | **272.3 ns** | **9.74 µs** | 0.6 ns |
 
-The 10,000-row update, which changes one row in place, costs as much as the insert. The cause is in the
-design that `StoreCell`'s own docs describe ("each commit costs O(n) to compute the patch"): at every commit
-`KeyedList::diff` (`crates/keel-signals/src/store.rs`) calls `KeyedPatch::diff` (`crates/keel-wire/src/patch.rs`)
-over the old and the new list, and that diff hashes every key of both lists into two `HashMap`s and builds
-position tables before it looks at what changed. Measured on its own, with a plain `u64` key and `PartialEq`
-(`wire/keyed_patch_10k/diff`), it takes 456.79 µs: **85% of the 536.16 µs**. The rest is the generated key
-function (a thread-local `Writer` encode plus an FNV hash per row), the encoded comparison of surviving rows,
-and the baseline replay. The host side is cheap by comparison: decoding the one-op patch and replaying it on a
-10,000-row list is 2.57 µs (`wire/keyed_patch_10k/apply`, including the `Vec::insert` shift).
+**The cause** was the design that `StoreCell`'s docs described ("each commit costs O(n) to compute the patch"): at every
+commit `KeyedList::diff` (`crates/keel-signals/src/store.rs`) called `KeyedPatch::diff`
+(`crates/keel-wire/src/patch.rs`) over the old and the new list, and that diff hashes every key of both lists into two
+`HashMap`s and builds position tables before it looks at what changed. Measured on its own, with a plain `u64` key and
+`PartialEq` (`wire/keyed_patch_10k/diff`), it takes 456.79 µs: **85% of the 536.16 µs**; the rest was the generated key
+function, the encoded comparison of surviving rows and the baseline replay.
 
-Reaching 20 µs on 10,000 rows needs the list's mutations recorded as they happen (an op log on the keyed
-signal) or per-row change stamps, instead of a diff; that changes a generated/public shape and the runtime
-model, so it needs an ADR first (R11). A cheaper first step, cutting the constant and not the order, is to
-keep the baseline's key vector between commits and skip the old-side hashing. The budgets file guards the
-current O(list) cost at 5x, with a comment saying so; tighten it when the algorithm changes.
+**The fix** (ADR-027) records the operation instead of rediscovering it. `Signal<Vec<T>>` has `push`, `insert`, `remove`,
+`update_at`, `move_item` and `clear`, which mutate the list and append the SPEC 3.8 op they performed to a log; a commit of
+a list written that way sends the log as the patch and replays it on the baseline, O(ops), with no key hashing and no item
+comparison. The wire is unchanged. The benchmark fixture's store methods now use them, which is what generated store code
+does. What remains at 10,000 rows is the `memmove` of the vector's tail, which the core's own `Vec::insert` needs and which
+is paid twice (the list and the baseline): 0.6 ns per row, so an insert into the middle of 10,000 rows is 6.3 µs, and an
+update, which moves nothing, is 272 ns (dispatch, argument decode, the write and the patch). The host side is unchanged
+and cheap: decoding a one-op patch and replaying it on a 10,000-row list is 2.57 µs (`wire/keyed_patch_10k/apply`).
+
+**The fallback** is unchanged on purpose. A list written with `set`, `update` or `replace` (a whole-list refresh, or an
+edit no recorded operation can express) is still found by diffing it against what the host has: the same one-row edit
+through the raw `update` is `signals/keyed_10k/raw_update_diff`, 528.7 µs in the gate harness (534.7 µs before, same
+machine and load), and a transaction that mixes recorded operations with a raw write is diffed as a whole. Its budget is
+guarded at the old level; the two paths are different rows so neither can hide a regression in the other.
 
 ### 2. The handle method call is over its iOS target on a faster core, and most of it is the allocator
 
@@ -145,7 +155,7 @@ value; `roundtrip` is what a call argument or return value pays: `encode_to_vec`
 
 ### Wire: keyed patch (keel-wire)
 
-The patch algorithm and its host-side replay on their own, with a cheap key and `PartialEq`: what is left of the signals number above once the generated key function and the encoded comparison are taken out.
+The patch algorithm and its host-side replay on their own, with a cheap key and `PartialEq`. `diff` is the O(list) fallback that a raw write (`set`, `update`, `replace`) takes since ADR-027; a recorded list operation does not run it. Before ADR-027 it was 85% of the keyed signals rows (Finding 1).
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
@@ -166,7 +176,7 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 
 ### Signals and stores
 
-`cell` is the signals crate alone (100 `Signal<u32>` attached to a `StoreCell`, one transaction, a counting sink). `runtime` is the same 100 writes as one method call on a macro-generated store through the runtime. `decode` is a host validating and walking that change-set (borrowed). Keyed rows are one call through the runtime on an observed `Signal<Vec<Item>>` with `#[keel(key = "id")]`; insert runs against a list that is restored outside the timed region.
+`cell` is the signals crate alone (100 `Signal<u32>` attached to a `StoreCell`, one transaction, a counting sink). `runtime` is the same 100 writes as one method call on a macro-generated store through the runtime. `decode` is a host validating and walking that change-set (borrowed). Keyed rows are one call through the runtime on an observed `Signal<Vec<Item>>` with `#[keel(key = "id")]`, written with the recorded list operations (`insert`, `update_at`, `move_item`); `raw_update_diff` is the same one-row edit through the raw `update`, which takes the diff path. Insert runs against a list that is restored outside the timed region. The wide interval on `raw_update_diff` is machine load (the gate harness measured 528.7 µs p50).
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
@@ -174,11 +184,12 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `signals/changeset_100/runtime` | 2.30 µs | 2.27 µs .. 2.33 µs |
 | `signals/changeset_100/decode` | 253.9 ns | 252.6 ns .. 255.1 ns |
 | `signals/observe_100_initial` | 2.82 µs | 2.80 µs .. 2.86 µs |
-| `signals/keyed_10k/insert` | 536.16 µs | 532.93 µs .. 539.09 µs |
-| `signals/keyed_10k/update` | 532.32 µs | 529.86 µs .. 535.14 µs |
-| `signals/keyed_10k/move` | 702.95 µs | 687.26 µs .. 721.70 µs |
-| `signals/keyed_1k/insert` | 55.74 µs | 55.20 µs .. 56.34 µs |
-| `signals/keyed_100/insert` | 6.28 µs | 6.25 µs .. 6.32 µs |
+| `signals/keyed_10k/insert` | 6.31 µs | 6.25 µs .. 6.35 µs |
+| `signals/keyed_10k/update` | 272.3 ns | 271.5 ns .. 273.5 ns |
+| `signals/keyed_10k/move` | 9.74 µs | 9.62 µs .. 9.86 µs |
+| `signals/keyed_10k/raw_update_diff` | 579.7 µs | 547.9 µs .. 630.8 µs |
+| `signals/keyed_1k/insert` | 769.7 ns | 745.8 ns .. 793.2 ns |
+| `signals/keyed_100/insert` | 359.1 ns | 352.6 ns .. 366.0 ns |
 | `signals/computed/recompute_1` | 42.1 ns | 41.8 ns .. 42.4 ns |
 | `signals/computed/recompute_chain_10` | 253.1 ns | 251.0 ns .. 256.3 ns |
 
@@ -219,12 +230,13 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 
 ## The CI gate
 
-`bench/budgets.toml` holds a host budget for each of the 45 operations the gate runs (the wire round trips,
+`bench/budgets.toml` holds a host budget for each of the 46 operations the gate runs (the wire round trips,
 dispatch, signals, snapshot). Each is about **5x** what this machine measures (with a 250 ns floor and two
 significant figures), which is what makes a shared CI runner pass while an operation that became several
 times slower fails. The budgets guard against **regressions on a host**; they are not the section 14 device
-targets, and two of them (the handle method call and the keyed patch) sit above the device targets today,
-see Findings. The test takes the best p50 of up to three attempts, runs in `--release` only (a debug build
+targets, and one of them (the handle method call) sits above its device target today, see Findings. (The
+keyed-patch rows were the second until ADR-027; the insert row's gate is 31 µs, 5x what it measures, and what it
+measures, 6.2 µs, is under the 20 µs device target.) The test takes the best p50 of up to three attempts, runs in `--release` only (a debug build
 just smoke-runs every operation, so `cargo test --workspace` stays green and fast), and supports
 `KEEL_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
 
@@ -238,7 +250,7 @@ mid-range Android phone, Chromium) from `examples/playground`. Until then:
 | Handle method call, all three platforms | the real Swift/JNI/JS crossing on device: the host number above is the core half only |
 | 1 KB record round trip, all three | the same, plus the platform runtime's own encode/decode (Swift, Kotlin, TypeScript) |
 | Change-set with 100 dirty signals, applied on the main thread | the platform mirror applying the change-set (`@Observable`, Compose `State`, the TS store): this host measures the core side and a borrowed decode only |
-| Keyed patch on 10,000 items, all three | the list mirror applying a patch, and the fix for Finding 1 |
+| Keyed patch on 10,000 items, all three | the list mirror applying a patch (the core half is fixed, Finding 1) |
 | Core cold start with 100 KB snapshot restore | dlopen/app launch on iOS and Android, wasm compile and instantiate on web (the web row is "after wasm compile") |
 | Hello-world size added to the app | release builds for `aarch64-apple-ios`, the Android ABIs and `wasm32-unknown-unknown` (none of these targets is installed here); the host proxy above is thin against 900 KB |
 | Runtime memory at idle | a device memory profile (Instruments, Android Studio); the host proxy above is an RSS delta, and an exact heap counter needs a custom global allocator, which is `unsafe` and outside `keel-ffi` (R2) |

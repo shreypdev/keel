@@ -33,8 +33,10 @@ impl<I: SignalValue> ListLike for Vec<I> {
 /// Maps a list item to the `u64` key that identifies it across updates.
 ///
 /// Generated code hashes the encoded key field (`fnv1a64`), so equal keys have equal `u64`s.
-/// Keys must be unique within a list; when they are not, the affected commit falls back to
-/// sending the full value.
+/// Keys must be unique within a list; when they are not, a commit that has to diff the list
+/// (one written with `set`, `update` or `replace`) falls back to sending the full value. A list
+/// written with the recorded operations (`push`, `insert`, `update_at`, ..) is sent by position
+/// and never looks at keys, so it does not notice.
 pub type KeyFn<T> = fn(&<T as ListLike>::Item) -> u64;
 
 #[cfg(test)]

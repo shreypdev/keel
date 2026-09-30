@@ -12,6 +12,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::computed::Computed;
 use crate::error::SignalsError;
 use crate::graph::{Binding, SlotFlags};
+use crate::oplog::{KeyedLog, ListLog, Taken, apply_ops};
 use crate::signal::Signal;
 use crate::sink::ChangeSink;
 use crate::txn::{TxnGuard, next_txn_id, recycle_buffer, take_buffer};
@@ -84,15 +85,33 @@ struct Slot {
 /// * Entries of one change-set are ordered by `signal_id`.
 /// * A change-set whose building or delivery panicked is abandoned whole, and its slots are
 ///   remembered: the next commit that touches the store sends them again as full values (keyed
-///   baselines are dropped), so the host cannot be left with values the core has moved on from.
+///   baselines and the op logs recorded against them are dropped), so the host cannot be left
+///   with values the core has moved on from.
 ///
-/// # Memory cost of keyed lists
+/// # Keyed lists: O(change), not O(list)
 ///
 /// For a keyed list ([`attach_keyed`](StoreCell::attach_keyed)) the cell keeps a copy of the list
-/// as the host last saw it, so the next commit can compute a patch. The copy exists only while
-/// the slot is observed and costs one clone of the list (`Vec<Item>`) per observed keyed
-/// signal. Each commit costs O(n) to compute the patch (key hashing plus an encoded comparison
-/// of surviving items) but only clones the items that changed.
+/// as the host last saw it (the *baseline*), so that a commit can say what changed. There are
+/// two ways it finds out, and the write decides which (ADR-027):
+///
+/// * **Recorded operations** ([`Signal::push`], [`insert`](Signal::insert),
+///   [`remove`](Signal::remove), [`update_at`](Signal::update_at),
+///   [`move_item`](Signal::move_item), [`clear`](Signal::clear)) append the SPEC 3.8 op they
+///   perform to a log as they perform it. The commit sends the log as the patch and replays it
+///   on the baseline: O(ops), whatever the list's length (the `memmove` a `Vec` needs for an
+///   insertion in the middle aside, which the host pays too). Key hashing and item comparison
+///   do not happen at all.
+/// * **Raw writes** ([`Signal::set`], [`update`](Signal::update), [`replace`](Signal::replace))
+///   invalidate the log, and the commit **diffs** the list against the baseline: O(list) (key
+///   hashing plus an encoded comparison of surviving items), sending the full value when more
+///   than half of the items were removed or no key overlaps. A transaction that mixes the two
+///   is diffed.
+///
+/// The baseline exists only while the slot is observed and costs one clone of the list per
+/// observed keyed signal; the op log holds at most as many ops as the list has items (at least
+/// 4096), and a transaction that records more makes the commit diff instead. Both are dropped
+/// when the host stops observing the slot or a delivery of it is abandoned, and nothing is
+/// recorded for a slot nobody observes.
 ///
 /// # Example
 ///
@@ -172,7 +191,10 @@ impl StoreCell {
     /// is possible, and as full values otherwise.
     ///
     /// `key` maps an item to the `u64` that identifies it (generated code hashes the encoded key
-    /// field). See the [type-level docs](StoreCell#memory-cost-of-keyed-lists) for the memory cost.
+    /// field); it is only called when a commit has to diff the list. The signal's recorded list
+    /// operations ([`Signal::push`] and friends) start logging into the slot from now on, which
+    /// makes their commits O(ops); see the [type-level docs](StoreCell#keyed-lists-ochange-not-olist)
+    /// for that and for the memory cost.
     ///
     /// # Errors
     ///
@@ -185,17 +207,24 @@ impl StoreCell {
     ) -> Result<(), SignalsError> {
         let source = signal.clone();
         let encode: Encoder = Box::new(move |w| source.with(|value| value.encode(w)));
+        let log = Arc::new(KeyedLog::new());
         let state = KeyedList {
             signal: signal.clone(),
             key,
             baseline: Mutex::new(None),
+            log: Arc::clone(&log),
         };
         self.install(
             signal_id,
             &signal.inner.binding,
             encode,
             SlotKind::Keyed(Box::new(state)),
-        )
+        )?;
+        // The signal's recorded list operations (`push`, `insert`, ..) log into this from now
+        // on; until the host observes the slot the log stays disarmed and records nothing.
+        let log: Arc<dyn ListLog> = log;
+        let _ = signal.inner.log.set(log);
+        Ok(())
     }
 
     /// Binds a computed to the next slot. Its value is delivered as a full value whenever it is
@@ -941,13 +970,57 @@ impl fmt::Debug for StoreCell {
     }
 }
 
-/// A keyed list slot: the signal, its key function and the list as the host last saw it.
+/// A keyed list slot: the signal, its key function, the list as the host last saw it and the
+/// log of the recorded operations made since.
 struct KeyedList<T: ListLike> {
     signal: Signal<T>,
     key: KeyFn<T>,
     /// The items the host has, in order; `None` until the first `resync`/`diff` and after
-    /// `forget`.
+    /// `forget`. Replaying `log` on it gives the signal's list while the log is usable.
     baseline: Mutex<Option<Vec<T::Item>>>,
+    /// Shared with the signal: what its recorded list operations append to (ADR-027).
+    log: Arc<KeyedLog<T::Item>>,
+}
+
+impl<T: SignalValue + ListLike> KeyedList<T> {
+    /// The keyed patch that turns the baseline into `items` by comparing them (O(list)), and
+    /// the baseline brought up to date; `None` (the full value is to be sent, and the baseline
+    /// was replaced) when no patch is possible or worthwhile.
+    fn diff_against_baseline(
+        &self,
+        baseline: &mut Option<Vec<T::Item>>,
+        items: &[T::Item],
+        w: &mut Writer,
+    ) -> PatchOrFull {
+        let patch = baseline
+            .as_deref()
+            .and_then(|old| diff_items(old, items, self.key));
+        match patch {
+            Some(patch) => {
+                patch.encode(w);
+                // Keep the baseline in step by replaying the patch: only the changed items
+                // are cloned. `diff` never yields a patch that does not apply; if it ever
+                // did, re-cloning the list is the safe fallback.
+                let replayed = baseline
+                    .as_mut()
+                    .is_some_and(|old| patch.apply(old).is_ok());
+                if !replayed {
+                    *baseline = Some(items.to_vec());
+                }
+                #[cfg(debug_assertions)]
+                if let Some(old) = baseline.as_deref() {
+                    let old_keys: Vec<u64> = old.iter().map(self.key).collect();
+                    let new_keys: Vec<u64> = items.iter().map(self.key).collect();
+                    debug_assert_eq!(old_keys, new_keys, "keyed baseline drifted from the list");
+                }
+                PatchOrFull::Patch
+            }
+            None => {
+                *baseline = Some(items.to_vec());
+                PatchOrFull::Full
+            }
+        }
+    }
 }
 
 impl<T: SignalValue + ListLike> KeyedState for KeyedList<T> {
@@ -956,55 +1029,71 @@ impl<T: SignalValue + ListLike> KeyedState for KeyedList<T> {
             self.signal.with(|current| current.encode(w));
             return PatchOrFull::Full;
         }
-        // Lock order: baseline, then the signal's value lock. `resync` does the same.
+        // Lock order: baseline, then the signal's value lock (read), then the log. `resync`
+        // does the same, and no writer takes the baseline lock.
         let mut baseline = self.baseline.lock();
-        self.signal.with(|current| {
-            let items = current.items();
-            let patch = baseline
-                .as_deref()
-                .and_then(|old| diff_items(old, items, self.key));
-            match patch {
-                Some(patch) => {
-                    patch.encode(w);
-                    // Keep the baseline in step by replaying the patch: only the changed items
-                    // are cloned. `diff` never yields a patch that does not apply; if it ever
-                    // did, re-cloning the list is the safe fallback.
-                    let replayed = baseline
-                        .as_mut()
-                        .is_some_and(|old| patch.apply(old).is_ok());
-                    if !replayed {
-                        *baseline = Some(items.to_vec());
-                    }
-                    #[cfg(debug_assertions)]
-                    if let Some(old) = baseline.as_deref() {
-                        let old_keys: Vec<u64> = old.iter().map(self.key).collect();
-                        let new_keys: Vec<u64> = items.iter().map(self.key).collect();
-                        debug_assert_eq!(
-                            old_keys, new_keys,
-                            "keyed baseline drifted from the list"
-                        );
-                    }
-                    PatchOrFull::Patch
-                }
-                None => {
-                    current.encode(w);
-                    *baseline = Some(items.to_vec());
-                    PatchOrFull::Full
-                }
+        let base_len = baseline.as_ref().map(Vec::len);
+        // Taking the log and looking at the list happen under the value's read lock: no write
+        // (which appends to the log under the write lock) can fall between them, so the ops
+        // taken are exactly the ones the list seen includes.
+        let taken = self
+            .signal
+            .read_locked(|current| self.log.take(current, current.items().len(), base_len));
+        match taken {
+            Taken::Full(current) => {
+                current.encode(w);
+                *baseline = Some(current.items().to_vec());
+                PatchOrFull::Full
             }
-        })
+            Taken::Diff(current) => {
+                let outcome = self.diff_against_baseline(&mut baseline, current.items(), w);
+                if matches!(outcome, PatchOrFull::Full) {
+                    current.encode(w);
+                }
+                outcome
+            }
+            Taken::Recorded {
+                ops,
+                #[cfg(debug_assertions)]
+                current,
+            } => {
+                // O(ops): the log is the patch, and the baseline follows by replaying it (the
+                // ops move into it, so only the clone made when each op was recorded is paid).
+                let patch = KeyedPatch { ops };
+                patch.encode(w);
+                let KeyedPatch { mut ops } = patch;
+                if let Some(old) = baseline.as_mut() {
+                    apply_ops(old, &mut ops);
+                }
+                self.log.recycle(ops);
+                #[cfg(debug_assertions)]
+                if let Some(old) = baseline.as_deref() {
+                    debug_assert!(
+                        same_encoding(old, current.items()),
+                        "keyed baseline drifted from the list (recorded ops)"
+                    );
+                }
+                PatchOrFull::Patch
+            }
+        }
     }
 
     fn resync(&self, w: &mut Writer) {
         let mut baseline = self.baseline.lock();
-        self.signal.with(|current| {
-            current.encode(w);
-            *baseline = Some(current.items().to_vec());
+        // Arming the log and looking at the list are one step under the read lock, for the
+        // reason `diff` gives: the baseline is the list as of this instant and the log starts
+        // empty at the same instant.
+        let current = self.signal.read_locked(|current| {
+            self.log.arm(current.items().len());
+            Arc::clone(current)
         });
+        current.encode(w);
+        *baseline = Some(current.items().to_vec());
     }
 
     fn forget(&self) {
         *self.baseline.lock() = None;
+        self.log.disarm();
     }
 }
 
@@ -1026,11 +1115,24 @@ fn diff_items<I: SignalValue>(old: &[I], new: &[I], key: fn(&I) -> u64) -> Optio
     })
 }
 
+/// Whether `a` and `b` are the same list as the host would see it: equal length, each item
+/// with the same encoding. Debug builds use it to check a baseline against the list.
+#[cfg(debug_assertions)]
+fn same_encoding<I: SignalValue>(a: &[I], b: &[I]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            let (mut left, mut right) = (Writer::new(), Writer::new());
+            x.encode(&mut left);
+            y.encode(&mut right);
+            left.as_slice() == right.as_slice()
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::CaptureSink;
-    use crate::{txn, with_sink};
+    use crate::{Computed, txn, with_sink};
 
     #[test]
     fn new_cell_is_empty() {
@@ -1182,6 +1284,93 @@ mod tests {
         assert!(patch.is_empty());
         let patch = diff_items(&old, &changed, key).expect("patch");
         assert_eq!(patch.len(), 1);
+    }
+
+    /// The op log of a keyed list signal.
+    fn log_of(signal: &Signal<Vec<u32>>) -> &KeyedLog<u32> {
+        signal
+            .inner
+            .log
+            .get()
+            .and_then(|log| log.as_any().downcast_ref::<KeyedLog<u32>>())
+            .expect("attach_keyed installs the op log")
+    }
+
+    fn u32_key(n: &u32) -> u64 {
+        u64::from(*n)
+    }
+
+    #[test]
+    fn the_log_records_only_while_the_slot_is_observed() {
+        let cell = StoreCell::new(1);
+        let list = Signal::new(vec![1_u32, 2, 3]);
+        cell.attach_keyed(&list, 0, u32_key).unwrap();
+        cell.set_handle(7);
+        let log = log_of(&list);
+        assert!(!log.is_recording(), "attached but not observed");
+        cell.observe(0, true, &mut Writer::new());
+        assert!(
+            log.is_recording(),
+            "observing baselines the list and arms the log"
+        );
+        cell.observe(0, false, &mut Writer::new());
+        assert!(
+            !log.is_recording(),
+            "unobserving forgets the baseline and the log"
+        );
+        list.push(4);
+        assert!(!log.is_recording());
+    }
+
+    #[test]
+    fn an_abandoned_commit_disarms_the_log_with_the_baseline() {
+        use std::sync::atomic::AtomicBool;
+        let cell = StoreCell::new(1);
+        let list = Signal::new(vec![1_u32, 2, 3]);
+        let armed = Arc::new(AtomicBool::new(false));
+        let bomb = {
+            let armed = Arc::clone(&armed);
+            Computed::new(&list, move |_: &Vec<u32>| {
+                assert!(!armed.load(Ordering::SeqCst), "computed failure");
+                0_u32
+            })
+        };
+        cell.attach_keyed(&list, 0, u32_key).unwrap();
+        cell.attach_computed(&bomb, 1).unwrap();
+        cell.set_handle(7);
+        cell.observe(ALL_SIGNALS, true, &mut Writer::new());
+        let log = log_of(&list);
+        assert!(log.is_recording());
+
+        armed.store(true, Ordering::SeqCst);
+        let sink = CaptureSink::new();
+        let aborted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_sink(sink.clone(), || list.push(4));
+        }));
+        assert!(aborted.is_err());
+        assert!(
+            !log.is_recording(),
+            "the ops of the abandoned change-set are dropped"
+        );
+        armed.store(false, Ordering::SeqCst);
+
+        with_sink(sink.clone(), || list.push(5));
+        assert!(
+            log.is_recording(),
+            "the full value that follows re-baselines and re-arms"
+        );
+    }
+
+    #[test]
+    fn a_failed_attach_installs_no_log() {
+        let first = StoreCell::new(1);
+        let second = StoreCell::new(2);
+        let list = Signal::new(vec![1_u32]);
+        first.attach_keyed(&list, 0, u32_key).unwrap();
+        let other = Signal::new(vec![1_u32]);
+        assert!(second.attach_keyed(&other, 5, u32_key).is_err());
+        assert!(other.inner.log.get().is_none());
+        assert!(second.attach_keyed(&list, 0, u32_key).is_err());
     }
 
     #[test]

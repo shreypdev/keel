@@ -44,7 +44,7 @@ assert_eq!(double.get(), 22);
 
 | Item | Purpose |
 |---|---|
-| `Signal<T>` | A shared value. `get`, `with`, `set`, `update`; `Clone` is another handle to the same signal. |
+| `Signal<T>` | A shared value. `get`, `with`, `set`, `update`; `Clone` is another handle to the same signal. A `Signal<Vec<T>>` adds the recorded list operations `push`, `insert`, `remove`, `update_at`, `move_item`, `clear` (and `replace`, which is `set`). |
 | `Computed<T>` | A cached value derived from signals and other computeds; lazy, recomputed eagerly at commit only while observed. |
 | `Effect` | Runs after every commit that changed one of its inputs; dropping it cancels it. |
 | `Deps` | The inputs of a computed or effect: one `&Signal` / `&Computed`, or a tuple of up to six. |
@@ -68,7 +68,11 @@ assert_eq!(double.get(), 22);
 * Unobserved signals are never encoded. `observe(on)` always sends the current value (and
   re-observing resends it, which is how a host resynchronises).
 * Keyed lists (`attach_keyed`) are sent as patches when a patch is possible and worthwhile, and
-  as full values otherwise (SPEC 3.8). Cost: one clone of the list per *observed* keyed signal.
+  as full values otherwise (SPEC 3.8). Written with the recorded list operations (`push`,
+  `insert`, `remove`, `update_at`, `move_item`, `clear`) a commit costs O(operations), however
+  long the list is; written with `set`, `update` or `replace` it is found by diffing the list
+  against what the host has, O(list) (ADR-027). Memory: one clone of the list per *observed*
+  keyed signal, plus the ops recorded since the last commit.
 * The only lock held while user code runs is a store's delivery lock, taken from the moment a
   commit claims the store's dirty slots until the sink has returned (a sink must not wait for
   another thread that writes the same store). Effects run after it is released. Writes made

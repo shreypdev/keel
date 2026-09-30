@@ -124,8 +124,9 @@ measured_ns = 17.4
 budget_ns = 350
 measured_ns = 68.1
 
-# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
-# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+# The diff itself (`KeyedPatch::diff`) is O(list) by nature: hashing both lists, then the order
+# analysis. Since ADR-027 it is the fallback for lists written with `set` / `update` / `replace`,
+# not the path of the recorded list operations (see the `signals/keyed_10k/*` rows below).
 [bench."wire/keyed_patch_10k/diff"]
 budget_ns = 2200000
 measured_ns = 435333.5
@@ -176,37 +177,39 @@ measured_ns = 235.8
 budget_ns = 14000
 measured_ns = 2709.0
 
-# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
-# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+# Keyed lists written with the recorded list operations (`Signal<Vec<T>>::insert`, `update_at`,
+# `move_item`, ADR-027): the patch is the op log, O(ops) and not O(list). What is left of the 10,000-row
+# cost is the `memmove` of the vector's tail (in the core's list and in the baseline), 0.6 ns per row.
+# `signals/keyed_10k/insert` is the blueprint section 14 row and now meets it on this host.
 [bench."signals/keyed_10k/insert"]
-budget_ns = 2700000
-measured_ns = 535625.0
+budget_ns = 31000
+measured_ns = 6125.0
 blueprint_ns = 20000
 blueprint = "Keyed patch on 10,000 items, one insert: <= 20 us iOS (A15), <= 40 us Android, <= 30 us web"
 
-# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
-# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
 [bench."signals/keyed_10k/update"]
-budget_ns = 2700000
-measured_ns = 539375.0
+budget_ns = 1400
+measured_ns = 277.4
 
-# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
-# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
 [bench."signals/keyed_10k/move"]
-budget_ns = 3300000
-measured_ns = 651709.0
+budget_ns = 48000
+measured_ns = 9523.1
 
-# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
-# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+# The fallback: the same one-row edit through the raw `Signal::update`, which the commit finds by
+# diffing the list against what the host has. Patches are computed by diffing the whole list, so this
+# is O(list), not O(change): it guards the fallback path at about its old cost (the row was
+# `signals/keyed_10k/update` before ADR-027, budget 2,700,000 ns).
+[bench."signals/keyed_10k/raw_update_diff"]
+budget_ns = 2700000
+measured_ns = 525542.0
+
 [bench."signals/keyed_1k/insert"]
-budget_ns = 280000
-measured_ns = 54708.0
+budget_ns = 3200
+measured_ns = 625.0
 
-# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
-# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
 [bench."signals/keyed_100/insert"]
-budget_ns = 31000
-measured_ns = 6125.0
+budget_ns = 1700
+measured_ns = 333.0
 
 [bench."signals/computed/recompute_1"]
 budget_ns = 250

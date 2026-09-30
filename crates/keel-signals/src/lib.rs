@@ -41,6 +41,7 @@ mod deps;
 mod effect;
 mod error;
 mod graph;
+mod oplog;
 mod signal;
 mod sink;
 mod store;
