@@ -130,6 +130,9 @@ pub(crate) fn take(attrs: &mut Vec<Attribute>, site: Site, errors: &mut Errors) 
 fn reject_cfg(attrs: &[Attribute], site: Site, errors: &mut Errors) {
     for attr in attrs {
         let path = attr.path();
+        if path.is_ident("cfg_attr") && is_schema_neutral_cfg_attr(attr) {
+            continue;
+        }
         if path.is_ident("cfg") || path.is_ident("cfg_attr") {
             errors.push(
                 Diag::new(
@@ -142,6 +145,34 @@ fn reject_cfg(attrs: &[Attribute], site: Site, errors: &mut Errors) {
             );
         }
     }
+}
+
+/// `#[cfg_attr(docsrs, doc(cfg(feature = "x")))]` and friends: a conditional attribute whose
+/// every expansion leaves the schema alone (documentation flags, lint levels, inlining hints).
+///
+/// `doc = "text"` is not neutral: the text is part of the schema, so it may not depend on the
+/// build. The list form (`doc(hidden)`, `doc(cfg(..))`, `doc(alias = "..")`) is.
+fn is_schema_neutral_cfg_attr(attr: &Attribute) -> bool {
+    let Ok(args) =
+        attr.parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+    else {
+        return false;
+    };
+    // The first element is the condition; the rest are the attributes it switches on.
+    let mut attributes = args.iter().skip(1).peekable();
+    if attributes.peek().is_none() {
+        return false;
+    }
+    attributes.all(|meta| match meta {
+        Meta::List(list) if list.path.is_ident("doc") => true,
+        Meta::List(list) => ["allow", "warn", "deny", "forbid", "expect"]
+            .iter()
+            .any(|name| list.path.is_ident(name)),
+        Meta::Path(path) => ["must_use", "inline", "cold", "track_caller"]
+            .iter()
+            .any(|name| path.is_ident(name)),
+        Meta::NameValue(_) => false,
+    })
 }
 
 fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()> {
@@ -538,7 +569,7 @@ mod tests {
             "{message}"
         );
         let message = first_error(
-            vec![parse_quote!(#[cfg_attr(test, allow(dead_code))])],
+            vec![parse_quote!(#[cfg_attr(test, derive(Clone))])],
             Site::NOTHING,
         );
         assert!(message.contains("`#[cfg_attr]`"), "{message}");
@@ -549,6 +580,29 @@ mod tests {
         take(&mut attrs, Site::ITEM, &mut errors);
         assert!(errors.is_empty());
         assert_eq!(attrs.len(), 1, "cfg is kept where it is allowed");
+    }
+
+    #[test]
+    fn documentation_and_lint_cfg_attrs_are_schema_neutral() {
+        let mut attrs: Vec<Attribute> = vec![
+            parse_quote!(#[cfg_attr(docsrs, doc(cfg(feature = "x")))]),
+            parse_quote!(#[cfg_attr(test, allow(dead_code), doc(hidden))]),
+            parse_quote!(#[cfg_attr(feature = "hot", inline)]),
+        ];
+        let mut errors = Errors::new();
+        take(&mut attrs, Site::FIELD, &mut errors);
+        assert!(errors.is_empty(), "neutral cfg_attrs are accepted");
+        assert_eq!(attrs.len(), 3, "and kept for rustc");
+        // A `doc = \"..\"` text, a derive or an unknown attribute may change the schema.
+        for attr in [
+            parse_quote!(#[cfg_attr(test, doc = "only in tests")]),
+            parse_quote!(#[cfg_attr(test, derive(Debug))]),
+            parse_quote!(#[cfg_attr(test, serde(skip))]),
+            parse_quote!(#[cfg_attr(test)]),
+        ] {
+            let message = first_error(vec![attr], Site::FIELD);
+            assert!(message.contains("`#[cfg_attr]`"), "{message}");
+        }
     }
 
     #[test]

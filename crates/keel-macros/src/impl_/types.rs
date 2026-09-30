@@ -251,6 +251,7 @@ pub(crate) fn ty_string(ty: &impl ToTokens) -> String {
         (" (", "("),
         ("[ ", "["),
         (" ]", "]"),
+        (">+", "> +"),
     ] {
         s = s.replace(from, to);
     }
@@ -1239,6 +1240,91 @@ mod tests {
     #[test]
     fn parens_and_groups_are_transparent() {
         assert_eq!(field("(String)").unwrap(), KType::String);
+    }
+
+    #[test]
+    fn nested_options_are_e0063_at_any_depth() {
+        assert_eq!(code_of(field("Option<Option<i32>>")), code::E0063);
+        assert_eq!(code_of(field("Vec<Option<Option<i32>>>")), code::E0063);
+        assert_eq!(code_of(field("Option<Box<Option<u8>>>")), code::E0063);
+        assert_eq!(code_of(ret("Option<Option<u8>>")), code::E0063);
+        assert!(field("Option<Vec<Option<u8>>>").is_ok());
+        assert!(field("Vec<Option<u8>>").is_ok());
+    }
+
+    #[test]
+    fn handle_has_no_schema_type() {
+        let err = field("Handle").unwrap_err();
+        assert_eq!(err.diag.code, code::E0001);
+        assert!(err.diag.what.contains("`Handle`"), "{:?}", err.diag);
+        assert!(err.diag.help.contains("rename it"), "{:?}", err.diag);
+        assert_eq!(code_of(field("Vec<Handle>")), code::E0001);
+    }
+
+    #[test]
+    fn the_error_side_of_a_result_must_be_a_name() {
+        for src in [
+            "Result<u8, String>",
+            "Result<u8, u32>",
+            "Result<u8, Vec<String>>",
+        ] {
+            let err = ret(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0001, "{src}");
+            assert!(
+                err.diag.what.contains("error type"),
+                "{src}: {:?}",
+                err.diag
+            );
+        }
+        assert!(ret("Result<u8, crate::errors::TodoError>").is_ok());
+        assert!(ret("Result<u8, Box<TodoError>>").is_ok());
+    }
+
+    #[test]
+    fn associated_types_and_boxed_streams_have_their_own_messages() {
+        let err = field("Self::Output").unwrap_err();
+        assert!(err.diag.what.contains("Self::Output"), "{:?}", err.diag);
+        for src in [
+            "Pin<Box<dyn Stream<Item = u8> + Send>>",
+            "Box<dyn Stream<Item = u8>>",
+            "Pin<Box<dyn futures_core::Stream<Item = u8>>>",
+        ] {
+            let err = ret(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0004, "{src}");
+            assert!(
+                err.diag.help.contains("return `impl Stream<Item = T>"),
+                "{src}: {:?}",
+                err.diag
+            );
+        }
+    }
+
+    #[test]
+    fn a_result_nested_in_a_return_says_nested_not_return_type() {
+        let err = ret("Vec<Result<u8, E>>").unwrap_err();
+        assert_eq!(err.diag.code, code::E0005);
+        assert!(
+            err.diag.what.contains("nested inside another type"),
+            "{:?}",
+            err.diag
+        );
+        let err = ret("Vec<impl Stream<Item = u8>>").unwrap_err();
+        assert!(
+            err.diag.what.contains("nested inside another type"),
+            "{:?}",
+            err.diag
+        );
+        // In a field the old wording stands.
+        let err = field("Result<u8, E>").unwrap_err();
+        assert!(err.diag.what.contains("a field"), "{:?}", err.diag);
+    }
+
+    #[test]
+    fn names_the_mapper_recognises_come_with_a_rename_hint() {
+        for src in ["Instant", "Path", "SystemTime", "Ctx", "PathBuf"] {
+            let err = field(src).unwrap_err();
+            assert!(err.diag.help.contains("rename it"), "{src}: {:?}", err.diag);
+        }
     }
 
     #[test]

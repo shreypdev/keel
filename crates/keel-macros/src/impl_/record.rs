@@ -87,7 +87,7 @@ fn parse_fields<'a>(
             let (from, source) = take_field_attrs(&mut field.attrs);
             if from || source {
                 errors.push(error_attribute_misplaced(
-                    &name,
+                    &format!("the field `{name}`"),
                     if from { "from" } else { "source" },
                     &field.ty,
                 ));
@@ -128,7 +128,7 @@ fn error_attribute_misplaced(
 ) -> syn::Error {
     Diag::new(
         code::E0010,
-        format!("`#[{attribute}]` on `{what}` belongs to `#[keel::error]`, not `#[keel::api]`"),
+        format!("`#[{attribute}]` on {what} belongs to `#[keel::error]`, not `#[keel::api]`"),
         "`#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[keel::api]` enum has no messages, `Display` or `From` impls",
         "change the enum's attribute to `#[keel::error]`, or remove the helper attribute",
     )
@@ -330,7 +330,7 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
             variant.attrs = kept;
             for attr in &misplaced {
                 errors.push(error_attribute_misplaced(
-                    &variant.ident.to_string(),
+                    &format!("the variant `{}`", variant.ident),
                     "error",
                     attr,
                 ));

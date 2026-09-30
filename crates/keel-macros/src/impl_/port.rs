@@ -824,7 +824,8 @@ fn call_helpers(
 /// `snake` as an identifier, raw (`r#match`) when it is a keyword. `self`, `super` and `crate`
 /// cannot be raw identifiers; they get a trailing underscore.
 fn ident_or_raw(snake: &str) -> syn::Ident {
-    if syn::parse_str::<syn::Ident>(snake).is_ok() {
+    // `gen` is reserved from edition 2024 on, which `syn` does not know; raw is valid in all.
+    if snake != "gen" && syn::parse_str::<syn::Ident>(snake).is_ok() {
         return syn::Ident::new(snake, Span::call_site());
     }
     if matches!(snake, "self" | "super" | "crate") {
@@ -1237,6 +1238,96 @@ mod tests {
                 .to_string()
                 .contains("E0007")
         );
+    }
+
+    #[test]
+    fn result_methods_map_every_port_outcome_to_their_error() {
+        let out = trait_result(
+            "pub trait Http { async fn request(&self, req: Req) -> Result<Resp, HttpError>; async fn ping(&self) -> bool; }",
+            Requested::Inferred,
+        )
+        .unwrap();
+        // The error channel: `E::from(PortError)` through a bound that carries E0033.
+        for needle in [
+            "trait __KeelPortError_Http: ::core::marker::Sized",
+            "error[keel::E0033]",
+            "<HttpError as __KeelPortError_Http>::__keel_from_port_error(__keel_e)",
+            "::keel::runtime::PortError::Failed(__keel_bytes)",
+            "::keel::runtime::PortError::Decode(__keel_error)",
+        ] {
+            assert!(has(&out, needle), "missing `{needle}` in {out}");
+        }
+        // A method without one panics with the teaching message of E0062.
+        for needle in [
+            "fn __keel_port_failure_Http(__keel_method: &str, __keel_error: ::keel::runtime::PortError) -> !",
+            "has no adapter registered (method `{}`)",
+            "core.registerPort(..) (TypeScript, Kotlin, Swift) / keel_port_register (C)",
+            "https://keel.dev/errors",
+            "__keel_port_failure_Http(\"ping\", __keel_error)",
+        ] {
+            assert!(has(&out, needle), "missing `{needle}` in {out}");
+        }
+        // No error channel anywhere: no bound to satisfy.
+        let out = trait_result(
+            "pub trait Clock { fn now_ms(&self) -> i64; }",
+            Requested::Sync,
+        )
+        .unwrap();
+        assert!(!has(&out, "__KeelPortError_Clock"), "{out}");
+        assert!(has(&out, "__keel_port_failure_Clock"), "{out}");
+    }
+
+    #[test]
+    fn generated_locals_never_use_the_users_parameter_names() {
+        let out = trait_result(
+            "pub trait P { async fn f(&self, __w: u32, __args: u32, __ctx: u32) -> u32; }",
+            Requested::Inferred,
+        )
+        .unwrap();
+        // The user's names appear in the signature and the encodes only.
+        assert!(has(&out, "Encode::encode(&__w, &mut __keel_w)"), "{out}");
+        assert!(has(&out, "let __keel_a0: u32 = match"), "{out}");
+        assert!(
+            has(
+                &out,
+                "let __keel_ctx = ::core::clone::Clone::clone(&self.0)"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn keyword_snake_names_become_raw_accessors() {
+        for (snake, expected) in [
+            ("http", "http"),
+            ("match", "r#match"),
+            ("type", "r#type"),
+            ("loop", "r#loop"),
+            ("gen", "r#gen"),
+            ("super", "super_"),
+            ("self", "self_"),
+            ("crate", "crate_"),
+        ] {
+            assert_eq!(ident_or_raw(snake).to_string(), expected, "{snake}");
+        }
+        let out = trait_result("pub trait Match { fn go(&self) -> u8; }", Requested::Sync).unwrap();
+        assert!(
+            has(&out, "pub fn r#match(ctx: &::keel::runtime::Ctx)"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn parenthesised_returns_are_read_through() {
+        let (ok, err) = result_types(&syn::parse_quote!(-> (Result<u8, E>)), false);
+        assert_eq!(ok.map(|t| ty_string(&t)), Some("u8".to_owned()));
+        assert_eq!(err.map(|t| ty_string(&t)), Some("E".to_owned()));
+        let out = trait_result(
+            "pub trait P { fn f(&self) -> (Result<u8, E>); }",
+            Requested::Sync,
+        )
+        .unwrap();
+        assert!(has(&out, "__keel_port_error(__keel_other)"), "{out}");
     }
 
     #[test]

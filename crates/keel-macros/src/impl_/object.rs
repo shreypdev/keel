@@ -1125,8 +1125,8 @@ pub(crate) fn expand_impl(
             errors.push(shape_error(
                 format!("`{name}` is neither a method nor a constructor"),
                 &func.sig.ident,
-                "a `pub fn` in a `#[keel::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor)",
-                "add `&self`, make it return `Self`, or make it private / move it to a free `#[keel::api] fn`",
+                "a `pub fn` in a `#[keel::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed",
+                "add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[keel::api] fn`",
             ));
         }
     }

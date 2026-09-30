@@ -756,6 +756,49 @@ mod tests {
     }
 
     #[test]
+    fn parenthesised_result_types_are_read_through() {
+        // L4: this used to fail with "keel: internal error: a validated query has no Result type".
+        let out = run(
+            Flavor::Query,
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx) -> (Result<u8, E>) { Ok(1) }",
+        )
+        .unwrap();
+        assert!(has(&out, "type Output = u8"), "{out}");
+        assert!(has(&out, "type Error = E"), "{out}");
+    }
+
+    #[test]
+    fn a_query_cannot_cache_unit_or_an_option() {
+        let message = run(
+            Flavor::Query,
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx) -> Result<(), E> { Ok(()) }",
+        )
+        .unwrap_err();
+        assert!(
+            message.starts_with("error[keel::E0042]: query `q` returns `()`"),
+            "{message}"
+        );
+        let message = run(
+            Flavor::Query,
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx) -> Result<Option<u8>, E> { Ok(None) }",
+        )
+        .unwrap_err();
+        assert!(message.contains("returns an `Option`"), "{message}");
+        assert!(
+            run(
+                Flavor::Mutation,
+                "",
+                "async fn m(ctx: &Ctx) -> Result<Option<u8>, E> { Ok(None) }"
+            )
+            .is_ok(),
+            "mutations may return either"
+        );
+    }
+
+    #[test]
     fn crate_override_and_send_assertion() {
         let out = run(
             Flavor::Query,

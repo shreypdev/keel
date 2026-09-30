@@ -82,7 +82,9 @@ fn wrong_item(macro_name: &str, expected: &str, item: &syn::Item) -> syn::Error 
 
 /// `#[keel::api]`.
 pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
-    run(item, &[], |item| {
+    // `error`, `from` and `source` belong to `#[keel::error]`; on a plain enum they are reported
+    // (E0010) and then dropped, so `rustc` does not add "cannot find attribute" on top.
+    run(item, &["error", "from", "source"], |item| {
         let mut root: Option<Root> = None;
         let mut store = false;
         parse_args(
