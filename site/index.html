@@ -3,90 +3,88 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keel — One Rust core. Native everywhere.</title>
-<meta name="description" content="Keel is a Rust framework that owns everything under the pixels of native iOS, Android and web apps: domain logic, reactive state, the data layer, persistence and the dev loop. The UI stays SwiftUI, Compose and React.">
-<meta name="theme-color" content="#0a0a0a">
-<meta name="color-scheme" content="dark light">
+<title>Keel — the Rust core for native apps</title>
+<meta name="description" content="Keel is a Rust framework for sharing business logic across iOS, Android and web. It generates Swift, Kotlin and TypeScript; your UI stays native.">
 <link rel="canonical" href="https://shreypdev.github.io/keel/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Keel — One Rust core. Native everywhere.">
-<meta property="og:description" content="Domain logic, reactive state, the data layer and persistence in one Rust core. The UI stays SwiftUI, Compose and React.">
+<meta property="og:site_name" content="Keel">
+<meta property="og:title" content="Keel — the Rust core for native apps">
+<meta property="og:description" content="Write your domain once in Rust. Keel generates native Swift, Kotlin and TypeScript; your UI stays SwiftUI, Compose and React.">
 <meta property="og:url" content="https://shreypdev.github.io/keel/">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Keel — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Keel — the Rust core for native apps">
+<meta name="twitter:description" content="Write your domain once in Rust. Keel generates native Swift, Kotlin and TypeScript; your UI stays SwiftUI, Compose and React.">
+<meta name="twitter:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"WebSite","@id":"https://shreypdev.github.io/keel/#website","name":"Keel","alternateName":"Keel framework","url":"https://shreypdev.github.io/keel/","description":"Keel is a Rust framework for sharing business logic across iOS, Android and web, with generated native Swift, Kotlin and TypeScript.","inLanguage":"en","publisher":{"@id":"https://shreypdev.github.io/keel/#org"}},
+{"@type":"Organization","@id":"https://shreypdev.github.io/keel/#org","name":"Keel","url":"https://shreypdev.github.io/keel/","logo":"https://shreypdev.github.io/keel/favicon.svg","sameAs":["https://github.com/shreypdev/keel"]},
+{"@type":"SoftwareSourceCode","name":"Keel","codeRepository":"https://github.com/shreypdev/keel","programmingLanguage":"Rust","runtimePlatform":"iOS, Android, Web","license":"https://github.com/shreypdev/keel/blob/main/LICENSE-MIT","dateModified":"2026-09-30"},
+{"@type":"SoftwareApplication","name":"Keel","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","description":"Rust framework and CLI that owns domain logic, reactive state, the data layer and persistence for native iOS, Android and web apps.","url":"https://shreypdev.github.io/keel/","downloadUrl":"https://github.com/shreypdev/keel","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://github.com/shreypdev/keel/blob/main/LICENSE-MIT"}
+]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0b">
+<meta name="color-scheme" content="dark light">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="alternate" type="application/rss+xml" title="Keel blog" href="feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap"></noscript>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
 <link rel="stylesheet" href="assets/base.css">
 <link rel="stylesheet" href="assets/home.css">
 </head>
-<body>
+<body data-page="home">
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="./" aria-label="Keel, home">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Keel</span>
-    </a>
-    <nav class="nav" aria-label="Primary">
-      <a class="hide-sm" href="#how">How it works</a>
-      <a class="hide-sm" href="#numbers">Numbers</a>
-      <a class="hide-sm" href="#code">Code</a>
-      <a class="hide-sm" href="#trust">Trust</a>
+    <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="docs/">Docs</a>
+      <a href="blog/">Blog</a>
+      <a href="roadmap/">Roadmap</a>
+      <a href="playground/">Playground</a>
+      <span class="sp"></span>
       <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
-      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme">
-        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
-        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
-      </button>
     </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
 </header>
 
 <main id="main">
 
-<!-- ===================== HERO ===================== -->
+<!-- 1. HERO -->
 <section class="hero">
   <div class="wrap">
-    <a class="eyebrow" href="https://github.com/shreypdev/keel/blob/main/.10x/status.md" rel="noopener"><i></i> v1 complete · MIT OR Apache-2.0</a>
-    <h1 class="display"><span>One Rust core.</span> <em>Native everywhere.</em></h1>
+    <div class="hero-in">
+      <p class="eyebrow">Rust core · native UI</p>
+      <h1>One Rust core. Native everywhere.</h1>
+      <p class="lede">Write your domain once in Rust. Keel generates the Swift, Kotlin and TypeScript your engineers would have written by hand, and your UI stays SwiftUI, Compose and React.</p>
 
-    <div class="hero-grid">
-      <div>
-        <p class="hero-sub">Keel owns everything <strong>under the pixels</strong> of your iOS, Android and web apps: domain logic, reactive state, the data layer, persistence and the dev loop. The UI stays 100% native: SwiftUI, Jetpack Compose and React, written by hand.</p>
-        <p class="hero-sub">It is the opposite of a cross-platform UI framework. Your screens never leave the platform. Your <em>logic</em> stops being written three times.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="docs/getting-started.html">Get started <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
-          <a class="btn btn-ghost" href="https://github.com/shreypdev/keel" rel="noopener">View on GitHub</a>
-        </div>
+      <div class="install" data-tabs data-label="Install Keel">
+        <div class="tabs-head"></div>
+        <div class="tab-panel" data-label="brew"><p class="tab-label">brew</p><div class="cmd"><code>brew install shreypdev/keel/keel</code><button class="copy" type="button" data-copy="brew install shreypdev/keel/keel" aria-label="Copy the brew command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @keel/cli</code><button class="copy" type="button" data-copy="npm install -g @keel/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/keel/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/keel/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/keel keel-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/keel keel-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
       </div>
-      <div>
-        <div class="install" data-tabs data-label="Install Keel">
-          <div class="tabs-head"></div>
-          <section class="tab-panel" data-label="Install">
-            <p class="tab-label">Install</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">git clone https://github.com/shreypdev/keel.git &amp;&amp; cd keel
-cargo install --path crates/keel-cli    # the `keel` command</code></pre></div>
-          </section>
-          <section class="tab-panel" data-label="New app">
-            <p class="tab-label">New app</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel init myapp    # core + SwiftUI + Compose + React shells
-cd myapp</code></pre></div>
-          </section>
-          <section class="tab-panel" data-label="Dev loop">
-            <p class="tab-label">Dev loop</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel dev    # live core over WebSocket, rebuild on save</code></pre></div>
-          </section>
-          <section class="tab-panel" data-label="Doctor">
-            <p class="tab-label">Doctor</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel doctor    # what your machine is missing, with the fix</code></pre></div>
-          </section>
-        </div>
-        <p class="install-note">Builds an XCFramework, 16&nbsp;KB-aligned <code>.so</code>s and a <code>wasm-opt</code>'d module. <a href="docs/getting-started.html">Full walkthrough</a>.</p>
+      <p class="install-note">Installs the <code>keel</code> CLI. Then <code>keel doctor</code> tells you what your machine is missing.</p>
+
+      <div class="cta-row">
+        <a class="btn btn-primary" href="docs/getting-started.html">Get started <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
+        <a class="btn btn-ghost" href="#live">See it live</a>
       </div>
+      <p class="hero-meta">Open source · MIT OR Apache-2.0 · macOS and Linux CLI</p>
     </div>
 
     <div class="stage-wrap reveal" id="architecture">
@@ -177,7 +175,7 @@ cd myapp</code></pre></div>
     <g data-role="core">
       <rect data-role="core-glow" x="80" y="340" width="1040" height="140" fill="url(#dgw-core)" opacity=".5"/>
       <rect class="core" x="80" y="360" width="1040" height="232" rx="22"/>
-      <text class="t-core serif" x="112" y="432">Rust core</text>
+      <text class="t-core" x="112" y="432">Rust core</text>
       <text class="t-dim mono" x="1088" y="430" text-anchor="end">stores · queries · mutations · persistence · offline queue</text>
       <line class="core-line" x1="112" x2="1088" y1="448" y2="448"/>
       <text class="h-lbl mono" x="112" y="474">store · Todos</text>
@@ -269,7 +267,7 @@ cd myapp</code></pre></div>
     <g data-role="core">
       <rect data-role="core-glow" x="8" y="220" width="344" height="110" fill="url(#dgn-core)" opacity=".5"/>
       <rect class="core" x="8" y="236" width="344" height="226" rx="18"/>
-      <text class="t-core serif" x="22" y="296" style="font-size:22px">Rust core</text>
+      <text class="t-core" x="22" y="296" style="font-size:22px">Rust core</text>
       <text class="h-lbl mono" x="22" y="322" style="font-size:9.5px">store · Todos</text>
       <g data-chip="todos"><rect class="chip" x="22" y="328" width="54" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="22" y="328" width="54" height="24" rx="7"/><text class="chip-t mono" x="49" y="344" text-anchor="middle" style="font-size:10.5px">todos</text></g>
       <g data-chip="filter"><rect class="chip" x="82" y="328" width="54" height="24" rx="7"/><rect class="chip-on" data-role="on" x="82" y="328" width="54" height="24" rx="7"/><text class="chip-t mono" x="109" y="344" text-anchor="middle" style="font-size:10.5px">filter</text></g>
@@ -302,401 +300,349 @@ cd myapp</code></pre></div>
   </div>
 </section>
 
-<!-- ===================== THESIS ===================== -->
-<section class="thesis">
-  <div class="wrap thesis-grid">
-    <p class="big reveal">Write the domain once. Keep every screen <em>exactly as native</em> as the platform wants it.</p>
-    <div class="reveal" data-d="1">
-      <div class="plat" aria-label="Platforms"><span><b>iOS</b>SwiftUI</span><span><b>Android</b>Jetpack Compose</span><span><b>Web</b>React</span><span><b>Core</b>Rust</span></div>
-      <p class="lede" style="margin-top:16px">Stores, queries, mutations, persistence and offline behaviour live in the core. Each platform gets generated code a native reviewer would sign off on: <code>@Observable</code> stores, <code>StateFlow</code>s, hooks and signals.</p>
+<!-- 2. 60 SECONDS -->
+<section class="section" id="start">
+  <div class="wrap split">
+    <div class="reveal">
+      <p class="eyebrow">Quick start</p>
+      <h2>60 seconds to a native app</h2>
+      <p class="lede">Scaffold a project, start the live core, open a shell. The templates ship inside the binary, so nothing is downloaded and the bindings are already generated.</p>
+      <ol class="steps-list">
+        <li><b><code>keel init myapp</code></b><span>A Rust core with a working to-do store, plus SwiftUI, Compose and React shells.</span></li>
+        <li><b><code>keel dev</code></b><span>Serves the core over a WebSocket and rebuilds on save. Edit Rust, reload the app.</span></li>
+        <li><b>Open a shell</b><span>Each shell is a plain native project that uses the generated bindings.</span></li>
+      </ol>
+    </div>
+    <figure class="term reveal" data-term>
+      <div class="term-bar"><span>~/code</span><button class="copy" type="button" data-term-replay aria-label="Replay the terminal session" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.8-4.1M2.5 2.5v3h3"/></svg><span>Replay</span></button></div>
+      <pre class="term-body"><code><span class="ln c">keel init myapp</span>
+<span class="ln o dim">==&gt; Creating myapp in /Users/dev/myapp</span>
+<span class="ln o">Created /Users/dev/myapp (56 files, bindings for schema hash 0x4937957423dcf62b).</span>
+<span class="ln o">&nbsp;</span>
+<span class="ln o">Next:</span>
+<span class="ln o">  cd myapp</span>
+<span class="ln o">  keel doctor                 check this machine</span>
+<span class="ln o">  keel dev                    serve the core to a running app, rebuilding on change</span>
+<span class="ln o">&nbsp;</span>
+<span class="ln c">cd myapp &amp;&amp; keel dev</span>
+<span class="ln o dim">==&gt; Building the dev server for myapp-core</span>
+<span class="ln o">Keel dev server is running.</span>
+<span class="ln o">ws://127.0.0.1:7443</span>
+<span class="ln o">  schema hash   0x4937957423dcf62b</span>
+<span class="ln o">&nbsp;</span>
+<span class="ln c">open ios/Myapp.xcodeproj           <span class="cm"># SwiftUI</span></span>
+<span class="ln c">./gradlew -p android :app:installDebug   <span class="cm"># Compose</span></span>
+<span class="ln c">cd web &amp;&amp; npm install &amp;&amp; npm run dev   <span class="cm"># React</span></span></code></pre>
+    </figure>
+  </div>
+</section>
+
+<!-- 3. LIVE DEMO -->
+<section class="section" id="live">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Live demo</p>
+      <h2>See it live</h2>
+      <p class="lede">This is the real Rust core, compiled to WebAssembly and running in this tab. The list below has 10,000 keyed rows, and ten updates a second stream in from the core as one-row patches.</p>
+    </div>
+    <div class="live reveal" data-live>
+      <div class="live-frame">
+        <div class="frame-bar"><span>playground · list · 10,000 rows</span><a href="playground/?screen=list&amp;stream=1" data-live-open>Open in a tab</a></div>
+        <div class="frame-body" data-live-mount data-src="playground/?screen=list&amp;stream=1&amp;embed=1">
+          <p class="live-fallback" data-live-note>The live demo starts when you scroll here. It needs JavaScript and WebAssembly; <a href="playground/?screen=list&amp;stream=1">open the playground directly</a> if you prefer.</p>
+        </div>
+      </div>
+      <div class="live-side">
+        <dl class="counters" aria-label="Live measurements from the demo">
+          <div><dt>Change-sets applied</dt><dd><span class="num" data-stat="rate">–</span><small>/ s</small></dd></div>
+          <div><dt>Apply time, p50</dt><dd><span class="num" data-stat="p50">–</span></dd></div>
+          <div><dt>Apply time, p99</dt><dd><span class="num" data-stat="p99">–</span></dd></div>
+        </dl>
+        <p class="fine">Measured in your browser, on your machine, with <code>performance.now()</code> around the application of each change-set. Nothing here is a recording.</p>
+        <div class="cta-row left">
+          <a class="btn btn-ghost" href="playground/">Open the full playground</a>
+          <!-- pushit:start -->
+          <button class="btn btn-primary" type="button" data-push-it hidden>Push it</button>
+          <!-- pushit:end -->
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ===================== NUMBERS ===================== -->
+<!-- 4. NUMBERS -->
 <section class="section" id="numbers">
   <div class="wrap">
-    <span class="kicker reveal">Numbers</span>
-    <h2 class="h2 display reveal">The boundary is cheap. <em>Measured,</em> not promised.</h2>
-    <p class="lede reveal" data-d="1">Reads never cross the language boundary, and lists cross as O(change) patches. The timings come from the benchmark suite in <a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">bench/RESULTS.md</a>, measured on an Apple M5 Pro and guarded by budgets in CI. The two sizes are what <code>keel build</code> reports.</p>
-
-    <div class="stats">
-      <article class="stat w4 reveal" data-bar>
-        <div class="lbl">Synchronous core call, through the C ABI, end to end</div>
-        <div class="val"><span data-count="49.8" data-dec="1" data-final="49.8">49.8</span><small>ns</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:83%"></span></div><div class="meter-cap"><span><b>83%</b> of target</span><span>target ≤ 60 ns</span></div></div>
-        <div class="gate"><b>CI gate</b> dispatch path ≤ 250 ns<br>allocations per call pinned by a test</div>
-      </article>
-      <article class="stat w4 reveal" data-bar data-d="1">
-        <div class="lbl">1&nbsp;KB record, encode and decode round trip</div>
-        <div class="val"><span data-count="228" data-dec="0" data-final="228">228</span><small>ns</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:7.6%"></span></div><div class="meter-cap"><span><b>7.6%</b> of target</span><span>target ≤ 3 µs</span></div></div>
-        <div class="gate"><b>CI gate</b> wire/record1k ≤ 990 ns</div>
-      </article>
-      <article class="stat w4 reveal" data-bar data-d="2">
-        <div class="lbl">One insert into an observed, keyed 10,000-row list</div>
-        <div class="val"><span data-count="6.3" data-dec="1" data-final="6.3">6.3</span><small>µs</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:31.5%"></span></div><div class="meter-cap"><span><b>32%</b> of target</span><span>target ≤ 20 µs</span></div></div>
-        <div class="gate"><b>CI gate</b> keyed_10k/insert ≤ 31 µs</div>
-      </article>
-      <article class="stat reveal" data-bar>
-        <div class="lbl">Change-set for 100 dirty signals, core side</div>
-        <div class="val"><span data-count="2.3" data-dec="1" data-final="2.3">2.3</span><small>µs</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:2.3%"></span></div><div class="meter-cap"><span><b>2.3%</b> of target</span><span>target ≤ 100 µs</span></div></div>
-        <div class="gate"><b>CI gate</b> changeset_100 ≤ 11 µs</div>
-      </article>
-      <article class="stat reveal" data-bar data-d="1">
-        <div class="lbl">Cold start restoring 100&nbsp;KB of state</div>
-        <div class="val"><span data-count="71" data-dec="0" data-final="71">71</span><small>µs</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:2.4%"></span></div><div class="meter-cap"><span><b>2.4%</b> of target</span><span>target ≤ 3 ms</span></div></div>
-        <div class="gate"><b>CI gate</b> cold_start_restore_100kb ≤ 340 µs</div>
-      </article>
-      <article class="stat reveal" data-bar data-d="2">
-        <div class="lbl">Web runtime plus a hello-world core, gzipped wasm</div>
-        <div class="val"><span data-count="85" data-dec="0" data-final="85">85</span><small>KB</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:71%"></span></div><div class="meter-cap"><span><b>71%</b> of budget</span><span>budget ≤ 120 KB</span></div></div>
-        <div class="gate"><b>size</b> printed by <code>keel build</code> against the design budget</div>
-      </article>
-      <article class="stat reveal" data-bar data-d="3">
-        <div class="lbl">Android core, one <code>.so</code> per ABI, release</div>
-        <div class="val"><span data-count="831" data-dec="0" data-final="831">831</span><small>KB</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:69%"></span></div><div class="meter-cap"><span><b>69%</b> of budget</span><span>budget ≤ 1.2 MB</span></div></div>
-        <div class="gate"><b>size</b> printed by <code>keel build</code> against the design budget</div>
-      </article>
+    <div class="sec-head reveal">
+      <p class="eyebrow">Numbers</p>
+      <h2>The boundary is cheap. Measured, not promised.</h2>
+      <p class="lede">Reads never cross the language boundary, and lists cross as O(change) patches. Every row links to <a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">bench/RESULTS.md</a>, and the core operations are gated by budgets in CI.</p>
     </div>
-
-    <div class="story reveal" data-bar>
+    <!-- numbers:start -->
+    <div class="table-wrap bench reveal">
+    <table>
+    <caption class="sr">Benchmark results, measured on Apple M5 Pro, 18 cores, macOS 26.5</caption>
+    <thead><tr><th scope="col">Operation</th><th scope="col" class="r">Measured</th><th scope="col" class="r">Budget</th><th scope="col">CI gate</th><th scope="col">Source</th></tr></thead>
+    <tbody>
+    <tr><th scope="row">Synchronous core call (C ABI, end to end)</th><td class="r" data-l="Measured"><span class="val">49.8 ns</span><span class="use" role="img" aria-label="83% of the budget" style="--w:83.0%"><i></i></span></td><td class="n r" data-l="Budget">≤ 60 ns</td><td data-l="CI gate"><code>dispatch/call_sync/add ≤ 250 ns</code></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">RESULTS.md</a></td></tr>
+    <tr><th scope="row">1 KB record round trip</th><td class="r" data-l="Measured"><span class="val">228 ns</span><span class="use" role="img" aria-label="7.6% of the budget" style="--w:7.6%"><i></i></span></td><td class="n r" data-l="Budget">≤ 3 µs</td><td data-l="CI gate"><code>wire/record1k/roundtrip ≤ 990 ns</code></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">RESULTS.md</a></td></tr>
+    <tr><th scope="row">One insert into an observed 10,000-row list</th><td class="r" data-l="Measured"><span class="val">6.3 µs</span><span class="use" role="img" aria-label="32% of the budget" style="--w:31.5%"><i></i></span></td><td class="n r" data-l="Budget">≤ 20 µs</td><td data-l="CI gate"><code>signals/keyed_10k/insert ≤ 31 µs</code></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md#1-a-keyed-patch-was-olist-not-ochange-with-recorded-list-operations-it-is-ochange-resolved-adr-027" rel="noopener">RESULTS.md</a></td></tr>
+    <tr><th scope="row">Change-set for 100 dirty signals</th><td class="r" data-l="Measured"><span class="val">2.3 µs</span><span class="use" role="img" aria-label="2.3% of the budget" style="--w:2.3%"><i></i></span></td><td class="n r" data-l="Budget">≤ 100 µs</td><td data-l="CI gate"><code>signals/changeset_100/runtime ≤ 11 µs</code></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">RESULTS.md</a></td></tr>
+    <tr><th scope="row">Cold start restoring 100 KB of state</th><td class="r" data-l="Measured"><span class="val">71 µs</span><span class="use" role="img" aria-label="2.4% of the budget" style="--w:2.4%"><i></i></span></td><td class="n r" data-l="Budget">≤ 3 ms</td><td data-l="CI gate"><code>snapshot/cold_start_restore_100kb ≤ 340 µs</code></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">RESULTS.md</a></td></tr>
+    <tr><th scope="row">Web runtime + hello-world core, gzipped wasm</th><td class="r" data-l="Measured"><span class="val">85 KB</span><span class="use" role="img" aria-label="71% of the budget" style="--w:70.8%"><i></i></span></td><td class="n r" data-l="Budget">≤ 120 KB</td><td data-l="CI gate"><span class="tok-dim">reported by <code>keel build</code></span></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/README.md#why-its-fast" rel="noopener">README.md</a></td></tr>
+    <tr><th scope="row">Android core, one .so per ABI, release</th><td class="r" data-l="Measured"><span class="val">831 KB</span><span class="use" role="img" aria-label="69% of the budget" style="--w:69.3%"><i></i></span></td><td class="n r" data-l="Budget">≤ 1.2 MB</td><td data-l="CI gate"><span class="tok-dim">reported by <code>keel build</code></span></td><td data-l="Source"><a href="https://github.com/shreypdev/keel/blob/main/README.md#why-its-fast" rel="noopener">README.md</a></td></tr>
+    </tbody>
+    </table>
+    </div>
+    <p class="fine">Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median. Measured on Apple M5 Pro, 18 cores, macOS 26.5.</p>
+    <p class="bench-note">High-frequency stress rows (firehose transactions, keyed-list churn, stream backpressure, a soak run) are in flight. See the <a href="roadmap/">roadmap</a>.</p>
+    <!-- numbers:end -->
+    <div class="story reveal">
       <div>
         <h3>A list write costs the change, not the list.</h3>
-        <p>Recording the list operation instead of rediscovering it took a one-row insert into a 10,000-row observed list from 536&nbsp;µs to 6.3&nbsp;µs. A keyed patch is now O(change). <a href="https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md" rel="noopener">ADR-027</a> has the before and after.</p>
+        <p>Recording the list operation instead of rediscovering it took one insert into a 10,000-row observed list from 536&nbsp;µs to 6.3&nbsp;µs. <a href="https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md" rel="noopener">ADR-027</a> has the before and after.</p>
       </div>
-      <div class="cmp" aria-label="Insert into a 10,000-row list, before and after ADR-027">
+      <div class="cmp" role="img" aria-label="Insert into a 10,000-row list: diffed 536 microseconds, recorded operation 6.3 microseconds, update one row 272 nanoseconds">
         <div class="cmp-row"><span>diffed</span><span class="track"><span class="fill" style="--w:100%"></span></span><b>536 µs</b></div>
         <div class="cmp-row new"><span>recorded op</span><span class="track"><span class="fill" style="--w:1.2%"></span></span><b>6.3 µs</b></div>
         <div class="cmp-row new"><span>update one row</span><span class="track"><span class="fill" style="--w:0.05%"></span></span><b>272 ns</b></div>
       </div>
     </div>
-
-    <p class="fine"><strong>How to read this.</strong> Medians from <code>cargo bench</code> (criterion, release, LTO) on an Apple M5 Pro. "Target" is the design's per-device budget; a phone core is slower than this host, so a pass here is necessary, not sufficient. "CI gate" is the regression guard in <code>bench/budgets.toml</code>, about 5x the host median; it fails the build. The two size rows are recorded when the core is built. <strong>Device-measured numbers</strong> (iPhone, mid-range Android, Chromium) are tracked in RESULTS.md and are not claimed here.</p>
+    <p class="fine">Timings are host-measured. A phone core is slower than this host, so a pass here is necessary, not sufficient. Device-measured rows (iPhone, mid-range Android, Chromium) are on the <a href="roadmap/">roadmap</a> and are not claimed here.</p>
   </div>
 </section>
 
-<!-- ===================== HOW IT WORKS ===================== -->
+<!-- 5. HOW IT WORKS -->
 <section class="section" id="how">
   <div class="wrap">
-    <span class="kicker reveal">How it works</span>
-    <h2 class="h2 display reveal">Describe once. Generate native. <em>Write once per change.</em></h2>
-    <div class="how">
-      <article class="how-card reveal">
-        <span class="n">1</span>
-        <h3>Describe it in Rust</h3>
-        <p>Mark your types and functions. The macros emit a schema, and the schema is the only source of truth: nothing public exists that it cannot describe.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[keel::api]
-pub struct Todo {
-    pub id: Uuid,
-    pub title: String,
-    pub done: bool,
-}</code></pre></div>
-      </article>
-      <article class="how-card reveal" data-d="1">
-        <span class="n">2</span>
-        <h3>Generate native code</h3>
-        <p><code>keel bindgen</code> reads the schema and writes Swift, Kotlin and TypeScript. No wrappers, no reflection, no <code>Any</code>. Golden files lock the output.</p>
-        <ul class="tree" aria-label="Generated files">
-          <li><span class="tok-dim">$</span> <b>keel bindgen</b></li>
-          <li><span class="tok-acc">+</span> generated/swift/…/<b>Stores.swift</b></li>
-          <li><span class="tok-acc">+</span> generated/kotlin/…/<b>Stores.kt</b></li>
-          <li><span class="tok-acc">+</span> generated/ts/src/<b>stores.ts</b></li>
-        </ul>
-      </article>
-      <article class="how-card reveal" data-d="2">
-        <span class="n">3</span>
-        <h3>Read locally, write once</h3>
-        <p>Each platform holds a mirror of your state. A write crosses once; the change-set updates every signal it touched in a single main-thread apply.</p>
-        <div class="flow" aria-label="One write">
-          <div><b>store.add("milk")</b> crosses once</div>
-          <div class="arrow">↓</div>
-          <div>change-set <b>todos</b> · <b>visible</b> · <b>remaining</b></div>
-          <div class="arrow">↓</div>
-          <div>mirrors patched, reads stay local</div>
-        </div>
-      </article>
+    <div class="sec-head reveal">
+      <p class="eyebrow">How it works</p>
+      <h2>Describe once. Generate native. Write once per change.</h2>
+      <p class="lede">The schema is the only source of truth. <code>keel bindgen</code> reads it and writes Swift, Kotlin and TypeScript with no wrappers, no reflection and no <code>Any</code>. Golden files lock the output.</p>
     </div>
-  </div>
-</section>
-
-<!-- ===================== CODE ===================== -->
-<section class="section codesec" id="code">
-  <div class="wrap">
-    <span class="kicker reveal">What it looks like</span>
-    <h2 class="h2 display reveal">Write it once in Rust. <em>Read it natively.</em></h2>
-    <p class="lede reveal" data-d="1">The shapes below come from the README and from <a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">examples/playground</a>, which runs one core on Chrome, an iPhone simulator and an Android emulator.</p>
-
-    <div class="panel reveal" data-tabs data-label="Code samples">
-      <div class="tabs-head"></div>
-
-      <section class="tab-panel" data-label="Rust core">
-        <p class="tab-label">Rust core</p>
-<div class="code"><div class="code-bar"><span>core/src/todos.rs</span></div><pre><code data-lang="rust">use keel::prelude::*;
-
-/// One item of the to-do list.
-#[keel::api]
+    <div class="how-top">
+      <div class="reveal">
+<div class="code"><div class="code-bar"><span>core/src/todos.rs</span></div><pre><code data-lang="rust">#[keel::api]
 pub struct Todo {
     pub id: Uuid,
     pub title: String,
     pub done: bool,
 }
 
-/// Why an item could not be added.
-#[keel::error]
-pub enum TodoError {
-    #[error("the title cannot be empty")]
-    EmptyTitle,
-}
-
-/// The to-do list: what every UI observes and calls.
 #[keel::store]
 pub struct Todos {
     #[keel(key = "id")]
     todos: Signal&lt;Vec&lt;Todo&gt;&gt;,
-    filter: Signal&lt;Filter&gt;,
     visible: Computed&lt;Vec&lt;Todo&gt;&gt;,
     remaining: Computed&lt;u32&gt;,
 }
 
 #[keel::api(store)]
 impl Todos {
-    pub async fn add(&amp;self, title: String) -&gt; Result&lt;Todo, TodoError&gt; { /* … */ }
-    pub fn set_filter(&amp;self, filter: Filter) { /* … */ }
+    pub async fn add(&amp;self, title: String)
+        -&gt; Result&lt;Todo, TodoError&gt; { /* … */ }
 }</code></pre></div>
-        <p><strong>One definition.</strong> <code>visible</code> and <code>remaining</code> are computed in the core and arrive in the same change-set as the write that caused them.</p>
-      </section>
+      </div>
+      <div class="reveal" data-d="1">
+        <figure class="mirror-dg">
+          <svg viewBox="0 0 620 300" role="img" aria-labelledby="mdg-t mdg-d" focusable="false">
+            <title id="mdg-t">Reads stay local; writes cross once</title>
+            <desc id="mdg-d">A native UI reads from a local mirror of the state, in memory. A write from the UI crosses the boundary once per transaction into the Rust core. The core sends one binary change-set back, which patches the mirror.</desc>
+            <line x1="310" y1="12" x2="310" y2="288" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="4 6" opacity=".6"/>
+            <text x="318" y="26" class="dgt mono dim">the boundary</text>
+            <rect x="16" y="28" width="250" height="88" rx="12" fill="var(--surface)" stroke="var(--line-strong)"/>
+            <text x="34" y="56" class="dgt strong">Native UI</text>
+            <text x="34" y="78" class="dgt mono dim">SwiftUI · Compose · React</text>
+            <rect x="34" y="88" width="132" height="20" rx="6" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+            <text x="44" y="102" class="dgt mono acc">store.add("milk")</text>
+            <rect x="16" y="184" width="250" height="88" rx="12" fill="var(--surface)" stroke="var(--line-strong)"/>
+            <text x="34" y="212" class="dgt strong">Local mirror</text>
+            <text x="34" y="234" class="dgt mono dim">signals in memory, per platform</text>
+            <text x="34" y="256" class="dgt mono dim">todos · visible · remaining</text>
+            <path d="M141 116v66" stroke="var(--accent)" stroke-width="1.6" fill="none" marker-end="url(#mdg-a)"/>
+            <text x="154" y="154" class="dgt mono acc">1. reads stay local</text>
+            <rect x="354" y="28" width="250" height="244" rx="12" fill="var(--surface-2)" stroke="var(--accent-line)"/>
+            <text x="374" y="60" class="dgt strong">Rust core</text>
+            <text x="374" y="82" class="dgt mono dim">stores · queries · mutations</text>
+            <text x="374" y="102" class="dgt mono dim">persistence · offline queue</text>
+            <rect x="374" y="124" width="210" height="28" rx="8" fill="var(--bg)" stroke="var(--line-strong)" stroke-dasharray="3 3"/>
+            <text x="388" y="142" class="dgt mono">one transaction, one commit</text>
+            <rect x="374" y="210" width="210" height="28" rx="8" fill="var(--accent)" />
+            <text x="388" y="228" class="dgt mono ink">ChangeSet · todos · visible</text>
+            <path d="M266 76H352" stroke="var(--accent)" stroke-width="1.6" fill="none" marker-end="url(#mdg-a)"/>
+            <text x="276" y="68" class="dgt mono acc">2. write</text>
+            <path d="M352 224H268" stroke="var(--accent)" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#mdg-a)"/>
+            <text x="276" y="250" class="dgt mono acc">3. change-set</text>
+            <defs><marker id="mdg-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 8 4 0 8z" fill="var(--accent)"/></marker></defs>
+          </svg>
+          <figcaption><strong>Reads never cross the boundary.</strong> Each platform holds a mirror, so a read is a plain property access on local memory. A write crosses once per transaction, and the core answers with one binary change-set that patches every signal it touched.</figcaption>
+        </figure>
+      </div>
+    </div>
 
-      <section class="tab-panel" data-label="SwiftUI">
-        <p class="tab-label">SwiftUI</p>
-<div class="code"><div class="code-bar"><span>TodosScreen.swift</span></div><pre><code data-lang="swift">// SwiftUI: Todos is @Observable. Reading a signal is a plain property read.
-struct TodosScreen: View {
-    let todos: Todos            // try Todos(ctx: .shared)
-    @State private var draft = ""
-    @State private var problem: String?
+    <div class="gen3">
+      <div class="reveal">
+<div class="code"><div class="code-bar"><span>TodosScreen.swift</span></div><pre><code data-lang="swift">struct TodosScreen: View {
+  let todos: Todos  // @Observable
 
-    var body: some View {
-        List {
-            ForEach(todos.visible, id: \.id) { todo in
-                Button { todos.toggle(id: todo.id) } label: {
-                    Label(todo.title, systemImage: todo.done ? "checkmark.circle.fill" : "circle")
-                }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) { Text("\(todos.remaining) left") }
-        }
+  var body: some View {
+    List(todos.visible, id: \.id) { todo in
+      Text(todo.title)
     }
-
-    private func add() {
-        Task {
-            do { _ = try await todos.add(title: draft); draft = "" }
-            catch { problem = error.localizedDescription }   // TodoError.emptyTitle
-        }
-    }
-}</code></pre></div>
-        <p><strong>No wrappers.</strong> <code>add(title:)</code> is <code>async throws(TodoError)</code>; the store is <code>@MainActor @Observable</code>.</p>
-      </section>
-
-      <section class="tab-panel" data-label="Compose">
-        <p class="tab-label">Compose</p>
-<div class="code"><div class="code-bar"><span>TodosScreen.kt</span></div><pre><code data-lang="kotlin">// Compose: signals are StateFlows.
-@Composable
-fun TodosScreen(vm: TodosViewModel = viewModel()) {
-    val store = vm.store
-    val visible by store.visible.collectAsState()
-    val remaining by store.remaining.collectAsState()
-
-    Column {
-        Text("$remaining left")
-        LazyColumn {
-            // keyed by id in the core, so Compose moves rows instead of redrawing them
-            items(visible, key = { it.id }) { todo -&gt;
-                TodoRow(todo, onToggle = { store.toggle(todo.id) })
-            }
-        }
-    }
-}
-
-// in the ViewModel
-viewModelScope.launch {
-    try { store.add(draft) }
-    catch (e: TodoError) { /* TodoError.EmptyTitle */ }
-}</code></pre></div>
-        <p><strong>No extra module.</strong> <code>collectAsState()</code> on the store's <code>StateFlow</code>s; <code>add</code> is a <code>suspend fun</code> that throws the typed error.</p>
-      </section>
-
-      <section class="tab-panel" data-label="React">
-        <p class="tab-label">React</p>
-<div class="code"><div class="code-bar"><span>TodosView.tsx</span></div><pre><code data-lang="tsx">// React: hooks from @keel/runtime/react (vue, svelte and solid adapters ship too).
-import { useKeel, useSignal } from "@keel/runtime/react";
-import { Todos, TodoError } from "@playground/core";
-
-export function TodosView() {
-  const store = useKeel(Todos);            // undefined until it exists
-  const todos = useSignal(store?.visible);
-  const remaining = useSignal(store?.remaining);
-
-  async function add(title: string) {
-    try {
-      await store?.add(title);
-    } catch (error) {
-      if (error instanceof TodoError) { /* a typed error, not a string to parse */ }
+    .toolbar {
+      Text("\(todos.remaining) left")
     }
   }
-  /* … render todos, `${remaining} left` … */
-}</code></pre></div>
-        <p><strong>Hooks, not glue.</strong> <code>useSignal</code> is <code>useSyncExternalStore</code> over the mirror; <code>useKeel</code> creates the store on mount and closes it on unmount.</p>
-      </section>
-
-      <section class="tab-panel" data-label="Queries">
-        <p class="tab-label">Queries</p>
-<div class="code"><div class="code-bar"><span>core/src/remote.rs</span></div><pre><code data-lang="rust">/// The items of a server list, cached per list, fresh for 30 s, persisted.
-#[keel::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
-pub async fn remote_todos(ctx: &amp;Ctx, list: String) -&gt; Result&lt;Vec&lt;RemoteTodo&gt;, RemoteError&gt; {
-    let url = endpoint(ctx, &amp;format!("/lists/{list}/todos"))?;
-    parse(&amp;send(ctx, HttpRequest::get(url)).await?)
 }
 
-/// Shows the item at once; takes it back if the server refuses.
-#[keel::api]
-pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt; Result&lt;RemoteTodo, RemoteError&gt; {
-    // …build `placeholder`…
-    ctx.mutate::&lt;PostRemoteTodoMutation&gt;((list, title))
-        .optimistic(move |cache| {
-            cache.update::&lt;RemoteTodosQuery&gt;((cached,), |items| items.push(placeholder));
-        })
-        .await
-}</code></pre></div>
-        <p><strong>The data layer is in the core.</strong> Staleness, dedup, retry with jitter, optimistic updates with surgical rollback and an offline queue replayed on reconnect.</p>
-      </section>
+// async throws(TodoError)
+try await todos.add(title: draft)</code></pre></div>
+        <p class="cap"><b>SwiftUI.</b> <code>@MainActor @Observable</code> stores and typed throws.</p>
+      </div>
+      <div class="reveal" data-d="1">
+<div class="code"><div class="code-bar"><span>TodosScreen.kt</span></div><pre><code data-lang="kotlin">@Composable
+fun TodosScreen(store: Todos) {
+  val visible by store.visible
+    .collectAsState()
+  val remaining by store.remaining
+    .collectAsState()
+
+  Text("$remaining left")
+  LazyColumn {
+    items(visible, key = { it.id }) {
+      Text(it.title)
+    }
+  }
+}
+// suspend fun, throws TodoError
+store.add(draft)</code></pre></div>
+        <p class="cap"><b>Compose.</b> Signals are <code>StateFlow</code>s; <code>add</code> is a <code>suspend fun</code>.</p>
+      </div>
+      <div class="reveal" data-d="2">
+<div class="code"><div class="code-bar"><span>TodosView.tsx</span></div><pre><code data-lang="tsx">export function TodosView() {
+  const store = useKeel(Todos);
+  const todos = useSignal(store?.visible);
+  const left = useSignal(store?.remaining);
+
+  return (
+    &lt;&gt;
+      &lt;h2&gt;{left} left&lt;/h2&gt;
+      {todos?.map((t) =&gt; (
+        &lt;li key={t.id}&gt;{t.title}&lt;/li&gt;
+      ))}
+    &lt;/&gt;
+  );
+}
+// Promise, rejects with TodoError
+await store?.add(draft);</code></pre></div>
+        <p class="cap"><b>React.</b> <code>useSignal</code> is <code>useSyncExternalStore</code> over the mirror.</p>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ===================== FEATURES ===================== -->
+<!-- 6. FEATURES -->
 <section class="section" id="features">
   <div class="wrap">
-    <span class="kicker reveal">What's in v1</span>
-    <h2 class="h2 display reveal">Everything under the pixels, <em>in one place.</em></h2>
+    <div class="sec-head reveal">
+      <p class="eyebrow">What's in v1</p>
+      <h2>Everything under the pixels, in one place.</h2>
+    </div>
     <div class="bento">
-
-      <article class="feat wide reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg></span>
+      <article class="tile t7 reveal">
         <h3>Stores, signals and computeds</h3>
         <p>A store is an object with reactive fields. Signals hold state, computeds derive from it, and a transaction batches writes into <strong>one</strong> change-set. Only signals a platform observes are sent.</p>
 <div class="code"><div class="code-bar"><span>counter.rs</span></div><pre><code data-lang="rust">pub fn add(&amp;self, amount: i32) {
     self.ctx.txn(|| {
         self.count.update(|c| *c = c.saturating_add(amount));
         self.changes.update(|n| *n = n.saturating_add(1));
-    });   // one transaction, one change-set, `parity` included
+    });   // one transaction, one change-set
 }</code></pre></div>
-        <div class="more"><a href="docs/concepts.html">Core concepts →</a></div>
+        <a class="more" href="docs/concepts.html">Core concepts <span aria-hidden="true">→</span></a>
       </article>
-
-      <article class="feat wide reveal" data-d="1">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></span>
-        <h3>Queries, mutations and offline</h3>
-        <p><code>#[keel::query]</code> and <code>#[keel::mutation]</code> give you a cache with staleness, dedup, retry, persistence and an offline queue. Optimistic updates roll back precisely: only what the failed mutation wrote is restored.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">ctx.mutate::&lt;PostRemoteTodoMutation&gt;((list, title))
-    .optimistic(|cache| { /* show it now */ })
-    .await   // refused? the optimistic write is undone</code></pre></div>
-        <div class="more"><a href="docs/queries.html">Queries &amp; mutations →</a></div>
+      <article class="tile t5 reveal" data-d="1">
+        <h3>Queries and mutations</h3>
+        <p><code>#[keel::query]</code> gives you a cache with staleness, dedup, retry and persistence. Optimistic updates roll back precisely: only what the failed mutation wrote is restored.</p>
+<div class="code"><div class="code-bar"><span>remote.rs</span></div><pre><code data-lang="rust">ctx.mutate::&lt;PostRemoteTodoMutation&gt;(
+    (list, title),
+)
+.optimistic(|cache| { /* show it now */ })
+.await   // refused? the write is undone</code></pre></div>
+        <a class="more" href="docs/queries.html">Queries &amp; mutations <span aria-hidden="true">→</span></a>
       </article>
-
-      <article class="feat reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></svg></span>
+      <article class="tile t3 reveal">
+        <h3>Offline queue</h3>
+        <p>Idempotent mutations made offline are queued and replayed, in order, when connectivity returns.</p>
+        <div class="qviz" aria-label="Three mutations queued offline, then replayed"><span>POST</span><span>POST</span><span>PATCH</span><i aria-hidden="true">→</i><b>replay</b></div>
+      </article>
+      <article class="tile t3 reveal" data-d="1">
         <h3>Ports and adapters</h3>
-        <p>The core touches the world through ten ports. Each platform ships default adapters; tests get deterministic fakes.</p>
-        <div class="ports" aria-label="The ten ports"><span>Http</span><span>Kv</span><span>SecureStore</span><span>Fs</span><span>Clock</span><span>Rng</span><span>Log</span><span>Timer</span><span>Connectivity</span><span>Lifecycle</span></div>
-        <div class="more"><a href="docs/ports.html">Ports &amp; adapters →</a></div>
+        <p>The core touches the world through ten ports. Platforms ship adapters; tests get deterministic fakes.</p>
+        <div class="chips" aria-label="The ten ports"><span>Http</span><span>Kv</span><span>SecureStore</span><span>Fs</span><span>Clock</span><span>Rng</span><span>Log</span><span>Timer</span><span>Connectivity</span><span>Lifecycle</span></div>
+        <a class="more" href="docs/ports.html">Ports <span aria-hidden="true">→</span></a>
       </article>
-
-      <article class="feat reveal" data-d="1">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span>
-        <h3><code>keel dev</code></h3>
-        <p>Serve the core over a WebSocket, rebuild on save, and point a simulator or browser tab at it. Edit Rust, reload the app, no rebuild of the UI.</p>
+      <article class="tile t3 reveal" data-d="2">
+        <h3>Contract-tested</h3>
+        <p>Seventeen wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: <strong>51 of 51</strong> pass.</p>
+        <div class="chips" aria-label="Scenarios covered"><span>keyed patch</span><span>optimistic rollback</span><span>offline replay</span><span>panic containment</span></div>
+        <a class="more" href="https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md" rel="noopener">The scenarios <span aria-hidden="true">→</span></a>
+      </article>
+      <article class="tile t3 reveal" data-d="3">
+        <h3>Snapshot and restore</h3>
+        <p>Stores snapshot for crash recovery. Every core carries a schema hash, checked at load and at build, so a mismatched UI and core refuse to talk.</p>
+        <div class="chips" aria-label="What it covers"><span>snapshot</span><span>restore</span><span>schema hash</span></div>
+        <a class="more" href="docs/architecture.html">Architecture <span aria-hidden="true">→</span></a>
+      </article>
+      <article class="tile t6 reveal">
+        <h3>The dev loop</h3>
+        <p>Serve the core over a WebSocket, rebuild on save, and point a simulator or a browser tab at it. Edit Rust, reload the app, no UI rebuild.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel dev                        # 127.0.0.1:7443
 keel dev --addr 0.0.0.0:7443   # reachable from a phone</code></pre></div>
-        <div class="more"><a href="docs/cli.html">The CLI →</a></div>
+        <a class="more" href="docs/cli.html">The CLI <span aria-hidden="true">→</span></a>
       </article>
-
-      <article class="feat reveal" data-d="2">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8 7.5 9.5 4.4-1.5 7.5-5.1 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span>
-        <h3>Contract-tested on all three</h3>
-        <p>Seventeen wire-level scenarios run against the real core on Swift, Kotlin and TypeScript. 51 of 51 pass.</p>
-        <div class="ports"><span>keyed patch</span><span>optimistic rollback</span><span>offline replay</span><span>snapshot/restore</span><span>schema mismatch</span><span>panic containment</span></div>
-      </article>
-
-      <article class="feat reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
+      <article class="tile t6 reveal" data-d="1">
         <h3>Diagnostics that teach</h3>
-        <p>Every macro mistake says what happened, why, and how to fix it.</p>
-<pre class="diag"><span class="e">error[keel::E0012]</span>: `Vec&lt;Box&lt;dyn Any&gt;&gt;` cannot cross the boundary
+        <p>Every macro error says what happened, why, how to fix it, and where to read more.</p>
+<pre class="diag"><span class="e">error[keel::E0004]</span>: trait object `dyn Fn(u32)`
+  cannot cross the boundary
   = <span class="d">note:</span> trait objects have no wire representation
-  = <span class="h">help:</span> make `items` a concrete `#[keel::api]`
-          type, or an enum listing the cases you need
-  = <span class="d">docs:</span> https://keel.dev/errors/E0012</pre>
-      </article>
-
-      <article class="feat reveal" data-d="1">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
-        <h3>Keyed lists, O(change)</h3>
-        <p>Insert, remove, update and move cross as one-operation patches, however long the list is. On a 10,000-row list: <strong>6.3&nbsp;µs</strong> to insert, <strong>272&nbsp;ns</strong> to update, <strong>9.7&nbsp;µs</strong> to move.</p>
-        <div class="more"><a href="docs/concepts.html#keyed-lists">Keyed lists →</a></div>
-      </article>
-
-      <article class="feat reveal" data-d="2">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a8 3 0 0 0 16 0 8 3 0 0 0-16 0z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
-        <h3>Snapshots and a schema gate</h3>
-        <p>Stores snapshot and restore for crash recovery. Every core carries a schema hash, checked at load and at build; a mismatched UI and core refuse to talk.</p>
-        <div class="more"><a href="docs/architecture.html">Architecture →</a></div>
-      </article>
-
-      <article class="feat reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4c-2 0-3 1-3 3v2c0 1.5-.8 2.6-2 3 1.2.4 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5.8 2.6 2 3-1.2.4-2 1.5-2 3v2c0 2-1 3-3 3"/></svg></span>
-        <h3>Typed, idiomatic output</h3>
-        <p>Records, enums and errors become what each language expects: Swift <code>async throws(TodoError)</code>, Kotlin <code>suspend</code> plus sealed classes, TypeScript promises and <code>instanceof</code>.</p>
-        <div class="more"><a href="docs/api-swift.html">API overviews →</a></div>
+  = <span class="h">help:</span> use a concrete `#[keel::api]` type or an enum
+          listing the cases you need; callbacks into
+          the platform are ports (`#[keel::port]`)</pre>
       </article>
     </div>
   </div>
 </section>
 
-<!-- ===================== TRUST ===================== -->
+<!-- 7. TRUST -->
 <section class="section" id="trust">
   <div class="wrap">
-    <span class="kicker reveal">Receipts</span>
-    <h2 class="h2 display reveal">Trust it because you can <em>check it.</em></h2>
+    <div class="sec-head reveal">
+      <p class="eyebrow">Receipts</p>
+      <h2>Trust it because you can check it.</h2>
+      <p class="lede">Every number below links to the file it came from.</p>
+    </div>
     <div class="trust">
       <article class="tcard t-tests reveal" data-bar>
-        <h3>Tests across five languages</h3>
+        <h3><a href="https://github.com/shreypdev/keel#why-you-can-trust-it" rel="noopener">Tests across five languages</a></h3>
         <div class="big"><span data-count="3800" data-dec="0" data-final="3,800">3,800</span>+<small>all green in one pass</small></div>
         <div class="seg" role="img" aria-label="Rust 2,109, TypeScript 897, Kotlin 454, Swift 328, plus wasm and C ABI suites"><i style="--w:55.7%"></i><i style="--w:23.7%"></i><i style="--w:12%"></i><i style="--w:8.6%"></i></div>
-        <ul class="seg-key"><li>Rust<b>2,109</b></li><li>TypeScript<b>897</b></li><li>Kotlin<b>454</b></li><li>Swift<b>328</b></li><li>wasm / C ABI acceptance suites</li></ul>
-        <p>Property tests and a byte-fuzz harness on the wire decoders. The unsafe boundary runs under ASan and Miri in review.</p>
+        <ul class="seg-key"><li>Rust<b>2,109</b></li><li>TypeScript<b>897</b></li><li>Kotlin<b>454</b></li><li>Swift<b>328</b></li><li>wasm / C ABI suites</li></ul>
+        <p>Property tests and a byte-fuzz harness on the wire decoders.</p>
       </article>
-
       <article class="tcard t-cells reveal" data-bar data-d="1">
-        <h3>Contract scenarios on every platform</h3>
-        <div class="big">51<small>/ 51 cells</small></div>
+        <h3><a href="https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md" rel="noopener">17 scenarios × 3 platforms</a></h3>
+        <div class="big">51<small>/ 51 cells pass</small></div>
         <div class="grid51" role="img" aria-label="17 scenarios by 3 platforms, all passing">
           <span class="r">Swift</span><i style="--i:0" title="S01 primitives round-trip (Swift): pass"></i><i style="--i:1" title="S02 records, enums and errors (Swift): pass"></i><i style="--i:2" title="S03 sync call (Swift): pass"></i><i style="--i:3" title="S04 async call (Swift): pass"></i><i style="--i:4" title="S05 error propagation (Swift): pass"></i><i style="--i:5" title="S06 cancellation (Swift): pass"></i><i style="--i:6" title="S07 stream with backpressure (Swift): pass"></i><i style="--i:7" title="S08 store observe: initial change-set (Swift): pass"></i><i style="--i:8" title="S09 transaction: a single change-set (Swift): pass"></i><i style="--i:9" title="S10 keyed patch (Swift): pass"></i><i style="--i:10" title="S11 computed (Swift): pass"></i><i style="--i:11" title="S12 query: fetch, stale, refetch (Swift): pass"></i><i style="--i:12" title="S13 optimistic mutation and rollback (Swift): pass"></i><i style="--i:13" title="S14 offline queue replay (Swift): pass"></i><i style="--i:14" title="S15 snapshot and restore (Swift): pass"></i><i style="--i:15" title="S16 schema mismatch rejection (Swift): pass"></i><i style="--i:16" title="S17 panic containment (Swift): pass"></i>
           <span class="r">Kotlin</span><i style="--i:0" title="S01 primitives round-trip (Kotlin): pass"></i><i style="--i:1" title="S02 records, enums and errors (Kotlin): pass"></i><i style="--i:2" title="S03 sync call (Kotlin): pass"></i><i style="--i:3" title="S04 async call (Kotlin): pass"></i><i style="--i:4" title="S05 error propagation (Kotlin): pass"></i><i style="--i:5" title="S06 cancellation (Kotlin): pass"></i><i style="--i:6" title="S07 stream with backpressure (Kotlin): pass"></i><i style="--i:7" title="S08 store observe: initial change-set (Kotlin): pass"></i><i style="--i:8" title="S09 transaction: a single change-set (Kotlin): pass"></i><i style="--i:9" title="S10 keyed patch (Kotlin): pass"></i><i style="--i:10" title="S11 computed (Kotlin): pass"></i><i style="--i:11" title="S12 query: fetch, stale, refetch (Kotlin): pass"></i><i style="--i:12" title="S13 optimistic mutation and rollback (Kotlin): pass"></i><i style="--i:13" title="S14 offline queue replay (Kotlin): pass"></i><i style="--i:14" title="S15 snapshot and restore (Kotlin): pass"></i><i style="--i:15" title="S16 schema mismatch rejection (Kotlin): pass"></i><i style="--i:16" title="S17 panic containment (Kotlin): pass"></i>
           <span class="r">TS</span><i style="--i:0" title="S01 primitives round-trip (TS): pass"></i><i style="--i:1" title="S02 records, enums and errors (TS): pass"></i><i style="--i:2" title="S03 sync call (TS): pass"></i><i style="--i:3" title="S04 async call (TS): pass"></i><i style="--i:4" title="S05 error propagation (TS): pass"></i><i style="--i:5" title="S06 cancellation (TS): pass"></i><i style="--i:6" title="S07 stream with backpressure (TS): pass"></i><i style="--i:7" title="S08 store observe: initial change-set (TS): pass"></i><i style="--i:8" title="S09 transaction: a single change-set (TS): pass"></i><i style="--i:9" title="S10 keyed patch (TS): pass"></i><i style="--i:10" title="S11 computed (TS): pass"></i><i style="--i:11" title="S12 query: fetch, stale, refetch (TS): pass"></i><i style="--i:12" title="S13 optimistic mutation and rollback (TS): pass"></i><i style="--i:13" title="S14 offline queue replay (TS): pass"></i><i style="--i:14" title="S15 snapshot and restore (TS): pass"></i><i style="--i:15" title="S16 schema mismatch rejection (TS): pass"></i><i style="--i:16" title="S17 panic containment (TS): pass"></i>
         </div>
         <p class="grid51-cap">S01 primitives … S17 panic containment</p>
-        <a class="tlink" href="https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md" rel="noopener">Read the scenarios →</a>
       </article>
-
       <article class="tcard t-rev reveal">
-        <h3>Four adversarial review cycles</h3>
-        <p>Signals, runtime, macros and ffi were each attacked by a reviewer who did not write them. Every High and Medium finding was fixed and independently re-verified; the ffi fixes were re-verified under ASan and Miri.</p>
+        <h3>Four adversarial reviews</h3>
+        <p>Signals, runtime, macros and ffi were each attacked by a reviewer who did not write them. Every High and Medium finding was fixed and re-verified; the unsafe boundary was re-verified under ASan and Miri.</p>
         <ul class="rev-list">
           <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-signals-review.md" rel="noopener">keel-signals review</a><span>closed</span></li>
           <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-runtime-review.md" rel="noopener">keel-runtime review</a><span>closed</span></li>
@@ -704,60 +650,64 @@ keel dev --addr 0.0.0.0:7443   # reachable from a phone</code></pre></div>
           <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-ffi-review.md" rel="noopener">keel-ffi review</a><span>closed · ASan + Miri</span></li>
         </ul>
       </article>
-
       <article class="tcard t-app reveal" data-d="1">
-        <h3>The reference app is real</h3>
-        <p><a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">examples/playground</a> uses only public APIs and runs one Rust core on Chrome, an iPhone simulator and an Android emulator: todos, a counter, a 10,000-row keyed list, and remote queries with an offline switch. Proof screenshots are committed.</p>
-        <a class="tlink" href="https://github.com/shreypdev/keel/tree/main/examples/playground/.proof" rel="noopener">See the proof →</a>
+        <h3><a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">The reference app is real</a></h3>
+        <p><code>examples/playground</code> uses only public APIs and runs one Rust core on Chrome, an iPhone simulator and an Android emulator: todos, a counter, a 10,000-row keyed list and remote queries with an offline switch. The demo above is its web build.</p>
+        <a class="more" href="https://github.com/shreypdev/keel/tree/main/examples/playground/.proof" rel="noopener">See the proof screenshots <span aria-hidden="true">→</span></a>
       </article>
     </div>
   </div>
 </section>
 
-<!-- ===================== PRINCIPLES ===================== -->
-<section class="section" id="principles">
+<!-- 8. COMPARED -->
+<section class="section" id="compared">
   <div class="wrap">
-    <span class="kicker reveal">Principles</span>
-    <h2 class="h2 display reveal">Twelve rules, <em>enforced in review.</em></h2>
-    <p class="lede reveal" data-d="1">The constitution every change is held to, human or agent. <a href="docs/architecture.html#constitution">Read the digest</a> or the source, <a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">CLAUDE.md</a>.</p>
-    <div class="rules reveal">
-      <div class="rule"><span class="r">R1</span><div><b>The schema is the only truth</b><span>A public type exists only if the schema can describe it. Every language's output derives from it.</span></div></div>
-      <div class="rule"><span class="r">R2</span><div><b>unsafe has one home</b><span>Only keel-ffi (plus one schema loader in the CLI). Every block carries a SAFETY comment; every other crate forbids it.</span></div></div>
-      <div class="rule"><span class="r">R3</span><div><b>Generated code passes native review</b><span>A Swift, Kotlin or TypeScript engineer who never saw Rust would write it that way. Golden files lock it.</span></div></div>
-      <div class="rule"><span class="r">R4</span><div><b>Every feature lands whole</b><span>Unit tests, contract scenarios, a benchmark if the boundary moves, docs on every pub item.</span></div></div>
-      <div class="rule"><span class="r">R5</span><div><b>Reads never cross the boundary</b><span>Writes cross once per transaction. No generated getter calls into the core.</span></div></div>
-      <div class="rule"><span class="r">R6</span><div><b>Nothing escapes as a panic</b><span>Every boundary entry is guarded and every error is a typed value.</span></div></div>
-      <div class="rule"><span class="r">R7</span><div><b>Compatibility is checked</b><span>Schema hash at load and at build. Breaking the wire is a major version and an ADR.</span></div></div>
-      <div class="rule"><span class="r">R8</span><div><b>Macro errors teach</b><span>Code, what, why, fix, docs link.</span></div></div>
-      <div class="rule"><span class="r">R9</span><div><b>Budgets are tests</b><span>Benchmarks live in bench/; a regression fails CI.</span></div></div>
-      <div class="rule"><span class="r">R10</span><div><b>We ship on it first</b><span>examples/playground uses only public APIs.</span></div></div>
-      <div class="rule"><span class="r">R11</span><div><b>Boundary changes need an ADR</b><span>Wire, runtime model, threading or a generated shape: decision record before code.</span></div></div>
-      <div class="rule"><span class="r">R12</span><div><b>The core is deterministic</b><span>No wall clock, randomness or threads outside the Clock, Rng and Timer ports and the runtime.</span></div></div>
+    <div class="sec-head reveal">
+      <p class="eyebrow">Compared</p>
+      <h2>Where Keel fits, and where it does not.</h2>
+      <p class="lede">Honest comparisons, each with a section on when the other tool is the better choice.</p>
+    </div>
+    <div class="cards4">
+      <a class="card reveal" href="blog/keel-vs-kotlin-multiplatform/"><span class="k">Comparison</span><h3>Keel vs Kotlin Multiplatform</h3><p>Two ways to share logic across iOS and Android: what each one shares, what stays native, and when KMP is the better choice.</p><span class="go">Read the comparison <i aria-hidden="true">→</i></span></a>
+      <a class="card reveal" href="blog/keel-vs-uniffi-and-crux/" data-d="1"><span class="k">Comparison</span><h3>Keel vs UniFFI and Crux</h3><p>Rust cores with generated bindings: where each tool draws the line between the core and the shell.</p><span class="go">Read the comparison <i aria-hidden="true">→</i></span></a>
+      <a class="card reveal" href="blog/why-keel-keeps-your-ui-native/" data-d="2"><span class="k">Architecture</span><h3>Why Keel keeps your UI native</h3><p>Why the line is drawn under the pixels: share the domain, never the screens.</p><span class="go">Read the essay <i aria-hidden="true">→</i></span></a>
+      <a class="card reveal" href="blog/reads-never-cross-the-boundary/" data-d="3"><span class="k">Architecture</span><h3>Reads never cross the boundary</h3><p>The rule behind the wire: mirrors, change-sets and one crossing per transaction.</p><span class="go">Read the essay <i aria-hidden="true">→</i></span></a>
     </div>
   </div>
 </section>
 
-<!-- ===================== FINAL CTA ===================== -->
-<section class="final">
+<!-- 9. ROADMAP TEASER -->
+<section class="section" id="roadmap-teaser">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Roadmap</p>
+      <h2>v1.0 shipped. Here is what is in flight.</h2>
+    </div>
+    <div class="now3">
+      <article class="reveal"><span class="st">Now</span><h3>Distribution</h3><p>brew, npm, a curl installer and cargo-from-git, each proved by a release dry run.</p></article>
+      <article class="reveal" data-d="1"><span class="st">Now</span><h3>Harsh-conditions benchmarks</h3><p>A stress suite for very high-frequency data, with CI budgets and its numbers on this page.</p></article>
+      <article class="reveal" data-d="2"><span class="st">Now</span><h3>Device-measured rows</h3><p>The same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies.</p></article>
+    </div>
+    <p class="more-row reveal"><a class="btn btn-ghost" href="roadmap/">See the full roadmap <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a></p>
+  </div>
+</section>
+
+<!-- 10. FINAL CTA -->
+<section class="section final">
   <div class="wrap">
     <div class="final-card reveal">
-      <div>
-        <h2 class="display">Build the part <em>under the pixels</em> once.</h2>
-        <p>Clone it, run <code>keel init</code>, and open the shells. Or start with the playground, which is the same thing fully built.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="docs/getting-started.html">Read the docs</a>
-          <a class="btn btn-ghost" href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">Open the playground</a>
-        </div>
-      </div>
-      <div class="install" data-tabs data-label="Quick start">
+      <h2>Build the part under the pixels once.</h2>
+      <p class="lede">Install the CLI, run <code>keel init</code>, and open the shells. Or start with the playground, which is the same thing fully built.</p>
+      <div class="install" data-tabs data-label="Install Keel, again">
         <div class="tabs-head"></div>
-        <section class="tab-panel" data-label="Quick start">
-          <p class="tab-label">Quick start</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">git clone https://github.com/shreypdev/keel.git &amp;&amp; cd keel
-cargo install --path crates/keel-cli
-keel init myapp &amp;&amp; cd myapp
-keel dev</code></pre></div>
-        </section>
+        <div class="tab-panel" data-label="brew"><p class="tab-label">brew</p><div class="cmd"><code>brew install shreypdev/keel/keel</code><button class="copy" type="button" data-copy="brew install shreypdev/keel/keel" aria-label="Copy the brew command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @keel/cli</code><button class="copy" type="button" data-copy="npm install -g @keel/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/keel/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/keel/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/keel keel-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/keel keel-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+      </div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="docs/getting-started.html">Read the docs</a>
+        <a class="btn btn-ghost" href="playground/">Open the playground</a>
       </div>
     </div>
   </div>
@@ -770,7 +720,7 @@ keel dev</code></pre></div>
     <div class="footer-grid">
       <div>
         <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
-        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+        <p class="footer-note">The Rust core for native apps. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>
         <h3>Docs</h3>
@@ -784,6 +734,16 @@ keel dev</code></pre></div>
         </ul>
       </div>
       <div>
+        <h3>Keel</h3>
+        <ul>
+          <li><a href="blog/">Blog</a></li>
+          <li><a href="roadmap/">Roadmap</a></li>
+          <li><a href="playground/">Playground</a></li>
+          <li><a href="feed.xml">RSS feed</a></li>
+          <li><a href="llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
         <h3>Project</h3>
         <ul>
           <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
@@ -791,7 +751,6 @@ keel dev</code></pre></div>
           <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
           <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
           <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
         </ul>
       </div>
     </div>
@@ -804,5 +763,6 @@ keel dev</code></pre></div>
 
 <script src="assets/site.js" defer></script>
 <script src="assets/hero.js" defer></script>
+<script src="assets/home.js" defer></script>
 </body>
 </html>
