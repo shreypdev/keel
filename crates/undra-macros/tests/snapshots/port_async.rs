@@ -276,7 +276,10 @@ pub fn __undra_port_dispatch_Http(
     __method_id: u32,
     __args: &[u8],
 ) -> ::undra::runtime::PortDispatch {
-    const __UNDRA_ID_request: u32 = ::undra::meta::ids::port_method_id("Http", "request");
+    const __UNDRA_ID_request: u32 = ::undra::meta::ids::port_method_id(
+        "Http",
+        "request",
+    );
     const __UNDRA_ID_ping: u32 = ::undra::meta::ids::port_method_id("Http", "ping");
     match __method_id {
         __UNDRA_ID_request => {

@@ -2,19 +2,19 @@ error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
          = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
          = help: remove or correct the option
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
- --> tests/ui/e0008_unknown_attribute.rs:7:12
+ --> tests/ui/e0008_unknown_attribute.rs:7:13
   |
 7 |     #[undra(defualt)]
-  |            ^^^^^^^
+  |             ^^^^^^^
 
 error: error[undra::E0008]: `#[undra(key)]` is not valid on a record or variant field
          = note: `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches
          = help: remove the option, or move it to where it applies
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
- --> tests/ui/e0008_unknown_attribute.rs:9:12
+ --> tests/ui/e0008_unknown_attribute.rs:9:13
   |
 9 |     #[undra(key = "id")]
-  |            ^^^
+  |             ^^^
 
 error: error[undra::E0008]: unknown argument `colour` for `#[undra::api]`
          = note: `#[undra::api]` accepts: `crate = "path"`, and `store` on an impl block of a `#[undra::store]` struct

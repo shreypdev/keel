@@ -65,7 +65,9 @@ fn __undra_dispatch_fn_greet(
             }
         };
         __undra_assert_send(&__fut);
-        __undra_out(::undra::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)))
+        __undra_out(
+            ::undra::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)),
+        )
     }
 }
 #[allow(non_upper_case_globals)]

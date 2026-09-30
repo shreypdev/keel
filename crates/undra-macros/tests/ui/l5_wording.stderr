@@ -32,7 +32,7 @@ error: error[undra::E0004]: boxed stream `Pin<Box<dyn undra::runtime::Stream<Ite
   --> tests/ui/l5_wording.rs:37:19
    |
 37 | pub fn boxed() -> Pin<Box<dyn undra::runtime::Stream<Item = u32> + Send>> {
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: error[undra::E0005]: `Result<u32, String>` cannot be nested inside another type
          = note: `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return

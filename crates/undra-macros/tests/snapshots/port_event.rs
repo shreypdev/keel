@@ -51,7 +51,9 @@ pub fn on_connectivity_changed(
             ::undra::meta::ids::port_method_id("Connectivity", "changed"),
             ::std::boxed::Box::new(move |__payload: &[u8]| {
                 let mut __r = ::undra::wire::Reader::new(__payload);
-                let __a0: bool = match <bool as ::undra::wire::Decode>::decode(&mut __r) {
+                let __a0: bool = match <bool as ::undra::wire::Decode>::decode(
+                    &mut __r,
+                ) {
                     ::core::result::Result::Ok(__v) => __v,
                     ::core::result::Result::Err(_) => return,
                 };

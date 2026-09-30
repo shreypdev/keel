@@ -2,9 +2,9 @@
 
 import {
   type Codec,
+  ReplyStatus,
   UndraError,
   UndraReplyError,
-  ReplyStatus,
   WireError,
   decodeValue,
 } from "@undra/runtime";

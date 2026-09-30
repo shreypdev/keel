@@ -7,10 +7,10 @@ import {
   HttpRequestCodec,
   type HttpResponse,
   HttpResponseCodec,
+  type PortImpl,
   type UndraPort,
   UndraPortError,
   UndraReader,
-  type PortImpl,
   encodeValue,
 } from "@undra/runtime";
 import { UndraIds } from "./ids.js";

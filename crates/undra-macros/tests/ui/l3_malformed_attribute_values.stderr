@@ -2,28 +2,28 @@ error: error[undra::E0008]: `default` takes no value
          = note: `default` switches a behaviour on by being present; there is nothing to set it to
          = help: write `default` alone
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/l3_malformed_attribute_values.rs:18:12
+  --> tests/ui/l3_malformed_attribute_values.rs:18:13
    |
 18 |     #[undra(default = true)]
-   |            ^^^^^^^
+   |             ^^^^^^^
 
 error: error[undra::E0008]: `key` must be a string literal naming a field
          = note: `key` takes a string literal naming a field; anything else cannot be read at compile time
          = help: write `key = "id"`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/l3_malformed_attribute_values.rs:25:18
+  --> tests/ui/l3_malformed_attribute_values.rs:25:19
    |
 25 |     #[undra(key = 5)]
-   |                  ^
+   |                   ^
 
 error: error[undra::E0008]: `no_coalesce` takes no value
          = note: `no_coalesce` switches a behaviour on by being present; there is nothing to set it to
          = help: write `no_coalesce` alone
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/l3_malformed_attribute_values.rs:27:12
+  --> tests/ui/l3_malformed_attribute_values.rs:27:13
    |
 27 |     #[undra(no_coalesce = 1)]
-   |            ^^^^^^^^^^^
+   |             ^^^^^^^^^^^
 
 error: error[undra::E0008]: `crate` needs a value
          = note: `crate` takes a string literal naming a path

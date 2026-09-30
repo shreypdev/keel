@@ -4,11 +4,11 @@ import {
   ALL_SIGNALS,
   CallTarget,
   ChangeOp,
+  Signal,
+  type Timestamp,
   UndraCore,
   UndraStore,
   UndraWriter,
-  Signal,
-  type Timestamp,
   codecs,
   decodeValue,
 } from "@undra/runtime";

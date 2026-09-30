@@ -5,7 +5,7 @@ error: error[undra::E0007]: `#[undra::query]` inside an `impl` block
   --> tests/ui/m5_query_inside_an_impl.rs:21:5
    |
 21 |     #[undra::query(key = "todos")]
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: error[undra::E0007]: `#[undra::mutation]` inside an `impl` block
          = note: a query or mutation is a free function: the macro generates a struct next to it, which an impl block cannot hold
@@ -14,4 +14,4 @@ error: error[undra::E0007]: `#[undra::mutation]` inside an `impl` block
   --> tests/ui/m5_query_inside_an_impl.rs:26:5
    |
 26 |     #[undra::mutation]
-   |     ^^^^^^^^^^^^^^^^^
+   |     ^^^^^^^^^^^^^^^^^^

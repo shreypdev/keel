@@ -253,7 +253,10 @@ export function numbers(upto: number, core: UndraCore = UndraCore.shared): Async
 }
 
 /** @throws {CalcError} */
-export async function ping(core: UndraCore = UndraCore.shared, signal?: AbortSignal): Promise<void> {
+export async function ping(
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise<void> {
   try {
     await core.call(
       { target: CallTarget.FreeFunction },

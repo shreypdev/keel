@@ -16,7 +16,7 @@ help: the trait `UndraObject` is implemented for `LazyList`
   --> $WORKSPACE/crates/undra-runtime/src/lazy.rs
    |
    | impl UndraObject for LazyList {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 note: required for `Todos` to implement `__UndraStoreNeedsImpl`
  --> tests/ui/m2_store_without_impl.rs:8:1
   |

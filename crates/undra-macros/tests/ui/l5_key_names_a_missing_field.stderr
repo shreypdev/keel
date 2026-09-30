@@ -1,7 +1,7 @@
 error[E0609]: no field `identifier` on type `&Row`
-  --> tests/ui/l5_key_names_a_missing_field.rs:17:18
+  --> tests/ui/l5_key_names_a_missing_field.rs:17:19
    |
 17 |     #[undra(key = "identifier")]
-   |                  ^^^^^^^^^^^^ unknown field
+   |                   ^^^^^^^^^^^^ unknown field
    |
    = note: available field is: `id`

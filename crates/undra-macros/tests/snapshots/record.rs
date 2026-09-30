@@ -79,7 +79,9 @@ static __UNDRA_META_Todo: ::undra::meta::RecordMeta = ::undra::meta::RecordMeta 
         },
         ::undra::meta::FieldMeta {
             name: "due",
-            ty: ::undra::meta::TypeRefMeta::Option(&::undra::meta::TypeRefMeta::Timestamp),
+            ty: ::undra::meta::TypeRefMeta::Option(
+                &::undra::meta::TypeRefMeta::Timestamp,
+            ),
             default: false,
             docs: "",
         },

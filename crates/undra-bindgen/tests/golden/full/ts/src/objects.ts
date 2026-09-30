@@ -92,7 +92,10 @@ export async function greet(name: string, core: UndraCore = UndraCore.shared): P
 }
 
 /** @throws {TodoError} */
-export async function ping(core: UndraCore = UndraCore.shared, signal?: AbortSignal): Promise<void> {
+export async function ping(
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise<void> {
   try {
     await core.call(
       { target: CallTarget.FreeFunction },

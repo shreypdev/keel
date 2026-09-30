@@ -53,8 +53,8 @@ impl Todos {
     > {
         fn __undra_key_rows(__item: &Row) -> u64 {
             ::std::thread_local! {
-                static __UNDRA_KEY_BUF : ::core::cell::RefCell < ::undra::wire::Writer > =
-                ::core::cell::RefCell::new(::undra::wire::Writer::new());
+                static __UNDRA_KEY_BUF : ::core::cell::RefCell < ::undra::wire::Writer >
+                = ::core::cell::RefCell::new(::undra::wire::Writer::new());
             }
             __UNDRA_KEY_BUF
                 .with(|__buf| {

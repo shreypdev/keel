@@ -2,10 +2,10 @@
 
 package golden.ports
 
+import dev.undra.runtime.PortImpl
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraPort
 import dev.undra.runtime.UndraPortException
-import dev.undra.runtime.PortImpl
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter

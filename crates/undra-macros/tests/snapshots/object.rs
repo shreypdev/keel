@@ -149,7 +149,9 @@ fn __undra_dispatch_Calculator(
     match __call.method_id {
         __UNDRA_ID_new => {
             let mut __r = ::undra::wire::Reader::new(__call.args);
-            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -210,7 +212,9 @@ fn __undra_dispatch_Calculator(
         }
         __UNDRA_ID_add => {
             let mut __r = ::undra::wire::Reader::new(__call.args);
-            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -221,7 +225,9 @@ fn __undra_dispatch_Calculator(
                     );
                 }
             };
-            let __undra_a1: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a1: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -254,7 +260,9 @@ fn __undra_dispatch_Calculator(
         }
         __UNDRA_ID_divide => {
             let mut __r = ::undra::wire::Reader::new(__call.args);
-            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -265,7 +273,9 @@ fn __undra_dispatch_Calculator(
                     );
                 }
             };
-            let __undra_a1: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a1: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -303,7 +313,9 @@ fn __undra_dispatch_Calculator(
         }
         __UNDRA_ID_slow_add => {
             let mut __r = ::undra::wire::Reader::new(__call.args);
-            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -342,13 +354,17 @@ fn __undra_dispatch_Calculator(
                 };
                 __undra_assert_send(&__fut);
                 __undra_out(
-                    ::undra::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)),
+                    ::undra::runtime::DispatchResult::Async(
+                        ::std::boxed::Box::pin(__fut),
+                    ),
                 )
             }
         }
         __UNDRA_ID_slow_divide => {
             let mut __r = ::undra::wire::Reader::new(__call.args);
-            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a0: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -359,7 +375,9 @@ fn __undra_dispatch_Calculator(
                     );
                 }
             };
-            let __undra_a1: i64 = match <i64 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a1: i64 = match <i64 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -390,7 +408,8 @@ fn __undra_dispatch_Calculator(
             };
             {
                 let __fut = async move {
-                    match Calculator::slow_divide(&*__obj, __undra_a0, __undra_a1).await {
+                    match Calculator::slow_divide(&*__obj, __undra_a0, __undra_a1).await
+                    {
                         ::core::result::Result::Ok(__v) => {
                             ::core::result::Result::<
                                 _,
@@ -407,13 +426,17 @@ fn __undra_dispatch_Calculator(
                 };
                 __undra_assert_send(&__fut);
                 __undra_out(
-                    ::undra::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)),
+                    ::undra::runtime::DispatchResult::Async(
+                        ::std::boxed::Box::pin(__fut),
+                    ),
                 )
             }
         }
         __UNDRA_ID_counts => {
             let mut __r = ::undra::wire::Reader::new(__call.args);
-            let __undra_a0: u32 = match <u32 as ::undra::wire::Decode>::decode(&mut __r) {
+            let __undra_a0: u32 = match <u32 as ::undra::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __undra_bad_request(
@@ -576,7 +599,9 @@ static __UNDRA_META_Calculator: ::undra::meta::ObjectMeta = ::undra::meta::Objec
                     ty: ::undra::meta::TypeRefMeta::U32,
                 },
             ],
-            returns: ::undra::meta::TypeRefMeta::Stream(&::undra::meta::TypeRefMeta::U32),
+            returns: ::undra::meta::TypeRefMeta::Stream(
+                &::undra::meta::TypeRefMeta::U32,
+            ),
             is_async: false,
             takes_ctx: false,
             docs: "",
