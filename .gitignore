@@ -22,3 +22,5 @@ dist
 /contract-tests/**/build
 /contract-tests/swift/.build
 /contract-tests/.logs
+/examples/playground/generated/kotlin/build
+/examples/playground/generated/kotlin/.gradle
