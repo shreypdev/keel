@@ -28,6 +28,10 @@ import {
   TodoCodec,
 } from "./types.js";
 
+/**
+ * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
+ * exercise the boundary.
+ */
 export class Bench extends KeelStore {
   readonly rows: Signal<Item[]> = new Signal<Item[]>([]);
   readonly s000: Signal<number> = new Signal<number>(0);
@@ -1044,6 +1048,7 @@ export class Bench extends KeelStore {
   }
 }
 
+/** A list of [`LIST_LEN`] items with operations that change one item at a time. */
 export class BigList extends KeelStore {
   readonly items: Signal<Item[]> = new Signal<Item[]>([]);
   /** Computed by the core; read-only. */
@@ -1191,6 +1196,7 @@ export class BigList extends KeelStore {
   }
 }
 
+/** A counter with a change tally and a computed parity. */
 export class Counter extends KeelStore {
   readonly count: Signal<number> = new Signal<number>(0);
   readonly changes: Signal<number> = new Signal<number>(0);
@@ -1279,6 +1285,7 @@ export class Counter extends KeelStore {
   }
 }
 
+/** The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls. */
 export class Todos extends KeelStore {
   readonly todos: Signal<Todo[]> = new Signal<Todo[]>([]);
   readonly filter: Signal<Filter> = new Signal<Filter>("all");

@@ -4,6 +4,8 @@ import Foundation
 import KeelRuntime
 import Observation
 
+/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
+/// exercise the boundary.
 @MainActor @Observable
 public final class Bench: KeelStore {
     public private(set) var rows: [Item] = []
@@ -1540,6 +1542,7 @@ public final class Bench: KeelStore {
     }
 }
 
+/// A list of [`LIST_LEN`] items with operations that change one item at a time.
 @MainActor @Observable
 public final class BigList: KeelStore {
     public private(set) var items: [Item] = []
@@ -1687,6 +1690,7 @@ public final class BigList: KeelStore {
     }
 }
 
+/// A counter with a change tally and a computed parity.
 @MainActor @Observable
 public final class Counter: KeelStore {
     public private(set) var count: Int32 = 0
@@ -1811,6 +1815,7 @@ public final class Counter: KeelStore {
     }
 }
 
+/// The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls.
 @MainActor @Observable
 public final class Todos: KeelStore {
     public private(set) var todos: [Todo] = []

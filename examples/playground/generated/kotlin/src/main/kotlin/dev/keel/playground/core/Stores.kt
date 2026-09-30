@@ -19,6 +19,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
+ * exercise the boundary.
+ */
 class Bench private constructor(core: KeelCore, handle: Long) : KeelStore(core, handle) {
     private val _rows: MutableStateFlow<List<Item>> = signal(emptyList())
     val rows: StateFlow<List<Item>> = _rows.asStateFlow()
@@ -1161,6 +1165,7 @@ class Bench private constructor(core: KeelCore, handle: Long) : KeelStore(core, 
     }
 }
 
+/** A list of [`LIST_LEN`] items with operations that change one item at a time. */
 class BigList private constructor(core: KeelCore, handle: Long) : KeelStore(core, handle) {
     private val _items: MutableStateFlow<List<Item>> = signal(emptyList())
     val items: StateFlow<List<Item>> = _items.asStateFlow()
@@ -1309,6 +1314,7 @@ class BigList private constructor(core: KeelCore, handle: Long) : KeelStore(core
     }
 }
 
+/** A counter with a change tally and a computed parity. */
 class Counter private constructor(core: KeelCore, handle: Long) : KeelStore(core, handle) {
     private val _count: MutableStateFlow<Int> = signal(0)
     val count: StateFlow<Int> = _count.asStateFlow()
@@ -1403,6 +1409,7 @@ class Counter private constructor(core: KeelCore, handle: Long) : KeelStore(core
     }
 }
 
+/** The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls. */
 class Todos private constructor(core: KeelCore, handle: Long) : KeelStore(core, handle) {
     private val _todos: MutableStateFlow<List<Todo>> = signal(emptyList())
     val todos: StateFlow<List<Todo>> = _todos.asStateFlow()

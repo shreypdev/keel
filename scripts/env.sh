@@ -13,7 +13,9 @@ _KEEL_TOOLS="$(cd "$_KEEL_ROOT/.." && pwd)/.tools"
 [ -d "$_KEEL_TOOLS" ] || _KEEL_TOOLS="$(cd "$_KEEL_ROOT/../../.." && pwd)/.tools"
 
 # --- Rust ------------------------------------------------------------------------------------
-if [ -d "$_KEEL_TOOLS/rust/bin" ]; then
+# Only use the portable toolchain when its binaries actually run here (they are Linux
+# ELF executables; on macOS they would shadow a working cargo and break every build).
+if [ -d "$_KEEL_TOOLS/rust/bin" ] && "$_KEEL_TOOLS/rust/bin/cargo" --version >/dev/null 2>&1; then
   export PATH="$_KEEL_TOOLS/rust/bin:$PATH"
   # This toolchain builds wasm32 std from source (rust-src is installed).
   export KEEL_WASM_BUILD_STD="-Z build-std=std,panic_abort"
