@@ -195,6 +195,12 @@ pub fn kotlin_build(runtime: &RuntimeRef) -> String {
          \x20   targetCompatibility = JavaVersion.VERSION_11\n\
          }}\n\
          \n\
+         kotlin {{\n\
+         \x20   compilerOptions {{\n\
+         \x20       jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)\n\
+         \x20   }}\n\
+         }}\n\
+         \n\
          dependencies {{\n\
          \x20   api(\"dev.keel:runtime:{version}\")\n\
          }}\n"

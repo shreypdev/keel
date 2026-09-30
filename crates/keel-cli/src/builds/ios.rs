@@ -1,11 +1,13 @@
 //! The iOS build: the shim as a static library for device and simulator, packaged as an
 //! XCFramework.
 //!
-//! `KeelCore.xcframework` holds one slice per platform (`ios-arm64`, `ios-arm64-simulator`, plus
-//! an x86_64 simulator slice folded into the simulator one when `[ios] simulator_archs` asks for
-//! it), each with the C header of the ABI (`keel.h`). The Swift runtime's `KeelFFI` target
-//! declares the same header; the app links the XCFramework and the runtime package is built with
-//! `KEEL_LINK_CORE=1` so its link-time stand-ins do not shadow the real core.
+//! `KeelCore.xcframework` holds one static library per platform (`ios-arm64`,
+//! `ios-arm64-simulator`; an x86_64 simulator slice is folded into the simulator one when
+//! `[ios] simulator_archs` asks for it) and **no header and no module map**: the Swift runtime's
+//! `KeelFFI` target already declares the C ABI as the module `KeelFFI`, and a second definition in
+//! the XCFramework fails the app's build with "redefinition of module 'KeelFFI'". The app links the
+//! XCFramework and builds the runtime package with `KEEL_LINK_CORE=1`, so the runtime's link-time
+//! stand-ins do not shadow the real core.
 //!
 //! **Debug builds and `-force_load`.** The core's `#[keel::api]` registrations are static
 //! constructors in object files that nothing references. A release build (`lto = "fat"`, one
@@ -18,16 +20,11 @@ use std::process::{Command, Stdio};
 
 use crate::cargo::{Build, Profile};
 use crate::error::{CliError, Code, Result};
-use crate::fsutil::{copy_file, create_dir_all, remove_dir_all, size_of, write_if_changed};
+use crate::fsutil::{create_dir_all, remove_dir_all, size_of};
 use crate::session::Session;
 use crate::sys::Os;
 
 use super::{Artifact, unsupported};
-
-/// The C header of the ABI, as the Swift runtime declares it.
-const KEEL_H: &str = include_str!("../../templates/ios-ffi/keel.h");
-/// The module map that names the header `KeelFFI`.
-const MODULE_MAP: &str = include_str!("../../templates/ios-ffi/module.modulemap");
 
 /// Rust target of a physical device.
 pub const DEVICE_TRIPLE: &str = "aarch64-apple-ios";
@@ -133,11 +130,6 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         fat
     };
 
-    // Headers: the C ABI header and the module map that names it `KeelFFI`.
-    let headers = stage.join("include");
-    write_if_changed(&headers.join("keel.h"), KEEL_H)?;
-    write_if_changed(&headers.join("module.modulemap"), MODULE_MAP)?;
-
     let out_dir = session.project.build_dir().join("ios");
     let xcframework = out_dir.join("KeelCore.xcframework");
     remove_dir_all(&xcframework)?;
@@ -146,7 +138,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     let mut cmd = Command::new(&xcodebuild);
     cmd.arg("-create-xcframework");
     for lib in [&device, &sim] {
-        cmd.arg("-library").arg(lib).arg("-headers").arg(&headers);
+        cmd.arg("-library").arg(lib);
     }
     cmd.arg("-output").arg(&xcframework).stdin(Stdio::null());
     session.toolchain.apply(&mut cmd);
@@ -176,19 +168,6 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     ])
 }
 
-/// Copies the C header and module map next to a file, for tools that want them on their own
-/// (`keel adopt` documents this).
-///
-/// # Errors
-///
-/// `C0010`.
-pub fn write_ffi_headers(dir: &Path) -> Result<()> {
-    write_if_changed(&dir.join("keel.h"), KEEL_H)?;
-    write_if_changed(&dir.join("module.modulemap"), MODULE_MAP)?;
-    let _ = copy_file;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,23 +179,16 @@ mod tests {
     }
 
     #[test]
-    fn the_embedded_header_matches_the_swift_runtime_when_the_checkout_is_here() {
-        // The CLI embeds a copy of `keel.h`; the runtime's copy is the source of truth.
+    fn the_runtime_declares_the_c_abi_module_itself() {
+        // The XCFramework carries no header and no module map, and this is why: the Swift
+        // runtime's `KeelFFI` target already defines the module `KeelFFI`, and a second
+        // definition in the XCFramework fails the build ("redefinition of module 'KeelFFI'").
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let runtime = repo.join("runtimes/swift/KeelRuntime/Sources/KeelFFI/include");
-        if !runtime.join("keel.h").is_file() {
+        let modulemap = repo.join("runtimes/swift/KeelRuntime/Sources/KeelFFI/include/module.modulemap");
+        if !modulemap.is_file() {
             return; // built outside the repository (a packaged crate)
         }
-        assert_eq!(
-            std::fs::read_to_string(runtime.join("keel.h")).unwrap(),
-            KEEL_H,
-            "crates/keel-cli/templates/ios-ffi/keel.h is stale: copy runtimes/swift/KeelRuntime/Sources/KeelFFI/include/keel.h over it"
-        );
-        assert_eq!(
-            std::fs::read_to_string(runtime.join("module.modulemap")).unwrap(),
-            MODULE_MAP,
-            "crates/keel-cli/templates/ios-ffi/module.modulemap is stale"
-        );
+        assert!(std::fs::read_to_string(modulemap).unwrap().contains("module KeelFFI"));
     }
 
     #[test]

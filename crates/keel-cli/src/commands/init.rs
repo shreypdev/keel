@@ -162,8 +162,15 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     let link_flags = format!(
         "\"OTHER_LDFLAGS[sdk=iphoneos*]\" = (\n\t\t\t\t\t\"$(inherited)\",\n\t\t\t\t\t\"-force_load\",\n\t\t\t\t\t\"$(SRCROOT)/{xcframework_rel}/ios-arm64/libkeel_core.a\",\n\t\t\t\t);\n\t\t\t\t\"OTHER_LDFLAGS[sdk=iphonesimulator*]\" = (\n\t\t\t\t\t\"$(inherited)\",\n\t\t\t\t\t\"-force_load\",\n\t\t\t\t\t\"$(SRCROOT)/{xcframework_rel}/{slice_sim}/libkeel_core.a\",\n\t\t\t\t);"
     );
+    // A generic simulator destination builds every architecture Xcode knows; the XCFramework has
+    // only the slices of `[ios] simulator_archs`, so exclude the others instead of failing to link.
+    let excluded = match config.ios.simulator_archs.as_slice() {
+        [only] if only == "arm64" => "\n\t\t\t\t\"EXCLUDED_ARCHS[sdk=iphonesimulator*]\" = x86_64;",
+        [only] if only == "x86_64" => "\n\t\t\t\t\"EXCLUDED_ARCHS[sdk=iphonesimulator*]\" = arm64;",
+        _ => "",
+    };
     vars.set("XCFRAMEWORK_PATH", xcframework_rel);
-    vars.set("LINK_FLAGS", link_flags);
+    vars.set("LINK_FLAGS", format!("{link_flags}{excluded}"));
     vars.set("DEPLOYMENT_TARGET", config.ios.deployment_target.clone());
     vars.set("PACKAGE_REFERENCE_SECTIONS", package_references(&rel(&ios_dir, &generated.join("swift")), &runtimes.swift, &ios_dir));
 
