@@ -37,7 +37,8 @@ function target(page, url) {
   if (/^(?:mailto:|tel:|data:|javascript:)/i.test(url)) return null;
   if (/^https?:\/\//i.test(url)) return url.startsWith(ORIGIN) ? url.slice(ORIGIN.length) : null;
   if (url.startsWith("//")) return null;
-  if (url.startsWith("/")) return url.slice(1); // root-absolute: only the 404 page uses these
+  if (url.startsWith("/keel/")) return url.slice("/keel/".length); // root-absolute under the Pages base path: the 404 page and the playground build
+  if (url.startsWith("/")) return url.slice(1);
   return posix.join(posix.dirname(page), url);
 }
 
@@ -55,7 +56,7 @@ for (const f of files) {
     const [bare] = noHash.split("?");
     let t = raw.startsWith("#") ? page : target(page, bare);
     if (t === null) continue;
-    if (EXEMPT.has(page) && raw.startsWith("/")) continue; // the 404 page links through /keel/ and /
+    if (EXEMPT.has(page) && raw.startsWith("/") && !raw.startsWith("/keel/")) continue; // the 404 page's fallback for a site served at the root
     if (t === "" || t.endsWith("/")) t += "index.html";
     if (BUILT(t)) continue;
     const exists = existsSync(join(ROOT, t));
@@ -69,7 +70,7 @@ for (const f of files) {
       if (!set.has(decodeURIComponent(frag))) fail(page, `broken fragment "${raw}" (no id="${frag}" in ${t})`);
     }
   }
-  if (EXEMPT.has(page)) continue;
+  if (EXEMPT.has(page) || page.startsWith("playground/")) continue; // the playground is an app build, not a content page
 
   // ---- per-page SEO contract
   const expectedUrl = ORIGIN + (page === "index.html" ? "" : page.endsWith("/index.html") ? page.slice(0, -"index.html".length) : page);
