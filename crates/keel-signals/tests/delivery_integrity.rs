@@ -667,3 +667,165 @@ fn m2_transaction_ids_seen_by_one_store_only_ever_grow() {
         "S2 saw transaction ids {s2_ids:?}: they must ascend in delivery order"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// M3: the round cap must not strand dirty slots or queued effects
+// ---------------------------------------------------------------------------------------------
+
+/// `x` (0) and `y` (1), observed, with two effects that keep waking each other.
+struct PingPong {
+    rig: Rig,
+    x: Signal<u32>,
+    y: Signal<u32>,
+    effects: Vec<keel_signals::Effect>,
+}
+
+fn ping_pong() -> PingPong {
+    let rig = Rig::new();
+    let x = Signal::new(0_u32);
+    let y = Signal::new(0_u32);
+    rig.cell.attach(&x, 0).unwrap();
+    rig.cell.attach(&y, 1).unwrap();
+    rig.observe_all();
+    let y2 = y.clone();
+    let x_to_y = keel_signals::Effect::new(&x, move |v: &u32| y2.set(*v + 1));
+    let x2 = x.clone();
+    let y_to_x = keel_signals::Effect::new(&y, move |v: &u32| x2.set(*v + 1));
+    PingPong {
+        rig,
+        x,
+        y,
+        effects: vec![x_to_y, y_to_x],
+    }
+}
+
+#[test]
+fn m3_the_round_cap_does_not_strand_slots_for_other_threads() {
+    // The review's repro: an x <-> y effect ping-pong on a short-lived thread, then the effects
+    // are dropped. Later writes on another thread must still be delivered.
+    let mut p = ping_pong();
+    let mut host = Host::default();
+    host.apply_entries(&p.rig.observe_all(), None);
+
+    let (x, sink) = (p.x.clone(), p.rig.sink.clone());
+    std::thread::spawn(move || with_sink(sink, || x.set(1)))
+        .join()
+        .unwrap();
+    assert_eq!(
+        p.rig.sink.round_caps(),
+        1,
+        "the cut-off was reported to the sink"
+    );
+    p.effects.clear(); // dropping cancels them
+    host.apply_all(&p.rig.sets(), None);
+    assert_eq!(
+        (host.values[&0], host.values[&1]),
+        (p.x.get(), p.y.get()),
+        "the changes that were already dirty were delivered when the loop was cut off"
+    );
+
+    // A watcher on x: with the bug it never ran again, because x stayed marked dirty.
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = runs.clone();
+    let _watch = keel_signals::Effect::new(&p.x, move |_: &u32| {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    for v in 1000..1010_u32 {
+        p.rig.run(|| p.x.set(v));
+        host.apply_all(&p.rig.sets(), None);
+        assert_eq!(host.values[&0], v, "every later write reaches the host");
+    }
+    assert_eq!(count(&runs), 10, "and every one runs the watcher");
+}
+
+#[test]
+fn m3_queued_effects_are_released_at_the_cap_and_run_again_later() {
+    let p = ping_pong();
+    p.rig.run(|| p.x.set(1));
+    assert_eq!(p.rig.sink.round_caps(), 1);
+    p.rig.sets();
+    // The effects are still alive; they were dropped from the queue, not cancelled: the next
+    // write starts the ping-pong again (and is cut off again) instead of being ignored.
+    p.rig.run(|| p.x.set(7));
+    assert_eq!(p.rig.sink.round_caps(), 2);
+    assert!(!p.rig.sets().is_empty());
+}
+
+#[test]
+fn m3_a_loop_that_stops_by_itself_is_never_reported() {
+    // A loop that stops by itself is never cut off, however long it runs.
+    let rig = Rig::new();
+    let n = Signal::new(0_u32);
+    rig.cell.attach(&n, 0).unwrap();
+    rig.observe_all();
+    let again = n.clone();
+    let _count_down = keel_signals::Effect::new(&n, move |v: &u32| {
+        if *v < 50 {
+            again.set(*v + 1);
+        }
+    });
+    rig.run(|| n.set(1));
+    assert_eq!(n.get(), 50);
+    assert_eq!(rig.sink.round_caps(), 0);
+}
+
+#[test]
+fn m3_writes_queued_by_the_last_delivery_are_released_not_stranded() {
+    // A sink that writes both signals on every delivery: no effect is involved, the writes it
+    // makes keep the commit loop going until the cap. The writes queued by the very last
+    // delivery must be released with their slots remembered as unsent, not left dirty with
+    // nobody to deliver them.
+    struct Echo {
+        capture: Arc<keel_signals::testing::CaptureSink>,
+        x: Signal<u32>,
+        y: Signal<u32>,
+        enabled: AtomicBool,
+    }
+    impl ChangeSink for Echo {
+        fn deliver(&self, change_set: &[u8]) {
+            self.capture.deliver(change_set);
+            if self.enabled.load(Ordering::SeqCst) {
+                txn(|| {
+                    self.x.update(|v| *v += 1);
+                    self.y.update(|v| *v += 1);
+                });
+            }
+        }
+        fn round_cap_hit(&self, rounds: usize) {
+            self.capture.round_cap_hit(rounds);
+        }
+    }
+
+    let rig = Rig::new();
+    let x = Signal::new(0_u32);
+    let y = Signal::new(0_u32);
+    rig.cell.attach(&x, 0).unwrap();
+    rig.cell.attach(&y, 1).unwrap();
+    let mut host = Host::default();
+    host.apply_entries(&rig.observe_all(), None);
+    let echo = Arc::new(Echo {
+        capture: rig.sink.clone(),
+        x: x.clone(),
+        y: y.clone(),
+        enabled: AtomicBool::new(true),
+    });
+
+    with_sink(echo.clone(), || x.set(1));
+    assert_eq!(rig.sink.round_caps(), 1);
+    echo.enabled.store(false, Ordering::SeqCst);
+    host.apply_all(&rig.sets(), None);
+
+    // Another thread writes x. Had x stayed dirty from the cut-off, its write would be skipped
+    // and never delivered; instead the store delivers x, and y with it (still unsent).
+    let (x2, echo2) = (x.clone(), echo.clone());
+    std::thread::spawn(move || with_sink(echo2, || x2.set(500)))
+        .join()
+        .unwrap();
+    host.apply_all(&rig.sets(), None);
+    assert_eq!(host.values[&0], 500);
+    assert_eq!(
+        (host.values[&0], host.values[&1]),
+        (x.get(), y.get()),
+        "the host ends up in step with the core"
+    );
+}

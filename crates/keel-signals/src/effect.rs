@@ -17,7 +17,9 @@ use crate::graph::Reactive;
 ///   once.
 /// * It runs on the thread that committed. Signals it writes are committed afterwards as a new
 ///   transaction (never re-entrantly); an effect that keeps re-triggering itself is cut off
-///   after 1000 rounds per outermost commit.
+///   after 1000 rounds per outermost commit: the queued effects are dropped from the queue (a
+///   later change queues them again), the changes already made are delivered, and the sink is
+///   told through [`ChangeSink::round_cap_hit`](crate::ChangeSink::round_cap_hit).
 /// * Dropping the `Effect` cancels it: it will not run again, even if a run was already queued.
 ///
 /// The closure receives references to the dependencies' current values, exactly like
@@ -81,6 +83,12 @@ impl Effect {
 }
 
 impl EffectInner {
+    /// Forgets a queued run (the commit loop was cut off): the next invalidation queues the
+    /// effect again instead of assuming a run is already on its way.
+    pub(crate) fn cancel_queued_run(&self) {
+        self.dirty.store(false, Ordering::SeqCst);
+    }
+
     /// Runs the body if a run is queued and the effect has not been cancelled. Called by the
     /// commit loop, with no locks held.
     pub(crate) fn run_if_dirty(&self) {

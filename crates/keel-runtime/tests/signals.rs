@@ -258,6 +258,49 @@ fn release_invalidates_the_handle_and_detaches_the_store() {
     assert_eq!(t.host().change_set_count(), 0);
 }
 
+/// Review finding M3: a commit cut off at `keel-signals`' round cap is reported as an error
+/// through the runtime's log, and it leaves the store usable.
+#[test]
+fn m3_a_commit_cut_off_at_the_round_cap_is_logged_as_an_error() {
+    use keel_signals::Effect;
+    let t = TestRuntime::new();
+    let h = new_counter(&t, 0, "");
+    t.runtime().observe(h.0, ALL_SIGNALS, true);
+    t.host().take_change_sets();
+    t.host().take_logs();
+    let counter = t.runtime().object::<Counter>(h.0).unwrap();
+
+    // Two effects that keep waking each other: count -> label -> count -> ...
+    let label = counter.label.clone();
+    let to_label = Effect::new(&counter.count, move |n: &i32| label.set(n.to_string()));
+    let count = counter.count.clone();
+    let to_count = Effect::new(&counter.label, move |l: &String| count.set(l.len() as i32));
+    {
+        let _scope = t.ctx().enter();
+        counter.count.set(12);
+    }
+    let logs = t.host().take_logs();
+    let capped: Vec<_> = logs
+        .iter()
+        .filter(|l| l.message.contains("effect loop hit the round cap"))
+        .collect();
+    assert_eq!(capped.len(), 1, "{logs:?}");
+    assert_eq!(capped[0].level, 4, "error level");
+    assert_eq!(capped[0].target, "keel::signals");
+
+    // The store still delivers: the last change-set carries the values the core ended with, and
+    // the next write reaches the host.
+    let sets = t.host().take_decoded_change_sets();
+    assert!(!sets.is_empty());
+    drop((to_label, to_count));
+    t.host().take_change_sets();
+    {
+        let _scope = t.ctx().enter();
+        counter.count.set(5);
+    }
+    assert_eq!(single(&t).entries, [entry(h, COUNT_SIGNAL, enc(&5_i32))]);
+}
+
 #[test]
 fn a_reused_slot_gets_a_fresh_generation_end_to_end() {
     let t = TestRuntime::new();

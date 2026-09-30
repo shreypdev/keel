@@ -601,6 +601,16 @@ impl StoreCell {
         recycle_buffer(payload.into_vec());
     }
 
+    /// Releases a slot that a cut-off commit still had queued: it is clean again (so any thread's
+    /// next write to it is recorded and committed) and remembered as unsent, so that the next
+    /// commit of this store delivers its current value.
+    pub(crate) fn defer(&self, signal_id: u32) {
+        if let Some(slot) = self.slot(signal_id) {
+            slot.flags.dirty.store(false, Ordering::SeqCst);
+        }
+        self.mark_unsent(signal_id);
+    }
+
     /// Remembers that the host may not have the current value of `signal_id`: the next commit
     /// that touches this store sends it again.
     fn mark_unsent(&self, signal_id: u32) {

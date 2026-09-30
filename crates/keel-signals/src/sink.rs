@@ -28,6 +28,20 @@ use parking_lot::RwLock;
 pub trait ChangeSink: Send + Sync {
     /// Handles one change-set payload.
     fn deliver(&self, change_set: &[u8]);
+
+    /// Reports that a commit was cut off after `rounds` rounds because effects (or computeds
+    /// and sinks) kept writing signals that triggered themselves.
+    ///
+    /// When the cap is hit the commit stops running effects, delivers the changes that are
+    /// already dirty one last time, and releases the work it had queued (a slot or effect it
+    /// still owned would otherwise be skipped by every other thread for good). This call is the
+    /// error report for that: `keel-signals` has no log of its own, so the embedder's sink logs
+    /// it (the runtime's sink logs at error level). The default does nothing. It runs after the
+    /// store change-sets of the cut-off round were delivered, on the committing thread, with no
+    /// store delivery lock held.
+    fn round_cap_hit(&self, rounds: usize) {
+        let _ = rounds;
+    }
 }
 
 static GLOBAL: RwLock<Option<Arc<dyn ChangeSink>>> = RwLock::new(None);

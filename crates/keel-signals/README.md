@@ -73,6 +73,10 @@ assert_eq!(double.get(), 22);
   commit claims the store's dirty slots until the sink has returned (a sink must not wait for
   another thread that writes the same store). Effects run after it is released. Writes made
   during a commit are queued and committed as a new transaction afterwards.
+* A commit is bounded. After 1000 rounds (effects that keep waking each other) it stops running
+  effects, delivers the changes that are already dirty, and releases what it still had queued, so
+  other threads are never left skipping a slot or effect this thread owned; the sink is told
+  through `ChangeSink::round_cap_hit` (the runtime logs it at error level).
 * A panic in a transaction, sink, effect or computed never corrupts the thread's transaction
   state; the first panic is re-raised once the commit has finished. A change-set that was
   abandoned by a panic is not lost: its slots are sent again, as full values, by the next commit

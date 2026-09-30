@@ -73,6 +73,21 @@ impl ChangeSink for RuntimeSink {
             rt.deliver_change_set(change_set);
         }
     }
+
+    /// A commit hit `keel-signals`' round cap (effects re-triggering each other): logged at
+    /// error level through the runtime the commit belongs to.
+    fn round_cap_hit(&self, rounds: usize) {
+        if let Some(rt) = current_or_global() {
+            rt.log(
+                ERROR,
+                "keel::signals",
+                &format!(
+                    "effect loop hit the round cap: a commit was cut off after {rounds} rounds; \
+                     the queued effects were dropped and the pending changes delivered"
+                ),
+            );
+        }
+    }
 }
 
 /// The write-context check installed into `keel-signals`: may the calling thread write signals?
