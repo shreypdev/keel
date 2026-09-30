@@ -13,8 +13,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration as StdDuration, Instant};
 
 use keel::meta::ids;
-use keel::prelude::*;
-use keel::runtime::{Runtime, RuntimeConfig, Stream};
+use keel::prelude::Handle;
+use keel::runtime::{Runtime, RuntimeConfig};
 use keel::wire::payload::{
     CallTarget, ChangeSet, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StreamFlag,
     StreamItem,
@@ -31,118 +31,8 @@ use keel_ffi::{
 // The core under test
 // ---------------------------------------------------------------------------------------------
 
-#[keel::error]
-#[derive(Clone, Debug, PartialEq)]
-pub enum CalcError {
-    #[error("the calculation failed on purpose")]
-    Failed,
-}
-
-/// Answered by the host, asynchronously.
-#[keel::port]
-pub trait Echo {
-    async fn ping(&self, n: u32) -> u32;
-}
-
-/// Answered by the host, synchronously.
-#[keel::port(sync)]
-pub trait Sum {
-    fn add(&self, a: u32, b: u32) -> u32;
-}
-
-pub struct Calculator {
-    ctx: Ctx,
-    base: i64,
-}
-
-#[keel::api]
-impl Calculator {
-    pub fn new(ctx: Ctx, base: i64) -> Self {
-        Calculator { ctx, base }
-    }
-
-    pub fn add(&self, a: i64, b: i64) -> i64 {
-        self.base + a + b
-    }
-
-    pub async fn slow_add(&self, a: i64, b: i64) -> i64 {
-        self.ctx.sleep(Duration::from_millis(20)).await;
-        self.base + a + b
-    }
-
-    pub async fn never(&self) -> i64 {
-        std::future::pending().await
-    }
-
-    pub fn ticks(&self, n: u32) -> impl Stream<Item = u32> {
-        Ticks { next: 0, n }
-    }
-
-    pub fn boom(&self) -> i64 {
-        panic!("kaboom")
-    }
-
-    pub async fn async_boom(&self) -> i64 {
-        panic!("async kaboom")
-    }
-
-    pub fn fail(&self) -> Result<i64, CalcError> {
-        Err(CalcError::Failed)
-    }
-
-    pub async fn ping_host(&self, n: u32) -> u32 {
-        echo(&self.ctx).ping(n).await
-    }
-
-    pub fn sum_on_host(&self, a: u32, b: u32) -> u32 {
-        sum(&self.ctx).add(a, b)
-    }
-}
-
-struct Ticks {
-    next: u32,
-    n: u32,
-}
-
-impl Stream for Ticks {
-    type Item = u32;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<u32>> {
-        if self.next < self.n {
-            self.next += 1;
-            std::task::Poll::Ready(Some(self.next - 1))
-        } else {
-            std::task::Poll::Ready(None)
-        }
-    }
-}
-
-#[keel::store]
-pub struct Counter {
-    count: Signal<u32>,
-}
-
-#[keel::api(store)]
-#[allow(clippy::new_without_default)]
-impl Counter {
-    pub fn new() -> Self {
-        Counter {
-            count: Signal::new(0),
-        }
-    }
-
-    pub fn bump(&self) {
-        self.count.update(|n| *n += 1);
-    }
-}
-
-#[keel::api]
-pub fn version() -> String {
-    "keel-ffi test core 1".to_owned()
-}
+#[path = "common/core.rs"]
+mod test_core;
 
 // ---------------------------------------------------------------------------------------------
 // A host: callbacks that capture what the core sends
@@ -183,6 +73,9 @@ struct Capture {
     inner: Mutex<Inner>,
     changed: Condvar,
     echo_mode: Mutex<PortMode>,
+    /// When set, `on_reply` calls back into the core (which SPEC 5.1 forbids) and records the answer.
+    reenter: std::sync::atomic::AtomicBool,
+    reentered: Mutex<Vec<u32>>,
 }
 
 impl Capture {
@@ -191,6 +84,8 @@ impl Capture {
             inner: Mutex::new(Inner::default()),
             changed: Condvar::new(),
             echo_mode: Mutex::new(PortMode::Sync),
+            reenter: std::sync::atomic::AtomicBool::new(false),
+            reentered: Mutex::new(Vec::new()),
         })
     }
 
@@ -289,6 +184,22 @@ unsafe fn copy(ptr: *const u8, len: u32) -> Vec<u8> {
 extern "C" fn on_reply(user: *mut c_void, call_id: u32, ptr: *const u8, len: u32) {
     // SAFETY: `user` is the capture given to `keel_init`; `ptr`/`len` are valid during the call.
     let (cap, bytes) = unsafe { (capture(user), copy(ptr, len)) };
+    if cap.reenter.load(Ordering::Acquire) {
+        // A host must not do this. The core answers "refused" instead of deadlocking.
+        let refused = submit(&call_payload(function("version"), 9_999_999, &[]));
+        let sync = call_sync_raw(&call_payload(function("version"), 9_999_998, &[]));
+        // SAFETY: `sync` came from the core and is read before it is freed.
+        let status = unsafe { sync.as_slice() }
+            .get(4)
+            .copied()
+            .map_or(255, u32::from);
+        // SAFETY: freed once; `keel_buf_free` is the one call a callback may make.
+        unsafe { keel_buf_free(sync) };
+        cap.reentered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend([refused, status]);
+    }
     cap.with(|inner| inner.replies.push((call_id, bytes)));
 }
 
@@ -666,6 +577,26 @@ fn init_is_idempotent_for_the_same_embedder_and_refuses_another() {
 }
 
 #[test]
+fn core_threads_zero_still_runs_async_calls() {
+    // The native ABI has no keel_poll, so "the host polls" cannot be honoured: the core thread runs.
+    let cfg = RuntimeConfig {
+        core_threads: 0,
+        ..RuntimeConfig::default()
+    }
+    .encode_to_vec();
+    let host = Embedder::start_with(&cfg, true);
+    let calc = host.calculator(1);
+    let (status, body) = host.run(
+        method(calc, "Calculator", "slow_add"),
+        &[1_i64.encode_to_vec(), 1_i64.encode_to_vec()].concat(),
+    );
+    assert_eq!(
+        (status, i64::decode_exact(&body).unwrap()),
+        (ReplyStatus::Ok, 3)
+    );
+}
+
+#[test]
 fn shutdown_is_idempotent_and_init_can_follow() {
     let host = Embedder::start();
     let (status, body) = host.sync(function("version"), &[]);
@@ -793,6 +724,19 @@ fn malformed_calls_are_rejected_without_a_crash() {
     );
     host.cap
         .with(|inner| assert!(inner.replies.is_empty(), "no stray replies"));
+}
+
+#[test]
+fn calling_back_into_the_core_from_a_callback_is_refused_not_deadlocked() {
+    let host = Embedder::start();
+    host.cap.reenter.store(true, Ordering::Release);
+    // The async path replies from inside `keel_call`, on this thread, under the core lock.
+    let (status, _) = host.run(function("version"), &[]);
+    assert_eq!(status, ReplyStatus::Ok, "the original call is unaffected");
+    let answers = host.cap.reentered.lock().unwrap().clone();
+    assert_eq!(answers, [5, u32::from(ReplyStatus::BadRequest.as_u8())]);
+    host.cap.reenter.store(false, Ordering::Release);
+    assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);
 }
 
 #[test]

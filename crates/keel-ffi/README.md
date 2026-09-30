@@ -53,22 +53,51 @@ int main(void) {
   the core copies it and `free`s it.
 * **Callbacks** run on the core thread, a blocking thread or your calling thread, possibly with
   the core lock held (SPEC 5.1). Copy the bytes and return; a same-thread call back into the core
-  is refused (`E_REENTRANT`) rather than deadlocked.
+  is refused (`E_REENTRANT`, status 5) rather than deadlocked.
 * **Nothing unwinds out of a `keel_*` function.** A panic in the core answers status 2; a panic
-  in the shim itself is contained and logged at level 5.
-* **`keel_init` is idempotent** for the same embedder and returns a code from `init_code`
-  otherwise; `keel_restore` returns a `restore_code`.
+  in the shim itself is contained and logged at level 5. This needs `panic = "unwind"` on native
+  targets (the crate refuses to compile with `panic = "abort"`); only wasm aborts (SPEC 7: log at
+  level 5, then trap).
+* **`keel_init`** returns `0` or an `init_code`: repeating it with the same callbacks is a
+  no-op, a different embedder gets `ALREADY_INITIALIZED`. `core_threads == 0` is treated as `1`
+  (there is no native `keel_poll`). `keel_shutdown` joins the core threads and drops the port
+  registrations; `keel_init` may follow. `keel_restore` returns a `restore_code`.
 * **Logs** reach a native host as calls to its `Log` port (`port.Log` / `Log.log`), so register
-  one to see the core's own records.
+  one to see the core's own records. `keel_port_register` also takes a port over from any default
+  Rust binding.
+* **Static linking.** The core's `#[keel::api]` registrations are static constructors in object
+  files that nothing references. A release build (`lto = "fat"`, `codegen-units = 1`) is one
+  object and links as is; a debug staticlib has many, so link it with `-force_load` (Apple) or
+  `--whole-archive` (GNU) or the schema comes out empty.
+
+## The three surfaces
+
+| | Entry | Notes |
+|---|---|---|
+| C ABI | `keel_*` in `native` | Swift (module `KeelFFI`, `keel.h`), any C host, `keel-cli` (`dlopen` + `keel_schema_json`) |
+| JNI | `JNI_OnLoad` registers `dev.keel.runtime.KeelNative` | Kotlin; callbacks are direct `ByteBuffer`s valid only during the call; callback threads attach as daemons |
+| wasm | 20 exports + `_initialize`, 9 imports from module `"keel"` | `Clock`, `Rng`, `Log` are answered natively over `now_ms` / `random` / `log` unless the host answers the port first |
 
 ## Building
 
 ```sh
 cargo build -p keel-ffi                          # libkeel_ffi.{dylib,so,a}: the C ABI
 cargo build -p keel-ffi --features jni           # + JNI_OnLoad / RegisterNatives (Kotlin)
-cargo build -p keel-ffi --target wasm32-unknown-unknown   # keel_ffi.wasm: the wasm ABI
+cargo build -p keel-ffi --target wasm32-unknown-unknown --profile release-wasm   # keel_ffi.wasm
 ```
 
-The library's schema is whatever `#[keel::api]` items are linked into the same binary; a
-core crate depends on `keel-ffi` and builds as a `cdylib` / `staticlib`, and `keel-cli` extracts
-its schema with `keel_schema_json`.
+The library's schema is whatever `#[keel::api]` items are linked into the same binary: a core
+crate depends on `keel-ffi` and builds as a `cdylib` / `staticlib` (its `keel_*` exports come
+along), and `keel-cli` extracts the schema with `keel_schema_json`. `tests/fixture` is exactly
+such a core.
+
+## Tests
+
+| What | How |
+|---|---|
+| C ABI, in process, real callbacks | `cargo test -p keel-ffi` (`tests/abi.rs`) |
+| wasm ABI, hand-written host | `tests/wasm/raw.test.mjs` |
+| wasm ABI under the TypeScript runtime | `tests/wasm/ts-runtime.test.mjs` |
+| JNI under the Kotlin runtime | `tests/jni/run.sh`, and the runtime's own `NativeSmokeTests` (`KEEL_NATIVE_LIB_DIR=target/debug KEEL_NATIVE_NAME=keel_ffi scripts/test-local.sh run`) |
+| C ABI under the Swift runtime | `tests/swift/run.sh` |
+| Crossing cost | `cargo bench -p keel-ffi --bench boundary` |

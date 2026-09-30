@@ -1,0 +1,37 @@
+# A real Keel core for the boundary end-to-end runs: the same code as `tests/common/core.rs`
+# built as a cdylib/staticlib on top of keel-ffi. It is its own workspace, so it never enters
+# `cargo build --workspace`.
+#
+#   cargo build --manifest-path crates/keel-ffi/tests/fixture/Cargo.toml --target wasm32-unknown-unknown
+#   cargo build --manifest-path crates/keel-ffi/tests/fixture/Cargo.toml            # libkeel_core.dylib for the Kotlin tests
+[package]
+name = "keel-ffi-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "keel_core"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+keel = { path = "../../../keel" }
+keel-ffi = { path = "../..", features = [] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+keel-ffi = { path = "../..", features = ["jni"] }
+
+[workspace]
+
+# Match the workspace: native builds unwind (constitution R6: a panic becomes a status 2 reply);
+# only the wasm profile aborts (SPEC 7).
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+panic = "unwind"
+
+[profile.release-wasm]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
