@@ -1,5 +1,5 @@
 // GENERATED FILE, DO NOT EDIT. Regenerate with scripts/gen-vectors.py.
-// Source: contract-tests/wire-vectors.json (sha256 d8b8370e85e024a33459f5906bf964a1f834c5ab9abf269cf0bcda3a340288ab)
+// Source: contract-tests/wire-vectors.json (sha256 c3705059f72a7c25db8ae03b96afa899bd2d4ada248a82e29fed56a60b213427)
 package dev.keel.runtime.wire
 
 import dev.keel.runtime.testing.JV
@@ -42,5 +42,6 @@ internal object WireVectors {
         WireVector("reply_ok", "reply payload", JV.Obj(listOf("call_id" to JV.Num("9"), "status" to JV.Num("0"), "body" to JV.Num("5"))), "090000000005000000", ""),
         WireVector("changeset_one", "changeset payload", JV.Obj(listOf("txn_id" to JV.Str("42"), "entries" to JV.Arr(listOf(JV.Obj(listOf("handle" to JV.Str("4294967297"), "signal_id" to JV.Num("0"), "op" to JV.Num("0"), "value" to JV.Arr(listOf(JV.Num("1"), JV.Num("2"))))))))), "2a0000000000000001000000010000000100000000000000000c000000020000000100000002000000", ""),
         WireVector("keyed_patch", "keyed patch (item i32)", JV.Obj(listOf("ops" to JV.Arr(listOf(JV.Obj(listOf("op" to JV.Str("insert"), "index" to JV.Num("0"), "item" to JV.Num("5"))), JV.Obj(listOf("op" to JV.Str("remove"), "index" to JV.Num("1"))), JV.Obj(listOf("op" to JV.Str("move"), "from" to JV.Num("0"), "to" to JV.Num("1"))), JV.Obj(listOf("op" to JV.Str("clear"))))))), "04000000000000000005000000010100000003000000000100000004", ""),
+        WireVector("map_key_order_by_encoded_bytes", "map<string,i32>", JV.Obj(listOf("aa" to JV.Num("1"), "b" to JV.Num("2"))), "0200000001000000620200000002000000616101000000", "sorted by encoded key bytes, so the u32 length prefix dominates: \"b\" (len 1) precedes \"aa\" (len 2)"),
     )
 }

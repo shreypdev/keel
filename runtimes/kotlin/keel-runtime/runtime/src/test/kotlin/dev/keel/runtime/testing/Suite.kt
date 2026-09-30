@@ -11,14 +11,24 @@ package dev.keel.runtime.testing
 abstract class Suite {
     private class Case(val name: String, val body: () -> Unit)
 
+    /** Thrown by [skip]: the case cannot run here (for example, no native library) and counts as neither pass nor failure. */
+    private class Skipped(reason: String) : RuntimeException(reason)
+
     private val cases = ArrayList<Case>()
     private val failureLog = ArrayList<String>()
+
+    /** Cases skipped in the last [runAll], with their reasons. */
+    val skipped: List<String> get() = skippedLog
+    private val skippedLog = ArrayList<String>()
 
     /** The class name, for reporting. */
     val suiteName: String get() = javaClass.simpleName
 
     /** Number of registered cases. */
     val caseCount: Int get() = cases.size
+
+    /** Ends the running case as skipped, with a reason that is printed. Use it when the environment lacks something the case needs. */
+    protected fun skip(reason: String): Nothing = throw Skipped(reason)
 
     /** Registers a case. Call from `init`. */
     protected fun case(name: String, body: () -> Unit) {
@@ -32,10 +42,14 @@ abstract class Suite {
      */
     fun runAll(): Int {
         failureLog.clear()
+        skippedLog.clear()
         var failures = 0
         for (c in cases) {
             try {
                 c.body()
+            } catch (s: Skipped) {
+                skippedLog += "$suiteName > ${c.name}: ${s.message}"
+                System.err.println("  SKIP $suiteName > ${c.name}: ${s.message}")
             } catch (t: Throwable) {
                 failures++
                 val entry = "  FAIL $suiteName > ${c.name}\n${describe(t)}"

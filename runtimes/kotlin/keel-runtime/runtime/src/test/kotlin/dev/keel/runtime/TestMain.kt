@@ -33,18 +33,38 @@ fun main() {
         KeyedPatchTests(),
         MalformedInputTests(),
         FuzzTests(),
+        GoldenFullTests(),
+        CoreCallTests(),
+        StreamTests(),
+        MirrorTests(),
+        StoreTests(),
+        PortTests(),
+        InprocTransportTests(),
+        RemoteTransportTests(),
+        AdapterTests(),
+        FileAdapterTests(),
+        HttpAdapterTests(),
+        ErrorTests(),
+        StatsTests(),
+        CleanerTests(),
+        DispatcherTests(),
+        NativeShapeTests(),
+        NativeSmokeTests(),
     )
     var failures = 0
     var cases = 0
+    var skipped = 0
     for (suite in suites) {
         val started = System.nanoTime()
         val failed = suite.runAll()
         val millis = (System.nanoTime() - started) / 1_000_000
-        println("%-24s %4d cases  %4d failed  %6d ms".format(suite.suiteName, suite.caseCount, failed, millis))
+        val skipNote = if (suite.skipped.isEmpty()) "" else "  (${suite.skipped.size} skipped)"
+        println("%-24s %4d cases  %4d failed  %6d ms%s".format(suite.suiteName, suite.caseCount, failed, millis, skipNote))
         failures += failed
         cases += suite.caseCount
+        skipped += suite.skipped.size
     }
     println("----")
-    println("$cases cases in ${suites.size} suites, $failures failed")
+    println("$cases cases in ${suites.size} suites, $failures failed, $skipped skipped")
     exitProcess(if (failures == 0) 0 else 1)
 }
