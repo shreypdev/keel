@@ -233,7 +233,7 @@ static PROCESS_GENERATIONS: Generations = Generations::new();
 /// The highest generation the process-wide counter has issued so far (`0` before any), which
 /// survives a runtime's shutdown: what a snapshot taken with no runtime running must record as
 /// its floor so a fresh `init` never re-issues a generation a host may still hold (ADR-022).
-/// Tables built with [`ObjectTable::isolated`] have counters of their own and are not counted.
+/// Tables with a counter of their own (the ones test runtimes use) are not counted.
 pub fn process_generation_floor() -> u32 {
     PROCESS_GENERATIONS.last()
 }

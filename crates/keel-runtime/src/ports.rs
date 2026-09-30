@@ -624,7 +624,7 @@ pub struct Subscription {
 
 impl Subscription {
     /// Keeps the subscription for the life of the runtime instead of until dropped: the
-    /// subscriber stays in the table until [`Events::clear`] (shutdown) removes it.
+    /// subscriber stays in the table until shutdown clears it.
     ///
     /// The handle's reference to the table is released, not leaked: forgetting the whole
     /// `Subscription` kept the table's allocation alive after the runtime was gone (80 bytes per
