@@ -48,6 +48,8 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
 
 ## Gaps and defects found (for the integrator)
 
+Fixed since (playground finding 5): the Mirror stranded a change-set enqueued from a signal subscriber during the flush; the flush now drains it in a further round (`runtimes/ts/@keel/runtime/test/mirror.test.ts`).
+
 1. **`KeelCore` has no `snapshot()` / `restore()`** (SPEC 17.1 lists none). The runtime implements
    `Kind.Restore` in `WasmMainTransport.send` and the core exports `keel_snapshot`, but an app holding only a
    `KeelCore` cannot use either. The scenarios reach the transport; an app would have to as well.
@@ -55,21 +57,14 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
    old core are alive again, but `Todos.create()` always constructs a new one and the constructor is private,
    so there is no supported way to put a store class on a restored handle. S17 casts around the private
    constructor (`adoptTodos`, the one place that does).
-3. **Mirror strands a change-set enqueued from a signal subscriber** (`runtimes/ts/@keel/runtime/src/mirror.ts`).
-   `flush()` keeps `#flushing` set until `batch()` returns, and `batch()` notifies subscribers as it returns, so
-   a subscriber that makes a synchronous core call enqueues its change-set while `#flushing` is true: no flush
-   is scheduled and nothing looks at the queue again until an unrelated change-set arrives. Minimal repro:
-   `test/findings.test.ts` (an expected-fail test, so it turns red when the runtime is fixed). Fix: re-check
-   the queue after `#flushing` is cleared. It does not affect a scenario (S04.4 only needs the observer's own
-   call to resolve).
-4. **A failed mutation's rollback removes the placeholder of a later mutation** (keel-query, SPEC 9: "the
+3. **A failed mutation's rollback removes the placeholder of a later mutation** (keel-query, SPEC 9: "the
    pre-mutation entries are restored"). The restore is a snapshot taken before the mutation ran; a mutation
    that started after it has already put its own optimistic item into the entry, and the restore takes it
    away while its request is in flight (offline and queued, it stays gone until the replay succeeds). The web
    app hit it by accident: Offline turned on while a toggle's PATCH was in flight, then an add. Repro:
    `test/findings.test.ts`, expected-fail. The flow is: toggle (PATCH, 300 ms) then, before it answers, add; the
    PATCH fails; the add's item disappears. A rollback that undoes only its own change would not.
-5. **A keyed patch costs O(list) in the core, not O(change)** (keel-runtime / keel-signals, blueprint section 14:
+4. **A keyed patch costs O(list) in the core, not O(change)** (keel-runtime / keel-signals, blueprint section 14:
    "lists must be O(change)", web budget for a one-insert patch on 10,000 items: 30 us). S10 prints the numbers
    (node 24, the release-wasm build): `update_at` on the 10,000-row list takes 5 us with nobody observing the store
    and about 1.26 ms with an observing store; the TypeScript side of it (decode, apply to the 10,000-item copy,

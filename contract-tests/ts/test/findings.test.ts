@@ -1,39 +1,15 @@
 import { expect, test } from "vitest";
-import { ChangeOp, Mirror, Signal, encodeChangeSet } from "@keel/runtime";
 import { RemoteTodosQueryHandle, configureRemote, createRemoteTodo, setRemoteDone } from "@playground/core";
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
 import { waitFor } from "../src/wait.js";
 
-// Defects found in the merged runtime while writing the scenarios. Each is a minimal repro that
-// is written as the behaviour it should have and marked `fails`: it passes while the defect is
-// there, and starts failing (telling whoever fixes it to delete the mark) once it is fixed.
-// They are not scenarios: the reporter ignores them.
-
-const fullValue = (n: number): Uint8Array =>
-  encodeChangeSet({ txnId: 1n, entries: [{ handle: 1n, signalId: 0, op: ChangeOp.FullValue, value: Uint8Array.of(n) }] });
-
-// FINDING ts-runtime/Mirror: `Mirror.flush` sets `#flushing` while it runs `batch(...)`, and the
-// signal subscribers are notified when the batch ends, which is still inside that window. A
-// subscriber that makes a core call whose change-set arrives synchronously (every synchronous
-// core method in wasm-main) enqueues it while `#flushing` is true, so no flush is scheduled, and
-// nothing looks at the queue again: the change-set waits for an unrelated one. The fix is to
-// re-check the queue after `#flushing` is cleared.
-test.fails("FINDING a change-set enqueued by a subscriber during the flush is applied", async () => {
-  const mirror = new Mirror();
-  const count = new Signal(0);
-  const seen: number[] = [];
-  mirror.register(1n, (_signalId, _op, value) => {
-    count._set(value[0] as number);
-  });
-  count.subscribe((n) => {
-    seen.push(n);
-    if (n === 1) mirror.enqueue(fullValue(2));
-  });
-  mirror.enqueue(fullValue(1));
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(seen).toEqual([1, 2]);
-});
+// Defects found in merged code while writing the scenarios and still open. Each is a minimal repro
+// written as the behaviour it should have and marked `fails`: it passes while the defect is there,
+// and starts failing (telling whoever fixes it to delete the mark) once it is fixed. They are not
+// scenarios: the reporter ignores them. (The Mirror defect that used to be here, a change-set
+// enqueued by a signal subscriber during the flush, is fixed and tested in the runtime's own suite,
+// `test/mirror.test.ts`.)
 
 // FINDING keel-query/optimistic rollback: a failed mutation restores the snapshot of the cache
 // entry it took before it ran (SPEC 9: "the pre-mutation entries are restored"). A mutation that
