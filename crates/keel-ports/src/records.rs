@@ -427,6 +427,56 @@ mod tests {
     }
 
     #[test]
+    fn port_errors_map_onto_the_typed_errors() {
+        use keel_wire::WireError;
+
+        let bad = WireError::InvalidTag {
+            tag: 9,
+            at: 3,
+            ty: "HttpResponse",
+        };
+        assert_eq!(
+            HttpError::from(PortError::Unavailable),
+            HttpError::Network("the Http port has no adapter registered".into())
+        );
+        assert_eq!(HttpError::from(PortError::Cancelled), HttpError::Cancelled);
+        assert_eq!(
+            HttpError::from(PortError::Decode(bad)),
+            HttpError::Network(format!("malformed port reply: {bad}"))
+        );
+        // `Failed` carries the encoded error: a typed one comes back as itself, garbage as text.
+        assert_eq!(
+            HttpError::from(PortError::Failed(HttpError::Timeout.encode_to_vec())),
+            HttpError::Timeout
+        );
+        assert_eq!(
+            HttpError::from(PortError::Failed(vec![0xff, 0xff])),
+            HttpError::Network("the Http port reported an error that does not decode".into())
+        );
+
+        assert_eq!(
+            FsError::from(PortError::Unavailable),
+            FsError::Io("the Fs port has no adapter registered".into())
+        );
+        assert_eq!(
+            FsError::from(PortError::Cancelled),
+            FsError::Io("the Fs call was cancelled".into())
+        );
+        assert_eq!(
+            FsError::from(PortError::Decode(bad)),
+            FsError::Io(format!("malformed port reply: {bad}"))
+        );
+        assert_eq!(
+            FsError::from(PortError::Failed(FsError::Denied.encode_to_vec())),
+            FsError::Denied
+        );
+        assert_eq!(
+            FsError::from(PortError::Failed(vec![9])),
+            FsError::Io("the Fs port reported an error that does not decode".into())
+        );
+    }
+
+    #[test]
     fn every_unit_enum_variant_round_trips() {
         for kind in [
             NetKind::Wifi,
