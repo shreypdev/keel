@@ -60,7 +60,7 @@
     var theme = function () { return doc.documentElement.dataset.theme === "light" ? "light" : "dark"; };
     var fmt = function (us) {
       if (!isFinite(us) || us < 0) return "–";
-      if (step > 0 && us <= step) return "< " + (step >= 1000 ? (step / 1000) + " ms" : step + " µs");
+      if (step > 0 ? us <= step : us < 1) return "< " + (step >= 1000 ? (step / 1000) + " ms" : (step || 1) + " µs"); // below the clock's resolution
       return us >= 1000 ? (us / 1000).toFixed(us >= 10000 ? 1 : 2) + " ms" : Math.round(us) + " µs";
     };
     var url = function (screen) { return src.replace(/screen=[^&]*/, "screen=" + screen) + "&theme=" + theme(); };

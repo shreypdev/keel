@@ -330,9 +330,9 @@
 <span class="ln o">ws://127.0.0.1:7443</span>
 <span class="ln o">  schema hash   0x4937957423dcf62b</span>
 <span class="ln o">&nbsp;</span>
-<span class="ln c">open ios/Myapp.xcodeproj           <span class="cm"># SwiftUI</span></span>
-<span class="ln c">./gradlew -p android :app:installDebug   <span class="cm"># Compose</span></span>
-<span class="ln c">cd web &amp;&amp; npm install &amp;&amp; npm run dev   <span class="cm"># React</span></span></code></pre>
+<span class="ln c">open ios/Myapp.xcodeproj                   <span class="cm"># SwiftUI</span></span>
+<span class="ln c">./gradlew -p android :app:installDebug     <span class="cm"># Compose</span></span>
+<span class="ln c">cd web &amp;&amp; npm install &amp;&amp; npm run dev       <span class="cm"># React</span></span></code></pre>
     </figure>
   </div>
 </section>
@@ -358,7 +358,7 @@
           <div><dt>Apply time, p50</dt><dd><span class="num" data-stat="p50">–</span></dd></div>
           <div><dt>Apply time, p99</dt><dd><span class="num" data-stat="p99">–</span></dd></div>
         </dl>
-        <p class="fine">Measured in your browser, on your machine, with <code>performance.now()</code> around the application of each change-set. Nothing here is a recording.</p>
+        <p class="fine">Measured in your browser with <code>performance.now()</code>: the time the mirror spends applying one change-set to the local signals and notifying subscribers, over the last two seconds. Browsers round that clock (Chrome to 0.1&nbsp;ms), so the smallest values read as &ldquo;under&rdquo; the step. Nothing here is a recording.</p>
         <div class="cta-row left">
           <a class="btn btn-ghost" href="playground/">Open the full playground</a>
           <!-- pushit:start -->

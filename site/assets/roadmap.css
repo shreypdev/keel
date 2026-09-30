@@ -17,7 +17,9 @@
 .rm-items li:hover { border-color: var(--line-strong); }
 .rm-items h3 { font-size: 1rem; }
 .rm-items p { margin: 6px 0 0; font-size: .92rem; }
-#shipped .rm-items li::before { content: "✓"; display: block; margin-bottom: 8px; color: var(--ok); font: 600 .8rem/1 var(--font-mono); }
+.rm-items li { position: relative; }
+#shipped .rm-items li::before { content: "✓"; position: absolute; top: 18px; right: 18px; color: var(--ok); font: 600 .85rem/1 var(--font-mono); }
+#shipped .rm-items h3 { padding-right: 24px; }
 #now .rm-items li { border-color: var(--accent-line); }
 .rm-no { margin: 0; padding: 18px 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius); max-width: 60ch; }
 .rm-influence { margin-top: 24px; }

@@ -129,7 +129,8 @@
 @media (min-width: 960px) { .live { grid-template-columns: minmax(0, 7fr) minmax(0, 4fr); gap: 28px; align-items: start; } }
 .live-frame { border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .frame-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; height: 38px; padding: 0 14px; border-bottom: 1px solid var(--line); font: 400 .75rem/1 var(--font-mono); color: var(--text-3); }
-.frame-bar a { color: var(--text-2); }
+.frame-bar span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frame-bar a { color: var(--text-2); white-space: nowrap; }
 .frame-body { position: relative; height: 470px; background: var(--bg); }
 .frame-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .live-fallback { z-index: 1; background: var(--bg); position: absolute; inset: 0; margin: 0; padding: 24px; display: grid; place-content: center; text-align: center; font-size: .95rem; color: var(--text-2); }
