@@ -151,3 +151,58 @@ confirmed use-after-free under the contract as written, and M1 turns a one-field
 2. **M1 + M2** — make `out_reply` always `free()`d (or add `keel_buf_alloc`), and put the lifetime / concurrency /
    no-unwind / re-entrancy preconditions into `keel.h`.
 3. **M3** — repair `smoke.c` (8-byte snapshot), run the C harness (with the H1 ASan repro) and the TS-over-wasm leg in CI.
+
+## Re-review (fix round merged at `f92d11e`)
+
+I rebuilt every scratch harness against the merged checkout. The matrix is green:
+- `cargo test -p keel-ffi`: 28 unit + 32 abi + 10 host_contract.
+- `KEEL_C_SANITIZE=1 c/run.sh`: smoke and lifetime both ok.
+- wasm: raw 19/19 and TS 10/10 (fresh dist), debug and release-wasm.
+- JNI 13/13, Swift 1/1, Miri `--lib` 28/28.
+- The wasm re-entrancy hammer still never traps.
+
+| Finding | Verdict | Evidence (own harness) |
+|---|---|---|
+| H1 | **CLOSED for the reported race; see N1** | `stress.c uaf-shutdown/uaf-unregister` under ASan: no report. Both calls now return only after the callback ends. |
+| M1 | CLOSED | `miri-lie` (`cap = 5` on a malloc block, callback asserted to run): no UB. The Vec branch is gone. |
+| M2 | CLOSED | `keel.h` host contract 1–6 and SPEC §6 cover lifetime, concurrency, no-unwind, the callable-from-callback list and Log id 0. |
+| M3 | CLOSED | `smoke.c` checks the 8-byte snapshot. CI runs `c/run.sh` with ASan, `npm ci`, a fresh TS dist and Miri. |
+| M4 | CLOSED | `pingpong.c`: 1 Log call in 1 s (was about 100k/s). |
+| L1 | CLOSED | `floor.c`: floor 3 after `keel_shutdown` (was 0). |
+| L2 | CLOSED | `l2.mjs`: the host answers call 1 inside call 2's import and returns 0. Call 2 now fails instead of staying pending. (On wasm that failure is the Echo port panic, which traps by design.) |
+| L3 | CLOSED | `keel_alloc(0x7fff_fff9)` and `keel_alloc(0x8000_0000)` trap in both profiles; `wasm-main.ts:105-106` throws on 0. |
+| L4 | CLOSED (docs) | `keel.h` trailer and SPEC §6.1 name the thread-local `portSyncReply` rule. |
+| L5 | CLOSED (as scoped) | `probe2 drain-allowed`: a `keel_init` issued mid-drain waits, then returns 0. SPEC promises only registrations made after that init. |
+| I1 | CLOSED | 3,000 fixture init/shutdown cycles: heap flat at 17,040 B from cycle 500 on (was +80 B per cycle). |
+
+**Answers to the four questions** (probes in `c/probe2.c`, fixture core, ASan):
+- **(a) Long callback, concurrent removal.**
+  - A `port_cb` that never returns blocks removal and `keel_shutdown` forever, with no timeout. This is documented (keel.h §5, SPEC §6 point 5, rustdoc).
+  - Two threads removing the same port do not deadlock on the Condvar. But the second returns without waiting: see **N1**.
+- **(b) Callback A removing B while B runs elsewhere.**
+  - This waits correctly: `cross-wait` returned after 222 ms, with no deadlock.
+  - A and B each removing the other from inside their callbacks hangs: see **N2**.
+- **(c) Lock ordering: no new cycle.**
+  - `retire_all` runs after `rt.shutdown()` has joined the runtime threads, and it holds only `INSTALLED`.
+  - `drain-allowed` made every call keel.h allows from a callback, in the middle of the drain: `stats_json`, `schema_json`, `schema_hash`, `abi_version`, `port_reply`, `timer_fired`, `stream_credit`. All completed and shutdown returned.
+- **(d) Id 0.**
+  - `PortTable::begin` skips 0 on wrap (`ports.rs:229-240`), and only `NativeHost::log` sends id 0.
+  - So dropping id-0 replies can only swallow answers to fire-and-forget Log calls. A host that echoes an id it was never given loses only the WARN.
+
+**N1 (HIGH, the H1 class again; CONFIRMED by ASan): a removal that loses the race returns without draining.**
+- **Cause.** `Registry::remove`/`install` (`registry.rs`) wait only for the registration *they* took out of the map. If `retire_all` (shutdown) or another `remove` took it first, the second caller finds `None` and returns at once.
+- **Repro.** `probe2 remove-vs-shutdown` and `remove-vs-remove`:
+  1. A Log callback is running on thread T.
+  2. Thread Y calls `keel_shutdown` (it is now draining), or thread X calls `keel_port_register(LOG, NULL)`.
+  3. Main calls `keel_port_register(LOG, NULL)`. It returns in 0.0 ms while the callback still runs.
+  4. Main does `free(user)`. ASan reports `heap-use-after-free in on_log ← CSink::port_call ← NativeHost::log`.
+- **Contract broken.** keel.h contract 1 ("when one of them returns, no invocation of the old registration is running"). Also SPEC §6 point 5, which allows `keel_shutdown` concurrently with other entries.
+- **Fix.** Every removal of an id (and `retire_all`) must wait for *all* retired registrations of that id that are still in flight. For example, keep them in a per-id draining list until their count reaches 0, instead of dropping them from reach.
+- **Scope.** Swift never removes ports, and Kotlin and wasm do not use the registry, so the shipped platforms are unaffected.
+
+**N2 (LOW, CONFIRMED): mutual removal from callbacks is a silent hang.**
+- **What happens.** `probe2 mutual`: the Sum callback (thread 1, under the core lock) removes Log while the Log callback (thread 2) removes Sum. Both drains wait for each other, and both are still stuck after 3 s. This happens in debug and in release. Before the fix it did not hang.
+- **Why it is not caught.** keel.h §4 and §5 forbid `keel_port_register` from any callback. But the debug assertion only catches self-removal (`drain`'s `own` count).
+- **Fix.** Assert (debug) and refuse with a FATAL log (release) whenever `RUNNING` is non-empty on the calling thread, not only for the same serial.
+
+**Verdict.** Every original finding is closed. N1 reopens H1's use-after-free under concurrent removal, so fix N1 before the C ABI goes to third-party hosts. N2 is cheap hardening.
