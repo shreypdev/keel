@@ -671,8 +671,27 @@ impl TestClient {
     }
 
     /// Whether anything at all arrives in `timeout` (a frame or a close).
+    /// Whether no frame but dev-mode `Log` chatter arrives within `timeout`.
+    ///
+    /// A core in `mode = "dev"` may log at any moment (SPEC 5.10: every port call and
+    /// transaction), and background work such as keel-query's hydration may offer this
+    /// client a `PortCall` whenever it runs. Silence is about frames addressed to *this
+    /// client's calls*: `Log` and `PortCall` restart the wait, anything else ends it.
     pub fn silent_for(&mut self, timeout: Duration) -> bool {
-        matches!(self.recv_within(timeout), Received::Silence)
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return true;
+            }
+            match self.recv_within(left) {
+                Received::Silence => return true,
+                Received::Frame(frame) if matches!(frame.kind, Kind::Log | Kind::PortCall) => {
+                    continue;
+                }
+                Received::Frame(_) | Received::Closed(_) => return false,
+            }
+        }
     }
 
     pub fn frames_of(&self, kind: Kind) -> Vec<&Frame> {
