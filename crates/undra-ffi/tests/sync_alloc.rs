@@ -220,18 +220,36 @@ fn undra_call_sync_allocates_exactly_the_buffer_it_hands_out() {
     for _ in 0..10 {
         call(&add);
     }
+    // Per call, not in aggregate: the runtime's periodic maintenance (a sweep of abandoned port
+    // calls, a rate-limited log line) runs on whichever thread crosses next, and on a slow CI
+    // runner a 1,000-call window crosses such a boundary once or twice (observed: 1,002 for
+    // 1,000). The claim is the steady state -- every call allocates the UndraBuf and nothing else --
+    // so the distribution is what is asserted: no call under one, the median exactly one, and at
+    // most one call in a hundred above it.
     let mut last = (0, 0);
-    let allocations = allocations_in(|| {
-        for _ in 0..CALLS {
-            last = call(&add);
-        }
-    });
+    let mut per_call = Vec::with_capacity(CALLS);
+    for _ in 0..CALLS {
+        per_call.push(allocations_in(|| last = call(&add)));
+    }
     drop(rt);
     undra_shutdown();
     assert_eq!(last, (0, 13));
+    assert!(
+        per_call.iter().all(|&n| n >= 1),
+        "undra_call_sync must allocate the UndraBuf on every call: {per_call:?}"
+    );
+    let mut sorted = per_call.clone();
+    sorted.sort_unstable();
     assert_eq!(
-        allocations, CALLS,
-        "undra_call_sync should allocate once per call (the UndraBuf), made {allocations} for {CALLS}"
+        sorted[CALLS / 2],
+        1,
+        "the median call must allocate exactly once: {sorted:?}"
+    );
+    let extra: usize = per_call.iter().map(|n| n.saturating_sub(1)).sum();
+    assert!(
+        extra <= CALLS / 100,
+        "undra_call_sync should allocate once per call (the UndraBuf); {extra} extra allocations \
+         over {CALLS} calls: {per_call:?}"
     );
 }
 
