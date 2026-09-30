@@ -52,7 +52,7 @@ All identifiers are computed at compile time by the macros and embedded in the s
 
 ### 1.2 Handles
 
-A handle is a `u64`: low 32 bits = slot index, high 32 bits = generation (starts at 1). `0` is the null handle. Handles are issued by the runtime's object table (§5.4) and are only meaningful inside the runtime instance that issued them.
+A handle is a `u64`: low 32 bits = slot index, high 32 bits = generation (starts at 1, never `0`, never `u32::MAX` after the counter is spent). `0` is the null handle. Handles are issued by the runtime's object table (§5.4) and are only meaningful inside the runtime instance that issued them. Generations come from one monotonically increasing counter, so a `(slot, generation)` pair is never issued twice in a process (ADR-022).
 
 ### 1.3 Call ids
 
@@ -370,7 +370,7 @@ impl Ctx {
 
 ### 5.4 Object table
 
-`Slab<Entry { generation: u32, object: Arc<dyn AnyObject> }>`. `AnyObject: Any + Send + Sync + KeelObject`. `insert(Arc<T>) -> Handle`, `get::<T>(handle) -> Result<Arc<T>, BadHandle>`, `release(handle)`. Release decrements; the `Arc` may outlive the handle if a task holds it. Stores additionally register in the `stores` index for change-set routing. Debug builds keep a count of live handles readable via `keel_stats()`.
+`Slab<Slot { generation: u32, entry: Option<Entry { object: Arc<dyn AnyObject>, .. }> }>`. `AnyObject: Any + Send + Sync + KeelObject`. `insert(Arc<T>) -> Handle`, `get::<T>(handle) -> Result<Arc<T>, BadHandle>`, `release(handle)`. **Generations are issued from one process-wide, monotonically increasing `u32` counter** (`fetch_add`; `0` is never issued), not from the slot: every `insert` takes a fresh generation, so a released handle stays stale for good and a restore (§5.9) cannot re-issue one. The counter does not wrap: after `u32::MAX` issues the next `insert` logs FATAL and panics (contained at the boundary, status 2) while everything that exists keeps working, a documented v1 limit (ADR-022). Release decrements; the `Arc` may outlive the handle if a task holds it. Stores additionally register in the `stores` index for change-set routing. Debug builds keep a count of live handles readable via `keel_stats()`.
 
 ### 5.5 Transactions and change-sets
 
@@ -401,7 +401,9 @@ Standard ports and their methods are defined in `keel-ports` (§8).
 
 ### 5.9 Snapshot and restore
 
-`Snapshot` payload: `count u32, stores × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value bytes } }` (computed signals excluded; restored by recomputation). `keel_restore(bytes)` rebuilds each store via its generated `restore(ctx, values)` and re-issues the same handles (the table is rebuilt from the snapshot, so handles held by the host remain valid). Objects that are not stores are not snapshotted; their handles become invalid after restore (status 5 `stale_handle`). Restore emits change-sets for all observed signals.
+`Snapshot` payload (all little-endian): `count u32, generation_floor u32, stores × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value bytes } }` (computed signals excluded; restored by recomputation). `generation_floor` is the highest handle generation the core had issued when the snapshot was taken (`0` if none). Hosts treat a snapshot as opaque bytes and hand it back unchanged.
+
+`keel_restore(bytes)` rebuilds each store via its generated `restore(ctx, values)` and re-issues the same handles (the table is rebuilt from the snapshot, so handles held by the host remain valid). It raises the generation counter to `max(current, generation_floor, every generation in the snapshot)` and never lowers it, so a handle issued before the snapshot, or between the snapshot and the restore, can never be issued again to another object, in this process or a fresh one (ADR-022). A snapshot whose floor, or any store handle's generation, is `u32::MAX` is refused (status 5 / `BAD_SNAPSHOT`): it would leave nothing to issue. A snapshot in the layout without the floor fails to decode. Objects that are not stores are not snapshotted; their handles become invalid after restore (status 5 `stale_handle`). Restore emits change-sets for all observed signals.
 
 ### 5.10 Devtools protocol (transport only, optional)
 
