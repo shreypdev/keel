@@ -349,6 +349,49 @@ mod tests {
         schema
     }
 
+    use proptest::prelude::{any, prop_assert_eq, proptest};
+
+    proptest! {
+        #[test]
+        fn rendering_matches_plain_formatting_for_arbitrary_values(
+            a in any::<u32>(), b in "[a-z0-9 :_-]{0,12}", c in any::<bool>(), d in any::<Option<i64>>(),
+        ) {
+            let params = [
+                param("a", TypeRef::U32),
+                param("b", TypeRef::String),
+                param("c", TypeRef::Bool),
+                param("d", TypeRef::option(TypeRef::I64)),
+            ];
+            let mut w = keel_wire::Writer::new();
+            a.encode(&mut w);
+            b.encode(&mut w);
+            c.encode(&mut w);
+            d.encode(&mut w);
+            let expected = format!(
+                "k:{a}:{b}:{c}:{}",
+                d.map_or_else(|| "none".to_owned(), |n| n.to_string())
+            );
+            prop_assert_eq!(render("k:{a}:{b}:{c}:{d}", &params, w.as_slice()), expected);
+        }
+
+        /// Random bytes are never a panic: a walk either reads a value or says it cannot.
+        #[test]
+        fn arbitrary_bytes_never_panic_the_walk(bytes in proptest::collection::vec(any::<u8>(), 0..64)) {
+            let schema = schema();
+            let plan = KeyPlan::new(
+                "{a}/{b}/{c}",
+                Some(&[
+                    param("a", TypeRef::named("AppError")),
+                    param("b", TypeRef::vec(TypeRef::named("Point"))),
+                    param("c", TypeRef::map(TypeRef::String, TypeRef::option(TypeRef::named("Filter")))),
+                ]),
+            );
+            let _ = plan.render(&schema, &bytes);
+            let _ = probe_network_error(&schema, &TypeRef::named("AppError"), &bytes);
+            let _ = probe_network_error(&schema, &TypeRef::named("HttpError"), &bytes);
+        }
+    }
+
     fn param(name: &str, ty: TypeRef) -> ParamDef {
         ParamDef {
             name: name.to_owned(),

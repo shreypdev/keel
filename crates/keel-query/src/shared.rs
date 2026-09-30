@@ -28,11 +28,11 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use keel_meta::ids::fnv1a64;
-use keel_ports::CtxPorts;
+use keel_ports::{CtxPorts, Kv};
 use keel_runtime::executor::TaskId;
-use keel_runtime::log::{DEBUG, ERROR};
-use keel_runtime::{Ctx, Runtime};
-use keel_wire::Bytes;
+use keel_runtime::log::{DEBUG, ERROR, WARN};
+use keel_runtime::{Ctx, Port, PortError, Runtime};
+use keel_wire::{Bytes, Decode, Encode};
 use parking_lot::Mutex;
 
 use crate::erased::{Erased, Failure, Outcome, QueryVTable};
@@ -81,6 +81,22 @@ pub(crate) struct Inflight {
     /// Identifies the fetch, so a result that arrives after the fetch was replaced is dropped.
     pub(crate) serial: u64,
     pub(crate) task: TaskId,
+}
+
+/// The compiled key template of query or mutation `id`, made on first use.
+fn plan_for(
+    plans: &mut HashMap<u32, Arc<KeyPlan>>,
+    schema: &keel_meta::Schema,
+    id: u32,
+    template: &str,
+) -> Arc<KeyPlan> {
+    plans
+        .entry(id)
+        .or_insert_with(|| {
+            let meta = schema.queries.iter().find(|q| q.query_id == id);
+            Arc::new(KeyPlan::new(template, meta.map(|m| m.params.as_slice())))
+        })
+        .clone()
 }
 
 /// One cached query result (SPEC 9's `Entry`).
@@ -166,7 +182,11 @@ impl Entry {
         }
         match (self.vt.stale_ms, self.updated_at) {
             (Some(window), Some(at)) => {
-                now.saturating_sub(at) >= i64::try_from(window).unwrap_or(i64::MAX)
+                let age = now.saturating_sub(at);
+                // An age below zero means the wall clock went backwards since the data was
+                // confirmed (or it was persisted by a device with a wrong clock): trust
+                // nothing and fetch.
+                age < 0 || age >= i64::try_from(window).unwrap_or(i64::MAX)
             }
             // No staleness window: the data is always stale.
             _ => true,
@@ -361,17 +381,7 @@ impl Shared {
     /// The key template of `template` for the encoded `params`.
     pub(crate) fn render_key(&self, ctx: &Ctx, id: u32, template: &str, params: &[u8]) -> String {
         let schema = ctx.runtime().schema();
-        let plan = {
-            let mut state = self.state.lock();
-            state
-                .plans
-                .entry(id)
-                .or_insert_with(|| {
-                    let meta = schema.queries.iter().find(|q| q.query_id == id);
-                    Arc::new(KeyPlan::new(template, meta.map(|m| m.params.as_slice())))
-                })
-                .clone()
-        };
+        let plan = plan_for(&mut self.state.lock().plans, schema, id, template);
         plan.render(schema, params)
     }
 
@@ -390,16 +400,20 @@ impl Shared {
     ) -> (QueryKey, View) {
         let now = self.now(ctx);
         let key = QueryKey::new(vt.id, params);
-        let rendered = self.render_key(ctx, vt.id, vt.key, &key.params);
+        let schema = ctx.runtime().schema();
         let mut fx = Fx::default();
         let view = {
             let mut state = self.state.lock();
             let State {
-                entries, hydrated, ..
+                entries,
+                hydrated,
+                plans,
+                ..
             } = &mut *state;
-            let entry = entries
-                .entry(key.clone())
-                .or_insert_with(|| Entry::new(vt, rendered));
+            let entry = entries.entry(key.clone()).or_insert_with(|| {
+                let rendered = plan_for(plans, schema, vt.id, vt.key).render(schema, &key.params);
+                Entry::new(vt, rendered)
+            });
             if entry.data.is_none() && vt.persist {
                 if let Some(persisted) = hydrated.remove(&(vt.id, fnv1a64(&key.params))) {
                     entry.seed(&persisted);
@@ -681,9 +695,11 @@ impl Shared {
     /// observed yet waits in memory until it is. A queue written under another schema hash
     /// is deleted; otherwise its mutations are replayed at once if the client is online.
     pub(crate) async fn hydrate(self: &Arc<Self>, ctx: &Ctx) {
+        let Some(keys) = list_when_available(ctx, CACHE_KEY_PREFIX).await else {
+            return;
+        };
         let kv = ctx.kv();
         let schema_hash = ctx.runtime().schema_hash();
-        let keys = kv.list(CACHE_KEY_PREFIX.to_owned()).await;
         for key in keys {
             let Some((query_id, params_hash)) = parse_cache_key(&key) else {
                 continue;
@@ -766,18 +782,22 @@ impl Shared {
         undo: Option<&mut crate::mutation::UndoLog>,
     ) {
         let key = QueryKey::new(vt.id, params);
-        let rendered = self.render_key(ctx, vt.id, vt.key, &key.params);
+        let schema = ctx.runtime().schema();
         let persist_now = undo.is_none();
         let mut fx = Fx::default();
         {
             let mut state = self.state.lock();
             let State {
-                entries, hydrated, ..
+                entries,
+                hydrated,
+                plans,
+                ..
             } = &mut *state;
             let fresh = !entries.contains_key(&key);
-            let entry = entries
-                .entry(key.clone())
-                .or_insert_with(|| Entry::new(vt, rendered));
+            let entry = entries.entry(key.clone()).or_insert_with(|| {
+                let rendered = plan_for(plans, schema, vt.id, vt.key).render(schema, &key.params);
+                Entry::new(vt, rendered)
+            });
             if fresh && entry.data.is_none() && vt.persist {
                 if let Some(persisted) = hydrated.remove(&(vt.id, fnv1a64(&key.params))) {
                     entry.seed(&persisted);
@@ -875,6 +895,41 @@ impl Shared {
 // -------------------------------------------------------------------------------------------
 // Tasks
 // -------------------------------------------------------------------------------------------
+
+/// How many times hydration asks for the `Kv` port before giving up, and how long it waits
+/// between asks.
+const KV_ATTEMPTS: u32 = 50;
+const KV_RETRY_MS: u64 = 100;
+
+/// The keys under `prefix`, asked of the `Kv` port with a raw call so that a port that is not
+/// there *yet* is an answer, not a panic. Hydration runs at start-up, possibly before the
+/// platform has registered its adapters (a native host registers them right after
+/// `keel_init`, while the core thread is already running), so `Unavailable` is retried for a
+/// few seconds. `None` if the port never appears (the cache then simply starts empty).
+async fn list_when_available(ctx: &Ctx, prefix: &str) -> Option<Vec<String>> {
+    let args = prefix.to_owned().encode_to_vec();
+    for _ in 0..KV_ATTEMPTS {
+        match ctx
+            .port_call(<dyn Kv as Port>::PORT_ID, KV_LIST_ID, args.clone())
+            .await
+        {
+            Ok(body) => return Vec::<String>::decode_exact(&body).ok(),
+            Err(PortError::Unavailable) => {
+                ctx.sleep(Duration::from_millis(KV_RETRY_MS)).await;
+            }
+            Err(_) => return None,
+        }
+    }
+    Shared::log(
+        ctx,
+        WARN,
+        "the Kv port never became available; the query cache starts empty",
+    );
+    None
+}
+
+/// The `Kv.list` method id (`fnv1a32("Kv.list")`).
+const KV_LIST_ID: u32 = keel_meta::ids::port_method_id("Kv", "list");
 
 /// Clears the in-flight marker of a fetch whose task was dropped before it finished.
 struct FetchGuard {
@@ -1107,8 +1162,9 @@ mod tests {
             "the window is over at exactly its length"
         );
         assert!(fresh.is_stale(5_000));
-        // A clock that moved backwards does not make data stale (or panic).
-        assert!(!fresh.is_stale(0));
+        // A clock that moved backwards cannot vouch for the data: stale (and no panic).
+        assert!(fresh.is_stale(0));
+        assert!(fresh.is_stale(i64::MIN));
 
         assert!(entry().is_stale(0), "no data is always stale");
 

@@ -398,3 +398,54 @@ fn bytes_in_the_store_use_the_documented_layout() {
         "{{ schema_hash u64, updated_at i64, data bytes }}, little-endian"
     );
 }
+
+// ----- start-up ordering -----------------------------------------------------------------------
+
+#[test]
+fn hydration_waits_for_a_platform_that_registers_its_adapters_late() {
+    // A native host starts the core thread before it has registered its port adapters, so the
+    // first ask of the `Kv` port can be answered "unavailable". Hydration asks again.
+    let t = keel::runtime::testing::TestRuntime::new();
+    t.run_init_hooks();
+    t.run_pending();
+
+    let fakes = Fakes::new();
+    let schema_hash = t.runtime().schema_hash();
+    fakes.kv.insert(
+        settings_key(),
+        encoded(schema_hash, 5, &"stored".to_owned()),
+    );
+    fakes.install_test(&t);
+    t.advance(std::time::Duration::from_millis(100));
+    t.run_pending();
+    let h = Harness { t, fakes };
+
+    let handle = h.query().observe::<SettingsQuery>(());
+    assert_eq!(handle.data().get(), Some("stored".to_owned()));
+}
+
+#[test]
+fn hydration_gives_up_after_a_few_seconds_without_a_kv_port_and_the_cache_still_works() {
+    let t = keel::runtime::testing::TestRuntime::new();
+    t.run_init_hooks();
+    t.run_pending();
+    for _ in 0..60 {
+        t.advance(std::time::Duration::from_millis(100));
+    }
+    let logs = t.host().take_logs();
+    assert!(
+        logs.iter()
+            .any(|l| l.message.contains("Kv port never became available")),
+        "{logs:?}"
+    );
+    // The client is usable: a query that does not persist needs no storage.
+    let fakes = Fakes::new();
+    fakes.install_test(&t);
+    fakes
+        .http
+        .respond(format!("{API}/hello/x"), ok(&"hi".to_owned()));
+    let h = Harness { t, fakes };
+    let handle = h.query().observe::<GreetingQuery>(("x".to_owned(),));
+    h.t.run_pending();
+    assert_eq!(handle.data().get(), Some("hi".to_owned()));
+}

@@ -185,6 +185,32 @@ mod tests {
         assert_eq!(decode_queue(&encode_queue(1, &[])), Ok((1, Vec::new())));
     }
 
+    proptest::proptest! {
+        /// The byte-fuzz of the storage decoders: whatever is in the store, reading it is an
+        /// `Ok` or an `Err`, never a panic and never a huge allocation.
+        #[test]
+        fn arbitrary_bytes_never_panic_the_decoders(bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..96)) {
+            let _ = decode_persisted(&bytes);
+            let _ = decode_queue(&bytes);
+            let _ = parse_cache_key(&String::from_utf8_lossy(&bytes));
+        }
+
+        #[test]
+        fn a_queue_survives_a_round_trip(
+            hash in proptest::prelude::any::<u64>(),
+            items in proptest::collection::vec(
+                (proptest::prelude::any::<u32>(), proptest::collection::vec(proptest::prelude::any::<u8>(), 0..16), proptest::prelude::any::<[u8; 16]>()),
+                0..6,
+            ),
+        ) {
+            let items: Vec<QueuedMutation> = items
+                .into_iter()
+                .map(|(id, params, key)| QueuedMutation { mutation_id: id, params, idempotency_key: Uuid(key) })
+                .collect();
+            proptest::prop_assert_eq!(decode_queue(&encode_queue(hash, &items)), Ok((hash, items)));
+        }
+    }
+
     #[test]
     fn a_huge_count_is_refused_before_allocating() {
         let mut bytes = 1_u64.to_le_bytes().to_vec();

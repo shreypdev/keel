@@ -490,3 +490,27 @@ fn an_idempotent_key_is_a_random_version_4_uuid_from_the_rng_port() {
     );
     assert_eq!(&key[14..15], "4");
 }
+
+#[test]
+fn an_optimistic_closure_that_panics_halfway_gets_its_writes_undone() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    let (result, _) = spawn(
+        &h,
+        h.ctx().mutate::<KeyProbeMutation>(()).optimistic(|cache| {
+            push_eggs(cache);
+            panic!("the update blew up after its first write");
+        }),
+    );
+    h.t.run_pending();
+    assert!(
+        take(&result).is_none(),
+        "the panicked task produced no result"
+    );
+    assert_eq!(
+        handle.data().get().unwrap().items,
+        vec![todo(1, "milk")],
+        "the half-applied update was rolled back"
+    );
+    assert_eq!(handle.status().get(), QueryStatus::Success);
+}

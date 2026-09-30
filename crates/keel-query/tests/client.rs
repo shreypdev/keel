@@ -791,3 +791,55 @@ fn dropping_a_handle_after_the_runtime_shut_down_is_harmless() {
     h.t.runtime().shutdown();
     drop(handle);
 }
+
+#[test]
+fn nothing_keeps_a_runtime_alive_once_the_app_lets_go_of_it() {
+    // The cache lives in the runtime; its tasks, timers, subscriptions and handles must not
+    // hold the runtime back (no reference cycle through the extension or the event table).
+    let weak = {
+        let h = Harness::new();
+        h.fakes
+            .http
+            .respond(format!("{API}/settings"), ok(&"dark".to_owned()));
+        h.fakes
+            .http
+            .respond(format!("{API}/slow?ms=500"), ok(&7_u32));
+        let settings = h.query().observe::<SettingsQuery>(());
+        let slow = h.query().observe::<SlowQuery>((500,));
+        h.t.run_pending();
+        h.advance_ms(100);
+        drop(settings);
+        let weak = std::sync::Arc::downgrade(h.t.runtime());
+        drop(slow);
+        weak
+        // `h` (and with it the TestRuntime) is dropped here, with a gc timer, a persist task
+        // and an event subscription still registered.
+    };
+    assert!(weak.upgrade().is_none(), "the runtime leaked");
+}
+
+#[test]
+fn handle_signals_compose_with_computed_and_effects_in_the_core() {
+    use keel::prelude::{Computed, Effect};
+    use std::sync::{Arc, Mutex};
+
+    let h = Harness::new();
+    h.serve_page(0, vec![todo(1, "milk"), todo(2, "eggs")]);
+    let handle = h.query().observe::<TodosQuery>((0,));
+    // What a store in the core does: derive state from a query.
+    let count = Computed::new(handle.data(), |page| {
+        page.as_ref().map_or(0_u32, |p| p.items.len() as u32)
+    });
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    let _effect = Effect::new(&count, move |n| sink.lock().unwrap().push(*n));
+    assert_eq!(count.get(), 0);
+
+    h.t.run_pending();
+    assert_eq!(count.get(), 2);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [2],
+        "the effect ran once, for the fetch"
+    );
+}

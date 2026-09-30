@@ -21,10 +21,10 @@
 //!    with the input) together with the `invalidates` targets are marked stale; the observed
 //!    ones refetch.
 //! 4. On failure every entry the closure touched is restored to exactly what it was, in one
-//!    transaction, and the error is returned. The exception is the offline queue: an idempotent
-//!    mutation that failed for lack of a network while the client is offline is queued and
-//!    keeps waiting (see the [`queue`](crate::idempotency_key) notes), its optimistic writes
-//!    staying visible; the awaited result is that of the replay.
+//!    transaction, and the error is returned. The exception is the offline queue (see the crate
+//!    documentation): an idempotent mutation that failed for lack of a network while the client is
+//!    offline is queued and keeps waiting, its optimistic writes staying visible; the awaited
+//!    result is that of the replay.
 //! 5. Dropping the future (a cancelled call) rolls the optimistic writes back too.
 
 use core::future::IntoFuture;
@@ -232,25 +232,27 @@ async fn run<M: MutationDef>(builder: MutationBuilder<M>) -> Result<M::Output, M
         invalidations,
     } = builder;
 
-    // 1. The optimistic update, in one transaction.
-    let mut undo = UndoLog::default();
-    if let Some(update) = optimistic {
-        let now = shared.now(&ctx);
-        ctx.txn(|| {
-            let mut cache = CacheView {
-                ctx: &ctx,
-                shared: &shared,
-                undo: &mut undo,
-                now,
-            };
-            update(&mut cache);
-        });
-    }
+    // 1. The optimistic update, in one transaction. The rollback guard exists before the update
+    //    runs, so a closure that panics halfway still gets what it did undone.
     let mut rollback = Rollback {
         shared: shared.clone(),
         ctx: ctx.clone(),
-        undo: Some(undo),
+        undo: Some(UndoLog::default()),
     };
+    if let Some(update) = optimistic {
+        let now = shared.now(&ctx);
+        ctx.txn(|| {
+            if let Some(undo) = rollback.undo.as_mut() {
+                let mut cache = CacheView {
+                    ctx: &ctx,
+                    shared: &shared,
+                    undo,
+                    now,
+                };
+                update(&mut cache);
+            }
+        });
+    }
 
     // 2. Run it, with retries. An idempotent mutation carries one key for all its runs.
     let input_bytes = input.encode_to_vec();

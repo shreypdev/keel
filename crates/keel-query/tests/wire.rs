@@ -633,3 +633,58 @@ fn an_optimistic_update_is_one_change_set_and_its_rollback_is_one_more_that_rest
         "restored to exactly what it was"
     );
 }
+
+// ----- the raw bytes, straight from SPEC 3.3 and 3.4 -----------------------------------------------
+
+#[test]
+fn a_platform_that_builds_its_own_payloads_gets_the_same_answers() {
+    let p = Platform::new();
+    p.h.serve_page(0, vec![todo(1, "milk")]);
+
+    // Constructor: `target u8 = 2, type_id u32, method_id u32, call_id u32, args`.
+    let mut call = vec![2_u8];
+    call.extend_from_slice(&TodosQuery::QUERY_ID.to_le_bytes());
+    call.extend_from_slice(&TodosQuery::QUERY_ID.to_le_bytes());
+    call.extend_from_slice(&7_u32.to_le_bytes());
+    call.extend_from_slice(&0_u32.to_le_bytes()); // page 0
+    let reply = p.t().runtime().call_sync(&call);
+    // Reply: `call_id u32, status u8 (0 = ok), body` with the handle as a u64.
+    assert_eq!(&reply[..4], &7_u32.to_le_bytes());
+    assert_eq!(reply[4], 0);
+    let handle = Handle(u64::from_le_bytes(reply[5..13].try_into().unwrap()));
+    assert_eq!(reply.len(), 13);
+
+    // Object method: `target u8 = 1, handle u64, method_id u32, call_id u32`, no args.
+    let mut call = vec![1_u8];
+    call.extend_from_slice(&handle.0.to_le_bytes());
+    call.extend_from_slice(&0x21d1_b9e2_u32.to_le_bytes()); // refetch
+    call.extend_from_slice(&8_u32.to_le_bytes());
+    let reply = p.t().runtime().call_sync(&call);
+    assert_eq!(reply, [8, 0, 0, 0, 0], "call_id 8, status ok, empty body");
+
+    // The same call on a handle nobody issued: status 5 (bad request) with a reason.
+    let mut call = vec![1_u8];
+    call.extend_from_slice(&0xdead_beef_u64.to_le_bytes());
+    call.extend_from_slice(&0x21d1_b9e2_u32.to_le_bytes());
+    call.extend_from_slice(&9_u32.to_le_bytes());
+    let reply = p.t().runtime().call_sync(&call);
+    assert_eq!((&reply[..4], reply[4]), (&9_u32.to_le_bytes()[..], 5));
+
+    // Free function (a mutation), async: `target u8 = 0, handle u64 = 0, method_id u32,
+    // call_id u32, args`; `Runtime::call` answers 0 (accepted) and the reply follows.
+    p.h.fakes.http.respond(
+        keel_ports::fakes::Matcher::post(format!("{API}/todos")),
+        ok(&todo(9, "x")),
+    );
+    let mut call = vec![0_u8];
+    call.extend_from_slice(&0_u64.to_le_bytes());
+    call.extend_from_slice(&AddTodoMutation::MUTATION_ID.to_le_bytes());
+    call.extend_from_slice(&10_u32.to_le_bytes());
+    call.extend_from_slice(&1_u32.to_le_bytes()); // the title: a string of one byte ...
+    call.extend_from_slice(b"x");
+    assert_eq!(p.t().runtime().call(&call), 0);
+    p.t().run_pending();
+    let reply = one(p.t().take_replies());
+    assert_eq!((reply.call_id, reply.status), (10, ReplyStatus::Ok));
+    assert_eq!(Todo::decode_exact(&reply.body).unwrap(), todo(9, "x"));
+}

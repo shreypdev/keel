@@ -39,8 +39,52 @@
 //! * **Persistence.** `persist` entries are written to the `Kv` port 250 ms after a successful
 //!   fetch, and read back when the runtime starts (see [`cache_key`]); entries written by
 //!   another schema are dropped.
-//! * **Mutations** are described in [`MutationBuilder`]; the offline queue in
-//!   [`idempotency_key`].
+//! * **Mutations** (`ctx.mutate(M, input)`, see [`MutationBuilder`]) run an optional
+//!   *optimistic* update inside one transaction, so observers see the result at once; on failure
+//!   every entry it touched is restored exactly, in one more transaction; on success the
+//!   mutation's own `key` (rendered with its input) and the `invalidates` targets are marked stale
+//!   and the observed ones refetch. A mutation retries `RETRY` times (default 0) with the same
+//!   backoff as a query.
+//! * **The offline queue.** An `idempotent` mutation that fails with an `HttpError::Network` (its
+//!   own error type usually wraps it; the client looks inside) **while the client believes the
+//!   device is offline** is not failed: it is appended to a queue persisted under
+//!   [`QUEUE_KEY`] and replayed first in first out when `Connectivity` reports online. The
+//!   caller's `.await` keeps waiting and resolves with the result of the replay; its optimistic
+//!   writes stay visible meanwhile and are rolled back if the replay is rejected. Everything else
+//!   fails at once: a non-idempotent mutation is never queued, and neither is a network error
+//!   while the platform says it is online (that is an ordinary failure). Every run of an
+//!   idempotent mutation carries one key (a UUID v4 from the `Rng` port), visible inside its body
+//!   as [`idempotency_key`], the same across retries and replays. A replay that fails for lack of
+//!   network again stays queued: it waits for the next `online` event while the client is
+//!   offline and retries with backoff while it is online. The `invalidates` targets of a queued
+//!   mutation are remembered in memory only: after a restart the replay invalidates just the
+//!   mutation's own key, and there is no optimistic update left to roll back.
+//! * **What a platform sees.** For each query a `<Name>QueryHandle` object: its constructor
+//!   (type id and method id are the query id) observes the entry, `refetch()` and `invalidate()`
+//!   have the same method ids on every handle ([`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`]),
+//!   the five signals travel in ordinary change-sets, and releasing the object handle removes the
+//!   observer. For each mutation an async function whose method id is the mutation id. None of
+//!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the crate
+//!   registers a `keel_runtime::DispatchLayer` and the macros submit a [`QueryRegistration`] /
+//!   [`MutationRegistration`] per definition. Query handles are transient: a snapshot leaves them
+//!   out and the platform re-creates them after a restore.
+//!
+//! # Deviations from SPEC 9 and 5.3
+//!
+//! * `ctx.query()` returns an owned [`QueryClient`] bound to the `Ctx`, not `&QueryClient`
+//!   (the cache lives in the runtime's extension slot; see [`CtxQuery::query`]).
+//! * `status` is derived: `Fetching` means a fetch is in flight *and there is nothing to show yet*.
+//!   A refetch of an entry with data stays `Success` while `fetching` (signal 3) is `true`
+//!   (see [`QueryStatus`]).
+//! * The persisted queue starts with the schema hash, so arguments encoded by another schema are
+//!   never replayed (SPEC 9 lists only `mutation_id`, params and the key per item).
+//! * `interval_ms` is listed among the refetch triggers but neither `QueryDef` nor `QueryMeta`
+//!   carries an interval, so timed refetching is not part of the v1 contract.
+//! * The client assumes it is **online** until the platform says otherwise (platforms report the
+//!   real state right after start-up), so a mutation made before the first connectivity event is
+//!   attempted rather than parked.
+//! * A failed fetch shows its typed error only after the retries run out; a fetch that
+//!   panics has no typed error and shows `Error` with `error == None`.
 //!
 //! # Determinism
 //!
