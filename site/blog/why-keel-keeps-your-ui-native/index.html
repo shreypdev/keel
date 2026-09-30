@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Keel keeps your UI native | Keel blog</title>
+<meta name="description" content="Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Keel stops.">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://shreypdev.github.io/keel/blog/why-keel-keeps-your-ui-native/">
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="Why Keel keeps your UI native | Keel blog">
+<meta property="og:description" content="Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Keel stops.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://shreypdev.github.io/keel/blog/why-keel-keeps-your-ui-native/">
+<meta property="og:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta property="article:published_time" content="2026-09-30">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Why Keel keeps your UI native | Keel blog">
+<meta name="twitter:description" content="Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Keel stops.">
+<meta name="twitter:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Why Keel keeps your UI native",
+  "description": "Shared UI and shared logic are different bets. What Flutter, React Native and Compose Multiplatform trade, who should pick which, and where Keel stops.",
+  "datePublished": "2026-09-30",
+  "dateModified": "2026-09-30",
+  "inLanguage": "en",
+  "image": "https://shreypdev.github.io/keel/assets/og.png",
+  "author": {
+    "@type": "Organization",
+    "name": "Keel team"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Keel",
+    "url": "https://shreypdev.github.io/keel/"
+  },
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://shreypdev.github.io/keel/blog/why-keel-keeps-your-ui-native/"
+  }
+}</script>
+<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;display=swap"></noscript>
+<link rel="stylesheet" href="../../assets/base.css"><link rel="stylesheet" href="../../assets/blog.css">
+</head>
+<body data-page="blog">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a class="hide-sm" href="../../">Home</a>
+      <a href="../../docs/">Docs</a>
+      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    </nav>
+  </div>
+</header>
+<main class="post" id="main"><article>
+  <header class="post-header">
+    <p class="eyebrow">Thesis</p><h1>Why Keel keeps your UI native</h1><p class="lede">Cross-platform tools fall into two camps. One shares the pixels: you write the UI once and a toolkit puts it on every platform. The other shares what is under the pixels and lets each platform draw its own screens. Keel is in the second camp, and this post explains why without pretending the first camp is wrong. Shared UI is the right answer for many products, and we say which.</p>
+    <p class="post-meta"><time datetime="2026-09-30">30 Sep 2026</time> · 8 min read · Keel team</p>
+  </header>
+  <nav class="toc" aria-label="On this page"><ol><li><a href="#two-bets">Two bets on going cross-platform</a></li><li><a href="#what-shared-ui-buys">What shared UI buys</a></li><li><a href="#what-shared-ui-trades">What shared UI trades away</a></li><li><a href="#the-line">The line under the pixels</a></li><li><a href="#why-not-share-ui">Why not share the UI too?</a></li><li><a href="#what-the-line-costs">What the line costs</a></li><li><a href="#choosing">Choosing</a></li></ol></nav>
+<aside class="callout note"><p><strong>How to read this page.</strong> We build Keel, a framework that shares logic and never UI, so we have a stake in this argument. Statements about Flutter, React Native and Compose Multiplatform describe them on 30 September 2026 and link to their own documentation. If you think we have misrepresented one, <a href="https://github.com/shreypdev/keel/issues" rel="noopener">open an issue</a>.</p></aside>
+<section id="two-bets">
+<h2>Two bets on going cross-platform</h2>
+<p>The first bet is that the UI is the expensive part, so share it. Three mature tools make this bet in different ways.</p>
+<ul><li><strong>Flutter</strong> has its own rendering engine, Impeller, and its own implementations of each UI control rather than deferring to the system's (<a href="https://docs.flutter.dev/resources/architectural-overview" rel="noopener">architecture overview</a>). You write Dart, and Flutter draws every pixel.</li><li><strong>React Native</strong> turns a tree of React components into the platform's own views: a <code>UIView</code> on iOS, an <code>android.view.ViewGroup</code> or <code>android.widget.TextView</code> on Android (<a href="https://reactnative.dev/architecture/render-pipeline" rel="noopener">render pipeline</a>). You write JavaScript or TypeScript and the screen is made of host views. Its New Architecture has been the default since React Native 0.76 (<a href="https://reactnative.dev/docs/the-new-architecture/landing-page" rel="noopener">docs</a>).</li><li><strong>Compose Multiplatform</strong> takes Jetpack Compose to other platforms. JetBrains lists iOS as Stable and web as Beta and describes interop that lets you keep existing SwiftUI or Android View code (<a href="https://kotlinlang.org/compose-multiplatform/" rel="noopener">product page</a>). Its FAQ says the components are drawn on a canvas rather than being platform widgets (<a href="https://kotlinlang.org/docs/multiplatform/faq.html" rel="noopener">FAQ</a>).</li></ul>
+<p>The second bet is that the logic is the expensive part, so share that and keep the UI native. Keel, UniFFI, Crux and Kotlin Multiplatform used without Compose Multiplatform all make it, with different amounts of framework around the shared code. The <a href="../keel-vs-kotlin-multiplatform/">Kotlin Multiplatform comparison</a> and the <a href="../keel-vs-uniffi-and-crux/">UniFFI and Crux comparison</a> cover the differences among them.</p>
+</section>
+<section id="what-shared-ui-buys">
+<h2>What shared UI buys</h2>
+<p>The benefits are large and we do not want to undersell them.</p>
+<ul><li><strong>One UI codebase.</strong> One set of screens, one set of UI tests, one design system implementation. A small team ships to several platforms with the headcount of one.</li><li><strong>Consistency by construction.</strong> The same screen behaves the same way everywhere, which matters when the product's identity is its own look and not the platform's.</li><li><strong>Iteration speed.</strong> These toolkits put a lot of effort into fast feedback loops for UI work, and a single codebase means a fix lands everywhere at once.</li><li><strong>Fit with your existing skills.</strong> A team that already writes React can reach mobile through React Native. A Kotlin team can reach iOS through Compose Multiplatform.</li></ul>
+<p>Shared UI is usually the right choice when any of these describes the product:</p>
+<ul><li>A small team or a startup that needs to reach several platforms quickly.</li><li>A brand-led or highly custom interface, where a bespoke look matters more than platform convention.</li><li>An internal tool or a content app where the screens are simple and the platform's idioms are not a selling point.</li><li>An app that is mostly UI with a thin logic layer, where there is little below the pixels worth sharing.</li></ul>
+<p>If that is you, use one of those toolkits. Keel will not help, and we do not plan to add shared UI.</p>
+</section>
+<section id="what-shared-ui-trades">
+<h2>What shared UI trades away</h2>
+<p>The trade is not the same for each toolkit, and none of it is fatal. It is a set of costs that show up at the edges, and the costs are different if you start from a native app than if you start from nothing.</p>
+<p><strong>Platform idioms.</strong> Native controls bring platform behaviour with them: text selection, scroll physics, navigation transitions, keyboard handling, system sheets and menus. React Native inherits much of this because its screens are host views. Flutter and Compose Multiplatform draw their own controls, so matching a platform convention is the toolkit's work, or yours. Brand-led apps often do not want a match, which is the point of the first bet.</p>
+<p><strong>Day-one OS features.</strong> When a platform ships a new UI API, native code can adopt it with the new SDK. A shared toolkit adopts it on its own schedule, or you embed a native view. Flutter documents platform views for exactly this, and notes that synchronising them with Flutter's rendering carries overhead, so it recommends them for complex controls where reimplementing is impractical. Some surfaces, such as iOS widgets, are built in the platform's own UI framework regardless, so a shared-UI app writes those natively anyway.</p>
+<p><strong>Accessibility fidelity.</strong> With native UI, the platform's accessibility stack talks to platform views directly. A toolkit that draws its own controls must publish a semantics tree that the platform accessibility APIs can read. Flutter documents a semantics tree separate from its render tree, and JetBrains documents that Compose semantics are mapped to native iOS accessibility objects and support VoiceOver (<a href="https://kotlinlang.org/docs/multiplatform/compose-ios-accessibility.html" rel="noopener">docs</a>). These work and are widely used. The cost is that keeping parity with each platform's accessibility behaviour is the toolkit's ongoing job, where with native UI it is the platform's.</p>
+<p><strong>The hiring pool.</strong> Platform teams hire SwiftUI, Compose and React specialists. A shared-UI toolkit has its own pool (Dart, React Native, Kotlin with Compose), and each of those is large. The cost appears when you already employ platform specialists: moving to shared UI re-skills or replaces them. Keel's version of this problem is Rust, which we come back to below.</p>
+</section>
+<section id="the-line">
+<h2>The line under the pixels</h2>
+<p>Keel draws the line exactly at the UI. Everything under it is shared: domain logic, reactive state, the data layer, persistence and the dev loop. Everything above it stays a hand-written SwiftUI, Jetpack Compose or React screen.</p>
+<p>Our reasoning starts from where the work repeats. In our experience the code beneath the UI is where the three platforms disagree and where the subtle bugs live: the cache, the retry policy, the offline queue, pagination, the session refresh. Teams write these three times and get three slightly different answers. The screens, by contrast, are where platform expertise pays off. So Keel shares the part that must be identical and leaves the part that should feel native.</p>
+<p>The bar is that a SwiftUI view bound to Keel state is indistinguishable from one bound to Swift state. That is achievable because the generated store is an ordinary <code>@Observable</code> class, a Kotlin <code>StateFlow</code> or a TypeScript <code>Signal</code>. The same store in the playground, in each platform's own UI code:</p>
+<p class="code-caption">Playground code, abbreviated: examples/playground/ios/PlaygroundApp/Screens/TodosScreen.swift</p>
+<pre><code class="language-swift" data-lang="swift">ForEach(todos.visible, id: \.id) { todo in
+    Button {
+        todos.toggle(id: todo.id)
+    } label: {
+        Label(todo.title, systemImage: todo.done ? "checkmark.circle.fill" : "circle")
+    }
+    // ...
+}</code></pre>
+<p class="code-caption">Playground code, abbreviated: examples/playground/android/.../ui/TodosScreen.kt</p>
+<pre><code class="language-kotlin" data-lang="kotlin">val visible by store.visible.collectAsState()
+val remaining by store.remaining.collectAsState()</code></pre>
+<p class="code-caption">Playground code, abbreviated: examples/playground/web/src/views/TodosView.tsx</p>
+<pre><code class="language-tsx" data-lang="tsx">const visible = useSignal(todos.visible);
+const remaining = useSignal(todos.remaining);</code></pre>
+<p>Three screens, each written in its platform's idiom, reading one core's state. The consequence for day-one features is direct: because the UI is plain SwiftUI, Compose or React, a new platform API is available to you on the day it ships. Accessibility modifiers, previews, navigation, animation and the design system are the platform's own and stay yours. Keel's part is to keep what those screens show consistent with the logic, and it does that with a local mirror of the state, so reads from the UI never cross into the core.</p>
+<p>Native tooling applies unchanged for the same reason. The playground's iOS screens carry accessibility identifiers and are driven by an XCUITest tour against the real core; its Compose screens use test tags; its web build is exercised by a Playwright smoke test in headless Chromium. Nothing in those tests knows Keel exists, because what they see is a SwiftUI, Compose or React UI.</p>
+</section>
+<section id="why-not-share-ui">
+<h2>Why not share the UI too?</h2>
+<p>We considered it and rejected it, for a reason that is about focus more than principle. Flutter, React Native and Compose Multiplatform are whole-UI products, each maintained by a large team that chases every platform's new UI features, keeps accessibility in step and polishes rendering. A Keel UI toolkit would be a smaller and later version of one of them, and it would be the part of Keel most likely to age badly. The moment a framework paints pixels on three platforms it takes on that ongoing work, and it inherits the trade-offs listed above.</p>
+<p>There is also a practical reason. If the UI stays native, Keel's generated code has a clear bar to meet: a Swift, Kotlin or TypeScript engineer who has never seen Rust must be able to review it and find it idiomatic. The golden files that lock the generated output are how the project holds itself to that bar.</p>
+</section>
+<section id="what-the-line-costs">
+<h2>What the line costs</h2>
+<p>Drawing the line here has costs, and they are the mirror image of what shared UI buys.</p>
+<ul><li><strong>You build three UIs.</strong> That means three implementations of the design, three UI test suites, and keeping the screens from drifting apart. If your product needs pixel-identical screens, this is the wrong tool.</li><li><strong>You need Rust.</strong> The core is Rust. Keel's macros emit errors that say what, why, how to fix it and where to read more, and they keep lifetimes and threads off the common path, but the borrow checker remains, and in our experience most mobile teams have few Rust engineers. Only the people writing the core need it; the platform teams consume generated Swift, Kotlin and TypeScript.</li><li><strong>Logic must be worth sharing.</strong> If your app is mostly UI with little logic beneath it, sharing the logic buys little. The worst case for Keel is an app that is 90 percent UI and 10 percent logic.</li><li><strong>It is a new framework.</strong> Keel 1.0 shipped on 30 September 2026. Its reference app is the playground in the repository, and its evidence is its tests: more than 3,800 across five languages, and 17 contract scenarios run on iOS, Android and web. We are not claiming production mileage.</li><li><strong>The scope is a choice.</strong> Keel v1 has no sync engine, no hosted services and no shared UI. The last is a decision and not a backlog item.</li></ul>
+</section>
+<section id="choosing">
+<h2>Choosing</h2>
+<table class="compare"><thead><tr><th scope="col">Your situation</th><th scope="col">A better fit</th></tr></thead><tbody><tr><th scope="row">Small team, one UI codebase, brand-led custom interface</th><td>Shared UI: Flutter, React Native or Compose Multiplatform</td></tr><tr><th scope="row">An existing React team that wants mobile apps</th><td>React Native</td></tr><tr><th scope="row">A Kotlin team, Android first, wanting iOS screens too</th><td>Compose Multiplatform, which JetBrains lists as Stable on iOS</td></tr><tr><th scope="row">Existing native iOS and Android apps with platform teams and duplicated logic</th><td>Shared logic: Keel, Kotlin Multiplatform, UniFFI or Crux</td></tr><tr><th scope="row">Platform-idiomatic UI is a product requirement</th><td>Native UI with shared logic</td></tr><tr><th scope="row">A Rust library already exists and you need bindings</th><td>UniFFI</td></tr><tr><th scope="row">An app that is mostly UI with thin logic</th><td>Shared UI</td></tr><tr><th scope="row">Stateful, server-backed logic on three platforms that must stay consistent</th><td>Keel</td></tr></tbody></table>
+<p>The two bets are not exclusive over time. Some teams share logic first and UI later, and a Kotlin team can do that inside one ecosystem. We have not built or tested Keel underneath a shared-UI toolkit, and Keel's generated bindings target SwiftUI, Compose and React idioms, so we make no claim there.</p>
+<p>If the argument persuades you, the next question is how the state model works. <a href="../reads-never-cross-the-boundary/">Reads never cross the boundary</a> explains it in detail, and the <a href="../../docs/getting-started.html">getting started guide</a> gets a three-platform app running.</p>
+</section>
+</article></main>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../../docs/cli.html">The CLI</a></li>
+          <li><a href="../../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/site.js" defer></script></body></html>
