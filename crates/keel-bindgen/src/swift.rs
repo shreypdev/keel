@@ -306,7 +306,11 @@ impl Types<'_> {
                 }
                 _ => false,
             },
-            TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => false,
+            // `Swift.Duration` only conforms to `Codable` from the Swift 6.0 standard library
+            // (macOS 15, iOS 18), above the runtime's deployment floor.
+            TypeRef::Duration | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
+                false
+            }
             _ => true,
         }
     }
