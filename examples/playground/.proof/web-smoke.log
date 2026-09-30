@@ -17,14 +17,15 @@ dist/assets/keel_core-CRNmuM_5.wasm  538.46 kB │ gzip: 205.50 kB
 dist/assets/index-Ck_UYfUR.css         4.54 kB │ gzip:   1.54 kB
 dist/assets/wasm-worker-BWUAUNsX.js    5.51 kB │ gzip:   2.24 kB
 dist/assets/index-6EvRmS9G.js        319.10 kB │ gzip:  98.45 kB
-✓ built in 473ms
+✓ built in 452ms
 
 Running 2 tests using 1 worker
 
-startup: the first view was interactive 55 ms after navigation started (fetch, compile and instantiate the 538 KB core, create four stores, render)
-10k list: update round trip, median of 25 clicks: 1.30 ms (samples: 2.5, 1.5, 1.4, 1.4, 1.3, 1.1, 1.3, 1.3, 1.4, 1.3, 1.3, 1.5, 1.4, 1.4, 1.3, 1.4, 1.3, 1.2, 1.2, 1.2, 1.1, 1.2, 1.1, 1.1, 1.3)
-10k list: rows with a version above 0 after the update clicks: 1; after a second of streaming: 7
-  ✓  1 [chromium] › smoke/smoke.spec.ts:22:1 › the playground runs: todos, counter, 10k list, remote (6.9s)
-  ✓  2 [chromium] › smoke/smoke.spec.ts:181:1 › a core that cannot be loaded is reported on the page (66ms)
+startup: the first view was interactive 51 ms after navigation started (fetch, compile and instantiate the 538 KB core, create four stores, render)
+10k list: update round trip, median of 25 clicks: 1.20 ms (samples: 2.7, 1.6, 1.4, 1.3, 1.4, 1.2, 1.3, 1.2, 1.2, 1.2, 1.2, 1.2, 1.2, 1.3, 1.2, 1.2, 1.2, 1.2, 1.1, 1.1, 1.1, 1.2, 1.2, 1.1, 1.2)
+10k list: streaming ten updates a second: 62 frames in one second, longest gap between frames 16.8 ms, median 16.7 ms
+10k list: rows with a version above 0 after the update clicks: 1; after a second of streaming: 8
+  ✓  1 [chromium] › smoke/smoke.spec.ts:22:1 › the playground runs: todos, counter, 10k list, remote (7.0s)
+  ✓  2 [chromium] › smoke/smoke.spec.ts:196:1 › a core that cannot be loaded is reported on the page (63ms)
 
   2 passed (7.7s)

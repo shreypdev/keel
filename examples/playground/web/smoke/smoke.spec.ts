@@ -106,9 +106,24 @@ test("the playground runs: todos, counter, 10k list, remote", async ({ page }) =
     console.log(`10k list: update round trip, median of 25 clicks: ${median(samples).toFixed(2)} ms (samples: ${samples.join(", ")})`);
 
     const versionsBefore = await page.locator(".row-version.flash").count();
+    // While the stream runs, watch the frames: a second of requestAnimationFrame timestamps.
+    const frames = page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const stamps: number[] = [];
+          const tick = (now: number): void => {
+            stamps.push(now);
+            if (now - (stamps[0] ?? now) < 1_000) requestAnimationFrame(tick);
+            else resolve(stamps);
+          };
+          requestAnimationFrame(tick);
+        }),
+    );
     await page.getByTestId("biglist-stream").check();
-    await page.waitForTimeout(1_000);
+    const stamps = await frames;
     await page.getByTestId("biglist-stream").uncheck();
+    const gaps = stamps.slice(1).map((stamp, i) => stamp - (stamps[i] as number));
+    console.log(`10k list: streaming ten updates a second: ${stamps.length} frames in one second, longest gap between frames ${Math.max(...gaps).toFixed(1)} ms, median ${median(gaps).toFixed(1)} ms`);
     const streamed = await page.locator(".row-version.flash").count();
     console.log(`10k list: rows with a version above 0 after the update clicks: ${versionsBefore}; after a second of streaming: ${streamed}`);
     expect(streamed, "rows changed while streaming").toBeGreaterThan(versionsBefore);
