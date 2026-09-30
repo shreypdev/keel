@@ -116,13 +116,24 @@ pub fn ts_runtime_js() -> Option<&'static Path> {
     .as_deref()
 }
 
-/// Installs `@keel/runtime` below `root/node_modules`: the real wire layer
-/// (declarations, and compiled JavaScript when `with_js`) plus the
-/// hand-written base API from `tests/fixtures/ts-base`.
+/// Installs `@keel/runtime` below `root/node_modules`: the real wire layer and
+/// standard types (declarations, and compiled JavaScript when `with_js`) plus
+/// the hand-written base API from `tests/fixtures/ts-base`.
 pub fn install_ts_runtime(root: &Path, declarations: &Path, js: Option<&Path>) {
     let module = root.join("node_modules/@keel/runtime");
     copy_dir(&declarations.join("wire"), &module.join("wire"));
     fs::copy(declarations.join("fnv.d.ts"), module.join("fnv.d.ts")).unwrap();
+    // The standard types and their codecs, which generated code imports from the runtime
+    // instead of declaring them (ADR-024), and the error base class they extend.
+    fs::copy(declarations.join("errors.d.ts"), module.join("errors.d.ts")).unwrap();
+    fs::create_dir_all(module.join("adapters")).unwrap();
+    for name in ["types.d.ts", "codecs.d.ts"] {
+        fs::copy(
+            declarations.join("adapters").join(name),
+            module.join("adapters").join(name),
+        )
+        .unwrap();
+    }
     let base = manifest_dir().join("tests/fixtures/ts-base");
     fs::copy(base.join("index.d.ts"), module.join("index.d.ts")).unwrap();
     fs::write(
@@ -152,7 +163,7 @@ pub fn copy_dir(from: &Path, to: &Path) {
 
 /// The names of the golden cases, in the order they are documented.
 pub const CASES: &[&str] = &[
-    "records", "enums", "errors", "objects", "stores", "ports", "queries", "full",
+    "records", "enums", "errors", "objects", "stores", "ports", "queries", "full", "stdlib",
 ];
 
 /// The generator configuration of a case: default names, and a Kotlin package
@@ -174,6 +185,7 @@ pub fn case(name: &str) -> Schema {
         "ports" => ports(),
         "queries" => queries(),
         "full" => full(),
+        "stdlib" => stdlib(),
         other => panic!("unknown golden case {other}"),
     }
 }
@@ -1060,6 +1072,137 @@ fn ports() -> Schema {
     s
 }
 
+/// The schema of an app core: the standard library exactly as `keel-ports` registers it (every
+/// core links it, so every schema has it), plus the app's own items, some of which refer to the
+/// standard types. Nothing of the standard library is generated; the references resolve to the
+/// runtimes' own types (ADR-024).
+fn stdlib() -> Schema {
+    // Naming a registered type links the registrations of `keel-ports` into this binary.
+    let _ = keel_ports::HttpMethod::Get;
+    let mut s = keel_meta::collect_schema("golden-stdlib");
+    s.records.push(record(
+        "Endpoint",
+        "A request the app makes again and again.",
+        vec![
+            field("name", TypeRef::String),
+            field("request", named("HttpRequest")),
+            field("fallback", opt(named("HttpResponse"))),
+            field("accepted", vec_of(named("HttpMethod"))),
+            field("extra", vec_of(named("Header"))),
+        ],
+    ));
+    // A user type may share the name of a standard *port*: the ports are not generated.
+    s.records.push(record(
+        "Connectivity",
+        "What the app last learned about the network.",
+        vec![
+            field("online", TypeRef::Bool),
+            field("kind", named("NetKind")),
+            field("app", opt(named("AppState"))),
+        ],
+    ));
+    s.enums.push(error_def(
+        "SyncError",
+        "Why a sync failed.",
+        vec![
+            with_message(unit_variant("Offline", 0), "offline"),
+            tuple_variant("Http", 1, vec![named("HttpError")]),
+            with_message(
+                tuple_variant("Disk", 2, vec![named("FsError"), TypeRef::String]),
+                "disk failure at {1}",
+            ),
+            with_message(
+                struct_variant("Rejected", 3, vec![field("status", TypeRef::U16)]),
+                "status {status}",
+            ),
+        ],
+    ));
+    s.objects.push(object(
+        "Syncer",
+        "Talks to the server.",
+        vec![ctor("Syncer", "new", vec![], false)],
+        vec![
+            method(
+                "Syncer",
+                "send",
+                "Performs one request.",
+                vec![param("request", named("HttpRequest"))],
+                err_result(named("HttpResponse"), "HttpError"),
+                true,
+            ),
+            method(
+                "Syncer",
+                "follow",
+                "Streams the responses of a request that repeats.",
+                vec![param("endpoint", named("Endpoint"))],
+                TypeRef::result(TypeRef::stream(named("HttpResponse")), named("HttpError")),
+                true,
+            ),
+            method(
+                "Syncer",
+                "save",
+                "Writes the last response to disk.",
+                vec![param("path", TypeRef::String)],
+                err_result(TypeRef::Unit, "FsError"),
+                true,
+            ),
+            method(
+                "Syncer",
+                "sync",
+                "",
+                vec![],
+                err_result(TypeRef::Unit, "SyncError"),
+                true,
+            ),
+        ],
+    ));
+    s.objects.push(store(
+        object(
+            "Link",
+            "Mirrors what the platform reports about the connection.",
+            vec![ctor("Link", "new", vec![], false)],
+            vec![],
+        ),
+        vec![
+            ("state", named("AppState"), false, None),
+            ("kind", named("NetKind"), false, None),
+            ("last", opt(named("HttpResponse")), false, None),
+            ("failure", opt(named("HttpError")), false, None),
+            ("pending", vec_of(named("HttpRequest")), false, None),
+        ],
+    ));
+    s.ports.push(port(
+        "Uploader",
+        "The platform uploads a request in the background.",
+        PortKind::Async,
+        vec![port_method(
+            "Uploader",
+            "upload",
+            "",
+            vec![param("request", named("HttpRequest"))],
+            err_result(named("HttpResponse"), "HttpError"),
+            true,
+        )],
+    ));
+    s.queries.push(query(
+        "latest_response",
+        QueryKind::Query,
+        "latest",
+        vec![],
+        err_result(named("HttpResponse"), "HttpError"),
+        Some(30_000),
+    ));
+    s.queries.push(query(
+        "retry",
+        QueryKind::Mutation,
+        "retry",
+        vec![param("request", named("HttpRequest"))],
+        err_result(named("HttpResponse"), "HttpError"),
+        None,
+    ));
+    s
+}
+
 fn queries() -> Schema {
     let mut s = Schema::new("golden-queries");
     s.enums.push(error_def(
@@ -1338,13 +1481,15 @@ fn full() -> Schema {
         err_result(TypeRef::Unit, "TodoError"),
         true,
     ));
+    // Not `Clock`: a port that is exactly the standard `Clock` is left out of the output
+    // (ADR-024), and this case is about a sync port of the app's own.
     s.ports.push(port(
-        "Clock",
+        "WallClock",
         "",
         PortKind::Sync,
         vec![
-            port_method("Clock", "now_ms", "", vec![], TypeRef::I64, false),
-            port_method("Clock", "monotonic_ns", "", vec![], TypeRef::U64, false),
+            port_method("WallClock", "now_ms", "", vec![], TypeRef::I64, false),
+            port_method("WallClock", "monotonic_ns", "", vec![], TypeRef::U64, false),
         ],
     ));
     s.ports.push(port(

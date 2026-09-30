@@ -8,6 +8,9 @@
 
 export * from "./fnv.js";
 export * from "./wire/index.js";
+// The real standard types of SPEC section 8 (`HttpRequest`, `HttpError`, ..., and their codecs).
+export * from "./adapters/types.js";
+export * from "./adapters/codecs.js";
 
 import type { CallTarget, ChangeOp, Handle, ReplyStatus } from "./wire/index.js";
 

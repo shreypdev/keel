@@ -105,6 +105,7 @@ const MAINS: &[(&str, &str)] = &[
     ("errors", "ErrorsTestKt"),
     ("enums", "EnumsTestKt"),
     ("records", "RecordsTestKt"),
+    ("stdlib", "StdlibTestKt"),
 ];
 
 /// Generates every golden case, each in its own package, compiles all of them

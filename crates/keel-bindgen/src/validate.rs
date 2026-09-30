@@ -17,6 +17,7 @@
 //! | E0031 | an event port method with a return type |
 //! | E0050 | duplicate type name, id or variant index |
 //! | E0051 | a name that collides after case conversion or is not an identifier (new in bindgen) |
+//! | E0052 | an item named like a standard library item, with another id (new in bindgen) |
 
 use core::fmt;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -28,6 +29,7 @@ use keel_meta::{
 
 use crate::model::{Ret, parse_message, query_handle_name};
 use crate::naming;
+use crate::stdlib;
 
 /// Names the generated code refers to in at least one language. A schema type
 /// with one of these names would shadow it, so it is rejected up front.
@@ -164,6 +166,17 @@ pub enum BindgenError {
         /// Why that is a problem.
         why: String,
     },
+    /// An item has the name of a standard library item but not its id (E0052).
+    ShadowsStandard {
+        /// What the item is: `record`, `enum`, `error`, `object` or `port`.
+        what: &'static str,
+        /// The shared name.
+        name: String,
+        /// The id the standard item has.
+        standard: u32,
+        /// The id the schema's item has.
+        found: u32,
+    },
     /// A type or shape the generated code cannot express (E0001).
     Unsupported {
         /// Where it appears.
@@ -197,6 +210,7 @@ impl BindgenError {
             BindgenError::Schema(e) => e.code(),
             BindgenError::Duplicate { .. } => "E0050",
             BindgenError::NameCollision { .. } => "E0051",
+            BindgenError::ShadowsStandard { .. } => "E0052",
             BindgenError::Unsupported { .. } => "E0001",
             BindgenError::ErrorMessage { .. } => "E0010",
             BindgenError::EventReturn { .. } => "E0031",
@@ -226,6 +240,15 @@ impl fmt::Display for BindgenError {
                     .map(|n| format!("`{n}`"))
                     .collect::<Vec<_>>()
                     .join(", ")
+            ),
+            BindgenError::ShadowsStandard {
+                what,
+                name,
+                standard,
+                found,
+            } => write!(
+                f,
+                "error[keel::{code}]: {what} `{name}` has the name of a Keel standard library item but the id 0x{found:08x} instead of 0x{standard:08x}; every platform runtime implements the standard ports and types under those names and ids (generated code refers to them instead of declaring them), so a different item cannot share the name; rename it, for example `My{name}`, or use the standard one from keel-ports"
             ),
             BindgenError::Unsupported { at, what, help } => {
                 write!(f, "error[keel::{code}]: {what} at {at}; {help}")
@@ -266,10 +289,16 @@ impl From<SchemaError> for BindgenError {
 /// assert!(validate(&Schema::new("demo")).is_ok());
 /// ```
 pub fn validate(schema: &Schema) -> Result<(), Vec<BindgenError>> {
+    validate_for(schema, false)
+}
+
+/// [`validate`] for a generator that does (`emit_standard`) or does not declare the standard
+/// library: declared, the standard ports claim their names like any other port.
+pub(crate) fn validate_for(schema: &Schema, emit_standard: bool) -> Result<(), Vec<BindgenError>> {
     if let Err(errors) = schema.validate() {
         return Err(errors.into_iter().map(BindgenError::Schema).collect());
     }
-    let mut checker = Checker::new(schema);
+    let mut checker = Checker::new(schema, emit_standard);
     checker.run();
     if checker.errors.is_empty() {
         Ok(())
@@ -291,10 +320,11 @@ struct Checker<'a> {
     schema: &'a Schema,
     kinds: HashMap<&'a str, Kind>,
     errors: Vec<BindgenError>,
+    emit_standard: bool,
 }
 
 impl<'a> Checker<'a> {
-    fn new(schema: &'a Schema) -> Self {
+    fn new(schema: &'a Schema, emit_standard: bool) -> Self {
         let mut kinds = HashMap::new();
         for r in &schema.records {
             kinds.insert(r.name.as_str(), Kind::Record);
@@ -312,10 +342,12 @@ impl<'a> Checker<'a> {
             schema,
             kinds,
             errors: Vec::new(),
+            emit_standard,
         }
     }
 
     fn run(&mut self) {
+        self.check_standard_names();
         self.check_identifiers();
         self.check_type_names();
         self.check_ids();
@@ -344,6 +376,20 @@ impl<'a> Checker<'a> {
             self.check_query(query);
         }
         self.check_top_level_values();
+    }
+
+    // ----- the standard library -----------------------------------------------
+
+    /// Items named like a standard library item with another id (E0052).
+    fn check_standard_names(&mut self) {
+        for clash in stdlib::id_clashes(self.schema) {
+            self.errors.push(BindgenError::ShadowsStandard {
+                what: clash.what,
+                name: clash.name,
+                standard: clash.standard,
+                found: clash.found,
+            });
+        }
     }
 
     // ----- identifiers ------------------------------------------------------
@@ -462,7 +508,18 @@ impl<'a> Checker<'a> {
         for o in &s.objects {
             declare(&mut self.errors, o.name.clone(), "object");
         }
-        for p in &s.ports {
+        // The standard ports are not declared in generated code (ADR-024), so they do not
+        // claim a name there: an app may have its own `Timer` or `Log`.
+        let standard = if self.emit_standard {
+            stdlib::Covered::default()
+        } else {
+            stdlib::covered(s)
+        };
+        for p in s
+            .ports
+            .iter()
+            .filter(|p| !standard.ports.contains(p.name.as_str()))
+        {
             declare(&mut self.errors, p.name.clone(), "port");
             if p.kind == PortKind::Event {
                 declare(

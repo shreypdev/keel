@@ -607,6 +607,7 @@ version = "0.1.0"
 dependencies = [
  "heck",
  "keel-meta",
+ "keel-ports",
  "serde_json",
 ]
 

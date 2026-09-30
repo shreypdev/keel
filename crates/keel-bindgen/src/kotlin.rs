@@ -25,6 +25,9 @@ use crate::model::{Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, pars
 use crate::naming;
 use crate::{GeneratedFile, Generator};
 
+/// The package of the standard types the Kotlin runtime provides (`StandardRecords.kt`).
+const RUNTIME_ADAPTERS: &str = "dev.keel.runtime.adapters";
+
 const FILES: [&str; 7] = [
     "Types", "Errors", "Objects", "Stores", "Ports", "Queries", "Ids",
 ];
@@ -198,12 +201,47 @@ impl<'a> Ctx<'a> {
         simple.to_owned()
     }
 
-    fn named(&self, name: &str, shadow: &Shadow) -> String {
+    /// The spelling of the declared type `name`: simple, or qualified when `shadow` hides the
+    /// simple name. A standard type the runtime provides is imported from
+    /// `dev.keel.runtime.adapters`.
+    fn named(&mut self, name: &str, shadow: &Shadow) -> String {
+        if self.model().external(name).is_some() {
+            let fqn = format!("{RUNTIME_ADAPTERS}.{name}");
+            if shadow.contains(name) {
+                return fqn;
+            }
+            self.import(&fqn);
+            return name.to_owned();
+        }
         if shadow.contains(name) {
             format!("{}.{name}", self.package())
         } else {
             name.to_owned()
         }
+    }
+
+    /// The error type `err` of a `Result`, as written in a `catch` or a `throw` outside any
+    /// sealed hierarchy.
+    fn err_name(&mut self, err: &str) -> String {
+        self.named(err, &Shadow::new())
+    }
+
+    /// The expression that turns the failed call `var` (a `KeelReplyException`) into the typed
+    /// error `err`: a generated error class knows how (`fromReply`); a standard error the
+    /// runtime provides does not, so its codec decodes the reply here.
+    fn typed_error(&mut self, err: &str, var: &str, checked: bool) -> String {
+        let name = self.err_name(err);
+        if self.model().external(err).is_none() {
+            return format!("{name}.fromReply({var})");
+        }
+        self.import("dev.keel.runtime.wire.Payloads.ReplyStatus");
+        self.import("dev.keel.runtime.wire.decodeAll");
+        let test = if checked {
+            format!("{var} is KeelReplyException && {var}.status == ReplyStatus.ERROR")
+        } else {
+            format!("{var}.status == ReplyStatus.ERROR")
+        };
+        format!("if ({test}) {name}.decodeAll({var}.body) else {var}")
     }
 
     // ----- types ------------------------------------------------------------
@@ -439,6 +477,7 @@ impl<'a> Ctx<'a> {
         if depth > 8 {
             return "error(\"recursive default\")".to_owned();
         }
+        let shown = self.named(name, &Shadow::new());
         match model.kind(name) {
             Some(NamedKind::Record) => {
                 let Some(record) = model.record(name) else {
@@ -449,12 +488,12 @@ impl<'a> Ctx<'a> {
                     .iter()
                     .map(|f| format!("{} = {}", ident(&f.name), self.zero(&f.ty, depth + 1)))
                     .collect();
-                format!("{name}({})", args.join(", "))
+                format!("{shown}({})", args.join(", "))
             }
             Some(NamedKind::UnitEnum) => model
                 .enum_def(name)
                 .and_then(|e| e.variants.first())
-                .map(|v| format!("{name}.{}", naming::upper_snake(&v.name)))
+                .map(|v| format!("{shown}.{}", naming::upper_snake(&v.name)))
                 .unwrap_or_default(),
             Some(NamedKind::DataEnum | NamedKind::Error) => {
                 let en = model.enum_def(name).or_else(|| model.error_def(name));
@@ -462,7 +501,16 @@ impl<'a> Ctx<'a> {
                     return String::new();
                 };
                 if variant.fields.is_empty() {
-                    format!("{name}.{}", variant.name)
+                    format!("{shown}.{}", variant.name)
+                } else if model.external(name).is_some() {
+                    // The runtime names the payload as it likes; positional arguments do not
+                    // depend on it.
+                    let args: Vec<String> = variant
+                        .fields
+                        .iter()
+                        .map(|f| self.zero(&f.ty, depth + 1))
+                        .collect();
+                    format!("{shown}.{}({})", variant.name, args.join(", "))
                 } else {
                     let names = self.variant_props(en, variant);
                     let args: Vec<String> = names
@@ -470,7 +518,7 @@ impl<'a> Ctx<'a> {
                         .zip(&variant.fields)
                         .map(|(n, f)| format!("{n} = {}", self.zero(&f.ty, depth + 1)))
                         .collect();
-                    format!("{name}.{}({})", variant.name, args.join(", "))
+                    format!("{shown}.{}({})", variant.name, args.join(", "))
                 }
             }
             Some(NamedKind::Object) | None => String::new(),
@@ -1325,7 +1373,8 @@ impl<'a> Ctx<'a> {
                 w.line(format!("val {handle} = try {{"));
                 w.indented(|w| w.line(decode(self, call.clone())));
                 w.line("} catch (e: KeelReplyException) {");
-                w.indented(|w| w.line(format!("throw {err}.fromReply(e)")));
+                let typed = self.typed_error(err, "e", false);
+                w.indented(|w| w.line(format!("throw {typed}")));
                 w.line("}");
             } else {
                 w.line(format!("val {handle} = {}", decode(self, call)));
@@ -1396,13 +1445,19 @@ impl<'a> Ctx<'a> {
                 if let Some(err) = &err {
                     self.import("dev.keel.runtime.KeelReplyException");
                     self.import("kotlinx.coroutines.flow.catch");
+                    let typed = if self.model().external(err).is_some() {
+                        self.typed_error(err, "error", true)
+                    } else {
+                        let name = self.err_name(err);
+                        format!(
+                            "if (error is KeelReplyException) {name}.fromReply(error) else error"
+                        )
+                    };
                     w.line(format!("return {stream_var}"));
                     w.indented(|w| {
                         w.line(format!(".map {{ bytes -> {decode} }}"));
                         w.block_with(".catch { error ->", "}", |w| {
-                            w.line(format!(
-                                "throw if (error is KeelReplyException) {err}.fromReply(error) else error"
-                            ));
+                            w.line(format!("throw {typed}"));
                         });
                     });
                 } else {
@@ -1440,7 +1495,8 @@ impl<'a> Ctx<'a> {
                 w.line(format!("{bind}try {{"));
                 w.indented(|w| w.call(call.clone(), &call_args, "", true));
                 w.line("} catch (e: KeelReplyException) {");
-                w.indented(|w| w.line(format!("throw {err}.fromReply(e)")));
+                let typed = self.typed_error(err, "e", false);
+                w.indented(|w| w.line(format!("throw {typed}")));
                 w.line("}");
             } else if is_unit {
                 w.call(call, &call_args, "", true);
@@ -1622,6 +1678,7 @@ impl<'a> Ctx<'a> {
                 Ret::Result { ok, err } => {
                     self.import("dev.keel.runtime.KeelPortException");
                     self.import("dev.keel.runtime.wire.encodeToByteArray");
+                    let err = self.err_name(err);
                     w.line("try {");
                     w.indented(|w| encode_result(self, w, ok));
                     w.line(format!("}} catch (e: {err}) {{"));

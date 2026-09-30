@@ -290,12 +290,12 @@ private fun stores() {
 }
 
 private fun ports() {
-    val clock = clockPortImpl(object : Clock {
+    val clock = wallClockPortImpl(object : WallClock {
         override fun nowMs(): Long = 5L
         override fun monotonicNs(): ULong = 6uL
     })
     expect(clock.sync, "clock is a sync port")
-    expectEq(runBlocking { clock.methods.getValue(KeelIds.Ports.Clock.NOW_MS)(ByteArray(0)) }.hex(), "0500000000000000", "sync port reply")
+    expectEq(runBlocking { clock.methods.getValue(KeelIds.Ports.WallClock.NOW_MS)(ByteArray(0)) }.hex(), "0500000000000000", "sync port reply")
 
     var seen: HttpRequest? = null
     val http = httpPortImpl(object : Http {

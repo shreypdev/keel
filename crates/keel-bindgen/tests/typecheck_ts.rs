@@ -1,6 +1,6 @@
-//! Type-checks the generated TypeScript against the real wire layer of
-//! `@keel/runtime` (its declarations are built from source on every run) and
-//! the hand-written declaration of the base API in
+//! Type-checks the generated TypeScript against the real wire layer and the
+//! real standard types of `@keel/runtime` (its declarations are built from
+//! source on every run) and the hand-written declaration of the base API in
 //! `tests/fixtures/ts-base/index.d.ts`. Skipped, with a message on stderr,
 //! when no TypeScript compiler is installed; `KEEL_REQUIRE_TOOLCHAINS=1` turns
 //! the skip into a failure.
@@ -55,7 +55,7 @@ macro_rules! ts_cases {
 }
 
 ts_cases!(
-    records, enums, errors, objects, stores, ports, queries, full
+    records, enums, errors, objects, stores, ports, queries, full, stdlib
 );
 
 #[test]
