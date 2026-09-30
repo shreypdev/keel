@@ -79,6 +79,15 @@ impl Violation {
     }
 }
 
+/// Text a client sent, made safe to print in a terminal or a log: control characters (ANSI
+/// escapes among them) replaced, length capped.
+fn printable(text: &str) -> String {
+    text.chars()
+        .take(64)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
 /// Decodes `payload` with `f` and requires that it is consumed exactly.
 fn decode<'a, T>(
     payload: &'a [u8],
@@ -154,7 +163,8 @@ impl Session {
                 WARN,
                 &format!(
                     "refused a {} client: schema {:#018x}, core {ours:#018x}",
-                    hello.platform, hello.schema_hash
+                    printable(hello.platform),
+                    hello.schema_hash
                 ),
             );
             return Err(Violation {
@@ -163,9 +173,9 @@ impl Session {
             });
         }
         let info = ClientInfo {
-            keel_version: hello.keel_version.to_owned(),
-            platform: hello.platform.to_owned(),
-            mode: hello.mode.to_owned(),
+            keel_version: printable(hello.keel_version),
+            platform: printable(hello.platform),
+            mode: printable(hello.mode),
         };
         self.conn.set_client(info.clone());
         if !self.bridge.claim(&self.conn, self.busy_grace) {
@@ -414,7 +424,7 @@ fn session_loop(
         if allowed {
             return Ok(response);
         }
-        let shown = origin.and_then(Result::ok).unwrap_or("(not text)");
+        let shown = origin.and_then(Result::ok).map_or_else(|| "(not text)".to_owned(), printable);
         session.note(WARN, &format!("refused a page from origin {shown}: see OriginPolicy"));
         let mut refusal = ErrorResponse::new(Some("origin not allowed".to_owned()));
         *refusal.status_mut() = StatusCode::FORBIDDEN;
@@ -442,10 +452,12 @@ fn session_loop(
     socket.get_mut().route_writes_to_queue(conn.raw_sender());
 
     let begin_close = |violation: Violation| {
-        session.note(
-            DEBUG,
-            &format!("closing a connection ({}): {}", violation.code, violation.reason),
-        );
+        if !violation.noted {
+            session.note(
+                WARN,
+                &format!("closing the connection ({}): {}", violation.code, violation.reason),
+            );
+        }
         conn.close(violation.code, &violation.reason);
         // The peer's Close reply, or the end of the stream, is now all we wait for.
         let _ = control.set_read_timeout(Some(config.close_timeout));
@@ -628,6 +640,13 @@ mod tests {
             .expect("a well-formed call is not a violation");
         assert_eq!(rig.replies(), [(5, ReplyStatus::BadRequest)]);
         assert_eq!(rig.session.conn.drain().calls, Vec::<u32>::new(), "answered, so not open");
+    }
+
+    #[test]
+    fn client_supplied_text_is_made_safe_to_print() {
+        assert_eq!(printable("ios"), "ios");
+        assert_eq!(printable("\u{1b}[2Jwipe\n"), "?[2Jwipe?");
+        assert_eq!(printable(&"x".repeat(500)).len(), 64);
     }
 
     #[test]
