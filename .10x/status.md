@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,400 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,572 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 830 passed (20 files) |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -30,11 +30,22 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- keel-query (SPEC §9) — worktree `wt/keel-query` (agent).
 - keel-cli (init/build/dev/bindgen/doctor/adopt + packaging) — worktree `wt/keel-cli` (agent).
 - keel-signals review fixes (H1, M1-M3, lows) — worktree `wt/signals-fixes` (agent).
 
 ## Landed since takeover
+
+- **keel-query** (SPEC §9, ADR-018) merged after review: QueryClient (staleness, dedup,
+  retry w/ Rng jitter, gc), QueryHandle serving the bindgen-golden wire shape (ids
+  0x54209c7c/0x21d1b9e2/0x44cec2fa/0x4abb0ec8 locked), optimistic mutations with
+  single-transaction rollback, offline queue (schema-hash-guarded), debounced Kv
+  persistence + hydration. Runtime additions per ADR-018: DispatchLayer fall-through
+  (zero cost on static hits), transient objects skip snapshots; macros emit
+  Query/MutationRegistration. Facade: keel::query is a shim; ports re-exported;
+  CtxPorts + CtxQuery in the prelude. Cross-branch interaction fixed in integration:
+  transport's silent_for now exempts dev chatter (Log, hydration PortCall).
+  Known debt: persisted cache entries never gc'd from Kv; queued mutations lose their
+  .invalidates list across restart; interval_ms not in the v1 contract (no carrier).
 
 - **keel-transport** merged after review: WebSocket server for `keel dev` (Bridge Host,
   never blocks the core; seq assigned under the queue lock; overflow aborts the lagging
