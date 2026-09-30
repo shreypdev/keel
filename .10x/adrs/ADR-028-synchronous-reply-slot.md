@@ -90,11 +90,13 @@ reference instead of two; the panic guard's depth counter and last-report slot s
 
 ## Consequences
 
-* Measured on the Apple M5 Pro host (shared machine, best of three; see `bench/RESULTS.md`):
-  `dispatch/call_sync/add` 74.4 to 42.9 ns, the allocation-free `call_sync_with` variant 31.8 ns,
-  `boundary/call_sync/add` (C ABI, one `KeelBuf`) 79.3 to about 49 ns. An A15 core is slower than this
-  one, so the blueprint row (60 ns on iOS) is **closer, not closed**; the verdict belongs to the device
-  phase. The status 5 / 2 paths (allocating anyway) are unchanged.
+* Measured on the Apple M5 Pro host (shared machine; parent commit and new build measured back to back,
+  best of three rounds; see `bench/RESULTS.md`): `dispatch/call_sync/add` 73.8 to 43.9 ns, the
+  allocation-free `call_sync_with` variant 31.5 ns, `boundary/call_sync/add` (C ABI, one `KeelBuf`)
+  79.3 to 49.8 ns, `echo_record1k` 268 to 140 ns. An A15 core is slower than this one, so the blueprint
+  row (60 ns on iOS) is **within on the host and open on the device**: it passes there only if an A15
+  core runs the path within 1.37x of this core's time; the verdict belongs to the device phase. The
+  status 5 / 2 paths (allocating anyway) are unchanged.
 * `crates/keel-ffi/tests/sync_alloc.rs` counts allocations with a global allocator: zero per
   `call_sync_with`, one per `call_sync`, one per `keel_call_sync`, for generated methods (ok, typed
   error, free function).
