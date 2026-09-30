@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30 · **Author:** principal architect (design pass) · **Branch:** `wt/stress` ·
 **Status:** design, ready for implementation after the integrator's decisions in section 10 ·
-**Implements:** launch-v2 design section 5 · **Companion:** `.10x/adrs/ADR-030-frame-coalesced-delivery.md`
+**Implements:** launch-v2 design section 5 · **Companion:** `.10x/adrs/ADR-031-frame-coalesced-delivery.md`
 (proposed)
 
 The founder asked for "another, more aggressive benchmark that pushes the limit with very, very
@@ -28,7 +28,7 @@ for the integrator · 11 findings outside this piece.
   change-set is copied, decoded and applied on the main thread, into queues with no bound, and a keyed patch
   copies the whole list on TypeScript and Kotlin. In TS worker mode each change-set is its own `postMessage`.
   That is a runtime-model gap against the blueprint's own promise ("change-sets committed before the
-  platform's next main-thread hop are merged"), so it is written up as **ADR-030 (proposed)**:
+  platform's next main-thread hop are merged"), so it is written up as **ADR-031 (proposed)**:
   frame-aligned drains, a byte-level merge per signal, a bounded backlog, a batching worker; no wire, ABI or
   core change.
 * **The benchmark** is two layers in `bench/` (per-operation p50 rows in the existing gate, and sustained
@@ -79,7 +79,7 @@ every change-set is a main-thread task: **a firehose does mean on the order of 1
 second in the worst realistic cases, and always means 100 k per-change-set copies, decodes and applies per
 second, an O(list) copy per keyed patch on TS and Kotlin, and an unbounded backlog when the main thread falls
 behind or is suspended.** The fix is a frame-coalesced delivery mode in the platform mirrors:
-**ADR-030 (proposed)** chooses platform-side merge over core-side coalescing and producer backpressure, and
+**ADR-031 (proposed)** chooses platform-side merge over core-side coalescing and producer backpressure, and
 keeps every guarantee of ADR-019/020/023/027 on the wire.
 
 ## 3. What was measured, and how
@@ -123,10 +123,10 @@ the claim a demanding app team would otherwise ask about.
 | # | Scenario | What it proves | Metrics | Proposed CI budget | Measured now (host) |
 |---|---|---|---|---|---|
 | a | **Firehose**: one observed `Signal<u64>`, one transaction per update, sustained, core-driven (`burst`) and host-driven (`call_sync`) | each transaction costs O(1) in the core at 100x any UI rate; exactly one 37-byte change-set per transaction | txn/s, p50/p99/p999 per txn, bytes/txn, allocations/txn | row A `stress/firehose/txn_x1000` ≤ 420 us, `stress/firehose/call_set` ≤ 770 ns; B ≥ 1.1 M txn/s, p99 ≤ 1.1 us, p999 ≤ 3 us, 37 B/txn exact | 82 ns core-side (12.1 M/s); 5.70 M/s via `call_sync`, p50/p99/p999 166/209/292 ns; 37 B; 3 allocs |
-| a' | **Firehose on the web** (playground stress screen, wasm-main) | what the UI thread pays per change-set, before and after ADR-030 | change-sets/s, apply per frame p50/p99, ns per change-set, dropped frames | not CI-gated (device-class numbers); recorded in RESULTS.md and shown live | V8 mirror ~175 ns per change-set; worker mode +1.25 us per message |
+| a' | **Firehose on the web** (playground stress screen, wasm-main) | what the UI thread pays per change-set, before and after ADR-031 | change-sets/s, apply per frame p50/p99, ns per change-set, dropped frames | not CI-gated (device-class numbers); recorded in RESULTS.md and shown live | V8 mirror ~175 ns per change-set; worker mode +1.25 us per message |
 | b | **Keyed churn**: 10,000 rows, a fixed cycle of 10 ops (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one op per transaction, with a host-side list applying every patch | recorded list ops stay O(change) under sustained churn, and the mirror never desynchronises | ops/s, p50/p99/p999 per op (commit + deliver + host apply), bytes/op, final equality | A `stress/keyed_churn_10k/ops_x1000` ≤ 19 ms; B ≥ 56 k ops/s, p99 ≤ 24 us, p999 ≤ 71 us, bytes/op ≤ 1.1x measured, host list == core list | 280 k ops/s, 3.5/4.7/7.1 us, 61 B/op (random mix; re-measure with the fixed cycle) |
 | c | **Fan-out**: 100,000 observed signals in one store cell, 1% (1,000) dirty per transaction, and the same 1,000 dirty over 10,000 observed | commit time and bytes follow the dirty count, not the observed count | txn/s, p99 per txn, bytes/txn, time ratio 100 k / 10 k | A `stress/fanout/100k_observed_1k_dirty` ≤ 500 us, `.../10k_observed_1k_dirty` ≤ 180 us; B ≥ 2,500 txn/s, p99 ≤ 1.3 ms, 21,012 B exact, ratio ≤ 4, bytes equal | 36-103 us vs 26-36 us; 21,012 B both |
-| c' | **Fan-out across stores** (added): 1,000 stores, one dirty signal in each, one transaction | the per-store overhead when one transaction touches many stores (1,000 change-sets sharing a `txn_id`), the worst case for ADR-030's merge | txn/s, change-sets/txn | A `stress/fanout/1k_stores_1k_dirty` ≤ 890 us (re-baseline) | 115-177 us, 1,000 change-sets |
+| c' | **Fan-out across stores** (added): 1,000 stores, one dirty signal in each, one transaction | the per-store overhead when one transaction touches many stores (1,000 change-sets sharing a `txn_id`), the worst case for ADR-031's merge | txn/s, change-sets/txn | A `stress/fanout/1k_stores_1k_dirty` ≤ 890 us (re-baseline) | 115-177 us, 1,000 change-sets |
 | d | **Stream backpressure**: an always-ready producer (so its rate is whatever the core polls, far above 1 M items/s), a consumer granting 16 credits per round; then a consumer granting 100,000 | Keel buffers at most one item beyond credit, so memory is bounded whatever the producer does; the item path is fast when credit allows | max(produced − delivered), RSS growth, items/s | A `stress/stream/items_x1000` ≤ 190 us; B max ahead ≤ 1 exact, RSS growth ≤ 1%, ≥ 5.7 M items/s | 1; +0 KB; 29 M items/s |
 | e | **Concurrent completions**: 8 host threads answering async port calls, a `keel-core` thread, a "main" thread draining change-sets at 60 Hz, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention: nothing lost, nothing reordered | completions/s, call→reply p50/p99, lost, out-of-order `txn_id`s, final sum | B ≥ 56 k/s, p99 ≤ 5.4 ms, lost = 0, out-of-order = 0, sum exact | 280 k/s, 155 us / 1.08 ms, 0, 0 |
 | f | **Soak**: the mixed, paced load of a busy app (firehose 100 k txn/s, churn 20 k ops/s, completions 50 k/s, a stream at 1 M items/s, a 60 Hz drain) for 60 s locally, 10 s in CI | no leak, no drift | RSS growth after warm-up, p99 per 1 s window, achieved rates | RSS ≤ +1% (or ≤ 64 KiB) from the first post-warm-up sample to the last; worst window p99 ≤ 3x the median window p99; invariants of a, b, e | 12 s probe: 0.0% after the first second |
@@ -141,7 +141,7 @@ Dropped or reshaped, with the reason:
   then waits for credit, `runtime.rs:2351-2384`; credit accounting 255-277), so a producer's rate is whatever
   the core polls. The claim worth proving is "Keel never holds more than one item beyond credit", with a
   producer that is always ready (faster than any push source). A push source inside an app (a channel fed by
-  a port) is the app's buffer and must be bounded by the app; the docs page for ADR-030 says so. The soak runs
+  a port) is the app's buffer and must be bounded by the app; the docs page for ADR-031 says so. The soak runs
   a stream at 1 M items/s with a consumer that keeps up.
 * The web side (a') is not CI-gated: a shared runner's headless Chromium says nothing about a user's device.
 
@@ -461,7 +461,7 @@ Two steps after the existing one, same job:
   proves, measured on the reference host from `--seconds 60` / `KEEL_STRESS_SECONDS=10`, CI gate, verdict),
   the in-browser numbers from the stress screen with the browser, device and date, and a short honesty
   paragraph: host numbers are the core side; the platform apply is measured in the browser and, for iOS and
-  Android, in the device phase; what ADR-030 changes once implemented (before and after on the same screen).
+  Android, in the device phase; what ADR-031 changes once implemented (before and after on the same screen).
   "The CI gate" section mentions the second test and the soak.
 * `site/data/bench.json` is owned by site-v2 (it lands first). Stress adds rows to its "harsh" group in
   whatever shape site-v2 chose; the proposed row, which `KEEL_STRESS_JSON` and `soak --json` emit:
@@ -491,7 +491,7 @@ Two steps after the existing one, same job:
 
 Decision: the updates are **generated in the core by a task paced by the `Timer` port**, not by a host loop
 calling methods. A host loop would deliver every change-set inside a call, before its reply, which is the
-read-your-writes path (ADR-030 decision 2) and not the firehose; real high-frequency data (a socket, a
+read-your-writes path (ADR-031 decision 2) and not the firehose; real high-frequency data (a socket, a
 sensor, a simulation) arrives in the core on its own. A synchronous `burst` method also exists for the Rust
 benches, the unit tests and contract scenario S18.
 
@@ -580,7 +580,7 @@ What it shows:
   `embed=`).
 * Six tiles, refreshed every 500 ms: **Generated** (transactions/s: Δ`generated` / Δt), **Received**
   (change-sets/s: Δ`KeelCore.shared.mirror.changeSets` / Δt), **Applied** (entries/s, from the drain listener;
-  equal to received entries until ADR-030 merges), **Apply per frame** (p50 / p99 of drain durations, us),
+  equal to received entries until ADR-031 merges), **Apply per frame** (p50 / p99 of drain durations, us),
   **Apply per change-set** (Σ drain time / Σ change-sets, ns: the average survives timer quantisation),
   **Dropped frames** (last 5 s / since start) and the longest frame (ms).
 * The visual: Firehose, `value` as a large tabular number and a 60-point sparkline of received/s; Churn, the
@@ -612,7 +612,7 @@ interface KeelStats {
   applyP50Us: number;                  // site-v2 base: per drain (per change-set when one drain = one change-set)
   applyP99Us: number;                  // site-v2 base
   generatedPerSec?: number;            // stress: transactions the core committed
-  entriesAppliedPerSec?: number;       // stress: after merging (ADR-030)
+  entriesAppliedPerSec?: number;       // stress: after merging (ADR-031)
   drainsPerSec?: number;
   applyNsPerChangeSet?: number;        // Σ drain time / Σ change-sets over the window
   droppedFrames?: number;              // in this window
@@ -631,7 +631,7 @@ interface KeelStats {
 ### 8.3 iOS and Android (device phase, not in this piece)
 
 The same `Stress` store; `StressView.swift` and `StressScreen.kt` with the same tiles; apply measured by the
-Swift/Kotlin drain listeners of ADR-030 decision 5 with `os_signpost` / `FrameMetrics` for frames. Numbers
+Swift/Kotlin drain listeners of ADR-031 decision 5 with `os_signpost` / `FrameMetrics` for frames. Numbers
 recorded on the blueprint's devices only (RESULTS.md's rule: no simulator numbers).
 
 ## 9. Implementation brief
@@ -641,7 +641,7 @@ recorded on the blueprint's devices only (RESULTS.md's rule: no simulator number
 * **S1 `stress` (this branch, implementable now)**: sections 7 and 8 with the TS drain listener (D2). No ADR
   needed: no wire, ABI, threading or generated public shape changes (the playground's own bindings grow a
   store, which is app code).
-* **S2 `coalesce` (after ADR-030 is accepted)**: ADR-030 in TS first (it has the worst case, worker mode,
+* **S2 `coalesce` (after ADR-031 is accepted)**: ADR-031 in TS first (it has the worst case, worker mode,
   and the live demo), then Kotlin, then Swift; contract scenario S18; the stress screen re-measured before and
   after, both recorded. Decision 6 of the ADR may be a later S3.
 
@@ -756,16 +756,16 @@ cargo test --workspace
 
 ## 10. Decisions for the integrator
 
-* **D1. Accept ADR-030's direction?** Platform-side, frame-aligned merge with a bounded backlog (recommended)
+* **D1. Accept ADR-031's direction?** Platform-side, frame-aligned merge with a bounded backlog (recommended)
   versus core-side coalescing (rejected in the ADR, kept as the fallback if device numbers show the FFI copy
   dominating). S2 cannot start before this.
 * **D2. Let S1 add `Mirror.addDrainListener` and three counters to the TS runtime** (additive public API,
-  no behaviour change, outside S1's `bench/**` + playground ownership). Recommended: yes, it is ADR-030
+  no behaviour change, outside S1's `bench/**` + playground ownership). Recommended: yes, it is ADR-031
   decision 5 pulled forward, and it is what makes the live numbers honest. Fallback: the view wraps
   `mirror.flush`.
 * **D3. Where do the landing page's live numbers come from before S2?** Recommended: ship S1's screen
   against today's runtime (wasm-main batches per timer tick already, so firehose at 100 k/s is presentable;
-  keyed churn at 1 M/s drops frames today) and swap the numbers when S2 lands, saying "before/after ADR-030"
+  keyed churn at 1 M/s drops frames today) and swap the numbers when S2 lands, saying "before/after ADR-031"
   in RESULTS.md. Alternative: hold the stress screen's landing-page link until S2.
 * **D4. Allocation gate in `keel-ffi`** (`crates/keel-ffi/tests/commit_alloc.rs`: at most 3 allocations per
   observed single-signal commit, 0 unobserved) and a follow-up to make it 0 (section 11). Outside `bench/**`.
@@ -782,10 +782,10 @@ cargo test --workspace
    call on this OS. Reusing per-thread vectors (as `take_buffer` already does for the payload,
    `txn.rs:360-374`) is internal to `keel-signals` (no ADR); ADR-028 took 40% off the sync call by removing
    allocations the same way, so a similar share of the 82 ns is likely. A follow-up task, gated by D4's test.
-2. **Kotlin's patch apply copies the list per change-set** and TS's does too; ADR-030 fixes both through the
+2. **Kotlin's patch apply copies the list per change-set** and TS's does too; ADR-031 fixes both through the
    merge, but even one patch per frame on a 100,000-row list is a 100,000-element copy per frame on those two
    platforms. An in-place apply for lists the mirror created in the same drain is possible later (TS: safe
    while notifications are deferred to the end of the batch), not needed for the budgets here.
 3. **Cross-store tearing**: a transaction that touches several stores reaches the platform as several
-   change-sets, and a drain can fall between them (today and after ADR-030). Worth a line in SPEC 11; a fix
+   change-sets, and a drain can fall between them (today and after ADR-031). Worth a line in SPEC 11; a fix
    would need the mirror to know a transaction's store count (a wire change), not proposed.

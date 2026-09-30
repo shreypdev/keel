@@ -14,5 +14,5 @@ takeover; treat these notes as [DISCOVERED] context, confirmed by reading the co
 - Lost ADRs: ADR-014 (Kv foreign port), ADR-017 (panic poisoning, no CoW overlay) are
   referenced by the SPEC; re-write them if those decisions are reopened.
 - [stress-bench](stress-bench.md) (2026-09-30): harsh-conditions benchmark design; the core is
-  not the bottleneck, platform delivery does not bound work or memory; ADR-030 (frame-coalesced
+  not the bottleneck, platform delivery does not bound work or memory; ADR-031 (frame-coalesced
   delivery) proposed.

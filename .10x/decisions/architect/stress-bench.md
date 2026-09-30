@@ -1,7 +1,7 @@
 # Architect: the harsh-conditions benchmark (branch `wt/stress`, design only)
 
 Full design and implementation brief: `.10x/specs/2026-09-30-stress-bench-design.md`. Draft ADR:
-`.10x/adrs/ADR-030-frame-coalesced-delivery.md` (proposed).
+`.10x/adrs/ADR-031-frame-coalesced-delivery.md` (proposed).
 
 ## Decisions
 
@@ -23,7 +23,7 @@ Full design and implementation brief: `.10x/specs/2026-09-30-stress-bench-design
   the firehose. It reports through the site-v2 `keel-stats` message with optional extra fields.
 * **Frame-coalesced delivery needs an ADR.** Nothing coalesces across transactions between the core and the
   UI; the platforms coalesce the hop, not the work, with unbounded queues, an O(list) copy per keyed patch
-  (TS, Kotlin) and one `postMessage` per change-set in TS worker mode. ADR-030 proposes a platform-side,
+  (TS, Kotlin) and one `postMessage` per change-set in TS worker mode. ADR-031 proposes a platform-side,
   frame-aligned, byte-level merge per signal with a bounded backlog and read-your-writes on replies; it
   rejects core-side coalescing (reopens ADR-019/020/023/027, adds ABI, loses per-transaction change-sets)
   and producer backpressure (state is last-writer-wins; blocking the committer stalls the core).
@@ -33,11 +33,11 @@ Full design and implementation brief: `.10x/specs/2026-09-30-stress-bench-design
 The founder's question is "does it survive very high-frequency data". The honest answer from the code is
 "the core does, the platform delivery path does not yet bound its work or memory", and a benchmark that only
 timed the core would have hidden that. The design makes the gap measurable (the stress screen, before and
-after), fixes it with the smallest change that keeps every wire and ordering guarantee (ADR-030), and gates
+after), fixes it with the smallest change that keeps every wire and ordering guarantee (ADR-031), and gates
 the core side in CI so it stays fast.
 
 ## Open for the integrator
 
-D1 accept ADR-030's direction; D2 let S1 add `Mirror.addDrainListener` to the TS runtime; D3 landing-page
+D1 accept ADR-031's direction; D2 let S1 add `Mirror.addDrainListener` to the TS runtime; D3 landing-page
 numbers before or after S2; D4 an allocation gate in `keel-ffi` (3 allocations per observed commit today);
 D5 about a minute more CI; D6 split S1 into bench and playground halves. Details in section 10 of the spec.

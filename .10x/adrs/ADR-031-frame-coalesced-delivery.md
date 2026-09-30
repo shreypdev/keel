@@ -1,4 +1,4 @@
-# ADR-030: the platform mirror applies change-sets once per frame, merged, with a bounded backlog
+# ADR-031: the platform mirror applies change-sets once per frame, merged, with a bounded backlog
 
 Status: **proposed** (draft, 2026-09-30, from the harsh-conditions benchmark design,
 `.10x/specs/2026-09-30-stress-bench-design.md`). Not accepted, not implemented. Touches SPEC 11 (the
