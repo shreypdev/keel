@@ -7,16 +7,16 @@
 //! 64-bit libraries (NDK r27 and `cargo-ndk` 4 do it by default; the check says so if a toolchain
 //! does not).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::binary::{elf_is_64, elf_min_load_alignment};
 use crate::error::{CliError, Code, Result};
-use crate::fsutil::{copy_file, remove_dir_all, size_of};
+use crate::fsutil::{copy_file, human_size, remove_dir_all, size_of};
 use crate::session::Session;
 use crate::toolchain::{Concern, ndk_major};
 
-use super::Artifact;
+use super::{Artifact, gradle};
 
 /// The Rust target of an Android ABI.
 #[must_use]
@@ -150,12 +150,90 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             note,
         });
     }
+    let root = &session.project.root;
+    if let Some(message) = gradle::reconcile(root, &jni_libs, &cfg.abis)?.message(root, &jni_libs) {
+        session.ui.warn(&message);
+    }
     Ok(artifacts)
+}
+
+/// The size of the release library an earlier `keel build --platform android --release` left in
+/// Cargo's target directory for `abi`, if there is one.
+fn earlier_release_size(target_dir: &Path, abi: &str) -> Option<u64> {
+    let library = target_dir
+        .join(triple_of(abi))
+        .join("release/libkeel_core.so");
+    std::fs::metadata(library).ok().map(|m| m.len())
+}
+
+/// The hint printed after a debug Android build: what a debug core weighs and what packaging
+/// with `--release` would change.
+///
+/// `debug` is the largest library of the build and `abi` its ABI; `target_dir` is where Cargo put
+/// an earlier release build, whose size makes the hint exact.
+#[must_use]
+pub fn debug_size_hint(target_dir: &Path, debug: u64, abi: &str) -> String {
+    let release = earlier_release_size(target_dir, abi).filter(|size| *size > 0);
+    let how = "keel build --platform android --release";
+    match release {
+        Some(release) => format!(
+            "this Android core is a debug build ({} per ABI, fine for the dev loop); a release build is {}, {}x smaller. Package with `{how}`",
+            human_size(debug),
+            human_size(release),
+            debug / release
+        ),
+        None => format!(
+            "this Android core is a debug build ({} per ABI, fine for the dev loop); a release build is typically 20x or more smaller. Package with `{how}`",
+            human_size(debug)
+        ),
+    }
+}
+
+/// The hint for a debug build, from what `artifacts` holds; `None` when nothing Android was built.
+pub(crate) fn hint(session: &Session<'_>, artifacts: &[Artifact]) -> Option<String> {
+    let largest = artifacts
+        .iter()
+        .filter(|a| a.label.starts_with("android "))
+        .max_by_key(|a| a.size)?;
+    let abi = largest.path.parent()?.file_name()?.to_str()?;
+    Some(debug_size_hint(
+        &session.target_dir().ok()?,
+        largest.size,
+        abi,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_debug_hint_names_the_release_command_and_the_saving() {
+        // No release build to measure: a rule of thumb.
+        let none = debug_size_hint(Path::new("/does/not/exist"), 42_400_000, "arm64-v8a");
+        assert!(
+            none.contains("debug build")
+                && none.contains("42.4 MB per ABI")
+                && none.contains("20x or more smaller")
+                && none.contains("`keel build --platform android --release`"),
+            "{none}"
+        );
+        assert!(!none.contains('\n'), "one line");
+
+        // With the release library of an earlier build at hand: the real numbers.
+        let target = crate::fsutil::unique_temp_dir("android-hint");
+        let release = target.join("aarch64-linux-android/release");
+        std::fs::create_dir_all(&release).unwrap();
+        std::fs::write(release.join("libkeel_core.so"), vec![0_u8; 1_500_000]).unwrap();
+        let known = debug_size_hint(&target, 42_400_000, "arm64-v8a");
+        assert!(
+            known.contains("a release build is 1.5 MB, 28x smaller"),
+            "{known}"
+        );
+        // Another ABI has no release library of its own.
+        assert!(debug_size_hint(&target, 42_300_000, "x86_64").contains("typically"));
+        let _ = std::fs::remove_dir_all(target);
+    }
 
     #[test]
     fn abis_map_to_rust_targets() {

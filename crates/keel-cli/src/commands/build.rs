@@ -28,6 +28,9 @@ pub fn run(env: &Env<'_>, args: &BuildArgs) -> Result<()> {
     env.ui.line(&env.ui.bold_out("Built:"));
     env.ui
         .line(builds::summary(&session.project.root, &artifacts).trim_end());
+    for hint in builds::hints(&session, &options, &artifacts) {
+        env.ui.hint(&hint);
+    }
     Ok(())
 }
 

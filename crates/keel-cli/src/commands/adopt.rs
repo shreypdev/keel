@@ -446,7 +446,7 @@ impl Steps<'_> {
             format!("sourceSets {{ main {{ jniLibs.srcDir '{jni}' }} }}")
         };
         text.push_str(&format!(
-            "2. **Depend on it and package the native libraries** in the app module's `{build}` (inside `android {{ }}` for the\n   source set):\n\n   ```\n   dependencies {{\n   {deps}\n   }}\n   android {{\n       {jni_line}\n   }}\n   ```\n\n   `keel build --platform android` writes `libkeel_core.so` for the ABIs in keel.toml (arm64-v8a, x86_64) below `build/android/jniLibs`.\n   The app needs `minSdk` {} or higher and Kotlin/Java 11 bytecode.\n",
+            "2. **Depend on it and package the native libraries** in the app module's `{build}` (inside `android {{ }}` for the\n   source set):\n\n   ```\n   dependencies {{\n   {deps}\n   }}\n   android {{\n       {jni_line}\n   }}\n   ```\n\n   `keel build --platform android --release` writes `libkeel_core.so` for the ABIs in keel.toml (arm64-v8a, x86_64) below\n   `build/android/jniLibs`; use `--release` when you package (a debug core is tens of megabytes per ABI).\n   The app needs `minSdk` {} or higher and Kotlin/Java 11 bytecode.\n",
             self.config.android.min_sdk
         ));
         text.push_str(&format!(

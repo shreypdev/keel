@@ -52,8 +52,9 @@ Then run an app:
 * iOS: `keel build -C examples/playground --platform ios`, then open `ios/PlaygroundApp.xcodeproj`
   (`KEEL_LINK_CORE=1` in the environment of Xcode, see the project settings), or run `ios/smoke.sh` to
   build, launch every tab on the simulator, screenshot it and run the XCUITest tour.
-* Android: `keel build -C examples/playground --platform android`, then `cd android && ./gradlew
-  :app:installDebug` (`android/README.md` has the `adb` commands).
+* Android: `keel build -C examples/playground --platform android --release`, then `cd android && ./gradlew
+  :app:installDebug` (`android/README.md` has the `adb` commands). `--release` is what you package: a debug
+  core is 42 MB per ABI.
 
 The apps have no server: each supplies an in-memory `Http` adapter ("a server in a few lines of Swift, Kotlin
 or TypeScript") that answers for `https://playground.keel.test`, and an Offline switch on the Remote tab makes

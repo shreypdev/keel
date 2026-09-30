@@ -181,6 +181,74 @@ fn android_builds_a_16kb_aligned_library_per_abi() {
 }
 
 #[test]
+fn a_debug_android_build_hints_at_release_and_lands_where_the_gradle_app_looks() {
+    if skipped("KEEL_TEST_ANDROID") && skipped("KEEL_TEST_ANDROID_APP") {
+        return;
+    }
+    assert!(
+        has_tool("cargo-ndk", "--version"),
+        "cargo install cargo-ndk"
+    );
+    assert!(
+        has_rust_target("aarch64-linux-android") && has_rust_target("x86_64-linux-android"),
+        "rustup target add aarch64-linux-android x86_64-linux-android"
+    );
+    let project = init_project("androidwiring", "android");
+
+    // A debug build (the default): it says what a debug core weighs and what to package with, and
+    // the template's jniLibs path is where the build wrote the libraries, so nothing else is said.
+    let out = run_ok(project.keel().args(["build", "--platform", "android"]));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("hint: this Android core is a debug build")
+            && stderr.contains("`keel build --platform android --release`"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("warning:") && !stderr.contains("UnsatisfiedLinkError"),
+        "the generated Gradle app packages build/android/jniLibs:\n{stderr}"
+    );
+
+    // The Gradle path drifts (relative to android/ instead of android/app/): the libraries are
+    // put where the app looks, and the warning names the line to fix.
+    let script = project.root.join("android/app/build.gradle.kts");
+    let text = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(
+        &script,
+        text.replace(
+            "\"../../build/android/jniLibs\"",
+            "\"../build/android/jniLibs\"",
+        ),
+    )
+    .unwrap();
+    let out = run_ok(project.keel().args(["build", "--platform", "android"]));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("copied the libraries there too")
+            && stderr.contains("jniLibs.srcDir(\"../../build/android/jniLibs\")"),
+        "{stderr}"
+    );
+    for abi in ["arm64-v8a", "x86_64"] {
+        let copy = project
+            .root
+            .join("android/build/android/jniLibs")
+            .join(abi)
+            .join("libkeel_core.so");
+        assert!(copy.is_file(), "{abi}: nothing at {}", copy.display());
+        assert_eq!(
+            size(&copy),
+            size(
+                &project
+                    .root
+                    .join("build/android/jniLibs")
+                    .join(abi)
+                    .join("libkeel_core.so")
+            )
+        );
+    }
+}
+
+#[test]
 fn the_web_app_shell_type_checks_and_bundles() {
     if skipped("KEEL_TEST_WEB_APP") {
         return;

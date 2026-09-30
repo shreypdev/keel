@@ -10,6 +10,7 @@
 //! Every target prints the size of what it made, next to the budget of the blueprint.
 
 pub(crate) mod android;
+pub(crate) mod gradle;
 pub(crate) mod host;
 pub(crate) mod ios;
 pub(crate) mod web;
@@ -127,6 +128,17 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
         all.extend(produced);
     }
     Ok(all)
+}
+
+/// Advice after a build, one line each: a debug Android core is tens of megabytes per ABI, and
+/// `--release` is what gets packaged.
+#[must_use]
+pub fn hints(session: &Session<'_>, options: &Options, artifacts: &[Artifact]) -> Vec<String> {
+    let mut out = Vec::new();
+    if !options.release && options.targets.contains(&Target::Android) {
+        out.extend(android::hint(session, artifacts));
+    }
+    out
 }
 
 /// The summary table of a build: one row per artifact, with its budget where the blueprint has one.

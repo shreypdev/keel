@@ -16,11 +16,16 @@ store, so the state (which lives in the core) survives switching tabs and rotati
 ## Build and run
 
 ```sh
-keel build -C .. --platform android     # ../build/android/jniLibs/<abi>/libkeel_core.so
-./gradlew :app:assembleDebug            # app/build/outputs/apk/debug/app-debug.apk
+keel build -C .. --platform android --release   # ../build/android/jniLibs/<abi>/libkeel_core.so (1.5 MB each)
+./gradlew :app:assembleDebug                    # app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n dev.keel.playground/.MainActivity --es tab remote   # todos | counter | biglist | remote
 ```
+
+`--release` is the packaging path: without it `keel build` makes a debug core, 42 MB per ABI, which is right for
+the dev loop and makes a 96 MB APK (13 MB with the release core). `app/build.gradle.kts` names the directory with
+a path relative to the module (`../../build/android/jniLibs`); after every Android build `keel` checks that
+line and says so if the app would not package what it just built.
 
 The Gradle project includes the Kotlin runtime from this checkout (`includeBuild`) and the generated bindings
 as the `:core-bindings` module, so a change to either shows up in the next build.
