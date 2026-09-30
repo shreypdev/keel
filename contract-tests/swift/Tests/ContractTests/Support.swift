@@ -1,5 +1,5 @@
 import Foundation
-import KeelRuntime
+@testable import KeelRuntime
 
 /// Why a scenario failed: the first check that did not hold.
 struct ScenarioFailure: Error, CustomStringConvertible {
@@ -157,4 +157,77 @@ func success<Value, Failure: Error>(
     case .failure(let error):
         throw ScenarioFailure(description: "\(what()): failed with \(error) (\(file):\(line))")
     }
+}
+
+// MARK: - Events and recording
+
+extension KeelCore {
+    /// Emits `Connectivity.changed(online, kind)`, the way the platform's monitor would.
+    func emitConnectivity(online: Bool, kind: PortNetKind) {
+        event(
+            port: StandardPorts.Connectivity.portId,
+            method: StandardPorts.Connectivity.changed,
+            payload: ConnectivityAdapter.encodeChanged(online: online, kind: kind)
+        )
+    }
+}
+
+/// Records every distinct consecutive value of something a store shows, by reading it every
+/// millisecond on the main actor (the stores are `@Observable`; the scenarios only need the values
+/// that stay on screen long enough to matter, such as the optimistic placeholder held for 50 ms).
+@MainActor
+final class ChangeRecorder<Value: Equatable & Sendable> {
+    private var recorded: [Value]
+    private let read: @MainActor () -> Value
+    private var poller: Task<Void, Never>?
+
+    /// Starts recording; the first value is what `read` returns now.
+    init(_ read: @escaping @MainActor () -> Value) {
+        self.read = read
+        recorded = [read()]
+        poller = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.sample()
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+        }
+    }
+
+    /// The values seen so far, oldest first, up to and including the one shown right now.
+    var values: [Value] {
+        sample()
+        return recorded
+    }
+
+    /// Reads the value once and records it if it differs from the last one.
+    private func sample() {
+        let current = read()
+        if recorded.last != current {
+            recorded.append(current)
+        }
+    }
+
+    /// Takes a last reading and stops polling.
+    func stop() {
+        sample()
+        poller?.cancel()
+        poller = nil
+    }
+
+    deinit {
+        poller?.cancel()
+    }
+}
+
+/// The value of an optional, or a scenario failure saying what was missing.
+func require<Value>(
+    _ value: Value?,
+    _ what: @autoclosure () -> String,
+    file: StaticString = #fileID,
+    line: UInt = #line
+) throws -> Value {
+    guard let value = value else {
+        throw ScenarioFailure(description: "missing: \(what()) (\(file):\(line))")
+    }
+    return value
 }
