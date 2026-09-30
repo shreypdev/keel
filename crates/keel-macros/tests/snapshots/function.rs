@@ -47,7 +47,7 @@ fn __keel_dispatch_fn_greet(
         );
     }
     let __ctx = __rt.ctx();
-    __keel_out({
+    {
         let __fut = async move {
             match greet(&__ctx, __keel_a0).await {
                 ::core::result::Result::Ok(__v) => {
@@ -65,8 +65,8 @@ fn __keel_dispatch_fn_greet(
             }
         };
         __keel_assert_send(&__fut);
-        ::keel::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut))
-    })
+        __keel_out(::keel::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)))
+    }
 }
 #[allow(non_upper_case_globals)]
 static __KEEL_META_fn_greet: ::keel::meta::FunctionMeta = ::keel::meta::FunctionMeta {

@@ -168,17 +168,13 @@ fn __keel_dispatch_Calculator(
                 );
             }
             let __ctx = __rt.ctx();
-            __keel_out({
+            {
                 let __value = Calculator::new(&__ctx, __keel_a0);
                 {
                     let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
-                    ::keel::runtime::DispatchResult::Sync(
-                        ::core::result::Result::Ok(
-                            ::keel::wire::Encode::encode_to_vec(&__handle),
-                        ),
-                    )
+                    __rt.sync_ok(&__handle, ::keel::wire::Encode::encode)
                 }
-            })
+            }
         }
         __KEEL_ID_open => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -202,26 +198,15 @@ fn __keel_dispatch_Calculator(
                     ),
                 );
             }
-            __keel_out(
-                match Calculator::open(__keel_a0) {
-                    ::core::result::Result::Ok(__value) => {
-                        let __handle = __rt
-                            .insert_object(::std::sync::Arc::new(__value));
-                        ::keel::runtime::DispatchResult::Sync(
-                            ::core::result::Result::Ok(
-                                ::keel::wire::Encode::encode_to_vec(&__handle),
-                            ),
-                        )
-                    }
-                    ::core::result::Result::Err(__e) => {
-                        ::keel::runtime::DispatchResult::Sync(
-                            ::core::result::Result::Err(
-                                ::keel::wire::Encode::encode_to_vec(&__e),
-                            ),
-                        )
-                    }
-                },
-            )
+            match Calculator::open(__keel_a0) {
+                ::core::result::Result::Ok(__value) => {
+                    let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
+                    __rt.sync_ok(&__handle, ::keel::wire::Encode::encode)
+                }
+                ::core::result::Result::Err(__e) => {
+                    __rt.sync_err(&__e, ::keel::wire::Encode::encode)
+                }
+            }
         }
         __KEEL_ID_add => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -262,14 +247,10 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            __keel_out({
+            {
                 let __out = Calculator::add(&*__obj, __keel_a0, __keel_a1);
-                ::keel::runtime::DispatchResult::Sync(
-                    ::core::result::Result::Ok(
-                        ::keel::wire::Encode::encode_to_vec(&__out),
-                    ),
-                )
-            })
+                __rt.sync_ok(&__out, ::keel::wire::Encode::encode)
+            }
         }
         __KEEL_ID_divide => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -311,24 +292,14 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            __keel_out(
-                match Calculator::divide(&*__obj, __keel_a0, __keel_a1) {
-                    ::core::result::Result::Ok(__v) => {
-                        ::keel::runtime::DispatchResult::Sync(
-                            ::core::result::Result::Ok(
-                                ::keel::wire::Encode::encode_to_vec(&__v),
-                            ),
-                        )
-                    }
-                    ::core::result::Result::Err(__e) => {
-                        ::keel::runtime::DispatchResult::Sync(
-                            ::core::result::Result::Err(
-                                ::keel::wire::Encode::encode_to_vec(&__e),
-                            ),
-                        )
-                    }
-                },
-            )
+            match Calculator::divide(&*__obj, __keel_a0, __keel_a1) {
+                ::core::result::Result::Ok(__v) => {
+                    __rt.sync_ok(&__v, ::keel::wire::Encode::encode)
+                }
+                ::core::result::Result::Err(__e) => {
+                    __rt.sync_err(&__e, ::keel::wire::Encode::encode)
+                }
+            }
         }
         __KEEL_ID_slow_add => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -361,7 +332,7 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            __keel_out({
+            {
                 let __fut = async move {
                     let __out = Calculator::slow_add(&*__obj, __keel_a0).await;
                     ::core::result::Result::<
@@ -370,8 +341,10 @@ fn __keel_dispatch_Calculator(
                     >::Ok(::keel::wire::Encode::encode_to_vec(&__out))
                 };
                 __keel_assert_send(&__fut);
-                ::keel::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut))
-            })
+                __keel_out(
+                    ::keel::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)),
+                )
+            }
         }
         __KEEL_ID_slow_divide => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -415,7 +388,7 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            __keel_out({
+            {
                 let __fut = async move {
                     match Calculator::slow_divide(&*__obj, __keel_a0, __keel_a1).await {
                         ::core::result::Result::Ok(__v) => {
@@ -433,8 +406,10 @@ fn __keel_dispatch_Calculator(
                     }
                 };
                 __keel_assert_send(&__fut);
-                ::keel::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut))
-            })
+                __keel_out(
+                    ::keel::runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)),
+                )
+            }
         }
         __KEEL_ID_counts => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -465,13 +440,17 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            __keel_out({
+            {
                 let __stream = __KeelMap(
                     ::std::boxed::Box::pin(Calculator::counts(&*__obj, __keel_a0)),
                 );
                 __keel_assert_send(&__stream);
-                ::keel::runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream))
-            })
+                __keel_out(
+                    ::keel::runtime::DispatchResult::Stream(
+                        ::std::boxed::Box::pin(__stream),
+                    ),
+                )
+            }
         }
         _ => __keel_unknown(),
     }
