@@ -94,7 +94,13 @@ public object KeelNative {
          */
         public fun onPortCall(portId: Int, methodId: Int, portCallId: Int, args: ByteBuffer): Int
 
-        /** The `PortReply` payload (SPEC 3.6) of the port call that [onPortCall] just answered with `0`. */
+        /**
+         * The `PortReply` payload (SPEC 3.6) of the port call that [onPortCall] just answered with `0`.
+         *
+         * The core calls it on the same thread, right after [onPortCall] returned `0`, while callbacks run
+         * concurrently on other threads: hand the reply over through thread-local state (as `InprocTransport`
+         * does), never through a field that all threads share.
+         */
         public fun portSyncReply(): ByteArray
     }
 

@@ -483,7 +483,7 @@ static native byte[] snapshot();
 static native int    restore(byte[] snapshot);
 static native String statsJson();
 ```
-`ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`.
+`ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`. The JNI callbacks follow the host contract of §6. In particular a synchronous port is a two-call protocol with hidden per-thread state: the shim calls `portSyncReply()` on the same thread, right after `onPortCall` returned 0, and callbacks run concurrently, so an implementation must carry the reply in thread-local state (the shipped `InprocTransport` does, in a `ThreadLocal`), never in a shared field.
 
 ### 6.2 Swift
 
@@ -527,6 +527,8 @@ now_ms() -> f64                 // Date.now()
 random(ptr, len)                // crypto.getRandomValues into memory
 ```
 The Clock/Rng/Log ports have built-in wasm bindings over these imports so a web app needs no adapter code for them. All ports remain overridable.
+
+`keel_alloc(len)` never returns 0: it traps (after a level-5 `log` record) when memory is exhausted and when `len` is a size no allocation can have (`>= 0x7fff_fff9` on wasm32); a host that does not check the result would otherwise write at linear address 0, the bottom of the shadow stack (the TypeScript runtime also refuses a 0). `port_call` returning 0 means the host called `keel_port_reply` for **that** `port_call_id` before returning; a reply for some other pending call does not count, and the call then fails instead of staying pending.
 
 Build: `--release`, `-C panic=abort`, `-C opt-level=z` or `s` (measured), `-C lto=fat`, `-Z`-free. `wasm-opt -Oz` when available. Panics call the `log` import with level 5 (fatal) before trapping so the host can restart from snapshot.
 
