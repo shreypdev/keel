@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,926 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,973 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 833 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -32,10 +32,21 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 - O(change) keyed-list ops (ADR-027) — `wt/keyed-ops` (bench found diff O(list), 27x miss).
 - No-alloc sync dispatch (ADR-028) — `wt/fast-dispatch` (bench: 60% allocator, 1.3x miss).
-- playground: core + 3 apps + §14 contract scenarios ×3 — `wt/playground` (agent).
-- re-reviews in flight: keel-runtime fixes; adversarial review of keel-ffi.
+- query-rollback fix (playground finding 2) — `wt/query-rollback`.
+- platform polish (Swift stream backpressure, hash-check order, TS mirror strand,
+  Sendable restatement, react/vue/svelte/solid adapters) — `wt/platform-polish`.
+- cli polish (install name, jniLibs, target reuse, noise) — `wt/cli-polish`.
 
 ## Landed since takeover
+
+- **playground merged** — the end-to-end proof. One core (todos, counter, 10k keyed list,
+  remote query/mutations, lab, bench hooks; 47 tests), React/SwiftUI/Compose apps RUN on
+  Chrome (48 ms interactive, 62 fps under 10k-list updates), the iPhone 17 Pro simulator
+  (XCUITests 5/5) and the `keel` AVD, with proof screenshots in examples/playground/.proof.
+  **All 51 contract cells pass (S01-S17 × 3 platforms), re-verified on the merged tree.**
+  Found 8 defect groups (recorded in .10x/decisions/sde/playground.md); fixes in flight.
+  Playground bindings regenerated post-macros; env.sh no longer prefers a non-executable
+  portable toolchain.
 
 - **bench harness merged**: 45 gated ops sharing one workload source with the criterion
   benches; budgets.toml at 5x quiet-host medians; bench.yml CI gate; RESULTS.md v1 table.
