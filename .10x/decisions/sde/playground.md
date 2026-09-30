@@ -83,3 +83,6 @@ iOS release 7.8 MB per slice (app bundle 4.7 MB after strip); debug iOS xcframew
 Sync call (wasm-main, node) about 1.4 us; Swift C ABI sync call about 2.1 us through the generated binding;
 web startup to interactive 48 ms; 10 updates/s streaming on the 10k list: 62 frames per second, longest gap
 16.8 ms. `bench_touch_signals(100)` observed, core side only: 2.5 us.
+
+
+Update (integrator): finding 2 (rollback removes a later mutation's optimistic placeholder) is FIXED on main-line — keel-query stamps + per-mutation layers; regression tests in keel-query/tests/mutations.rs.
