@@ -653,7 +653,7 @@ export class Todos extends KeelStore {
 }
 export interface Http extends KeelPort { request(req: HttpRequest): Promise<HttpResponse> }
 ```
-All methods return `Promise` (uniform across main-thread, worker and remote modes). `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@keel/runtime/react` exports `useKeel(Class)` and `useSignal(signal)`; `vue`, `svelte`, `solid` adapters are thin files. `i64`/`u64` → `bigint`; `#[keel(js_number)]` → `number`.
+All methods return `Promise` (uniform across main-thread, worker and remote modes). `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@keel/runtime/react` exports `useKeel(Class)` (creates a store on mount, closes it on unmount; `undefined` until it exists) and `useSignal(signal)` (`useSyncExternalStore`, with a server snapshot); `vue` (`useSignal` as a `shallowRef`, `useKeel`), `svelte` (`signalStore`, a `Readable`) and `solid` (`useSignal` as an `Accessor`, `useKeel`) adapters are thin files. The frameworks are optional peer dependencies; the core package imports none of them. `i64`/`u64` → `bigint`; `#[keel(js_number)]` → `number`.
 
 ### 10.4 Codecs
 
