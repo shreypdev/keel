@@ -887,6 +887,11 @@ dependencies = [
 [[package]]
 name = "playground-core"
 version = "0.1.0"
+dependencies = [
+ "keel",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "ppv-lite86"
