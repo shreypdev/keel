@@ -1,5 +1,5 @@
 //! The C ABI's port registrations (SPEC 6.3) and the rule that keeps a host's `user` pointer valid
-//! for exactly as long as a callback can still use it (ADR-025).
+//! for exactly as long as a callback can still use it (ADR-026).
 //!
 //! `keel_port_register` hands the core a `(callback, user)` pair. The host is allowed to free
 //! `user` once the registration has been removed, so removal cannot return while a callback of

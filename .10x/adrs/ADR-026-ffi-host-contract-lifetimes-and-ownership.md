@@ -1,4 +1,4 @@
-# ADR-025: the native host contract: port registrations drain, `out_reply` is always `free()`d, Log is fire and forget
+# ADR-026: the native host contract: port registrations drain, `out_reply` is always `free()`d, Log is fire and forget
 
 Status: accepted (2026-09-30). Touches SPEC 6, 6.1, 6.3 and 7 and `keel.h` (contract text; no
 signature changes, no wire change). Origin: `.10x/reviews/2026-09-30-keel-ffi-review.md`, findings

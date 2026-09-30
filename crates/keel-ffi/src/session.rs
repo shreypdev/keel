@@ -164,7 +164,7 @@ pub(crate) fn start(config: &[u8], sink: Arc<dyn Sink>, after_init: impl FnOnce(
 /// `keel_init` (and the registrations its host makes once it returns) on another thread waits
 /// for this shutdown to finish, so it can never be wiped by it. Removing the registrations
 /// waits for the port callbacks still running on other threads, which is what lets the host free
-/// its `user` pointers when this returns (SPEC 6.3, ADR-025).
+/// its `user` pointers when this returns (SPEC 6.3, ADR-026).
 pub(crate) fn stop() {
     guarded(
         "keel_shutdown",

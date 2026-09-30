@@ -1,7 +1,7 @@
 # SDE: keel-ffi review fixes (branch `wt/ffi-fixes`)
 
 Closes `.10x/reviews/2026-09-30-keel-ffi-review.md` (H1, M1 to M4, L1 to L5, I1). Decision record:
-ADR-025.
+ADR-026.
 
 | Finding | Change | Regression tests |
 |---|---|---|
@@ -19,7 +19,7 @@ ADR-025.
 
 Outside the brief's file list, flagged for the integrator: `keel-runtime/src/object_table.rs` gained the
 read-only `process_generation_floor()` (L1 cannot be done without reading the private counter);
-`docs/SPEC.md` 6.1 and 7 (per the task) and ADR-025 (R11).
+`docs/SPEC.md` 6.1 and 7 (per the task) and ADR-026 (R11).
 
 Known local caveats: `abi.rs` does not link under ASan on macOS aarch64 (ld64 rejects the `inventory`
 constructors of `keel-ports`/`keel-query`: "initializer pointer has no target"), so `host_contract.rs`

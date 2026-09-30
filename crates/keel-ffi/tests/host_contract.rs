@@ -1,5 +1,5 @@
 //! The promises `keel.h` makes to a C host about its callbacks and its `user` pointers, checked
-//! from the host's side (constitution R6; ADR-025):
+//! from the host's side (constitution R6; ADR-026):
 //!
 //! * a port callback never runs, and its `user` is never read, after `keel_port_register(id, NULL)`,
 //!   a replacing `keel_port_register` or `keel_shutdown` has returned (the review's H1 use after
@@ -308,7 +308,7 @@ fn no_callback_outlives_its_registration_under_load() {
 }
 
 /// Unregistering from inside the registration's own callback would wait for itself. Debug builds
-/// refuse loudly (the contained assertion of ADR-025); release builds skip the wait. Either way
+/// refuse loudly (the contained assertion of ADR-026); release builds skip the wait. Either way
 /// it returns, and the registration is gone.
 #[test]
 fn unregistering_from_inside_its_own_callback_returns_instead_of_deadlocking() {
