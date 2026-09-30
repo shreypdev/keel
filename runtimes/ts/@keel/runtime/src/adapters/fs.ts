@@ -1,0 +1,120 @@
+import { type FsAdapter, FsError } from "./types.js";
+
+/** Options of {@link opfsFs}. */
+export interface OpfsFsOptions {
+  /**
+   * The directory to serve, or a function that opens it. Default: the origin
+   * private file system root, `navigator.storage.getDirectory()`.
+   */
+  readonly root?: FileSystemDirectoryHandle | (() => Promise<FileSystemDirectoryHandle>);
+}
+
+/** Splits an adapter path into safe segments; `..` is refused so that a path cannot leave the root. */
+export function splitPath(path: string): string[] {
+  const parts: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") throw new FsError.Denied();
+    parts.push(part);
+  }
+  return parts;
+}
+
+/** Maps what the File System Access API throws to {@link FsError}. */
+function mapError(error: unknown): FsError {
+  if (error instanceof FsError) return error;
+  const name = typeof error === "object" && error !== null ? (error as { name?: unknown }).name : undefined;
+  const text = error instanceof Error ? error.message : String(error);
+  switch (name) {
+    case "NotFoundError":
+      return new FsError.NotFound();
+    case "NotAllowedError":
+    case "SecurityError":
+      return new FsError.Denied();
+    case "TypeMismatchError":
+      return new FsError.Io(`wrong kind of entry: ${text}`);
+    default:
+      return new FsError.Io(text);
+  }
+}
+
+/**
+ * The `Fs` port over the Origin Private File System. Paths are `/`-separated
+ * and relative to the root; missing directories are created by `write`.
+ * `list` returns the names of the entries (files and directories) in
+ * ascending order. Errors are {@link FsError}: a missing entry is `NotFound`,
+ * a refused permission `Denied`, anything else `Io`.
+ */
+export function opfsFs(options: OpfsFsOptions = {}): FsAdapter {
+  let root: Promise<FileSystemDirectoryHandle> | null = null;
+  const openRoot = (): Promise<FileSystemDirectoryHandle> => {
+    if (root === null) {
+      const option = options.root;
+      if (typeof option === "function") root = option();
+      else if (option !== undefined) root = Promise.resolve(option);
+      else {
+        const storage = (globalThis as { navigator?: { storage?: StorageManager } }).navigator?.storage;
+        if (storage === undefined || typeof storage.getDirectory !== "function") {
+          root = Promise.reject(new FsError.Io("the origin private file system is not available on this platform"));
+        } else {
+          root = storage.getDirectory();
+        }
+      }
+      root.catch(() => {
+        root = null;
+      });
+    }
+    return root;
+  };
+
+  /** The directory holding the last segment of `parts`, and that segment. */
+  const locate = async (path: string, create: boolean): Promise<{ dir: FileSystemDirectoryHandle; name: string }> => {
+    const parts = splitPath(path);
+    const name = parts.pop();
+    if (name === undefined) throw new FsError.Io("the path is empty");
+    let dir = await openRoot();
+    for (const part of parts) dir = await dir.getDirectoryHandle(part, { create });
+    return { dir, name };
+  };
+
+  const guard = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      throw mapError(error);
+    }
+  };
+
+  return {
+    read: (path) =>
+      guard(async () => {
+        const { dir, name } = await locate(path, false);
+        const file = await (await dir.getFileHandle(name)).getFile();
+        return new Uint8Array(await file.arrayBuffer());
+      }),
+    write: (path, data) =>
+      guard(async () => {
+        const { dir, name } = await locate(path, true);
+        const handle = await dir.getFileHandle(name, { create: true });
+        const writable = await handle.createWritable();
+        try {
+          await writable.write(data as unknown as FileSystemWriteChunkType);
+        } finally {
+          await writable.close();
+        }
+      }),
+    delete: (path) =>
+      guard(async () => {
+        const { dir, name } = await locate(path, false);
+        await dir.removeEntry(name, { recursive: true });
+      }),
+    list: (dirPath) =>
+      guard(async () => {
+        let dir = await openRoot();
+        for (const part of splitPath(dirPath)) dir = await dir.getDirectoryHandle(part);
+        const names: string[] = [];
+        for await (const name of dir.keys()) names.push(name);
+        return names.sort();
+      }),
+  };
+}
