@@ -156,3 +156,14 @@ CI → adversarial reviews closed.
 - Android SDK at /opt/homebrew/share/android-commandlinetools (platform-tools, android-35,
   build-tools 35, NDK 27.2.12479018, emulator, arm64 system image, AVD `keel`); cargo-ndk
   installed. `sudo` remains unavailable to the agent.
+
+## Playground and contract tests (branch `wt/playground`, 2026-09-30)
+
+- **Playground landed**: `examples/playground/core` (47 tests; todos, counter, 10k keyed list, remote query +
+  optimistic/offline commands, lab, bench hooks), generated bindings, React/Vite, SwiftUI and Compose apps that
+  ran on headless Chromium, the iPhone 17 Pro simulator and the `keel` AVD (proof in `examples/playground/.proof`).
+- **Contract scenarios S01..S17 pass on all three platforms** (TS over wasm, Kotlin over JNI, Swift over the C
+  ABI): `contract-tests/run-all.sh`. Workspace `cargo test`: 1,883 passed, 0 failed, 7 ignored (1,836 + 47).
+- **Findings for the integrator** (details in `decisions/sde/playground.md`): keyed patch cost is O(list)
+  (471 us native vs a 20 us budget), keel-query rollback drops a later placeholder, generated Swift streams lose
+  backpressure, Swift `load` inits before the schema check, TS Mirror strands a subscriber-enqueued change-set.

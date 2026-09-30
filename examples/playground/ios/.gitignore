@@ -1,0 +1,7 @@
+# Xcode and SwiftPM output. The derived data of the proof builds lives here too.
+DerivedData/
+build/
+.build/
+xcuserdata/
+*.xcuserstate
+.swiftpm/

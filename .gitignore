@@ -15,3 +15,12 @@ dist
 *.bundle
 *.xcframework
 .claude/
+# The playground project: what `keel build` writes, and the apps' build output.
+/examples/playground/build
+/examples/playground/web/dist
+/contract-tests/ts/node_modules
+/contract-tests/**/build
+/contract-tests/swift/.build
+/contract-tests/.logs
+/examples/playground/generated/kotlin/build
+/examples/playground/generated/kotlin/.gradle
