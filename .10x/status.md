@@ -4,8 +4,15 @@ Updated: 2026-09-30 (integrator takeover, branch `claude/keel-framework-takeover
 
 ## Phase
 
-Implementation (Phase 4 of the 10x flow). Strategy/design live in `docs/blueprint.html`
-and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
+**v1 COMPLETE** (2026-09-30). Every item of docs/HANDOFF.md §5 is met; the final
+verification matrix (fmt, clippy, Rust 2,109, TS 869, Kotlin 454, Swift 328, wasm 29,
+C harness, budgets gate in release, contracts 51/51) ran green on this tree in one pass.
+
+Honest caveats: (1) the bench rows that name devices (A15 / mid-range Android / Chromium
+budgets, hello-world sizes) carry host-proxy numbers within budget; device-measured
+verdicts land with a device phase. (2) CI workflows are authored and YAML-validated but
+have not executed on GitHub runners from this machine. (3) The v1.x debt list lives in
+the "Landed" notes below and .10x/reviews resolutions.
 
 ## Test truth (all green as of the update above)
 
@@ -29,6 +36,8 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
   as the plan of record.
 
 ## In progress
+
+(nothing — v1 is complete)
 
 
 ## Landed since takeover

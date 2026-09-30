@@ -1,33 +1,21 @@
-# Handoff — integrator → keel-ports implementer
+# Handoff — v1 complete
 
-The tree is green everywhere (see status.md). Next piece: **keel-ports**, SPEC §8, in
-worktree `wt/keel-ports`.
+v1 shipped on branch `claude/keel-framework-takeover-66c4ea` (2026-09-30). The tree is
+green across every gate; see status.md for the matrix and docs/HANDOFF.md §5 for the
+definition it meets. `main` can fast-forward to this branch.
 
-Hard constraints the implementer must not miss:
-
-1. The three platform runtimes already implement the §8 records and ids in their
-   adapters and tests (`runtimes/ts/@keel/runtime/src/adapters`, `runtimes/kotlin/...
-   /adapters`, `runtimes/swift/.../Adapters` + each one's StandardPort/Adapter tests, and
-   `contract-tests/wire-vectors.json`). The Rust crate must match **them** — field order,
-   variant order and indices, method names, port ids — bit for bit.
-2. Port ids and method ids are FNV-1a as SPEC §1.1 (`port.<TraitName>` /
-   `<TraitName>.<method>`). The runtimes hard-code these; a mismatch fails their suites.
-3. `#[keel::port]` (keel-macros) is done — use it, with `#[keel(crate = ...)]` as the
-   in-workspace path override (SPEC §16.3). Records use `#[keel::api]`, errors
-   `#[keel::error]`.
-4. Fakes per SPEC §8 + `TestRuntime` integration (keel-runtime::testing exists).
-5. `#![forbid(unsafe_code)]`, clippy -D warnings, docs on every pub item, tests beside
-   code + integration tests, wasm32 build must succeed.
-
----
-
-# Handoff: playground to integrator
-
-The playground, the contract tests and three running apps are done on `wt/playground` (see
-`decisions/sde/playground.md` and the last section of `status.md`). To merge: `cargo test --workspace`,
-`keel bindgen -C examples/playground --docs --check`, then `contract-tests/run-all.sh` (needs `kotlinc`,
-`KEEL_KOTLIN_STDLIB`, `KEEL_KOTLINX_COROUTINES`, Xcode) and, for the apps, `examples/playground/web`
-`npm run smoke`, `examples/playground/ios/smoke.sh`, and the commands in `examples/playground/android/README.md`.
-Next for the bench piece: use the `Bench` store (`examples/playground/README.md`, "Benchmark hooks");
-finding 1 (keyed patch is O(list)) will fail the 10,000-item row. CI does not yet build `playground-core` for
-wasm32 or run the contract tests: add `playground-core` to the wasm32 build loop and `contract-tests/run-all.sh ts kotlin` (macOS runner: `swift`).
+For whoever picks this up next:
+1. Read status.md (the "Landed since takeover" ledger is the project history) and the
+   four review files under .10x/reviews/ — every re-review verdict is recorded there.
+2. ADRs 018–028 cover every decision made since the takeover.
+3. The v1.x queue, in rough priority: device-measured bench rows (run the playground
+   Bench hooks on an iPhone + Android device + Chromium and fill bench/RESULTS.md's
+   device section); macros diagnostic polish (query-in-impl, split-impl follow-ons,
+   NF1/NF2 wording); WeakCtx so long-lived tasks don't pin a dropped runtime; the L3
+   release-build silent drop of off-runtime writes; keel_schema_json full-JSON variant so
+   dlopen bindgen keeps docs; Swift runtime Port* types public (drops the bindgen
+   fallback, ADR-024); Android remote (`keel dev`) mode; dev-client auto-reconnect;
+   per-signal isolation of a panicking computed (ADR-019 note).
+4. How to run everything locally: source scripts/env.sh, then the commands in
+   status.md's table; contract-tests/run-all.sh for the scenario matrix;
+   examples/playground/{web/npm run smoke, ios/smoke.sh, android/README.md} for apps.
