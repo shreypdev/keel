@@ -16,8 +16,9 @@
 
 use std::net::{Shutdown, TcpStream};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant};
 
 use keel_runtime::PortCallOutcome;
 use keel_wire::payload::{Log, PortCall, Reply, ReplyStatus, StreamItem};
@@ -66,6 +67,10 @@ pub(crate) struct Conn {
     /// A handle on the socket used only to abort it.
     tcp: Option<TcpStream>,
     client: OnceLock<ClientInfo>,
+    /// When the connection was accepted; [`last_rx`](Conn::last_rx) counts from here.
+    epoch: Instant,
+    /// Milliseconds after `epoch` at which bytes last arrived from the peer.
+    last_rx: AtomicU64,
 }
 
 impl Conn {
@@ -93,6 +98,8 @@ impl Conn {
             }),
             tcp,
             client: OnceLock::new(),
+            epoch: Instant::now(),
+            last_rx: AtomicU64::new(0),
         };
         (conn, rx)
     }
@@ -110,6 +117,18 @@ impl Conn {
     /// The client's Hello, once it has been received.
     pub(crate) fn client(&self) -> Option<&ClientInfo> {
         self.client.get()
+    }
+
+    /// Bytes just arrived from the peer: it is alive.
+    pub(crate) fn touch(&self) {
+        let now = u64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.last_rx.store(now, Ordering::Relaxed);
+    }
+
+    /// How long the peer has been silent (nothing at all, not even a pong).
+    pub(crate) fn silent_for(&self) -> Duration {
+        let last = Duration::from_millis(self.last_rx.load(Ordering::Relaxed));
+        self.epoch.elapsed().saturating_sub(last)
     }
 
     /// Whether frames are no longer accepted.
@@ -152,14 +171,16 @@ impl Conn {
         Envelope::write_with(&mut w, kind, seq, self.schema, payload);
         let frame = w.into_vec();
         let len = frame.len();
-        let queued = self.queued.fetch_add(len, Ordering::Relaxed) + len;
+        let before = self.queued.fetch_add(len, Ordering::Relaxed);
         if state.tx.send(Item::Frame(frame)).is_err() {
             // The writer is gone: the connection is over.
             state.closing = true;
             self.closing.store(true, Ordering::Release);
             return false;
         }
-        if queued > self.max_queued {
+        // A single message larger than the cap is fine when nothing else waits (the cap is
+        // about a client falling behind, not about how big one reply is).
+        if before > 0 && before + len > self.max_queued {
             // The client is not keeping up. Waiting would block the core and buffering would
             // grow without bound, so the connection goes instead.
             state.closing = true;
@@ -429,11 +450,26 @@ mod tests {
     #[test]
     fn a_client_that_falls_too_far_behind_is_dropped_not_waited_for() {
         let (conn, rx) = Conn::new(1, 1, 100, None);
-        let big = vec![0_u8; 200];
-        assert!(!conn.send(Kind::ChangeSet, &big), "over the cap");
+        let payload = vec![0_u8; 60];
+        assert!(conn.send(Kind::ChangeSet, &payload), "the first message fits");
+        assert!(
+            !conn.send(Kind::ChangeSet, &payload),
+            "the second finds the first still queued and passes the cap"
+        );
         assert!(conn.is_closing());
         assert!(!conn.send(Kind::Log, &[]));
         drop(rx);
+    }
+
+    #[test]
+    fn one_message_bigger_than_the_cap_is_allowed_when_nothing_else_waits() {
+        let (conn, rx) = Conn::new(1, 1, 100, None);
+        assert!(conn.send(Kind::ChangeSet, &vec![0_u8; 500]));
+        assert!(!conn.is_closing());
+        // Once it is written, the queue is empty again.
+        let frame = frames(&rx).remove(0);
+        conn.dequeued(frame.len());
+        assert!(conn.send(Kind::Log, &[]));
     }
 
     #[test]
@@ -494,6 +530,15 @@ mod tests {
             };
             assert_eq!(targets, expected, "mode {mode}");
         }
+    }
+
+    #[test]
+    fn silence_is_measured_from_the_last_bytes_received() {
+        let (conn, _rx) = Conn::new(1, 1, 1 << 20, None);
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(conn.silent_for() >= Duration::from_millis(40));
+        conn.touch();
+        assert!(conn.silent_for() < Duration::from_millis(30));
     }
 
     #[test]

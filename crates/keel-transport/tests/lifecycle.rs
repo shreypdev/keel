@@ -405,3 +405,96 @@ fn url_names_the_bound_port() {
     assert_ne!(f.server.addr().port(), 0);
     let _ = Message::Ping(Vec::new());
 }
+
+// ----- keepalive -----------------------------------------------------------------------------
+
+/// A Hello envelope as a raw client sends it.
+fn hello_bytes(schema: u64) -> Vec<u8> {
+    let mut payload = keel::wire::Writer::new();
+    keel::wire::payload::Hello {
+        keel_version: "t",
+        schema_hash: schema,
+        platform: "raw",
+        mode: "dev",
+    }
+    .encode(&mut payload);
+    let mut envelope = keel::wire::Writer::new();
+    keel::wire::Envelope::write(&mut envelope, Kind::Hello, 0, schema, payload.as_slice());
+    envelope.into_vec()
+}
+
+#[test]
+fn a_client_that_goes_silent_is_pinged_and_then_dropped_so_it_cannot_hold_the_slot() {
+    let config = ServerConfig {
+        ping_interval: Duration::from_millis(100),
+        ..quick()
+    };
+    let f = start_with(config, "dev");
+    let mut silent = RawWs::connect(f.server.addr());
+    silent.binary(&hello_bytes(f.schema()));
+    f.eventually("it is attached", |f| f.bridge.is_connected());
+
+    // It never answers a ping (a half-open connection looks exactly like this).
+    let started = Instant::now();
+    f.eventually("it was dropped", |f| !f.bridge.is_connected());
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "took {:?}",
+        started.elapsed()
+    );
+    let frames = silent.frames_until_end(Duration::from_secs(2));
+    assert!(
+        frames.iter().any(|frame| frame.opcode == 9),
+        "it was pinged first: {frames:?}"
+    );
+
+    // The slot is free for the relaunched app.
+    let mut next = f.client();
+    assert!(next.new_counter(1) > 0);
+}
+
+#[test]
+fn a_client_that_answers_pings_is_kept() {
+    let config = ServerConfig {
+        ping_interval: Duration::from_millis(100),
+        ..quick()
+    };
+    let f = start_with(config, "dev");
+    let mut client = f.client();
+    let handle = client.new_counter(3);
+    // Idle for well over three intervals while reading, which is what answers the pings.
+    let until = Instant::now() + Duration::from_millis(900);
+    while Instant::now() < until {
+        let _ = client.recv_within(Duration::from_millis(50));
+    }
+    assert!(f.bridge.is_connected());
+    let (status, body) = client.method(handle, GET, &[]);
+    assert_eq!((status, dec::<i32>(&body)), (ReplyStatus::Ok, 3));
+}
+
+#[test]
+fn a_chatty_client_is_never_pinged() {
+    let config = ServerConfig {
+        ping_interval: Duration::from_millis(150),
+        ..quick()
+    };
+    let f = start_with(config, "dev");
+    let mut ws = RawWs::connect(f.server.addr());
+    ws.binary(&hello_bytes(f.schema()));
+    // A stream of ordinary messages keeps it alive without ever answering a ping.
+    let mut w = keel::wire::Writer::new();
+    keel::wire::Envelope::write(&mut w, Kind::TimerFired, 1, f.schema(), &enc(&1_u32));
+    for _ in 0..12 {
+        ws.binary(w.as_slice());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(f.bridge.is_connected());
+    ws.tcp
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let frames = ws.frames_until_end(Duration::from_millis(200));
+    assert!(
+        frames.iter().all(|frame| frame.opcode != 9),
+        "no ping was needed: {frames:?}"
+    );
+}

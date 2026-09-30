@@ -16,11 +16,12 @@
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use tungstenite::protocol::WebSocketConfig;
 
-use crate::conn::Item;
+use crate::conn::{Conn, Item};
 
 /// WebSocket close codes (RFC 6455 section 7.4) the server sends.
 pub mod close {
@@ -52,16 +53,19 @@ enum Sink {
 pub(crate) struct ReadHalf {
     tcp: TcpStream,
     sink: Sink,
+    /// Told whenever bytes arrive, so silence can be told from a slow transfer.
+    conn: Arc<Conn>,
 }
 
 impl ReadHalf {
     /// A read side that reads `tcp` and, until [`route_writes_to_queue`](Self::route_writes_to_queue),
     /// writes to it as well (the upgrade response).
-    pub(crate) fn new(tcp: TcpStream) -> io::Result<ReadHalf> {
+    pub(crate) fn new(tcp: TcpStream, conn: Arc<Conn>) -> io::Result<ReadHalf> {
         let writer = tcp.try_clone()?;
         Ok(ReadHalf {
             tcp,
             sink: Sink::Socket(writer),
+            conn,
         })
     }
 
@@ -73,7 +77,11 @@ impl ReadHalf {
 
 impl Read for ReadHalf {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.tcp.read(buf)
+        let n = self.tcp.read(buf)?;
+        if n > 0 {
+            self.conn.touch();
+        }
+        Ok(n)
     }
 }
 

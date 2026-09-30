@@ -4,6 +4,10 @@
 //! the read side go out between them; a Close item sends a Close frame and starts a linger
 //! timer, after which the socket is shut down whether or not the peer answered; Stop ends it.
 //! Consecutive messages are batched into one `write` and flushed when the queue runs dry.
+//!
+//! It also keeps the connection honest: a peer that has been silent for a while is pinged, and
+//! one that stays silent (the phone left the Wi-Fi, the laptop lid closed, the tab was killed
+//! without a FIN) is dropped, so that a dead client cannot hold the one client slot.
 
 use std::io::{self, Write};
 use std::net::{Shutdown, TcpStream};
@@ -18,44 +22,63 @@ use tungstenite::protocol::{CloseFrame, Message, Role, WebSocketConfig, WebSocke
 use crate::conn::{Conn, Item};
 use crate::ws::WriteHalf;
 
-/// Starts the writer thread of `conn`. `linger` bounds how long it waits for the peer after
-/// sending a Close frame.
+/// The writer's clocks.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Timing {
+    /// How long to wait for the peer after sending a Close frame.
+    pub(crate) linger: Duration,
+    /// After this much silence from the peer send a Ping; after three times as much drop it.
+    /// Zero switches keepalive off.
+    pub(crate) ping_interval: Duration,
+}
+
+/// Starts the writer thread of `conn`.
 pub(crate) fn spawn(
     conn: Arc<Conn>,
     queue: Receiver<Item>,
     tcp: TcpStream,
     config: WebSocketConfig,
-    linger: Duration,
+    timing: Timing,
 ) -> io::Result<JoinHandle<()>> {
     thread::Builder::new()
         .name(format!("keel-transport-writer-{}", conn.id))
-        .spawn(move || run(&conn, &queue, tcp, config, linger))
+        .spawn(move || run(&conn, &queue, tcp, config, timing))
 }
 
-fn run(conn: &Conn, queue: &Receiver<Item>, tcp: TcpStream, config: WebSocketConfig, linger: Duration) {
+fn run(conn: &Conn, queue: &Receiver<Item>, tcp: TcpStream, config: WebSocketConfig, timing: Timing) {
     let mut ws = WebSocketContext::new(Role::Server, Some(config));
     let mut out = WriteHalf(tcp);
     let mut close_sent: Option<Instant> = None;
-    // Set when the socket is unusable or the peer ignored our Close: shut both halves so the
-    // reader thread, blocked on the same socket, wakes up.
+    // Set when the socket is unusable, the peer ignored our Close or went silent: shut both
+    // halves so the reader thread, blocked on the same socket, wakes up.
     let mut force = false;
+    let keepalive = !timing.ping_interval.is_zero();
+    let mut next_check = Instant::now() + timing.ping_interval;
 
     'run: loop {
-        let first = match close_sent {
+        // What the next wait is bounded by: the linger after our Close, else the next
+        // keepalive check.
+        let bound = match close_sent {
+            Some(at) => Some(at + timing.linger),
+            None if keepalive => Some(next_check),
+            None => None,
+        };
+        let first = match bound {
             None => match queue.recv() {
-                Ok(item) => item,
+                Ok(item) => Some(item),
                 Err(_) => break,
             },
-            Some(at) => match queue.recv_timeout(linger.saturating_sub(at.elapsed())) {
-                Ok(item) => item,
-                Err(RecvTimeoutError::Timeout) => {
+            Some(deadline) => match queue.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(item) => Some(item),
+                Err(RecvTimeoutError::Timeout) if close_sent.is_some() => {
                     force = true;
                     break;
                 }
+                Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => break,
             },
         };
-        let mut next = Some(first);
+        let mut next = first;
         while let Some(item) = next {
             match item {
                 Item::Frame(bytes) => {
@@ -94,6 +117,19 @@ fn run(conn: &Conn, queue: &Receiver<Item>, tcp: TcpStream, config: WebSocketCon
             }
             next = queue.try_recv().ok();
         }
+
+        if keepalive && close_sent.is_none() && Instant::now() >= next_check {
+            next_check = Instant::now() + timing.ping_interval;
+            let silent = conn.silent_for();
+            if silent >= timing.ping_interval * 3 {
+                force = true;
+                break;
+            }
+            if silent >= timing.ping_interval && ws.write(&mut out, Message::Ping(Vec::new())).is_err() {
+                force = true;
+                break;
+            }
+        }
         if ws.flush(&mut out).is_err() {
             force = true;
             break;
@@ -106,5 +142,7 @@ fn run(conn: &Conn, queue: &Receiver<Item>, tcp: TcpStream, config: WebSocketCon
     }
     // A FIN after our last frame, so the peer sees the Close frame and then end-of-stream. A
     // forced shutdown also wakes the reader thread.
-    let _ = out.0.shutdown(if force { Shutdown::Both } else { Shutdown::Write });
+    let _ = out
+        .0
+        .shutdown(if force { Shutdown::Both } else { Shutdown::Write });
 }

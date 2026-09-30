@@ -57,6 +57,8 @@ pub const KEEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub(crate) struct Violation {
     pub(crate) code: u16,
     pub(crate) reason: String,
+    /// Already reported to the log by whoever produced it.
+    pub(crate) noted: bool,
 }
 
 impl Violation {
@@ -64,6 +66,7 @@ impl Violation {
         Violation {
             code: close::PROTOCOL_ERROR,
             reason,
+            noted: false,
         }
     }
 
@@ -71,6 +74,7 @@ impl Violation {
         Violation {
             code: close::POLICY_VIOLATION,
             reason: format!("schema mismatch: core {ours:#018x}, client {theirs:#018x}"),
+            noted: false,
         }
     }
 }
@@ -153,7 +157,10 @@ impl Session {
                     hello.platform, hello.schema_hash
                 ),
             );
-            return Err(Violation::schema(ours, hello.schema_hash));
+            return Err(Violation {
+                noted: true,
+                ..Violation::schema(ours, hello.schema_hash)
+            });
         }
         let info = ClientInfo {
             keel_version: hello.keel_version.to_owned(),
@@ -170,6 +177,7 @@ impl Session {
                 code: close::TRY_AGAIN_LATER,
                 reason: "another client is already connected; keel dev serves one at a time"
                     .to_owned(),
+                noted: true,
             });
         }
         self.note(
@@ -389,7 +397,7 @@ fn session_loop(
     let conn = &session.conn;
     let ws_config = ws::config(config.max_message_bytes);
 
-    let half = match ReadHalf::new(tcp) {
+    let half = match ReadHalf::new(tcp, conn.clone()) {
         Ok(half) => half,
         Err(e) => {
             session.note(DEBUG, &format!("could not clone the socket: {e}"));
@@ -420,7 +428,11 @@ fn session_loop(
             return;
         }
     };
-    let writer = match writer::spawn(conn.clone(), queue, write_tcp, ws_config, config.close_timeout) {
+    let timing = writer::Timing {
+        linger: config.close_timeout,
+        ping_interval: config.ping_interval,
+    };
+    let writer = match writer::spawn(conn.clone(), queue, write_tcp, ws_config, timing) {
         Ok(handle) => handle,
         Err(e) => {
             session.note(ERROR, &format!("could not start a writer thread: {e}"));
@@ -466,6 +478,7 @@ fn session_loop(
                     begin_close(Violation {
                         code: close::UNSUPPORTED_DATA,
                         reason: "Keel speaks binary envelopes; got a text message".to_owned(),
+                        noted: false,
                     });
                 }
             }
@@ -508,16 +521,19 @@ fn violation_for(error: &Error, attached: bool, handshake_timeout: Duration) -> 
             Some(Violation {
                 code: close::POLICY_VIOLATION,
                 reason: format!("no Hello within {} ms", handshake_timeout.as_millis()),
+                noted: false,
             })
         }
         Error::Io(_) => None,
         Error::Capacity(e) => Some(Violation {
             code: close::MESSAGE_TOO_BIG,
             reason: e.to_string(),
+            noted: false,
         }),
         Error::Utf8 => Some(Violation {
             code: close::INVALID_PAYLOAD,
             reason: "a text message was not valid UTF-8".to_owned(),
+            noted: false,
         }),
         other => Some(Violation::protocol(other.to_string())),
     }

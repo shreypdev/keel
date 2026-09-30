@@ -51,6 +51,13 @@ pub struct ServerConfig {
     /// Release the objects a client's constructors made when it disconnects (its observations
     /// and open calls are always ended). Default `true`.
     pub release_on_disconnect: bool,
+    /// How long a client may be silent before it is sent a WebSocket Ping, and (three times
+    /// as long) before it is dropped as dead. Every client answers pings without any code of
+    /// its own, so this only catches connections that died without a FIN: a phone that left the
+    /// Wi-Fi, a sleeping laptop. Without it such a connection would hold the one client slot
+    /// until the OS gave up on it, and the relaunched app would be refused. Default 5 s;
+    /// `Duration::ZERO` switches it off.
+    pub ping_interval: Duration,
     /// Which web pages may connect. Default: pages on this machine or a private network (see
     /// [`OriginPolicy`]); native clients always may.
     pub origin_policy: OriginPolicy,
@@ -67,6 +74,7 @@ impl Default for ServerConfig {
             max_queued_bytes: 64 << 20,
             max_connections: 16,
             release_on_disconnect: true,
+            ping_interval: Duration::from_secs(5),
             origin_policy: OriginPolicy::default(),
         }
     }
