@@ -11,9 +11,9 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,235 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,276 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 830 passed (20 files) |
-| Kotlin `scripts/test-local.sh` | 454 cases, 0 failed, 2 skipped (JNI smoke awaits keel-ffi) |
+| Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
 
 ## Done
@@ -30,11 +30,22 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- keel-ffi (SPEC §6/§7) — worktree `wt/keel-ffi` (agent).
 - keel-query (SPEC §9) — worktree `wt/keel-query` (agent).
 - keel-transport (§3.2/§5.10) — worktree `wt/keel-transport` (agent).
 
 ## Landed since takeover
+
+- **keel-ffi** (SPEC §6/§6.1/§7) merged after adversarial review: C ABI (19 fns, panic
+  guard at every entry, SAFETY lint-enforced), JNI shim (RegisterNatives, direct buffers,
+  daemon-attached callback threads), wasm exports/imports verified against the real TS
+  runtime (10/10) and hand-written host (16/16); Kotlin NativeSmokeTests pass against the
+  real dylib (454 cases 0 failed). Crossing bench: ~81 ns keel_call_sync. Workspace: 1,276.
+  Follow-ups for keel-cli: name the cdylib `keel_core` (or pass keel.native.name);
+  XCFramework static linking needs -force_load in debug (release LTO links clean).
+  Known issue: macro-generated port proxies panic when a port is unavailable → traps on
+  wasm (native contains it as status 2); document adapters as required on web, or teach
+  the proxies a typed fallback in a later pass. SPEC §6/§6.3/§7 updated to match shipped
+  reality (init/restore codes, out_reply ownership, log routing, core_threads=0→1).
 
 - **keel-ports** (SPEC §8) merged after adversarial review: ten ports, records with
   byte-golden layout locks, id parity vs the Kotlin constants, deterministic fakes
@@ -49,6 +60,7 @@ CI → adversarial reviews closed.
 
 ## Environment notes
 
-- `sudo` is unavailable to the agent: xcode-select stays on CommandLineTools; use
-  `DEVELOPER_DIR` (env.sh does). Android SDK/NDK/AVD not yet installed (needed at the
-  playground step). cargo-ndk not yet installed.
+- Shrey ran `xcode-select -s` to full Xcode 26.6; iOS 26.5 simulators installed.
+- Android SDK at /opt/homebrew/share/android-commandlinetools (platform-tools, android-35,
+  build-tools 35, NDK 27.2.12479018, emulator, arm64 system image, AVD `keel`); cargo-ndk
+  installed. `sudo` remains unavailable to the agent.

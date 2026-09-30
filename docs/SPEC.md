@@ -443,6 +443,8 @@ void     keel_buf_free(KeelBuf buf);
 
 `RuntimeConfig` record: `{ platform: String, mode: String /* "inproc" | "dev" */, core_threads: u8, blocking_threads: u8, log_level: u8 }`.
 
+Return codes (as implemented): `keel_init` returns 0 ok, or a nonzero `init_code` (bad argument, undecodable config, already initialized with a *different* embedder — a repeat init with the same callbacks and `user` is a no-op returning 0). `keel_restore` returns 0 ok or a nonzero `restore_code`; a failed restore leaves the core unchanged. The native ABI has no `keel_poll`, so `core_threads == 0` is treated as 1. There is no native log callback: core log records reach the host through its registered `Log` port (the JNI `Callbacks` interface likewise has none).
+
 Callback threading: `reply_cb`, `changeset_cb`, `stream_cb` and `port_cb` may be invoked on the core thread, a blocking thread, or the caller's thread (sync path), possibly while the core lock is held. See §5.1 for the re-entrancy rule.
 
 ### 6.1 JNI shim (feature `jni`)
@@ -477,6 +479,8 @@ Swift calls the C ABI through a module map (`KeelFFI` C module inside the XCFram
 
 For **sync** ports the host must fill `out_reply` with a PortReply payload and return 0 before returning. For **async** ports the host returns 1 and later calls `keel_port_reply`. Returning 2 fails the call with `PortError::Unavailable`. A port that is not registered behaves as 2.
 
+`out_reply` memory rule (the one buffer a host allocates): on returning 0 the host stores a block from the C allocator (`malloc`) with `len` set and **`cap = 0`**; ownership passes to the core, which copies the bytes and releases the block with `free`, never `keel_buf_free`. A non-zero `cap` marks a `KeelBuf` this library itself produced (a Rust embedder reusing one); the core reclaims it as a `Vec`. On wasm (§7) a sync port must call `keel_port_reply` *before* returning 0 from the `port_call` import; returning 0 without having replied fails that call instead of leaving it pending.
+
 ---
 
 ## 7. wasm ABI (`keel-ffi`, target `wasm32-unknown-unknown`)
@@ -504,7 +508,7 @@ reply(call_id, ptr, len)        changeset(ptr, len)        stream(call_id, ptr, 
 port_call(port_id, method_id, port_call_id, ptr, len) -> i32 (0 sync: host wrote reply via keel_port_reply *before returning*; 1 async; 2 unavailable)
 schedule()                      // host must call keel_poll() on the next microtask
 timer_set(timer_id, delay_ms_lo, delay_ms_hi)
-log(level, ptr, len)
+log(level, ptr, len)            // payload at ptr/len: target String, message String
 now_ms() -> f64                 // Date.now()
 random(ptr, len)                // crypto.getRandomValues into memory
 ```
