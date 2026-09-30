@@ -151,6 +151,9 @@ fn todos(rt: &Runtime) -> (u64, Arc<Todos>) {
     (handle, rt.object::<Todos>(handle).unwrap())
 }
 
+/// The handle the tests pretend the snapshot re-issues.
+const RESTORED_HANDLE: u64 = 0x0000_0002_0000_0007;
+
 fn restorer(type_name: &str) -> &'static StoreRestorer {
     let type_id = ids::type_id(type_name);
     keel::meta::inventory::iter::<StoreRestorer>
@@ -165,7 +168,8 @@ fn restore<T: Send + Sync + 'static>(
     body: &[u8],
 ) -> Result<Arc<T>, WireError> {
     let mut r = Reader::new(body);
-    let any: Arc<dyn Any + Send + Sync> = (restorer(type_name).restore)(rt.ctx(), &mut r)?;
+    let any: Arc<dyn Any + Send + Sync> =
+        (restorer(type_name).restore)(rt.ctx(), RESTORED_HANDLE, &mut r)?;
     Ok(any.downcast::<T>().expect("restored the registered type"))
 }
 
@@ -354,6 +358,11 @@ fn restore_with_a_hook_rebuilds_computed_and_lazy_fields() {
         5,
         "signals are attached after restore"
     );
+    assert_eq!(
+        restored.cell().handle(),
+        RESTORED_HANDLE,
+        "the re-issued handle reached the cell"
+    );
     // The restored store is independent of the original.
     restored.add(9, "z".to_owned());
     assert_eq!(store.rows.get().len(), 3);
@@ -436,6 +445,19 @@ fn restore_ignores_unknown_signals_and_rejects_missing_ones() {
     }
     // An absurd count fails on end of input instead of looping or allocating.
     assert!(restore::<Counter>(&rt, "Counter", &u32::MAX.to_le_bytes()).is_err());
+}
+
+#[test]
+fn the_registered_cell_accessor_reaches_the_cell_through_dyn_any() {
+    let rt = Runtime::new();
+    let (handle, store) = todos(&rt);
+    let any: Arc<dyn Any + Send + Sync> = store.clone();
+    let cell = (restorer("Todos").cell)(any.as_ref()).expect("a Todos");
+    assert!(Arc::ptr_eq(cell, store.cell()));
+    assert_eq!(cell.handle(), handle);
+    // Something that is not a `Todos` has no cell.
+    let other: Arc<dyn Any + Send + Sync> = Arc::new(5_u32);
+    assert!((restorer("Todos").cell)(other.as_ref()).is_none());
 }
 
 #[test]

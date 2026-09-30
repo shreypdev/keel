@@ -89,20 +89,29 @@ impl ::keel::runtime::StoreObject for Counter {
 #[allow(non_snake_case)]
 fn __keel_restore_erased_Counter(
     __ctx: ::keel::runtime::Ctx,
+    __handle: u64,
     __r: &mut ::keel::wire::Reader<'_>,
 ) -> ::core::result::Result<
     ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>,
     ::keel::wire::WireError,
 > {
-    <Counter as ::keel::runtime::StoreObject>::restore(__ctx, __r)
-        .map(|__value| {
-            ::std::sync::Arc::new(__value)
-                as ::std::sync::Arc<
-                    dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync,
-                >
-        })
+    let __value = <Counter as ::keel::runtime::StoreObject>::restore(__ctx, __r)?;
+    __value.__keel_set_handle(__handle);
+    ::core::result::Result::Ok(
+        ::std::sync::Arc::new(__value)
+            as ::std::sync::Arc<
+                dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync,
+            >,
+    )
+}
+#[doc(hidden)]
+#[allow(non_snake_case)]
+fn __keel_cell_erased_Counter(
+    __any: &(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync),
+) -> ::core::option::Option<&::std::sync::Arc<::keel::signals::StoreCell>> {
+    __any.downcast_ref::<Counter>().map(<Counter as ::keel::runtime::StoreObject>::cell)
 }
 ::keel::meta::inventory::submit! {
     ::keel::runtime::StoreRestorer { type_id : ::keel::meta::ids::type_id("Counter"),
-    restore : __keel_restore_erased_Counter, }
+    restore : __keel_restore_erased_Counter, cell : __keel_cell_erased_Counter, }
 }

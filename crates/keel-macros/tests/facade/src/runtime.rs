@@ -34,12 +34,15 @@ pub trait StoreObject: KeelObject {
         Self: Sized;
 }
 
-/// A restore function registered by `#[keel::store]`.
+/// What `#[keel::store]` registers for a store type: how to rebuild an instance from a snapshot
+/// body and how to reach its signal cell through `dyn Any`.
 pub struct StoreRestorer {
     /// The store's type id.
     pub type_id: u32,
-    /// Rebuilds the store from a snapshot body.
-    pub restore: fn(Ctx, &mut Reader<'_>) -> Result<Arc<dyn Any + Send + Sync>, WireError>,
+    /// Rebuilds the store from a snapshot body; the handle is the one the snapshot re-issues.
+    pub restore: fn(Ctx, u64, &mut Reader<'_>) -> Result<Arc<dyn Any + Send + Sync>, WireError>,
+    /// The signal cell of a store instance held as `dyn Any` in the object table.
+    pub cell: fn(&(dyn Any + Send + Sync)) -> Option<&Arc<StoreCell>>,
 }
 keel_meta::inventory::collect!(StoreRestorer);
 

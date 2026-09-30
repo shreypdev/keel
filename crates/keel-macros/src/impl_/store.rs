@@ -392,7 +392,8 @@ pub(crate) fn expand_store(
     };
 
     let restorer_fn = format_ident!("__keel_restore_erased_{}", name_str);
-    let restorer = registration(&root, &name_str, &restorer_fn);
+    let cell_fn = format_ident!("__keel_cell_erased_{}", name_str);
+    let restorer = registration(&root, &name_str, &restorer_fn, &cell_fn);
 
     Ok(quote! {
         #item
@@ -473,22 +474,39 @@ pub(crate) fn expand_store(
         #[allow(non_snake_case)]
         fn #restorer_fn(
             __ctx: #runtime::Ctx,
+            __handle: u64,
             __r: &mut #wire::Reader<'_>,
         ) -> ::core::result::Result<
             ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>,
             #wire::WireError,
         > {
-            <#name as #runtime::StoreObject>::restore(__ctx, __r).map(|__value| {
-                ::std::sync::Arc::new(__value)
-                    as ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>
-            })
+            let __value = <#name as #runtime::StoreObject>::restore(__ctx, __r)?;
+            // The snapshot re-issues the store's old handle; the cell must know it.
+            __value.__keel_set_handle(__handle);
+            ::core::result::Result::Ok(::std::sync::Arc::new(__value)
+                as ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>)
+        }
+
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        fn #cell_fn(
+            __any: &(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync),
+        ) -> ::core::option::Option<&::std::sync::Arc<#signals_path::StoreCell>> {
+            __any
+                .downcast_ref::<#name>()
+                .map(<#name as #runtime::StoreObject>::cell)
         }
         #restorer
     })
 }
 
-/// The `inventory::submit!` of the store's restore function.
-fn registration(root: &Root, name: &str, restorer_fn: &syn::Ident) -> TokenStream {
+/// The `inventory::submit!` of the store's erased restore function and cell accessor.
+fn registration(
+    root: &Root,
+    name: &str,
+    restorer_fn: &syn::Ident,
+    cell_fn: &syn::Ident,
+) -> TokenStream {
     let meta = root.meta();
     let runtime = root.runtime();
     quote! {
@@ -496,6 +514,7 @@ fn registration(root: &Root, name: &str, restorer_fn: &syn::Ident) -> TokenStrea
             #runtime::StoreRestorer {
                 type_id: #meta::ids::type_id(#name),
                 restore: #restorer_fn,
+                cell: #cell_fn,
             }
         }
     }
