@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 2,047 passed / 0 failed |
+| Rust `cargo test --workspace` | 2,076 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 869 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 328 passed / 0 failed |
@@ -31,9 +31,17 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 ## In progress
 
 - No-alloc sync dispatch (ADR-028) — `wt/fast-dispatch` (bench: 60% allocator, 1.3x miss).
-- cli polish (install name, jniLibs, target reuse, noise) — `wt/cli-polish`.
 
 ## Landed since takeover
+
+- **cli-polish merged**: @rpath install name, platform-scoped toolchain notes, jniLibs
+  drift detection (the silent no-core APK now warns with the line to fix), debug-size
+  hint, kotlin .gitignore emitted by bindgen output, workspace target-dir reuse (no more
+  second 1.4 GB tree), and a real `keel dev` watcher race fixed (10/10 under load).
+- **bindgen Swift naming fixed**: a store signal named a reserved word (`default`) spells
+  as `default_` — @Observable rejects backticked stored properties. Goldens refreshed.
+- **CI**: playground-core added to the wasm32 loop; contract runners (ts+kotlin on Linux,
+  swift on macOS) are jobs.
 
 - **keyed-ops merged** (ADR-027): recorded list operations make keyed change-sets
   O(change) — 10k insert 536us -> 6.3us, update 272ns; model-based proptest at 100k cases;
