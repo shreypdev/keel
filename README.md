@@ -6,6 +6,8 @@
 [![Benchmarks](https://github.com/shreypdev/keel/actions/workflows/bench.yml/badge.svg)](https://github.com/shreypdev/keel/actions/workflows/bench.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
+**[keel.dev docs & site → shreypdev.github.io/keel](https://shreypdev.github.io/keel/)**
+
 Keel owns everything **under the pixels** of your iOS, Android and web apps — domain
 logic, reactive state, the data layer, persistence, and the dev loop — while the UI stays
 100% native: SwiftUI, Jetpack Compose and React, written by hand, the way platform
@@ -33,9 +35,10 @@ platform. Your *logic* stops being written three times.
 Reads never cross the language boundary — each platform holds a mirror of your state,
 updated by compact binary change-sets, once per transaction. Lists cross as O(change)
 patches, not O(list) copies. The numbers below are measured by the benchmark suite in
-[`bench/`](bench/RESULTS.md) on an Apple-Silicon host; every row is a CI gate, so a
-regression fails the build (device-measured rows are tracked in
-[`bench/RESULTS.md`](bench/RESULTS.md)):
+[`bench/`](bench/RESULTS.md) on an Apple-Silicon host. The core operations are gated in CI
+against host budgets (a regression fails the build); the sizes are reported by `keel build`,
+and the per-device targets in the "Budget" column are the blueprint's goals, measured on
+real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS.md)):
 
 | Operation | Measured | Budget |
 |---|---|---|
