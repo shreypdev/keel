@@ -279,6 +279,12 @@ just smoke-runs every operation, so `cargo test --workspace` stays green and fas
 
 ## Device numbers (iOS, Android, Web)
 
+> The playground has now been exercised interactively on the iOS simulator, the Android
+> emulator (live 10/s keyed-patch streaming on the 10,000-row list) and Chrome. Those runs
+> validate behaviour, not budgets: virtualized numbers are deliberately NOT recorded here —
+> only real-device measurements will fill this table, so the budget verdicts stay honest.
+> Per-platform benchmark splits are likewise deferred until real devices produce them.
+
 Land with the playground phase, measured on the devices the blueprint names (iPhone with an A15, a 2022
 mid-range Android phone, Chromium) from `examples/playground`. Until then:
 
