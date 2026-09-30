@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,276 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,400 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 830 passed (20 files) |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -31,9 +31,22 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 ## In progress
 
 - keel-query (SPEC §9) — worktree `wt/keel-query` (agent).
-- keel-transport (§3.2/§5.10) — worktree `wt/keel-transport` (agent).
+- keel-cli (init/build/dev/bindgen/doctor/adopt + packaging) — worktree `wt/keel-cli` (agent).
+- keel-signals review fixes (H1, M1-M3, lows) — worktree `wt/signals-fixes` (agent).
 
 ## Landed since takeover
+
+- **keel-transport** merged after review: WebSocket server for `keel dev` (Bridge Host,
+  never blocks the core; seq assigned under the queue lock; overflow aborts the lagging
+  client; origin policy LocalNetwork; keepalive; release-on-disconnect for dev relaunch).
+  124 real-socket tests + byte fuzz; interop-verified against the unmodified TS, Kotlin
+  and Swift clients. p50 sync call over loopback ~21 µs. Workspace: 1,400.
+  Note for cli: dev cores must bind Rust Clock/Rng/Log (sync ports can't be remote);
+  `keel::dev::serve()` facade wiring is an integrator follow-up.
+- **Adversarial review: keel-signals** (.10x/reviews/2026-09-30-keel-signals-review.md):
+  keyed diff CONFIRMED correct (80k property cases, all three platforms' Move semantics);
+  1 High (panic mid-commit → silent host divergence), 3 Medium (observe ordering,
+  cross-thread writes, effect-cap stranding), 4 Low. Fix round in flight.
 
 - **keel-ffi** (SPEC §6/§6.1/§7) merged after adversarial review: C ABI (19 fns, panic
   guard at every entry, SAFETY lint-enforced), JNI shim (RegisterNatives, direct buffers,
