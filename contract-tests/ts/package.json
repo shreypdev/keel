@@ -1,0 +1,20 @@
+{
+  "name": "@keel/contract-tests-ts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The TypeScript column of the seventeen contract scenarios (contract-tests/scenarios.md): @keel/runtime over the real wasm build of the playground core.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  }
+}
