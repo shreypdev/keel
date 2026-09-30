@@ -93,24 +93,22 @@ impl BigList {
             Ok(())
         })?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.items.update(|list| {
-            list.insert(
-                index as usize,
-                Item {
-                    id,
-                    label,
-                    version: 0,
-                },
-            );
-        });
+        // The recorded list ops keep the change-set O(change) (ADR-027).
+        self.items.insert(
+            index as usize,
+            Item {
+                id,
+                label,
+                version: 0,
+            },
+        );
         Ok(id)
     }
 
     /// Changes the label of the row at `index` and bumps its version. One keyed `Update`.
     pub fn update_at(&self, index: u32, label: String) -> Result<(), ListError> {
         self.items.with(|list| check(index, list.len()))?;
-        self.items.update(|list| {
-            let item = &mut list[index as usize];
+        self.items.update_at(index as usize, |item| {
             item.label = label;
             item.version += 1;
         });
@@ -123,19 +121,14 @@ impl BigList {
             check(from, list.len())?;
             check(to, list.len())
         })?;
-        self.items.update(|list| {
-            let item = list.remove(from as usize);
-            list.insert(to as usize, item);
-        });
+        self.items.move_item(from as usize, to as usize);
         Ok(())
     }
 
     /// Removes the row at `index`. One keyed `Remove`.
     pub fn remove_at(&self, index: u32) -> Result<(), ListError> {
         self.items.with(|list| check(index, list.len()))?;
-        self.items.update(|list| {
-            list.remove(index as usize);
-        });
+        self.items.remove(index as usize);
         Ok(())
     }
 
