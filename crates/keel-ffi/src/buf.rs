@@ -14,7 +14,9 @@ use core::ptr;
 /// field of a buffer it got from the core.
 ///
 /// The one place a *host* fills a `KeelBuf` is the `out_reply` argument of a synchronous port
-/// callback; see `KeelPortCb` in the `native` module for that memory rule (`cap == 0`, malloc'd).
+/// callback; see `KeelPortCb` in the `native` module for that memory rule: a `malloc`ed block
+/// with `len` set, which the core releases with `free`. `cap` is reserved there (set it to `0`)
+/// and ignored, so a host cannot turn it into an allocator mix-up.
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct KeelBuf {

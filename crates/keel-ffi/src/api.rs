@@ -9,6 +9,8 @@
 
 use std::sync::Arc;
 
+#[cfg(any(target_family = "wasm", test))]
+use keel_runtime::keel_wire::payload::PortReply;
 use keel_runtime::keel_wire::payload::{Call, Reply, ReplyStatus};
 use keel_runtime::keel_wire::{Decode, Reader, Writer};
 use keel_runtime::{InitError, RestoreError, Runtime, RuntimeConfig};
@@ -197,12 +199,35 @@ pub(crate) fn release(handle: u64) {
     );
 }
 
-/// `keel_port_reply`.
+/// The port call id of fire-and-forget calls: the core sends the host's `Log` port its log
+/// records under it and never waits for an answer. Real port calls are numbered from 1.
+pub(crate) const FIRE_AND_FORGET_PORT_CALL: u32 = 0;
+
+/// Whether `payload` is a well-formed `PortReply` header answering a fire-and-forget call.
+fn answers_a_fire_and_forget_call(payload: &[u8]) -> bool {
+    payload.len() >= 5 && payload[..4] == FIRE_AND_FORGET_PORT_CALL.to_le_bytes()
+}
+
+/// The port call a well-formed `PortReply` payload answers (`None` for a malformed one, which the
+/// runtime rejects too, so it answers nothing).
+#[cfg(any(target_family = "wasm", test))]
+pub(crate) fn port_reply_call_id(payload: &[u8]) -> Option<u32> {
+    PortReply::decode(&mut Reader::new(payload))
+        .ok()
+        .map(|reply| reply.port_call_id)
+}
+
+/// `keel_port_reply`. An answer to a fire-and-forget call is dropped silently: nothing waits for
+/// it, and logging "no port call 0 is pending" would be one more Log call, which a host that
+/// answers Log asynchronously would answer again, without end.
 pub(crate) fn port_reply(payload: &[u8]) {
     guarded(
         "keel_port_reply",
         |_| (),
         || {
+            if answers_a_fire_and_forget_call(payload) {
+                return;
+            }
             if let Some(rt) = runtime() {
                 rt.port_reply(payload);
             }
@@ -250,18 +275,26 @@ pub(crate) fn poll() {
     );
 }
 
-/// A snapshot of nothing: `count u32 = 0, generation_floor u32 = 0` (SPEC 5.9).
-const EMPTY_SNAPSHOT: [u8; 8] = [0; 8];
+/// A snapshot of nothing: `count u32 = 0, generation_floor u32` (SPEC 5.9), the floor being the
+/// process-wide generation counter: it outlives `keel_shutdown`, so a host that snapshots
+/// between a shutdown and the next init keeps ADR-022's guarantee that a generation it may still
+/// hold is never issued again in this process.
+fn empty_snapshot() -> Vec<u8> {
+    let mut w = Writer::with_capacity(8);
+    w.write_u32(0);
+    w.write_u32(keel_runtime::object_table::process_generation_floor());
+    w.into_vec()
+}
 
-/// `keel_snapshot`: a `Snapshot` payload; an empty one (no stores, generation floor 0) before
-/// init.
+/// `keel_snapshot`: a `Snapshot` payload; with no runtime, an empty one carrying the
+/// process-wide generation floor.
 pub(crate) fn snapshot() -> Vec<u8> {
     guarded(
         "keel_snapshot",
-        |_| EMPTY_SNAPSHOT.to_vec(),
+        |_| empty_snapshot(),
         || match runtime() {
             Some(rt) => rt.snapshot(),
-            None => EMPTY_SNAPSHOT.to_vec(),
+            None => empty_snapshot(),
         },
     )
 }
@@ -314,6 +347,37 @@ mod tests {
     fn decode(reply: &[u8]) -> (u32, ReplyStatus, Vec<u8>) {
         let r = Reply::decode(&mut Reader::new(reply)).expect("a reply payload");
         (r.call_id, r.status, r.body.to_vec())
+    }
+
+    #[test]
+    fn a_port_reply_names_its_call_only_when_well_formed() {
+        assert_eq!(port_reply_call_id(&[7, 0, 0, 0, 0]), Some(7));
+        assert_eq!(port_reply_call_id(&[7, 0, 0, 0, 0, 1, 2]), Some(7));
+        assert_eq!(port_reply_call_id(&[7, 0, 0, 0, 9]), None, "no such status");
+        assert_eq!(port_reply_call_id(&[7, 0, 0]), None);
+    }
+
+    #[test]
+    fn the_empty_snapshot_is_count_zero_then_the_process_floor() {
+        let floor = keel_runtime::object_table::process_generation_floor();
+        let bytes = empty_snapshot();
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(bytes[..4], [0; 4]);
+        let carried = u32::from_le_bytes(bytes[4..].try_into().unwrap());
+        assert!(
+            carried >= floor,
+            "{carried} < {floor}: the floor never goes down"
+        );
+    }
+
+    #[test]
+    fn only_a_whole_port_reply_header_with_id_zero_is_fire_and_forget() {
+        assert!(answers_a_fire_and_forget_call(&[0, 0, 0, 0, 0]));
+        assert!(answers_a_fire_and_forget_call(&[0, 0, 0, 0, 2, 9, 9]));
+        assert!(!answers_a_fire_and_forget_call(&[0, 0, 0, 0]), "truncated");
+        assert!(!answers_a_fire_and_forget_call(&[1, 0, 0, 0, 0]));
+        assert!(!answers_a_fire_and_forget_call(&[0, 0, 0, 1, 0]));
+        assert!(!answers_a_fire_and_forget_call(&[]));
     }
 
     #[test]

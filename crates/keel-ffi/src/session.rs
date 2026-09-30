@@ -14,6 +14,7 @@ use keel_runtime::{Host, PortCallOutcome, Runtime};
 
 use crate::api::{self, init_code, init_error_code, parse_config};
 use crate::guard::guarded;
+use crate::registry::PORTS;
 
 /// Where the runtime's outgoing traffic goes; one implementation per native shim.
 pub(crate) trait Sink: Send + Sync + 'static {
@@ -95,10 +96,14 @@ impl Host for NativeHost {
         args.write_str(target);
         args.write_str(message);
         // The answer is irrelevant: a log record is fire and forget. A synchronous reply is
-        // consumed (and freed) by the sink; an asynchronous one is ignored.
-        let _ = self
-            .sink
-            .port_call(LOG_PORT, LOG_METHOD, 0, args.as_slice());
+        // consumed (and freed) by the sink; an asynchronous one is ignored, and a late
+        // `keel_port_reply` carrying this call's id is dropped (`api::port_reply`).
+        let _ = self.sink.port_call(
+            LOG_PORT,
+            LOG_METHOD,
+            api::FIRE_AND_FORGET_PORT_CALL,
+            args.as_slice(),
+        );
         LOGGING.with(|flag| flag.set(false));
     }
 }
@@ -154,6 +159,12 @@ pub(crate) fn start(config: &[u8], sink: Arc<dyn Sink>, after_init: impl FnOnce(
 
 /// `keel_shutdown`: stops the runtime (idempotent) and forgets the embedder, so a later
 /// `keel_init` may install another one.
+///
+/// The port registrations go with it, inside the same critical section as the embedder: a
+/// `keel_init` (and the registrations its host makes once it returns) on another thread waits
+/// for this shutdown to finish, so it can never be wiped by it. Removing the registrations
+/// waits for the port callbacks still running on other threads, which is what lets the host free
+/// its `user` pointers when this returns (SPEC 6.3, ADR-026).
 pub(crate) fn stop() {
     guarded(
         "keel_shutdown",
@@ -164,6 +175,8 @@ pub(crate) fn stop() {
                 rt.shutdown();
             }
             *slot = None;
+            // After the runtime: its shutdown still logs through the Log port.
+            PORTS.retire_all();
         },
     );
 }

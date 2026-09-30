@@ -237,6 +237,14 @@ impl Generations {
 /// another.
 static PROCESS_GENERATIONS: Generations = Generations::new();
 
+/// The highest generation the process-wide counter has issued so far (`0` before any), which
+/// survives a runtime's shutdown: what a snapshot taken with no runtime running must record as
+/// its floor so a fresh `init` never re-issues a generation a host may still hold (ADR-022).
+/// Tables with a counter of their own (the ones test runtimes use) are not counted.
+pub fn process_generation_floor() -> u32 {
+    PROCESS_GENERATIONS.last()
+}
+
 /// What [`ObjectTable::clear`] took out of the table.
 pub(crate) struct Cleared {
     pub handle: Handle,
@@ -807,6 +815,21 @@ mod tests {
         t.raise_generation_floor(3);
         assert_eq!(t.generation_floor(), 11, "never lowered");
         assert_eq!(t.insert(a(2)).generation(), 12);
+    }
+
+    #[test]
+    fn the_process_floor_follows_the_shared_counter_and_ignores_isolated_tables() {
+        let shared = ObjectTable::new();
+        let first = shared.insert(a(0));
+        assert!(process_generation_floor() >= first.generation());
+        let second = shared.insert(a(1));
+        assert!(process_generation_floor() >= second.generation());
+        assert!(second.generation() > first.generation());
+        // A table with a counter of its own does not move the process one.
+        let isolated = ObjectTable::isolated();
+        isolated.raise_generation_floor(u32::MAX / 2);
+        isolated.insert(a(2));
+        assert!(process_generation_floor() < u32::MAX / 2);
     }
 
     #[test]

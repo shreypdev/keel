@@ -49,11 +49,18 @@ int main(void) {
 ## Contracts worth knowing
 
 * **Buffers.** A `KeelBuf` the core returns is yours until `keel_buf_free`. The single buffer
-  a *host* allocates is the `out_reply` of a synchronous port callback: `malloc`ed, `cap = 0`;
-  the core copies it and `free`s it.
+  a *host* allocates is the `out_reply` of a synchronous port callback: `malloc`ed, `len` set,
+  `cap` reserved (0); the core copies it and always `free`s it.
 * **Callbacks** run on the core thread, a blocking thread or your calling thread, possibly with
-  the core lock held (SPEC 5.1). Copy the bytes and return; a same-thread call back into the core
-  is refused (`E_REENTRANT`, status 5) rather than deadlocked.
+  the core lock held (SPEC 5.1), **concurrently**: they must be thread-safe, must not unwind and
+  must copy the bytes and return. A call back into the core is refused (`E_REENTRANT`, status 5)
+  rather than deadlocked, except `keel_buf_free`, `keel_port_reply`, `keel_stream_credit`,
+  `keel_timer_fired`, `keel_stats_json` and the read-only `keel_abi_version`, `keel_schema_hash`,
+  `keel_schema_json`. The whole host contract is the header comment of `keel.h` (SPEC 6).
+* **Lifetimes.** Your `user` pointers outlive `keel_shutdown` returning; a port's outlives the
+  `keel_port_register` call that removes or replaces it, which **waits** for that port's running
+  callbacks first (so you may free `user` when it returns, and must not call it from inside that
+  callback). `keel_shutdown` waits the same way.
 * **Nothing unwinds out of a `keel_*` function.** A panic in the core answers status 2; a panic
   in the shim itself is contained and logged at level 5. This needs `panic = "unwind"` on native
   targets (the crate refuses to compile with `panic = "abort"`); only wasm aborts (SPEC 7: log at
@@ -61,9 +68,11 @@ int main(void) {
 * **`keel_init`** returns `0` or an `init_code`: repeating it with the same callbacks is a
   no-op, a different embedder gets `ALREADY_INITIALIZED`. `core_threads == 0` is treated as `1`
   (there is no native `keel_poll`). `keel_shutdown` joins the core threads and drops the port
-  registrations; `keel_init` may follow. `keel_restore` returns a `restore_code`.
+  registrations (waiting for port callbacks still running); `keel_init` may follow.
+  `keel_restore` returns a `restore_code`.
 * **Logs** reach a native host as calls to its `Log` port (`port.Log` / `Log.log`), so register
-  one to see the core's own records. `keel_port_register` also takes a port over from any default
+  one to see the core's own records (fire and forget: port call id 0, any answer accepted, a
+  `keel_port_reply` for id 0 ignored). `keel_port_register` also takes a port over from any default
   Rust binding.
 * **Static linking.** The core's `#[keel::api]` registrations are static constructors in object
   files that nothing references. A release build (`lto = "fat"`, `codegen-units = 1`) is one

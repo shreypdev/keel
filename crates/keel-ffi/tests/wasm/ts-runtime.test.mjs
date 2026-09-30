@@ -1,15 +1,38 @@
 // The real keel-ffi wasm module driven by the real TypeScript runtime (`KeelCore` over
 // `WasmMainTransport`, mode "wasm-main"): the acceptance run for SPEC 7 and SPEC 17.1.
-// Needs the TypeScript runtime built: `npm ci && npx tsc -p tsconfig.build.json` in
-// runtimes/ts/@keel/runtime (or KEEL_TS_DIST=/path/to/dist/index.js).
+// Needs the TypeScript runtime built: run.sh builds it fresh into a scratch directory and sets
+// KEEL_TS_DIST; by hand, `npm ci && npx tsc -p tsconfig.build.json` in runtimes/ts/@keel/runtime
+// (a dist/ older than its sources is refused, so this can never test a stale build).
 import assert from "node:assert/strict";
-import { dirname, resolve } from "node:path";
+import { readdirSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Instance, ids, loadModule } from "./helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dist = process.env.KEEL_TS_DIST ?? resolve(here, "../../../../runtimes/ts/@keel/runtime/dist/index.js");
+const tsRoot = resolve(here, "../../../../runtimes/ts/@keel/runtime");
+const dist = process.env.KEEL_TS_DIST ?? resolve(tsRoot, "dist/index.js");
+if (!process.env.KEEL_TS_DIST) refuseStaleDist(dist, join(tsRoot, "src"));
+
+/** Throws when `dist` is missing or older than the newest TypeScript source: a stale build would pass or fail for the wrong reasons. */
+function refuseStaleDist(dist, src) {
+  let built;
+  try {
+    built = statSync(dist).mtimeMs;
+  } catch {
+    throw new Error(`${dist} does not exist: run crates/keel-ffi/tests/wasm/run.sh, or build the TypeScript runtime (npm ci && npx tsc -p tsconfig.build.json)`);
+  }
+  const newest = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).reduce(
+      (latest, entry) =>
+        Math.max(latest, entry.isDirectory() ? newest(join(dir, entry.name)) : entry.name.endsWith(".ts") ? statSync(join(dir, entry.name)).mtimeMs : 0),
+      0,
+    );
+  if (newest(src) > built) {
+    throw new Error(`${dist} is older than the TypeScript sources: rebuild it (run.sh does) instead of testing a stale dist`);
+  }
+}
 const K = await import(pathToFileURL(dist).href);
 const {
   ALL_SIGNALS,

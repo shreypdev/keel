@@ -47,7 +47,7 @@ static uint8_t on_port(void *user, uint32_t port, uint32_t method, uint32_t call
     memcpy(reply, &call, 4);               /* port_call_id, status 0 = ok, empty body */
     out->ptr = reply;
     out->len = 5;
-    out->cap = 0;                          /* ... and marks it: the core copies and free()s it */
+    out->cap = 0;                          /* cap is reserved; the core copies the block and free()s it */
     return 0;
 }
 
@@ -92,7 +92,10 @@ int main(void) {
         keel_release(0x7777777700000001ull);
 
         KeelBuf snap = keel_snapshot();
-        assert(snap.len == 4); /* no stores: count = 0 */
+        /* SPEC 5.9 / ADR-022: `count u32, generation_floor u32` then the stores. No stores: 8 bytes.
+         * The library is linked without a core, so nothing in this process ever issued a handle:
+         * the generation floor is 0. */
+        assert(snap.len == 8 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0);
         assert(keel_restore(snap.ptr, snap.len) == 0);
         keel_buf_free(snap);
         KeelBuf stats = keel_stats_json();
@@ -102,6 +105,11 @@ int main(void) {
 
         keel_shutdown();
         keel_shutdown(); /* idempotent */
+
+        /* With no runtime the snapshot keeps the same layout and the process-wide floor (L1). */
+        snap = keel_snapshot();
+        assert(snap.len == 8 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0);
+        keel_buf_free(snap);
     }
     puts("c smoke: ok");
     return 0;

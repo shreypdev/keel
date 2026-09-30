@@ -44,7 +44,7 @@ unsafe extern "C" {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PortMode {
-    /// Answer inline through `out_reply` (malloc'd, `cap == 0`).
+    /// Answer inline through `out_reply` (malloc'd, `cap` reserved).
     Sync,
     /// Return 1 and let the test call `keel_port_reply`.
     Async,
@@ -76,6 +76,10 @@ struct Capture {
     /// When set, `on_reply` calls back into the core (which SPEC 5.1 forbids) and records the answer.
     reenter: std::sync::atomic::AtomicBool,
     reentered: Mutex<Vec<u32>>,
+    /// When set, `on_reply` exercises every entry point `keel.h` lists (as callable or not
+    /// callable from a callback) and records what happened in `probed`.
+    probe: std::sync::atomic::AtomicBool,
+    probed: Mutex<Vec<(&'static str, bool)>>,
 }
 
 impl Capture {
@@ -86,6 +90,8 @@ impl Capture {
             echo_mode: Mutex::new(PortMode::Sync),
             reenter: std::sync::atomic::AtomicBool::new(false),
             reentered: Mutex::new(Vec::new()),
+            probe: std::sync::atomic::AtomicBool::new(false),
+            probed: Mutex::new(Vec::new()),
         })
     }
 
@@ -200,7 +206,73 @@ extern "C" fn on_reply(user: *mut c_void, call_id: u32, ptr: *const u8, len: u32
             .unwrap_or_else(PoisonError::into_inner)
             .extend([refused, status]);
     }
+    if cap.probe.load(Ordering::Acquire) {
+        probe_entries(cap);
+    }
     cap.with(|inner| inner.replies.push((call_id, bytes)));
+}
+
+/// Calls, from inside a callback, every entry point `keel.h` lists, and records whether it did
+/// what the header says. Nothing here may panic (this runs in an `extern "C"` callback).
+fn probe_entries(cap: &Capture) {
+    let mut seen: Vec<(&'static str, bool)> = Vec::new();
+
+    // Callable from a callback: they never take the core lock.
+    let stats = keel_stats_json();
+    // SAFETY: a buffer the core returned, read and freed once (`keel_buf_free` is on the list).
+    let stats_ok = unsafe {
+        let ok = serde_json::from_slice::<serde_json::Value>(stats.as_slice())
+            .is_ok_and(|json| json["platform"] == "test");
+        keel_buf_free(stats);
+        ok
+    };
+    seen.push(("keel_stats_json", stats_ok));
+    // SAFETY: the empty buffer owns nothing.
+    unsafe { keel_buf_free(KeelBuf::EMPTY) };
+    seen.push(("keel_buf_free", true));
+    keel_stream_credit(0xFFFF_0001, 1);
+    seen.push(("keel_stream_credit", true));
+    keel_timer_fired(0xFFFF_0002);
+    seen.push(("keel_timer_fired", true));
+    port_reply(&port_reply_payload(0xFFFF_0003, PortStatus::Ok, &[]));
+    seen.push(("keel_port_reply", true));
+    seen.push(("keel_abi_version", keel_abi_version() == 1));
+    seen.push(("keel_schema_hash", keel_schema_hash() != 0));
+    let json = keel_schema_json();
+    // SAFETY: a buffer the core returned, read and freed once.
+    let json_ok = unsafe {
+        let ok = json.as_slice().first() == Some(&b'{');
+        keel_buf_free(json);
+        ok
+    };
+    seen.push(("keel_schema_json", json_ok));
+
+    // Refused (E_REENTRANT), answered without deadlocking or running.
+    seen.push((
+        "keel_call refused",
+        submit(&call_payload(function("version"), 9_999_001, &[])) == 5,
+    ));
+    let sync = call_sync_raw(&call_payload(function("version"), 9_999_002, &[]));
+    // SAFETY: a buffer the core returned, read and freed once.
+    let sync_refused = unsafe {
+        let refused = sync.as_slice().get(4) == Some(&ReplyStatus::BadRequest.as_u8());
+        keel_buf_free(sync);
+        refused
+    };
+    seen.push(("keel_call_sync refused", sync_refused));
+    keel_cancel(9_999_003);
+    keel_observe(0x1_0000_0001, 0, 1);
+    keel_release(0x1_0000_0001);
+    event(1, 2, &[]);
+    seen.push((
+        "keel_restore refused",
+        restore(&[0; 8]) == restore_code::UNAVAILABLE,
+    ));
+
+    cap.probed
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .extend(seen);
 }
 
 extern "C" fn on_changes(user: *mut c_void, ptr: *const u8, len: u32) {
@@ -215,7 +287,11 @@ extern "C" fn on_stream(user: *mut c_void, call_id: u32, ptr: *const u8, len: u3
     cap.with(|inner| inner.stream_items.push((call_id, bytes)));
 }
 
-/// Hands `payload` to the core as a host-allocated reply: `malloc`ed, `cap == 0`.
+/// What `answer_sync` writes into `out_reply.cap`: `0` as `keel.h` asks, or (set by a test) the
+/// block's length, the way a host that took "cap" to mean "capacity" would fill it (review M1).
+static REPLY_CAP_IS_LEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hands `payload` to the core as a host-allocated reply: `malloc`ed, `cap` reserved (0).
 ///
 /// # Safety
 ///
@@ -228,10 +304,15 @@ unsafe fn answer_sync(out: *mut KeelBuf, payload: &[u8]) {
     unsafe { std::ptr::copy_nonoverlapping(payload.as_ptr(), block, payload.len()) };
     // SAFETY: `out` is valid per the caller's contract; ownership of `block` passes to the core.
     unsafe {
+        let len = u32::try_from(payload.len()).expect("small");
         *out = KeelBuf {
             ptr: block,
-            len: u32::try_from(payload.len()).expect("small"),
-            cap: 0,
+            len,
+            cap: if REPLY_CAP_IS_LEN.load(Ordering::Acquire) {
+                len
+            } else {
+                0
+            },
         };
     }
 }
@@ -549,7 +630,8 @@ fn calls_before_init_fail_softly() {
     port_reply(&[]);
     event(1, 2, &[]);
     let snapshot = take(keel_snapshot());
-    assert_eq!(snapshot, [0; 8], "no stores, generation floor 0");
+    assert_eq!(snapshot.len(), 8, "no stores, then the generation floor");
+    assert_eq!(snapshot[..4], [0; 4]);
     assert_eq!(restore(&snapshot), restore_code::UNAVAILABLE);
     let stats: serde_json::Value = serde_json::from_slice(&take(keel_stats_json())).expect("JSON");
     assert_eq!(stats["initialized"], false);
@@ -736,6 +818,50 @@ fn calling_back_into_the_core_from_a_callback_is_refused_not_deadlocked() {
     let answers = host.cap.reentered.lock().unwrap().clone();
     assert_eq!(answers, [5, u32::from(ReplyStatus::BadRequest.as_u8())]);
     host.cap.reenter.store(false, Ordering::Release);
+    assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);
+}
+
+/// M2: the list of entry points `keel.h` and SPEC 5.1 allow from inside a callback is the list
+/// that works; every other core-lock entry is refused with `E_REENTRANT` (logged, never a
+/// deadlock), and none of the allowed ones is.
+#[test]
+fn callbacks_may_call_exactly_the_documented_entry_points() {
+    let host = Embedder::start();
+    host.cap.probe.store(true, Ordering::Release);
+    // The async path replies from inside `keel_call`, on this thread, under the core lock.
+    let (status, _) = host.run(function("version"), &[]);
+    host.cap.probe.store(false, Ordering::Release);
+    assert_eq!(status, ReplyStatus::Ok, "the original call is unaffected");
+
+    let probed = host.cap.probed.lock().unwrap().clone();
+    assert!(probed.len() == 11, "the probe ran: {probed:?}");
+    for (what, ok) in &probed {
+        assert!(*ok, "{what} did not behave as keel.h says: {probed:?}");
+    }
+    host.cap.with(|inner| {
+        let refused: Vec<&str> = inner
+            .logs
+            .iter()
+            .filter(|(_, target, message)| {
+                target == "keel::runtime" && message.contains("E_REENTRANT")
+            })
+            .map(|(_, _, message)| message.split(':').next().unwrap_or(""))
+            .collect();
+        for entry in ["cancel", "observe", "release", "event"] {
+            assert!(
+                refused.contains(&entry),
+                "{entry} from a callback must be refused: {refused:?}"
+            );
+        }
+        // The allowed entries are not among the refusals (the list is exactly the allowed set).
+        for entry in ["stream_credit", "timer_fired", "port_reply", "stats_json"] {
+            assert!(
+                !refused.contains(&entry),
+                "{entry} is allowed from a callback: {refused:?}"
+            );
+        }
+    });
+    // Nothing was left wedged.
     assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);
 }
 
@@ -947,6 +1073,46 @@ fn snapshot_and_restore_round_trip_and_reject_garbage() {
     assert_eq!(status, ReplyStatus::Ok);
 }
 
+/// L1: the generation counter outlives `keel_shutdown`, so a snapshot taken with no runtime
+/// carries the true process-wide floor (not 0), and a runtime started afterwards continues above
+/// it: a handle from before the shutdown never names anything in the new one (ADR-022).
+#[test]
+fn a_snapshot_with_no_runtime_keeps_the_process_generation_floor() {
+    let host = Embedder::start();
+    let mut last = host.construct("Counter", &[]);
+    for _ in 0..3 {
+        last = host.construct("Counter", &[]);
+    }
+    let floor_of = |bytes: Vec<u8>| {
+        Snapshot::decode(&mut Reader::new(&bytes))
+            .unwrap()
+            .generation_floor
+    };
+    let running = floor_of(take(keel_snapshot()));
+    assert!(running >= last.generation());
+
+    keel_shutdown();
+    let down = take(keel_snapshot());
+    let decoded = Snapshot::decode(&mut Reader::new(&down)).unwrap();
+    assert_eq!(decoded.stores.len(), 0, "a stopped runtime has no stores");
+    assert!(
+        decoded.generation_floor >= running,
+        "floor after shutdown {} fell below the {} of the running runtime",
+        decoded.generation_floor,
+        running
+    );
+
+    // The next runtime issues above it, so the old handle cannot be mistaken for a new object.
+    assert_eq!(init_raw(&config("inproc", 2), &host.cap), init_code::OK);
+    let fresh = host.construct("Counter", &[]);
+    assert!(fresh.generation() > last.generation());
+    assert!(fresh.generation() > decoded.generation_floor);
+    assert_eq!(
+        host.sync(method(last, "Counter", "bump"), &[]).0,
+        ReplyStatus::BadRequest
+    );
+}
+
 /// H1 over the C ABI: a handle the host still holds (here `b`, issued after the snapshot) must
 /// never name an object created after the restore.
 #[test]
@@ -1006,6 +1172,26 @@ fn sync_port_answers_through_out_reply_and_the_core_frees_it() {
         assert_eq!(call.method_id, ids::port_method_id("Sum", "add"));
         assert_eq!(call.args, args);
     });
+}
+
+/// M1: a host that fills `cap` (the natural reading of the field) on its `malloc`ed reply must
+/// not make the core free a C block with Rust's allocator: `out_reply` is always `free`d. Under
+/// Miri a mismatched deallocator is reported as undefined behaviour, so this is the test
+/// `cargo +nightly miri test -p keel-ffi --test abi -- cap_set` runs.
+#[test]
+fn a_host_that_sets_cap_on_its_malloc_block_is_still_freed_with_free() {
+    let host = Embedder::start();
+    let calc = host.calculator(0);
+    let args: Vec<u8> = [20_u32.encode_to_vec(), 22_u32.encode_to_vec()].concat();
+    REPLY_CAP_IS_LEN.store(true, Ordering::Release);
+    for _ in 0..10 {
+        let (status, body) = host.sync(method(calc, "Calculator", "sum_on_host"), &args);
+        assert_eq!(
+            (status, u32::decode_exact(&body).unwrap()),
+            (ReplyStatus::Ok, 42)
+        );
+    }
+    REPLY_CAP_IS_LEN.store(false, Ordering::Release);
 }
 
 #[test]

@@ -52,6 +52,26 @@ test("keel_alloc and keel_free hand out 8-aligned, distinct blocks", () => {
   core.x.keel_free(0, 0); // freeing null is harmless
 });
 
+test("keel_alloc traps for a size nothing can satisfy instead of returning 0 (L3)", () => {
+  for (const size of [0x7fff_fff9, 0x8000_0000, 0xffff_ffff]) {
+    const core = fresh();
+    core.x._initialize();
+    assert.throws(
+      () => core.x.keel_alloc(size),
+      (error) => error instanceof WebAssembly.RuntimeError,
+      `keel_alloc(${size >>> 0}) must trap, not hand back linear address 0`,
+    );
+    // The panic hook reported it at level 5 through the host before the trap.
+    const fatal = core.logs.filter((l) => l.level === 5);
+    assert.equal(fatal.length, 1, JSON.stringify(core.logs));
+    assert.match(fatal[0].message, /keel_alloc/);
+  }
+  // An ordinary size is unaffected, and never 0.
+  const core = fresh();
+  core.x._initialize();
+  assert.notEqual(core.x.keel_alloc(0x1000), 0);
+});
+
 test("version, schema hash and schema JSON are consistent and work before keel_init", () => {
   const core = fresh();
   core.x._initialize();
@@ -277,6 +297,60 @@ test("an asynchronous port (return 1) is answered later through keel_port_reply"
   core.portReplyInto(portReply(pending.portCallId, 0, u32(1)));
   core.portReplyInto(portReply(999_999, 0, u32(1)));
   core.portReplyInto(Uint8Array.of(1, 2, 3));
+});
+
+test("an async port answered with keel_port_reply inside port_call (returning 0) completes the call", () => {
+  const core = fresh({
+    portCall: (call, self) => {
+      if (call.portId !== ids.port("Echo")) return 2;
+      self.portReplyInto(portReply(call.portCallId, 0, u32(new Reader(call.args).u32() + 1000)));
+      return 0;
+    },
+  });
+  core.init();
+  const calc = core.construct(CALC, i64(0));
+  const id = core.callId();
+  assert.equal(core.submit(call.method(calc, ids.method(CALC, "ping_host"), id, u32(5))), 0);
+  core.drain();
+  const reply = core.takeReply(id);
+  assert.equal(reply.status, Status.Ok);
+  assert.equal(new Reader(reply.body).u32(), 1005);
+});
+
+test("a host that answers a different call and returns 0 has not answered this one (L2)", () => {
+  // Call A is left pending (return 1). While call B's import runs the host answers A, then
+  // returns 0 for B without answering B: B must fail, not wait forever.
+  const pending = [];
+  const core = fresh({
+    portCall: (call, self) => {
+      if (call.portId !== ids.port("Echo")) return 2;
+      if (pending.length === 0) {
+        pending.push(call);
+        return 1;
+      }
+      self.portReplyInto(portReply(pending[0].portCallId, 0, u32(1234)));
+      return 0;
+    },
+  });
+  core.init();
+  const calc = core.construct(CALC, i64(0));
+  const a = core.callId();
+  assert.equal(core.submit(call.method(calc, ids.method(CALC, "ping_host"), a, u32(7))), 0);
+  core.drain();
+  assert.equal(pending.length, 1, "call A reached the host and is pending");
+  const b = core.callId();
+  assert.equal(core.submit(call.method(calc, ids.method(CALC, "ping_host"), b, u32(8))), 0);
+  // B fails as an unavailable port does on wasm (the generated proxy panics, the module traps)
+  // and is reported at level 5. Before the fix the lie went undetected and B stayed pending:
+  // `drain` returned quietly and no record was written.
+  assert.throws(
+    () => core.drain(),
+    (error) => error instanceof WebAssembly.RuntimeError,
+    "call B must fail instead of hanging",
+  );
+  const fatal = core.logs.filter((l) => l.level === 5);
+  assert.equal(fatal.length, 1, JSON.stringify(core.logs));
+  assert.match(fatal[0].message, /Echo/);
 });
 
 test("Clock, Rng and Log have built-in bindings over now_ms, random and log", () => {

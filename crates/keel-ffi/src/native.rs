@@ -8,20 +8,28 @@
 //! * buffers the core returns are [`KeelBuf`]s, owned by the caller until
 //!   [`keel_buf_free`];
 //! * the reply, change-set, stream and port callbacks run on the core thread, a blocking thread
-//!   or the caller's thread, possibly while the core lock is held, and must not call back into
-//!   the core (SPEC 5.1) except [`keel_buf_free`];
+//!   or the caller's thread, possibly while the core lock is held, **concurrently** with each
+//!   other, and must be thread-safe, must not unwind and must not call back into the core
+//!   (SPEC 5.1) except the entries that never take the core lock: [`keel_buf_free`],
+//!   [`keel_port_reply`], [`keel_stream_credit`], [`keel_timer_fired`], [`keel_stats_json`] and
+//!   the read-only [`keel_abi_version`], [`keel_schema_hash`] and [`keel_schema_json`]; the
+//!   others are refused (`E_REENTRANT`) or must not be called from a callback at all. The
+//!   complete host contract is the header comment of `keel.h` and SPEC 6;
+//! * the callbacks and their `user` pointers stay valid until [`keel_shutdown`] returns, a port
+//!   callback until [`keel_port_register`] has removed or replaced it (which waits for its running
+//!   invocations, so the host may free `user` when it returns);
 //! * nothing unwinds out of any function (constitution R6): a contained panic becomes a status 2
 //!   reply, an error code, or nothing for `void` entries.
 
 use core::ffi::c_void;
-use std::collections::BTreeMap;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
 
 use keel_runtime::{PortCallOutcome, Runtime};
 
 use crate::api::{self, init_code};
 use crate::buf::KeelBuf;
 use crate::guard::guarded;
+use crate::registry::{PORTS, UserPtr};
 use crate::session::{self, Sink};
 
 /// `void (*keel_reply_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len)`:
@@ -49,12 +57,13 @@ pub type KeelStreamCb =
 /// * `2` (or anything else): the port is unavailable.
 ///
 /// **Host reply memory rule** (the one place where the host, not the core, allocates a
-/// buffer): on `0` the host stores in `*out_reply` a block from the C allocator
-/// (`malloc(n)`) with `len = n` and **`cap = 0`**. Ownership passes to the core when the callback
-/// returns: it copies the bytes at once and releases the block with `free`, never with
-/// `keel_buf_free`. A non-zero `cap` marks a buffer that this crate allocated (a Rust embedder
-/// reusing a [`KeelBuf`]); the core then reclaims it as a `Vec`. For `1` and `2` the host leaves
-/// `*out_reply` untouched.
+/// buffer): on `0` the host stores in `*out_reply` a block from the C allocator (`malloc(n)`)
+/// with `len = n`. **The block is always released with `free`**, by the core, once it has copied
+/// the bytes: never with `keel_buf_free`, never as a Rust `Vec`, whatever the other fields say.
+/// `cap` is reserved and ignored: set it to `0`. (An earlier draft let a non-zero `cap` mark a
+/// Rust-allocated buffer; a host that filled `cap` with the natural meaning of the word then
+/// made the core free a C block with Rust's allocator, which is undefined behaviour, so the
+/// branch is gone.) For `1` and `2` the host leaves `*out_reply` untouched.
 pub type KeelPortCb = unsafe extern "C" fn(
     user: *mut c_void,
     port_id: u32,
@@ -66,37 +75,8 @@ pub type KeelPortCb = unsafe extern "C" fn(
 ) -> u8;
 
 unsafe extern "C" {
-    /// The C allocator's `free`, for host-allocated port replies (`cap == 0`).
+    /// The C allocator's `free`, for host-allocated port replies (always `malloc`ed).
     fn free(ptr: *mut c_void);
-}
-
-/// An opaque host pointer handed back to its callbacks.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct UserPtr(*mut c_void);
-
-// SAFETY: the pointer is never dereferenced here, only passed back to the host's own callbacks.
-// SPEC 6 makes the host responsible for those callbacks being callable from any thread.
-unsafe impl Send for UserPtr {}
-// SAFETY: as above; sharing the value shares no data.
-unsafe impl Sync for UserPtr {}
-
-/// One registered port callback.
-#[derive(Clone, Copy)]
-struct PortReg {
-    cb: KeelPortCb,
-    user: UserPtr,
-}
-
-/// Port callbacks by port id. Survives between `keel_port_register` and `keel_shutdown`; a
-/// registration made before `keel_init` applies once the runtime is up.
-static PORTS: RwLock<BTreeMap<u32, PortReg>> = RwLock::new(BTreeMap::new());
-
-fn port_registration(port_id: u32) -> Option<PortReg> {
-    PORTS
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&port_id)
-        .copied()
 }
 
 /// The embedder of a C host: its three callbacks and its `user` pointer.
@@ -126,10 +106,14 @@ fn c_len(payload: &[u8]) -> Option<u32> {
 
 /// Reads and releases the reply a synchronous port callback left in `out`.
 ///
+/// The block is the host's `malloc`ed memory and is released with `free`, always: `out.cap` is
+/// reserved and never looked at (see [`KeelPortCb`]).
+///
 /// # Safety
 ///
 /// `out` must be what the host stored on returning `0` from the port callback, following the
-/// memory rule of [`KeelPortCb`].
+/// memory rule of [`KeelPortCb`]: null, or `len` readable bytes in a block from the C allocator
+/// that the host hands over.
 unsafe fn take_host_reply(out: KeelBuf) -> Option<Vec<u8>> {
     if out.ptr.is_null() {
         return None;
@@ -141,14 +125,8 @@ unsafe fn take_host_reply(out: KeelBuf) -> Option<Vec<u8>> {
         // callback's caller (us) releases the block below.
         Some(unsafe { core::slice::from_raw_parts(out.ptr, out.len as usize) }.to_vec())
     };
-    if out.cap == 0 {
-        // SAFETY: `cap == 0` means a block from the C allocator that the host handed over.
-        unsafe { free(out.ptr.cast()) };
-    } else {
-        // SAFETY: a non-zero `cap` means a buffer built by `KeelBuf::from_vec`, which
-        // `KeelBuf::free` reclaims exactly once.
-        unsafe { out.free() };
-    }
+    // SAFETY: the memory rule makes `ptr` a block from the C allocator that the host handed over.
+    unsafe { free(out.ptr.cast()) };
     bytes
 }
 
@@ -180,19 +158,22 @@ impl Sink for CSink {
         port_call_id: u32,
         args: &[u8],
     ) -> PortCallOutcome {
-        let Some(reg) = port_registration(port_id) else {
-            return PortCallOutcome::Unavailable;
-        };
         let Some(len) = c_len(args) else {
             return PortCallOutcome::Unavailable;
         };
+        // Held until this call is done with the host's memory: `keel_port_register` (replace or
+        // remove) and `keel_shutdown` wait for it, so the host may free `user` when they return.
+        let Some(invocation) = PORTS.enter(port_id) else {
+            return PortCallOutcome::Unavailable;
+        };
         let mut out = KeelBuf::EMPTY;
-        // SAFETY: `cb` and `user` come from `keel_port_register`, whose contract keeps them valid
-        // until `keel_shutdown`; `args` is valid for `len` bytes and `out` is a live `KeelBuf`
-        // the callback may fill.
+        // SAFETY: `callback` and `user` come from `keel_port_register`; the invocation keeps that
+        // registration alive, because removing it waits until the invocation is dropped (after
+        // the reply below was read and released). `args` is valid for `len` bytes and `out` is a
+        // live `KeelBuf` the callback may fill.
         let answer = unsafe {
-            (reg.cb)(
-                reg.user.0,
+            (invocation.callback())(
+                invocation.user(),
                 port_id,
                 method_id,
                 port_call_id,
@@ -280,7 +261,8 @@ pub extern "C" fn keel_schema_json() -> KeelBuf {
 /// # Safety
 ///
 /// `cfg` must be null or valid for `len` bytes. The callbacks and `user` must stay valid, and
-/// the callbacks callable from any thread, until [`keel_shutdown`] returns.
+/// the callbacks must be thread-safe (they run concurrently on arbitrary threads) and must not
+/// unwind, until [`keel_shutdown`] returns. See the host contract in `keel.h`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn keel_init(
     cfg: *const u8,
@@ -303,13 +285,7 @@ pub unsafe extern "C" fn keel_init(
     });
     session::start(config, sink, |runtime: &Runtime| {
         // A host that registered a port takes it over from any default Rust binding.
-        let ids: Vec<u32> = PORTS
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .copied()
-            .collect();
-        for id in ids {
+        for id in PORTS.ids() {
             runtime.bind_foreign_port(id);
         }
     })
@@ -317,14 +293,17 @@ pub unsafe extern "C" fn keel_init(
 
 /// `void keel_shutdown(void)`: stops the runtime (idempotent), joins its threads, drops every
 /// object and forgets the callbacks and port registrations. Calls made afterwards fail with
-/// status 5 until `keel_init` runs again. The host must not call it from inside a callback.
+/// status 5 until `keel_init` runs again.
+///
+/// **Blocking:** it waits for the port callbacks still running on other threads (after the
+/// runtime has stopped), so when it returns no callback is running or will start and the host may
+/// free every `user` pointer. It does all this inside the critical section that serialises
+/// `keel_init`, so an init on another thread waits for it. The host must not call it from inside
+/// a callback (debug builds assert; release builds skip the waits that could never finish) nor
+/// while holding a lock a port callback needs.
 #[unsafe(no_mangle)]
 pub extern "C" fn keel_shutdown() {
     session::stop();
-    PORTS
-        .write()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clear();
 }
 
 /// `uint32_t keel_call(const uint8_t *ptr, uint32_t len)`: submits a `Call` payload (SPEC 3.3).
@@ -393,10 +372,18 @@ pub extern "C" fn keel_release(handle: u64) {
 /// no registration behaves as unavailable (SPEC 6.3). Registering takes the port over from any
 /// default Rust binding (for example the native `Timer`).
 ///
+/// **Blocking:** removing a registration, or replacing it with another, returns only after every
+/// invocation of the *old* callback running on another thread has returned, and the old callback
+/// is never started again: the host may free the old `user` the moment this returns. Do not call
+/// it from inside a port callback of the registration being removed (it would wait for itself:
+/// debug builds assert, release builds skip that wait) nor while holding a lock a port callback
+/// needs; a port callback that never returns keeps this call from returning.
+///
 /// # Safety
 ///
-/// `cb` and `user` must stay valid, and `cb` callable from any thread, until the registration is
-/// removed or [`keel_shutdown`] returns.
+/// `cb` and `user` must stay valid until the registration is removed or replaced (this call
+/// returns for that id) or [`keel_shutdown`] returns, and `cb` must be thread-safe (port calls
+/// arrive concurrently on arbitrary threads) and must not unwind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn keel_port_register(
     port_id: u32,
@@ -407,22 +394,9 @@ pub unsafe extern "C" fn keel_port_register(
         "keel_port_register",
         |_| (),
         || {
-            {
-                let mut ports = PORTS.write().unwrap_or_else(PoisonError::into_inner);
-                match cb {
-                    Some(cb) => {
-                        ports.insert(
-                            port_id,
-                            PortReg {
-                                cb,
-                                user: UserPtr(user),
-                            },
-                        );
-                    }
-                    None => {
-                        ports.remove(&port_id);
-                    }
-                }
+            match cb {
+                Some(cb) => PORTS.install(port_id, cb, user),
+                None => PORTS.remove(port_id),
             }
             if cb.is_some() {
                 if let Some(runtime) = api::runtime() {
@@ -436,7 +410,8 @@ pub unsafe extern "C" fn keel_port_register(
 /// `void keel_port_reply(const uint8_t *ptr, uint32_t len)`: answers a port call the callback
 /// deferred by returning `1` (a `PortReply` payload, SPEC 3.6). Never takes the core lock, so it
 /// is safe from any thread, including from inside the port callback itself. A reply to an
-/// abandoned call is discarded.
+/// abandoned call is discarded, and one carrying port call id `0` (the fire-and-forget id of the
+/// `Log` port's calls) is ignored silently.
 ///
 /// # Safety
 ///
@@ -503,7 +478,7 @@ pub extern "C" fn keel_stats_json() -> KeelBuf {
 }
 
 /// `void keel_buf_free(KeelBuf buf)`: releases a buffer returned by the core. Empty buffers
-/// (`cap == 0`) are ignored. The only core function a callback may call.
+/// (`cap == 0`) are ignored. Callable from inside a callback (it never touches the runtime).
 ///
 /// # Safety
 ///
@@ -512,4 +487,53 @@ pub extern "C" fn keel_stats_json() -> KeelBuf {
 pub unsafe extern "C" fn keel_buf_free(buf: KeelBuf) {
     // SAFETY: the caller guarantees `buf` came from this library and is freed once.
     unsafe { buf.free() };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    unsafe extern "C" {
+        fn malloc(size: usize) -> *mut c_void;
+    }
+
+    /// A reply the way a C host leaves it: `malloc`ed, `len` set, and whatever it put in `cap`.
+    fn host_reply(bytes: &[u8], cap: u32) -> KeelBuf {
+        // SAFETY: `malloc` of a non-zero size; the block is filled before it is used.
+        let block = unsafe { malloc(bytes.len().max(1)) }.cast::<u8>();
+        assert!(!block.is_null());
+        // SAFETY: `block` is valid for `bytes.len()` bytes and does not overlap `bytes`.
+        unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), block, bytes.len()) };
+        KeelBuf {
+            ptr: block,
+            len: u32::try_from(bytes.len()).expect("small"),
+            cap,
+        }
+    }
+
+    /// M1: `cap` is reserved. Whatever a host writes there, the block is released with `free`
+    /// (Miri: a mismatched deallocator is undefined behaviour it reports).
+    #[test]
+    fn a_host_reply_is_released_with_free_whatever_cap_says() {
+        for cap in [0, 5, 4096, u32::MAX] {
+            let reply = host_reply(&[1, 2, 3, 4, 5], cap);
+            // SAFETY: `reply` follows the memory rule of `KeelPortCb`.
+            let taken = unsafe { take_host_reply(reply) };
+            assert_eq!(taken, Some(vec![1, 2, 3, 4, 5]), "cap = {cap}");
+        }
+    }
+
+    #[test]
+    fn an_empty_or_missing_host_reply_is_unavailable_and_still_freed() {
+        // A block with `len == 0` (the host allocated and wrote nothing): freed, no bytes.
+        let empty = KeelBuf {
+            len: 0,
+            ..host_reply(&[9], 7)
+        };
+        // SAFETY: `empty` follows the memory rule (a `malloc`ed block, handed over).
+        assert_eq!(unsafe { take_host_reply(empty) }, None);
+        // The host returned 0 without storing anything: `out_reply` is still the empty buffer.
+        // SAFETY: a null `ptr` is always acceptable.
+        assert_eq!(unsafe { take_host_reply(KeelBuf::EMPTY) }, None);
+    }
 }

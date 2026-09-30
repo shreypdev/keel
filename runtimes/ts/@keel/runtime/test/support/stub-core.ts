@@ -47,6 +47,8 @@ export interface StubGlobals {
   release_hi: WebAssembly.Global;
   free_count: WebAssembly.Global;
   alloc_count: WebAssembly.Global;
+  /** When non-zero, `keel_alloc` returns 0 (a module that breaks SPEC 7's "traps instead"). */
+  alloc_zero: WebAssembly.Global;
   poll_count: WebAssembly.Global;
   initialized: WebAssembly.Global;
   init_len: WebAssembly.Global;
@@ -104,6 +106,7 @@ export function stubWat(options: StubOptions = {}): string {
   (global $release_hi (export "release_hi") (mut i32) (i32.const 0))
   (global $free_count (export "free_count") (mut i32) (i32.const 0))
   (global $alloc_count (export "alloc_count") (mut i32) (i32.const 0))
+  (global $alloc_zero (export "alloc_zero") (mut i32) (i32.const 0))
   (global $poll_count (export "poll_count") (mut i32) (i32.const 0))
   (global $initialized (export "initialized") (mut i32) (i32.const 0))
   (global $init_len (export "init_len") (mut i32) (i32.const -1))
@@ -125,6 +128,7 @@ export function stubWat(options: StubOptions = {}): string {
   (func $alloc (export "keel_alloc") (param $len i32) (result i32)
     (local $ptr i32) (local $end i32) (local $have i32)
     (global.set $alloc_count (i32.add (global.get $alloc_count) (i32.const 1)))
+    (if (global.get $alloc_zero) (then (return (i32.const 0))))
     (local.set $ptr (global.get $heap))
     (local.set $end (i32.add (local.get $ptr) (call $align8 (local.get $len))))
     (local.set $have (i32.mul (memory.size) (i32.const 65536)))
