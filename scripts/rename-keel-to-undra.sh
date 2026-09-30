@@ -140,14 +140,21 @@ PERL
 # same command line works before and after the rename: idempotency).
 SCOPE=()
 if [ ${#ARGS[@]} -gt 0 ]; then
+  ROOT_P="$(cd "$ROOT" && pwd -P)"
   for a in "${ARGS[@]}"; do
-    case "$a" in /*) abs="$a" ;; *) abs="$START_DIR/$a" ;; esac
-    abs="$(cd "$(dirname "$abs")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename "$abs")")" \
-      || die "no such path: $a"
-    rootp="$(pwd -P)"
-    rel="${abs#"$(cd "$ROOT" && pwd -P)"/}"
-    [ "$rel" != "$abs" ] || die "outside the repository: $a"
-    rel="${rel%/}"
+    rel=""
+    # The path may be given in either spelling (a run after the rename names the old one).
+    for cand in "$a" "$(newpath "$a")"; do
+      case "$cand" in /*) abs="$cand" ;; *) abs="$START_DIR/$cand" ;; esac
+      if dir="$(cd "$(dirname "$abs")" 2>/dev/null && pwd -P)"; then
+        abs="$dir/$(basename "$abs")"
+        rel="${abs#"$ROOT_P"/}"
+        [ "$rel" != "$abs" ] || die "outside the repository: $a"
+        rel="${rel%/}"
+        break
+      fi
+    done
+    [ -n "$rel" ] || die "no such path: $a"
     SCOPE+=("$rel")
     n="$(newpath "$rel")"
     [ "$n" = "$rel" ] || SCOPE+=("$n")
