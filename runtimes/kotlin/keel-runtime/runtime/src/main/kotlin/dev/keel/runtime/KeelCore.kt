@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.Flow
  */
 public open class KeelCore protected constructor() : AutoCloseable {
 
+    /** Loading a core and the process-wide shared one. */
     public companion object {
         private val current = AtomicReference<KeelCore?>(null)
 

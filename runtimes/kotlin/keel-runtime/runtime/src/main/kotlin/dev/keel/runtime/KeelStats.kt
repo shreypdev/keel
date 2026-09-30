@@ -40,6 +40,7 @@ public class KeelStats(
             "openStreams=$openStreams, pendingPortCalls=$pendingPortCalls, pendingTimers=$pendingTimers, " +
             "transactions=$transactions, panics=$panics, hostPendingCalls=$hostPendingCalls, hostMirrorHandles=$hostMirrorHandles)"
 
+    /** The marker for numbers that are not known. */
     public companion object {
         /** The value of a core-side number that is not known. */
         public const val UNKNOWN: Int = -1
