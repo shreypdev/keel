@@ -54,7 +54,7 @@ mod project;
 mod render;
 mod runner;
 mod runtimes;
-mod schema;
+pub mod schema;
 mod session;
 mod shim;
 mod sys;

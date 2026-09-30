@@ -36,6 +36,8 @@ jobs:
         run: cargo clippy -p keel-ffi --target wasm32-unknown-unknown -- -D warnings
       - name: C ABI acceptance (keel.h with -Werror; the host contract under ASan)
         run: KEEL_C_SANITIZE=1 bash crates/keel-ffi/tests/c/run.sh
+      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression)
+        run: cargo test -p keel-cli --test schema_retention -- --ignored --nocapture
       - name: Docs
         run: cargo doc --workspace --no-deps
         env:
@@ -124,6 +126,8 @@ jobs:
         run: bash crates/keel-ffi/tests/swift/run.sh
       - name: C ABI acceptance (keel.h with -Werror; the host contract under ASan)
         run: KEEL_C_SANITIZE=1 bash crates/keel-ffi/tests/c/run.sh
+      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression, macOS dead-strip)
+        run: cargo test -p keel-cli --test schema_retention -- --ignored --nocapture
       - name: iOS cross-build (device + simulator)
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
