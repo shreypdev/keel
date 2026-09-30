@@ -29,8 +29,9 @@ Records and errors: `HttpRequest`, `HttpResponse`, `Header`, `HttpMethod`, `Http
 The three platform runtimes (Swift, Kotlin, TypeScript) hand-write codecs for these types and
 hard-code the port and method ids. **Field order, variant order and indices, method names and
 declaration order are frozen**; changing any of them is a major version and an ADR
-(constitution R7, R11). `tests/ids.rs`, `tests/encoding.rs` and `tests/schema.rs` lock the ids,
-the exact bytes and the schema hash.
+(constitution R7, R11). `tests/ids.rs`, `tests/encoding.rs`, `tests/wire_contract.rs` and
+`tests/schema.rs` lock the ids, the exact bytes (and what a platform receives from each proxy) and
+the schema hash; `encoding.rs` and `ids.rs` also compare against the three runtimes' sources.
 
 * `port_id = fnv1a32("port.<Trait>")`, `method_id = fnv1a32("<Trait>.<method>")` (SPEC 1.1).
 * Records are their fields in order; enums and errors are a `u16` variant index plus fields.
