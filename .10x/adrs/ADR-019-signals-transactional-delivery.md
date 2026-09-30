@@ -1,4 +1,4 @@
-# ADR-018: keel-signals delivery is transactional
+# ADR-019: keel-signals delivery is transactional
 
 Status: accepted (2026-09-30). Touches SPEC 16.1 (commit algorithm, `observe`).
 Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, findings H1 and M1.

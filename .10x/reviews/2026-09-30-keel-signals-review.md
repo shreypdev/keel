@@ -201,7 +201,7 @@ Repros: a temporary scratch crate outside the repo; each finding's steps are eno
 
 Every finding above was closed with a regression test that reproduces the review's steps
 (`crates/keel-signals/tests/delivery_integrity.rs`, `tests/write_checker.rs`, and the runtime tests
-named below). Contract changes are in SPEC 16.1 and ADR-018/019/020 (`.10x/adrs/`).
+named below). Contract changes are in SPEC 16.1 and ADR-019/019/020 (`.10x/adrs/`).
 
 | Finding | Fix | Regression tests |
 |---|---|---|
@@ -215,5 +215,5 @@ named below). Contract changes are in SPEC 16.1 and ADR-018/019/020 (`.10x/adrs/
 | L4 | An unobserved `no_coalesce` keyed list sends full values and keeps no baseline | `l4_*` |
 
 Left as they were: notes N1 to N7. Documented trade-offs: a computed that panics on every evaluation
-holds back its store's change-sets until it recovers (ADR-018); a write to a slot that another thread
-has dirty in an open transaction is absorbed into that transaction (ADR-019).
+holds back its store's change-sets until it recovers (ADR-019); a write to a slot that another thread
+has dirty in an open transaction is absorbed into that transaction (ADR-020).

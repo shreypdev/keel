@@ -1,8 +1,8 @@
-# ADR-020: keel-signals turns three misuse hangs and aborts into contained panics
+# ADR-021: keel-signals turns three misuse hangs and aborts into contained panics
 
 Status: accepted (2026-09-30). Touches SPEC 16.1 (`Signal::update`, `Computed::get`, keyed lists).
 Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, findings L1, L3 and L4 (L2, the unknown
-`observe` id, is covered by ADR-018).
+`observe` id, is covered by ADR-019).
 
 ## L1: a computed cycle overflowed the stack (R6)
 

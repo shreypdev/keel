@@ -1,4 +1,4 @@
-# ADR-019: keel-signals orders delivery per store and polices the write context
+# ADR-020: keel-signals orders delivery per store and polices the write context
 
 Status: accepted (2026-09-30). Touches SPEC 3.5, 5.1, 16.1 (`ChangeSink`, commit algorithm,
 `set_write_checker`). Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, findings M2 and
@@ -57,7 +57,7 @@ Decision. When the cap is hit the commit (1) cancels the queued effects' runs (t
 is cleared, so the next invalidation queues them again), (2) delivers the queued writes one last
 time, store by store, without running effects, (3) releases whatever that delivery queued in
 turn: effects cancelled, slots `defer`red (dirty bit cleared and remembered as unsent, the
-ADR-018 mechanism, so the next commit of the store re-sends them), and (4) reports through a new
+ADR-019 mechanism, so the next commit of the store re-sends them), and (4) reports through a new
 defaulted method `ChangeSink::round_cap_hit(rounds)`. `keel-signals` has no log dependency, and
 the sink is already the bridge to the runtime, so the error report travels the same way; the
 runtime's sink logs "effect loop hit the round cap" at error level. No debug assertion: cutting a
