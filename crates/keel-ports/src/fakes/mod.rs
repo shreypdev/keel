@@ -2,27 +2,30 @@
 //!
 //! | Fake | Port(s) | Behaviour |
 //! |---|---|---|
-//! | [`FakeHttp`] | [`Http`](crate::Http) | scripted replies chosen by [`Matcher`], every request recorded |
-//! | [`MemKv`] | [`Kv`](crate::Kv) | in-memory ordered map, operations recorded |
-//! | [`MemSecureStore`] | [`SecureStore`](crate::SecureStore) | same, under its own port id |
-//! | [`MemFs`] | [`Fs`](crate::Fs) | in-memory tree with the platform adapters' error semantics |
-//! | [`FakeClock`] | [`Clock`](crate::Clock) + [`Timer`](crate::Timer) | settable time; `advance` fires due timers |
-//! | [`SeededRng`] | [`Rng`](crate::Rng) | xorshift64\*, same seed same bytes |
-//! | [`CaptureLog`] | [`Log`](crate::Log) | keeps every record |
-//! | [`ScriptedConnectivity`] | [`Connectivity`](crate::Connectivity) | pushes scripted events into a runtime |
-//! | [`ScriptedLifecycle`] | [`Lifecycle`](crate::Lifecycle) | pushes scripted events into a runtime |
+//! | [`FakeHttp`] | [`Http`] | scripted replies chosen by [`Matcher`], every request recorded |
+//! | [`MemKv`] | [`Kv`] | in-memory ordered map, operations recorded |
+//! | [`MemSecureStore`] | [`SecureStore`] | same, under its own port id |
+//! | [`MemFs`] | [`Fs`] | in-memory tree with the platform adapters' error semantics |
+//! | [`FakeClock`] | [`Clock`] + [`Timer`] | settable time; `advance` fires due timers |
+//! | [`SeededRng`] | [`Rng`] | xorshift64\*, same seed same bytes |
+//! | [`CaptureLog`] | [`Log`] | keeps every record |
+//! | [`ScriptedConnectivity`] | [`Connectivity`] | pushes scripted events into a runtime |
+//! | [`ScriptedLifecycle`] | [`Lifecycle`] | pushes scripted events into a runtime |
 //!
 //! Every fake is `Send + Sync`, keeps its state behind a lock and never reads the system clock,
 //! a random source or a thread (CLAUDE.md R12).
 //!
 //! [`install`] builds all of them and binds them into a
-//! [`TestRuntime`](keel_runtime::testing::TestRuntime); [`Fakes`] is the bundle it returns.
+//! [`TestRuntime`]; [`Fakes`] is the bundle it returns.
 //!
 //! # Time
 //!
-//! A [`TestRuntime`](keel_runtime::testing::TestRuntime) has its own manual clock for
-//! `ctx.sleep`, and [`FakeClock`] has one for `Clock` and `Timer`. [`Fakes::advance`] moves both
-//! together, which is what a test almost always wants.
+//! [`FakeClock`] is the single source of time, for `Clock` and for `Timer`. On a
+//! [`TestRuntime`], [`install`] makes the runtime's recording
+//! host own the timers (like the web host does), so `ctx.sleep` asks for a timer and
+//! [`Fakes::advance`] serves it from the fake clock: sleeps wake up at exactly their deadline, and
+//! a task that reads `Clock::now_ms` when it wakes sees that deadline. Use [`Fakes::advance`], not
+//! `TestRuntime::advance`, to move time on such a runtime.
 
 mod clock;
 mod events;
@@ -107,7 +110,8 @@ impl Fakes {
     /// * timers armed on the fake clock report `Runtime::timer_fired` when they fire, which is
     ///   what a platform timer does.
     ///
-    /// Calling it again with another runtime binds the same fakes there too.
+    /// Calling it again with another runtime binds the same fakes there too. To let the fake clock
+    /// serve `ctx.sleep` on a [`TestRuntime`], use [`Fakes::install_test`] or [`install`].
     pub fn install(&self, rt: &Arc<Runtime>) {
         rt.bind_dyn_port::<dyn Clock>(<dyn Clock as Port>::PORT_ID, self.clock.clone());
         rt.bind_dyn_port::<dyn Timer>(<dyn Timer as Port>::PORT_ID, self.clock.clone());
@@ -138,12 +142,73 @@ impl Fakes {
         });
     }
 
-    /// Moves time forward by `duration` everywhere: the fake clock (firing its due timers into
-    /// the runtime) and the test runtime's own clock (completing due `ctx.sleep`s and running the
-    /// tasks they wake). Returns the ids of the timers the fake clock fired.
-    pub fn advance(&self, t: &TestRuntime, duration: Duration) -> Vec<u32> {
-        let fired = self.clock.advance(duration);
-        t.advance(duration);
+    /// [`install`](Fakes::install)s into `t`'s runtime and makes the fake clock the source of its
+    /// timers: `ctx.sleep` on `t` is served by [`Fakes::advance`] from now on.
+    pub fn install_test(&self, t: &TestRuntime) {
+        self.install(t.runtime());
+        t.host().set_own_timers(true);
+    }
+
+    /// Arms on the fake clock every timer the runtime has asked its host for since the last call
+    /// (the sleeps its tasks started). [`advance`](Fakes::advance) does this itself; call it when
+    /// you want [`FakeClock::pending_timers`] to show sleeps that started after a
+    /// `t.run_pending()`. Only meaningful after [`install_test`](Fakes::install_test).
+    pub fn sync_timers(&self, t: &TestRuntime) {
+        for (timer_id, delay_ms) in t.host().take_timer_sets() {
+            Timer::set(&*self.clock, timer_id, delay_ms);
+        }
+    }
+
+    /// Moves time forward by `duration`, one deadline at a time, and returns how many timers
+    /// fired.
+    ///
+    /// At each deadline inside the window the fake clock reads exactly that instant, the due timer
+    /// fires into the runtime (completing a `ctx.sleep`, or whatever else was armed through the
+    /// `Timer` port), and the tasks it woke run before time moves on, so a task that sleeps again
+    /// is served within the same call and a task that reads the clock sees its own deadline.
+    /// Timers armed with a delay of zero fire at the end of the call.
+    ///
+    /// ```
+    /// use std::sync::{Arc, Mutex};
+    /// use std::time::Duration;
+    /// use keel_ports::{Clock, fakes};
+    /// use keel_runtime::testing::TestRuntime;
+    ///
+    /// let t = TestRuntime::new();
+    /// let fakes = fakes::install(&t);
+    /// let woke_at = Arc::new(Mutex::new(Vec::new()));
+    /// let (ctx, clock, sink) = (t.ctx(), fakes.clock.clone(), woke_at.clone());
+    /// t.ctx().spawn(async move {
+    ///     for _ in 0..2 {
+    ///         ctx.sleep(Duration::from_secs(10)).await;
+    ///         sink.lock().unwrap().push(clock.now_ms());
+    ///     }
+    /// });
+    ///
+    /// let start = fakes.clock.now_ms();
+    /// assert_eq!(fakes.advance(&t, Duration::from_secs(60)), 2);
+    /// assert_eq!(*woke_at.lock().unwrap(), [start + 10_000, start + 20_000]);
+    /// assert_eq!(fakes.clock.now_ms(), start + 60_000);
+    /// ```
+    pub fn advance(&self, t: &TestRuntime, duration: Duration) -> usize {
+        let mut fired = 0;
+        let mut remaining = duration;
+        // Tasks that are ready run at the current time, before any time passes.
+        t.run_pending();
+        self.sync_timers(t);
+        while !remaining.is_zero() {
+            let step = self
+                .clock
+                .next_due_in()
+                .map_or(remaining, |due| due.min(remaining));
+            fired += self.clock.advance(step).len();
+            t.run_pending();
+            self.sync_timers(t);
+            remaining -= step;
+        }
+        fired += self.clock.advance(Duration::ZERO).len();
+        t.run_pending();
+        self.sync_timers(t);
         fired
     }
 }
@@ -154,7 +219,8 @@ impl Default for Fakes {
     }
 }
 
-/// Builds a [`Fakes`] and [installs](Fakes::install) it into `t`.
+/// Builds a [`Fakes`] and [installs](Fakes::install_test) it into `t`, with the fake clock as the
+/// source of the runtime's timers.
 ///
 /// ```
 /// use keel_ports::{Clock, fakes};
@@ -167,7 +233,7 @@ impl Default for Fakes {
 /// ```
 pub fn install(t: &TestRuntime) -> Fakes {
     let fakes = Fakes::new();
-    fakes.install(t.runtime());
+    fakes.install_test(t);
     fakes
 }
 
@@ -185,5 +251,85 @@ pub(crate) mod testing {
             Poll::Ready(value) => value,
             Poll::Pending => panic!("a fake port future was not ready on its first poll"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keel_runtime::Host;
+
+    #[test]
+    fn new_fakes_start_in_the_documented_state() {
+        let fakes = Fakes::new();
+        assert_eq!(fakes.clock.now_ms(), FakeClock::DEFAULT_NOW_MS);
+        assert_eq!(fakes.clock.monotonic_ns(), 0);
+        assert_eq!(fakes.http.call_count(), 0);
+        assert!(fakes.kv.is_empty() && fakes.secure_store.is_empty());
+        assert!(fakes.fs.file_paths().is_empty());
+        assert!(fakes.log.is_empty());
+        assert_eq!(fakes.connectivity.current(), (true, crate::NetKind::Wifi));
+        assert_eq!(fakes.lifecycle.current(), crate::AppState::Active);
+        assert_eq!(
+            Fakes::default().rng.fill(8),
+            Fakes::with_seed(SeededRng::DEFAULT_SEED).rng.fill(8)
+        );
+        assert_ne!(
+            Fakes::with_seed(1).rng.fill(8),
+            Fakes::with_seed(2).rng.fill(8)
+        );
+    }
+
+    #[test]
+    fn install_test_makes_the_host_own_timers_and_plain_install_does_not() {
+        let t = TestRuntime::new();
+        assert!(
+            !t.host().timer_set(1, 10),
+            "a fresh test host has no timers"
+        );
+        let fakes = Fakes::new();
+        fakes.install(t.runtime());
+        assert!(
+            !t.host().timer_set(1, 10),
+            "install alone leaves timers to the runtime"
+        );
+        fakes.install_test(&t);
+        assert!(
+            t.host().timer_set(2, 20),
+            "install_test hands timers to the fake clock"
+        );
+        assert_eq!(t.host().take_timer_sets(), [(2, 20)]);
+    }
+
+    #[test]
+    fn sync_timers_moves_host_timer_requests_onto_the_fake_clock() {
+        let t = TestRuntime::new();
+        let fakes = install(&t);
+        let ctx = t.ctx();
+        t.ctx()
+            .spawn(async move { ctx.sleep(Duration::from_millis(30)).await });
+        t.run_pending();
+        assert_eq!(fakes.clock.pending_timers(), 0, "not armed until synced");
+        fakes.sync_timers(&t);
+        assert_eq!(fakes.clock.next_due_in(), Some(Duration::from_millis(30)));
+        fakes.sync_timers(&t);
+        assert_eq!(
+            fakes.clock.pending_timers(),
+            1,
+            "syncing twice arms nothing twice"
+        );
+    }
+
+    #[test]
+    fn advance_counts_fired_timers_and_lands_on_the_requested_time() {
+        let t = TestRuntime::new();
+        let fakes = install(&t);
+        Timer::set(&*fakes.clock, 40, 10);
+        Timer::set(&*fakes.clock, 41, 20);
+        let start = fakes.clock.now_ms();
+        assert_eq!(fakes.advance(&t, Duration::from_millis(15)), 1);
+        assert_eq!(fakes.advance(&t, Duration::from_millis(15)), 1);
+        assert_eq!(fakes.clock.now_ms(), start + 30);
+        assert_eq!(fakes.clock.monotonic_ns(), 30_000_000);
     }
 }
