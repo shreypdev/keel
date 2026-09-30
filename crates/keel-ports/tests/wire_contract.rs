@@ -377,7 +377,8 @@ fn an_unscripted_port_is_unavailable_and_the_proxy_says_which() {
             .unwrap_or_default(),
     };
     assert!(
-        message.contains("keel: port call `Clock.now_ms` failed"),
+        message.contains("keel: the `Clock` port has no adapter registered (method `now_ms`)"),
         "{message}"
     );
+    assert!(message.contains("errors/E0062"), "{message}");
 }

@@ -47,6 +47,14 @@ pub enum StoreError {
     Offline,
 }
 
+// A port nobody registered is an ordinary outcome, not a bug: a port method that returns
+// `Result<T, E>` reports it as `E`, so `E` implements `From<PortError>`.
+impl From<keel::runtime::PortError> for StoreError {
+    fn from(_: keel::runtime::PortError) -> Self {
+        StoreError::Offline
+    }
+}
+
 #[keel::error]
 #[derive(Clone, Debug, PartialEq)]
 pub enum TodoError {

@@ -63,6 +63,14 @@ pub enum StoreError {
     Rejected(String),
 }
 
+/// A port that is not registered (or cannot answer) is an ordinary outcome; the `Store` port's
+/// `save` reports it as this error instead of panicking.
+impl From<keel::runtime::PortError> for StoreError {
+    fn from(_: keel::runtime::PortError) -> Self {
+        StoreError::Offline
+    }
+}
+
 #[keel::error]
 #[derive(Clone, Debug, PartialEq)]
 pub enum TodoError {
@@ -648,14 +656,17 @@ fn a_foreign_port_error_and_a_late_reply_reach_the_command() {
 }
 
 #[test]
-fn an_unavailable_port_is_contained_as_a_panic_reply() {
-    // No fake and no script: the platform does not implement `Store`.
+fn an_unavailable_port_is_a_typed_error_not_a_panic() {
+    // No fake and no script: the platform does not implement `Store` (SPEC 6.3: "unavailable").
+    // `Store::save` returns a `Result`, so the proxy reports the outcome as the method's error
+    // (`StoreError: From<PortError>`), which `?` carries into the command's own error type; on
+    // wasm a panic here would abort the whole module.
     let core = Core::without_fake();
     let store = core.todos();
     let reply = core.run(method(store, "Todos", "add"), &enc(&"Milk".to_owned()));
-    assert_eq!(reply.status, ReplyStatus::Panic);
-    let (message, _backtrace): (String, String) = decode(&reply.body);
-    assert!(message.contains("Store.save"), "{message}");
+    assert_eq!(reply.status, ReplyStatus::Error);
+    let error: TodoError = decode(&reply.body);
+    assert_eq!(error, TodoError::Store(StoreError::Offline));
     // The runtime still answers.
     let reply = core.sync(method(store, "Todos", "set_filter"), &enc(&Filter::All));
     assert_eq!(reply.status, ReplyStatus::Ok);

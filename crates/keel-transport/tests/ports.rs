@@ -82,12 +82,16 @@ fn a_platform_that_does_not_implement_the_port_answers_unavailable() {
     let id = send_ask(&mut client, handle, 1);
     let (_, _, port_call_id, _) = port_call(&client.recv_kind(Kind::PortCall));
     client.port_reply(port_call_id, PortStatus::Unavailable, &[]);
-    // The generated proxy turns an unavailable port into a panic naming port and method.
+    // `echo` has no error type, so the generated proxy turns an unavailable port into a panic
+    // whose message names the port and the method and says how to bind one (E0062).
     let (status, body) = client.await_reply(id);
     assert_eq!(status, ReplyStatus::Panic);
     let message = dec::<(String, String)>(&body).0;
-    assert!(message.contains("Echo.echo"), "{message}");
-    assert!(message.contains("Unavailable"), "{message}");
+    assert!(
+        message.contains("the `Echo` port has no adapter registered (method `echo`)"),
+        "{message}"
+    );
+    assert!(message.contains("errors/E0062"), "{message}");
     // The connection is fine.
     let (status, _) = client.method(handle, GET, &[]);
     assert_eq!(status, ReplyStatus::Ok);
@@ -189,7 +193,11 @@ fn a_synchronous_port_cannot_be_served_by_a_remote_client() {
         ReplyStatus::Panic,
         "the proxy of a sync port that is unavailable panics"
     );
-    assert!(dec::<(String, String)>(&body).0.contains("Unavailable"));
+    assert!(
+        dec::<(String, String)>(&body)
+            .0
+            .contains("the `Wall` port has no adapter registered (method `now`)")
+    );
 
     // The call still went out (the bridge cannot tell a sync port from an async one), so the
     // client saw it; whatever it answers now is discarded and harmless.
@@ -212,7 +220,11 @@ fn even_a_fire_and_forget_sync_port_is_unavailable_over_a_remote_client() {
     let handle = client.new_counter(0);
     let (status, body) = client.method(handle, BEEP_TWICE, &[]);
     assert_eq!(status, ReplyStatus::Panic);
-    assert!(dec::<(String, String)>(&body).0.contains("Beep.beep"));
+    assert!(
+        dec::<(String, String)>(&body)
+            .0
+            .contains("the `Beep` port has no adapter registered (method `beep`)")
+    );
     let calls: Vec<_> = client
         .frames_of(Kind::PortCall)
         .into_iter()
