@@ -141,6 +141,7 @@ code, kbd, samp, pre { font-family: var(--font-mono); }
 /* ---------- header ---------- */
 .site-header {
   position: sticky; top: 0; z-index: 50;
+  background: var(--bg);
   background: color-mix(in srgb, var(--bg) 78%, transparent);
   -webkit-backdrop-filter: saturate(1.4) blur(14px);
   backdrop-filter: saturate(1.4) blur(14px);
