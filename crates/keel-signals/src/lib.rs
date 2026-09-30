@@ -15,8 +15,13 @@
 //! A panic inside [`txn`], a computed closure, an effect, an encoder or a sink leaves the
 //! thread's transaction state consistent (see [`txn`](crate::txn())). The panic is re-raised
 //! from the outermost write once the commit has finished, so a write can panic if something it
-//! triggered did. If encoding a store's change-set panics, that store's change-set for the
-//! transaction is abandoned (never half-sent); the host can resynchronise with `observe`.
+//! triggered did. If encoding or delivering a store's change-set panics, that change-set is
+//! abandoned (never half-sent) and the claim is undone: the slots it covered are remembered and
+//! sent again, as full values, by the next commit that touches the store (or dropped once the
+//! host observes them again), so the host never keeps values the core has moved on from. A
+//! computed that panics on every evaluation therefore holds back the store's later change-sets
+//! until it recovers. `observe` is transactional the same way: if it panics, no target stays
+//! observed because of it and no partial entries are produced.
 
 mod computed;
 mod deps;

@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use keel_wire::payload::{ChangeEntry, ChangeOp, ChangeSetBuilder, StoreSnapshot};
@@ -73,6 +73,9 @@ struct Slot {
 ///   observed slot re-sends the value: that is how a host resynchronises after a bad patch
 ///   (SPEC 3.8).
 /// * Entries of one change-set are ordered by `signal_id`.
+/// * A change-set whose building or delivery panicked is abandoned whole, and its slots are
+///   remembered: the next commit that touches the store sends them again as full values (keyed
+///   baselines are dropped), so the host cannot be left with values the core has moved on from.
 ///
 /// # Memory cost of keyed lists
 ///
@@ -106,6 +109,11 @@ pub struct StoreCell {
     type_id: u32,
     handle: AtomicU64,
     slots: RwLock<Vec<Arc<Slot>>>,
+    /// Slots whose change was claimed for delivery but never reached the sink, sorted (see
+    /// `commit_slots`). The next commit that touches this store sends them again.
+    unsent: Mutex<Vec<u32>>,
+    /// `unsent` is not empty. Lets the common commit skip the lock.
+    has_unsent: AtomicBool,
 }
 
 impl StoreCell {
@@ -115,6 +123,8 @@ impl StoreCell {
             type_id,
             handle: AtomicU64::new(0),
             slots: RwLock::new(Vec::new()),
+            unsent: Mutex::new(Vec::new()),
+            has_unsent: AtomicBool::new(false),
         })
     }
 
@@ -286,8 +296,12 @@ impl StoreCell {
     ///
     /// With `on == false`, stops delivery for the targeted signals, writes nothing and returns 0.
     ///
-    /// An unknown `signal_id` is ignored (returns 0); debug builds assert, because it means the
-    /// caller's schema and the store disagree.
+    /// An unknown `signal_id` is ignored in every build (returns 0, writes nothing): it comes
+    /// from the host, and host input must never be able to make the core assert.
+    ///
+    /// If building the entries panics (a computed's closure or an encoder), nothing is left half
+    /// done: no target stays marked observed by this call, no keyed baseline is kept for a value
+    /// the host never received, and `out` is untouched.
     ///
     /// Call [`set_handle`](StoreCell::set_handle) first: entries carry the current handle.
     ///
@@ -316,22 +330,36 @@ impl StoreCell {
     pub fn observe(&self, signal_id: u32, on: bool, out: &mut Writer) -> u32 {
         let targets = self.targets(signal_id);
         if targets.is_empty() {
-            debug_assert!(
-                signal_id == ALL_SIGNALS,
-                "keel-signals: observe of unknown signal id {signal_id}"
-            );
+            // An unknown id comes from the host: it is ignored in every build (never asserted),
+            // and nothing is counted or logged here.
             return 0;
         }
-        let handle = Handle(self.handle());
-        let mut written = 0_u32;
-        for (id, slot) in targets {
-            if !on {
+        if !on {
+            for (_, slot) in &targets {
                 slot.flags.observed.store(false, Ordering::SeqCst);
                 if let SlotKind::Keyed(state) = &slot.kind {
                     state.forget();
                 }
-                continue;
             }
+            return 0;
+        }
+
+        let handle = Handle(self.handle());
+        // Nothing is left behind if building the entries panics (a computed's closure or an
+        // encoder): the slots go back to what they were, so the host is not assumed to have
+        // values it never received.
+        let mut rollback = ObserveRollback {
+            cell: self,
+            touched: Vec::with_capacity(targets.len()),
+            armed: true,
+        };
+        let mut entries = Writer::new();
+        for (id, slot) in &targets {
+            rollback.touched.push((
+                *id,
+                Arc::clone(slot),
+                slot.flags.observed.load(Ordering::SeqCst),
+            ));
             slot.flags.observed.store(true, Ordering::SeqCst);
             // Clear the dirty bit *before* reading the value: a write that lands in between is
             // recorded again and delivered by its own commit, instead of being lost.
@@ -343,14 +371,18 @@ impl StoreCell {
             }
             ChangeEntry {
                 handle,
-                signal_id: id,
+                signal_id: *id,
                 op: ChangeOp::Full,
                 value: value.into_vec(),
             }
-            .encode(out);
-            written += 1;
+            .encode(&mut entries);
         }
-        written
+        rollback.armed = false;
+        // The host is about to receive the current value of every target, so an earlier
+        // abandoned delivery of one of them no longer needs a retry.
+        self.forget_unsent(targets.iter().map(|(id, _)| *id));
+        out.write_raw(entries.as_slice());
+        u32::try_from(targets.len()).unwrap_or(u32::MAX)
     }
 
     /// Appends the full encoded value of one signal to `out` (no entry header, no length).
@@ -418,6 +450,12 @@ impl StoreCell {
     /// host cannot have missed something it never had; its next `observe` sends the current
     /// value.
     ///
+    /// The claim is transactional. If building the change-set or delivering it is abandoned
+    /// (a computed or an encoder panicked, or the sink did), the claimed slots are remembered
+    /// as *unsent* and the keyed baselines among them are dropped, so that the next commit that
+    /// touches this store sends every one of them again as a full value. Without that, the host
+    /// would silently keep values the core has moved on from.
+    ///
     /// `txn_id` is the transaction id of the current round, allocated on first use so that
     /// every store committed by the same transaction shares one id.
     pub(crate) fn commit_slots(
@@ -426,6 +464,11 @@ impl StoreCell {
         sink: Option<&Arc<dyn ChangeSink>>,
         txn_id: &mut Option<u64>,
     ) {
+        // Slots an earlier commit of this store abandoned are sent again with this one.
+        let unsent = self.take_unsent();
+        if !unsent.is_empty() {
+            ids.extend_from_slice(&unsent);
+        }
         ids.sort_unstable();
         ids.dedup();
 
@@ -443,7 +486,11 @@ impl StoreCell {
                 let flags = &slot.flags;
                 let wanted = flags.observed.load(Ordering::SeqCst)
                     || flags.no_coalesce.load(Ordering::SeqCst);
-                if wanted && flags.dirty.swap(false, Ordering::SeqCst) {
+                if !wanted {
+                    continue;
+                }
+                let dirty = flags.dirty.swap(false, Ordering::SeqCst);
+                if dirty || unsent.binary_search(&id).is_ok() {
                     claimed.push((id, Arc::clone(slot)));
                 }
             }
@@ -461,6 +508,13 @@ impl StoreCell {
         let handle = Handle(handle);
         let txn = *txn_id.get_or_insert_with(next_txn_id);
 
+        // From here until the sink has returned, the change-set is in flight: unwinding
+        // abandons it (see `Abandon`).
+        let mut abandon = Abandon {
+            cell: self,
+            claimed: &claimed,
+            armed: true,
+        };
         let mut payload = Writer::from_vec(take_buffer());
         let mut scratch = Writer::new();
         let mut builder = ChangeSetBuilder::new(&mut payload, txn);
@@ -481,7 +535,93 @@ impl StoreCell {
         }
         builder.finish();
         sink.deliver(payload.as_slice());
+        abandon.armed = false;
         recycle_buffer(payload.into_vec());
+    }
+
+    /// Remembers that the host may not have the current value of `signal_id`: the next commit
+    /// that touches this store sends it again.
+    fn mark_unsent(&self, signal_id: u32) {
+        let mut unsent = self.unsent.lock();
+        if let Err(at) = unsent.binary_search(&signal_id) {
+            unsent.insert(at, signal_id);
+        }
+        self.has_unsent.store(true, Ordering::Release);
+    }
+
+    /// Takes the sorted list of slots to send again.
+    fn take_unsent(&self) -> Vec<u32> {
+        if !self.has_unsent.load(Ordering::Acquire) {
+            return Vec::new();
+        }
+        let mut unsent = self.unsent.lock();
+        self.has_unsent.store(false, Ordering::Release);
+        std::mem::take(&mut *unsent)
+    }
+
+    /// Stops remembering `ids` as unsent (the host has just been given their current values).
+    fn forget_unsent(&self, ids: impl Iterator<Item = u32>) {
+        if !self.has_unsent.load(Ordering::Acquire) {
+            return;
+        }
+        let mut unsent = self.unsent.lock();
+        for id in ids {
+            if let Ok(at) = unsent.binary_search(&id) {
+                unsent.remove(at);
+            }
+        }
+        self.has_unsent.store(!unsent.is_empty(), Ordering::Release);
+    }
+}
+
+/// Armed while a claimed change-set is being built and delivered; if it is dropped still armed
+/// (something panicked), the change-set is abandoned: every claimed slot is marked unsent and
+/// its keyed baseline is dropped, because the host may never have seen the change the baseline
+/// already counts.
+struct Abandon<'a> {
+    cell: &'a StoreCell,
+    claimed: &'a [(u32, Arc<Slot>)],
+    armed: bool,
+}
+
+impl Drop for Abandon<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        for (id, slot) in self.claimed {
+            if let SlotKind::Keyed(state) = &slot.kind {
+                state.forget();
+            }
+            self.cell.mark_unsent(*id);
+        }
+    }
+}
+
+/// Undoes a partly built `observe(on)` when it unwinds: every target it touched returns to its
+/// previous observed state, its keyed baseline is dropped, and a target that was already
+/// observed (and whose dirty bit `observe` cleared) is marked unsent, so the host still gets
+/// its current value with the next commit.
+struct ObserveRollback<'a> {
+    cell: &'a StoreCell,
+    touched: Vec<(u32, Arc<Slot>, bool)>,
+    armed: bool,
+}
+
+impl Drop for ObserveRollback<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        for (id, slot, was_observed) in &self.touched {
+            slot.flags.observed.store(*was_observed, Ordering::SeqCst);
+            if let SlotKind::Keyed(state) = &slot.kind {
+                state.forget();
+            }
+            if *was_observed {
+                self.cell.mark_unsent(*id);
+            }
+        }
     }
 }
 
