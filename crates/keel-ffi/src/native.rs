@@ -8,8 +8,16 @@
 //! * buffers the core returns are [`KeelBuf`]s, owned by the caller until
 //!   [`keel_buf_free`];
 //! * the reply, change-set, stream and port callbacks run on the core thread, a blocking thread
-//!   or the caller's thread, possibly while the core lock is held, and must not call back into
-//!   the core (SPEC 5.1) except [`keel_buf_free`];
+//!   or the caller's thread, possibly while the core lock is held, **concurrently** with each
+//!   other, and must be thread-safe, must not unwind and must not call back into the core
+//!   (SPEC 5.1) except the entries that never take the core lock: [`keel_buf_free`],
+//!   [`keel_port_reply`], [`keel_stream_credit`], [`keel_timer_fired`], [`keel_stats_json`] and
+//!   the read-only [`keel_abi_version`], [`keel_schema_hash`] and [`keel_schema_json`]; the
+//!   others are refused (`E_REENTRANT`) or must not be called from a callback at all. The
+//!   complete host contract is the header comment of `keel.h` and SPEC 6;
+//! * the callbacks and their `user` pointers stay valid until [`keel_shutdown`] returns, a port
+//!   callback until [`keel_port_register`] has removed or replaced it (which waits for its running
+//!   invocations, so the host may free `user` when it returns);
 //! * nothing unwinds out of any function (constitution R6): a contained panic becomes a status 2
 //!   reply, an error code, or nothing for `void` entries.
 
@@ -253,7 +261,8 @@ pub extern "C" fn keel_schema_json() -> KeelBuf {
 /// # Safety
 ///
 /// `cfg` must be null or valid for `len` bytes. The callbacks and `user` must stay valid, and
-/// the callbacks callable from any thread, until [`keel_shutdown`] returns.
+/// the callbacks must be thread-safe (they run concurrently on arbitrary threads) and must not
+/// unwind, until [`keel_shutdown`] returns. See the host contract in `keel.h`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn keel_init(
     cfg: *const u8,
@@ -284,7 +293,14 @@ pub unsafe extern "C" fn keel_init(
 
 /// `void keel_shutdown(void)`: stops the runtime (idempotent), joins its threads, drops every
 /// object and forgets the callbacks and port registrations. Calls made afterwards fail with
-/// status 5 until `keel_init` runs again. The host must not call it from inside a callback.
+/// status 5 until `keel_init` runs again.
+///
+/// **Blocking:** it waits for the port callbacks still running on other threads (after the
+/// runtime has stopped), so when it returns no callback is running or will start and the host may
+/// free every `user` pointer. It does all this inside the critical section that serialises
+/// `keel_init`, so an init on another thread waits for it. The host must not call it from inside
+/// a callback (debug builds assert; release builds skip the waits that could never finish) nor
+/// while holding a lock a port callback needs.
 #[unsafe(no_mangle)]
 pub extern "C" fn keel_shutdown() {
     session::stop();
@@ -356,10 +372,18 @@ pub extern "C" fn keel_release(handle: u64) {
 /// no registration behaves as unavailable (SPEC 6.3). Registering takes the port over from any
 /// default Rust binding (for example the native `Timer`).
 ///
+/// **Blocking:** removing a registration, or replacing it with another, returns only after every
+/// invocation of the *old* callback running on another thread has returned, and the old callback
+/// is never started again: the host may free the old `user` the moment this returns. Do not call
+/// it from inside a port callback of the registration being removed (it would wait for itself:
+/// debug builds assert, release builds skip that wait) nor while holding a lock a port callback
+/// needs; a port callback that never returns keeps this call from returning.
+///
 /// # Safety
 ///
-/// `cb` and `user` must stay valid, and `cb` callable from any thread, until the registration is
-/// removed or [`keel_shutdown`] returns.
+/// `cb` and `user` must stay valid until the registration is removed or replaced (this call
+/// returns for that id) or [`keel_shutdown`] returns, and `cb` must be thread-safe (port calls
+/// arrive concurrently on arbitrary threads) and must not unwind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn keel_port_register(
     port_id: u32,
@@ -386,7 +410,8 @@ pub unsafe extern "C" fn keel_port_register(
 /// `void keel_port_reply(const uint8_t *ptr, uint32_t len)`: answers a port call the callback
 /// deferred by returning `1` (a `PortReply` payload, SPEC 3.6). Never takes the core lock, so it
 /// is safe from any thread, including from inside the port callback itself. A reply to an
-/// abandoned call is discarded.
+/// abandoned call is discarded, and one carrying port call id `0` (the fire-and-forget id of the
+/// `Log` port's calls) is ignored silently.
 ///
 /// # Safety
 ///
@@ -453,7 +478,7 @@ pub extern "C" fn keel_stats_json() -> KeelBuf {
 }
 
 /// `void keel_buf_free(KeelBuf buf)`: releases a buffer returned by the core. Empty buffers
-/// (`cap == 0`) are ignored. The only core function a callback may call.
+/// (`cap == 0`) are ignored. Callable from inside a callback (it never touches the runtime).
 ///
 /// # Safety
 ///

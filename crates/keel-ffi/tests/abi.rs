@@ -76,6 +76,10 @@ struct Capture {
     /// When set, `on_reply` calls back into the core (which SPEC 5.1 forbids) and records the answer.
     reenter: std::sync::atomic::AtomicBool,
     reentered: Mutex<Vec<u32>>,
+    /// When set, `on_reply` exercises every entry point `keel.h` lists (as callable or not
+    /// callable from a callback) and records what happened in `probed`.
+    probe: std::sync::atomic::AtomicBool,
+    probed: Mutex<Vec<(&'static str, bool)>>,
 }
 
 impl Capture {
@@ -86,6 +90,8 @@ impl Capture {
             echo_mode: Mutex::new(PortMode::Sync),
             reenter: std::sync::atomic::AtomicBool::new(false),
             reentered: Mutex::new(Vec::new()),
+            probe: std::sync::atomic::AtomicBool::new(false),
+            probed: Mutex::new(Vec::new()),
         })
     }
 
@@ -200,7 +206,73 @@ extern "C" fn on_reply(user: *mut c_void, call_id: u32, ptr: *const u8, len: u32
             .unwrap_or_else(PoisonError::into_inner)
             .extend([refused, status]);
     }
+    if cap.probe.load(Ordering::Acquire) {
+        probe_entries(cap);
+    }
     cap.with(|inner| inner.replies.push((call_id, bytes)));
+}
+
+/// Calls, from inside a callback, every entry point `keel.h` lists, and records whether it did
+/// what the header says. Nothing here may panic (this runs in an `extern "C"` callback).
+fn probe_entries(cap: &Capture) {
+    let mut seen: Vec<(&'static str, bool)> = Vec::new();
+
+    // Callable from a callback: they never take the core lock.
+    let stats = keel_stats_json();
+    // SAFETY: a buffer the core returned, read and freed once (`keel_buf_free` is on the list).
+    let stats_ok = unsafe {
+        let ok = serde_json::from_slice::<serde_json::Value>(stats.as_slice())
+            .is_ok_and(|json| json["platform"] == "test");
+        keel_buf_free(stats);
+        ok
+    };
+    seen.push(("keel_stats_json", stats_ok));
+    // SAFETY: the empty buffer owns nothing.
+    unsafe { keel_buf_free(KeelBuf::EMPTY) };
+    seen.push(("keel_buf_free", true));
+    keel_stream_credit(0xFFFF_0001, 1);
+    seen.push(("keel_stream_credit", true));
+    keel_timer_fired(0xFFFF_0002);
+    seen.push(("keel_timer_fired", true));
+    port_reply(&port_reply_payload(0xFFFF_0003, PortStatus::Ok, &[]));
+    seen.push(("keel_port_reply", true));
+    seen.push(("keel_abi_version", keel_abi_version() == 1));
+    seen.push(("keel_schema_hash", keel_schema_hash() != 0));
+    let json = keel_schema_json();
+    // SAFETY: a buffer the core returned, read and freed once.
+    let json_ok = unsafe {
+        let ok = json.as_slice().first() == Some(&b'{');
+        keel_buf_free(json);
+        ok
+    };
+    seen.push(("keel_schema_json", json_ok));
+
+    // Refused (E_REENTRANT), answered without deadlocking or running.
+    seen.push((
+        "keel_call refused",
+        submit(&call_payload(function("version"), 9_999_001, &[])) == 5,
+    ));
+    let sync = call_sync_raw(&call_payload(function("version"), 9_999_002, &[]));
+    // SAFETY: a buffer the core returned, read and freed once.
+    let sync_refused = unsafe {
+        let refused = sync.as_slice().get(4) == Some(&ReplyStatus::BadRequest.as_u8());
+        keel_buf_free(sync);
+        refused
+    };
+    seen.push(("keel_call_sync refused", sync_refused));
+    keel_cancel(9_999_003);
+    keel_observe(0x1_0000_0001, 0, 1);
+    keel_release(0x1_0000_0001);
+    event(1, 2, &[]);
+    seen.push((
+        "keel_restore refused",
+        restore(&[0; 8]) == restore_code::UNAVAILABLE,
+    ));
+
+    cap.probed
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .extend(seen);
 }
 
 extern "C" fn on_changes(user: *mut c_void, ptr: *const u8, len: u32) {
@@ -745,6 +817,50 @@ fn calling_back_into_the_core_from_a_callback_is_refused_not_deadlocked() {
     let answers = host.cap.reentered.lock().unwrap().clone();
     assert_eq!(answers, [5, u32::from(ReplyStatus::BadRequest.as_u8())]);
     host.cap.reenter.store(false, Ordering::Release);
+    assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);
+}
+
+/// M2: the list of entry points `keel.h` and SPEC 5.1 allow from inside a callback is the list
+/// that works; every other core-lock entry is refused with `E_REENTRANT` (logged, never a
+/// deadlock), and none of the allowed ones is.
+#[test]
+fn callbacks_may_call_exactly_the_documented_entry_points() {
+    let host = Embedder::start();
+    host.cap.probe.store(true, Ordering::Release);
+    // The async path replies from inside `keel_call`, on this thread, under the core lock.
+    let (status, _) = host.run(function("version"), &[]);
+    host.cap.probe.store(false, Ordering::Release);
+    assert_eq!(status, ReplyStatus::Ok, "the original call is unaffected");
+
+    let probed = host.cap.probed.lock().unwrap().clone();
+    assert!(probed.len() == 11, "the probe ran: {probed:?}");
+    for (what, ok) in &probed {
+        assert!(*ok, "{what} did not behave as keel.h says: {probed:?}");
+    }
+    host.cap.with(|inner| {
+        let refused: Vec<&str> = inner
+            .logs
+            .iter()
+            .filter(|(_, target, message)| {
+                target == "keel::runtime" && message.contains("E_REENTRANT")
+            })
+            .map(|(_, _, message)| message.split(':').next().unwrap_or(""))
+            .collect();
+        for entry in ["cancel", "observe", "release", "event"] {
+            assert!(
+                refused.contains(&entry),
+                "{entry} from a callback must be refused: {refused:?}"
+            );
+        }
+        // The allowed entries are not among the refusals (the list is exactly the allowed set).
+        for entry in ["stream_credit", "timer_fired", "port_reply", "stats_json"] {
+            assert!(
+                !refused.contains(&entry),
+                "{entry} is allowed from a callback: {refused:?}"
+            );
+        }
+    });
+    // Nothing was left wedged.
     assert_eq!(host.sync(function("version"), &[]).0, ReplyStatus::Ok);
 }
 

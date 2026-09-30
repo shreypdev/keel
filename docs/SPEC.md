@@ -414,7 +414,7 @@ When a transport is attached with `mode = "dev"`, the core additionally emits `L
 
 ## 6. Native C ABI (`keel-ffi`)
 
-Exported with `#[unsafe(no_mangle)] pub extern "C"`, C-compatible types only. All `*const u8, u32` pairs are borrowed for the duration of the call unless stated. All functions are thread-safe. `keel-ffi` is the only crate besides the JNI shim allowed to contain `unsafe`, and every block has a `// SAFETY:` comment.
+Exported with `#[unsafe(no_mangle)] pub extern "C"`, C-compatible types only. All `*const u8, u32` pairs are borrowed for the duration of the call unless stated (a null `ptr` is an empty payload). The functions may be called from any thread, concurrently, subject to the host contract below. `keel-ffi` is the only crate besides the JNI shim allowed to contain `unsafe`, and every block has a `// SAFETY:` comment.
 
 ```c
 typedef struct { uint8_t *ptr; uint32_t len; uint32_t cap; } KeelBuf;        // owned by the core; free with keel_buf_free
@@ -427,15 +427,15 @@ uint32_t keel_abi_version(void);                       // 1
 uint64_t keel_schema_hash(void);
 KeelBuf  keel_schema_json(void);                       // owned copy
 uint32_t keel_init(const uint8_t *cfg, uint32_t len, keel_reply_cb reply, keel_changeset_cb changes, keel_stream_cb stream, void *user); // idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok
-void     keel_shutdown(void);                          // answers every in-flight call (status 3) and ends every open stream (§5.1 Shutdown) before stopping the threads
+void     keel_shutdown(void);                          // answers every in-flight call (status 3) and ends every open stream (§5.1 Shutdown) before stopping the threads; then drops the port registrations, waiting for port callbacks still running (host contract 5)
 uint32_t keel_call(const uint8_t *ptr, uint32_t len);  // Call payload (§3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods.
 KeelBuf  keel_call_sync(const uint8_t *ptr, uint32_t len); // Reply payload (§3.4) returned directly; only for sync methods (async → status 5)
 void     keel_cancel(uint32_t call_id);
 void     keel_stream_credit(uint32_t call_id, uint32_t credit);
 void     keel_observe(uint64_t handle, uint32_t signal_id, uint8_t on);
 void     keel_release(uint64_t handle);
-void     keel_port_register(uint32_t port_id, keel_port_cb cb, void *user);
-void     keel_port_reply(const uint8_t *ptr, uint32_t len);   // PortReply payload
+void     keel_port_register(uint32_t port_id, keel_port_cb cb, void *user); // cb NULL removes; removing or replacing waits for the old registration's running callbacks (host contract 1, 5)
+void     keel_port_reply(const uint8_t *ptr, uint32_t len);   // PortReply payload; allowed from a callback; port_call_id 0 is ignored (host contract 6)
 void     keel_event(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
 void     keel_timer_fired(uint32_t timer_id);
 KeelBuf  keel_snapshot(void);
@@ -446,9 +446,18 @@ void     keel_buf_free(KeelBuf buf);
 
 `RuntimeConfig` record: `{ platform: String, mode: String /* "inproc" | "dev" */, core_threads: u8, blocking_threads: u8, log_level: u8 }`.
 
+`keel_snapshot` with no running runtime (before `keel_init`, after `keel_shutdown`) returns an empty snapshot (`count 0`) whose `generation_floor` is the process-wide generation counter, which survives shutdown (§5.9, ADR-022).
+
 Return codes (as implemented): `keel_init` returns 0 ok, or a nonzero `init_code` (bad argument, undecodable config, already initialized with a *different* embedder — a repeat init with the same callbacks and `user` is a no-op returning 0). `keel_restore` returns 0 ok or a nonzero `restore_code`; a failed restore leaves the core unchanged. The native ABI has no `keel_poll`, so `core_threads == 0` is treated as 1. There is no native log callback: core log records reach the host through its registered `Log` port (the JNI `Callbacks` interface likewise has none).
 
-Callback threading: `reply_cb`, `changeset_cb`, `stream_cb` and `port_cb` may be invoked on the core thread, a blocking thread, or the caller's thread (sync path), possibly while the core lock is held. See §5.1 for the re-entrancy rule.
+**Host contract** (the same text is the header comment of `keel.h`; a host that breaks a rule has undefined behaviour). The *callbacks* are `reply_cb`, `changeset_cb`, `stream_cb` (given to `keel_init`) and every `port_cb` (given to `keel_port_register`).
+
+1. **Lifetime.** The three `keel_init` callbacks and its `user` stay valid until `keel_shutdown` *returns*; none is called afterwards. A `port_cb` and its `user` stay valid until `keel_port_register(id, NULL, ..)` or a replacing `keel_port_register(id, ..)` has returned for that id, or `keel_shutdown` has returned. When one of those calls returns, no invocation of the old registration is running, none will start and its `user` is never read again: the host may free `user` right then (ADR-025; the core waits, see 5).
+2. **Threads.** A callback runs on the thread that produced the event (the `keel-core` thread, a blocking-pool thread, or a host thread inside a `keel_*` call such as `keel_call`), possibly with the core lock or a store's delivery lock held (§5.1). Callbacks run **concurrently** (four simultaneous `port_cb` invocations are measured): they must be thread-safe, short, and must not assume the main thread.
+3. **No unwinding.** A callback must not throw, `longjmp` or otherwise unwind through the core.
+4. **Re-entrancy.** A callback must not call back into the core except the entries that never take the core lock: `keel_buf_free`, `keel_port_reply`, `keel_stream_credit`, `keel_timer_fired`, `keel_stats_json`, and the read-only `keel_abi_version`, `keel_schema_hash`, `keel_schema_json` (§5.1). `keel_call`, `keel_call_sync`, `keel_cancel`, `keel_observe`, `keel_release`, `keel_event` and `keel_restore` take the core lock and are refused with `E_REENTRANT` (status 5, restore code 6, or logged and ignored), never deadlocked; `keel_init`, `keel_shutdown`, `keel_port_register` and `keel_snapshot` must not be called from a callback at all.
+5. **Blocking.** Removing or replacing a port registration (`keel_port_register`) and `keel_shutdown` wait for the port callbacks of the registrations they remove that are running on other threads. They must not be called from inside a callback (debug builds assert; release builds skip the wait for the calling thread's own callbacks), not while holding a lock a `port_cb` needs, and a `port_cb` that never returns keeps them from returning. `keel_shutdown` may be called from any thread but a callback, also concurrently with other entries (they complete or fail softly); it removes the port registrations inside the same critical section that serialises `keel_init`, so an init on another thread waits for it and a registration made after that init returns is never lost to it.
+6. **Log.** The core's log records reach the host as `Log.log` calls with `port_call_id 0` (fire and forget). Nothing waits for the answer (0, 1 or 2 are all accepted) and a `keel_port_reply` carrying id 0 is ignored silently: acting on it would log "no port call 0 is pending", which is one more Log call. Real port calls are numbered from 1.
 
 Register ports before the core needs them. `InitHook`s (query hydration reads the `Kv` port) run on the core as soon as the runtime has been created, which is before `keel_init` has returned to the host. Ports the host supplies *with* the init call (the JNI `Callbacks` object, the wasm `port_call` import) are in place by then; a port registered with `keel_port_register` **after** `keel_init` returns is racy against the hooks: a hook's first call to it can reach the host before the registration and is answered `Unavailable` (§6.3), and the hook has silently lost its start-up work unless it retries (`keel-query` hydration retries for about five seconds). A host that needs a port at start-up therefore supplies it with `keel_init`, or registers it before any hook could run it, and must not assume a late registration is seen by start-up work.
 
