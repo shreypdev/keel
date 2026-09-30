@@ -316,6 +316,12 @@ pub struct Runtime {
     stats: Stats,
     extensions: Extensions,
     shut_down: AtomicBool,
+    /// How many times user code used this runtime after `shutdown` (only the first few are
+    /// logged).
+    late_uses: AtomicU32,
+    /// Cancelled futures that could not be dropped on the spot without waiting for the core
+    /// lock; dropped at the start of the next core turn.
+    deferred_drops: Mutex<Vec<BoxFuture>>,
     core_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
@@ -448,7 +454,7 @@ impl Runtime {
             } else {
                 ObjectTable::new()
             },
-            ports: Arc::new(PortTable::default()),
+            ports: Arc::new(PortTable::with_owner(weak.clone())),
             events: Events::default(),
             table,
             restorers,
@@ -457,6 +463,8 @@ impl Runtime {
             stats: Stats::default(),
             extensions: Extensions::default(),
             shut_down: AtomicBool::new(false),
+            late_uses: AtomicU32::new(0),
+            deferred_drops: Mutex::new(Vec::new()),
             core_thread: Mutex::new(None),
         });
 
@@ -524,19 +532,51 @@ impl Runtime {
         }
     }
 
-    /// Stops the runtime: ends the `keel-core`, timer and blocking threads, fails pending port
-    /// calls, drops every task and object (under the core lock, so user `Drop` code runs
-    /// where it expects to) and releases the global slot. Idempotent. Calls made afterwards
-    /// are answered with status 5.
+    /// Stops the runtime and releases everything it holds (ADR-023, findings L1 and L5):
     ///
-    /// Called from inside a host callback or a dispatched call it does not wait for the
-    /// `keel-core` thread (that would deadlock); the thread exits on its own.
+    /// 1. every call still in flight is answered with status 3 and every open stream ends with
+    ///    an error item (`"cancelled: the runtime shut down"`), each exactly once, before
+    ///    anything slow is waited for, so a host that is waiting on a reply is released at once;
+    /// 2. the `keel-core`, timer and blocking threads are stopped and joined;
+    /// 3. pending port calls fail with [`PortError::Cancelled`], event subscribers and
+    ///    Rust port bindings are cleared (closures that hold a [`Ctx`] would keep the runtime
+    ///    alive through a reference cycle), and every task and object is dropped under the core
+    ///    lock, so user `Drop` code runs where it expects to;
+    /// 4. the global slot is released.
+    ///
+    /// Idempotent. Calls made afterwards are answered with status 5, and `spawn`, `sleep`,
+    /// `port_call` and `event` on a surviving [`Ctx`] are no-ops that log a warning (never a
+    /// panic, never queued). [`Runtime::extension`] values are **not** cleared: they are handed
+    /// out as `&T` for the life of the runtime, so an extension that holds a `Ctx` has to
+    /// release it itself.
+    ///
+    /// # Must not be called from the core or a host callback
+    ///
+    /// Not from a dispatched call, a task, an event subscriber or a `Host` callback of this
+    /// runtime: it joins the threads it stops, which would wait for itself (from the core
+    /// thread) or for a job that is waiting for the core lock (from a blocking closure that
+    /// took it). Debug builds assert this; release builds skip the joins that could never
+    /// finish (the threads exit on their own) and carry on.
     pub fn shutdown(&self) {
+        let inside = self.is_reentrant();
+        debug_assert!(
+            !inside,
+            "keel-runtime: Runtime::shutdown was called from the core thread or from a host \
+             callback, which cannot wait for the threads it stops (see its documentation)"
+        );
         if self.shut_down.swap(true, Ordering::AcqRel) {
             return;
         }
+        // Refuses every task spawned from now on; the core thread leaves its loop.
         self.exec.shutdown();
-        let core_thread = if self.holds_core() {
+        // Answer and cancel what is in flight, under the core lock (so no poll is running and
+        // no call is half way through `dispatch`), before any thread is joined.
+        {
+            let guard = self.enter_core().ok();
+            self.cancel_all_calls("the runtime shut down");
+            drop(guard);
+        }
+        let core_thread = if inside {
             None
         } else {
             self.core_thread.lock().take()
@@ -549,6 +589,7 @@ impl Runtime {
         self.timers.shutdown();
         self.blocking.shutdown();
         self.ports.cancel_all();
+        self.release_user_references();
         let _guard = self.enter_core().ok();
         self.teardown();
         drop(_guard);
@@ -566,8 +607,20 @@ impl Runtime {
         drop(released);
     }
 
+    /// Clears what user code registered with the runtime and may hold a `Ctx` through: event
+    /// subscribers and Rust port bindings. Dropped outside their locks, under the panic guard.
+    fn release_user_references(&self) {
+        for callback in self.events.clear() {
+            self.drop_guarded_logged("an event subscriber at shutdown", callback);
+        }
+        for binding in self.ports.clear_bindings() {
+            self.drop_guarded_logged("a port binding at shutdown", binding);
+        }
+    }
+
     /// Drops every task, call and object.
     fn teardown(&self) {
+        self.drain_deferred_drops();
         for future in self.exec.clear() {
             self.drop_guarded_logged("a task at shutdown", future);
         }
@@ -728,6 +781,21 @@ impl Runtime {
         let guard = self.core.lock();
         let _ = HELD.try_with(|held| held.borrow_mut().push(self.id));
         Ok(CoreGuard {
+            guard: Some(guard),
+            id: self.id,
+            scope: Some(CtxScope::enter(self.me())),
+        })
+    }
+
+    /// Like [`enter_core`](Runtime::enter_core) but never waits: `None` if the thread may not
+    /// enter or the lock is taken.
+    fn try_enter_core(&self) -> Option<CoreGuard<'_>> {
+        if self.is_reentrant() {
+            return None;
+        }
+        let guard = self.core.try_lock()?;
+        let _ = HELD.try_with(|held| held.borrow_mut().push(self.id));
+        Some(CoreGuard {
             guard: Some(guard),
             id: self.id,
             scope: Some(CtxScope::enter(self.me())),
@@ -1080,13 +1148,23 @@ impl Runtime {
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
         let rt = self.me();
-        let task = self.exec.spawn(
+        let spawned = self.exec.try_spawn(
             Box::pin(async move {
                 let result = future.await;
                 rt.finish_call(call_id, result);
             }),
             TaskKind::Call { call_id, handle },
         );
+        let task = match spawned {
+            Ok(task) => task,
+            Err(refused) => {
+                // The runtime began shutting down after `call` checked: nothing will run this
+                // call, so it is answered as cancelled rather than left silent.
+                self.drop_guarded_logged("a call refused at shutdown", refused);
+                self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
+                return;
+            }
+        };
         self.calls.lock().insert(
             call_id,
             CallEntry {
@@ -1116,10 +1194,18 @@ impl Runtime {
     ) {
         let state = Arc::new(StreamState::default());
         let rt = self.me();
-        let task = self.exec.spawn(
+        let spawned = self.exec.try_spawn(
             Box::pin(drive_stream(rt, call_id, stream, state.clone())),
             TaskKind::Stream { call_id, handle },
         );
+        let task = match spawned {
+            Ok(task) => task,
+            Err(refused) => {
+                self.drop_guarded_logged("a stream refused at shutdown", refused);
+                self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
+                return;
+            }
+        };
         // The call must be registered *before* the host hears status 4: `stream_credit` does
         // not take the core lock, so a host that grants credit the moment it sees the reply
         // must find the stream. The driver cannot run yet (we hold the core lock), so the
@@ -1188,6 +1274,15 @@ impl Runtime {
                 call_id,
                 "the object it was running on was replaced by a restore",
             );
+        }
+    }
+
+    /// Ends every in-flight call and stream from the runtime's side ([`abort_call`](Runtime::abort_call)
+    /// each). The caller holds the core lock (or is the thread that would).
+    fn cancel_all_calls(&self, why: &str) {
+        let ids: Vec<u32> = self.calls.lock().keys().copied().collect();
+        for call_id in ids {
+            self.abort_call(call_id, why);
         }
     }
 
@@ -1336,14 +1431,70 @@ impl Runtime {
 
     // ----- executor ----------------------------------------------------------------------
 
-    /// Spawns a detached task.
+    /// Spawns a detached task. After [`shutdown`](Runtime::shutdown) the future is dropped
+    /// unpolled, a warning is logged and the returned id names nothing.
     pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) -> TaskId {
-        self.exec.spawn(Box::pin(future), TaskKind::Detached)
+        if self.is_shut_down() {
+            self.warn_shut_down("spawn");
+            self.drop_guarded_logged("a task spawned after shutdown", future);
+            return TaskId::dead();
+        }
+        match self.exec.try_spawn(Box::pin(future), TaskKind::Detached) {
+            Ok(id) => id,
+            Err(refused) => {
+                self.warn_shut_down("spawn");
+                self.drop_guarded_logged("a task spawned after shutdown", refused);
+                TaskId::dead()
+            }
+        }
+    }
+
+    /// Logs (for the first few uses only, so a loop that keeps calling cannot flood the host)
+    /// that user code used a runtime that has been shut down. The call is a no-op.
+    fn warn_shut_down(&self, what: &str) {
+        const LOGGED: u32 = 8;
+        let seen = self.late_uses.fetch_add(1, Ordering::Relaxed);
+        if seen < LOGGED {
+            let more = if seen + 1 == LOGGED {
+                " (further warnings of this kind are suppressed)"
+            } else {
+                ""
+            };
+            self.log(
+                WARN,
+                "keel::runtime",
+                &format!("{what}: the runtime is shut down; the call was ignored{more}"),
+            );
+        }
     }
 
     /// Cancels a task; see [`Ctx::cancel_task`].
+    ///
+    /// The cancelled future is dropped **on the core** (ADR-023, finding L6): user `Drop` code
+    /// (stores, `PortFuture`s, anything the task captured) must not run concurrently with core
+    /// user code. On the core already (inside a task or a dispatch) it is dropped on the spot;
+    /// elsewhere it is dropped at once under the core lock if that is free, and otherwise
+    /// queued and dropped at the start of the core's next turn, so this never waits for the
+    /// core.
     pub fn cancel_task(&self, id: TaskId) {
-        if let CancelOutcome::Dropped(future) = self.exec.cancel(id) {
+        let CancelOutcome::Dropped(future) = self.exec.cancel(id) else {
+            return;
+        };
+        if self.holds_core() {
+            self.drop_guarded_logged("a cancelled task", future);
+        } else if let Some(_guard) = self.try_enter_core() {
+            self.drop_guarded_logged("a cancelled task", future);
+        } else {
+            self.deferred_drops.lock().push(future);
+            // Wake the core so the drop is not left waiting for unrelated work.
+            self.exec.nudge();
+        }
+    }
+
+    /// Drops the futures `cancel_task` queued. The caller holds the core lock.
+    fn drain_deferred_drops(&self) {
+        let queued = std::mem::take(&mut *self.deferred_drops.lock());
+        for future in queued {
             self.drop_guarded_logged("a cancelled task", future);
         }
     }
@@ -1356,9 +1507,14 @@ impl Runtime {
         self.blocking.spawn(self.ctx(), f)
     }
 
-    /// Sleeps; see [`Ctx::sleep`].
+    /// Sleeps; see [`Ctx::sleep`]. After [`shutdown`](Runtime::shutdown) it completes at once
+    /// (and logs a warning) instead of registering a timer nobody would fire.
     pub fn sleep(&self, duration: Duration) -> Sleep {
         if duration.is_zero() {
+            return Sleep::ready();
+        }
+        if self.is_shut_down() {
+            self.warn_shut_down("sleep");
             return Sleep::ready();
         }
         let (id, slot) = self.timers.register();
@@ -1427,6 +1583,7 @@ impl Runtime {
         if self.is_shut_down() {
             return;
         }
+        self.drain_deferred_drops();
         if let Some(state) = guard.state() {
             state.turns += 1;
         }
@@ -1550,7 +1707,14 @@ impl Runtime {
     /// Calls a platform-implemented async port method (SPEC 5.7). The call is sent when this
     /// function is called; the future resolves when the host replies through
     /// [`port_reply`](Runtime::port_reply), or immediately if the host answered synchronously.
+    ///
+    /// After [`shutdown`](Runtime::shutdown) nothing is sent: the future resolves at once to
+    /// [`PortError::Cancelled`] and a warning is logged.
     pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture {
+        if self.is_shut_down() {
+            self.warn_shut_down("port_call");
+            return PortFuture::ready(self.ports.clone(), Err(PortError::Cancelled));
+        }
         Stats::inc(&self.stats.port_calls);
         if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
             return match self.dispatch_to_rust(&imp, port_id, method_id, &args) {
@@ -1592,6 +1756,10 @@ impl Runtime {
         method_id: u32,
         args: &[u8],
     ) -> Result<Vec<u8>, PortError> {
+        if self.is_shut_down() {
+            self.warn_shut_down("port_call_sync");
+            return Err(PortError::Cancelled);
+        }
         Stats::inc(&self.stats.port_calls);
         if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
             return match self.dispatch_to_rust(&imp, port_id, method_id, args) {
@@ -1684,6 +1852,10 @@ impl Runtime {
     /// A host-to-core event (SPEC 5.7): fans out to the [`Events`] subscribers of
     /// `(port_id, method_id)` on the core loop, with the core lock held.
     pub fn event(&self, port_id: u32, method_id: u32, payload: &[u8]) {
+        if self.is_shut_down() {
+            self.warn_shut_down("event");
+            return;
+        }
         let Ok(_guard) = self.enter_core() else {
             self.reentrant("event");
             return;

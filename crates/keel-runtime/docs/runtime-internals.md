@@ -281,7 +281,11 @@ loop {
   already arrived* during the host call; otherwise the id is abandoned.
 * **Abandoned ids**: `PortTable.abandoned` holds ids whose future was dropped; `begin` never
   hands one out again while it is there; a late reply removes it. Ids wrap, skip `0`, and
-  skip anything live or abandoned.
+  skip anything live or abandoned. The host is never told about an abandonment (v1), so a host
+  that drops such requests would leak one id per cancel: the set is capped at `MAX_ABANDONED`
+  (4096), oldest first (`abandoned_order`, a FIFO that is compacted when it holds more than
+  twice the cap of stale ids), and each eviction logs a WARN through the owning runtime; a late
+  reply to a forgotten id is logged as unknown like any other unknown id (ADR-023, L7).
 * **`port_reply`** decodes, completes the slot, wakes the task. No core lock.
 * **`Events`**: subscribers run in `Runtime::event` under the core lock, in subscription order,
   each under the panic guard. `Subscription::drop` unsubscribes.
@@ -445,14 +449,37 @@ error item), a level 5 log record, `stats.panics += 1`, and the receiver object 
 
 ## 15. Lifetime, shutdown and reference cycles
 
-`Ctx` is an `Arc<Runtime>`. A store that keeps a `Ctx`, and every in-flight async call, is
-therefore a **reference cycle** with the runtime that owns it. `Runtime::shutdown` breaks
-them: it stops the executor, joins the `keel-core`, timer and blocking threads (not from
-inside a callback, where it would wait for itself), fails pending port calls with
-`Cancelled`, then, under the core lock, drops every task and object under the panic guard.
+`Ctx` is an `Arc<Runtime>`. A store that keeps a `Ctx`, an event subscriber or Rust port
+binding that captured one, and every in-flight async call, is therefore a **reference cycle**
+with the runtime that owns it. `Runtime::shutdown` breaks them, in this order (ADR-023, L1):
+
+1. flag the runtime shut down (later `call`s answer 5) and close the executor (`Executor::shutdown`
+   sets `closed` under the `tasks` lock, so a racing `spawn` is refused instead of landing after
+   the final `clear`);
+2. **under the core lock, before anything slow is joined**: `cancel_all_calls`, which for every
+   entry of the call table sends status 3 (a stream: a flag 2 item, `"cancelled: the runtime shut
+   down"`) and drops its task (`abort_call`, the same exactly-once gate as cancel). Taking the
+   lock here means no poll is running and no `call` is half way through its dispatch: a call
+   either registered before (and is answered) or sees the flag and is refused;
+3. join the `keel-core`, timer and blocking threads (not when the caller is the core or inside a
+   callback; debug builds assert that this is never the case, L5);
+4. fail pending port calls with `Cancelled`, clear event subscribers and Rust port bindings
+   (`release_user_references`, dropped outside their locks under the panic guard);
+5. under the core lock, `teardown`: drain deferred drops, drop every remaining task and object.
+   `Runtime::extension` values stay (they are handed out as `&T`; one that holds a `Ctx` must let go
+   of it itself).
+
 After `shutdown` a runtime that nothing else references is freed; before it, an idle
 runtime with no stores holding a `Ctx` is also freed when the last `Arc` drops (its `Drop`
-runs the same teardown without locks, since nothing else can be running).
+runs the same teardown without locks, since nothing else can be running). `spawn`, `sleep`,
+`port_call` and `event` on a surviving `Ctx` do nothing but log a WARN (the first eight per
+runtime; `warn_shut_down`): `spawn` drops the future unpolled and returns `TaskId::dead()`,
+`sleep` completes at once, `port_call` resolves to `PortError::Cancelled`, `event` returns.
+
+**Cancelled futures drop on the core (L6).** `cancel_task` drops the cancelled future with the core
+lock held: on the spot when the caller already is the core, else under `try_enter_core` if the
+lock is free, else it is queued in `deferred_drops` and the core is nudged (a dead task id in the
+ready queue), so the drop happens at the start of its next turn. It never waits for the core.
 
 * `Runtime::init` puts a strong reference in the global slot, so a global runtime lives until
   `shutdown` (dropping your own `Arc` does not stop it).
@@ -508,6 +535,14 @@ Known limitations, each deliberate for v1:
   are not ordered with core writes.
 * An `Arc<Runtime>` held only by your code does not stop a global runtime, and a store's `Ctx`
   keeps a runtime alive until `shutdown` (section 15).
+* Generations are a process-wide `u32` counter: 2^32 - 1 handles per process, then object creation
+  fails loudly (section 13, ADR-022).
+* `Runtime::extension` values are not released by `shutdown`; one that holds a `Ctx` pins the
+  runtime until it lets go (section 15).
+* A host that calls `release` or `observe` from inside a callback gets the logged no-op, not a
+  deferred retry (review note N8).
+* `InitHook`s run before the embedder can bind ports (review finding L2); the C ABI's
+  documentation of port registration (SPEC 6) says how hosts cope.
 
 ## 18. How it is tested
 
