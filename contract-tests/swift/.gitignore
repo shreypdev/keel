@@ -1,0 +1,4 @@
+# SwiftPM build output, including the staged copy of the core library (.build/core).
+.build/
+.swiftpm/
+Package.resolved
