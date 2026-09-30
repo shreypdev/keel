@@ -37,7 +37,7 @@ pub const REFETCH_METHOD_ID: u32 = ids::fnv1a32("query.refetch");
 /// The method id of `invalidate()` on every query handle: `fnv1a32("query.invalidate")`.
 pub const INVALIDATE_METHOD_ID: u32 = ids::fnv1a32("query.invalidate");
 
-fn dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome {
+pub(crate) fn dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome {
     let Some(rt) = rt.downcast_ref::<Runtime>() else {
         return DispatchOutcome::new(DispatchResult::Unknown);
     };

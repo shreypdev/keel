@@ -37,8 +37,9 @@
 //! * **Garbage collection.** When the last observer of an entry goes, its fetch is cancelled and
 //!   the entry is dropped after 5 minutes ([`QueryClient::set_gc_time`]) unless observed again.
 //! * **Persistence.** `persist` entries are written to the `Kv` port 250 ms after a successful
-//!   fetch, and read back when the runtime starts (see [`cache_key`]); entries written by
-//!   another schema are dropped.
+//!   fetch, and read back when the runtime starts (see [`cache_key`]; the client waits a few
+//!   seconds for a platform that registers its `Kv` adapter late); entries written by another
+//!   schema are dropped. A garbage-collected entry leaves its persisted copy in the store.
 //! * **Mutations** (`ctx.mutate(M, input)`, see [`MutationBuilder`]) run an optional
 //!   *optimistic* update inside one transaction, so observers see the result at once; on failure
 //!   every entry it touched is restored exactly, in one more transaction; on success the
@@ -122,7 +123,7 @@ pub use status::QueryStatus;
 use keel_runtime::{Ctx, InitHook, inventory};
 
 /// Reads the persisted cache and queue when a runtime starts.
-fn init(ctx: &Ctx) {
+pub(crate) fn init(ctx: &Ctx) {
     let client = ctx.query();
     ctx.spawn(async move { client.hydrate().await });
 }

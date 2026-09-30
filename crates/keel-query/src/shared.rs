@@ -83,6 +83,22 @@ pub(crate) struct Inflight {
     pub(crate) task: TaskId,
 }
 
+/// Makes every use of the query client depend on the two `inventory` registrations of this
+/// crate (the dispatch layer and the init hook).
+///
+/// `inventory` registrations are static initialisers in an object file, and a linker only pulls
+/// an object out of a library if something refers to it. Any program that observes a query calls
+/// `Shared::observe`, so referring to the registrations' functions from here makes the linker keep
+/// them, including in a platform-only app that never calls `ctx.query()` from Rust and reaches
+/// the client only through the runtime's dispatch.
+#[inline(never)]
+fn keep_registrations() {
+    std::hint::black_box((
+        crate::dispatch::dispatch as keel_meta::DispatchFn,
+        crate::init as fn(&Ctx),
+    ));
+}
+
 /// The compiled key template of query or mutation `id`, made on first use.
 fn plan_for(
     plans: &mut HashMap<u32, Arc<KeyPlan>>,
@@ -398,6 +414,7 @@ impl Shared {
         params: Arc<[u8]>,
         sink: Option<(u64, Weak<dyn Sink>)>,
     ) -> (QueryKey, View) {
+        keep_registrations();
         let now = self.now(ctx);
         let key = QueryKey::new(vt.id, params);
         let schema = ctx.runtime().schema();
