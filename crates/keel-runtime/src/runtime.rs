@@ -35,7 +35,7 @@ use crate::host::{Host, PortCallOutcome};
 use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
 use crate::object::{AnyObject, KeelObject, StoreObject, StoreRestorer, erased, store};
-use crate::object_table::{BadHandle, ObjectTable};
+use crate::object_table::{BadHandle, GENERATION_CEILING, ObjectTable};
 use crate::ports::{
     Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
     PortTable, decode_dispatch_reply, decode_port_reply,
@@ -1969,16 +1969,18 @@ impl Runtime {
             let h = s.handle;
             if h.is_null()
                 || h.generation() == 0
-                || h.generation() == u32::MAX
+                || h.generation() >= GENERATION_CEILING
                 || h.index() as usize > crate::object_table::MAX_RESTORE_INDEX
                 || !seen.insert(h.0)
             {
                 return Err(RestoreError::BadHandle { handle: h.0 });
             }
         }
-        // The counter must be left room to issue from (a floor at u32::MAX would make every
-        // later insert fail); a hostile or corrupt snapshot is refused rather than obeyed.
-        if snapshot.generation_floor == u32::MAX {
+        // The counter must be left real room to issue from: the generation counter is shared by
+        // every runtime in the process, so obeying a floor near `u32::MAX` would let one corrupt
+        // or hostile snapshot exhaust handle creation process-wide — and crash recovery restores
+        // the same bytes on every launch. Anything above the ceiling is refused (re-review NF1).
+        if snapshot.generation_floor >= GENERATION_CEILING {
             return Err(RestoreError::GenerationFloor {
                 floor: snapshot.generation_floor,
             });

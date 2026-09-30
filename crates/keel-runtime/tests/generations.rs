@@ -151,9 +151,18 @@ fn h1_a_floor_that_leaves_nothing_to_issue_is_refused() {
         t.runtime().restore(&empty_snapshot_with_floor(u32::MAX)),
         Err(RestoreError::GenerationFloor { floor: u32::MAX })
     );
-    // One below is fine: exactly one generation is left.
+    // Anything at or above the ceiling is refused too (re-review NF1): the counter is shared
+    // by the whole process and crash recovery replays the same snapshot every launch.
+    const CEILING: u32 = u32::MAX - (1 << 24);
+    for floor in [u32::MAX - 1, CEILING + 1, CEILING] {
+        assert_eq!(
+            t.runtime().restore(&empty_snapshot_with_floor(floor)),
+            Err(RestoreError::GenerationFloor { floor })
+        );
+    }
+    // Just under the ceiling is accepted, with 2^24 generations of headroom left.
     t.runtime()
-        .restore(&empty_snapshot_with_floor(u32::MAX - 1))
+        .restore(&empty_snapshot_with_floor(CEILING - 1))
         .unwrap();
 }
 
@@ -163,13 +172,9 @@ fn h1_a_floor_that_leaves_nothing_to_issue_is_refused() {
 fn l8_an_exhausted_generation_counter_refuses_inserts_and_keeps_serving() {
     let t = TestRuntime::new();
     let survivor = new_counter(&t, 7, "survivor");
-    // Spend all but one generation: a floor of u32::MAX - 1 is the largest a restore accepts.
-    let snapshot = t.runtime().snapshot();
-    let mut w = Writer::new();
-    let mut decoded = Snapshot::decode(&mut Reader::new(&snapshot)).unwrap();
-    decoded.generation_floor = u32::MAX - 1;
-    decoded.encode(&mut w);
-    t.runtime().restore(w.as_slice()).unwrap();
+    // Spend all but one generation. A restore refuses floors near the ceiling (NF1), so the
+    // test raises this runtime's private counter directly.
+    t.raise_generation_floor(u32::MAX - 1);
 
     let last = new_counter(&t, 1, "last"); // takes generation u32::MAX
     assert_eq!(last.generation(), u32::MAX);
@@ -254,4 +259,24 @@ fn h1_generations_are_unique_across_runtimes_of_one_process() {
         2
     );
     second.shutdown();
+}
+
+/// Re-review NF1: a handle generation at or above the ceiling in a snapshot's stores is a
+/// `BadHandle`, not just the floor field.
+#[test]
+fn nf1_a_store_generation_near_the_ceiling_is_a_bad_handle() {
+    let t = TestRuntime::new();
+    let h = new_counter(&t, 1, "one");
+    let snapshot = t.runtime().snapshot();
+    let mut decoded = Snapshot::decode(&mut Reader::new(&snapshot)).unwrap();
+    let index = decoded.stores[0].handle.index();
+    let bad = Handle((u64::from(u32::MAX - 1) << 32) | u64::from(index));
+    decoded.stores[0].handle = bad;
+    let mut w = Writer::new();
+    decoded.encode(&mut w);
+    assert_eq!(
+        t.runtime().restore(w.as_slice()),
+        Err(RestoreError::BadHandle { handle: bad.0 })
+    );
+    let _ = h;
 }

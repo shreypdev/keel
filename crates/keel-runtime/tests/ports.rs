@@ -674,7 +674,14 @@ fn l7_abandoned_port_calls_are_capped_and_the_eviction_is_logged() {
         .into_iter()
         .filter(|l| l.level == 3 && l.message.contains("abandoned calls"))
         .collect();
-    assert_eq!(warnings.len(), 50, "one warning per eviction");
+    // Rate-limited (re-review NF2): the first eviction warns, then once per 1024. 50
+    // evictions therefore warn exactly once, and the message carries the running total.
+    assert_eq!(warnings.len(), 1, "the eviction warning is rate-limited");
+    assert!(
+        warnings[0].message.contains("forgot the"),
+        "{}",
+        warnings[0].message
+    );
 
     // A late reply to a call that is still remembered is discarded quietly and its id is freed;
     // one to a forgotten call is logged as unknown.

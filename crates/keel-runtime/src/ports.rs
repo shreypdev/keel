@@ -167,8 +167,15 @@ struct Pending {
     /// already arrived (removed from the set); they are skipped when evicting and dropped when
     /// the queue outgrows twice the cap.
     abandoned_order: VecDeque<u32>,
+    /// How many abandoned ids have ever been evicted, for rate-limiting the eviction warning
+    /// (a host that never answers is exactly the case the cap is for; one WARN per eviction
+    /// would flood the log — re-review NF2).
+    evicted_total: u64,
     next_id: u32,
 }
+
+/// The eviction warning fires on the first eviction and then once per this many.
+const EVICTION_LOG_EVERY: u64 = 1024;
 
 /// What became of a reply handed to [`PortTable::complete`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -287,9 +294,15 @@ impl PortTable {
                 let live = &pending.abandoned;
                 pending.abandoned_order.retain(|id| live.contains(id));
             }
-            evicted
+            let before = pending.evicted_total;
+            pending.evicted_total += u64::from(evicted);
+            (evicted, before, pending.evicted_total)
         };
-        if evicted > 0 {
+        let (evicted, before, total) = evicted;
+        // First eviction, then once per EVICTION_LOG_EVERY, so an unresponsive host cannot
+        // flood the log through the very mechanism that protects against it.
+        if evicted > 0 && (before == 0 || before / EVICTION_LOG_EVERY != total / EVICTION_LOG_EVERY)
+        {
             // Outside the lock: logging calls the host.
             if let Some(runtime) = self.owner.upgrade() {
                 runtime.log(
@@ -297,8 +310,8 @@ impl PortTable {
                     "keel::runtime",
                     &format!(
                         "port calls: {MAX_ABANDONED} abandoned calls are still waiting for a late \
-                         host reply; forgot the {evicted} oldest (a late reply to one of them will \
-                         be logged as unknown)"
+                         host reply; forgot the {total} oldest so far (a late reply to one of \
+                         them will be logged as unknown; warned once per {EVICTION_LOG_EVERY})"
                     ),
                 );
             }

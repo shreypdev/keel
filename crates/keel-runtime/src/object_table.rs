@@ -51,6 +51,13 @@ const MAX_INDEX_GAP: usize = 1 << 20;
 /// The largest slot index [`Runtime::restore`](crate::Runtime::restore) accepts in a snapshot.
 pub(crate) const MAX_RESTORE_INDEX: usize = MAX_INDEX_GAP;
 
+/// The highest generation (and snapshot `generation_floor`) a restore accepts. The counter is
+/// shared by every runtime in the process, so obeying a floor near `u32::MAX` would let one
+/// corrupt or hostile snapshot exhaust handle creation process-wide, permanently across
+/// relaunches (crash recovery restores the same bytes). 2^24 of headroom keeps ~16.7 million
+/// issues available after the most adversarial accepted snapshot.
+pub(crate) const GENERATION_CEILING: u32 = u32::MAX - (1 << 24);
+
 /// Why a handle did not resolve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BadHandleReason {

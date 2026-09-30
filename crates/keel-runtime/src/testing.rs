@@ -517,6 +517,14 @@ impl TestRuntime {
         &self.rt
     }
 
+    /// Raises this runtime's generation counter to at least `floor`, so a test can reach the
+    /// exhaustion path without issuing billions of handles. Test runtimes own a private
+    /// counter, so nothing leaks into other tests.
+    #[doc(hidden)]
+    pub fn raise_generation_floor(&self, floor: u32) {
+        self.rt.objects().raise_generation_floor(floor);
+    }
+
     /// A [`Ctx`] for the runtime.
     pub fn ctx(&self) -> Ctx {
         self.rt.ctx()
