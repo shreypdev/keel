@@ -1,0 +1,15 @@
+[versions]
+kotlin = "2.0.21"
+# Pinned to the version shipped inside the Gradle 8.14 distribution so that `scripts/test-local.sh`
+# (which compiles against that jar) and the Gradle build see the same API.
+coroutines = "1.6.4"
+junit = "5.10.3"
+
+[libraries]
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
