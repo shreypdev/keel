@@ -11,10 +11,10 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,973 passed / 0 failed |
-| TS `npm test` (runtimes/ts/@keel/runtime) | 833 passed |
+| Rust `cargo test --workspace` | 2,047 passed / 0 failed |
+| TS `npm test` (runtimes/ts/@keel/runtime) | 869 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
-| Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
+| Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 328 passed / 0 failed |
 
 ## Done
 
@@ -30,14 +30,25 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- O(change) keyed-list ops (ADR-027) — `wt/keyed-ops` (bench found diff O(list), 27x miss).
 - No-alloc sync dispatch (ADR-028) — `wt/fast-dispatch` (bench: 60% allocator, 1.3x miss).
-- query-rollback fix (playground finding 2) — `wt/query-rollback`.
-- platform polish (Swift stream backpressure, hash-check order, TS mirror strand,
-  Sendable restatement, react/vue/svelte/solid adapters) — `wt/platform-polish`.
 - cli polish (install name, jniLibs, target reuse, noise) — `wt/cli-polish`.
 
 ## Landed since takeover
+
+- **keyed-ops merged** (ADR-027): recorded list operations make keyed change-sets
+  O(change) — 10k insert 536us -> 6.3us, update 272ns; model-based proptest at 100k cases;
+  blueprint row moved from MISS to within. Playground BigList + bench hook now ride the
+  recorded path. Raw update()/set() keep the diff fallback.
+- **query-rollback merged**: a failed mutation's rollback is the inverse of its OWN writes
+  (per-entry write stamps + optimistic layers with hand-down); 8 regressions fail on the
+  old code. SPEC §9 made precise.
+- **platform-polish merged**: Swift generated streams apply real §3.7 backpressure;
+  InprocTransport checks the schema hash before keel_init; TS Mirror drains subscriber
+  enqueues; Sendable restated in generated Swift; @keel/runtime gains react/vue/svelte/
+  solid adapters (SPEC §10.3) and the playground web app uses the react one.
+  Post-merge sweep: Rust 2,047 · TS 869 · Swift 328 · contracts 51/51, clippy clean.
+  Known small issue (pre-existing): the `stores` bindgen golden has a signal named
+  `default`; Swift @Observable rejects the backticked property — needs a rename rule.
 
 - **playground merged** — the end-to-end proof. One core (todos, counter, 10k keyed list,
   remote query/mutations, lab, bench hooks; 47 tests), React/SwiftUI/Compose apps RUN on
