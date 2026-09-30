@@ -160,6 +160,23 @@ impl Pos {
     }
 }
 
+/// Where a type appears, plus the name `Self` stands for (in records and enums, where
+/// `Option<Box<Self>>` is the idiomatic way to write a recursive type).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Cx<'a> {
+    pub(crate) pos: Pos,
+    pub(crate) self_name: Option<&'a str>,
+}
+
+impl From<Pos> for Cx<'_> {
+    fn from(pos: Pos) -> Self {
+        Cx {
+            pos,
+            self_name: None,
+        }
+    }
+}
+
 /// What the outermost node of a type may be.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Allow {
@@ -245,8 +262,12 @@ const ALLOWED_SET: &str = "bool, i8..i64, u8..u64, f32, f64, String, Bytes, Vec<
 
 /// Maps the type of a record or variant field. A trait object anywhere inside is reported as
 /// E0012 on the whole field type, as in the blueprint's example.
-pub(crate) fn map_field(ty: &Type, field: &str) -> Result<KType, TyErr> {
-    match map_type(ty, Pos::Field, Allow::NONE) {
+pub(crate) fn map_field(ty: &Type, field: &str, self_name: &str) -> Result<KType, TyErr> {
+    let cx = Cx {
+        pos: Pos::Field,
+        self_name: Some(self_name),
+    };
+    match map_type(ty, cx, Allow::NONE) {
         Err(err) if err.diag.code == code::E0004 => {
             let shown = ty_string(ty);
             Err(TyErr::new(
@@ -275,10 +296,12 @@ pub(crate) fn map_return(ret: &ReturnType) -> Result<KType, TyErr> {
 }
 
 /// Maps `ty` found at `pos`, where the outermost node may be what `allow` says.
-pub(crate) fn map_type(ty: &Type, pos: Pos, allow: Allow) -> Result<KType, TyErr> {
+pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Result<KType, TyErr> {
+    let cx = cx.into();
+    let pos = cx.pos;
     match ty {
-        Type::Paren(inner) => map_type(&inner.elem, pos, allow),
-        Type::Group(inner) => map_type(&inner.elem, pos, allow),
+        Type::Paren(inner) => map_type(&inner.elem, cx, allow),
+        Type::Group(inner) => map_type(&inner.elem, cx, allow),
         Type::Tuple(tuple) if tuple.elems.is_empty() => {
             if allow.unit {
                 Ok(KType::Unit)
@@ -304,7 +327,7 @@ pub(crate) fn map_type(ty: &Type, pos: Pos, allow: Allow) -> Result<KType, TyErr
             ),
         )),
         Type::Reference(reference) => Err(reference_error(ty, reference)),
-        Type::Path(path) => map_path(path, ty, pos, allow),
+        Type::Path(path) => map_path(path, ty, cx, allow),
         Type::TraitObject(_) => Err(TyErr::new(
             ty,
             Diag::new(
@@ -314,12 +337,15 @@ pub(crate) fn map_type(ty: &Type, pos: Pos, allow: Allow) -> Result<KType, TyErr
                 "use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`)",
             ),
         )),
-        Type::ImplTrait(impl_trait) => map_impl_trait(impl_trait, ty, pos, allow),
+        Type::ImplTrait(impl_trait) => map_impl_trait(impl_trait, ty, cx, allow),
         Type::BareFn(_) => Err(TyErr::new(
             ty,
             Diag::new(
                 code::E0004,
-                format!("function pointer `{}` cannot cross the boundary", ty_string(ty)),
+                format!(
+                    "function pointer `{}` cannot cross the boundary",
+                    ty_string(ty)
+                ),
                 "callbacks have no wire representation",
                 "declare a port (`#[keel::port]`) for the callback, or return a stream (`impl Stream<Item = T>`) for a sequence of results",
             ),
@@ -474,16 +500,15 @@ fn reject_path_lifetimes(path: &syn::TypePath, ty: &Type) -> Result<(), TyErr> {
     Ok(())
 }
 
-fn map_path(
-    path: &syn::TypePath,
-    ty: &Type,
-    pos: Pos,
-    allow: Allow,
-) -> Result<KType, TyErr> {
+fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result<KType, TyErr> {
+    let pos = cx.pos;
     if path.qself.is_some() {
         return Err(unsupported(
             ty,
-            format!("qualified path `{}` cannot cross the boundary", ty_string(ty)),
+            format!(
+                "qualified path `{}` cannot cross the boundary",
+                ty_string(ty)
+            ),
             "associated types cannot be described by the schema",
             "name the concrete type",
         ));
@@ -552,15 +577,11 @@ fn map_path(
             "it is unsized and borrowed",
             "use an owned `String`",
         )),
-        ("Box", 1) => map_type(args[0], pos, Allow::NONE),
-        ("Vec", 1) => Ok(KType::Vec(Box::new(map_type(args[0], pos, Allow::NONE)?))),
-        ("Option", 1) => Ok(KType::Option(Box::new(map_type(
-            args[0],
-            pos,
-            Allow::NONE,
-        )?))),
+        ("Box", 1) => map_type(args[0], cx, Allow::NONE),
+        ("Vec", 1) => Ok(KType::Vec(Box::new(map_type(args[0], cx, Allow::NONE)?))),
+        ("Option", 1) => Ok(KType::Option(Box::new(map_type(args[0], cx, Allow::NONE)?))),
         ("HashMap" | "BTreeMap", 2) => {
-            let key = map_type(args[0], pos, Allow::NONE)?;
+            let key = map_type(args[0], cx, Allow::NONE)?;
             if !key.is_valid_map_key() {
                 return Err(TyErr::new(
                     args[0],
@@ -572,7 +593,7 @@ fn map_path(
                     ),
                 ));
             }
-            let value = map_type(args[1], pos, Allow::NONE)?;
+            let value = map_type(args[1], cx, Allow::NONE)?;
             Ok(KType::Map(Box::new(key), Box::new(value)))
         }
         ("HashMap", 3) => Err(unsupported(
@@ -587,14 +608,14 @@ fn map_path(
             }
             let ok = map_type(
                 args[0],
-                pos,
+                cx,
                 Allow {
                     result: false,
                     stream: allow.stream,
                     unit: true,
                 },
             )?;
-            let err = map_type(args[1], pos, Allow::NONE)?;
+            let err = map_type(args[1], cx, Allow::NONE)?;
             Ok(KType::Result(Box::new(ok), Box::new(err)))
         }
         ("Result", _) => {
@@ -626,16 +647,16 @@ fn map_path(
             "the runtime injects `Ctx`; it is only accepted as the first parameter of a constructor, a free function, a query or a mutation",
             "remove the parameter; store a `Ctx` in the object at construction, or call `Ctx::current()`",
         )),
-        ("Self", 0) => Err(unsupported(
-            ty,
-            "`Self` cannot be used as a parameter or field type".to_owned(),
-            "the schema needs the type spelled out, and objects cross by handle, not by value",
-            "name the record or enum type",
-        )),
-        (
-            "HashSet" | "BTreeSet" | "VecDeque" | "LinkedList" | "BinaryHeap",
-            _,
-        ) => Err(unsupported(
+        ("Self", 0) => match cx.self_name {
+            Some(name) => Ok(KType::Named(name.to_owned())),
+            None => Err(unsupported(
+                ty,
+                "`Self` cannot be used as a parameter or return type".to_owned(),
+                "the schema needs the type spelled out, and objects cross by handle, not by value",
+                "name the record or enum type",
+            )),
+        },
+        ("HashSet" | "BTreeSet" | "VecDeque" | "LinkedList" | "BinaryHeap", _) => Err(unsupported(
             ty,
             format!("`{}` cannot cross the boundary", ty_string(ty)),
             "only sequences (`Vec<T>`) and maps have a wire representation",
@@ -696,11 +717,7 @@ fn result_misplaced(ty: &Type, pos: Pos) -> TyErr {
         ty,
         Diag::new(
             code::E0005,
-            format!(
-                "`{}` cannot be used as {}",
-                ty_string(ty),
-                pos.describe()
-            ),
+            format!("`{}` cannot be used as {}", ty_string(ty), pos.describe()),
             "`Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return",
             "return the `Result` from the method and keep only plain values in fields, parameters and nested types",
         ),
@@ -710,9 +727,10 @@ fn result_misplaced(ty: &Type, pos: Pos) -> TyErr {
 fn map_impl_trait(
     impl_trait: &syn::TypeImplTrait,
     ty: &Type,
-    pos: Pos,
+    cx: Cx<'_>,
     allow: Allow,
 ) -> Result<KType, TyErr> {
+    let pos = cx.pos;
     let mut item: Option<&Type> = None;
     let mut is_stream = false;
     for bound in &impl_trait.bounds {
@@ -778,7 +796,7 @@ fn map_impl_trait(
             ),
         ));
     };
-    Ok(KType::Stream(Box::new(map_type(item, pos, Allow::NONE)?)))
+    Ok(KType::Stream(Box::new(map_type(item, cx, Allow::NONE)?)))
 }
 
 fn impl_trait_error(ty: &Type) -> TyErr {
@@ -893,13 +911,41 @@ mod tests {
 
     #[test]
     fn invalid_map_keys_are_e0006() {
-        for key in ["f64", "f32", "Bytes", "Vec<u8>", "Todo", "Option<String>", "Duration"] {
+        for key in [
+            "f64",
+            "f32",
+            "Bytes",
+            "Vec<u8>",
+            "Todo",
+            "Option<String>",
+            "Duration",
+        ] {
             assert_eq!(
                 code_of(field(&format!("HashMap<{key}, u8>"))),
                 code::E0006,
                 "{key}"
             );
         }
+    }
+
+    #[test]
+    fn self_is_the_enclosing_type_in_fields_only() {
+        let in_field = |src: &str| map_field(&ty(src), "f", "Node");
+        assert_eq!(in_field("Self").unwrap(), named("Node"));
+        assert_eq!(
+            in_field("Vec<Self>").unwrap(),
+            KType::Vec(boxed(named("Node")))
+        );
+        assert_eq!(
+            in_field("Option<Box<Self>>").unwrap(),
+            KType::Option(boxed(named("Node")))
+        );
+        // Elsewhere `Self` is an object, which cannot cross by value.
+        assert_eq!(
+            code_of(map_type(&ty("Self"), Pos::Param, Allow::NONE)),
+            code::E0001
+        );
+        assert_eq!(code_of(field("Vec<Self>")), code::E0001);
     }
 
     #[test]
@@ -925,7 +971,10 @@ mod tests {
         assert_eq!(code_of(ret("Result<Result<i32, A>, B>")), code::E0005);
         assert_eq!(code_of(field("impl Stream<Item = i32>")), code::E0005);
         assert_eq!(code_of(ret("Vec<impl Stream<Item = i32>>")), code::E0005);
-        assert_eq!(code_of(ret("Result<i32, impl Stream<Item = i32>>")), code::E0005);
+        assert_eq!(
+            code_of(ret("Result<i32, impl Stream<Item = i32>>")),
+            code::E0005
+        );
     }
 
     #[test]
@@ -1017,32 +1066,40 @@ mod tests {
 
     #[test]
     fn trait_object_in_a_field_is_e0012_on_the_whole_type() {
-        let err = map_field(&ty("Vec<Box<dyn Any>>"), "items").unwrap_err();
+        let err = map_field(&ty("Vec<Box<dyn Any>>"), "items", "Cart").unwrap_err();
         assert_eq!(err.diag.code, code::E0012);
-        assert_eq!(err.diag.what, "`Vec<Box<dyn Any>>` cannot cross the boundary");
+        assert_eq!(
+            err.diag.what,
+            "`Vec<Box<dyn Any>>` cannot cross the boundary"
+        );
         assert!(err.diag.help.contains("`items`"));
         // Non-trait-object failures keep their own code.
-        assert_eq!(map_field(&ty("&str"), "name").unwrap_err().diag.code, code::E0001);
+        assert_eq!(
+            map_field(&ty("&str"), "name", "Cart")
+                .unwrap_err()
+                .diag
+                .code,
+            code::E0001
+        );
     }
 
     #[test]
     fn lifetimes_are_e0003() {
-        for src in ["&'a str", "Foo<'a>", "Vec<&'a str>", "std::borrow::Cow<'a, str>"] {
+        for src in [
+            "&'a str",
+            "Foo<'a>",
+            "Vec<&'a str>",
+            "std::borrow::Cow<'a, str>",
+        ] {
             assert_eq!(code_of(field(src)), code::E0003, "{src}");
         }
-        assert_eq!(
-            code_of(ret("impl Stream<Item = u8> + 'a")),
-            code::E0003
-        );
+        assert_eq!(code_of(ret("impl Stream<Item = u8> + 'a")), code::E0003);
     }
 
     #[test]
     fn stream_bounds_accept_send_and_static() {
         assert!(ret("impl Stream<Item = u8> + Send + Unpin + 'static").is_ok());
-        assert_eq!(
-            code_of(ret("impl Stream<Item = u8> + Clone")),
-            code::E0004
-        );
+        assert_eq!(code_of(ret("impl Stream<Item = u8> + Clone")), code::E0004);
         assert_eq!(code_of(ret("impl Stream")), code::E0001);
     }
 
@@ -1062,7 +1119,10 @@ mod tests {
     fn meta_tokens_nest_with_references() {
         let meta = quote!(::keel::meta);
         let kt = KType::Result(
-            boxed(KType::Map(boxed(KType::Uuid), boxed(KType::Vec(boxed(named("Todo")))))),
+            boxed(KType::Map(
+                boxed(KType::Uuid),
+                boxed(KType::Vec(boxed(named("Todo")))),
+            )),
             boxed(named("TodoError")),
         );
         let rendered = kt.meta(&meta).to_string().replace(' ', "");
@@ -1076,7 +1136,10 @@ mod tests {
     fn ty_string_tidies_token_spacing() {
         assert_eq!(ty_string(&ty("Vec<Box<dyn Any>>")), "Vec<Box<dyn Any>>");
         assert_eq!(ty_string(&ty("&str")), "&str");
-        assert_eq!(ty_string(&ty("HashMap<String, i32>")), "HashMap<String, i32>");
+        assert_eq!(
+            ty_string(&ty("HashMap<String, i32>")),
+            "HashMap<String, i32>"
+        );
         assert_eq!(ty_string(&ty("std::string::String")), "std::string::String");
         assert_eq!(ty_string(&ty("(i32, u8)")), "(i32, u8)");
     }

@@ -182,7 +182,11 @@ impl StoreCell {
     }
 
     /// Binds a computed field.
-    pub fn attach_computed<T: SignalValue>(self: &Arc<Self>, _computed: &Computed<T>, signal_id: u32) {
+    pub fn attach_computed<T: SignalValue>(
+        self: &Arc<Self>,
+        _computed: &Computed<T>,
+        signal_id: u32,
+    ) {
         self.entries.lock().unwrap().push(Entry {
             info: Attached {
                 signal_id,

@@ -95,7 +95,11 @@ pub(crate) fn parse_query_args(attr: TokenStream, flavor: Flavor) -> syn::Result
         flavor.attribute(),
         "`key = \"..\"`, `stale = \"30s\"`, `persist`, `retry = N`, `idempotent` and `crate = \"path\"`",
         |meta| {
-            let name = meta.path.get_ident().map(ToString::to_string).unwrap_or_default();
+            let name = meta
+                .path
+                .get_ident()
+                .map(ToString::to_string)
+                .unwrap_or_default();
             match name.as_str() {
                 "crate" => {
                     args.root = Some(root_arg(meta)?);
@@ -276,7 +280,9 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         }
     };
     let (ok_ty, err_ty) = match (&ret, &item.sig.output) {
-        (KType::Result(ok, _), syn::ReturnType::Type(_, ty)) if !matches!(**ok, KType::Stream(_)) => {
+        (KType::Result(ok, _), syn::ReturnType::Type(_, ty))
+            if !matches!(**ok, KType::Stream(_)) =>
+        {
             result_arguments(ty)
         }
         _ => {
@@ -348,16 +354,8 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
     };
     let span = fn_ident.span();
     let run_body = quote_spanned! {span=>
-        #[diagnostic::on_unimplemented(
-            message = "error[keel::E0022]: the future of this query or mutation is not `Send`",
-            label = "this value must be `Send` because the runtime polls it on its executor thread",
-            note = "an `async` query or mutation runs on the runtime's executor, which may move it between threads",
-            note = "help: do not hold `Rc`, `RefCell` borrows, `MutexGuard`s or other non-`Send` values across an `.await`; drop them first",
-            note = "docs: https://keel.dev/errors/E0022"
-        )]
-        trait __KeelSend {}
-        impl<T: ::core::marker::Send> __KeelSend for T {}
-        fn __keel_assert_send<T: __KeelSend>(_: &T) {}
+        // E0022: reported by `rustc` at the function, see `object.rs`.
+        fn __keel_assert_send<T: ::core::marker::Send>(_: &T) {}
         let ( #(#param_names,)* ) = __params;
         let __fut = async move { #fn_ident( #ctx_arg #(, #param_names)* ).await };
         __keel_assert_send(&__fut);
@@ -508,13 +506,26 @@ mod tests {
         assert!(parse_duration_ms("30").unwrap_err().contains("no unit"));
         assert!(parse_duration_ms("s").unwrap_err().contains("whole number"));
         assert!(parse_duration_ms("5y").unwrap_err().contains("not a unit"));
-        assert!(parse_duration_ms("99999999999999999999s").unwrap_err().contains("too large"));
-        assert!(parse_duration_ms("18446744073709551615d").unwrap_err().contains("overflows"));
+        assert!(
+            parse_duration_ms("99999999999999999999s")
+                .unwrap_err()
+                .contains("too large")
+        );
+        assert!(
+            parse_duration_ms("18446744073709551615d")
+                .unwrap_err()
+                .contains("overflows")
+        );
     }
 
     #[test]
     fn a_query_gets_constants_a_def_impl_and_meta() {
-        let out = run(Flavor::Query, "key = \"todos:{page}\", stale = \"30s\", persist, retry = 5", TODOS).unwrap();
+        let out = run(
+            Flavor::Query,
+            "key = \"todos:{page}\", stale = \"30s\", persist, retry = 5",
+            TODOS,
+        )
+        .unwrap();
         for needle in [
             "pub struct TodosQuery;",
             "pub const QUERY_ID: u32 = ::keel::meta::ids::query_id(\"todos\")",
@@ -574,11 +585,27 @@ mod tests {
     #[test]
     fn e0040_query_without_key_and_mutation_with_stale() {
         let message = run(Flavor::Query, "stale = \"1s\"", TODOS).unwrap_err();
-        assert!(message.starts_with("error[keel::E0040]: query `todos` has no `key`"), "{message}");
+        assert!(
+            message.starts_with("error[keel::E0040]: query `todos` has no `key`"),
+            "{message}"
+        );
         assert!(message.contains("help: add `key = \"todos\"`"), "{message}");
-        let message = run(Flavor::Mutation, "stale = \"1s\"", "async fn m(ctx: &Ctx) -> Result<u8, E> { Ok(1) }").unwrap_err();
-        assert!(message.starts_with("error[keel::E0040]: mutation `m` has `stale`"), "{message}");
-        let message = run(Flavor::Mutation, "persist", "async fn m(ctx: &Ctx) -> Result<u8, E> { Ok(1) }").unwrap_err();
+        let message = run(
+            Flavor::Mutation,
+            "stale = \"1s\"",
+            "async fn m(ctx: &Ctx) -> Result<u8, E> { Ok(1) }",
+        )
+        .unwrap_err();
+        assert!(
+            message.starts_with("error[keel::E0040]: mutation `m` has `stale`"),
+            "{message}"
+        );
+        let message = run(
+            Flavor::Mutation,
+            "persist",
+            "async fn m(ctx: &Ctx) -> Result<u8, E> { Ok(1) }",
+        )
+        .unwrap_err();
         assert!(message.contains("mutation `m` has `persist`"), "{message}");
     }
 
@@ -587,42 +614,80 @@ mod tests {
         let message = run(Flavor::Query, "key = \"k\", stale = \"soon\"", TODOS).unwrap_err();
         assert!(message.contains("invalid `stale` duration"), "{message}");
         let message = run(Flavor::Query, "key = \"k\", retry = 99999999999", TODOS).unwrap_err();
-        assert!(message.contains("`retry` must be a whole number"), "{message}");
+        assert!(
+            message.contains("`retry` must be a whole number"),
+            "{message}"
+        );
         let message = run(Flavor::Query, "key = \"todos:{nope}\"", TODOS).unwrap_err();
-        assert!(message.contains("`{nope}` in `key` is not a parameter"), "{message}");
+        assert!(
+            message.contains("`{nope}` in `key` is not a parameter"),
+            "{message}"
+        );
         assert!(message.contains("the parameters are: page, q"), "{message}");
         let message = run(Flavor::Query, "key = \"todos:{page\"", TODOS).unwrap_err();
         assert!(message.contains("unterminated `{`"), "{message}");
         let message = run(Flavor::Query, "key = \"todos}\"", TODOS).unwrap_err();
         assert!(message.contains("unmatched `}`"), "{message}");
         let message = run(Flavor::Query, "key = \"k\", bogus", TODOS).unwrap_err();
-        assert!(message.contains("unknown argument `bogus` for `#[keel::query]`"), "{message}");
-        let message = run(Flavor::Query, "key = \"{x}\"", "async fn q(ctx: &Ctx) -> Result<u8, E> { Ok(1) }").unwrap_err();
-        assert!(message.contains("the function has no parameters after `ctx`"), "{message}");
+        assert!(
+            message.contains("unknown argument `bogus` for `#[keel::query]`"),
+            "{message}"
+        );
+        let message = run(
+            Flavor::Query,
+            "key = \"{x}\"",
+            "async fn q(ctx: &Ctx) -> Result<u8, E> { Ok(1) }",
+        )
+        .unwrap_err();
+        assert!(
+            message.contains("the function has no parameters after `ctx`"),
+            "{message}"
+        );
     }
 
     #[test]
     fn e0041_signature_rules() {
         let e = |src: &str| run(Flavor::Query, "key = \"k\"", src).unwrap_err();
-        assert!(e("fn q(ctx: &Ctx) -> Result<u8, E> { Ok(1) }").contains("error[keel::E0041]: `q` must be `async`"));
-        assert!(e("async fn q(page: u32) -> Result<u8, E> { Ok(1) }").contains("must take `ctx: &Ctx`"));
+        assert!(
+            e("fn q(ctx: &Ctx) -> Result<u8, E> { Ok(1) }")
+                .contains("error[keel::E0041]: `q` must be `async`")
+        );
+        assert!(
+            e("async fn q(page: u32) -> Result<u8, E> { Ok(1) }").contains("must take `ctx: &Ctx`")
+        );
         assert!(e("async fn q(ctx: &Ctx) -> u8 { 1 }").contains("must return `Result<T, E>`"));
         assert!(e("async fn q(ctx: &Ctx) {}").contains("must return `Result<T, E>`"));
-        assert!(e("async fn q(ctx: &Ctx) -> Result<impl Stream<Item = u8>, E> { todo }").contains("E0041"));
-        assert!(e("async fn q(&self, ctx: &Ctx) -> Result<u8, E> { Ok(1) }").contains("takes `self`"));
+        assert!(
+            e("async fn q(ctx: &Ctx) -> Result<impl Stream<Item = u8>, E> { todo }")
+                .contains("E0041")
+        );
+        assert!(
+            e("async fn q(&self, ctx: &Ctx) -> Result<u8, E> { Ok(1) }").contains("takes `self`")
+        );
     }
 
     #[test]
     fn parameter_and_generic_errors_keep_their_codes() {
         let e = |src: &str| run(Flavor::Query, "key = \"k\"", src).unwrap_err();
-        assert!(e("async fn q(ctx: &Ctx, s: &str) -> Result<u8, E> { Ok(1) }").contains("error[keel::E0001]"));
-        assert!(e("async fn q<T>(ctx: &Ctx, s: T) -> Result<u8, E> { Ok(1) }").contains("error[keel::E0002]"));
+        assert!(
+            e("async fn q(ctx: &Ctx, s: &str) -> Result<u8, E> { Ok(1) }")
+                .contains("error[keel::E0001]")
+        );
+        assert!(
+            e("async fn q<T>(ctx: &Ctx, s: T) -> Result<u8, E> { Ok(1) }")
+                .contains("error[keel::E0002]")
+        );
     }
 
     #[test]
     fn crate_override_and_send_assertion() {
-        let out = run(Flavor::Query, "key = \"k\", crate = \"::k\"", "async fn q(ctx: &Ctx) -> Result<u8, E> { Ok(1) }").unwrap();
+        let out = run(
+            Flavor::Query,
+            "key = \"k\", crate = \"::k\"",
+            "async fn q(ctx: &Ctx) -> Result<u8, E> { Ok(1) }",
+        )
+        .unwrap();
         assert!(has(&out, "impl ::k::query::QueryDef for QQuery"), "{out}");
-        assert!(has(&out, "E0022"), "{out}");
+        assert!(has(&out, "__keel_assert_send(&__fut)"), "{out}");
     }
 }

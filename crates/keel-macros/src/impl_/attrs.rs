@@ -4,7 +4,7 @@
 //! never sees an unknown `keel` attribute. Anything unrecognised or misplaced is E0008;
 //! nothing is silently ignored.
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use syn::meta::ParseNestedMeta;
 use syn::visit_mut::{self, VisitMut};
 use syn::{Attribute, Expr, ExprLit, Lit, LitStr, Meta};
@@ -34,6 +34,9 @@ pub(crate) struct Site {
     pub(crate) default: bool,
     pub(crate) key: bool,
     pub(crate) no_coalesce: bool,
+    /// Whether the node is part of the schema: `#[cfg]` on it would make the schema differ
+    /// between builds, so it is rejected (R1, R7).
+    pub(crate) schema: bool,
 }
 
 impl Site {
@@ -44,6 +47,7 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        schema: false,
     };
     /// A field of a record or of an enum variant.
     pub(crate) const FIELD: Site = Site {
@@ -52,6 +56,7 @@ impl Site {
         default: true,
         key: false,
         no_coalesce: false,
+        schema: true,
     };
     /// A signal field of a store.
     pub(crate) const SIGNAL: Site = Site {
@@ -60,6 +65,7 @@ impl Site {
         default: false,
         key: true,
         no_coalesce: true,
+        schema: true,
     };
     /// A non-signal field of a store.
     pub(crate) const STATE_FIELD: Site = Site {
@@ -68,6 +74,7 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        schema: true,
     };
     /// A node that takes no `#[keel(..)]` options at all (variants, methods, parameters).
     pub(crate) const NOTHING: Site = Site {
@@ -76,6 +83,17 @@ impl Site {
         default: false,
         key: false,
         no_coalesce: false,
+        schema: true,
+    };
+    /// A private method of an API impl block: not part of the schema, so anything goes except
+    /// `#[keel(..)]` options.
+    pub(crate) const PRIVATE: Site = Site {
+        name: "a private method",
+        root: false,
+        default: false,
+        key: false,
+        no_coalesce: false,
+        schema: false,
     };
 }
 
@@ -88,6 +106,9 @@ pub(crate) fn is_keel_attr(attr: &Attribute) -> bool {
 pub(crate) fn take(attrs: &mut Vec<Attribute>, site: Site, errors: &mut Errors) -> KeelAttr {
     let mut out = KeelAttr::default();
     let mut kept = Vec::with_capacity(attrs.len());
+    if site.schema {
+        reject_cfg(attrs, site, errors);
+    }
     for attr in attrs.drain(..) {
         if !is_keel_attr(&attr) {
             kept.push(attr);
@@ -99,6 +120,28 @@ pub(crate) fn take(attrs: &mut Vec<Attribute>, site: Site, errors: &mut Errors) 
     }
     *attrs = kept;
     out
+}
+
+/// E0008 for `#[cfg(..)]` and `#[cfg_attr(..)]` on a node that is part of the schema.
+///
+/// Attribute macros see the tokens before nested `cfg`s are resolved, and the generated
+/// encoders would not know which fields exist. More fundamentally, a schema that depends on
+/// the build configuration breaks compatibility checking between the core and the platforms.
+fn reject_cfg(attrs: &[Attribute], site: Site, errors: &mut Errors) {
+    for attr in attrs {
+        let path = attr.path();
+        if path.is_ident("cfg") || path.is_ident("cfg_attr") {
+            errors.push(
+                Diag::new(
+                    code::E0008,
+                    format!("`#[{}]` on {} is not supported", path.get_ident().map_or_else(String::new, ToString::to_string), site.name),
+                    "the schema must be identical in every build: it is hashed, and the platforms check the hash when they load the core",
+                    "remove the attribute; gate the whole type or function with `#[cfg]` instead, or split it into two types",
+                )
+                .on(attr),
+            );
+        }
+    }
 }
 
 fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()> {
@@ -170,10 +213,18 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
 
 fn option_hint(option: &str) -> &'static str {
     match option {
-        "crate" => "`crate = \"path\"` is an item-level option: it names the crate that generated code refers to",
-        "default" => "`default` marks a field of a `#[keel::api]` record or enum variant as having a default in generated constructors",
-        "key" => "`key = \"field\"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches",
-        "no_coalesce" => "`no_coalesce` makes a store signal deliver every commit instead of coalescing them",
+        "crate" => {
+            "`crate = \"path\"` is an item-level option: it names the crate that generated code refers to"
+        }
+        "default" => {
+            "`default` marks a field of a `#[keel::api]` record or enum variant as having a default in generated constructors"
+        }
+        "key" => {
+            "`key = \"field\"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches"
+        }
+        "no_coalesce" => {
+            "`no_coalesce` makes a store signal deliver every commit instead of coalescing them"
+        }
         _ => "this option is not valid here",
     }
 }
@@ -309,11 +360,6 @@ impl VisitMut for StripHelpers<'_> {
     }
 }
 
-/// A span for tokens that have none of their own (generated names).
-pub(crate) fn call_site() -> Span {
-    Span::call_site()
-}
-
 #[cfg(test)]
 mod tests {
     use quote::{ToTokens, quote};
@@ -322,7 +368,8 @@ mod tests {
     use super::*;
 
     fn field_attrs(tokens: TokenStream) -> Vec<Attribute> {
-        let field: syn::Field = syn::parse::Parser::parse2(syn::Field::parse_named, tokens).unwrap();
+        let field: syn::Field =
+            syn::parse::Parser::parse2(syn::Field::parse_named, tokens).unwrap();
         field.attrs
     }
 
@@ -402,6 +449,29 @@ mod tests {
     }
 
     #[test]
+    fn cfg_on_schema_members_is_e0008() {
+        let message = first_error(vec![parse_quote!(#[cfg(test)])], Site::FIELD);
+        assert!(
+            message.starts_with(
+                "error[keel::E0008]: `#[cfg]` on a record or variant field is not supported"
+            ),
+            "{message}"
+        );
+        let message = first_error(
+            vec![parse_quote!(#[cfg_attr(test, allow(dead_code))])],
+            Site::NOTHING,
+        );
+        assert!(message.contains("`#[cfg_attr]`"), "{message}");
+        // Private methods and items are not part of the schema.
+        let mut attrs: Vec<Attribute> = vec![parse_quote!(#[cfg(test)])];
+        let mut errors = Errors::new();
+        take(&mut attrs, Site::PRIVATE, &mut errors);
+        take(&mut attrs, Site::ITEM, &mut errors);
+        assert!(errors.is_empty());
+        assert_eq!(attrs.len(), 1, "cfg is kept where it is allowed");
+    }
+
+    #[test]
     fn bare_keel_attribute_is_e0008() {
         let message = first_error(vec![parse_quote!(#[keel])], Site::FIELD);
         assert!(message.contains("`#[keel]` needs arguments"));
@@ -429,18 +499,23 @@ mod tests {
     #[test]
     fn parse_args_reports_unknown_arguments() {
         let mut seen = Vec::new();
-        let result = parse_args(quote!(store, crate = "::k", nope), "api", "store, crate", |meta| {
-            if meta.path.is_ident("store") {
-                seen.push("store");
-                return Ok(true);
-            }
-            if meta.path.is_ident("crate") {
-                root_arg(meta)?;
-                seen.push("crate");
-                return Ok(true);
-            }
-            Ok(false)
-        });
+        let result = parse_args(
+            quote!(store, crate = "::k", nope),
+            "api",
+            "store, crate",
+            |meta| {
+                if meta.path.is_ident("store") {
+                    seen.push("store");
+                    return Ok(true);
+                }
+                if meta.path.is_ident("crate") {
+                    root_arg(meta)?;
+                    seen.push("crate");
+                    return Ok(true);
+                }
+                Ok(false)
+            },
+        );
         assert_eq!(seen, ["store", "crate"]);
         let message = result.unwrap_err().to_string();
         assert!(message.contains("unknown argument `nope` for `#[keel::api]`"));

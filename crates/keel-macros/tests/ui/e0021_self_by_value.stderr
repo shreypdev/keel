@@ -1,0 +1,8 @@
+error: error[keel::E0021]: `self` by value on method `finish`
+         = note: an object is shared across calls; a method cannot consume it
+         = help: take `&self` and clone whatever you need to keep
+         = docs: https://keel.dev/errors/E0021
+  --> tests/ui/e0021_self_by_value.rs:15:19
+   |
+15 |     pub fn finish(self) -> u32 {
+   |                   ^^^^

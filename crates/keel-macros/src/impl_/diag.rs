@@ -16,7 +16,7 @@
 
 use core::fmt::Display;
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::Span;
 use quote::ToTokens;
 
 /// Where the per-code documentation lives.
@@ -46,7 +46,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0013 | store cannot be restored automatically (addition) |
 /// | E0020 | `&mut self` receiver |
 /// | E0021 | `self` by value |
-/// | E0022 | non-`Send` future in an async method (raised by `rustc` through a generated assertion) |
+/// | E0022 | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry a Keel code) |
 /// | E0030 | port method with a non-wire parameter |
 /// | E0031 | event port method that is not a plain `fn(..)` returning `()` |
 /// | E0032 | invalid port trait shape (addition) |
@@ -143,17 +143,6 @@ impl Errors {
         }
     }
 
-    /// Adds the error of a result and returns the value if there was one.
-    pub(crate) fn ok<T>(&mut self, result: syn::Result<T>) -> Option<T> {
-        match result {
-            Ok(value) => Some(value),
-            Err(error) => {
-                self.push(error);
-                None
-            }
-        }
-    }
-
     /// Whether any error was recorded.
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_none()
@@ -168,14 +157,10 @@ impl Errors {
     }
 
     /// Takes the combined error, if any.
+    #[cfg(test)]
     pub(crate) fn into_error(self) -> Option<syn::Error> {
         self.0
     }
-}
-
-/// Turns an error into `compile_error!` tokens.
-pub(crate) fn compile_error(error: &syn::Error) -> TokenStream {
-    error.to_compile_error()
 }
 
 #[cfg(test)]
@@ -184,7 +169,12 @@ mod tests {
 
     #[test]
     fn message_has_the_documented_shape() {
-        let diag = Diag::new(code::E0001, "`&str` cannot cross the boundary", "why", "fix");
+        let diag = Diag::new(
+            code::E0001,
+            "`&str` cannot cross the boundary",
+            "why",
+            "fix",
+        );
         let message = diag.message();
         let lines: Vec<&str> = message.lines().collect();
         assert_eq!(
@@ -207,16 +197,5 @@ mod tests {
         assert!(!errors.is_empty());
         let combined = errors.finish().unwrap_err();
         assert_eq!(combined.into_iter().count(), 2);
-    }
-
-    #[test]
-    fn ok_collects_errors_and_passes_values() {
-        let mut errors = Errors::new();
-        assert_eq!(errors.ok::<u8>(Ok(3)), Some(3));
-        assert_eq!(
-            errors.ok::<u8>(Err(Diag::new(code::E0001, "a", "b", "c").at(Span::call_site()))),
-            None
-        );
-        assert!(errors.into_error().is_some());
     }
 }

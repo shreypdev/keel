@@ -142,10 +142,9 @@ fn is_ctx_path(ty: &Type) -> bool {
 /// `&mut Ctx`, which is diagnosed.
 fn ctx_kind(ty: &Type) -> Option<(CtxParam, bool)> {
     match ty {
-        Type::Reference(reference) if is_ctx_path(&reference.elem) => Some((
-            CtxParam { by_ref: true },
-            reference.mutability.is_none(),
-        )),
+        Type::Reference(reference) if is_ctx_path(&reference.elem) => {
+            Some((CtxParam { by_ref: true }, reference.mutability.is_none()))
+        }
         _ if is_ctx_path(ty) => Some((CtxParam { by_ref: false }, true)),
         _ => None,
     }
@@ -321,7 +320,7 @@ enum CtorReturn {
     /// `-> Self` or `-> Type`.
     Plain,
     /// `-> Result<Self, E>` or `-> Result<Type, E>`, with the error type.
-    Fallible(Type),
+    Fallible(Box<Type>),
 }
 
 fn is_self_type(ty: &Type, type_name: &str) -> bool {
@@ -360,7 +359,7 @@ fn ctor_return(output: &ReturnType, type_name: &str) -> Option<CtorReturn> {
     let ok = types.next()?;
     let err = types.next()?;
     if is_self_type(ok, type_name) {
-        Some(CtorReturn::Fallible(err.clone()))
+        Some(CtorReturn::Fallible(Box::new(err.clone())))
     } else {
         None
     }
@@ -381,9 +380,9 @@ fn ensure_static_streams(ty: &mut Type) {
                 matches!(bound, syn::TypeParamBound::Trait(t)
                     if t.path.segments.last().is_some_and(|seg| seg.ident == "Stream"))
             });
-            let has_static = impl_trait.bounds.iter().any(|bound| {
-                matches!(bound, syn::TypeParamBound::Lifetime(l) if l.ident == "static")
-            });
+            let has_static = impl_trait.bounds.iter().any(
+                |bound| matches!(bound, syn::TypeParamBound::Lifetime(l) if l.ident == "static"),
+            );
             if is_stream && !has_static {
                 impl_trait.bounds.push(syn::parse_quote!('static));
             }
@@ -600,7 +599,12 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
 }
 
 /// The outcome of a constructor: insert the new object and reply with its handle.
-fn constructor_result(root: &Root, m: &FnModel, target: &Target<'_>, call: &TokenStream) -> TokenStream {
+fn constructor_result(
+    root: &Root,
+    m: &FnModel,
+    target: &Target<'_>,
+    call: &TokenStream,
+) -> TokenStream {
     let wire = root.wire();
     let runtime = root.runtime();
     let insert = if target.store {
@@ -608,7 +612,7 @@ fn constructor_result(root: &Root, m: &FnModel, target: &Target<'_>, call: &Toke
             __value.__keel_attach_all();
             let __arc = ::std::sync::Arc::new(__value);
             let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
-            __arc.__keel_set_handle(__handle.0);
+            (*__arc).__keel_set_handle(__handle.0);
         }
     } else {
         quote! {
@@ -722,17 +726,13 @@ fn helpers(root: &Root, needs: &Needs) -> TokenStream {
     let wire = root.wire();
 
     let send_assert = if needs.send_assert {
+        // E0022: the runtime polls futures and streams on its executor thread, so they must be
+        // `Send`. `rustc` cannot carry a Keel code, but this assertion, called with the
+        // method's span, makes its own "future cannot be sent between threads safely"
+        // error (with the offending value and the `.await` it lives across) point at the
+        // method instead of at generated code.
         quote! {
-            #[diagnostic::on_unimplemented(
-                message = "error[keel::E0022]: the future or stream of a `#[keel::api]` method is not `Send`",
-                label = "this value must be `Send` because the runtime polls it on its executor thread",
-                note = "an `async` method of an object or free function runs on the runtime's executor, which may move it between threads",
-                note = "help: do not hold `Rc`, `RefCell` borrows, `MutexGuard`s or other non-`Send` values across an `.await`; drop them first",
-                note = "docs: https://keel.dev/errors/E0022"
-            )]
-            trait __KeelSend {}
-            impl<T: ::core::marker::Send> __KeelSend for T {}
-            fn __keel_assert_send<T: __KeelSend>(_: &T) {}
+            fn __keel_assert_send<T: ::core::marker::Send>(_: &T) {}
         }
     } else {
         TokenStream::new()
@@ -892,9 +892,10 @@ impl VisitMut for PatchStoreLiterals<'_> {
             && node.path.segments.len() == 1
             && node.path.segments[0].arguments.is_none()
             && (node.path.segments[0].ident == "Self" || node.path.segments[0].ident == self.name);
-        let has_cell = node.fields.iter().any(|f| {
-            matches!(&f.member, syn::Member::Named(id) if id == "__keel_cell")
-        });
+        let has_cell = node
+            .fields
+            .iter()
+            .any(|f| matches!(&f.member, syn::Member::Named(id) if id == "__keel_cell"));
         if is_store && node.rest.is_none() && !has_cell {
             node.fields.push(syn::parse_quote!(
                 __keel_cell: ::core::default::Default::default()
@@ -968,8 +969,17 @@ pub(crate) fn expand_impl(
         let ImplItem::Fn(func) = impl_item else {
             continue;
         };
-        take(&mut func.attrs, Site::NOTHING, &mut errors);
-        if !matches!(func.vis, Visibility::Public(_)) {
+        let is_public = matches!(func.vis, Visibility::Public(_));
+        take(
+            &mut func.attrs,
+            if is_public {
+                Site::NOTHING
+            } else {
+                Site::PRIVATE
+            },
+            &mut errors,
+        );
+        if !is_public {
             continue; // private helpers are not part of the API
         }
         let fn_docs = docs(&func.attrs);
@@ -1009,15 +1019,13 @@ pub(crate) fn expand_impl(
             let named = KType::Named(type_name.clone());
             let ret = match returns {
                 CtorReturn::Plain => named,
-                CtorReturn::Fallible(err_ty) => {
-                    match map_type(&err_ty, Pos::Return, Allow::NONE) {
-                        Ok(err) => KType::Result(Box::new(named), Box::new(err)),
-                        Err(err) => {
-                            errors.push(err.into_error());
-                            named
-                        }
+                CtorReturn::Fallible(err_ty) => match map_type(&err_ty, Pos::Return, Allow::NONE) {
+                    Ok(err) => KType::Result(Box::new(named), Box::new(err)),
+                    Err(err) => {
+                        errors.push(err.into_error());
+                        named
                     }
-                }
+                },
             };
             constructors.push(FnModel {
                 ident: func.sig.ident.clone(),
@@ -1136,15 +1144,29 @@ pub(crate) fn expand_impl(
     let derived = derived();
     let registration = submit(&root, "Object", &meta_static);
 
+    // The members `#[keel::store]` defines inherently on the struct, with harmless fallbacks
+    // for every type that is not one. The fallbacks live in a trait of their own per type
+    // (implemented for that type only, so two objects in one module do not clash). Inherent
+    // items win over trait items in method and path resolution, so a real store resolves to
+    // its own members, anything else to the fallback, and a
+    // mismatch between the struct and the impl block's `store` marker yields the single
+    // branded E0011 below instead of a cascade of "no method named .." errors.
+    let probe_trait = format_ident!("__KeelStoreProbe_{}", type_name);
+
     Ok(quote! {
         #item
 
+        #[doc(hidden)]
+        #[allow(non_camel_case_types, dead_code)]
+        trait #probe_trait {
+            const __KEEL_IS_STORE: bool = false;
+            const __KEEL_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
+            fn __keel_attach_all(&self) {}
+            fn __keel_set_handle(&self, _handle: u64) {}
+        }
+        impl #probe_trait for #self_ty {}
+
         const _: () = {
-            #[allow(dead_code)]
-            trait __KeelStoreProbe {
-                const __KEEL_IS_STORE: bool = false;
-            }
-            impl<T: ?::core::marker::Sized> __KeelStoreProbe for T {}
             #probe_assert
         };
 
@@ -1155,7 +1177,7 @@ pub(crate) fn expand_impl(
         }
 
         #[doc(hidden)]
-        #[allow(non_snake_case, non_upper_case_globals, unused_variables, unused_mut, clippy::all)]
+        #[allow(non_snake_case, non_upper_case_globals, unused_variables, unused_mut, deprecated, clippy::all)]
         fn #dispatch_fn(
             __rt: &dyn ::core::any::Any,
             __call: #meta::DispatchCall<'_>,
@@ -1230,7 +1252,10 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     let dispatch_fn = format_ident!("__keel_dispatch_fn_{}", name);
     let meta_static = format_ident!("__KEEL_META_fn_{}", name);
     let function_id = quote!(#meta::ids::function_id(#name));
-    let params = model.params.iter().map(|p| param_meta(&meta, &p.name, &p.kty));
+    let params = model
+        .params
+        .iter()
+        .map(|p| param_meta(&meta, &p.name, &p.kty));
     let returns = model.ret.meta(&meta);
     let is_async = model.is_async;
     let takes_ctx = model.ctx.is_some();
@@ -1241,7 +1266,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
         #item
 
         #[doc(hidden)]
-        #[allow(non_snake_case, unused_variables, unused_mut, clippy::all)]
+        #[allow(non_snake_case, unused_variables, unused_mut, deprecated, clippy::all)]
         fn #dispatch_fn(
             __rt: &dyn ::core::any::Any,
             __call: #meta::DispatchCall<'_>,
@@ -1346,7 +1371,13 @@ mod tests {
             impl_error("impl C { pub fn new(ctx: &mut Ctx) -> Self { C } }").contains("&mut Ctx")
         );
         assert!(impl_result("impl C { pub fn new(ctx: &Ctx) -> Self { C } }", false).is_ok());
-        assert!(impl_result("impl C { pub fn new(ctx: Ctx, a: u8) -> Self { C } }", false).is_ok());
+        assert!(
+            impl_result(
+                "impl C { pub fn new(ctx: Ctx, a: u8) -> Self { C } }",
+                false
+            )
+            .is_ok()
+        );
         let out = impl_result("impl C { pub fn new(ctx: Ctx) -> Self { C } }", false).unwrap();
         assert!(has(&out, "takes_ctx: true"), "{out}");
         assert!(has(&out, "__rt.ctx()"), "{out}");
@@ -1390,9 +1421,7 @@ mod tests {
         assert!(impl_error("impl C { pub fn f(&self, s: &str) {} }").contains("E0001"));
         assert!(impl_error("impl C { pub fn f(&self, f: Box<dyn Fn()>) {} }").contains("E0004"));
         assert!(impl_error("impl C { pub fn f(&self, r: Result<u8, E>) {} }").contains("E0005"));
-        assert!(
-            impl_error("impl C { pub fn f(&self, m: HashMap<f64, u8>) {} }").contains("E0006")
-        );
+        assert!(impl_error("impl C { pub fn f(&self, m: HashMap<f64, u8>) {} }").contains("E0006"));
         assert!(
             impl_error("impl C { pub fn f(&self, (a, b): (u8, u8)) {} }").contains("is a pattern")
         );
@@ -1423,14 +1452,14 @@ mod tests {
             "{out}"
         );
         assert!(has(&out, "<S>::__KEEL_STORE_META"), "{out}");
-        assert!(has(&out, "__keel_attach_all"), "{out}");
+        assert!(has(&out, "__value.__keel_attach_all()"), "{out}");
     }
 
     #[test]
     fn non_store_impls_are_left_alone() {
         let out = impl_result("impl S { pub fn new() -> Self { Self { x: 1 } } }", false).unwrap();
         assert!(!has(&out, "__keel_cell"), "{out}");
-        assert!(!has(&out, "__keel_attach_all"), "{out}");
+        assert!(!has(&out, "__value.__keel_attach_all()"), "{out}");
         assert!(has(&out, "store: ::core::option::Option::None"), "{out}");
     }
 
@@ -1438,7 +1467,7 @@ mod tests {
     fn async_methods_get_a_send_check() {
         let out = impl_result("impl C { pub async fn f(&self) -> u8 { 1 } }", false).unwrap();
         assert!(has(&out, "__keel_assert_send"), "{out}");
-        assert!(has(&out, "E0022"), "{out}");
+        assert!(has(&out, "__keel_assert_send(&__fut)"), "{out}");
         assert!(has(&out, "is_async: true"), "{out}");
         let out = impl_result("impl C { pub fn f(&self) -> u8 { 1 } }", false).unwrap();
         assert!(!has(&out, "__keel_assert_send"), "{out}");

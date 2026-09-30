@@ -222,7 +222,11 @@ fn constructors_attach_every_signal_in_order_and_record_the_handle() {
     let (handle, store) = todos(&rt);
     let cell = store.cell();
     assert_eq!(StoreCell::type_id(cell), ids::type_id("Todos"));
-    assert_eq!(cell.handle(), handle, "the object table's handle reached the cell");
+    assert_eq!(
+        cell.handle(),
+        handle,
+        "the object table's handle reached the cell"
+    );
 
     let attached = cell.attached();
     let shape: Vec<(u32, AttachKind, bool, bool)> = attached
@@ -281,17 +285,26 @@ fn methods_work_through_dispatch_and_signals_update() {
         let mut w = Writer::new();
         id.encode(&mut w);
         title.to_owned().encode(&mut w);
-        assert!(rt.call_object("Todos", "add", handle, w.as_slice()).sync_ok().is_empty());
+        assert!(
+            rt.call_object("Todos", "add", handle, w.as_slice())
+                .sync_ok()
+                .is_empty()
+        );
     };
     add(1, "a");
     add(2, "b");
     assert_eq!(store.rows.get().len(), 2);
-    let len = rt.call_object("Todos", "visible_len", handle, &[]).sync_ok();
+    let len = rt
+        .call_object("Todos", "visible_len", handle, &[])
+        .sync_ok();
     assert_eq!(u32::decode_exact(&len).unwrap(), 2);
     let mut w = Writer::new();
     Filter::Even.encode(&mut w);
-    rt.call_object("Todos", "set_filter", handle, w.as_slice()).sync_ok();
-    let len = rt.call_object("Todos", "visible_len", handle, &[]).sync_ok();
+    rt.call_object("Todos", "set_filter", handle, w.as_slice())
+        .sync_ok();
+    let len = rt
+        .call_object("Todos", "visible_len", handle, &[])
+        .sync_ok();
     assert_eq!(u32::decode_exact(&len).unwrap(), 1);
     let label = rt.call_object("Todos", "label", handle, &[]).sync_ok();
     assert_eq!(String::decode_exact(&label).unwrap(), "todos");
@@ -336,7 +349,11 @@ fn restore_with_a_hook_rebuilds_computed_and_lazy_fields() {
     assert_eq!(restored.visible_len(), 2, "the computed value was rebuilt");
     assert_eq!(restored.label(), "todos", "state comes from the hook");
     assert!(restored.has_ctx());
-    assert_eq!(restored.cell().attached().len(), 5, "signals are attached after restore");
+    assert_eq!(
+        restored.cell().attached().len(),
+        5,
+        "signals are attached after restore"
+    );
     // The restored store is independent of the original.
     restored.add(9, "z".to_owned());
     assert_eq!(store.rows.get().len(), 3);
@@ -359,7 +376,11 @@ fn restore_without_a_hook_uses_ctx_and_default() {
     let restored = restore::<Counter>(&rt, "Counter", body.as_slice()).unwrap();
     assert_eq!(restored.count.get(), 2);
     assert_eq!(restored.name.get(), "renamed");
-    assert_eq!(restored.note(), "", "non-signal state falls back to Default");
+    assert_eq!(
+        restored.note(),
+        "",
+        "non-signal state falls back to Default"
+    );
     assert_eq!(restored.extra_len(), 0);
     let _ = restored.ctx.clone();
     assert_eq!(restored.cell().attached().len(), 2);
@@ -381,14 +402,19 @@ fn restore_ignores_unknown_signals_and_rejects_missing_ones() {
     w.write_u32(1);
     w.write_bytes(&"n".to_owned().encode_to_vec());
     let restored = restore::<Counter>(&rt, "Counter", w.as_slice()).unwrap();
-    assert_eq!((restored.count.get(), restored.name.get()), (7, "n".to_owned()));
+    assert_eq!(
+        (restored.count.get(), restored.name.get()),
+        (7, "n".to_owned())
+    );
 
     // Signal 1 is missing.
     let mut w = Writer::new();
     w.write_u32(1);
     w.write_u32(0);
     w.write_bytes(&7_i64.encode_to_vec());
-    let error = restore::<Counter>(&rt, "Counter", w.as_slice()).err().unwrap();
+    let error = restore::<Counter>(&rt, "Counter", w.as_slice())
+        .err()
+        .unwrap();
     assert!(
         matches!(error, WireError::InvalidTag { tag: 1, ty, .. } if ty.contains("missing signal 1 (name)")),
         "{error:?}"

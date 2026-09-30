@@ -311,7 +311,11 @@ impl Runtime {
 
     // --- test drivers -----------------------------------------------------------------
 
-    fn outcome(dispatch: keel_meta::DispatchFn, rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
+    fn outcome(
+        dispatch: keel_meta::DispatchFn,
+        rt: &Runtime,
+        call: DispatchCall<'_>,
+    ) -> DispatchResult {
         dispatch(rt, call)
             .downcast::<DispatchResult>()
             .unwrap_or_else(|_| panic!("dispatcher returned something other than a DispatchResult"))
@@ -358,7 +362,13 @@ impl Runtime {
     }
 
     /// Calls the object dispatcher with an arbitrary method id.
-    pub fn call_object_raw(&self, type_name: &str, method_id: u32, handle: u64, args: &[u8]) -> DispatchResult {
+    pub fn call_object_raw(
+        &self,
+        type_name: &str,
+        method_id: u32,
+        handle: u64,
+        args: &[u8],
+    ) -> DispatchResult {
         let meta = keel_meta::registrations()
             .find_map(|r| match r {
                 keel_meta::Registration::Object(o) if o.name == type_name => Some(*o),
@@ -398,7 +408,12 @@ impl Ctx {
     }
 
     /// Calls a port method synchronously.
-    pub fn port_call_sync(&self, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError> {
+    pub fn port_call_sync(
+        &self,
+        port_id: u32,
+        method_id: u32,
+        args: &[u8],
+    ) -> Result<Vec<u8>, PortError> {
         let foreign = match self.0.ports.lock().unwrap().get(&port_id) {
             Some(Binding::Foreign(f)) => Arc::clone(f),
             _ => return Err(PortError::Unavailable),

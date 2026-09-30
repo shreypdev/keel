@@ -522,43 +522,81 @@ mod tests {
 
     #[test]
     fn signals_are_numbered_in_declaration_order_skipping_state() {
-        let out = expand(
-            "struct S { ctx: Ctx, a: Signal<i32>, name: String, b: Signal<Vec<Row>> }",
-        )
-        .unwrap();
-        assert!(has(&out, "SignalMeta { name: \"a\", signal_id: 0u32"), "{out}");
-        assert!(has(&out, "SignalMeta { name: \"b\", signal_id: 1u32"), "{out}");
-        assert!(has(&out, "pub __keel_cell: ::keel::signals::CellSlot"), "{out}");
-        assert!(has(&out, "impl ::keel::runtime::StoreObject for S"), "{out}");
+        let out =
+            expand("struct S { ctx: Ctx, a: Signal<i32>, name: String, b: Signal<Vec<Row>> }")
+                .unwrap();
+        assert!(
+            has(&out, "SignalMeta { name: \"a\", signal_id: 0u32"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "SignalMeta { name: \"b\", signal_id: 1u32"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "pub __keel_cell: ::keel::signals::CellSlot"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "impl ::keel::runtime::StoreObject for S"),
+            "{out}"
+        );
         assert!(has(&out, "::keel::runtime::StoreRestorer"), "{out}");
     }
 
     #[test]
     fn computed_and_lazy_need_a_restore_hook() {
         let message = expand("struct S { a: Signal<i32>, b: Computed<i32> }").unwrap_err();
-        assert!(message.starts_with("error[keel::E0013]: store `S` cannot be restored automatically: `b`"), "{message}");
+        assert!(
+            message
+                .starts_with("error[keel::E0013]: store `S` cannot be restored automatically: `b`"),
+            "{message}"
+        );
         let message = expand("struct S { a: Signal<i32>, l: Lazy<Row> }").unwrap_err();
         assert!(message.contains("error[keel::E0013]"), "{message}");
-        let out = expand_with_hook("struct S { a: Signal<i32>, b: Computed<i32>, l: Lazy<Row> }").unwrap();
+        let out = expand_with_hook("struct S { a: Signal<i32>, b: Computed<i32>, l: Lazy<Row> }")
+            .unwrap();
         assert!(has(&out, "computed: true"), "{out}");
-        assert!(has(&out, "Lazy(&::keel::meta::TypeRefMeta::Named(\"Row\"))"), "{out}");
-        assert!(has(&out, "Self::rebuild(__ctx, ::keel::signals::Signal::<i32>::new(__value_a))"), "{out}");
+        assert!(
+            has(&out, "Lazy(&::keel::meta::TypeRefMeta::Named(\"Row\"))"),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "Self::rebuild(__ctx, ::keel::signals::Signal::<i32>::new(__value_a))"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "attach_computed(&self.b, 1u32)"), "{out}");
         assert!(has(&out, "attach_lazy(&self.l, 2u32)"), "{out}");
     }
 
     #[test]
     fn keyed_lists_and_no_coalesce() {
-        let out = expand(
-            "struct S { #[keel(key = \"id\", no_coalesce)] rows: Signal<Vec<Row>> }",
-        )
-        .unwrap();
-        assert!(has(&out, "fn __keel_key_rows(__item: &dyn ::core::any::Any) -> u64"), "{out}");
+        let out = expand("struct S { #[keel(key = \"id\", no_coalesce)] rows: Signal<Vec<Row>> }")
+            .unwrap();
+        assert!(
+            has(
+                &out,
+                "fn __keel_key_rows(__item: &dyn ::core::any::Any) -> u64"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "downcast_ref::<Row>()"), "{out}");
         assert!(has(&out, "encode_to_vec(&__item.id)"), "{out}");
-        assert!(has(&out, "attach(&self.rows, 0u32, ::core::option::Option::Some(__keel_key_rows))"), "{out}");
+        assert!(
+            has(
+                &out,
+                "attach(&self.rows, 0u32, ::core::option::Option::Some(__keel_key_rows))"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "set_no_coalesce(0u32)"), "{out}");
-        assert!(has(&out, "key: ::core::option::Option::Some(\"id\")"), "{out}");
+        assert!(
+            has(&out, "key: ::core::option::Option::Some(\"id\")"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -571,31 +609,68 @@ mod tests {
             assert!(message.contains("error[keel::E0008]"), "{message}");
             assert!(message.contains("needs a `Signal<Vec<T>>`"), "{message}");
         }
-        let message = expand("struct S { #[keel(key = \"not a name\")] a: Signal<Vec<Row>> }").unwrap_err();
+        let message =
+            expand("struct S { #[keel(key = \"not a name\")] a: Signal<Vec<Row>> }").unwrap_err();
         assert!(message.contains("is not a field name"), "{message}");
     }
 
     #[test]
     fn signal_types_are_checked() {
-        assert!(expand("struct S { a: Signal<&str> }").unwrap_err().contains("E0001"));
-        assert!(expand("struct S { a: Signal<Result<u8, E>> }").unwrap_err().contains("E0005"));
-        assert!(expand("struct S { a: Signal<()> }").unwrap_err().contains("E0001"));
+        assert!(
+            expand("struct S { a: Signal<&str> }")
+                .unwrap_err()
+                .contains("E0001")
+        );
+        assert!(
+            expand("struct S { a: Signal<Result<u8, E>> }")
+                .unwrap_err()
+                .contains("E0005")
+        );
+        assert!(
+            expand("struct S { a: Signal<()> }")
+                .unwrap_err()
+                .contains("E0001")
+        );
     }
 
     #[test]
     fn shapes_and_reserved_names_are_rejected() {
-        assert!(expand("struct S(Signal<i32>);").unwrap_err().contains("E0007"));
+        assert!(
+            expand("struct S(Signal<i32>);")
+                .unwrap_err()
+                .contains("E0007")
+        );
         assert!(expand("struct S;").unwrap_err().contains("E0007"));
-        assert!(expand("struct S<T> { a: Signal<i32> }").unwrap_err().contains("E0002"));
-        assert!(expand("struct S { __keel_cell: u8 }").unwrap_err().contains("reserved"));
+        assert!(
+            expand("struct S<T> { a: Signal<i32> }")
+                .unwrap_err()
+                .contains("E0002")
+        );
+        assert!(
+            expand("struct S { __keel_cell: u8 }")
+                .unwrap_err()
+                .contains("reserved")
+        );
     }
 
     #[test]
     fn restore_fills_state_from_ctx_and_default() {
         let out = expand("struct S { ctx: Ctx, extra: Vec<u8>, a: Signal<i32> }").unwrap();
-        assert!(has(&out, "ctx: ::core::clone::Clone::clone(&__ctx)"), "{out}");
-        assert!(has(&out, "extra: ::core::default::Default::default()"), "{out}");
-        assert!(has(&out, "a: ::keel::signals::Signal::<i32>::new(__value_a)"), "{out}");
-        assert!(has(&out, "snapshot of store S is missing signal 0 (a)"), "{out}");
+        assert!(
+            has(&out, "ctx: ::core::clone::Clone::clone(&__ctx)"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "extra: ::core::default::Default::default()"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "a: ::keel::signals::Signal::<i32>::new(__value_a)"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "snapshot of store S is missing signal 0 (a)"),
+            "{out}"
+        );
     }
 }

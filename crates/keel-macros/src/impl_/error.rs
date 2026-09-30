@@ -33,14 +33,13 @@ pub(crate) enum ErrorAttr {
     Transparent,
 }
 
-fn invalid(node: &impl quote::ToTokens, what: impl std::fmt::Display, help: &str) -> syn::Error {
-    Diag::new(
-        code::E0010,
-        what,
-        "every variant of a `#[keel::error]` enum needs a message, because the platforms show it to users and logs",
-        help,
-    )
-    .on(node)
+fn invalid(
+    node: &impl quote::ToTokens,
+    what: impl std::fmt::Display,
+    why: &str,
+    help: &str,
+) -> syn::Error {
+    Diag::new(code::E0010, what, why, help).on(node)
 }
 
 /// Removes `#[error(..)]` from a variant and parses it against the variant's fields.
@@ -64,6 +63,7 @@ pub(crate) fn take_message(
         errors.push(invalid(
             variant,
             format!("variant `{variant}` has no `#[error(..)]` message"),
+            "every variant of a `#[keel::error]` enum needs a message, because the platforms show it to users and logs",
             "add `#[error(\"what went wrong\")]`, or `#[error(transparent)]` to forward to the inner error",
         ));
         return None;
@@ -72,6 +72,7 @@ pub(crate) fn take_message(
         errors.push(invalid(
             &found[1],
             format!("variant `{variant}` has more than one `#[error(..)]`"),
+            "a variant has exactly one message",
             "keep a single `#[error(..)]` per variant",
         ));
     }
@@ -79,6 +80,7 @@ pub(crate) fn take_message(
         errors.push(invalid(
             attr,
             format!("`#[error]` on variant `{variant}` needs a message"),
+            "the attribute carries the text the platforms show for this error",
             "write `#[error(\"message\")]` or `#[error(transparent)]`",
         ));
         return None;
@@ -92,6 +94,7 @@ pub(crate) fn take_message(
                     "`#[error(transparent)]` on variant `{variant}` needs exactly one field, found {}",
                     fields.len()
                 ),
+                "`transparent` forwards `Display` and `source()` to the variant's only field",
                 "give the variant a single field holding the inner error",
             ));
         }
@@ -103,7 +106,8 @@ pub(crate) fn take_message(
             errors.push(invalid(
                 &list.tokens,
                 format!("`#[error(..)]` on variant `{variant}` must be a single string literal or `transparent`"),
-                "write `#[error(\"message with {0} or {name}\")]`; extra format arguments are not supported",
+                "the message is a template over the variant's fields; extra `format!` arguments are not supported",
+                "write `#[error(\"message with {0} or {name}\")]`",
             ));
             return None;
         }
@@ -118,6 +122,7 @@ pub(crate) fn take_message(
             errors.push(invalid(
                 &lit,
                 format!("invalid message for variant `{variant}`: {reason}"),
+                "the message is a template over the variant's fields",
                 "use `{0}` / `{}` for tuple fields and `{name}` for named fields",
             ));
             None
@@ -296,13 +301,16 @@ fn partial_pattern(
             quote!(Self::#ident( #(#slots),* ))
         }
         Shape::Named => {
-            let bound = variant.fields.iter().enumerate().filter_map(|(i, f)| {
-                wanted.contains(&i).then(|| {
+            let bound = variant
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| wanted.contains(i))
+                .map(|(i, f)| {
                     let field = f.ident.as_ref().expect("named field");
                     let binding = &bindings[i];
                     quote!(#field: #binding)
-                })
-            });
+                });
             quote!(Self::#ident { #(#bound,)* .. })
         }
     }
@@ -450,7 +458,11 @@ mod tests {
         (0..n).map(|i| field(&i.to_string())).collect()
     }
 
-    fn rewrite(text: &str, shape: Shape, fields: &[FieldModel]) -> Result<(String, Vec<usize>), String> {
+    fn rewrite(
+        text: &str,
+        shape: Shape,
+        fields: &[FieldModel],
+    ) -> Result<(String, Vec<usize>), String> {
         rewrite_template(text, shape, fields).map(|(s, used)| (s, used.into_iter().collect()))
     }
 
@@ -501,14 +513,50 @@ mod tests {
     fn invalid_templates_are_explained() {
         let tuple = tuple_fields(1);
         let named = vec![field("a")];
-        assert!(rewrite("{2}", Shape::Tuple, &tuple).unwrap_err().contains("field 2"));
-        assert!(rewrite("{}{}", Shape::Tuple, &tuple).unwrap_err().contains("field 1"));
-        assert!(rewrite("{a}", Shape::Tuple, &tuple).unwrap_err().contains("tuple fields"));
-        assert!(rewrite("{0}", Shape::Named, &named).unwrap_err().contains("named fields"));
-        assert!(rewrite("{b}", Shape::Named, &named).unwrap_err().contains("names no field"));
-        assert!(rewrite("{x}", Shape::Unit, &[]).unwrap_err().contains("no fields"));
-        assert!(rewrite("{0", Shape::Tuple, &tuple).unwrap_err().contains("unterminated"));
-        assert!(rewrite("a } b", Shape::Unit, &[]).unwrap_err().contains("unmatched"));
-        assert!(rewrite("{0:width$}", Shape::Tuple, &tuple).unwrap_err().contains("width"));
+        assert!(
+            rewrite("{2}", Shape::Tuple, &tuple)
+                .unwrap_err()
+                .contains("field 2")
+        );
+        assert!(
+            rewrite("{}{}", Shape::Tuple, &tuple)
+                .unwrap_err()
+                .contains("field 1")
+        );
+        assert!(
+            rewrite("{a}", Shape::Tuple, &tuple)
+                .unwrap_err()
+                .contains("tuple fields")
+        );
+        assert!(
+            rewrite("{0}", Shape::Named, &named)
+                .unwrap_err()
+                .contains("named fields")
+        );
+        assert!(
+            rewrite("{b}", Shape::Named, &named)
+                .unwrap_err()
+                .contains("names no field")
+        );
+        assert!(
+            rewrite("{x}", Shape::Unit, &[])
+                .unwrap_err()
+                .contains("no fields")
+        );
+        assert!(
+            rewrite("{0", Shape::Tuple, &tuple)
+                .unwrap_err()
+                .contains("unterminated")
+        );
+        assert!(
+            rewrite("a } b", Shape::Unit, &[])
+                .unwrap_err()
+                .contains("unmatched")
+        );
+        assert!(
+            rewrite("{0:width$}", Shape::Tuple, &tuple)
+                .unwrap_err()
+                .contains("width")
+        );
     }
 }

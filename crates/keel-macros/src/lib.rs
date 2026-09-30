@@ -20,7 +20,32 @@
 //! macro arguments, replaces `::keel`.
 //!
 //! Every rejection is a diagnostic with a stable code (`error[keel::E0001]: ..`, SPEC 12):
-//! what is wrong, why the rule exists, how to fix it and a docs link.
+//! what is wrong, why the rule exists, how to fix it and a docs link. After a diagnostic the
+//! original item is still emitted (with its helper attributes removed), so the user sees the
+//! Keel errors and no cascade.
+//!
+//! # Things the macros do that the SPEC leaves open
+//!
+//! * `Box<T>` is transparent in the schema (`T`), and `Self` in a record or enum field means the
+//!   type itself, so recursive types can be written: `children: Vec<Self>`.
+//! * A store's impl block is marked `#[keel::api(store)]`; the struct gets a hidden
+//!   `__keel_cell` field and struct literals of the type inside that impl block get it added.
+//!   Stores with `Computed`/`Lazy` fields name a rebuild function with
+//!   `#[keel::store(restore = "Self::rebuild")]`. See [`store`].
+//! * `#[keel::error]` derives `Debug` unless the enum already does.
+//! * `async fn`s of a port trait become methods returning boxed futures (`async fn` in traits
+//!   is not dyn compatible); `#[keel::port]` on `impl Trait for Type` blocks rewrites them back
+//!   for the implementor. See [`port`].
+//! * A returned `impl Stream<Item = T>` gets `+ 'static` added; a returned stream cannot borrow
+//!   from the object.
+//! * `#[cfg]` on fields, variants, parameters and public methods is rejected (E0008): the schema
+//!   is hashed and must not depend on the build.
+//!
+//! One `#[keel::api] impl` block per type: the registration and the dispatcher are named after
+//! the type, so a second block would define them twice.
+
+#![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 extern crate proc_macro;
 

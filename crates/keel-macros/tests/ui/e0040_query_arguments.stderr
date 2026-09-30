@@ -1,0 +1,26 @@
+error: error[keel::E0040]: query `todos` has no `key`
+         = note: the cache is addressed by key: two calls share a cached result only if their keys are equal
+         = help: add `key = "todos"`, with `{param}` placeholders for the parameters that distinguish results
+         = docs: https://keel.dev/errors/E0040
+ --> tests/ui/e0040_query_arguments.rs:7:14
+  |
+7 | pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<u32>, String> {
+  |              ^^^^^
+
+error: error[keel::E0040]: mutation `add_todo` has `stale`
+         = note: `stale` is how long a cached *read* stays fresh; a mutation writes and caches nothing
+         = help: remove `stale`; put it on the query the mutation invalidates
+         = docs: https://keel.dev/errors/E0040
+  --> tests/ui/e0040_query_arguments.rs:11:23
+   |
+11 | #[k::mutation(stale = "30s")]
+   |                       ^^^^^
+
+error: error[keel::E0040]: `{pgae}` in `key` is not a parameter of the function
+         = note: each placeholder is replaced by the encoded parameter of that name
+         = help: the parameters are: page
+         = docs: https://keel.dev/errors/E0040
+  --> tests/ui/e0040_query_arguments.rs:16:18
+   |
+16 | #[k::query(key = "todos:{pgae}")]
+   |                  ^^^^^^^^^^^^^^

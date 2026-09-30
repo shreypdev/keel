@@ -9,6 +9,11 @@ use keel::testing::block_on;
 use keel::wire::Encode;
 use keel_macros as k;
 
+/// Reads a constant flag at run time (clippy rejects asserting on constants).
+fn flag(value: bool) -> bool {
+    value
+}
+
 #[k::error]
 #[derive(Clone, PartialEq)]
 pub enum HttpError {
@@ -60,14 +65,14 @@ fn query_constants_follow_the_arguments() {
     assert_eq!(TodosQuery::QUERY_ID, ids::query_id("todos"));
     assert_eq!(TodosQuery::KEY, "todos:{page}:{q}");
     assert_eq!(TodosQuery::STALE_MS, Some(30_000));
-    assert!(TodosQuery::PERSIST);
+    assert!(flag(TodosQuery::PERSIST));
     assert_eq!(TodosQuery::RETRY, 5);
-    assert!(!TodosQuery::IDEMPOTENT);
+    assert!(!flag(TodosQuery::IDEMPOTENT));
 
     assert_eq!(CountQuery::STALE_MS, Some(7_200_000));
-    assert!(!CountQuery::PERSIST);
+    assert!(!flag(CountQuery::PERSIST));
     assert_eq!(CountQuery::RETRY, 3, "queries retry three times by default");
-    assert!(CountQuery::IDEMPOTENT);
+    assert!(flag(CountQuery::IDEMPOTENT));
 }
 
 #[test]
@@ -77,7 +82,13 @@ fn the_query_def_trait_mirrors_the_constants() {
     }
     assert_eq!(
         check::<TodosQuery>(),
-        (ids::query_id("todos"), "todos:{page}:{q}", Some(30_000), true, 5)
+        (
+            ids::query_id("todos"),
+            "todos:{page}:{q}",
+            Some(30_000),
+            true,
+            5
+        )
     );
     assert_eq!(check::<CountQuery>().0, ids::query_id("count"));
 }
@@ -117,18 +128,26 @@ fn mutation_constants_and_defaults() {
     assert_eq!(AddTodoMutation::MUTATION_ID, ids::mutation_id("add_todo"));
     assert_eq!(AddTodoMutation::KEY, "todos");
     assert_eq!(AddTodoMutation::RETRY, 2);
-    assert!(AddTodoMutation::IDEMPOTENT);
-    assert_eq!(WipeMutation::RETRY, 0, "mutations do not retry unless asked");
-    assert!(!WipeMutation::IDEMPOTENT);
+    assert!(flag(AddTodoMutation::IDEMPOTENT));
+    assert_eq!(
+        WipeMutation::RETRY,
+        0,
+        "mutations do not retry unless asked"
+    );
+    assert!(!flag(WipeMutation::IDEMPOTENT));
     assert_eq!(WipeMutation::KEY, "");
     assert_eq!(WipeMutation::STALE_MS, None);
-    assert!(!WipeMutation::PERSIST);
+    assert!(!flag(WipeMutation::PERSIST));
 }
 
 #[test]
 fn execute_runs_the_mutation() {
     let ctx = Runtime::new().ctx();
-    let todo = block_on(AddTodoMutation::execute(ctx.clone(), ("write".to_owned(), true))).unwrap();
+    let todo = block_on(AddTodoMutation::execute(
+        ctx.clone(),
+        ("write".to_owned(), true),
+    ))
+    .unwrap();
     assert_eq!(
         todo,
         Todo {
@@ -136,7 +155,10 @@ fn execute_runs_the_mutation() {
             title: "write".into()
         }
     );
-    assert_eq!(block_on(WipeMutation::execute(ctx, ())).unwrap_err(), HttpError::Timeout);
+    assert_eq!(
+        block_on(WipeMutation::execute(ctx, ())).unwrap_err(),
+        HttpError::Timeout
+    );
     fn ids_of<M: MutationDef>() -> (u32, u32, bool) {
         (M::ID, M::RETRY, M::IDEMPOTENT)
     }
@@ -158,13 +180,20 @@ fn query_meta_describes_params_returns_and_flags() {
     assert_eq!(todos.stale_ms, Some(30_000));
     assert!(todos.persist && !todos.idempotent);
     assert_eq!(
-        todos.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        todos
+            .params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
         ["page", "q"]
     );
     assert_eq!(todos.params[0].ty, TypeRef::U32);
     assert_eq!(
         todos.returns,
-        TypeRef::result(TypeRef::vec(TypeRef::named("Todo")), TypeRef::named("HttpError"))
+        TypeRef::result(
+            TypeRef::vec(TypeRef::named("Todo")),
+            TypeRef::named("HttpError")
+        )
     );
 
     let add = query("add_todo");
@@ -177,7 +206,10 @@ fn query_meta_describes_params_returns_and_flags() {
         query("wipe").returns,
         TypeRef::result(TypeRef::Unit, TypeRef::named("HttpError"))
     );
-    assert!(query("count").params.is_empty(), "Ctx is not a schema parameter");
+    assert!(
+        query("count").params.is_empty(),
+        "Ctx is not a schema parameter"
+    );
 }
 
 #[test]

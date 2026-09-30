@@ -194,7 +194,10 @@ fn an_unavailable_port_panics_with_a_message_naming_port_and_method() {
     }))
     .unwrap_err();
     let message = message_of(panic);
-    assert!(message.contains("keel: port call `Http.ping` failed"), "{message}");
+    assert!(
+        message.contains("keel: port call `Http.ping` failed"),
+        "{message}"
+    );
     assert!(message.contains("Unavailable"), "{message}");
 }
 
@@ -253,7 +256,9 @@ fn fire_and_forget_sync_methods_ignore_the_reply() {
         let target = r.read_str().unwrap().to_owned();
         let message = r.read_str().unwrap().to_owned();
         r.finish().unwrap();
-        sink.lock().unwrap().push(format!("{level} {target} {message}"));
+        sink.lock()
+            .unwrap()
+            .push(format!("{level} {target} {message}"));
         Ok(Vec::new())
     });
     log(&rt.ctx()).log(3, "core".into(), "hi".into());
@@ -311,7 +316,11 @@ impl Http for FakeHttp {
     }
 
     async fn check(&self, url: String) -> Result<(), HttpError> {
-        if url == "ok" { Ok(()) } else { Err(HttpError::Timeout) }
+        if url == "ok" {
+            Ok(())
+        } else {
+            Err(HttpError::Timeout)
+        }
     }
 }
 
@@ -333,7 +342,10 @@ fn the_accessor_prefers_a_rust_binding() {
     .unwrap();
     assert_eq!(response.body, Bytes(b"direct".to_vec()));
     assert_eq!(*fake.calls.lock().unwrap(), ["direct"]);
-    assert!(seen.lock().unwrap().is_empty(), "the host binding was not called");
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "the host binding was not called"
+    );
 }
 
 fn dispatch(imp: &Arc<dyn Http>, method: &str, args: &[u8]) -> Vec<u8> {
@@ -375,13 +387,22 @@ fn the_rust_dispatcher_decodes_calls_and_encodes_replies_with_a_status_byte() {
         .encode_to_vec(),
     );
     assert_eq!(reply[0], 1);
-    assert_eq!(HttpError::decode_exact(&reply[1..]).unwrap(), HttpError::Timeout);
+    assert_eq!(
+        HttpError::decode_exact(&reply[1..]).unwrap(),
+        HttpError::Timeout
+    );
     // Plain value and unit.
     let reply = dispatch(&fake, "ping", &"up".to_owned().encode_to_vec());
     assert_eq!(reply, [0, 1]);
-    assert_eq!(dispatch(&fake, "fire", &"m".to_owned().encode_to_vec()), [0]);
+    assert_eq!(
+        dispatch(&fake, "fire", &"m".to_owned().encode_to_vec()),
+        [0]
+    );
     // `Result<(), E>`: ok has an empty body.
-    assert_eq!(dispatch(&fake, "check", &"ok".to_owned().encode_to_vec()), [0]);
+    assert_eq!(
+        dispatch(&fake, "check", &"ok".to_owned().encode_to_vec()),
+        [0]
+    );
     let reply = dispatch(&fake, "check", &"no".to_owned().encode_to_vec());
     assert_eq!(reply[0], 1);
 }
@@ -419,10 +440,11 @@ fn dispatchers_are_registered_and_reachable_through_dyn_any() {
         .into_iter()
         .find(|d| d.port_id == ids::port_id("Http"))
         .expect("Http dispatcher registered");
-    let reply = match (dispatcher.dispatch)(&fake, id("Http", "ping"), &"up".to_owned().encode_to_vec()) {
-        PortDispatch::Async(future) => block_on(future),
-        PortDispatch::Sync(bytes) => bytes,
-    };
+    let reply =
+        match (dispatcher.dispatch)(&fake, id("Http", "ping"), &"up".to_owned().encode_to_vec()) {
+            PortDispatch::Async(future) => block_on(future),
+            PortDispatch::Sync(bytes) => bytes,
+        };
     assert_eq!(reply, [0, 1]);
     // Something that is not an `Arc<dyn Http>` is unavailable.
     let wrong = 5_u32;
@@ -464,10 +486,13 @@ fn event_subscriptions_decode_the_payload() {
         sink.lock().unwrap().push((online, kind));
     });
     let payload = encode_connectivity_changed_event(false, NetKind::Cellular);
-    assert_eq!(payload, encode(|w| {
-        false.encode(w);
-        NetKind::Cellular.encode(w);
-    }));
+    assert_eq!(
+        payload,
+        encode(|w| {
+            false.encode(w);
+            NetKind::Cellular.encode(w);
+        })
+    );
     rt.event(
         <dyn Connectivity as Port>::PORT_ID,
         id("Connectivity", "changed"),
@@ -476,9 +501,21 @@ fn event_subscriptions_decode_the_payload() {
     assert_eq!(*seen.lock().unwrap(), [(false, NetKind::Cellular)]);
 
     // Malformed payloads and other ports' events are ignored.
-    rt.event(<dyn Connectivity as Port>::PORT_ID, id("Connectivity", "changed"), &[9]);
-    rt.event(<dyn Connectivity as Port>::PORT_ID, id("Connectivity", "changed"), &[0, 0, 0, 0, 0]);
-    rt.event(<dyn Lifecycle as Port>::PORT_ID, id("Lifecycle", "changed"), &payload);
+    rt.event(
+        <dyn Connectivity as Port>::PORT_ID,
+        id("Connectivity", "changed"),
+        &[9],
+    );
+    rt.event(
+        <dyn Connectivity as Port>::PORT_ID,
+        id("Connectivity", "changed"),
+        &[0, 0, 0, 0, 0],
+    );
+    rt.event(
+        <dyn Lifecycle as Port>::PORT_ID,
+        id("Lifecycle", "changed"),
+        &payload,
+    );
     assert_eq!(seen.lock().unwrap().len(), 1);
 }
 
@@ -493,10 +530,18 @@ fn event_methods_without_arguments_and_same_named_methods_do_not_clash() {
     let counter = Arc::clone(&count);
     let _b = on_lifecycle_low_memory(&ctx, move || *counter.lock().unwrap() += 1);
     let payload = encode_lifecycle_changed_event(2);
-    rt.event(<dyn Lifecycle as Port>::PORT_ID, id("Lifecycle", "changed"), &payload);
+    rt.event(
+        <dyn Lifecycle as Port>::PORT_ID,
+        id("Lifecycle", "changed"),
+        &payload,
+    );
     let payload = encode_lifecycle_low_memory_event();
     assert!(payload.is_empty());
-    rt.event(<dyn Lifecycle as Port>::PORT_ID, id("Lifecycle", "low_memory"), &payload);
+    rt.event(
+        <dyn Lifecycle as Port>::PORT_ID,
+        id("Lifecycle", "low_memory"),
+        &payload,
+    );
     assert_eq!(*states.lock().unwrap(), [2]);
     assert_eq!(*count.lock().unwrap(), 1);
 }
@@ -511,7 +556,11 @@ fn port_consts_match_the_ids_and_kinds() {
     assert_eq!(<dyn Http as Port>::NAME, "Http");
     assert_eq!(<dyn Http as Port>::KIND, PortKind::Async);
     assert_eq!(<dyn Clock as Port>::KIND, PortKind::Sync);
-    assert_eq!(<dyn Log as Port>::KIND, PortKind::Sync, "all-sync ports are Sync");
+    assert_eq!(
+        <dyn Log as Port>::KIND,
+        PortKind::Sync,
+        "all-sync ports are Sync"
+    );
     assert_eq!(<dyn Connectivity as Port>::KIND, PortKind::Event);
 }
 
@@ -534,7 +583,10 @@ fn port_meta_describes_every_method() {
         TypeRef::result(TypeRef::named("HttpResponse"), TypeRef::named("HttpError"))
     );
     let check = http.methods.iter().find(|m| m.name == "check").unwrap();
-    assert_eq!(check.returns, TypeRef::result(TypeRef::Unit, TypeRef::named("HttpError")));
+    assert_eq!(
+        check.returns,
+        TypeRef::result(TypeRef::Unit, TypeRef::named("HttpError"))
+    );
     let fire = http.methods.iter().find(|m| m.name == "fire").unwrap();
     assert_eq!(fire.returns, TypeRef::Unit);
 

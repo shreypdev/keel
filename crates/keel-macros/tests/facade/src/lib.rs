@@ -13,6 +13,9 @@
 //! `keel` dev-dependency of keel-macros is repointed at the real facade and the same tests
 //! run against it.
 
+#![allow(clippy::type_complexity)] // the boxed futures and streams mirror the real contract
+
+pub use keel_macros::{api, error, mutation, port, query, store};
 pub use keel_meta as meta;
 pub use keel_wire as wire;
 
@@ -25,6 +28,8 @@ pub mod rooted {
 pub mod prelude {
     pub use crate::runtime::Ctx;
     pub use crate::signals::{Computed, Signal};
+    pub use core::time::Duration;
+    pub use keel_macros::{api, error, mutation, port, query, store};
     pub use keel_wire::{Bytes, Timestamp, Uuid};
 }
 

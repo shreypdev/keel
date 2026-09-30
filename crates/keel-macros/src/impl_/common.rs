@@ -2,9 +2,8 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::spanned::Spanned;
 
-use super::attrs::{Site, docs, take};
+use super::attrs::{Site, take};
 use super::diag::{Diag, Errors, code};
 use super::paths::Root;
 use super::types::KType;
@@ -92,11 +91,6 @@ pub(crate) fn item_root(
     parsed.root.or(args_root).unwrap_or_default()
 }
 
-/// The doc comment of an item as a string.
-pub(crate) fn doc_of(attrs: &[syn::Attribute]) -> String {
-    docs(attrs)
-}
-
 /// Whether the attribute list already derives `name` (`#[derive(Debug)]`).
 pub(crate) fn derives(attrs: &[syn::Attribute], name: &str) -> bool {
     let mut found = false;
@@ -117,11 +111,6 @@ pub(crate) fn derives(attrs: &[syn::Attribute], name: &str) -> bool {
         });
     }
     found
-}
-
-/// A span usable for errors about an item as a whole.
-pub(crate) fn item_span(node: &impl Spanned) -> proc_macro2::Span {
-    node.span()
 }
 
 #[cfg(test)]

@@ -12,4 +12,5 @@ publish = false
 [dependencies]
 keel-wire.workspace = true
 keel-meta.workspace = true
+keel-macros.workspace = true
 futures-core.workspace = true

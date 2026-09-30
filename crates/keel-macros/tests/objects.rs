@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use keel::meta::{Registration, TypeRef, collect_schema, ids};
-use keel::runtime::{Ctx, DispatchResult, KeelObject, Runtime, Stream};
+use keel::runtime::{Ctx, KeelObject, Runtime, Stream};
 use keel::testing::stream_of;
 use keel::wire::{Decode, Encode, Handle, Writer};
 use keel_macros as k;
@@ -136,15 +136,29 @@ impl Calculator {
         }
     }
 
+    #[deprecated(note = "kept to prove the dispatcher does not warn about deprecated methods")]
+    pub fn old_add(&self, a: i64) -> i64 {
+        self.base + a
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    fn only_in_tests(&self) -> i64 {
+        self.base
+    }
+
     /// Not exposed: private.
+    #[allow(dead_code)]
     fn helper(&self) -> i64 {
         self.ctx_is_alive() as i64
     }
 
+    #[allow(dead_code)]
     pub(crate) fn crate_visible(&self) -> i64 {
         self.helper()
     }
 
+    #[allow(dead_code)]
     fn ctx_is_alive(&self) -> bool {
         let _ = &self.ctx;
         true
@@ -152,6 +166,7 @@ impl Calculator {
 }
 
 /// A second object, to check that handles are typed.
+#[derive(Default)]
 pub struct Other;
 
 #[k::api]
@@ -186,11 +201,20 @@ fn constructors_insert_the_object_and_reply_with_its_handle() {
 #[test]
 fn the_ctx_parameter_may_be_owned_or_absent() {
     let rt = Runtime::new();
-    let owned = rt.call_object("Calculator", "from_owned_ctx", 0, &[]).sync_ok();
+    let owned = rt
+        .call_object("Calculator", "from_owned_ctx", 0, &[])
+        .sync_ok();
     let owned = Handle::decode_exact(&owned).unwrap().0;
     assert_eq!(rt.object::<Calculator>(owned).unwrap().base, 100);
-    let none = rt.call_object("Calculator", "without_ctx", 0, &[]).sync_ok();
-    assert_eq!(rt.object::<Calculator>(Handle::decode_exact(&none).unwrap().0).unwrap().base, 0);
+    let none = rt
+        .call_object("Calculator", "without_ctx", 0, &[])
+        .sync_ok();
+    assert_eq!(
+        rt.object::<Calculator>(Handle::decode_exact(&none).unwrap().0)
+            .unwrap()
+            .base,
+        0
+    );
 }
 
 #[test]
@@ -201,25 +225,37 @@ fn fallible_constructors_reply_with_a_handle_or_the_typed_error() {
     let err = rt
         .call_object("Calculator", "checked", 0, &args(|w| (-5_i64).encode(w)))
         .sync_err();
-    assert_eq!(CalcError::decode_exact(&err).unwrap(), CalcError::NegativeStart(-5));
+    assert_eq!(
+        CalcError::decode_exact(&err).unwrap(),
+        CalcError::NegativeStart(-5)
+    );
 }
 
 #[test]
 fn sync_methods_decode_arguments_in_order_and_encode_the_result() {
     let (rt, handle) = runtime_with_calculator();
     let out = rt
-        .call_object("Calculator", "add", handle, &args(|w| {
-            1_i64.encode(w);
-            2_i64.encode(w);
-        }))
+        .call_object(
+            "Calculator",
+            "add",
+            handle,
+            &args(|w| {
+                1_i64.encode(w);
+                2_i64.encode(w);
+            }),
+        )
         .sync_ok();
     assert_eq!(i64::decode_exact(&out).unwrap(), 13);
-    let len = rt.call_object("Calculator", "log_len", handle, &[]).sync_ok();
+    let len = rt
+        .call_object("Calculator", "log_len", handle, &[])
+        .sync_ok();
     assert_eq!(u32::decode_exact(&len).unwrap(), 1);
     // A unit result is an empty body.
     let unit = rt.call_object("Calculator", "reset", handle, &[]).sync_ok();
     assert!(unit.is_empty());
-    let len = rt.call_object("Calculator", "log_len", handle, &[]).sync_ok();
+    let len = rt
+        .call_object("Calculator", "log_len", handle, &[])
+        .sync_ok();
     assert_eq!(u32::decode_exact(&len).unwrap(), 0);
 }
 
@@ -227,31 +263,52 @@ fn sync_methods_decode_arguments_in_order_and_encode_the_result() {
 fn collection_arguments_round_trip() {
     let (rt, handle) = runtime_with_calculator();
     let out = rt
-        .call_object("Calculator", "describe", handle, &args(|w| {
-            vec!["a".to_owned(), "b".to_owned()].encode(w);
-            HashMap::from([("x".to_owned(), true)]).encode(w);
-        }))
+        .call_object(
+            "Calculator",
+            "describe",
+            handle,
+            &args(|w| {
+                vec!["a".to_owned(), "b".to_owned()].encode(w);
+                HashMap::from([("x".to_owned(), true)]).encode(w);
+            }),
+        )
         .sync_ok();
-    assert_eq!(String::decode_exact(&out).unwrap(), "a,b:[(\"x\", true)]:10");
+    assert_eq!(
+        String::decode_exact(&out).unwrap(),
+        "a,b:[(\"x\", true)]:10"
+    );
 }
 
 #[test]
 fn result_methods_split_into_ok_and_typed_error() {
     let (rt, handle) = runtime_with_calculator();
     let ok = rt
-        .call_object("Calculator", "divide", handle, &args(|w| {
-            9_i64.encode(w);
-            3_i64.encode(w);
-        }))
+        .call_object(
+            "Calculator",
+            "divide",
+            handle,
+            &args(|w| {
+                9_i64.encode(w);
+                3_i64.encode(w);
+            }),
+        )
         .sync_ok();
     assert_eq!(i64::decode_exact(&ok).unwrap(), 3);
     let err = rt
-        .call_object("Calculator", "divide", handle, &args(|w| {
-            9_i64.encode(w);
-            0_i64.encode(w);
-        }))
+        .call_object(
+            "Calculator",
+            "divide",
+            handle,
+            &args(|w| {
+                9_i64.encode(w);
+                0_i64.encode(w);
+            }),
+        )
         .sync_err();
-    assert_eq!(CalcError::decode_exact(&err).unwrap(), CalcError::DivideByZero);
+    assert_eq!(
+        CalcError::decode_exact(&err).unwrap(),
+        CalcError::DivideByZero
+    );
 }
 
 #[test]
@@ -262,19 +319,37 @@ fn malformed_requests_are_unknown_not_panics() {
         2_i64.encode(w);
     });
     // Too short, too long, empty.
-    assert!(rt.call_object("Calculator", "add", handle, &good[..15]).is_unknown());
+    assert!(
+        rt.call_object("Calculator", "add", handle, &good[..15])
+            .is_unknown()
+    );
     let mut long = good.clone();
     long.push(0);
-    assert!(rt.call_object("Calculator", "add", handle, &long).is_unknown());
-    assert!(rt.call_object("Calculator", "add", handle, &[]).is_unknown());
+    assert!(
+        rt.call_object("Calculator", "add", handle, &long)
+            .is_unknown()
+    );
+    assert!(
+        rt.call_object("Calculator", "add", handle, &[])
+            .is_unknown()
+    );
     // Unknown method id.
-    assert!(rt.call_object_raw("Calculator", 0xdead_beef, handle, &good).is_unknown());
+    assert!(
+        rt.call_object_raw("Calculator", 0xdead_beef, handle, &good)
+            .is_unknown()
+    );
     // Null, stale and wrongly typed handles.
     assert!(rt.call_object("Calculator", "add", 0, &good).is_unknown());
-    assert!(rt.call_object("Calculator", "add", Handle::new(99, 1).0, &good).is_unknown());
+    assert!(
+        rt.call_object("Calculator", "add", Handle::new(99, 1).0, &good)
+            .is_unknown()
+    );
     let other = rt.call_object("Other", "new", 0, &[]).sync_ok();
     let other = Handle::decode_exact(&other).unwrap().0;
-    assert!(rt.call_object("Calculator", "add", other, &good).is_unknown());
+    assert!(
+        rt.call_object("Calculator", "add", other, &good)
+            .is_unknown()
+    );
     // Constructors with bad arguments do not insert anything.
     assert!(rt.call_object("Calculator", "new", 0, &[1]).is_unknown());
 }
@@ -289,25 +364,43 @@ fn async_methods_return_a_future_over_ok_or_error_bytes() {
     assert_eq!(i64::decode_exact(&out).unwrap(), 15);
 
     let ok = rt
-        .call_object("Calculator", "slow_divide", handle, &args(|w| {
-            8_i64.encode(w);
-            2_i64.encode(w);
-        }))
+        .call_object(
+            "Calculator",
+            "slow_divide",
+            handle,
+            &args(|w| {
+                8_i64.encode(w);
+                2_i64.encode(w);
+            }),
+        )
         .run_async()
         .unwrap();
     assert_eq!(i64::decode_exact(&ok).unwrap(), 4);
     let err = rt
-        .call_object("Calculator", "slow_divide", handle, &args(|w| {
-            8_i64.encode(w);
-            0_i64.encode(w);
-        }))
+        .call_object(
+            "Calculator",
+            "slow_divide",
+            handle,
+            &args(|w| {
+                8_i64.encode(w);
+                0_i64.encode(w);
+            }),
+        )
         .run_async()
         .unwrap_err();
-    assert_eq!(CalcError::decode_exact(&err).unwrap(), CalcError::DivideByZero);
+    assert_eq!(
+        CalcError::decode_exact(&err).unwrap(),
+        CalcError::DivideByZero
+    );
 
-    let unit = rt.call_object("Calculator", "slow_unit", handle, &[]).run_async().unwrap();
+    let unit = rt
+        .call_object("Calculator", "slow_unit", handle, &[])
+        .run_async()
+        .unwrap();
     assert!(unit.is_empty());
-    let len = rt.call_object("Calculator", "log_len", handle, &[]).sync_ok();
+    let len = rt
+        .call_object("Calculator", "log_len", handle, &[])
+        .sync_ok();
     assert_eq!(u32::decode_exact(&len).unwrap(), 1);
 }
 
@@ -334,30 +427,58 @@ fn stream_methods_map_every_item() {
 fn result_stream_methods_fail_before_the_stream_opens() {
     let (rt, handle) = runtime_with_calculator();
     let items = rt
-        .call_object("Calculator", "try_counts", handle, &args(|w| 2_i64.encode(w)))
+        .call_object(
+            "Calculator",
+            "try_counts",
+            handle,
+            &args(|w| 2_i64.encode(w)),
+        )
         .run_stream();
     assert_eq!(u32_items(items), [Ok(0), Ok(1)]);
     let err = rt
-        .call_object("Calculator", "try_counts", handle, &args(|w| (-1_i64).encode(w)))
+        .call_object(
+            "Calculator",
+            "try_counts",
+            handle,
+            &args(|w| (-1_i64).encode(w)),
+        )
         .sync_err();
-    assert_eq!(CalcError::decode_exact(&err).unwrap(), CalcError::NegativeStart(-1));
+    assert_eq!(
+        CalcError::decode_exact(&err).unwrap(),
+        CalcError::NegativeStart(-1)
+    );
 }
 
 #[test]
 fn async_stream_methods_open_lazily() {
     let (rt, handle) = runtime_with_calculator();
     let items = rt
-        .call_object("Calculator", "later_counts", handle, &args(|w| 2_u32.encode(w)))
+        .call_object(
+            "Calculator",
+            "later_counts",
+            handle,
+            &args(|w| 2_u32.encode(w)),
+        )
         .run_stream();
     assert_eq!(u32_items(items), [Ok(0), Ok(1)]);
 
     let items = rt
-        .call_object("Calculator", "try_later_counts", handle, &args(|w| 2_i64.encode(w)))
+        .call_object(
+            "Calculator",
+            "try_later_counts",
+            handle,
+            &args(|w| 2_i64.encode(w)),
+        )
         .run_stream();
     assert_eq!(u32_items(items), [Ok(0), Ok(1)]);
     // An error after `await` becomes the single error item of the stream.
     let items = rt
-        .call_object("Calculator", "try_later_counts", handle, &args(|w| (-3_i64).encode(w)))
+        .call_object(
+            "Calculator",
+            "try_later_counts",
+            handle,
+            &args(|w| (-3_i64).encode(w)),
+        )
         .run_stream();
     assert_eq!(u32_items(items), [Err(CalcError::NegativeStart(-3))]);
 }
@@ -365,33 +486,58 @@ fn async_stream_methods_open_lazily() {
 #[test]
 fn private_and_crate_visible_functions_are_not_exposed() {
     let schema = collect_schema("objects-test");
-    let calc = schema.objects.iter().find(|o| o.name == "Calculator").unwrap();
+    let calc = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Calculator")
+        .unwrap();
     let methods: Vec<&str> = calc.methods.iter().map(|m| m.name.as_str()).collect();
     assert!(!methods.contains(&"helper"));
     assert!(!methods.contains(&"crate_visible"));
     assert!(!methods.contains(&"ctx_is_alive"));
     let ctors: Vec<&str> = calc.constructors.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(ctors, ["new", "from_owned_ctx", "without_ctx", "checked"]);
+    assert!(
+        methods.contains(&"old_add"),
+        "deprecated methods stay part of the API"
+    );
+    assert!(!methods.contains(&"only_in_tests"));
 }
 
 #[test]
 fn object_meta_describes_signatures() {
     let schema = collect_schema("objects-test");
-    let calc = schema.objects.iter().find(|o| o.name == "Calculator").unwrap();
+    let calc = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Calculator")
+        .unwrap();
     assert_eq!(calc.type_id, ids::type_id("Calculator"));
     assert_eq!(calc.docs, "A calculator.");
     assert!(calc.store.is_none());
-    assert_eq!(<Calculator as KeelObject>::TYPE_ID, ids::type_id("Calculator"));
+    assert_eq!(
+        <Calculator as KeelObject>::TYPE_ID,
+        ids::type_id("Calculator")
+    );
     assert_eq!(<Calculator as KeelObject>::NAME, "Calculator");
 
     let method = |name: &str| calc.methods.iter().find(|m| m.name == name).unwrap();
     let add = method("add");
     assert_eq!(add.method_id, ids::method_id("Calculator", "add"));
     assert_eq!(add.docs, "Adds to the base.");
-    assert_eq!(add.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(
+        add.params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
     assert_eq!(add.returns, TypeRef::I64);
     assert!(!add.is_async && !add.takes_ctx);
-    assert_eq!(method("divide").returns, TypeRef::result(TypeRef::I64, TypeRef::named("CalcError")));
+    assert_eq!(
+        method("divide").returns,
+        TypeRef::result(TypeRef::I64, TypeRef::named("CalcError"))
+    );
     assert_eq!(method("reset").returns, TypeRef::Unit);
     assert!(method("slow_add").is_async);
     assert_eq!(method("counts").returns, TypeRef::stream(TypeRef::U32));
@@ -473,21 +619,30 @@ fn free_functions_dispatch() {
 fn async_free_functions_get_the_context() {
     let rt = Runtime::new();
     let ok = rt
-        .call_function("greet_later", &args(|w| {
-            "abc".to_owned().encode(w);
-            true.encode(w);
-        }))
+        .call_function(
+            "greet_later",
+            &args(|w| {
+                "abc".to_owned().encode(w);
+                true.encode(w);
+            }),
+        )
         .run_async()
         .unwrap();
     assert_eq!(String::decode_exact(&ok).unwrap(), "ABC");
     let err = rt
-        .call_function("greet_later", &args(|w| {
-            String::new().encode(w);
-            false.encode(w);
-        }))
+        .call_function(
+            "greet_later",
+            &args(|w| {
+                String::new().encode(w);
+                false.encode(w);
+            }),
+        )
         .run_async()
         .unwrap_err();
-    assert_eq!(CalcError::decode_exact(&err).unwrap(), CalcError::DivideByZero);
+    assert_eq!(
+        CalcError::decode_exact(&err).unwrap(),
+        CalcError::DivideByZero
+    );
 }
 
 #[test]

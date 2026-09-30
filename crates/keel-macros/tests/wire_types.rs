@@ -272,6 +272,59 @@ fn recursive_records_round_trip_and_are_depth_limited() {
     ));
 }
 
+/// Recursive types written with `Self`.
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Outline {
+    pub title: String,
+    pub sections: Vec<Self>,
+    pub parent: Option<Box<Self>>,
+}
+
+/// A recursive enum written with `Self`.
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub enum Expr {
+    Num(i64),
+    Add(Box<Self>, Box<Self>),
+    Neg { inner: Box<Self> },
+}
+
+#[test]
+fn self_in_fields_means_the_type_itself() {
+    let outline = Outline {
+        title: "a".into(),
+        sections: vec![Outline {
+            title: "b".into(),
+            sections: vec![],
+            parent: None,
+        }],
+        parent: Some(Box::new(Outline {
+            title: "p".into(),
+            sections: vec![],
+            parent: None,
+        })),
+    };
+    assert_eq!(
+        Outline::decode_exact(&outline.encode_to_vec()).unwrap(),
+        outline
+    );
+    let expr = Expr::Add(
+        Box::new(Expr::Num(1)),
+        Box::new(Expr::Neg {
+            inner: Box::new(Expr::Num(2)),
+        }),
+    );
+    assert_eq!(Expr::decode_exact(&expr.encode_to_vec()).unwrap(), expr);
+
+    let def = record_def("Outline");
+    assert_eq!(def.fields[1].ty, TypeRef::vec(TypeRef::named("Outline")));
+    assert_eq!(def.fields[2].ty, TypeRef::option(TypeRef::named("Outline")));
+    let def = enum_def("Expr");
+    assert_eq!(def.variants[1].fields[0].ty, TypeRef::named("Expr"));
+    assert_eq!(def.variants[2].fields[0].ty, TypeRef::named("Expr"));
+}
+
 /// Uses the second path to the facade.
 #[k::api(crate = "::keel::rooted")]
 #[derive(Clone, Debug, PartialEq)]
@@ -295,7 +348,12 @@ fn crate_override_works_from_arguments_and_attributes() {
         RootedByAttribute { x: 5 }
     );
     assert!(schema().records.iter().any(|r| r.name == "Rooted"));
-    assert!(schema().records.iter().any(|r| r.name == "RootedByAttribute"));
+    assert!(
+        schema()
+            .records
+            .iter()
+            .any(|r| r.name == "RootedByAttribute")
+    );
 }
 
 /// Raw identifiers are unwrapped in the schema.
@@ -315,7 +373,10 @@ fn raw_identifiers_lose_their_prefix_in_the_schema() {
         r#type: "t".into(),
         r#match: 1,
     };
-    assert_eq!(Keywords::decode_exact(&value.encode_to_vec()).unwrap(), value);
+    assert_eq!(
+        Keywords::decode_exact(&value.encode_to_vec()).unwrap(),
+        value
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -429,7 +490,10 @@ pub enum Filter {
 
 #[test]
 fn unit_enums_are_two_bytes() {
-    for (i, filter) in [Filter::All, Filter::Active, Filter::Done].into_iter().enumerate() {
+    for (i, filter) in [Filter::All, Filter::Active, Filter::Done]
+        .into_iter()
+        .enumerate()
+    {
         let bytes = filter.encode_to_vec();
         assert_eq!(bytes, [i as u8, 0]);
         assert_eq!(Filter::decode_exact(&bytes).unwrap(), filter);
@@ -502,7 +566,10 @@ fn error_display_follows_the_messages() {
         "storage failed"
     );
     assert_eq!(TodoError::Braces(3).to_string(), "{literal} 3");
-    assert_eq!(TodoError::Second("a".into(), 9).to_string(), "only the second: 9");
+    assert_eq!(
+        TodoError::Second("a".into(), 9).to_string(),
+        "only the second: 9"
+    );
 }
 
 #[test]
@@ -545,7 +612,10 @@ fn errors_encode_like_enums() {
         TodoError::Http(HttpError::Network("x".into())),
         TodoError::Storage(HttpError::Timeout),
     ] {
-        assert_eq!(TodoError::decode_exact(&value.encode_to_vec()).unwrap(), value);
+        assert_eq!(
+            TodoError::decode_exact(&value.encode_to_vec()).unwrap(),
+            value
+        );
     }
     // Variant index then the inner error (index 0 = Network).
     let mut expected = vec![4, 0, 0, 0];
@@ -562,10 +632,19 @@ fn error_meta_carries_is_error_and_messages() {
     let def = enum_def("TodoError");
     assert!(def.is_error);
     assert_eq!(def.docs, "Failures of the todo core.");
-    assert_eq!(def.variants[0].message.as_deref(), Some("title cannot be empty"));
+    assert_eq!(
+        def.variants[0].message.as_deref(),
+        Some("title cannot be empty")
+    );
     assert_eq!(def.variants[0].docs, "The title was blank.");
-    assert_eq!(def.variants[1].message.as_deref(), Some("todo {0} not found"));
-    assert_eq!(def.variants[2].message.as_deref(), Some("code {code}: {reason}"));
+    assert_eq!(
+        def.variants[1].message.as_deref(),
+        Some("todo {0} not found")
+    );
+    assert_eq!(
+        def.variants[2].message.as_deref(),
+        Some("code {code}: {reason}")
+    );
     assert!(!def.variants[2].tuple);
     // Transparent variants have no message of their own.
     assert_eq!(def.variants[4].message, None);

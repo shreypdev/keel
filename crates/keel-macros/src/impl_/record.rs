@@ -66,6 +66,7 @@ pub(crate) enum Mode {
 
 fn parse_fields<'a>(
     fields: impl Iterator<Item = &'a mut syn::Field>,
+    self_name: &str,
     mode: Mode,
     errors: &mut Errors,
 ) -> Vec<FieldModel> {
@@ -81,7 +82,7 @@ fn parse_fields<'a>(
         } else {
             (false, false)
         };
-        let kty = match map_field(&field.ty, &name) {
+        let kty = match map_field(&field.ty, &name, self_name) {
             Ok(kty) => kty,
             Err(err) => {
                 errors.push(err.into_error());
@@ -111,12 +112,20 @@ fn item_shape(what: &str, node: &impl quote::ToTokens, why: &str, help: &str) ->
 // ---------------------------------------------------------------------------------------------
 
 /// Expands `#[keel::api]` on a struct.
-pub(crate) fn expand_struct(args_root: Option<Root>, mut item: ItemStruct) -> syn::Result<TokenStream> {
+pub(crate) fn expand_struct(
+    args_root: Option<Root>,
+    mut item: ItemStruct,
+) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     check_generics(&item.generics, &item.ident.to_string(), &mut errors);
     let fields = match &mut item.fields {
-        Fields::Named(named) => parse_fields(named.named.iter_mut(), Mode::Api, &mut errors),
+        Fields::Named(named) => parse_fields(
+            named.named.iter_mut(),
+            &unraw(&item.ident),
+            Mode::Api,
+            &mut errors,
+        ),
         Fields::Unit => Vec::new(),
         Fields::Unnamed(unnamed) => {
             errors.push(item_shape(
@@ -240,7 +249,7 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
                 }
                 (
                     Shape::Tuple,
-                    parse_fields(unnamed.unnamed.iter_mut(), mode, errors),
+                    parse_fields(unnamed.unnamed.iter_mut(), &enum_name, mode, errors),
                 )
             }
             Fields::Named(named) => {
@@ -254,7 +263,7 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
                 }
                 (
                     Shape::Named,
-                    parse_fields(named.named.iter_mut(), mode, errors),
+                    parse_fields(named.named.iter_mut(), &enum_name, mode, errors),
                 )
             }
         };
@@ -288,7 +297,10 @@ pub(crate) fn variant_pattern(variant: &VariantModel, bindings: &[syn::Ident]) -
         Shape::Unit => quote!(Self::#ident),
         Shape::Tuple => quote!(Self::#ident( #(#bindings),* )),
         Shape::Named => {
-            let names = variant.fields.iter().map(|f| f.ident.as_ref().expect("named"));
+            let names = variant
+                .fields
+                .iter()
+                .map(|f| f.ident.as_ref().expect("named"));
             quote!(Self::#ident { #(#names: #bindings),* })
         }
     }
@@ -319,7 +331,8 @@ pub(crate) fn expand_enum(
 
     // `std::error::Error` needs `Debug`; add the derive unless the user wrote one.
     if is_error && !derives(&item.attrs, "Debug") {
-        item.attrs.push(syn::parse_quote!(#[derive(::core::fmt::Debug)]));
+        item.attrs
+            .push(syn::parse_quote!(#[derive(::core::fmt::Debug)]));
     }
 
     let encode_arms = variants.iter().map(|v| {
@@ -574,14 +587,8 @@ mod tests {
             "{out}"
         );
         assert!(has(&out, "::core::write!(__fmt, \"io: {__f0}\")"), "{out}");
-        assert!(
-            has(&out, "::core::write!(__fmt, \"bad {__f0}\")"),
-            "{out}"
-        );
-        assert!(
-            has(&out, "::core::fmt::Display::fmt(__f0, __fmt)"),
-            "{out}"
-        );
+        assert!(has(&out, "::core::write!(__fmt, \"bad {__f0}\")"), "{out}");
+        assert!(has(&out, "::core::fmt::Display::fmt(__f0, __fmt)"), "{out}");
         assert!(has(&out, "::std::error::Error::source(__f0)"), "{out}");
         assert!(has(&out, "_ => ::core::option::Option::None"), "{out}");
         assert!(

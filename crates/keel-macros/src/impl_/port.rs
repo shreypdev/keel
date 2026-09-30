@@ -171,7 +171,7 @@ fn analyze_method(
 
     let mut params = Vec::new();
     let mut ok = true;
-    for (index, arg) in method.sig.inputs.iter_mut().enumerate() {
+    for arg in method.sig.inputs.iter_mut() {
         let FnArg::Typed(pat_type) = arg else {
             continue;
         };
@@ -333,10 +333,12 @@ pub(crate) fn expand_trait(
         })
     };
     if !has_bound(&item, "Send") {
-        item.supertraits.push(syn::parse_quote!(::core::marker::Send));
+        item.supertraits
+            .push(syn::parse_quote!(::core::marker::Send));
     }
     if !has_bound(&item, "Sync") {
-        item.supertraits.push(syn::parse_quote!(::core::marker::Sync));
+        item.supertraits
+            .push(syn::parse_quote!(::core::marker::Sync));
     }
     let mut boxed_sigs: Vec<syn::Signature> = Vec::new();
     for trait_item in &mut item.items {
@@ -838,9 +840,7 @@ pub(crate) fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
 }
 
 /// Parses the arguments of `#[keel::port(..)]`.
-pub(crate) fn parse_port_args(
-    attr: TokenStream,
-) -> syn::Result<(Option<Root>, Requested)> {
+pub(crate) fn parse_port_args(attr: TokenStream) -> syn::Result<(Option<Root>, Requested)> {
     let mut root = None;
     let mut requested = Requested::Inferred;
     let mut conflict: Option<syn::Error> = None;
@@ -920,7 +920,11 @@ mod tests {
 
     #[test]
     fn sync_ports_use_port_call_sync() {
-        let out = trait_result("pub trait Clock { fn now_ms(&self) -> i64; }", Requested::Sync).unwrap();
+        let out = trait_result(
+            "pub trait Clock { fn now_ms(&self) -> i64; }",
+            Requested::Sync,
+        )
+        .unwrap();
         assert!(has(&out, "port_call_sync"), "{out}");
         assert!(has(&out, "PortKind::Sync"), "{out}");
         assert!(!has(&out, "Box::pin(async move"), "{out}");
@@ -944,7 +948,13 @@ mod tests {
         )
         .unwrap();
         assert!(has(&out, "pub fn on_connectivity_changed"), "{out}");
-        assert!(has(&out, "pub fn encode_connectivity_changed_event(online: bool, kind: NetKind)"), "{out}");
+        assert!(
+            has(
+                &out,
+                "pub fn encode_connectivity_changed_event(online: bool, kind: NetKind)"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "PortKind::Event"), "{out}");
         assert!(!has(&out, "ConnectivityProxy"), "{out}");
     }
@@ -952,35 +962,72 @@ mod tests {
     #[test]
     fn port_diagnostics() {
         let e = |src: &str, req: Requested| trait_result(src, req).unwrap_err();
-        assert!(e("trait P { fn f(&self, s: &str); }", Requested::Inferred).contains("error[keel::E0030]"));
-        assert!(e("trait P { fn f(&self, s: Box<dyn Fn()>); }", Requested::Inferred).contains("error[keel::E0030]"));
-        assert!(e("trait P { fn f(&self) -> u8; }", Requested::Event).contains("error[keel::E0031]"));
-        assert!(e("trait P { async fn f(&self); }", Requested::Event).contains("error[keel::E0031]"));
-        assert!(e("trait P { async fn f(&self); }", Requested::Sync).contains("error[keel::E0032]"));
-        assert!(e("trait P { fn f(&mut self); }", Requested::Inferred).contains("error[keel::E0020]"));
+        assert!(
+            e("trait P { fn f(&self, s: &str); }", Requested::Inferred)
+                .contains("error[keel::E0030]")
+        );
+        assert!(
+            e(
+                "trait P { fn f(&self, s: Box<dyn Fn()>); }",
+                Requested::Inferred
+            )
+            .contains("error[keel::E0030]")
+        );
+        assert!(
+            e("trait P { fn f(&self) -> u8; }", Requested::Event).contains("error[keel::E0031]")
+        );
+        assert!(
+            e("trait P { async fn f(&self); }", Requested::Event).contains("error[keel::E0031]")
+        );
+        assert!(
+            e("trait P { async fn f(&self); }", Requested::Sync).contains("error[keel::E0032]")
+        );
+        assert!(
+            e("trait P { fn f(&mut self); }", Requested::Inferred).contains("error[keel::E0020]")
+        );
         assert!(e("trait P { fn f(self); }", Requested::Inferred).contains("error[keel::E0021]"));
         assert!(e("trait P { fn f(); }", Requested::Inferred).contains("no `&self` receiver"));
-        assert!(e("trait P { type X; fn f(&self); }", Requested::Inferred).contains("not a method"));
+        assert!(
+            e("trait P { type X; fn f(&self); }", Requested::Inferred).contains("not a method")
+        );
         assert!(e("trait P<T> { fn f(&self); }", Requested::Inferred).contains("E0002"));
         assert!(e("trait P { fn f<T>(&self, x: T); }", Requested::Inferred).contains("E0002"));
         assert!(e("trait P { }", Requested::Inferred).contains("no methods"));
-        assert!(e("trait P { fn f(&self) -> impl Stream<Item = u8>; }", Requested::Inferred).contains("returns a stream"));
+        assert!(
+            e(
+                "trait P { fn f(&self) -> impl Stream<Item = u8>; }",
+                Requested::Inferred
+            )
+            .contains("returns a stream")
+        );
     }
 
     #[test]
     fn e0030_keeps_the_underlying_reason() {
-        let message = trait_result("trait P { fn f(&self, s: &str); }", Requested::Inferred).unwrap_err();
-        assert!(message.contains("parameter `s` of port method `f` is not a wire type"), "{message}");
-        assert!(message.contains("references have no wire representation"), "{message}");
+        let message =
+            trait_result("trait P { fn f(&self, s: &str); }", Requested::Inferred).unwrap_err();
+        assert!(
+            message.contains("parameter `s` of port method `f` is not a wire type"),
+            "{message}"
+        );
+        assert!(
+            message.contains("references have no wire representation"),
+            "{message}"
+        );
         assert!(message.contains("use an owned `String`"), "{message}");
     }
 
     #[test]
     fn wildcard_and_pattern_parameters_are_rejected() {
-        let message = trait_result("pub trait P { fn f(&self, _: u8); }", Requested::Inferred).unwrap_err();
+        let message =
+            trait_result("pub trait P { fn f(&self, _: u8); }", Requested::Inferred).unwrap_err();
         assert!(message.contains("error[keel::E0032]"), "{message}");
         assert!(message.contains("is not a plain name"), "{message}");
-        let message = trait_result("pub trait P { fn f(&self, (a, b): (u8, u8)); }", Requested::Inferred).unwrap_err();
+        let message = trait_result(
+            "pub trait P { fn f(&self, (a, b): (u8, u8)); }",
+            Requested::Inferred,
+        )
+        .unwrap_err();
         assert!(message.contains("is not a plain name"), "{message}");
     }
 
@@ -990,7 +1037,12 @@ mod tests {
         assert_eq!(parse("").unwrap().1, Requested::Inferred);
         assert_eq!(parse("sync").unwrap().1, Requested::Sync);
         assert_eq!(parse("event").unwrap().1, Requested::Event);
-        assert!(parse("sync, event").unwrap_err().to_string().contains("cannot be combined"));
+        assert!(
+            parse("sync, event")
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be combined")
+        );
         assert!(parse("bogus").unwrap_err().to_string().contains("E0008"));
         assert!(parse("crate = \"::k\"").unwrap().0.is_some());
     }
@@ -1002,16 +1054,37 @@ mod tests {
         )
         .unwrap();
         let out = expand_impl(item).unwrap().to_string();
-        assert!(has(&out, "fn request(&self, req: HttpRequest) -> ::core::pin::Pin<::std::boxed::Box<dyn ::core::future::Future<Output = Result<u8, E>> + ::core::marker::Send + '_>> { ::std::boxed::Box::pin(async move { Ok(1) }) }"), "{out}");
+        assert!(
+            has(
+                &out,
+                "fn request(&self, req: HttpRequest) -> ::core::pin::Pin<::std::boxed::Box<dyn ::core::future::Future<Output = Result<u8, E>> + ::core::marker::Send + '_>> { ::std::boxed::Box::pin(async move { Ok(1) }) }"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "fn sync(&self) {}"), "{out}");
         let inherent: ItemImpl = syn::parse_str("impl Fake { fn f(&self) {} }").unwrap();
-        assert!(expand_impl(inherent).unwrap_err().to_string().contains("E0007"));
+        assert!(
+            expand_impl(inherent)
+                .unwrap_err()
+                .to_string()
+                .contains("E0007")
+        );
     }
 
     #[test]
     fn method_ids_use_the_port_formula() {
-        let out = trait_result("pub trait Clock { fn now_ms(&self) -> i64; }", Requested::Sync).unwrap();
-        assert!(has(&out, "::keel::meta::ids::port_method_id(\"Clock\", \"now_ms\")"), "{out}");
+        let out = trait_result(
+            "pub trait Clock { fn now_ms(&self) -> i64; }",
+            Requested::Sync,
+        )
+        .unwrap();
+        assert!(
+            has(
+                &out,
+                "::keel::meta::ids::port_method_id(\"Clock\", \"now_ms\")"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "::keel::meta::ids::port_id(\"Clock\")"), "{out}");
     }
 }
