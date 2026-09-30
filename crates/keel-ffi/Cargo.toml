@@ -6,6 +6,25 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel: ffi crate (stub, to be implemented)"
+description = "Keel: the C ABI, JNI shim and wasm ABI over keel-runtime"
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[features]
+default = []
+jni = ["dep:jni"]
 
 [dependencies]
+keel-runtime = { workspace = true }
+jni = { workspace = true, optional = true }
+
+[dev-dependencies]
+keel = { workspace = true }
+serde_json = { workspace = true }
+criterion = { workspace = true, features = ["cargo_bench_support"] }
+proptest = { workspace = true }
+
+[[bench]]
+name = "boundary"
+harness = false
