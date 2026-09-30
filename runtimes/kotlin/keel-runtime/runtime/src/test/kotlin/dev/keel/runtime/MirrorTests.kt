@@ -279,12 +279,14 @@ class MirrorTests : Suite() {
                 if (v == 1) {
                     // Like a store re-observing a desynchronised signal: the core answers with a newer change-set.
                     mirror.submit(changeSet(9uL, full(1L, 5u, u32(99))))
-                    mirror.awaitApplied(1000) // must not apply the newer change-set before the rest of this batch
+                    // Must neither apply the newer change-set before the rest of this batch nor report a timeout.
+                    assertTrue(mirror.awaitApplied(1000))
+                    order.add(-1)
                 }
             }
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(1L, 1u, u32(2)), full(1L, 2u, u32(3))))
             main.runPending()
-            assertEq(listOf(1, 2, 3, 99), order.toList())
+            assertEq(listOf(1, -1, 2, 3, 99), order.toList())
         }
 
         case("a burst larger than one hop's budget is still applied completely, over several hops") {

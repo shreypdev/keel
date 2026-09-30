@@ -37,6 +37,9 @@ fun main() {
         CoreCallTests(),
         StreamTests(),
         MirrorTests(),
+        StoreTests(),
+        PortTests(),
+        InprocTransportTests(),
     )
     var failures = 0
     var cases = 0

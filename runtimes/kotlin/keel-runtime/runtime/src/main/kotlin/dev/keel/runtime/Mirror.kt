@@ -86,13 +86,17 @@ public open class Mirror internal constructor(private val main: MainThread) {
     /**
      * Waits until every change-set submitted before this call has been applied. On the main thread
      * this applies them right away; anywhere else it blocks up to [timeoutMillis] for the main thread
-     * to do it. Returns `false` if they were not all applied in time (or, on the main thread, because
-     * this call came from inside a running callback, whose batch will still pick them up).
+     * to do it. Returns `false` only if the wait timed out.
+     *
+     * Called from inside a running callback (a store re-observing a signal it lost sync with), it
+     * cannot apply anything without reordering the batch in progress, so it returns `true` at once: the
+     * batch picks the new change-sets up as soon as the current callback returns.
      */
     internal fun awaitApplied(timeoutMillis: Long): Boolean {
         val target = submitted.get()
         if (applied.get() >= target) return true
         if (main.isCurrent()) {
+            if (draining) return true
             drain()
             return applied.get() >= target
         }

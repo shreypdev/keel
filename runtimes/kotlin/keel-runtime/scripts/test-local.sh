@@ -19,6 +19,7 @@
 #   KEEL_WERROR=0 scripts/test-local.sh   # do not treat compiler warnings as errors
 #   KEEL_FORCE=1 scripts/test-local.sh    # ignore the up-to-date stamps and recompile
 #   KEEL_SKIP_GOLDEN=1 scripts/test-local.sh   # leave the generated golden/full code out of the test build
+#   KEEL_BUILD_DIR=/tmp/keel-kotlin scripts/test-local.sh   # put the build output elsewhere (default: build/local)
 #   KEEL_NATIVE_LIB_DIR=target/debug scripts/test-local.sh run   # -Djava.library.path for the JNI smoke test
 #
 # Environment: KEEL_KOTLINX_COROUTINES (kotlinx-coroutines-core-jvm jar; scripts/env.sh sets it),
@@ -27,7 +28,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # runtimes/kotlin/keel-runtime
 REPO="$(cd "$HERE/../../.." && pwd)"
-OUT="$HERE/build/local"
+OUT="${KEEL_BUILD_DIR:-$HERE/build/local}"
 PHASE="${1:-all}"
 
 # --- toolchain -------------------------------------------------------------------------------------------
