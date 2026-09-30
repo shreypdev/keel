@@ -1,4 +1,4 @@
-# playground iOS smoke run, 2026-09-30 12:21:18
+# playground iOS smoke run, 2026-09-30 12:28:48
 
 $ xcodebuild -version
 Xcode 26.6
@@ -31,7 +31,19 @@ simulator iPhone 17 Pro = D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C
 
 $ xcrun simctl bootstatus D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C -b
 Monitoring boot status for iPhone 17 Pro (D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C).
-Device already booted, nothing to do.
+[2026-09-30 19:28:52 +0000] Status=2, isTerminal=NO, Elapsed=00:00.
+	Waiting on Data Migration
+		Reason:(null)
+		Migration Elapsed:00:00 seconds
+
+[2026-09-30 19:28:52 +0000] Status=4, isTerminal=NO, Elapsed=00:01.
+	Waiting on System App
+
+[2026-09-30 19:28:53 +0000] Status=4, isTerminal=NO, Elapsed=00:02.
+	Waiting on System App
+
+[2026-09-30 19:28:54 +0000] Status=4294967295, isTerminal=YES, Elapsed=00:03.
+	Finished
 
 
 $ xcrun simctl terminate D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C dev.keel.playground
@@ -47,51 +59,51 @@ $ xcrun simctl uninstall D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C dev.keel.playgroun
 $ xcrun simctl install D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C /Users/shrey/Desktop/src/.work/playground/examples/playground/ios/DerivedData/Build/Products/Debug-iphonesimulator/PlaygroundApp.app
 
 $ xcrun simctl launch D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C dev.keel.playground -tab todos
-dev.keel.playground: 21480
+dev.keel.playground: 29543
 
 $ xcrun simctl io D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C screenshot /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-todos.png
 Detected file type from extension: PNG
-Note: No display specified. Defaulting to display: EE0F8CB3-41AD-4735-B931-CA8F18130DF2 (screenID: 1, name: LCD)
+Note: No display specified. Defaulting to display: 43D0AD8F-8A6F-4134-8B40-341C3594598A (screenID: 1, name: LCD)
 Wrote screenshot to: /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-todos.png
 
 $ xcrun simctl spawn D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C launchctl list | grep dev.keel.playground
-21480	0	UIKitApplication:dev.keel.playground[5fdc][rb-legacy]
+29543	0	UIKitApplication:dev.keel.playground[c18f][rb-legacy]
 alive: todos
 
 $ xcrun simctl launch D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C dev.keel.playground -tab counter
-dev.keel.playground: 21501
+dev.keel.playground: 29600
 
 $ xcrun simctl io D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C screenshot /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-counter.png
 Detected file type from extension: PNG
-Note: No display specified. Defaulting to display: EE0F8CB3-41AD-4735-B931-CA8F18130DF2 (screenID: 1, name: LCD)
+Note: No display specified. Defaulting to display: 43D0AD8F-8A6F-4134-8B40-341C3594598A (screenID: 1, name: LCD)
 Wrote screenshot to: /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-counter.png
 
 $ xcrun simctl spawn D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C launchctl list | grep dev.keel.playground
-21501	0	UIKitApplication:dev.keel.playground[19fb][rb-legacy]
+29600	0	UIKitApplication:dev.keel.playground[9397][rb-legacy]
 alive: counter
 
 $ xcrun simctl launch D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C dev.keel.playground -tab biglist
-dev.keel.playground: 21521
+dev.keel.playground: 29663
 
 $ xcrun simctl io D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C screenshot /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-biglist.png
 Detected file type from extension: PNG
-Note: No display specified. Defaulting to display: EE0F8CB3-41AD-4735-B931-CA8F18130DF2 (screenID: 1, name: LCD)
+Note: No display specified. Defaulting to display: 43D0AD8F-8A6F-4134-8B40-341C3594598A (screenID: 1, name: LCD)
 Wrote screenshot to: /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-biglist.png
 
 $ xcrun simctl spawn D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C launchctl list | grep dev.keel.playground
-21521	0	UIKitApplication:dev.keel.playground[3e48][rb-legacy]
+29663	0	UIKitApplication:dev.keel.playground[b593][rb-legacy]
 alive: biglist
 
 $ xcrun simctl launch D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C dev.keel.playground -tab remote
-dev.keel.playground: 21722
+dev.keel.playground: 29693
 
 $ xcrun simctl io D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C screenshot /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-remote.png
 Detected file type from extension: PNG
-Note: No display specified. Defaulting to display: EE0F8CB3-41AD-4735-B931-CA8F18130DF2 (screenID: 1, name: LCD)
+Note: No display specified. Defaulting to display: 43D0AD8F-8A6F-4134-8B40-341C3594598A (screenID: 1, name: LCD)
 Wrote screenshot to: /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-remote.png
 
 $ xcrun simctl spawn D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C launchctl list | grep dev.keel.playground
-21722	0	UIKitApplication:dev.keel.playground[be34][rb-legacy]
+29693	0	UIKitApplication:dev.keel.playground[1869][rb-legacy]
 alive: remote
 
 $ xcrun simctl spawn D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C log show --last 5m --predicate 'process == "PlaygroundApp" AND (messageType == fault OR (messageType == error AND subsystem BEGINSWITH "dev.keel"))'
@@ -99,25 +111,25 @@ no fault lines and no Keel error lines in the app's log
 
 $ crash reports for PlaygroundApp since this run started
 none
-441922  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-biglist-streaming.png
-508074  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-biglist.png
-117707  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-counter-tour.png
-137242  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-counter.png
-185609  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-remote-offline.png
-190818  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-remote.png
-244560  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-todos-tour.png
-161481  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-todos.png
+438800  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-biglist-streaming.png
+509054  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-biglist.png
+116759  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-counter-tour.png
+138210  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-counter.png
+183652  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-remote-offline.png
+191545  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-remote.png
+244530  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-todos-tour.png
+162397  /Users/shrey/Desktop/src/.work/playground/examples/playground/.proof/ios-todos.png
 
 $ xcodebuild test -project PlaygroundApp.xcodeproj -scheme PlaygroundApp -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -parallel-testing-enabled NO
-Test Suite 'All tests' started at 2026-09-30 12:21:47.133.
-Test Suite 'PlaygroundAppUITests.xctest' started at 2026-09-30 12:21:47.133.
-Test Suite 'PlaygroundTourTests' started at 2026-09-30 12:21:47.133.
-Test Suite 'PlaygroundTourTests' passed at 2026-09-30 12:23:21.529.
-	 Executed 5 tests, with 0 failures (0 unexpected) in 94.392 (94.396) seconds
-Test Suite 'PlaygroundAppUITests.xctest' passed at 2026-09-30 12:23:21.530.
-	 Executed 5 tests, with 0 failures (0 unexpected) in 94.392 (94.397) seconds
-Test Suite 'All tests' passed at 2026-09-30 12:23:21.530.
-	 Executed 5 tests, with 0 failures (0 unexpected) in 94.392 (94.397) seconds
+Test Suite 'All tests' started at 2026-09-30 12:29:21.235.
+Test Suite 'PlaygroundAppUITests.xctest' started at 2026-09-30 12:29:21.235.
+Test Suite 'PlaygroundTourTests' started at 2026-09-30 12:29:21.235.
+Test Suite 'PlaygroundTourTests' passed at 2026-09-30 12:30:56.605.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 95.366 (95.370) seconds
+Test Suite 'PlaygroundAppUITests.xctest' passed at 2026-09-30 12:30:56.606.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 95.366 (95.371) seconds
+Test Suite 'All tests' passed at 2026-09-30 12:30:56.606.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 95.366 (95.371) seconds
 ** TEST SUCCEEDED **
 
 $ xcrun simctl shutdown D1AA8B3A-BBF9-4C28-83A0-ACBC3C38FC5C

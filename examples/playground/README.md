@@ -14,7 +14,7 @@ examples/playground/
   ios/             SwiftUI app (Xcode)      -> build/ios/KeelCore.xcframework
   android/         Compose app (Gradle)     -> build/android/jniLibs/<abi>/libkeel_core.so
   build/           what `keel build` writes (not committed)
-  .proof/          screenshots and logs of the apps running on Chromium, the iOS simulator and an emulator
+  .proof/          screenshots and logs of the apps running on Chromium, the iOS simulator and an Android emulator
 ```
 
 ## What the core shows
@@ -45,11 +45,20 @@ keel build   -C examples/playground --platform web,host,ios,android [--release]
 cargo test -p playground-core                    # the core's own tests (TestRuntime + keel::ports::fakes)
 ```
 
-Then run an app (each directory has its own README section in the files it ships):
+Then run an app:
 
-* web: `cd web && npm install && npm run dev`
-* iOS: open `ios/PlaygroundApp.xcodeproj` (first `keel build --platform ios`)
-* Android: `cd android && ./gradlew :app:installDebug` (first `keel build --platform android`)
+* web: `keel build -C examples/playground --platform web`, then `cd web && npm ci && npm run dev`
+  (`npm test` runs the fake server's tests, `npm run smoke` builds and drives the app in headless Chromium).
+* iOS: `keel build -C examples/playground --platform ios`, then open `ios/PlaygroundApp.xcodeproj`
+  (`KEEL_LINK_CORE=1` in the environment of Xcode, see the project settings), or run `ios/smoke.sh` to
+  build, launch every tab on the simulator, screenshot it and run the XCUITest tour.
+* Android: `keel build -C examples/playground --platform android`, then `cd android && ./gradlew
+  :app:installDebug` (`android/README.md` has the `adb` commands).
+
+The apps have no server: each supplies an in-memory `Http` adapter ("a server in a few lines of Swift, Kotlin
+or TypeScript") that answers for `https://playground.keel.test`, and an Offline switch on the Remote tab makes
+it fail every request and tells the core through the `Connectivity` port, so you can watch the offline queue
+hold an optimistic add and replay it.
 
 `keel dev -C examples/playground` serves the core over a WebSocket: start an app against it (web:
 `?keel=ws://127.0.0.1:7443`; iOS: the `KEEL_DEV_URL` environment variable) and edit `core/` to see the
