@@ -1,8 +1,8 @@
 {
-  "name": "@keel/contract-tests-ts",
+  "name": "@undra/contract-tests-ts",
   "version": "0.1.0",
   "private": true,
-  "description": "The TypeScript column of the seventeen contract scenarios (contract-tests/scenarios.md): @keel/runtime over the real wasm build of the playground core.",
+  "description": "The TypeScript column of the seventeen contract scenarios (contract-tests/scenarios.md): @undra/runtime over the real wasm build of the playground core.",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "engines": {

@@ -39,7 +39,7 @@ test("the playground runs: todos, counter, 10k list, remote", async ({ page }) =
   await expect(page.getByTestId("todo-input")).toBeVisible();
   const startedAt = await page.evaluate(() => performance.now());
   console.log(`startup: the first view was interactive ${startedAt.toFixed(0)} ms after navigation started (fetch, compile and instantiate the 538 KB core, create the stores, render)`);
-  await expect(page.getByRole("heading", { name: "Keel playground" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Undra playground" })).toBeVisible();
 
   // ---- Todos -------------------------------------------------------------------------------
   await test.step("todos: a refused add shows the typed error", async () => {
@@ -198,7 +198,7 @@ test("a core that cannot be loaded is reported on the page", async ({ page }) =>
   await page.route("**/*.wasm", (route) => route.abort());
   await page.goto("/");
   const alert = page.getByRole("alert");
-  await expect(alert).toContainText("Keel did not start");
+  await expect(alert).toContainText("Undra did not start");
   await expect(alert).toContainText("wasm core");
   await expect(page.getByTestId("tab-todos")).toHaveCount(0);
 });

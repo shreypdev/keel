@@ -1,0 +1,75 @@
+import type { HelloPayload, Kind, PortCallPayload } from "../wire/index.js";
+
+/*
+ * The seam between `UndraCore` and the thing that runs the Undra core (docs/SPEC.md
+ * sections 3.2, 7 and 11). A transport moves *logical envelopes*: a `Kind` and
+ * its payload bytes (SPEC 3.3 to 3.8). The wasm transports map them onto the
+ * ABI exports; the worker and WebSocket transports frame them with the 23-byte
+ * envelope header. `UndraCore` never sees the difference.
+ */
+
+/** How the host answers a `PortCall` (SPEC 6.3): now, later, or never. */
+export type PortOutcome =
+  /** The reply is ready: `reply` is a complete `PortReply` payload (`port_call_id u32, status u8, body`). */
+  | { readonly kind: "sync"; readonly reply: Uint8Array }
+  /** The host will send a `PortReply` envelope later with `Transport.send`. */
+  | { readonly kind: "async" }
+  /** Nobody implements the port (or the method); the core sees `PortError::Unavailable`. */
+  | { readonly kind: "unavailable" };
+
+/**
+ * What a transport calls when the core says something. `UndraCore` implements
+ * this. Handlers run inside the core's callbacks (the core lock may be held),
+ * so none of them may call back into the transport synchronously except
+ * `send(Kind.PortReply, ..)` from `portCall`.
+ */
+export interface TransportHandler {
+  /** A `Reply` payload (SPEC 3.4). */
+  reply(payload: Uint8Array): void;
+  /** A `ChangeSet` payload (SPEC 3.5). */
+  changeSet(payload: Uint8Array): void;
+  /** A `StreamItem` payload (SPEC 3.7). */
+  streamItem(payload: Uint8Array): void;
+  /** The core calls a platform port; answer with a {@link PortOutcome}. */
+  portCall(call: PortCallPayload): PortOutcome;
+  /** A log record from the core (`level` as the `Log` port defines it: 0 trace .. 5 fatal). */
+  log(level: number, target: string, message: string): void;
+  /** The channel is gone (connection closed, worker died, wasm trapped). Not called after the host closed the transport itself. */
+  closed(error: Error): void;
+}
+
+/**
+ * A way to reach an Undra core. The three implementations are
+ * {@link WasmMainTransport}, {@link WasmWorkerTransport} and
+ * {@link RemoteTransport}; tests and embedders can supply their own through
+ * `UndraCore.attach`.
+ */
+export interface Transport {
+  /** Name of the mode, for messages and `UndraModeError` (`"wasm-main"`, `"wasm-worker"`, `"remote"`). */
+  readonly mode: string;
+  /**
+   * `true` when the core runs on the calling thread inside `send`: everything
+   * the core emits in response (replies, change-sets) has been delivered to the
+   * handler by the time `send` returns. Only such transports offer `callSync`.
+   */
+  readonly synchronous: boolean;
+  /**
+   * Connects, performs the handshake and returns the core's `Hello`. Rejects
+   * with `UndraSchemaMismatchError` when the core was built from another
+   * schema, with `UndraTransportError` for anything else.
+   */
+  start(handler: TransportHandler): Promise<HelloPayload>;
+  /**
+   * Sends a host-to-core message: `Call`, `PortReply`, `Cancel`,
+   * `StreamCredit`, `Observe`, `Release`, `Event`, `TimerFired` or `Restore`.
+   * Throws `UndraTransportError` when the channel is closed and
+   * `UndraReplyError` (status 5) when a `Call` is refused without a reply.
+   */
+  send(kind: Kind, payload: Uint8Array): void;
+  /** Runs a `Call` and returns the `Reply` payload (SPEC 6 `undra_call_sync`). Present only when `synchronous`. */
+  callSync?(payload: Uint8Array): Uint8Array;
+  /** The core's statistics as JSON (`undra_stats_json`), or `null` when the transport cannot ask. */
+  stats?(): Promise<string | null>;
+  /** Releases the channel. Idempotent; the handler's `closed` is not called. */
+  close(): void;
+}

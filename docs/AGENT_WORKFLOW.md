@@ -1,4 +1,4 @@
-# The worktree workflow — how changes land on Keel
+# The worktree workflow — how changes land on Undra
 
 This is the working method that built v1, written down so the next contributor — human
 or AI agent — follows the same loop. It exists because parallel work on one checkout
@@ -65,7 +65,7 @@ No piece merges on its author's word. A reviewer who did not write the code atta
 * The author (or a fix round) closes every High/Medium with a regression test derived
   from the reviewer's repro, then the **same reviewer re-verifies** with their own
   repros and appends a per-finding CLOSED / NOT CLOSED verdict.
-* For `keel-ffi` (the only unsafe crate): the review runs ASan and Miri; a fix to a
+* For `undra-ffi` (the only unsafe crate): the review runs ASan and Miri; a fix to a
   safety finding is re-verified under the same tools.
 
 For small pieces the review can be a focused pass by the integrator; for core crates it
@@ -83,12 +83,12 @@ Then the integrator runs the **full matrix**, not just the touched crate:
 
 ```bash
 cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check
-(cd runtimes/ts/@keel/runtime && npm test)
-runtimes/kotlin/keel-runtime/scripts/test-local.sh
-(cd runtimes/swift/KeelRuntime && swift test)
-bash crates/keel-ffi/tests/wasm/run.sh && bash crates/keel-ffi/tests/c/run.sh
+(cd runtimes/ts/@undra/runtime && npm test)
+runtimes/kotlin/undra-runtime/scripts/test-local.sh
+(cd runtimes/swift/UndraRuntime && swift test)
+bash crates/undra-ffi/tests/wasm/run.sh && bash crates/undra-ffi/tests/c/run.sh
 bash contract-tests/run-all.sh
-cargo test -p keel-bench --test budgets --release
+cargo test -p undra-bench --test budgets --release
 ```
 
 Two rules of merge hygiene, both learned the hard way:

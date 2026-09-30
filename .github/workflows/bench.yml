@@ -1,6 +1,6 @@
 name: Bench
 
-# Constitution R9: budgets are tests. This workflow runs the budgets test of the `keel-bench`
+# Constitution R9: budgets are tests. This workflow runs the budgets test of the `undra-bench`
 # crate, which times every benchmarked operation (wire round trips, dispatch, change-sets, keyed
 # patches, snapshot and restore) with plain `Instant` and fails when the p50 of any of them is
 # over its budget in `bench/budgets.toml`.
@@ -10,8 +10,8 @@ name: Bench
 # They are not the blueprint's device targets (section 14: A15 iPhone, mid-range Android,
 # Chromium); those are measured on devices in the playground phase and recorded in
 # `bench/RESULTS.md`. A noisy run gets three attempts per operation (the best p50 counts).
-# If a runner class is consistently slower, set KEEL_BENCH_SCALE (for example 2) rather than
-# loosening the file. `cargo bench -p keel-bench` (criterion) is for humans and is deliberately
+# If a runner class is consistently slower, set UNDRA_BENCH_SCALE (for example 2) rather than
+# loosening the file. `cargo bench -p undra-bench` (criterion) is for humans and is deliberately
 # not run here.
 
 on:
@@ -36,4 +36,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Budgets
-        run: cargo test -p keel-bench --test budgets --release -- --nocapture
+        run: cargo test -p undra-bench --test budgets --release -- --nocapture

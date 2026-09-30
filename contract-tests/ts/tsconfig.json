@@ -19,7 +19,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@keel/runtime": ["../../runtimes/ts/@keel/runtime/src/index.ts"],
+      "@undra/runtime": ["../../runtimes/ts/@undra/runtime/src/index.ts"],
       "@playground/core": ["../../examples/playground/generated/ts/src/index.ts"]
     }
   },

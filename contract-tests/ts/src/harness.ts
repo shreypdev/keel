@@ -1,16 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
-import { type AdapterOverrides, KeelCore, type LoadOptions, WasmMainTransport } from "@keel/runtime";
-import { KeelIds } from "@playground/core";
+import { type AdapterOverrides, UndraCore, type LoadOptions, WasmMainTransport } from "@undra/runtime";
+import { UndraIds } from "@playground/core";
 import { CapturingLog } from "./capturing-log.js";
 import { FakeServer } from "./fake-server.js";
 import { ManualClock } from "./manual-clock.js";
 import { MemoryKv } from "./memory-kv.js";
 
-/** The playground core, built by `keel build -C examples/playground --platform web`. `KEEL_PLAYGROUND_WASM` overrides the path. */
+/** The playground core, built by `undra build -C examples/playground --platform web`. `UNDRA_PLAYGROUND_WASM` overrides the path. */
 export const PLAYGROUND_WASM: string =
-  process.env["KEEL_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/keel_core.wasm", import.meta.url));
+  process.env["UNDRA_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/undra_core.wasm", import.meta.url));
 
 /** The base URL every scenario that talks to the server configures (scenarios.md, "Server fixtures"). */
 export const BASE_URL = "https://playground.test";
@@ -26,7 +26,7 @@ export function playgroundModule(): Promise<WebAssembly.Module> {
     (bytes) => WebAssembly.compile(bytes),
     (cause: unknown) => {
       throw new Error(
-        `cannot read the playground core at ${PLAYGROUND_WASM}; build it with \`keel build -C examples/playground --platform web\` (contract-tests/ts/run.sh does)`,
+        `cannot read the playground core at ${PLAYGROUND_WASM}; build it with \`undra build -C examples/playground --platform web\` (contract-tests/ts/run.sh does)`,
         { cause },
       );
     },
@@ -49,14 +49,14 @@ export interface World {
 /** A loaded core and the world it runs in. */
 export interface Booted extends World {
   /** The core, loaded in `wasm-main` mode. */
-  readonly core: KeelCore;
+  readonly core: UndraCore;
   /** What the runtime reported through `onClose`: one entry when the channel to the core was lost. */
   readonly closed: Error[];
   /** What the runtime reported through `onError` (failures that have no caller to reject). */
   readonly runtimeErrors: unknown[];
 }
 
-/** A {@link Booted} core built over a `WasmMainTransport` the scenario holds, for what `KeelCore` does not expose (the wasm exports). */
+/** A {@link Booted} core built over a `WasmMainTransport` the scenario holds, for what `UndraCore` does not expose (the wasm exports). */
 export interface BootedRaw extends Booted {
   /** The transport `core` was attached to; `transport.instance` is the wasm instance. */
   readonly transport: WasmMainTransport;
@@ -64,7 +64,7 @@ export interface BootedRaw extends Booted {
 
 /** What a scenario may choose when it boots a core. */
 export interface BootOptions extends Partial<World> {
-  /** The schema hash to demand of the core. Default: the bindings' (`KeelIds.schemaHash`). */
+  /** The schema hash to demand of the core. Default: the bindings' (`UndraIds.schemaHash`). */
   readonly expectedSchemaHash?: bigint;
 }
 
@@ -106,9 +106,9 @@ function adaptersOf(world: World): AdapterOverrides {
 }
 
 /**
- * Loads a fresh core the way an app does: `KeelCore.load({ mode: "wasm-main" })` over the
+ * Loads a fresh core the way an app does: `UndraCore.load({ mode: "wasm-main" })` over the
  * playground's wasm, with the harness adapters (scenarios.md, "The harness"). The core is not
- * `KeelCore.shared`; pass it to the generated constructors. It is closed after the scenario.
+ * `UndraCore.shared`; pass it to the generated constructors. It is closed after the scenario.
  */
 export async function boot(options: BootOptions = {}): Promise<Booted> {
   const world = worldOf(options);
@@ -117,7 +117,7 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
   const load: LoadOptions = {
     mode: "wasm-main",
     wasm: await playgroundModule(),
-    expectedSchemaHash: options.expectedSchemaHash ?? KeelIds.schemaHash,
+    expectedSchemaHash: options.expectedSchemaHash ?? UndraIds.schemaHash,
     shared: false,
     adapters: adaptersOf(world),
     onClose: (error) => {
@@ -127,7 +127,7 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
       runtimeErrors.push(error);
     },
   };
-  const core = await KeelCore.load(load);
+  const core = await UndraCore.load(load);
   const loaded: Booted = { ...world, core, closed, runtimeErrors };
   booted.push(loaded);
   return loaded;
@@ -135,14 +135,14 @@ export async function boot(options: BootOptions = {}): Promise<Booted> {
 
 /**
  * Like {@link boot}, but builds the `WasmMainTransport` itself and attaches the core to it, so the
- * scenario can reach the wasm instance (`keel_snapshot`, `keel_schema_json`, ...). This is what
- * `KeelCore.load` does for mode `wasm-main`, step by step.
+ * scenario can reach the wasm instance (`undra_snapshot`, `undra_schema_json`, ...). This is what
+ * `UndraCore.load` does for mode `wasm-main`, step by step.
  */
 export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
   const world = worldOf(options);
   const closed: Error[] = [];
   const runtimeErrors: unknown[] = [];
-  const expectedSchemaHash = options.expectedSchemaHash ?? KeelIds.schemaHash;
+  const expectedSchemaHash = options.expectedSchemaHash ?? UndraIds.schemaHash;
   const transport = new WasmMainTransport({
     wasm: await playgroundModule(),
     expectedSchemaHash,
@@ -151,7 +151,7 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
       runtimeErrors.push(error);
     },
   });
-  const core = await KeelCore.attach(transport, {
+  const core = await UndraCore.attach(transport, {
     expectedSchemaHash,
     shared: false,
     adapters: adaptersOf(world),

@@ -1,5 +1,5 @@
 import Foundation
-import KeelRuntime
+import UndraRuntime
 import os
 import PlaygroundCore
 
@@ -15,7 +15,7 @@ import PlaygroundCore
 /// While offline every request fails with `HttpError.network`, and the core is told through the
 /// `Connectivity` port so that it queues idempotent mutations and replays them when the network
 /// returns.
-final class PlaygroundNetwork: KeelAdapter, @unchecked Sendable {
+final class PlaygroundNetwork: UndraAdapter, @unchecked Sendable {
     /// The one network of the app.
     static let shared = PlaygroundNetwork()
 
@@ -33,10 +33,10 @@ final class PlaygroundNetwork: KeelAdapter, @unchecked Sendable {
         var offline = false
         var nextId: UInt32 = 4
         var lists: [String: [ServerTodo]] = [
-            KeelBootstrap.inboxList: [
+            UndraBootstrap.inboxList: [
                 ServerTodo(id: 1, title: "Buy milk", done: false),
                 ServerTodo(id: 2, title: "Walk the dog", done: false),
-                ServerTodo(id: 3, title: "Write Keel", done: false),
+                ServerTodo(id: 3, title: "Write Undra", done: false),
             ],
         ]
         /// The item each `Idempotency-Key` already created.
@@ -56,7 +56,7 @@ final class PlaygroundNetwork: KeelAdapter, @unchecked Sendable {
 
     /// Makes the server unreachable (or reachable again) and tells the core, which replays what it
     /// queued when the network comes back.
-    func setOffline(_ offline: Bool, core: KeelCore = .shared) {
+    func setOffline(_ offline: Bool, core: UndraCore = .shared) {
         state.withLock { $0.offline = offline }
         core.event(
             port: WireConnectivity.portId,
@@ -71,12 +71,12 @@ final class PlaygroundNetwork: KeelAdapter, @unchecked Sendable {
         return fnv1a32("port.Http")
     }
 
-    func makePortImpl(core: KeelCore) -> PortImpl? {
+    func makePortImpl(core: UndraCore) -> PortImpl? {
         return .async([
             fnv1a32("Http.request"): { [self] arguments in
                 let request = try WireHttpRequest.decode(arguments)
                 if isOffline {
-                    throw KeelPortError(body: HttpError.network("The Internet connection appears to be offline.").keelEncoded())
+                    throw UndraPortError(body: HttpError.network("The Internet connection appears to be offline.").undraEncoded())
                 }
                 try await Task.sleep(for: PlaygroundNetwork.latency)
                 return respond(to: request).encoded()
@@ -84,9 +84,9 @@ final class PlaygroundNetwork: KeelAdapter, @unchecked Sendable {
         ])
     }
 
-    /// Routes one request. The URL is `https://playground.keel.test/lists/{list}/todos[/{id}]`.
+    /// Routes one request. The URL is `https://playground.undra.test/lists/{list}/todos[/{id}]`.
     private func respond(to request: WireHttpRequest) -> WireHttpResponse {
-        guard let url = URL(string: request.url), url.host == URL(string: KeelBootstrap.serverURL)?.host else {
+        guard let url = URL(string: request.url), url.host == URL(string: UndraBootstrap.serverURL)?.host else {
             return WireHttpResponse(status: 404, body: Data())
         }
         let path = url.pathComponents.filter { $0 != "/" }

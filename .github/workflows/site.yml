@@ -1,6 +1,6 @@
 name: Site
 
-# Publishes the static site in `site/` to GitHub Pages (https://shreypdev.github.io/keel/).
+# Publishes the static site in `site/` to GitHub Pages (https://shreypdev.github.io/undra/).
 # There is no build step: `site/` is plain HTML, CSS and JS and is uploaded as is.
 #
 # One-time repository setting: Settings > Pages > Build and deployment > Source = "GitHub Actions".

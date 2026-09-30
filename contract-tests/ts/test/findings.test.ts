@@ -11,7 +11,7 @@ import { waitFor } from "../src/wait.js";
 // enqueued by a signal subscriber during the flush, is fixed and tested in the runtime's own suite,
 // `test/mirror.test.ts`.)
 
-// FINDING keel-query/optimistic rollback: a failed mutation restores the snapshot of the cache
+// FINDING undra-query/optimistic rollback: a failed mutation restores the snapshot of the cache
 // entry it took before it ran (SPEC 9: "the pre-mutation entries are restored"). A mutation that
 // started after it, on the same list, has put its own optimistic item into that entry by then, and
 // the restore takes the item away again while its request is still in flight (offline, while it is

@@ -1,4 +1,4 @@
-import { ALL_SIGNALS, CallTarget, type ChangeOp, type Codec, type KeelCore, KeelWriter, decodeValue, encodeValue } from "@keel/runtime";
+import { ALL_SIGNALS, CallTarget, type ChangeOp, type Codec, type UndraCore, UndraWriter, decodeValue, encodeValue } from "@undra/runtime";
 
 /** One entry of a change-set as the mirror hands it to a store. */
 export interface SignalUpdate {
@@ -10,7 +10,7 @@ export interface SignalUpdate {
   readonly value: Uint8Array;
 }
 
-/** The ids a constructor needs: the `typeId` and `new` of an object in `KeelIds.Objects`. */
+/** The ids a constructor needs: the `typeId` and `new` of an object in `UndraIds.Objects`. */
 export interface ConstructorIds {
   readonly typeId: number;
   readonly new: number;
@@ -33,14 +33,14 @@ const NO_ARGS = new Uint8Array(0);
  * and checks op codes, which a generated store hides behind its signals.
  *
  * ```ts
- * const counter = await RawStore.open(core, KeelIds.Objects.Counter);
- * await counter.call(KeelIds.Objects.Counter.add, encodeValue(codecs.i32, 5));
+ * const counter = await RawStore.open(core, UndraIds.Objects.Counter);
+ * await counter.call(UndraIds.Objects.Counter.add, encodeValue(codecs.i32, 5));
  * counter.take(); // the entries of the initial change-set, then of the add
  * ```
  */
 export class RawStore {
   /** Opens a store: constructs it, registers the recording mirror callback and (by default) observes all its signals. */
-  static async open(core: KeelCore, ids: ConstructorIds, options: OpenOptions = {}): Promise<RawStore> {
+  static async open(core: UndraCore, ids: ConstructorIds, options: OpenOptions = {}): Promise<RawStore> {
     const handle = await core.construct(ids.typeId, ids.new, options.args ?? NO_ARGS);
     const store = new RawStore(core, handle);
     if (options.observe !== false) await store.observe(true);
@@ -48,13 +48,13 @@ export class RawStore {
   }
 
   /** The core the store lives in. */
-  readonly core: KeelCore;
+  readonly core: UndraCore;
   /** The store's handle. */
   readonly handle: bigint;
   #entries: SignalUpdate[] = [];
   #closed = false;
 
-  private constructor(core: KeelCore, handle: bigint) {
+  private constructor(core: UndraCore, handle: bigint) {
     this.core = core;
     this.handle = handle;
     core.mirror.register(handle, (signalId, op, value) => {
@@ -109,8 +109,8 @@ export class RawStore {
  * store.call(BigList.insertAt, args((w) => { w.writeU32(5000); w.writeStr("fresh"); }));
  * ```
  */
-export function args(write: (w: KeelWriter) => void): Uint8Array {
-  const w = new KeelWriter();
+export function args(write: (w: UndraWriter) => void): Uint8Array {
+  const w = new UndraWriter();
   write(w);
   return w.finish();
 }

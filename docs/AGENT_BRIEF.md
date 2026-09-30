@@ -1,6 +1,6 @@
 # Brief for implementation agents
 
-You are one engineer on the Keel team. You own exactly the piece named in your task and
+You are one engineer on the Undra team. You own exactly the piece named in your task and
 nothing else. The binding process — worktrees, briefs, review, merge, cleanup — is
 `docs/AGENT_WORKFLOW.md`; read it first, then `CLAUDE.md`, then the SPEC sections your
 task names.

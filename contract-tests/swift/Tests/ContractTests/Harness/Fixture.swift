@@ -1,10 +1,10 @@
 import Foundation
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 
 /// The one core of this process and the fakes it runs against.
 ///
-/// `keel_init` is once per process, so every scenario shares the core the first of them loads.
+/// `undra_init` is once per process, so every scenario shares the core the first of them loads.
 /// The fakes outlive a reload (S16 shuts the core down and loads it again), which is why they
 /// are owned here and not by the adapters.
 @MainActor
@@ -16,7 +16,7 @@ final class Fixture {
     let kv = MemoryKv()
     let log = CapturingLog()
 
-    private var loaded: KeelCore?
+    private var loaded: UndraCore?
 
     private init() {}
 
@@ -33,11 +33,11 @@ final class Fixture {
     }
 
     /// The loaded core, loading it (and pointing it at the fake server) on first use.
-    func core() throws -> KeelCore {
+    func core() throws -> UndraCore {
         if let core = loaded, !core.isShutDown {
             return core
         }
-        let core = try KeelCore.load(.inproc(adapters: makeAdapters(), expectedSchemaHash: KeelIds.schemaHash))
+        let core = try UndraCore.load(.inproc(adapters: makeAdapters(), expectedSchemaHash: UndraIds.schemaHash))
         configureRemote(RemoteConfig(baseUrl: FakeServer.baseURL), ctx: core)
         loaded = core
         return core

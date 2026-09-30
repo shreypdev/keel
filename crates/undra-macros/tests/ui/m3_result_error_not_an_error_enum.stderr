@@ -1,0 +1,17 @@
+error: error[undra::E0001]: `String` cannot be the error type of a `Result`
+         = note: the platforms throw the error by name, and only a `#[undra::error]` enum carries the messages they show
+         = help: declare an error enum: `#[undra::error] enum MyError { #[error("what went wrong")] Failed }`, and return `Result<T, MyError>`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/m3_result_error_not_an_error_enum.rs:14:39
+   |
+14 | pub fn by_string(a: u8) -> Result<u8, String> {
+   |                                       ^^^^^^
+
+error[E0080]: evaluation panicked: error[undra::E0001]: `Problem` is used as the error type of a `Result`, but it is not a `#[undra::error]` enum
+                = note: the platforms throw the error type by name, and only `#[undra::error]` enums carry the messages they show
+                = help: declare it with `#[undra::error]`, for example `#[undra::error] enum Problem { #[error("failed")] Failed }`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/m3_result_error_not_an_error_enum.rs:19:39
+   |
+19 | pub fn by_record(a: u8) -> Result<u8, Problem> {
+   |                                       ^^^^^^^ evaluation of `_::_` failed here

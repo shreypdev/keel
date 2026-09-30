@@ -1,6 +1,6 @@
-# Keel — working agreement for everyone (human or agent) who touches this repo
+# Undra — working agreement for everyone (human or agent) who touches this repo
 
-Keel is a Rust framework that owns everything under the pixels of native iOS, Android and web apps: domain logic, reactive state, the data layer, persistence, and the dev loop. The UI stays SwiftUI, Compose and React.
+Undra is a Rust framework that owns everything under the pixels of native iOS, Android and web apps: domain logic, reactive state, the data layer, persistence, and the dev loop. The UI stays SwiftUI, Compose and React.
 
 Read, in this order, before writing code:
 1. `docs/SPEC.md` — the binding implementation specification (wire format, ABI, schema, runtime model, generated code shapes). Code that disagrees with it is wrong.
@@ -9,8 +9,8 @@ Read, in this order, before writing code:
 
 ## The constitution (non-negotiable)
 
-R1  The schema is the only truth. A public type or function exists only if `keel-meta` can describe it. Every language's output is derived from that description.
-R2  `unsafe` lives in `crates/keel-ffi` only — plus the one schema loader in `keel-cli` that `dlopen`s the built core (SPEC §13). Every block has a `// SAFETY:` comment. Every other crate has `#![forbid(unsafe_code)]`; `keel-cli` holds `deny(unsafe_code)` everywhere outside that loader.
+R1  The schema is the only truth. A public type or function exists only if `undra-meta` can describe it. Every language's output is derived from that description.
+R2  `unsafe` lives in `crates/undra-ffi` only — plus the one schema loader in `undra-cli` that `dlopen`s the built core (SPEC §13). Every block has a `// SAFETY:` comment. Every other crate has `#![forbid(unsafe_code)]`; `undra-cli` holds `deny(unsafe_code)` everywhere outside that loader.
 R3  Generated code must pass native review: a Swift / Kotlin / TypeScript engineer who has never seen Rust would write it that way. Golden files lock the output.
 R4  Every feature lands whole: unit tests, contract scenario coverage, a benchmark if the boundary is touched, docs on every `pub` item.
 R5  Reads never cross the boundary; writes cross once per transaction. No generated getter calls into the core.
@@ -20,7 +20,7 @@ R8  Macro errors teach: code, what, why, fix, docs link (`docs/SPEC.md` §12).
 R9  Budgets are tests. Benchmarks live in `bench/` and regressions fail CI.
 R10 We ship on it first: `examples/playground` uses only public APIs.
 R11 Boundary changes need an ADR before code.
-R12 The core is deterministic: no wall-clock, randomness or threads outside the Clock / Rng / Timer ports and `keel-runtime`.
+R12 The core is deterministic: no wall-clock, randomness or threads outside the Clock / Rng / Timer ports and `undra-runtime`.
 
 ## Engineering standards
 
@@ -31,7 +31,7 @@ R12 The core is deterministic: no wall-clock, randomness or threads outside the 
 * Tests live next to the code (`#[cfg(test)]`) for units and in `tests/` for integration. Property tests use `proptest`.
 * Small commits, `type(scope): summary` messages (`feat`, `fix`, `test`, `docs`, `bench`, `state`, `chore`).
 * Do not add a dependency without checking it builds on `wasm32-unknown-unknown`, iOS and Android (no tokio, no reqwest, no ring in core crates). Ask in the PR description why it is needed.
-* TypeScript: strict mode, ESM, no `any` in exported types, no runtime dependencies in `@keel/runtime` core.
+* TypeScript: strict mode, ESM, no `any` in exported types, no runtime dependencies in `@undra/runtime` core.
 * Kotlin: stdlib + kotlinx-coroutines only in the runtime module; Android-specific code in `android-adapters`.
 * Swift: Swift 6 language mode, strict concurrency, no Objective-C.
 
@@ -40,10 +40,10 @@ R12 The core is deterministic: no wall-clock, randomness or threads outside the 
 Native macOS is the reference environment. `source scripts/env.sh` puts everything on
 PATH (rustup, brew JDK 17 + Kotlin, the kotlinx-coroutines jar, a `DEVELOPER_DIR`
 fallback when xcode-select still points at CommandLineTools). Machine setup, every
-suite's run command, and the known gotchas are in `docs/ONBOARDING.md`; `keel doctor`
+suite's run command, and the known gotchas are in `docs/ONBOARDING.md`; `undra doctor`
 diagnoses a machine. Rust stable (1.98+) with the wasm32/iOS/Android targets installed —
 no build-std, no nightly, except Miri/ASan jobs in CI. Full Xcode is required for Swift
-tests and simulators; Android work needs the SDK + NDK r27 + the `keel` AVD.
+tests and simulators; Android work needs the SDK + NDK r27 + the `undra` AVD.
 
 ## How changes land
 

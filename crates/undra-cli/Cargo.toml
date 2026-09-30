@@ -1,0 +1,37 @@
+[package]
+name = "undra-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The `undra` command: init, bindgen, build, dev, doctor and adopt for Undra apps"
+readme = "README.md"
+keywords = ["undra", "cli", "cross-platform", "ios", "android"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "undra_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "undra"
+path = "src/main.rs"
+# The facade crate `undra` owns the documentation name `undra`; the library docs are `undra_cli`.
+doc = false
+
+[dependencies]
+undra-meta = { workspace = true }
+undra-bindgen = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+notify = { workspace = true }
+libloading = { workspace = true }
+
+[dev-dependencies]
+# The `undra dev` tests speak to the served core with a raw WebSocket client and the wire codec, as
+# a platform runtime does.
+tungstenite = { workspace = true }
+undra-wire = { workspace = true }
+serde_json = { workspace = true }

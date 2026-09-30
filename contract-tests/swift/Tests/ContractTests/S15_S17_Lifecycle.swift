@@ -1,6 +1,6 @@
 import Foundation
-import KeelFFI
-@testable import KeelRuntime
+import UndraFFI
+@testable import UndraRuntime
 import PlaygroundCore
 import XCTest
 
@@ -19,7 +19,7 @@ extension ContractScenarios {
             defer { counter.close() }
             let list = try BigList(ctx: core)
             defer { list.close() }
-            let ghost = try core.construct(type: KeelIds.Objects.Probe.typeId, method: KeelIds.Objects.Probe.new, args: [])
+            let ghost = try core.construct(type: UndraIds.Objects.Probe.typeId, method: UndraIds.Objects.Probe.new, args: [])
             core.release(ghost)
 
             let a = try await todos.add(title: "a")
@@ -60,7 +60,7 @@ extension ContractScenarios {
             // 5. Identities continue: the next item collides with neither a nor b.
             let d = try await todos.add(title: "d")
             try check(d.id != a.id && d.id != b.id, "the id of d collides with a or b")
-            try check(KeelUUID(d.id) > KeelUUID(b.id), "the id of d is not above the id of b")
+            try check(UndraUUID(d.id) > UndraUUID(b.id), "the id of d is not above the id of b")
             _ = c
             try await waitUntil("d to show") { todos.todos.count == 3 }
 
@@ -71,7 +71,7 @@ extension ContractScenarios {
             do {
                 try core.restore(garbage)
                 throw ScenarioFailure(description: "16 random bytes were accepted as a snapshot")
-            } catch let error as KeelRestoreError {
+            } catch let error as UndraRestoreError {
                 try check(error.code != 0, "the restore error carries code 0")
             }
             try await quietFor(milliseconds: 100)
@@ -81,12 +81,12 @@ extension ContractScenarios {
             // 7. The handle released before the snapshot was not resurrected.
             do {
                 _ = try core.callSync(
-                    .objectMethod(handle: ghost, methodId: KeelIds.Objects.Probe.counters),
-                    method: KeelIds.Objects.Probe.counters,
+                    .objectMethod(handle: ghost, methodId: UndraIds.Objects.Probe.counters),
+                    method: UndraIds.Objects.Probe.counters,
                     args: []
                 )
                 throw ScenarioFailure(description: "a handle released before the snapshot answers a call after the restore")
-            } catch let error as KeelReplyError {
+            } catch let error as UndraReplyError {
                 try checkEqual(error.status, .badRequest, "status of a call on the released handle")
             }
 
@@ -100,37 +100,37 @@ extension ContractScenarios {
     func testS16_schemaMismatchRejection() async {
         await scenario("S16", "schema mismatch rejection") {
             // The one core of this process is shut down first: the scenario needs a process in which
-            // no core is initialised (`keel_init` is once per process).
+            // no core is initialised (`undra_init` is once per process).
             Fixture.shared.shutDown()
-            try check(KeelCore.current == nil, "a core is still loaded after shutdown")
-            let generated = KeelIds.schemaHash
+            try check(UndraCore.current == nil, "a core is still loaded after shutdown")
+            let generated = UndraIds.schemaHash
             let wrong = generated ^ 1
 
             // 1. A load that expects another schema fails with the runtime's mismatch error.
             do {
-                _ = try KeelCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
+                _ = try UndraCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
                 throw ScenarioFailure(description: "a load with the wrong schema hash succeeded")
-            } catch let error as KeelSchemaMismatchError {
+            } catch let error as UndraSchemaMismatchError {
                 try checkEqual(error.expected, wrong, "the expected hash in the error")
                 try checkEqual(error.got, generated, "the core's hash in the error")
                 let message = "\(error)"
                 try check(message.contains(ContractScenarios.hex(wrong)) && message.contains(ContractScenarios.hex(generated)),
                           "the message names both hashes in hex: \(message)")
             }
-            try check(KeelCore.current == nil, "a failed load left a shared core behind")
+            try check(UndraCore.current == nil, "a failed load left a shared core behind")
 
             // 1b. "Before the core is initialised" is what the error type shows when something else
-            // already initialised it: `keel_init` would be refused, and a runtime that called it
+            // already initialised it: `undra_init` would be refused, and a runtime that called it
             // before comparing the hashes would fail with `coreInitFailed` and never report the
             // mismatch. The check comes first, so the answer is the same.
             do {
                 let foreignInit = ContractScenarios.initialiseCoreElsewhere()
-                try checkEqual(foreignInit, 0, "keel_init by another embedder")
-                defer { keel_shutdown() }
+                try checkEqual(foreignInit, 0, "undra_init by another embedder")
+                defer { undra_shutdown() }
                 do {
-                    _ = try KeelCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
+                    _ = try UndraCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
                     throw ScenarioFailure(description: "a load with the wrong schema hash succeeded on an initialised core")
-                } catch let error as KeelSchemaMismatchError {
+                } catch let error as UndraSchemaMismatchError {
                     try checkEqual(error.got, generated, "the core's hash in the error, core initialised elsewhere")
                 }
             }
@@ -140,16 +140,16 @@ extension ContractScenarios {
             try checkEqual(PlaygroundCore.add(a: 20, b: 22, ctx: core), 42, "a call on the core loaded after the failed attempt")
 
             // 3. The hash of the bindings, of the statistics and of the exported schema agree.
-            try checkEqual(core.schemaHash, generated, "KeelCore.schemaHash")
+            try checkEqual(core.schemaHash, generated, "UndraCore.schemaHash")
             let statistics = try JSONSerialization.jsonObject(with: Data(core.stats().json.utf8)) as? [String: Any]
             let reported = try require(statistics?["schema_hash"] as? String, "schema_hash in the statistics")
             try checkEqual(UInt64(reported.dropFirst(2), radix: 16), generated, "stats().schema_hash")
-            try checkEqual(keel_schema_hash(), generated, "keel_schema_hash()")
+            try checkEqual(undra_schema_hash(), generated, "undra_schema_hash()")
 
             // 4. The exported schema lists the playground's types and the standard ports.
-            let exported = keel_schema_json()
-            defer { keel_buf_free(exported) }
-            let json = Data(bytes: try require(exported.ptr, "keel_schema_json output"), count: Int(exported.len))
+            let exported = undra_schema_json()
+            defer { undra_buf_free(exported) }
+            let json = Data(bytes: try require(exported.ptr, "undra_schema_json output"), count: Int(exported.len))
             let names = ContractScenarios.names(in: try JSONSerialization.jsonObject(with: json))
             for expected in ["Todos", "Counter", "BigList", "Bench", "Probe", "remote_todos", "post_remote_todo", "patch_remote_todo",
                              "Clock", "Rng", "Log", "Http", "Kv", "SecureStore", "Fs", "Timer", "Connectivity", "Lifecycle"] {
@@ -158,12 +158,12 @@ extension ContractScenarios {
         }
     }
 
-    /// `keel_init` as another embedder of the core would call it, without the runtime; returns its
+    /// `undra_init` as another embedder of the core would call it, without the runtime; returns its
     /// status code (0 when the core is running).
     private static func initialiseCoreElsewhere() -> UInt32 {
-        let config = RuntimeConfigRecord(platform: "macos", mode: "inproc", coreThreads: 1, blockingThreads: 0, logLevel: 2).keelEncoded()
+        let config = RuntimeConfigRecord(platform: "macos", mode: "inproc", coreThreads: 1, blockingThreads: 0, logLevel: 2).undraEncoded()
         return config.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> UInt32 in
-            return keel_init(bytes.baseAddress, UInt32(bytes.count), { _, _, _, _ in }, { _, _, _ in }, { _, _, _, _ in }, nil)
+            return undra_init(bytes.baseAddress, UInt32(bytes.count), { _, _, _, _ in }, { _, _, _ in }, { _, _, _, _ in }, nil)
         }
     }
 
@@ -207,15 +207,15 @@ extension ContractScenarios {
             // purpose, so the raw call is used.)
             do {
                 _ = try core.callSync(
-                    .freeFunction(methodId: KeelIds.Functions.explode),
-                    method: KeelIds.Functions.explode,
-                    args: encoded { (w: inout KeelWriter) in w.writeString("kaboom") }
+                    .freeFunction(methodId: UndraIds.Functions.explode),
+                    method: UndraIds.Functions.explode,
+                    args: encoded { (w: inout UndraWriter) in w.writeString("kaboom") }
                 )
                 throw ScenarioFailure(description: "explode(\"kaboom\") returned")
-            } catch let error as KeelReplyError {
+            } catch let error as UndraReplyError {
                 try checkEqual(error.status, .panic, "status of explode")
                 try check((error.message ?? "").contains("kaboom"), "the panic message names the reason: \(error.message ?? "<none>")")
-                var reader = KeelReader(error.body)
+                var reader = UndraReader(error.body)
                 _ = try reader.readString()
                 _ = try reader.readString()
                 try reader.finish()
@@ -225,7 +225,7 @@ extension ContractScenarios {
             do {
                 _ = try await explodeLater(delayMs: 10, reason: "later", ctx: core)
                 throw ScenarioFailure(description: "explode_later returned")
-            } catch let error as KeelReplyError {
+            } catch let error as UndraReplyError {
                 try checkEqual(error.status, .panic, "status of explode_later")
                 try check((error.message ?? "").contains("later"), "the panic message names the reason: \(error.message ?? "<none>")")
             }
@@ -236,11 +236,11 @@ extension ContractScenarios {
             try await waitUntil("the store built before the panics to update") { store.count == 1 }
             try checkEqual(core.stat("panics") - panicsBefore, 2, "panics delta")
 
-            // 4. The Log port got an error-or-worse record from `keel::panic` for each.
+            // 4. The Log port got an error-or-worse record from `undra::panic` for each.
             try await waitUntil("two panic records") {
-                log.all.dropFirst(recordsBefore).filter { $0.level >= 4 && $0.target == "keel::panic" }.count >= 2
+                log.all.dropFirst(recordsBefore).filter { $0.level >= 4 && $0.target == "undra::panic" }.count >= 2
             }
-            let records = log.all.dropFirst(recordsBefore).filter { $0.level >= 4 && $0.target == "keel::panic" }
+            let records = log.all.dropFirst(recordsBefore).filter { $0.level >= 4 && $0.target == "undra::panic" }
             try check(records.contains { $0.message.contains("kaboom") }, "no panic record names kaboom: \(records)")
             try check(records.contains { $0.message.contains("later") }, "no panic record names later: \(records)")
         }

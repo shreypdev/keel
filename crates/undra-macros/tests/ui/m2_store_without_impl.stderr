@@ -1,0 +1,30 @@
+error[E0277]: error[undra::E0011]: store `Todos` has no `#[undra::api(store)]` impl block
+                = note: the constructors of the impl block create the store and wire its signals to the platforms; without the block the store can never be instantiated
+                = help: add an `impl Todos` block marked `#[undra::api(store)]` with a constructor such as `pub fn new(ctx: Ctx) -> Self`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011
+  --> tests/ui/m2_store_without_impl.rs:9:12
+   |
+ 9 | pub struct Todos {
+   |            ^^^^^ this store has no `#[undra::api(store)]` impl block
+   |
+help: the trait `UndraObject` is not implemented for `Todos`
+  --> tests/ui/m2_store_without_impl.rs:9:1
+   |
+ 9 | pub struct Todos {
+   | ^^^^^^^^^^^^^^^^
+help: the trait `UndraObject` is implemented for `LazyList`
+  --> $WORKSPACE/crates/undra-runtime/src/lazy.rs
+   |
+   | impl UndraObject for LazyList {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required for `Todos` to implement `__UndraStoreNeedsImpl`
+ --> tests/ui/m2_store_without_impl.rs:8:1
+  |
+8 | #[k::store]
+  | ^^^^^^^^^^^
+note: required by a bound in `__undra_need_impl`
+ --> tests/ui/m2_store_without_impl.rs:8:1
+  |
+8 | #[k::store]
+  | ^^^^^^^^^^^ required by this bound in `__undra_need_impl`
+  = note: this error originates in the attribute macro `k::store` (in Nightly builds, run with -Z macro-backtrace for more info)

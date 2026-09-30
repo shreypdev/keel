@@ -1,4 +1,4 @@
-import type { KvAdapter } from "@keel/runtime";
+import type { KvAdapter } from "@undra/runtime";
 
 /**
  * The `Kv` port in memory. The core keeps its query cache and its offline queue in `Kv`. The

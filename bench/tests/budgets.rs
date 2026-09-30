@@ -1,7 +1,7 @@
 //! The budget gate (constitution R9): every benchmarked operation runs a few thousand times with
 //! plain `Instant` timing and its p50 must be under its budget in `bench/budgets.toml`.
 //!
-//! This is what CI runs (`cargo test -p keel-bench --test budgets --release`); criterion is for
+//! This is what CI runs (`cargo test -p undra-bench --test budgets --release`); criterion is for
 //! humans and stays out of the critical path.
 //!
 //! * The budgets are **host** regression guards, about five times what an Apple-silicon laptop
@@ -11,18 +11,18 @@
 //!   `cargo test --workspace`, and the timing assertion is left to `--release`.
 //! * A noisy run gets three attempts; the best p50 counts. One slow neighbour does not fail CI,
 //!   a real regression is slow on every attempt.
-//! * Knobs: `KEEL_BENCH_SCALE=2.5` multiplies every budget (a slower runner), `KEEL_BENCH_FILTER=
-//!   keyed` measures only matching names, `KEEL_BENCH_BUDGETS=path` reads another file.
-//! * `cargo test -p keel-bench --test budgets --release -- --ignored --nocapture baseline`
+//! * Knobs: `UNDRA_BENCH_SCALE=2.5` multiplies every budget (a slower runner), `UNDRA_BENCH_FILTER=
+//!   keyed` measures only matching names, `UNDRA_BENCH_BUDGETS=path` reads another file.
+//! * `cargo test -p undra-bench --test budgets --release -- --ignored --nocapture baseline`
 //!   prints fresh measurements in `budgets.toml` syntax, for setting or re-basing a budget.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use keel_bench::budget::Budgets;
-use keel_bench::measure::{MeasureConfig, Stats, measure};
-use keel_bench::workload::Workload;
+use undra_bench::budget::Budgets;
+use undra_bench::measure::{MeasureConfig, Stats, measure};
+use undra_bench::workload::Workload;
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -33,7 +33,7 @@ static SERIAL: Mutex<()> = Mutex::new(());
 const ATTEMPTS: usize = 3;
 
 fn budgets_path() -> PathBuf {
-    match std::env::var_os("KEEL_BENCH_BUDGETS") {
+    match std::env::var_os("UNDRA_BENCH_BUDGETS") {
         Some(path) => PathBuf::from(path),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("budgets.toml"),
     }
@@ -47,17 +47,17 @@ fn load_budgets() -> Budgets {
 }
 
 fn scale() -> f64 {
-    match std::env::var("KEEL_BENCH_SCALE") {
+    match std::env::var("UNDRA_BENCH_SCALE") {
         Ok(text) => match text.parse::<f64>() {
             Ok(scale) if scale.is_finite() && scale > 0.0 => scale,
-            _ => panic!("KEEL_BENCH_SCALE must be a positive number, not `{text}`"),
+            _ => panic!("UNDRA_BENCH_SCALE must be a positive number, not `{text}`"),
         },
         Err(_) => 1.0,
     }
 }
 
 fn selected(workloads: Vec<Workload>) -> Vec<Workload> {
-    match std::env::var("KEEL_BENCH_FILTER") {
+    match std::env::var("UNDRA_BENCH_FILTER") {
         Ok(filter) if !filter.is_empty() => workloads
             .into_iter()
             .filter(|w| w.name.contains(&filter))
@@ -128,9 +128,9 @@ fn the_budget_file_covers_every_workload_and_nothing_else() {
 fn budgets() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let workloads = selected(common::workloads::all());
-    assert!(!workloads.is_empty(), "KEEL_BENCH_FILTER matched nothing");
+    assert!(!workloads.is_empty(), "UNDRA_BENCH_FILTER matched nothing");
 
-    if cfg!(debug_assertions) && std::env::var_os("KEEL_BENCH_FORCE").is_none() {
+    if cfg!(debug_assertions) && std::env::var_os("UNDRA_BENCH_FORCE").is_none() {
         // Timings from an unoptimised build say nothing; prove the operations still work.
         for workload in &workloads {
             let mut op = workload.build();
@@ -143,7 +143,7 @@ fn budgets() {
         }
         eprintln!(
             "budgets: {} operations smoke-run; timing is asserted only with --release \
-             (KEEL_BENCH_FORCE=1 to time a debug build anyway)",
+             (UNDRA_BENCH_FORCE=1 to time a debug build anyway)",
             workloads.len()
         );
         return;
@@ -204,7 +204,7 @@ fn budgets() {
 fn baseline() {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let existing = Budgets::load(&budgets_path()).unwrap_or_default();
-    let factor: f64 = std::env::var("KEEL_BENCH_FACTOR")
+    let factor: f64 = std::env::var("UNDRA_BENCH_FACTOR")
         .ok()
         .and_then(|f| f.parse().ok())
         .unwrap_or(5.0);

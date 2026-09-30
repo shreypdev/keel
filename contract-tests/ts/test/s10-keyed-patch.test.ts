@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { ChangeOp, KeelReader, type PatchOp, applyPatch, codecs, decodePatch, decodeValue } from "@keel/runtime";
-import { BigList as BigListStore, type Item, ItemCodec, KeelIds } from "@playground/core";
+import { ChangeOp, UndraReader, type PatchOp, applyPatch, codecs, decodePatch, decodeValue } from "@undra/runtime";
+import { BigList as BigListStore, type Item, ItemCodec, UndraIds } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { RawStore, type SignalUpdate, args, valueOf } from "../src/raw-store.js";
 import { step } from "../src/wait.js";
@@ -9,8 +9,8 @@ import { step } from "../src/wait.js";
 // exactly one operation, a few bytes long, and applying it to the host's copy gives the list the
 // core has.
 
-const BigList = KeelIds.Objects.BigList;
-const Bench = KeelIds.Objects.Bench;
+const BigList = UndraIds.Objects.BigList;
+const Bench = UndraIds.Objects.Bench;
 const vecItem = codecs.vec(ItemCodec);
 
 const item = (id: number, label: string, version = 0): Item => ({ id, label, version });
@@ -18,7 +18,7 @@ const item = (id: number, label: string, version = 0): Item => ({ id, label, ver
 /** The patch an entry carries; fails if the entry is not a keyed patch. */
 function patchOf(entry: SignalUpdate): PatchOp<Item>[] {
   expect(entry.op, "the entry is a keyed patch").toBe(ChangeOp.KeyedPatch);
-  const r = new KeelReader(entry.value);
+  const r = new UndraReader(entry.value);
   const ops = decodePatch(r, ItemCodec);
   r.finish();
   return ops;

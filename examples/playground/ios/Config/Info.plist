@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<!-- The playground talks to an in-memory server it carries itself, so it needs no network
-	     permissions. `keel dev` serves the core over ws:// to a machine on your network; local
+	     permissions. `undra dev` serves the core over ws:// to a machine on your network; local
 	     addresses are exempt from App Transport Security with this key. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
@@ -11,6 +11,6 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connects to the core served by `keel dev` on your computer.</string>
+	<string>Connects to the core served by `undra dev` on your computer.</string>
 </dict>
 </plist>

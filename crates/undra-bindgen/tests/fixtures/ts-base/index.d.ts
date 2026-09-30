@@ -1,0 +1,111 @@
+// Hand-written declaration of the `@undra/runtime` base API that generated TypeScript depends on.
+//
+// SPEC section 17.1 lists these names, but the runtime package does not implement them yet, so the
+// type-check test (`tests/typecheck.rs`) pairs this file with the *real* wire-layer declarations,
+// built from `runtimes/ts/@undra/runtime/src` on every run. Everything under "Additions" is API the
+// generated code needs that section 17.1 does not spell out; the bindgen report lists it for the
+// runtime authors.
+
+export * from "./fnv.js";
+export * from "./wire/index.js";
+// The real standard types of SPEC section 8 (`HttpRequest`, `HttpError`, ..., and their codecs).
+export * from "./adapters/types.js";
+export * from "./adapters/codecs.js";
+
+import type { CallTarget, ChangeOp, Handle, ReplyStatus } from "./wire/index.js";
+
+export type LoadMode = "wasm-main" | "wasm-worker" | "remote";
+
+export interface LoadOptions {
+  readonly mode: LoadMode;
+  readonly wasm?: URL | BufferSource;
+  readonly url?: string;
+  readonly adapters?: Readonly<Record<string, PortImpl>>;
+  readonly expectedSchemaHash: bigint;
+}
+
+export interface UndraStats {
+  readonly liveHandles: number;
+}
+
+/**
+ * Addition: what a call addresses. The wire `CallTarget` enum carries only the discriminant, but a
+ * method call also needs the handle it runs on, so generated code passes this object instead.
+ */
+export type CallTargetRef =
+  | { readonly target: CallTarget.FreeFunction }
+  | { readonly target: CallTarget.ObjectMethod; readonly handle: Handle };
+
+export interface PortImpl {
+  readonly sync: boolean;
+  readonly methods: Readonly<Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>>;
+}
+
+export interface Mirror {
+  register(handle: Handle, apply: (signalId: number, op: ChangeOp, value: Uint8Array) => void): void;
+  unregister(handle: Handle): void;
+}
+
+export declare class UndraCore {
+  static load(options: LoadOptions): Promise<UndraCore>;
+  static get shared(): UndraCore;
+  callSync(target: CallTargetRef, methodId: number, args: Uint8Array): Uint8Array;
+  call(target: CallTargetRef, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;
+  stream(target: CallTargetRef, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;
+  construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle>;
+  /**
+   * Addition: resolves once the initial change-set of the observed signals has been applied to the
+   * mirror (immediately for in-process cores), so a store never exposes placeholder values.
+   */
+  observe(handle: Handle, signalId: number, on: boolean): Promise<void>;
+  release(handle: Handle): void;
+  /** Addition: sends a host-to-core event of an event port (`undra_event`). */
+  event(portId: number, methodId: number, payload: Uint8Array): void;
+  readonly mirror: Mirror;
+  registerPort(portId: number, impl: PortImpl): void;
+  stats(): Promise<UndraStats>;
+}
+
+export declare abstract class UndraObject {
+  protected constructor(core: UndraCore, handle: Handle);
+  readonly core: UndraCore;
+  readonly handle: Handle;
+  close(): void;
+}
+
+export declare abstract class UndraStore extends UndraObject {
+  protected _signals: Signal<unknown>[];
+  protected abstract _apply(signalId: number, op: ChangeOp, value: Uint8Array): void;
+}
+
+export declare class Signal<T> {
+  /** Addition: the constructor, taking the placeholder value shown until the first change-set. */
+  constructor(initial: T);
+  get(): T;
+  peek(): T;
+  subscribe(fn: (value: T) => void): () => void;
+  _set(value: T): void;
+}
+
+export declare class UndraError extends Error {
+  readonly kind: string;
+  /** Addition: the constructor, taking the discriminant and the usual `Error` arguments. */
+  constructor(kind: string, message?: string, options?: ErrorOptions);
+}
+
+export declare class UndraReplyError extends UndraError {
+  readonly status: ReplyStatus;
+  readonly body: Uint8Array;
+  constructor(status: ReplyStatus, body: Uint8Array);
+}
+
+/**
+ * Addition: thrown by a generated port adapter when the implementation fails with the port's typed
+ * error; `body` is the encoded error and becomes a `PortReply` with status 1.
+ */
+export declare class UndraPortError extends UndraError {
+  readonly body: Uint8Array;
+  constructor(body: Uint8Array);
+}
+
+export interface UndraPort {}

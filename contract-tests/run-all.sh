@@ -4,7 +4,7 @@
 #   contract-tests/run-all.sh                 # ts, kotlin and swift (swift only on macOS)
 #   contract-tests/run-all.sh ts kotlin       # a subset
 #
-# Each platform's run.sh builds what it needs with the keel CLI (the playground core as wasm, as a
+# Each platform's run.sh builds what it needs with the undra CLI (the playground core as wasm, as a
 # host library, ...) and prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines; check.sh grades them.
 # The logs are kept in contract-tests/.logs/ (not committed).
 set -uo pipefail

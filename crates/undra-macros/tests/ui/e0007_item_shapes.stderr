@@ -1,0 +1,35 @@
+error: error[undra::E0007]: tuple struct `Meters` cannot be a record
+         = note: the schema names every field so the other languages can generate properties; tuple fields have no names
+         = help: use named fields: `struct Meters { value: f64 }`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+ --> tests/ui/e0007_item_shapes.rs:6:18
+  |
+6 | pub struct Meters(pub f64);
+  |                  ^^^^^^^^^
+
+error: error[undra::E0007]: enum `Nothing` has no variants
+         = note: an enum without variants has no values, so it can never be sent
+         = help: add at least one variant
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+ --> tests/ui/e0007_item_shapes.rs:9:10
+  |
+9 | pub enum Nothing {}
+  |          ^^^^^^^
+
+error: error[undra::E0007]: constructor `new` is `async`
+         = note: a constructor inserts the new object into the object table before it replies, so it must finish synchronously
+         = help: construct synchronously and start asynchronous work with `ctx.spawn(..)`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/e0007_item_shapes.rs:15:9
+   |
+15 |     pub async fn new() -> Self {
+   |         ^^^^^
+
+error: error[undra::E0007]: `helper` is neither a method nor a constructor
+         = note: a `pub fn` in a `#[undra::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed
+         = help: add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[undra::api] fn`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/e0007_item_shapes.rs:19:12
+   |
+19 |     pub fn helper() -> u8 {
+   |            ^^^^^^

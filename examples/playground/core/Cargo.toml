@@ -5,11 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-description = "The Keel playground core: one Rust core shared by the web, iOS and Android playground apps and by the contract tests."
+description = "The Undra playground core: one Rust core shared by the web, iOS and Android playground apps and by the contract tests."
 
-# A plain library, like every Keel core: `keel build` links it with the C ABI into the library each
-# platform loads, and `keel dev` serves it over a WebSocket (see ../keel.toml).
+# A plain library, like every Undra core: `undra build` links it with the C ABI into the library each
+# platform loads, and `undra dev` serves it over a WebSocket (see ../undra.toml).
 [dependencies]
-keel = { workspace = true }
+undra = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
