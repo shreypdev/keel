@@ -216,7 +216,6 @@ fn store_struct() {
                     #[keel(no_coalesce)]
                     ticks: Signal<u32>,
                     visible: Computed<Vec<Row>>,
-                    page: Lazy<Row>,
                     label: String,
                 }
             },

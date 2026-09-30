@@ -4,7 +4,6 @@
 #![forbid(unsafe_code)]
 
 use keel::prelude::*;
-use keel::signals::Lazy;
 
 #[keel::api]
 #[derive(Clone, Debug, PartialEq)]
@@ -57,7 +56,6 @@ pub struct Todos {
     todos: Signal<Vec<Todo>>,
     filter: Signal<Filter>,
     visible: Computed<Vec<Todo>>,
-    older: Lazy<Todo>,
 }
 
 #[keel::api(store)]
@@ -68,14 +66,13 @@ impl Todos {
 
     fn assemble(ctx: Ctx, todos: Signal<Vec<Todo>>, filter: Signal<Filter>) -> Self {
         let visible = Computed::new((&todos, &filter), |(todos, filter)| {
-            todos.into_iter().filter(|t| filter.matches(t)).collect()
+            todos.iter().filter(|t| filter.matches(t)).cloned().collect()
         });
         Self {
             ctx,
             todos,
             filter,
             visible,
-            older: Lazy::new(),
         }
     }
 

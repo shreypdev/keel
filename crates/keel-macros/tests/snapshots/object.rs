@@ -32,7 +32,11 @@ trait __KeelStoreProbe_Calculator {
     const __KEEL_STORE_META: ::keel::meta::StoreMeta = ::keel::meta::StoreMeta {
         signals: &[],
     };
-    fn __keel_attach_all(&self) {}
+    fn __keel_attach_all(
+        &self,
+    ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
+        ::core::result::Result::Ok(())
+    }
     fn __keel_set_handle(&self, _handle: u64) {}
 }
 impl __KeelStoreProbe_Calculator for Calculator {}
@@ -128,12 +132,14 @@ fn __keel_dispatch_Calculator(
             let __ctx = __rt.ctx();
             __keel_out({
                 let __value = Calculator::new(&__ctx, base);
-                let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
-                ::keel::runtime::DispatchResult::Sync(
-                    ::core::result::Result::Ok(
-                        ::keel::wire::Encode::encode_to_vec(&__handle),
-                    ),
-                )
+                {
+                    let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
+                    ::keel::runtime::DispatchResult::Sync(
+                        ::core::result::Result::Ok(
+                            ::keel::wire::Encode::encode_to_vec(&__handle),
+                        ),
+                    )
+                }
             })
         }
         __KEEL_ID_open => {

@@ -138,6 +138,14 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "keel"
 version = "0.1.0"
+dependencies = [
+ "keel-bindgen",
+ "keel-macros",
+ "keel-meta",
+ "keel-runtime",
+ "keel-signals",
+ "keel-wire",
+]
 
 [[package]]
 name = "keel-bench"
@@ -164,7 +172,7 @@ version = "0.1.0"
 name = "keel-macros"
 version = "0.1.0"
 dependencies = [
- "keel-test-facade",
+ "keel",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -210,16 +218,6 @@ dependencies = [
  "keel-wire",
  "parking_lot",
  "proptest",
-]
-
-[[package]]
-name = "keel-test-facade"
-version = "0.1.0"
-dependencies = [
- "futures-core",
- "keel-macros",
- "keel-meta",
- "keel-wire",
 ]
 
 [[package]]

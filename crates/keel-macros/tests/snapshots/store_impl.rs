@@ -15,7 +15,11 @@ trait __KeelStoreProbe_Todos {
     const __KEEL_STORE_META: ::keel::meta::StoreMeta = ::keel::meta::StoreMeta {
         signals: &[],
     };
-    fn __keel_attach_all(&self) {}
+    fn __keel_attach_all(
+        &self,
+    ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
+        ::core::result::Result::Ok(())
+    }
     fn __keel_set_handle(&self, _handle: u64) {}
 }
 impl __KeelStoreProbe_Todos for Todos {}
@@ -66,15 +70,27 @@ fn __keel_dispatch_Todos(
             let __ctx = __rt.ctx();
             __keel_out({
                 let __value = Todos::new(__ctx);
-                __value.__keel_attach_all();
-                let __arc = ::std::sync::Arc::new(__value);
-                let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
-                (*__arc).__keel_set_handle(__handle.0);
-                ::keel::runtime::DispatchResult::Sync(
-                    ::core::result::Result::Ok(
-                        ::keel::wire::Encode::encode_to_vec(&__handle),
-                    ),
-                )
+                match __value.__keel_attach_all() {
+                    ::core::result::Result::Ok(()) => {
+                        let __arc = ::std::sync::Arc::new(__value);
+                        let __handle = __rt
+                            .insert_object(::std::sync::Arc::clone(&__arc));
+                        (*__arc).__keel_set_handle(__handle.0);
+                        ::keel::runtime::DispatchResult::Sync(
+                            ::core::result::Result::Ok(
+                                ::keel::wire::Encode::encode_to_vec(&__handle),
+                            ),
+                        )
+                    }
+                    ::core::result::Result::Err(__why) => {
+                        ::keel::runtime::DispatchResult::BadRequest(
+                            ::std::format!(
+                                "store `{}` could not attach its signals: {}", "Todos",
+                                __why
+                            ),
+                        )
+                    }
+                }
             })
         }
         __KEEL_ID_add => {

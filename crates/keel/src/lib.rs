@@ -1,2 +1,41 @@
 #![forbid(unsafe_code)]
-//! Keel facade. See docs/SPEC.md.
+#![deny(missing_docs)]
+#![doc = include_str!("../README.md")]
+//!
+//! # Where things live
+//!
+//! | Path | What |
+//! |---|---|
+//! | [`api`], [`error`], [`store`], [`port`], [`query`], [`mutation`] | the attribute macros (`keel-macros`) |
+//! | [`prelude`] | what an application core imports: signals, `Ctx`, the wire scalars, the macros |
+//! | [`runtime`] | `keel-runtime`: `Runtime`, `Ctx`, dispatch, ports, the test runtime |
+//! | [`signals`] | `keel-signals`: `Signal`, `Computed`, `Effect`, `txn`, `StoreCell` |
+//! | [`wire`] | `keel-wire`: the binary codec |
+//! | [`meta`] | `keel-meta`: the schema every language is generated from |
+//! | [`query`] | the traits `#[keel::query]` and `#[keel::mutation]` implement |
+//!
+//! The code the macros generate names everything through `::keel::{wire, meta, runtime,
+//! signals, query}` (SPEC 16.3), which is why an application depends on this crate alone.
+
+pub use keel_macros::{api, error, mutation, port, query, store};
+pub use keel_meta as meta;
+pub use keel_runtime as runtime;
+pub use keel_signals as signals;
+pub use keel_wire as wire;
+
+pub mod query;
+
+/// What an application core imports: `use keel::prelude::*;`.
+///
+/// It brings the reactive primitives ([`Signal`], [`Computed`], [`Effect`], [`txn`]), the
+/// runtime handle ([`Ctx`]), the wire scalars a public signature may use ([`Bytes`], [`Uuid`],
+/// [`Timestamp`], [`Duration`], and [`Handle`] for object references) and the six attribute
+/// macros (`#[keel::api]` and friends are also reachable as `keel::api`, ...).
+pub mod prelude {
+    pub use core::time::Duration;
+
+    pub use keel_macros::{api, error, mutation, port, query, store};
+    pub use keel_runtime::Ctx;
+    pub use keel_signals::{Computed, Effect, Signal, txn};
+    pub use keel_wire::{Bytes, Handle, Timestamp, Uuid};
+}

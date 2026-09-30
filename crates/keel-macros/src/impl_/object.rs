@@ -607,27 +607,37 @@ fn constructor_result(
 ) -> TokenStream {
     let wire = root.wire();
     let runtime = root.runtime();
-    let insert = if target.store {
+    let reply = enc(&wire, &quote!(__handle));
+    let ok = quote!(#runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply)));
+    // What to do with the constructed `__value`: publish it and answer its handle. A store
+    // first attaches its signals; if that fails the store is never published and the caller
+    // gets a bad request carrying the reason (nothing panics).
+    let finish = if target.store {
+        let type_name = target.self_ty.map(ty_string).unwrap_or_default();
         quote! {
-            __value.__keel_attach_all();
-            let __arc = ::std::sync::Arc::new(__value);
-            let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
-            (*__arc).__keel_set_handle(__handle.0);
+            match __value.__keel_attach_all() {
+                ::core::result::Result::Ok(()) => {
+                    let __arc = ::std::sync::Arc::new(__value);
+                    let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
+                    (*__arc).__keel_set_handle(__handle.0);
+                    #ok
+                }
+                ::core::result::Result::Err(__why) => #runtime::DispatchResult::BadRequest(
+                    ::std::format!("store `{}` could not attach its signals: {}", #type_name, __why),
+                ),
+            }
         }
     } else {
-        quote! {
+        quote! {{
             let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
-        }
+            #ok
+        }}
     };
-    let reply = enc(&wire, &quote!(__handle));
     let err = enc(&wire, &quote!(__e));
     if matches!(m.ret, KType::Result(..)) {
         quote! {
             match #call {
-                ::core::result::Result::Ok(__value) => {
-                    #insert
-                    #runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply))
-                }
+                ::core::result::Result::Ok(__value) => #finish,
                 ::core::result::Result::Err(__e) => {
                     #runtime::DispatchResult::Sync(::core::result::Result::Err(#err))
                 }
@@ -636,8 +646,7 @@ fn constructor_result(
     } else {
         quote! {{
             let __value = #call;
-            #insert
-            #runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply))
+            #finish
         }}
     }
 }
@@ -1087,6 +1096,7 @@ pub(crate) fn expand_impl(
 
     let meta = root.meta();
     let runtime = root.runtime();
+    let signals = root.signals();
     let target = Target {
         self_ty: Some(&self_ty),
         store,
@@ -1161,7 +1171,9 @@ pub(crate) fn expand_impl(
         trait #probe_trait {
             const __KEEL_IS_STORE: bool = false;
             const __KEEL_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
-            fn __keel_attach_all(&self) {}
+            fn __keel_attach_all(&self) -> ::core::result::Result<(), #signals::SignalsError> {
+                ::core::result::Result::Ok(())
+            }
             fn __keel_set_handle(&self, _handle: u64) {}
         }
         impl #probe_trait for #self_ty {}

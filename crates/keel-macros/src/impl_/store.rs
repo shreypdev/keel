@@ -2,10 +2,11 @@
 //!
 //! # Signals
 //!
-//! Fields typed `Signal<T>`, `Computed<T>` and `Lazy<T>` are the store's signals, numbered
-//! `0..n` in declaration order (other fields are private state, `Ctx` included).
+//! Fields typed `Signal<T>` and `Computed<T>` are the store's signals, numbered `0..n` in
+//! declaration order (other fields are private state, `Ctx` included).
 //! `#[keel(key = "id")]` on a `Signal<Vec<T>>` makes it a keyed list that ships patches;
-//! `#[keel(no_coalesce)]` makes every commit of a signal reach the platforms.
+//! `#[keel(no_coalesce)]` makes every commit of a signal reach the platforms. `Lazy<T>` fields
+//! are rejected (E0001): lazily paged lists are not available in v1.
 //!
 //! # The hidden cell
 //!
@@ -17,7 +18,7 @@
 //! #[doc(hidden)] pub __keel_cell: ::keel::signals::CellSlot
 //! ```
 //!
-//! `CellSlot` is `Default` and lazily creates the cell. To keep the ergonomic
+//! `CellSlot` is `Default` and creates the cell on first use. To keep the ergonomic
 //! `Self { ctx, todos, filter, visible }` working, the `#[keel::api(store)]` impl block of the
 //! store rewrites struct literals of `Self`/the type inside its own methods to add
 //! `__keel_cell: Default::default()` (see `object.rs`). Struct literals anywhere else must
@@ -25,20 +26,29 @@
 //!
 //! The cell is created and its signals attached the first time `StoreObject::cell()` is
 //! called, or explicitly by the constructor's dispatch arm (`__keel_attach_all`), which also
-//! gives the cell its handle (`__keel_set_handle`). The hidden methods and constants below
-//! are how the impl block's generated code talks to the struct without naming its fields.
+//! gives the cell its handle (`__keel_set_handle`). Attaching can fail (`SignalsError`, for
+//! example when a signal already belongs to another store), so `__keel_attach_all` returns
+//! the error and the constructor's dispatch arm answers `DispatchResult::BadRequest` with its
+//! text instead of publishing a store that cannot deliver. The hidden methods and constants
+//! below are how the impl block's generated code talks to the struct without naming its
+//! fields.
+//!
+//! Signals are attached with the `StoreCell` family that fits the field: `attach` for a plain
+//! `Signal<T>`, `attach_keyed` (with a typed `fn(&Item) -> u64` that hashes the encoded key
+//! field) for `#[keel(key = "..")]`, `attach_computed` for a `Computed<T>`, and
+//! `set_no_coalesce` after any of them for `#[keel(no_coalesce)]`.
 //!
 //! # Restore
 //!
 //! `StoreObject::restore(ctx, r)` reads the store body of a snapshot (SPEC 5.9): `signal_count
-//! u32`, then per signal `signal_id u32` and a length-prefixed value. Only non-computed,
-//! non-lazy signals are stored. The store is then rebuilt in one of two ways:
+//! u32`, then per signal `signal_id u32` and a length-prefixed value. Only non-computed
+//! signals are stored. The store is then rebuilt in one of two ways:
 //!
 //! * automatically, if every non-signal field is a `Ctx` (cloned from the argument) or
-//!   `Default`, and there are no `Computed`/`Lazy` fields: a struct literal;
+//!   `Default`, and there are no `Computed` fields: a struct literal;
 //! * through a hook, `#[keel::store(restore = "Self::rebuild")]`, with the signature
 //!   `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in order>) -> Self`. Use it when
-//!   the store has computed or lazy fields (only your code knows how to derive them) or other
+//!   the store has computed fields (only your code knows how to derive them) or other
 //!   state without a `Default`.
 
 use proc_macro2::TokenStream;
@@ -51,13 +61,20 @@ use super::common::{check_generics, derived, item_root};
 use super::diag::{Diag, Errors, code};
 use super::naming::unraw;
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_type};
+use super::types::{Allow, KType, Pos, map_type, ty_string};
 
 /// The kind of a signal field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SigKind {
     Signal,
     Computed,
+}
+
+/// What a field's type says about it.
+enum Wrapped {
+    /// `Signal<T>` or `Computed<T>` with its `T`.
+    Signal(SigKind, syn::Type),
+    /// `Lazy<T>`: recognised only to be rejected with a teaching diagnostic (not in v1).
     Lazy,
 }
 
@@ -68,7 +85,7 @@ struct SignalField {
     kind: SigKind,
     /// The `T` of `Signal<T>` / `Computed<T>` / `Lazy<T>`.
     value_ty: syn::Type,
-    /// The schema type of the signal (`Lazy(T)` for lazy lists).
+    /// The schema type of the signal.
     kty: KType,
     /// `#[keel(key = "..")]`: the key field and the list's item type.
     key: Option<(String, syn::Ident, syn::Type)>,
@@ -80,8 +97,8 @@ struct StateField {
     is_ctx: bool,
 }
 
-/// `Signal<T>`, `Computed<T>` or `Lazy<T>` (by last path segment) with its `T`.
-fn signal_wrapper(ty: &syn::Type) -> Option<(SigKind, syn::Type)> {
+/// `Signal<T>`, `Computed<T>` or `Lazy<T>` (by last path segment), with the `T` of the first two.
+fn signal_wrapper(ty: &syn::Type) -> Option<Wrapped> {
     let syn::Type::Path(path) = ty else {
         return None;
     };
@@ -90,9 +107,9 @@ fn signal_wrapper(ty: &syn::Type) -> Option<(SigKind, syn::Type)> {
     }
     let seg = path.path.segments.last()?;
     let kind = match seg.ident.to_string().as_str() {
-        "Signal" => SigKind::Signal,
-        "Computed" => SigKind::Computed,
-        "Lazy" => SigKind::Lazy,
+        "Signal" => Some(SigKind::Signal),
+        "Computed" => Some(SigKind::Computed),
+        "Lazy" => None,
         _ => return None,
     };
     let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
@@ -106,7 +123,10 @@ fn signal_wrapper(ty: &syn::Type) -> Option<(SigKind, syn::Type)> {
     if types.next().is_some() {
         return None;
     }
-    Some((kind, value.clone()))
+    Some(match kind {
+        Some(kind) => Wrapped::Signal(kind, value.clone()),
+        None => Wrapped::Lazy,
+    })
 }
 
 /// `Vec<Item>` -> `Item`.
@@ -164,19 +184,29 @@ pub(crate) fn expand_store(
                     continue;
                 }
                 match signal_wrapper(&field.ty) {
-                    Some((kind, value_ty)) => {
+                    Some(Wrapped::Lazy) => {
+                        take(&mut field.attrs, Site::SIGNAL, &mut errors);
+                        errors.push(
+                            Diag::new(
+                                code::E0001,
+                                format!(
+                                    "`{}` is not available in v1: lazy lists cannot be mirrored yet",
+                                    ty_string(&field.ty)
+                                ),
+                                "a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it",
+                                "expose the items as a `Signal<Vec<T>>` (keyed with `#[keel(key = \"..\")]` if they have an id) or as a paged method that takes an offset and a limit",
+                            )
+                            .on(&field.ty),
+                        );
+                    }
+                    Some(Wrapped::Signal(kind, value_ty)) => {
                         let attr = take(&mut field.attrs, Site::SIGNAL, &mut errors);
-                        let mapped = match map_type(&value_ty, Pos::Signal, Allow::NONE) {
+                        let kty = match map_type(&value_ty, Pos::Signal, Allow::NONE) {
                             Ok(kty) => kty,
                             Err(err) => {
                                 errors.push(err.into_error());
                                 KType::Unit
                             }
-                        };
-                        let kty = if kind == SigKind::Lazy {
-                            KType::Lazy(Box::new(mapped))
-                        } else {
-                            mapped
                         };
                         let key = attr.key.and_then(|lit| {
                             let key_name = lit.value();
@@ -245,7 +275,7 @@ pub(crate) fn expand_store(
 
     let derived_signals = signals
         .iter()
-        .filter(|s| s.kind != SigKind::Signal)
+        .filter(|s| s.kind == SigKind::Computed)
         .map(|s| s.name.clone())
         .collect::<Vec<_>>();
     if restore_hook.is_none() && !derived_signals.is_empty() {
@@ -253,10 +283,10 @@ pub(crate) fn expand_store(
             Diag::new(
                 code::E0013,
                 format!(
-                    "store `{name_str}` cannot be restored automatically: `{}` is computed or lazy",
+                    "store `{name_str}` cannot be restored automatically: `{}` is computed",
                     derived_signals.join("`, `")
                 ),
-                "restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed and lazy signals from them",
+                "restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them",
                 "add `#[keel::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store",
             )
             .on(&name),
@@ -293,40 +323,42 @@ pub(crate) fn expand_store(
         }
     });
 
+    // The key of a keyed list: `fn(&Item) -> u64`, the FNV-1a hash of the encoded key field
+    // (what `keel_signals::KeyFn` asks for). The encoding goes through a per-thread scratch
+    // buffer, because the function runs for every item of an observed list at every commit.
     let key_fns = signals.iter().filter_map(|s| {
         let (_, key_ident, item_ty) = s.key.as_ref()?;
         let fn_name = format_ident!("__keel_key_{}", s.ident);
         Some(quote_spanned! {item_ty.span()=>
-            fn #fn_name(__item: &dyn ::core::any::Any) -> u64 {
-                match __item.downcast_ref::<#item_ty>() {
-                    ::core::option::Option::Some(__item) => #meta::ids::fnv1a64(
-                        &#wire::Encode::encode_to_vec(&__item.#key_ident),
-                    ),
-                    ::core::option::Option::None => 0,
+            fn #fn_name(__item: &#item_ty) -> u64 {
+                ::std::thread_local! {
+                    static __KEEL_KEY_BUF: ::core::cell::RefCell<#wire::Writer> =
+                        ::core::cell::RefCell::new(#wire::Writer::new());
                 }
+                __KEEL_KEY_BUF.with(|__buf| {
+                    let mut __buf = __buf.borrow_mut();
+                    __buf.clear();
+                    #wire::Encode::encode(&__item.#key_ident, &mut __buf);
+                    #meta::ids::fnv1a64(__buf.as_slice())
+                })
             }
         })
     });
 
+    // One attach per signal, in declaration order; any failure aborts the whole build.
     let attach_stmts = signals.iter().map(|s| {
         let ident = &s.ident;
         let id = s.id;
-        let attach = match s.kind {
-            SigKind::Signal => {
-                let key = match &s.key {
-                    Some(_) => {
-                        let fn_name = format_ident!("__keel_key_{}", s.ident);
-                        quote!(::core::option::Option::Some(#fn_name))
-                    }
-                    None => quote!(::core::option::Option::None),
-                };
-                quote!(__cell.attach(&self.#ident, #id, #key);)
+        let attach = match (s.kind, &s.key) {
+            (SigKind::Signal, Some(_)) => {
+                let fn_name = format_ident!("__keel_key_{}", s.ident);
+                quote!(__cell.attach_keyed(&self.#ident, #id, #fn_name)?;)
             }
-            SigKind::Computed => quote!(__cell.attach_computed(&self.#ident, #id);),
-            SigKind::Lazy => quote!(__cell.attach_lazy(&self.#ident, #id);),
+            (SigKind::Signal, None) => quote!(__cell.attach(&self.#ident, #id)?;),
+            (SigKind::Computed, _) => quote!(__cell.attach_computed(&self.#ident, #id)?;),
         };
         let coalesce = if s.no_coalesce {
-            quote!(__cell.set_no_coalesce(#id);)
+            quote!(__cell.set_no_coalesce(#id)?;)
         } else {
             TokenStream::new()
         };
@@ -391,6 +423,9 @@ pub(crate) fn expand_store(
         }
     };
 
+    let attach_failed = format!(
+        "restored store {name_str} could not attach its signals (a signal is already attached to another store)"
+    );
     let restorer_fn = format_ident!("__keel_restore_erased_{}", name_str);
     let cell_fn = format_ident!("__keel_cell_erased_{}", name_str);
     let restorer = registration(&root, &name_str, &restorer_fn, &cell_fn);
@@ -407,10 +442,26 @@ pub(crate) fn expand_store(
                 signals: &[ #(#signal_metas),* ],
             };
 
-            /// Creates the signal cell and attaches every signal (idempotent).
+            /// Builds the signal cell and attaches every signal, in declaration order.
             #[doc(hidden)]
-            pub fn __keel_attach_all(&self) {
-                let _ = <Self as #runtime::StoreObject>::cell(self);
+            fn __keel_build_cell(&self) -> ::core::result::Result<
+                ::std::sync::Arc<#signals_path::StoreCell>,
+                #signals_path::SignalsError
+            > {
+                #(#key_fns)*
+                let __cell = #signals_path::StoreCell::new(#meta::ids::type_id(#name_str));
+                #(#attach_stmts)*
+                ::core::result::Result::Ok(__cell)
+            }
+
+            /// Creates the signal cell and attaches every signal (idempotent). Fails when a
+            /// signal cannot be attached, for example because it already belongs to another
+            /// store; the constructor's dispatch arm turns that into a bad request.
+            #[doc(hidden)]
+            pub fn __keel_attach_all(&self) -> ::core::result::Result<(), #signals_path::SignalsError> {
+                self.__keel_cell
+                    .get_or_try_init(|| self.__keel_build_cell())
+                    .map(|_| ())
             }
 
             /// Records the handle the object table issued.
@@ -423,11 +474,16 @@ pub(crate) fn expand_store(
         #derived
         impl #runtime::StoreObject for #name {
             fn cell(&self) -> &::std::sync::Arc<#signals_path::StoreCell> {
-                #(#key_fns)*
+                // Every path that publishes a store calls `__keel_attach_all` first and reports
+                // its error, so this only fails for a store that was never published. It then
+                // gets an empty cell (it delivers nothing) rather than a panic.
                 self.__keel_cell.get_or_init(|| {
-                    let __cell = #signals_path::StoreCell::new(#meta::ids::type_id(#name_str));
-                    #(#attach_stmts)*
-                    __cell
+                    match self.__keel_build_cell() {
+                        ::core::result::Result::Ok(__cell) => __cell,
+                        ::core::result::Result::Err(_) => {
+                            #signals_path::StoreCell::new(#meta::ids::type_id(#name_str))
+                        }
+                    }
                 })
             }
 
@@ -465,7 +521,13 @@ pub(crate) fn expand_store(
                     };
                 )*
                 let __value = #build;
-                __value.__keel_attach_all();
+                if __value.__keel_attach_all().is_err() {
+                    return ::core::result::Result::Err(#wire::WireError::InvalidTag {
+                        tag: 0,
+                        at: __r.position(),
+                        ty: #attach_failed,
+                    });
+                }
                 ::core::result::Result::Ok(__value)
             }
         }
@@ -564,22 +626,15 @@ mod tests {
     }
 
     #[test]
-    fn computed_and_lazy_need_a_restore_hook() {
+    fn computed_needs_a_restore_hook() {
         let message = expand("struct S { a: Signal<i32>, b: Computed<i32> }").unwrap_err();
         assert!(
             message
                 .starts_with("error[keel::E0013]: store `S` cannot be restored automatically: `b`"),
             "{message}"
         );
-        let message = expand("struct S { a: Signal<i32>, l: Lazy<Row> }").unwrap_err();
-        assert!(message.contains("error[keel::E0013]"), "{message}");
-        let out = expand_with_hook("struct S { a: Signal<i32>, b: Computed<i32>, l: Lazy<Row> }")
-            .unwrap();
+        let out = expand_with_hook("struct S { a: Signal<i32>, b: Computed<i32> }").unwrap();
         assert!(has(&out, "computed: true"), "{out}");
-        assert!(
-            has(&out, "Lazy(&::keel::meta::TypeRefMeta::Named(\"Row\"))"),
-            "{out}"
-        );
         assert!(
             has(
                 &out,
@@ -587,8 +642,57 @@ mod tests {
             ),
             "{out}"
         );
-        assert!(has(&out, "attach_computed(&self.b, 1u32)"), "{out}");
-        assert!(has(&out, "attach_lazy(&self.l, 2u32)"), "{out}");
+        assert!(has(&out, "attach_computed(&self.b, 1u32)?"), "{out}");
+    }
+
+    #[test]
+    fn lazy_lists_are_not_available_in_v1() {
+        for src in [
+            "struct S { a: Signal<i32>, l: Lazy<Row> }",
+            "struct S { #[keel(no_coalesce)] l: Lazy<Row> }",
+        ] {
+            for message in [expand(src).unwrap_err(), expand_with_hook(src).unwrap_err()] {
+                assert!(
+                    message.starts_with("error[keel::E0001]: `Lazy<Row>` is not available in v1"),
+                    "{message}"
+                );
+                assert!(message.contains("lazy lists cannot be mirrored yet"), "{message}");
+                assert!(message.contains("Signal<Vec<T>>"), "{message}");
+            }
+        }
+    }
+
+    #[test]
+    fn signals_attach_with_the_call_that_fits_their_kind() {
+        let out = expand_with_hook(
+            "struct S { plain: Signal<i32>, #[keel(key = \"id\")] rows: Signal<Vec<Row>>, derived: Computed<i32> }",
+        )
+        .unwrap();
+        assert!(has(&out, "__cell.attach(&self.plain, 0u32)?;"), "{out}");
+        assert!(
+            has(&out, "__cell.attach_keyed(&self.rows, 1u32, __keel_key_rows)?;"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "__cell.attach_computed(&self.derived, 2u32)?;"),
+            "{out}"
+        );
+        assert!(!has(&out, "attach_lazy"), "{out}");
+        assert!(!has(&out, "set_no_coalesce"), "{out}");
+    }
+
+    #[test]
+    fn attach_errors_are_returned_not_swallowed() {
+        let out = expand("struct S { a: Signal<i32> }").unwrap();
+        assert!(
+            has(
+                &out,
+                "pub fn __keel_attach_all(&self) -> ::core::result::Result<(), ::keel::signals::SignalsError>"
+            ),
+            "{out}"
+        );
+        assert!(has(&out, "get_or_try_init(|| self.__keel_build_cell())"), "{out}");
+        assert!(has(&out, "if __value.__keel_attach_all().is_err()"), "{out}");
     }
 
     #[test]
@@ -596,22 +700,16 @@ mod tests {
         let out = expand("struct S { #[keel(key = \"id\", no_coalesce)] rows: Signal<Vec<Row>> }")
             .unwrap();
         assert!(
-            has(
-                &out,
-                "fn __keel_key_rows(__item: &dyn ::core::any::Any) -> u64"
-            ),
+            has(&out, "fn __keel_key_rows(__item: &Row) -> u64"),
             "{out}"
         );
-        assert!(has(&out, "downcast_ref::<Row>()"), "{out}");
-        assert!(has(&out, "encode_to_vec(&__item.id)"), "{out}");
+        assert!(has(&out, "Encode::encode(&__item.id, &mut __buf)"), "{out}");
+        assert!(has(&out, "fnv1a64(__buf.as_slice())"), "{out}");
         assert!(
-            has(
-                &out,
-                "attach(&self.rows, 0u32, ::core::option::Option::Some(__keel_key_rows))"
-            ),
+            has(&out, "__cell.attach_keyed(&self.rows, 0u32, __keel_key_rows)?;"),
             "{out}"
         );
-        assert!(has(&out, "set_no_coalesce(0u32)"), "{out}");
+        assert!(has(&out, "__cell.set_no_coalesce(0u32)?;"), "{out}");
         assert!(
             has(&out, "key: ::core::option::Option::Some(\"id\")"),
             "{out}"

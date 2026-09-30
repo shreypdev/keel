@@ -3,7 +3,6 @@ pub struct Todos {
     rows: Signal<Vec<Row>>,
     ticks: Signal<u32>,
     visible: Computed<Vec<Row>>,
-    page: Lazy<Row>,
     label: String,
     #[doc(hidden)]
     pub __keel_cell: ::keel::signals::CellSlot,
@@ -39,21 +38,46 @@ impl Todos {
                 computed: true,
                 key: ::core::option::Option::None,
             },
-            ::keel::meta::SignalMeta {
-                name: "page",
-                signal_id: 3u32,
-                ty: ::keel::meta::TypeRefMeta::Lazy(
-                    &::keel::meta::TypeRefMeta::Named("Row"),
-                ),
-                computed: false,
-                key: ::core::option::Option::None,
-            },
         ],
     };
-    /// Creates the signal cell and attaches every signal (idempotent).
+    /// Builds the signal cell and attaches every signal, in declaration order.
     #[doc(hidden)]
-    pub fn __keel_attach_all(&self) {
-        let _ = <Self as ::keel::runtime::StoreObject>::cell(self);
+    fn __keel_build_cell(
+        &self,
+    ) -> ::core::result::Result<
+        ::std::sync::Arc<::keel::signals::StoreCell>,
+        ::keel::signals::SignalsError,
+    > {
+        fn __keel_key_rows(__item: &Row) -> u64 {
+            ::std::thread_local! {
+                static __KEEL_KEY_BUF : ::core::cell::RefCell < ::keel::wire::Writer > =
+                ::core::cell::RefCell::new(::keel::wire::Writer::new());
+            }
+            __KEEL_KEY_BUF
+                .with(|__buf| {
+                    let mut __buf = __buf.borrow_mut();
+                    __buf.clear();
+                    ::keel::wire::Encode::encode(&__item.id, &mut __buf);
+                    ::keel::meta::ids::fnv1a64(__buf.as_slice())
+                })
+        }
+        let __cell = ::keel::signals::StoreCell::new(
+            ::keel::meta::ids::type_id("Todos"),
+        );
+        __cell.attach_keyed(&self.rows, 0u32, __keel_key_rows)?;
+        __cell.attach(&self.ticks, 1u32)?;
+        __cell.set_no_coalesce(1u32)?;
+        __cell.attach_computed(&self.visible, 2u32)?;
+        ::core::result::Result::Ok(__cell)
+    }
+    /// Creates the signal cell and attaches every signal (idempotent). Fails when a
+    /// signal cannot be attached, for example because it already belongs to another
+    /// store; the constructor's dispatch arm turns that into a bad request.
+    #[doc(hidden)]
+    pub fn __keel_attach_all(
+        &self,
+    ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
+        self.__keel_cell.get_or_try_init(|| self.__keel_build_cell()).map(|_| ())
     }
     /// Records the handle the object table issued.
     #[doc(hidden)]
@@ -64,32 +88,16 @@ impl Todos {
 #[automatically_derived]
 impl ::keel::runtime::StoreObject for Todos {
     fn cell(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
-        fn __keel_key_rows(__item: &dyn ::core::any::Any) -> u64 {
-            match __item.downcast_ref::<Row>() {
-                ::core::option::Option::Some(__item) => {
-                    ::keel::meta::ids::fnv1a64(
-                        &::keel::wire::Encode::encode_to_vec(&__item.id),
-                    )
-                }
-                ::core::option::Option::None => 0,
-            }
-        }
         self.__keel_cell
             .get_or_init(|| {
-                let __cell = ::keel::signals::StoreCell::new(
-                    ::keel::meta::ids::type_id("Todos"),
-                );
-                __cell
-                    .attach(
-                        &self.rows,
-                        0u32,
-                        ::core::option::Option::Some(__keel_key_rows),
-                    );
-                __cell.attach(&self.ticks, 1u32, ::core::option::Option::None);
-                __cell.set_no_coalesce(1u32);
-                __cell.attach_computed(&self.visible, 2u32);
-                __cell.attach_lazy(&self.page, 3u32);
-                __cell
+                match self.__keel_build_cell() {
+                    ::core::result::Result::Ok(__cell) => __cell,
+                    ::core::result::Result::Err(_) => {
+                        ::keel::signals::StoreCell::new(
+                            ::keel::meta::ids::type_id("Todos"),
+                        )
+                    }
+                }
             })
     }
     #[allow(unused_mut, unused_variables)]
@@ -142,7 +150,13 @@ impl ::keel::runtime::StoreObject for Todos {
             ::keel::signals::Signal::<Vec<Row>>::new(__value_rows),
             ::keel::signals::Signal::<u32>::new(__value_ticks),
         );
-        __value.__keel_attach_all();
+        if __value.__keel_attach_all().is_err() {
+            return ::core::result::Result::Err(::keel::wire::WireError::InvalidTag {
+                tag: 0,
+                at: __r.position(),
+                ty: "restored store Todos could not attach its signals (a signal is already attached to another store)",
+            });
+        }
         ::core::result::Result::Ok(__value)
     }
 }

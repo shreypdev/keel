@@ -20,10 +20,28 @@ impl Counter {
             },
         ],
     };
-    /// Creates the signal cell and attaches every signal (idempotent).
+    /// Builds the signal cell and attaches every signal, in declaration order.
     #[doc(hidden)]
-    pub fn __keel_attach_all(&self) {
-        let _ = <Self as ::keel::runtime::StoreObject>::cell(self);
+    fn __keel_build_cell(
+        &self,
+    ) -> ::core::result::Result<
+        ::std::sync::Arc<::keel::signals::StoreCell>,
+        ::keel::signals::SignalsError,
+    > {
+        let __cell = ::keel::signals::StoreCell::new(
+            ::keel::meta::ids::type_id("Counter"),
+        );
+        __cell.attach(&self.count, 0u32)?;
+        ::core::result::Result::Ok(__cell)
+    }
+    /// Creates the signal cell and attaches every signal (idempotent). Fails when a
+    /// signal cannot be attached, for example because it already belongs to another
+    /// store; the constructor's dispatch arm turns that into a bad request.
+    #[doc(hidden)]
+    pub fn __keel_attach_all(
+        &self,
+    ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
+        self.__keel_cell.get_or_try_init(|| self.__keel_build_cell()).map(|_| ())
     }
     /// Records the handle the object table issued.
     #[doc(hidden)]
@@ -36,11 +54,14 @@ impl ::keel::runtime::StoreObject for Counter {
     fn cell(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
         self.__keel_cell
             .get_or_init(|| {
-                let __cell = ::keel::signals::StoreCell::new(
-                    ::keel::meta::ids::type_id("Counter"),
-                );
-                __cell.attach(&self.count, 0u32, ::core::option::Option::None);
-                __cell
+                match self.__keel_build_cell() {
+                    ::core::result::Result::Ok(__cell) => __cell,
+                    ::core::result::Result::Err(_) => {
+                        ::keel::signals::StoreCell::new(
+                            ::keel::meta::ids::type_id("Counter"),
+                        )
+                    }
+                }
             })
     }
     #[allow(unused_mut, unused_variables)]
@@ -81,7 +102,13 @@ impl ::keel::runtime::StoreObject for Counter {
                 __keel_cell: ::core::default::Default::default(),
             }
         };
-        __value.__keel_attach_all();
+        if __value.__keel_attach_all().is_err() {
+            return ::core::result::Result::Err(::keel::wire::WireError::InvalidTag {
+                tag: 0,
+                at: __r.position(),
+                ty: "restored store Counter could not attach its signals (a signal is already attached to another store)",
+            });
+        }
         ::core::result::Result::Ok(__value)
     }
 }

@@ -36,6 +36,6 @@ pub use effect::Effect;
 pub use error::SignalsError;
 pub use signal::Signal;
 pub use sink::{ChangeSink, clear_sink, set_sink, with_sink};
-pub use store::{ALL_SIGNALS, StoreCell};
+pub use store::{ALL_SIGNALS, CellSlot, StoreCell};
 pub use txn::{next_txn_id, txn};
 pub use value::{KeyFn, ListLike, SignalValue};

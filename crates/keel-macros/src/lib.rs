@@ -30,8 +30,9 @@
 //!   type itself, so recursive types can be written: `children: Vec<Self>`.
 //! * A store's impl block is marked `#[keel::api(store)]`; the struct gets a hidden
 //!   `__keel_cell` field and struct literals of the type inside that impl block get it added.
-//!   Stores with `Computed`/`Lazy` fields name a rebuild function with
+//!   Stores with `Computed` fields name a rebuild function with
 //!   `#[keel::store(restore = "Self::rebuild")]`. See [`store`].
+//! * `Lazy<T>` (a lazily paged list) is rejected with E0001 in v1, like in `keel-bindgen`.
 //! * `#[keel::error]` derives `Debug` unless the enum already does.
 //! * `async fn`s of a port trait become methods returning boxed futures (`async fn` in traits
 //!   is not dyn compatible); `#[keel::port]` on `impl Trait for Type` blocks rewrites them back
@@ -116,8 +117,8 @@ pub fn port(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_port(attr.into(), item.into()).into()
 }
 
-/// Marks a struct as a store: an object whose `Signal<T>`, `Computed<T>` and `Lazy<T>` fields
-/// the platforms mirror.
+/// Marks a struct as a store: an object whose `Signal<T>` and `Computed<T>` fields the
+/// platforms mirror.
 ///
 /// The macro appends a hidden `__keel_cell` field to the struct; struct literals of the type
 /// inside its `#[keel::api(store)]` impl block get it added automatically. See the
