@@ -1,8 +1,17 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { applyPageMode, listenForTheme } from "./embed";
 import "./index.css";
 import { startKeel } from "./keel";
+import { parseParams } from "./url-params";
+
+const params = parseParams(location.search);
+// Before the first render: the forced theme and the embed mode style the page from its first paint.
+applyPageMode(document.documentElement, params);
+// Embedded (`?embed=1` in an iframe), the landing page is the parent: it can restyle this page.
+const parent = params.embed && window.parent !== window ? window.parent : null;
+if (parent !== null) listenForTheme(window, document.documentElement, parent);
 
 const root = createRoot(document.getElementById("root") as HTMLElement);
 
@@ -10,7 +19,7 @@ startKeel().then(
   (playground) => {
     root.render(
       <StrictMode>
-        <App playground={playground} />
+        <App playground={playground} params={params} />
       </StrictMode>,
     );
   },

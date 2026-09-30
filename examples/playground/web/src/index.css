@@ -15,8 +15,10 @@
   line-height: 1.45;
 }
 
+/* The dark palette: by the system preference unless `data-theme="light"` (the `?theme=` URL
+   parameter, or the embedding page's message) forces light, and always for `data-theme="dark"`. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #101216;
     --surface: #181b21;
     --text: #e8eaef;
@@ -29,6 +31,25 @@
     --ok: #55c58a;
     --flash: #4a4317;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101216;
+  --surface: #181b21;
+  --text: #e8eaef;
+  --muted: #98a1b2;
+  --border: #2b303a;
+  --accent: #6b9bff;
+  --accent-text: #0b1020;
+  --accent-soft: #1f2a44;
+  --danger: #ff7b6b;
+  --ok: #55c58a;
+  --flash: #4a4317;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -45,6 +66,32 @@ main {
   max-width: 40rem;
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
+}
+
+/*
+ * Embedded (`?embed=1`, `data-embed` on <html>): one view inside the landing page's iframe. The
+ * page shows through (a transparent body and panel), so text must read on the site's own canvas:
+ * pass `theme=` (or post a `keel-theme` message) to match it, otherwise the system preference decides.
+ */
+:root[data-embed] body {
+  background: transparent;
+}
+
+:root[data-embed] main {
+  max-width: none;
+  padding: 0.5rem;
+}
+
+:root[data-embed] .panel {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+:root[data-embed] .viewport {
+  background: transparent;
 }
 
 h1 {
