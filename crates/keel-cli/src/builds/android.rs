@@ -14,7 +14,7 @@ use crate::binary::{elf_is_64, elf_min_load_alignment};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{copy_file, remove_dir_all, size_of};
 use crate::session::Session;
-use crate::toolchain::ndk_major;
+use crate::toolchain::{Concern, ndk_major};
 
 use super::Artifact;
 
@@ -62,7 +62,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             "install it with `sdkmanager \"ndk;27.2.12479018\"` (r27 or newer, for 16 KB pages) and set ANDROID_NDK_HOME, or set ANDROID_HOME so `ndk/` is found",
         ));
     };
-    for note in &session.toolchain.notes {
+    for note in session.toolchain.notes_for(Concern::Android) {
         session.ui.detail(note);
     }
     if ndk_major(&ndk).is_some_and(|major| major < 27) {

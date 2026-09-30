@@ -46,6 +46,11 @@ fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
             .args(["build", "--platform", "ios", "--release"]),
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.to_ascii_lowercase().contains("android"),
+        "an iOS build says nothing about Android:\n{stderr}"
+    );
     let xcframework = project.root.join("build/ios/KeelCore.xcframework");
     for slice in ["ios-arm64", "ios-arm64-simulator"] {
         let lib = xcframework.join(slice).join("libkeel_core.a");
