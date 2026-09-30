@@ -34,6 +34,9 @@ fun main() {
         MalformedInputTests(),
         FuzzTests(),
         GoldenFullTests(),
+        CoreCallTests(),
+        StreamTests(),
+        MirrorTests(),
     )
     var failures = 0
     var cases = 0

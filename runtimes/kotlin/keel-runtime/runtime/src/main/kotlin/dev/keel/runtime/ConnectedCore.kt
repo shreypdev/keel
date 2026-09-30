@@ -47,6 +47,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 internal class ConnectedCore(
     private val transport: Transport,
     private val blockingTimeout: Duration,
+    initialCallId: Int = 0,
 ) : KeelCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -65,7 +66,7 @@ internal class ConnectedCore(
         var coreDone = false
     }
 
-    private val callIds = AtomicInteger(0)
+    private val callIds = AtomicInteger(initialCallId)
     private val pending = ConcurrentHashMap<Int, Pending>()
     private val closed = AtomicBoolean(false)
 
