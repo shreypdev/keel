@@ -694,7 +694,7 @@ fn r2_observe_past_the_pass_cap_converges_through_follow_up_change_sets() {
 
     struct Chaser {
         cell: Arc<StoreCell>,
-        n: Signal<i32>,
+        _n: Signal<i32>,
         _chase: Computed<i32>,
     }
     impl keel_runtime::KeelObject for Chaser {
@@ -725,7 +725,7 @@ fn r2_observe_past_the_pass_cap_converges_through_follow_up_change_sets() {
     cell.attach_computed(&chase, 1).unwrap();
     let handle = t.runtime().insert_store(Arc::new(Chaser {
         cell,
-        n,
+        _n: n,
         _chase: chase,
     }));
 
