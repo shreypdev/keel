@@ -12,7 +12,6 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::task::Wake;
 
 use keel::meta::{DispatchCall, DispatchFn, Registration, ids};
 use keel::runtime::testing::port_reply;
@@ -96,7 +95,10 @@ impl Runtime {
     }
 
     /// Looks up an object by handle.
-    pub fn object<T: KeelObject>(&self, handle: u64) -> Result<Arc<T>, keel::runtime::object_table::BadHandle> {
+    pub fn object<T: KeelObject>(
+        &self,
+        handle: u64,
+    ) -> Result<Arc<T>, keel::runtime::object_table::BadHandle> {
         self.rt.object::<T>(handle)
     }
 
@@ -256,17 +258,10 @@ impl Dispatched {
 pub mod testing {
     use super::*;
 
-    struct Noop;
-
-    impl Wake for Noop {
-        fn wake(self: Arc<Self>) {}
-    }
-
     /// Polls `future` to completion on the current thread. Panics if it stays pending (nothing
     /// in these tests waits for another thread).
     pub fn block_on<F: Future>(future: F) -> F::Output {
-        let waker = Waker::from(Arc::new(Noop));
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(Waker::noop());
         let mut future = Box::pin(future);
         for _ in 0..10_000 {
             if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
@@ -278,8 +273,7 @@ pub mod testing {
 
     /// Drains a stream to the end on the current thread.
     pub fn collect<S: Stream + ?Sized>(stream: Pin<Box<S>>) -> Vec<S::Item> {
-        let waker = Waker::from(Arc::new(Noop));
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(Waker::noop());
         let mut stream = stream;
         let mut items = Vec::new();
         for _ in 0..10_000 {

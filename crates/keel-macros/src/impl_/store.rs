@@ -70,14 +70,6 @@ enum SigKind {
     Computed,
 }
 
-/// What a field's type says about it.
-enum Wrapped {
-    /// `Signal<T>` or `Computed<T>` with its `T`.
-    Signal(SigKind, syn::Type),
-    /// `Lazy<T>`: recognised only to be rejected with a teaching diagnostic (not in v1).
-    Lazy,
-}
-
 struct SignalField {
     ident: syn::Ident,
     name: String,
@@ -97,8 +89,8 @@ struct StateField {
     is_ctx: bool,
 }
 
-/// `Signal<T>`, `Computed<T>` or `Lazy<T>` (by last path segment), with the `T` of the first two.
-fn signal_wrapper(ty: &syn::Type) -> Option<Wrapped> {
+/// The last path segment of a one-argument generic type (`Signal<T>`), with its `T`.
+fn wrapper_of(ty: &syn::Type) -> Option<(String, syn::Type)> {
     let syn::Type::Path(path) = ty else {
         return None;
     };
@@ -106,12 +98,6 @@ fn signal_wrapper(ty: &syn::Type) -> Option<Wrapped> {
         return None;
     }
     let seg = path.path.segments.last()?;
-    let kind = match seg.ident.to_string().as_str() {
-        "Signal" => Some(SigKind::Signal),
-        "Computed" => Some(SigKind::Computed),
-        "Lazy" => None,
-        _ => return None,
-    };
     let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
         return None;
     };
@@ -123,10 +109,22 @@ fn signal_wrapper(ty: &syn::Type) -> Option<Wrapped> {
     if types.next().is_some() {
         return None;
     }
-    Some(match kind {
-        Some(kind) => Wrapped::Signal(kind, value.clone()),
-        None => Wrapped::Lazy,
-    })
+    Some((seg.ident.to_string(), value.clone()))
+}
+
+/// `Signal<T>` or `Computed<T>` (by last path segment) with its `T`.
+fn signal_wrapper(ty: &syn::Type) -> Option<(SigKind, syn::Type)> {
+    let (name, value) = wrapper_of(ty)?;
+    match name.as_str() {
+        "Signal" => Some((SigKind::Signal, value)),
+        "Computed" => Some((SigKind::Computed, value)),
+        _ => None,
+    }
+}
+
+/// `Lazy<T>`: recognised only to be rejected with a teaching diagnostic (not in v1).
+fn is_lazy(ty: &syn::Type) -> bool {
+    wrapper_of(ty).is_some_and(|(name, _)| name == "Lazy")
 }
 
 /// `Vec<Item>` -> `Item`.
@@ -183,23 +181,24 @@ pub(crate) fn expand_store(
                     );
                     continue;
                 }
+                if is_lazy(&field.ty) {
+                    take(&mut field.attrs, Site::SIGNAL, &mut errors);
+                    errors.push(
+                        Diag::new(
+                            code::E0001,
+                            format!(
+                                "`{}` is not available in v1: lazy lists cannot be mirrored yet",
+                                ty_string(&field.ty)
+                            ),
+                            "a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it",
+                            "expose the items as a `Signal<Vec<T>>` (keyed with `#[keel(key = \"..\")]` if they have an id) or as a paged method that takes an offset and a limit",
+                        )
+                        .on(&field.ty),
+                    );
+                    continue;
+                }
                 match signal_wrapper(&field.ty) {
-                    Some(Wrapped::Lazy) => {
-                        take(&mut field.attrs, Site::SIGNAL, &mut errors);
-                        errors.push(
-                            Diag::new(
-                                code::E0001,
-                                format!(
-                                    "`{}` is not available in v1: lazy lists cannot be mirrored yet",
-                                    ty_string(&field.ty)
-                                ),
-                                "a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it",
-                                "expose the items as a `Signal<Vec<T>>` (keyed with `#[keel(key = \"..\")]` if they have an id) or as a paged method that takes an offset and a limit",
-                            )
-                            .on(&field.ty),
-                        );
-                    }
-                    Some(Wrapped::Signal(kind, value_ty)) => {
+                    Some((kind, value_ty)) => {
                         let attr = take(&mut field.attrs, Site::SIGNAL, &mut errors);
                         let kty = match map_type(&value_ty, Pos::Signal, Allow::NONE) {
                             Ok(kty) => kty,
@@ -656,7 +655,10 @@ mod tests {
                     message.starts_with("error[keel::E0001]: `Lazy<Row>` is not available in v1"),
                     "{message}"
                 );
-                assert!(message.contains("lazy lists cannot be mirrored yet"), "{message}");
+                assert!(
+                    message.contains("lazy lists cannot be mirrored yet"),
+                    "{message}"
+                );
                 assert!(message.contains("Signal<Vec<T>>"), "{message}");
             }
         }
@@ -670,7 +672,10 @@ mod tests {
         .unwrap();
         assert!(has(&out, "__cell.attach(&self.plain, 0u32)?;"), "{out}");
         assert!(
-            has(&out, "__cell.attach_keyed(&self.rows, 1u32, __keel_key_rows)?;"),
+            has(
+                &out,
+                "__cell.attach_keyed(&self.rows, 1u32, __keel_key_rows)?;"
+            ),
             "{out}"
         );
         assert!(
@@ -691,8 +696,14 @@ mod tests {
             ),
             "{out}"
         );
-        assert!(has(&out, "get_or_try_init(|| self.__keel_build_cell())"), "{out}");
-        assert!(has(&out, "if __value.__keel_attach_all().is_err()"), "{out}");
+        assert!(
+            has(&out, "get_or_try_init(|| self.__keel_build_cell())"),
+            "{out}"
+        );
+        assert!(
+            has(&out, "if __value.__keel_attach_all().is_err()"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -706,7 +717,10 @@ mod tests {
         assert!(has(&out, "Encode::encode(&__item.id, &mut __buf)"), "{out}");
         assert!(has(&out, "fnv1a64(__buf.as_slice())"), "{out}");
         assert!(
-            has(&out, "__cell.attach_keyed(&self.rows, 0u32, __keel_key_rows)?;"),
+            has(
+                &out,
+                "__cell.attach_keyed(&self.rows, 0u32, __keel_key_rows)?;"
+            ),
             "{out}"
         );
         assert!(has(&out, "__cell.set_no_coalesce(0u32)?;"), "{out}");

@@ -158,6 +158,7 @@ pub struct Twin {
 }
 
 #[k::api(store)]
+#[allow(clippy::new_without_default)]
 impl Twin {
     pub fn new() -> Self {
         Twin {
@@ -291,14 +292,20 @@ fn constructors_attach_every_signal_in_order_and_record_the_handle() {
             (3, ChangeOp::Full)
         ]
     );
-    assert!(initial[0].entries.iter().all(|e| e.handle == Handle(handle)));
+    assert!(
+        initial[0]
+            .entries
+            .iter()
+            .all(|e| e.handle == Handle(handle))
+    );
 }
 
 fn add_row(rt: &Runtime, handle: u64, id: u32, title: &str) {
     let mut w = Writer::new();
     id.encode(&mut w);
     title.to_owned().encode(&mut w);
-    rt.call_object("Todos", "add", handle, w.as_slice()).sync_ok();
+    rt.call_object("Todos", "add", handle, w.as_slice())
+        .sync_ok();
 }
 
 fn patch_of(cs: &keel::wire::payload::ChangeSet, signal_id: u32) -> KeyedPatch<Row> {
@@ -382,9 +389,16 @@ fn attach_errors_are_returned_to_the_caller() {
     let first = Twin::new();
     let second = Twin::sharing(&first);
     assert_eq!(first.__keel_attach_all(), Ok(()));
-    assert_eq!(first.__keel_attach_all(), Ok(()), "attaching twice is a no-op");
+    assert_eq!(
+        first.__keel_attach_all(),
+        Ok(()),
+        "attaching twice is a no-op"
+    );
     // `second` reuses the first store's signal, which belongs to `first`'s cell.
-    assert_eq!(second.__keel_attach_all(), Err(SignalsError::AlreadyAttached));
+    assert_eq!(
+        second.__keel_attach_all(),
+        Err(SignalsError::AlreadyAttached)
+    );
     // (The constructor's dispatch arm turns that error into a bad request; see `keel`'s
     // end-to-end test.)
     let rt = Runtime::new();
@@ -443,7 +457,11 @@ fn snapshot_excludes_computed_signals() {
     let mut record = Writer::new();
     store.cell().encode_snapshot(&mut record);
     let mut r = Reader::new(record.as_slice());
-    assert_eq!(r.read_u64().unwrap(), handle, "the record starts with the handle");
+    assert_eq!(
+        r.read_u64().unwrap(),
+        handle,
+        "the record starts with the handle"
+    );
     assert_eq!(r.read_u32().unwrap(), ids::type_id("Todos"));
     assert_eq!(r.read_u32().unwrap(), 3, "rows, filter, ticks");
     let mut ids_seen = Vec::new();

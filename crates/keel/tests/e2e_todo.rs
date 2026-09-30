@@ -175,6 +175,7 @@ pub struct Shared {
 static SHARED_SIGNAL: OnceLock<Signal<u32>> = OnceLock::new();
 
 #[keel::api(store)]
+#[allow(clippy::new_without_default)]
 impl Shared {
     pub fn new() -> Self {
         Self {
@@ -280,9 +281,10 @@ impl Core {
     fn new() -> Core {
         let core = Core::without_fake();
         let fake = Arc::new(FakeStore::default());
-        core.t
-            .ctx()
-            .bind_dyn_port::<dyn Store>(<dyn Store as Port>::PORT_ID, fake.clone() as Arc<dyn Store>);
+        core.t.ctx().bind_dyn_port::<dyn Store>(
+            <dyn Store as Port>::PORT_ID,
+            fake.clone() as Arc<dyn Store>,
+        );
         Core { fake, ..core }
     }
 
@@ -324,11 +326,12 @@ impl Core {
         reply
     }
 
+    /// Calls the constructor `new` of `type_name` and returns the new object's handle.
     fn construct(&self, type_name: &str, args: &[u8]) -> Handle {
         let reply = self.sync(
             CallTarget::Constructor {
                 type_id: ids::type_id(type_name),
-                method_id: ids::method_id(type_name, type_name_ctor(type_name)),
+                method_id: ids::method_id(type_name, "new"),
             },
             args,
         );
@@ -354,11 +357,6 @@ impl Core {
     fn change_sets(&self) -> Vec<ChangeSet> {
         self.t.host().take_decoded_change_sets()
     }
-}
-
-/// Every constructor in this file is called `new`.
-fn type_name_ctor(_type_name: &str) -> &'static str {
-    "new"
 }
 
 fn method(handle: Handle, type_name: &str, name: &str) -> CallTarget {
@@ -453,7 +451,10 @@ fn observe_all_sends_the_initial_values_of_all_three_signals() {
         assert_eq!(e.op, ChangeOp::Full);
     }
     assert_eq!(decode::<Vec<Todo>>(&entry(&initial, TODOS).value), []);
-    assert_eq!(decode::<Filter>(&entry(&initial, FILTER).value), Filter::All);
+    assert_eq!(
+        decode::<Filter>(&entry(&initial, FILTER).value),
+        Filter::All
+    );
     assert_eq!(decode::<Vec<Todo>>(&entry(&initial, VISIBLE).value), []);
     // Nothing else crossed the boundary, and the runtime did not need the platform.
     assert!(core.t.host().port_calls().is_empty());
@@ -477,7 +478,7 @@ fn sync_command_emits_one_change_set_with_the_signal_and_the_computed() {
     assert_eq!(entry(&cs, VISIBLE).op, ChangeOp::Full);
     assert_eq!(decode::<Vec<Todo>>(&entry(&cs, VISIBLE).value), []);
 
-    // Writing the same filter again: one change-set again, never two.
+    // Switching back: again exactly one change-set, and `visible` is current.
     core.sync(method(store, "Todos", "set_filter"), &enc(&Filter::All));
     let cs = one(core.change_sets());
     assert_eq!(decode::<Vec<Todo>>(&entry(&cs, VISIBLE).value), [milk(1)]);
@@ -494,7 +495,10 @@ fn async_add_replies_and_ships_a_keyed_insert_patch() {
     core.run(method(store, "Todos", "add"), &enc(&"Bread".to_owned()));
     let first = one(core.change_sets());
     assert_eq!(entry(&first, TODOS).op, ChangeOp::Full);
-    assert_eq!(decode::<Vec<Todo>>(&entry(&first, TODOS).value), [todo(1, "Bread")]);
+    assert_eq!(
+        decode::<Vec<Todo>>(&entry(&first, TODOS).value),
+        [todo(1, "Bread")]
+    );
 
     let id = core.start(method(store, "Todos", "add"), &enc(&"Milk".to_owned()));
     // Asynchronous: nothing has happened until the executor runs.
@@ -609,7 +613,11 @@ fn a_foreign_port_error_and_a_late_reply_reach_the_command() {
     // The platform answers a typed error synchronously.
     core.t.host().script_port(port_id, save, |call| {
         let body = enc(&StoreError::Rejected("nope".to_owned()));
-        keel::runtime::PortCallOutcome::Sync(port_reply(call.port_call_id, PortStatus::Error, &body))
+        keel::runtime::PortCallOutcome::Sync(port_reply(
+            call.port_call_id,
+            PortStatus::Error,
+            &body,
+        ))
     });
     let reply = core.run(method(store, "Todos", "add"), &enc(&"Milk".to_owned()));
     assert_eq!(reply.status, ReplyStatus::Error);
@@ -623,9 +631,14 @@ fn a_foreign_port_error_and_a_late_reply_reach_the_command() {
     core.t.host().take_port_calls();
     let id = core.start(method(store, "Todos", "add"), &enc(&"Milk".to_owned()));
     core.t.run_pending();
-    assert!(core.t.take_replies().is_empty(), "the port has not answered yet");
+    assert!(
+        core.t.take_replies().is_empty(),
+        "the port has not answered yet"
+    );
     let call = one(core.t.host().take_port_calls());
-    core.t.runtime().port_reply(&port_reply_ok(call.port_call_id, &[]));
+    core.t
+        .runtime()
+        .port_reply(&port_reply_ok(call.port_call_id, &[]));
     core.t.run_pending();
     let reply = one(core.t.take_replies());
     assert_eq!((reply.call_id, reply.status), (id, ReplyStatus::Ok));
@@ -657,14 +670,21 @@ fn snapshot_and_restore_rebuild_the_store_under_the_same_handle() {
 
     // A new process: fresh runtime, restore, and the host's old handle still works.
     let revived = Core::new();
-    revived.t.runtime().restore(&snapshot).expect("the snapshot restores");
+    revived
+        .t
+        .runtime()
+        .restore(&snapshot)
+        .expect("the snapshot restores");
     let initial = revived.observe(store);
     assert_eq!(signal_ids(&initial), [TODOS, FILTER, VISIBLE]);
     let mut eggs = milk(2);
     eggs.title = "Eggs".to_owned();
     let all = vec![milk(1), eggs];
     assert_eq!(decode::<Vec<Todo>>(&entry(&initial, TODOS).value), all);
-    assert_eq!(decode::<Filter>(&entry(&initial, FILTER).value), Filter::Active);
+    assert_eq!(
+        decode::<Filter>(&entry(&initial, FILTER).value),
+        Filter::Active
+    );
     // The computed was rebuilt by the restore hook and is current.
     assert_eq!(decode::<Vec<Todo>>(&entry(&initial, VISIBLE).value), all);
 
@@ -676,7 +696,10 @@ fn snapshot_and_restore_rebuild_the_store_under_the_same_handle() {
     assert_eq!(entry(&cs, TODOS).op, ChangeOp::KeyedPatch);
 
     // Plain objects are not snapshotted: the calculator's handle is stale in the new runtime.
-    let reply = revived.sync(method(calc, "Calculator", "add"), &[enc(&1_i64), enc(&2_i64)].concat());
+    let reply = revived.sync(
+        method(calc, "Calculator", "add"),
+        &[enc(&1_i64), enc(&2_i64)].concat(),
+    );
     assert_eq!(reply.status, ReplyStatus::BadRequest);
 }
 
@@ -690,7 +713,7 @@ fn a_no_coalesce_signal_reaches_the_platform_while_unobserved() {
     let cs = one(core.change_sets());
     assert_eq!(signal_ids(&cs), [0]);
     assert_eq!(decode::<u32>(&entry(&cs, 0).value), 1);
-    // Observing `quiet` now sends its current value (2 bumps' worth is not lost: it is 1).
+    // Observing `quiet` sends its current value: the write it missed is not lost.
     core.t.runtime().observe(ticker.0, 1, true);
     let cs = one(core.change_sets());
     assert_eq!(signal_ids(&cs), [1]);
@@ -724,7 +747,16 @@ fn a_store_that_cannot_attach_its_signals_is_a_bad_request_not_a_panic() {
         "{reason}"
     );
     // Nothing was published and the runtime is fine.
-    assert_eq!(core.sync(CallTarget::Function { method_id: ids::function_id("version") }, &[]).status, ReplyStatus::Ok);
+    assert_eq!(
+        core.sync(
+            CallTarget::Function {
+                method_id: ids::function_id("version")
+            },
+            &[]
+        )
+        .status,
+        ReplyStatus::Ok
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -814,7 +846,13 @@ fn a_panicking_method_is_status_two_and_the_runtime_keeps_answering() {
     assert!(message.contains("kaboom"), "{message}");
     assert!(!backtrace.is_empty());
     // A fatal-level log record went to the host.
-    assert!(core.t.host().take_logs().iter().any(|l| l.level == 5 && l.message.contains("kaboom")));
+    assert!(
+        core.t
+            .host()
+            .take_logs()
+            .iter()
+            .any(|l| l.level == 5 && l.message.contains("kaboom"))
+    );
 
     // The very same object and the runtime still work.
     let reply = core.sync(
@@ -844,7 +882,10 @@ fn a_stream_delivers_only_as_much_as_the_host_has_credited() {
     let id = core.start(method(calc, "Calculator", "ticks"), &enc(&5_u32));
     // The stream was opened; no items flow before credit.
     let opened = one(core.t.take_replies());
-    assert_eq!((opened.call_id, opened.status), (id, ReplyStatus::StreamOpened));
+    assert_eq!(
+        (opened.call_id, opened.status),
+        (id, ReplyStatus::StreamOpened)
+    );
     core.t.run_pending();
     assert!(core.t.host().take_stream_items().is_empty());
 
@@ -852,7 +893,11 @@ fn a_stream_delivers_only_as_much_as_the_host_has_credited() {
     core.t.run_pending();
     let items = core.t.host().take_stream_items();
     assert_eq!(items.len(), 2, "{items:?}");
-    assert!(items.iter().all(|i| i.call_id == id && i.flag == StreamFlag::Item));
+    assert!(
+        items
+            .iter()
+            .all(|i| i.call_id == id && i.flag == StreamFlag::Item)
+    );
     assert_eq!(decode::<u32>(&items[0].body), 0);
     assert_eq!(decode::<u32>(&items[1].body), 1);
 
@@ -864,7 +909,15 @@ fn a_stream_delivers_only_as_much_as_the_host_has_credited() {
     core.t.run_pending();
     let items = core.t.host().take_stream_items();
     let flags: Vec<StreamFlag> = items.iter().map(|i| i.flag).collect();
-    assert_eq!(flags, [StreamFlag::Item, StreamFlag::Item, StreamFlag::Item, StreamFlag::End]);
+    assert_eq!(
+        flags,
+        [
+            StreamFlag::Item,
+            StreamFlag::Item,
+            StreamFlag::Item,
+            StreamFlag::End
+        ]
+    );
     let values: Vec<u32> = items[..3].iter().map(|i| decode(&i.body)).collect();
     assert_eq!(values, [2, 3, 4]);
     assert!(items[3].body.is_empty());
@@ -882,9 +935,12 @@ fn a_stream_delivers_only_as_much_as_the_host_has_credited() {
 fn the_registered_schema_validates_and_generates_all_three_languages() {
     let schema = keel::meta::collect_schema("e2e-todo");
     schema.validate().expect("the collected schema is valid");
-    let names = |types: Vec<&str>| types.into_iter().map(str::to_owned).collect::<Vec<_>>();
-    assert!(names(schema.records.iter().map(|r| r.name.as_str()).collect()).contains(&"Todo".into()));
-    let todos = schema.objects.iter().find(|o| o.name == "Todos").expect("Todos is registered");
+    assert!(schema.records.iter().any(|r| r.name == "Todo"));
+    let todos = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Todos")
+        .expect("Todos is registered");
     let store_def = todos.store.as_ref().expect("Todos is a store");
     let signals: Vec<(&str, bool, Option<&str>)> = store_def
         .signals
@@ -893,7 +949,11 @@ fn the_registered_schema_validates_and_generates_all_three_languages() {
         .collect();
     assert_eq!(
         signals,
-        [("todos", false, Some("id")), ("filter", false, None), ("visible", true, None)]
+        [
+            ("todos", false, Some("id")),
+            ("filter", false, None),
+            ("visible", true, None)
+        ]
     );
     assert!(schema.ports.iter().any(|p| p.name == "Store"));
     assert!(schema.functions.iter().any(|f| f.name == "version"));
@@ -905,11 +965,25 @@ fn the_registered_schema_validates_and_generates_all_three_languages() {
     let swift = generator.swift(&schema).expect("swift generates");
     let kotlin = generator.kotlin(&schema).expect("kotlin generates");
     let typescript = generator.typescript(&schema).expect("typescript generates");
-    for (language, files) in [("swift", &swift), ("kotlin", &kotlin), ("typescript", &typescript)] {
+    for (language, files) in [
+        ("swift", &swift),
+        ("kotlin", &kotlin),
+        ("typescript", &typescript),
+    ] {
         assert!(!files.is_empty(), "{language} produced no files");
         let all: String = files.iter().map(|f| f.contents.as_str()).collect();
-        for needle in ["Todos", "Todo", "Filter", "TodoError", "Calculator", "version"] {
-            assert!(all.contains(needle), "{language} output does not mention {needle}");
+        for needle in [
+            "Todos",
+            "Todo",
+            "Filter",
+            "TodoError",
+            "Calculator",
+            "version",
+        ] {
+            assert!(
+                all.contains(needle),
+                "{language} output does not mention {needle}"
+            );
         }
     }
 }
