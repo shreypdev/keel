@@ -918,7 +918,7 @@
           "docs": "The names of the entries directly inside `dir`, in ascending order."
         }
       ],
-      "docs": "A sandboxed file system. Paths are `/`-separated and relative to the platform's root."
+      "docs": "A sandboxed file system. Paths are `/`-separated and relative to the platform's root.\n\nA platform without a file system answers \"unavailable\"; every method reports that as an\n`FsError::Io` through `impl From<PortError> for FsError` instead of panicking."
     },
     {
       "name": "Http",
@@ -955,7 +955,7 @@
           "docs": "Performs `req`. Any status is a response; only failures before a response exists are an\n`HttpError`."
         }
       ],
-      "docs": "Performs HTTP requests."
+      "docs": "Performs HTTP requests.\n\nA platform that did not register the port answers \"unavailable\"; `request` reports that (and a\ncancelled call, and a reply that does not decode) as an `HttpError`, through\n`impl From<PortError> for HttpError`, instead of panicking."
     },
     {
       "name": "Kv",
@@ -1047,7 +1047,7 @@
           "docs": "The keys that start with `prefix`, in ascending order."
         }
       ],
-      "docs": "A persistent key-value store of byte strings."
+      "docs": "A persistent key-value store of byte strings.\n\nThe methods have no error channel: calling one while no adapter is registered panics with a\nmessage that names the port and says how to register one (E0062), which traps a wasm core.\nRegister `Kv` (or bind a fake) before the core uses it."
     },
     {
       "name": "Lifecycle",
@@ -1230,7 +1230,7 @@
           "docs": "The keys that start with `prefix`, in ascending order."
         }
       ],
-      "docs": "A key-value store for secrets. Same methods as `Kv`, under its own port id."
+      "docs": "A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same\nbehaviour when no adapter is registered (a panic naming the port, E0062)."
     },
     {
       "name": "Timer",

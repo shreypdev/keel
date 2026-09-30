@@ -193,3 +193,61 @@ Fix first:
    shutdown and on restore of their receiver; clear events, bindings and extensions; refuse
    spawn/sleep/port_call/event after shutdown. Close M2 in the same pass with a thread-local
    "in host callback" flag checked by `enter_core`.
+
+## Re-review (fix round merged at `4820127`; runtime sources unchanged through `b139218`)
+
+Every repro re-run against the checkout, plus new probes (`/private/tmp/keel-rt-review/tests/
+{closure,probes,floor,l4,shutdown_inside}.rs`). `cargo test -p keel-runtime -p keel-signals`: 519 passed.
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| H1 (+T8, L8) | CLOSED* | C1: 50 releases and re-inserts after the restore never re-issue `b` (0,2); stale `b` is status 5 and releasing it leaves the new object alive. C8: generation or floor `u32::MAX` is refused (`BadHandle`, `GenerationFloor`). *See NF1. The cross-process residual is documented in ADR-022. |
+| M1 | CLOSED | T2: the off-core writer's commit now waits for observe's delivery lock. Observe re-encodes after the write and ships x=2 in its one change-set, so host and core both end at 2. |
+| L9 | CLOSED | T12: restore phase 3 converges (host n=50, core n=50). |
+| M2 | CLOSED | T5: the re-entrant `observe` is refused with `E_REENTRANT` and `call_sync(add)` returns Ok (it deadlocked before). |
+| M3 | CLOSED | T10: an in-flight `slow_add` across a restore is answered status 3, not Ok. |
+| L1 | CLOSED | T9: status 3 for the call and a flag-2 item for the stream. C4: the subscriber does not run after shutdown; late `spawn`/`sleep` are no-ops; the runtime is freed. |
+| L5 | CLOSED (by contract) | Debug builds assert; see NF3 for how debug and release differ. |
+| L6 | CLOSED | PL6: a cancelled future's `Drop` writes a signal without tripping the checker, whether the core was free or busy (the deferred path). |
+| L7 | CLOSED | PL7: 5,000 abandoned calls leave the set at 4,096. See NF2. |
+| L4 | CLOSED | PL4: `TestRuntime` runs `spawn_blocking` on `keel-blocking-1`, and a signal write there is refused. |
+| L3 | PARTLY | Debug now refuses the unscoped write loudly. Release (C11, `--release`): the write is accepted, 0 change-sets are delivered, and the core holds count=2 that the host never sees. `RuntimeSink::deliver` still drops silently when no runtime is current. |
+| L2 | DOCUMENTED ONLY | T3 unchanged: the hook's first port call reaches the host 6/21/52 µs (min/median/p99) after `Runtime::new` returns. SPEC now tells hosts to register ports first. |
+| N5 | CLOSED | Observed is recorded only after the delivery succeeds. N1-N4 and N6-N10 were out of scope and are unchanged. |
+
+Probes you asked for:
+- **(a) Anything still keyed by slot alone?** No. Across crates, the only index-only uses are the
+  `stores` index set and `insert_at`'s occupancy check, and both are correct. Calls, restore
+  bookkeeping, the transport tracker and the platform mirrors all key on the full handle (TS uses
+  `bigint`, so the larger generations lose no precision).
+- **(b) Re-entry from a `change_set` delivered by `observe_and_deliver`?** PB: the host
+  re-enters (`observe` and `call_sync` both refused with `E_REENTRANT`), then panics on the next
+  delivery. The panic is contained, the lock is released (parking_lot does not poison), and a
+  later `add` plus `observe` complete within the watchdog.
+- **(c) One change-set per store after restore?** No in-tree consumer assumes a single set. The
+  Swift mirror batches per main-actor hop (all per-store sets land before the hop); TS and Kotlin
+  apply in arrival order; the transport forwards. What is gone is cross-store atomicity of the
+  restore's re-emission, which ADR-023 documents.
+- **(d) keel-transport Bridge (code read; suite green; no defect confirmed).** After `vacate`,
+  `current()` is `None` and the reply is dropped. After `drain`, `send_locked` refuses (closing). A
+  vanished writer makes `tx.send` fail and marks the connection closing. The runtime's calls map
+  gates everything, so teardown's `rt.cancel` after shutdown is a no-op: no double terminal
+  frame, no blocking.
+
+New findings (confirmed):
+- **NF1 (Medium): a floor just below `u32::MAX` is obeyed and exhausts the process.** Restore
+  refuses only exactly `u32::MAX`. P1 (real runtimes): restore into A with floor `u32::MAX-3`;
+  constructors on an unrelated runtime B go `[Ok, Ok, Ok, Panic, Panic]`, and a fresh runtime C
+  created after both shut down also answers status 2 ("generations are exhausted"). One corrupt
+  or hostile snapshot (a flipped high byte of the floor is enough) stops object creation for the
+  whole process, and the crash-recovery flow re-restores the same bytes on every launch. Fix:
+  refuse any floor or generation within a headroom of `u32::MAX` (e.g. above `u32::MAX - 2^24`).
+- **NF2 (Low): the abandoned-id eviction warning is not rate-limited.** PL7: 904 evictions
+  produced 904 WARN records. A host that never answers abandoned calls, which is the case the cap
+  exists for, floods the log. Rate-limit it like `warn_shut_down`.
+- **NF3 (Note): shutdown from the core behaves differently in debug and release.** PS: in a
+  debug build a task calling `shutdown()` hits the assertion, and the runtime keeps running with
+  only a FATAL "task panicked" record. The release build shuts down.
+
+Verdict: every original High and Medium is closed. NF1 is the one fix I would land before v1; it
+is a few lines in restore validation. L3's release-mode silent drop is the remaining v1.x item.
