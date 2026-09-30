@@ -124,7 +124,13 @@ pub(crate) struct Observed {
 
 impl Observed {
     /// Records an `observe(signal_id, on)` call. `signal_count` resolves "all but one".
+    ///
+    /// An id the store does not have is ignored, like `StoreCell::observe` ignores it: it comes
+    /// from the host, and must not be able to grow this set without bound.
     pub(crate) fn record(&mut self, signal_id: u32, on: bool, signal_count: u32) {
+        if signal_id != keel_meta::ids::ALL_SIGNALS && signal_id >= signal_count {
+            return;
+        }
         if signal_id == keel_meta::ids::ALL_SIGNALS {
             self.all = on;
             self.signals.clear();
@@ -653,6 +659,17 @@ mod tests {
         assert_eq!(o.to_reobserve(), [0, 2, 3]);
         o.record(keel_meta::ids::ALL_SIGNALS, false, 4);
         assert!(o.is_empty());
+    }
+
+    #[test]
+    fn observed_ignores_signal_ids_the_store_does_not_have() {
+        let mut o = Observed::default();
+        o.record(9, true, 4);
+        o.record(u32::MAX - 1, true, 4);
+        assert!(o.is_empty(), "host-supplied unknown ids are not remembered");
+        o.record(keel_meta::ids::ALL_SIGNALS, true, 4);
+        o.record(9, false, 4);
+        assert_eq!(o.to_reobserve(), [keel_meta::ids::ALL_SIGNALS]);
     }
 
     #[test]

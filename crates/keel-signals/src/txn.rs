@@ -21,6 +21,16 @@
 //! committed on the spot; the commit loop picks it up as a **new transaction** when the current
 //! round is done. That keeps change-sets in commit order and rules out re-entrant commits.
 //!
+//! # The round cap
+//!
+//! Effects (or computeds, or sinks) that keep writing signals that trigger themselves would
+//! keep the loop going forever, so a commit is cut off after [`MAX_COMMIT_ROUNDS`] rounds. The
+//! cut-off does not strand anything: the queued effects are dropped from the queue, the changes
+//! already dirty are delivered one last time, whatever that queued in turn is released (its slots
+//! are remembered as unsent for the next commit of the store), and the sink is told through
+//! [`ChangeSink::round_cap_hit`]. A slot left dirty with nobody to deliver it, or an effect left
+//! marked as queued, would otherwise be skipped by every other thread's writes for good.
+//!
 //! # Panics
 //!
 //! Every place that runs user code inside a commit is wrapped in `catch_unwind`, so a panicking
@@ -36,12 +46,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::effect::EffectInner;
-use crate::sink;
+use crate::sink::{self, ChangeSink};
 use crate::store::StoreCell;
 
 /// Upper bound on commit rounds in one outermost commit. Effects or sinks that keep writing
-/// signals that trigger themselves would otherwise loop forever; after this many rounds the
-/// commit stops and the remaining work is left queued for the thread's next commit.
+/// signals that trigger themselves would otherwise loop forever. After this many rounds the
+/// commit stops running effects, delivers the changes that are already dirty one last time,
+/// releases everything else (so that no slot or effect stays claimed by this thread) and reports
+/// the cut-off through [`ChangeSink::round_cap_hit`](crate::ChangeSink::round_cap_hit).
 pub(crate) const MAX_COMMIT_ROUNDS: usize = 1000;
 
 static TXN_ID: AtomicU64 = AtomicU64::new(1);
@@ -217,8 +229,13 @@ fn commit() {
         return;
     };
     let mut first_panic: Option<PanicPayload> = None;
-    for _ in 0..MAX_COMMIT_ROUNDS {
-        let Some(batch) = take_batch() else { break };
+    let mut rounds = 0;
+    while let Some(batch) = take_batch() {
+        if rounds == MAX_COMMIT_ROUNDS {
+            cut_off(batch, &mut first_panic);
+            break;
+        }
+        rounds += 1;
         run_round(batch, &mut first_panic);
     }
     drop(flag);
@@ -277,26 +294,63 @@ fn recycle_writes(writes: Vec<(Arc<StoreCell>, u32)>) {
 
 fn run_round(batch: Batch, first_panic: &mut Option<PanicPayload>) {
     let sink = sink::current();
-    let mut txn_id: Option<u64> = None;
+    let Batch { writes, effects } = batch;
+    commit_stores(writes, sink.as_ref(), first_panic);
 
-    let Batch {
-        mut writes,
-        effects,
-    } = batch;
+    for effect in effects {
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| effect.run_if_dirty())) {
+            first_panic.get_or_insert(payload);
+        }
+    }
+}
+
+/// Builds and delivers the change-set of every store in `writes`, one store at a time. A panic
+/// abandons that store's change-set only (see `StoreCell::commit_slots`) and is kept to be
+/// re-raised.
+fn commit_stores(
+    mut writes: Vec<(Arc<StoreCell>, u32)>,
+    sink: Option<&Arc<dyn ChangeSink>>,
+    first_panic: &mut Option<PanicPayload>,
+) {
+    let mut txn_id: Option<u64> = None;
     let groups = group_by_store(&mut writes);
     recycle_writes(writes);
-
     for Group { cell, ids } in groups {
         let outcome = catch_unwind(AssertUnwindSafe(|| {
-            cell.commit_slots(ids, sink.as_ref(), &mut txn_id);
+            cell.commit_slots(ids, sink, &mut txn_id);
         }));
         if let Err(payload) = outcome {
             first_panic.get_or_insert(payload);
         }
     }
+}
 
+/// The round cap was reached: something keeps re-triggering itself.
+///
+/// The work still queued is dealt with so that it does not stay claimed by this thread. Every
+/// slot a queued write dirtied is a slot other threads would skip (they see it dirty and assume
+/// this thread will deliver it), and every queued effect is one that would never be queued
+/// again. So: the queued effects are cancelled (a later write queues them again), the queued
+/// writes get one last delivery, and whatever that delivery queued in turn is released with its
+/// slots remembered as unsent, for the next commit of the store. Finally the sink is told.
+fn cut_off(batch: Batch, first_panic: &mut Option<PanicPayload>) {
+    let sink = sink::current();
+    let Batch { writes, effects } = batch;
     for effect in effects {
-        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| effect.run_if_dirty())) {
+        effect.cancel_queued_run();
+    }
+    commit_stores(writes, sink.as_ref(), first_panic);
+    if let Some(rest) = take_batch() {
+        for effect in rest.effects {
+            effect.cancel_queued_run();
+        }
+        for (cell, signal_id) in rest.writes {
+            cell.defer(signal_id);
+        }
+    }
+    if let Some(sink) = sink {
+        let reported = catch_unwind(AssertUnwindSafe(|| sink.round_cap_hit(MAX_COMMIT_ROUNDS)));
+        if let Err(payload) = reported {
             first_panic.get_or_insert(payload);
         }
     }

@@ -6,6 +6,8 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use parking_lot::RwLock;
 
+use std::cell::RefCell;
+
 use crate::deps::{Compute, Deps};
 use crate::graph::{Binding, Dependents, Reactive, add_dependent, propagate, record};
 use crate::value::SignalValue;
@@ -20,7 +22,13 @@ use crate::value::SignalValue;
 ///   the commit that follows a change of its inputs recomputes it, so the new value can be
 ///   encoded into the change-set.
 /// * **Composable.** A computed may depend on other computeds. Dependencies are fixed at
-///   construction and can only refer to nodes that already exist, so cycles are impossible.
+///   construction and can only refer to nodes that already exist, so the dependency graph the
+///   crate tracks cannot contain a cycle. A closure can still *read* a computed it did not
+///   declare (say, one reached through a `OnceLock` that is filled in later) and so form one
+///   behind the crate's back. Such a cycle is detected the moment a computed is recomputed
+///   again on the thread that is already recomputing it, and panics with "computed cycle
+///   detected" instead of overflowing the stack (a panic can be caught at the dispatch
+///   boundary, a stack overflow cannot).
 ///
 /// [`Clone`] gives another handle to the same computed.
 ///
@@ -57,6 +65,46 @@ pub(crate) struct ComputedInner<T> {
     visited: AtomicU64,
     pub(crate) dependents: Dependents,
     pub(crate) binding: OnceLock<Binding>,
+}
+
+thread_local! {
+    /// The computeds whose closures are running on this thread, innermost last (by address).
+    static RECOMPUTING: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Marks a computed as being recomputed on this thread until dropped; entering a computed that
+/// is already being recomputed here is a cycle.
+struct Recomputing;
+
+impl Recomputing {
+    fn enter(node: usize) -> Recomputing {
+        let cycle = RECOMPUTING
+            .try_with(|stack| {
+                let mut stack = stack.borrow_mut();
+                if stack.contains(&node) {
+                    true
+                } else {
+                    stack.push(node);
+                    false
+                }
+            })
+            .unwrap_or(false);
+        assert!(
+            !cycle,
+            "keel-signals: computed cycle detected: a computed's closure read the computed it \
+             is computing, directly or through other computeds (or wrote its own input while \
+             it was read outside a commit). Dependencies are fixed at construction, so this can \
+             only happen through a handle the closure captured, such as a `OnceLock` filled in \
+             later. Break the cycle: a computed must only read the dependencies it declared."
+        );
+        Recomputing
+    }
+}
+
+impl Drop for Recomputing {
+    fn drop(&mut self) {
+        let _ = RECOMPUTING.try_with(|stack| stack.borrow_mut().pop());
+    }
 }
 
 struct Cache<T> {
@@ -146,6 +194,8 @@ impl<T: SignalValue> ComputedInner<T> {
     }
 
     fn recompute(&self) -> Arc<T> {
+        // Before anything changes: a re-entrant recompute of this node is a cycle.
+        let _running = Recomputing::enter(std::ptr::from_ref(self) as usize);
         let ticket = self.tickets.fetch_add(1, Ordering::SeqCst) + 1;
         self.dirty.store(false, Ordering::SeqCst);
 

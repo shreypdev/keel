@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use keel_wire::payload::ChangeSet;
 use keel_wire::{Reader, WireError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use parking_lot::Mutex;
 
 use crate::ChangeSink;
@@ -33,6 +35,7 @@ use crate::ChangeSink;
 #[derive(Debug, Default)]
 pub struct CaptureSink {
     received: Mutex<Vec<Vec<u8>>>,
+    caps: AtomicUsize,
 }
 
 impl CaptureSink {
@@ -50,6 +53,11 @@ impl CaptureSink {
     /// Returns `true` if nothing has been received (or everything was taken).
     pub fn is_empty(&self) -> bool {
         self.received.lock().is_empty()
+    }
+
+    /// How many commits were cut off at the round cap ([`ChangeSink::round_cap_hit`]) so far.
+    pub fn round_caps(&self) -> usize {
+        self.caps.load(Ordering::SeqCst)
     }
 
     /// Takes the raw payloads received so far, oldest first, leaving the sink empty.
@@ -78,6 +86,10 @@ impl CaptureSink {
 impl ChangeSink for CaptureSink {
     fn deliver(&self, change_set: &[u8]) {
         self.received.lock().push(change_set.to_vec());
+    }
+
+    fn round_cap_hit(&self, _rounds: usize) {
+        self.caps.fetch_add(1, Ordering::SeqCst);
     }
 }
 

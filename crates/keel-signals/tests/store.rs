@@ -291,21 +291,17 @@ fn observe_all_on_an_empty_store_is_fine() {
 }
 
 #[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "unknown signal id 9")]
-fn observing_an_unknown_signal_asserts_in_debug_builds() {
-    let c = counter();
-    c.rig.cell.observe(9, true, &mut Writer::new());
-}
-
-#[test]
-#[cfg(not(debug_assertions))]
-fn observing_an_unknown_signal_is_ignored_in_release_builds() {
+fn l2_observing_an_unknown_signal_is_ignored_in_every_build() {
+    // The id comes from the host: it must never be able to make the core assert or panic.
     let c = counter();
     let mut out = Writer::new();
     assert_eq!(c.rig.cell.observe(9, true, &mut out), 0);
     assert!(out.is_empty());
     assert_eq!(c.rig.cell.observe(9, false, &mut out), 0);
+    assert!(out.is_empty());
+    assert!(!c.rig.cell.is_observed(9));
+    // Nothing else was disturbed.
+    assert_eq!(c.rig.cell.observe(0, true, &mut out), 1);
 }
 
 #[test]

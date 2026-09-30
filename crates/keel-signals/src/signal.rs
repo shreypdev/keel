@@ -1,5 +1,6 @@
 //! [`Signal`]: a shared, observable value.
 
+use std::cell::RefCell;
 use std::fmt;
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -30,7 +31,11 @@ use crate::value::SignalValue;
 /// reader keeps seeing the snapshot it started with).
 ///
 /// The one exception is [`update`](Signal::update): its closure runs with the value
-/// write-locked, so it must not read or write the signal it is updating.
+/// write-locked, so it must not read or write the signal it is updating, **nor read a
+/// [`Computed`](crate::Computed) (or anything else) that reads it**: recomputing the computed
+/// would read the write-locked value. The restriction is transitive. Read what the closure needs
+/// before calling `update`. A violation would deadlock; it is detected and panics instead (see
+/// `update`).
 ///
 /// # Example
 ///
@@ -112,11 +117,26 @@ impl<T: SignalValue> Signal<T> {
 
     /// Mutates the value in place. Transaction behaviour is the same as [`set`](Signal::set).
     ///
-    /// `f` runs with the value write-locked, so it must not read or write this signal. If a
-    /// reader is holding a snapshot at that moment (a computed or effect that is mid-run), the
-    /// value is copied first so the reader is undisturbed; otherwise it is mutated in place.
+    /// `f` runs with the value write-locked, so it must not read or write this signal, **and it
+    /// must not read a [`Computed`](crate::Computed) that depends on it** (or an effect's
+    /// inputs, or anything else that ends up reading this signal): the computed would recompute
+    /// and read the locked value. Read what `f` needs before calling `update`.
+    ///
+    /// # Panics
+    ///
+    /// If `f` (on this thread) reads or writes the signal it is updating, directly or through a
+    /// computed. That would otherwise deadlock forever, so it is detected and reported instead;
+    /// the value is left as it was before `f` ran. Contention with *other* threads is not a
+    /// violation and simply waits.
+    ///
+    /// If a reader is holding a snapshot at that moment (a computed or effect that is mid-run),
+    /// the value is copied first so the reader is undisturbed; otherwise it is mutated in place.
     pub fn update(&self, f: impl FnOnce(&mut T)) {
-        self.write_with(|slot| f(Arc::make_mut(slot)));
+        let me = self.id();
+        self.write_with(|slot| {
+            let _updating = Updating::enter(me);
+            f(Arc::make_mut(slot));
+        });
     }
 
     /// Returns `true` if `self` and `other` are handles to the same signal.
@@ -134,22 +154,85 @@ impl<T: SignalValue> Signal<T> {
     fn snapshot(&self) -> Arc<T> {
         // `read_recursive` never waits for a queued writer, so a thread that already holds a
         // read guard cannot deadlock against one.
+        if let Some(value) = self.inner.value.try_read_recursive() {
+            return Arc::clone(&value);
+        }
+        // A writer holds the lock. If it is this very thread (inside `update`'s closure) waiting
+        // would never end.
+        self.assert_not_updating("read");
         Arc::clone(&self.inner.value.read_recursive())
     }
 
+    /// The signal's identity for the "being updated on this thread" list.
+    fn id(&self) -> usize {
+        Arc::as_ptr(&self.inner) as usize
+    }
+
+    /// Panics if the calling thread is inside this signal's `update` closure: taking the lock
+    /// again would deadlock.
+    fn assert_not_updating(&self, what: &str) {
+        let me = self.id();
+        let reentered = UPDATING
+            .try_with(|list| list.borrow().contains(&me))
+            .unwrap_or(false);
+        assert!(
+            !reentered,
+            "keel-signals: the closure passed to Signal::update {what} the signal it is \
+             updating, directly or through a Computed that depends on it. That would deadlock: \
+             `update` holds the value write-locked while the closure runs. Read what the closure \
+             needs before calling `update`."
+        );
+    }
+
     fn write_with<R>(&self, f: impl FnOnce(&mut Arc<T>) -> R) -> R {
+        // Before anything changes: a write that reaches the host or other nodes must come from
+        // a thread the embedder allows to mutate (debug builds; see `set_write_checker`).
+        #[cfg(debug_assertions)]
+        if self.inner.binding.get().is_some() || !self.inner.dependents.lock().is_empty() {
+            crate::context::assert_write_allowed();
+        }
         // Drop order matters: the lock guard goes first, then the change is announced, then
         // the transaction ends (and commits if it was the outermost). Announcing from a guard
         // means a panicking `f` still marks whatever it managed to change.
         let _txn = TxnGuard::enter();
         let _announce = Announce(&self.inner);
-        let mut value = self.inner.value.write();
+        let mut value = match self.inner.value.try_write() {
+            Some(value) => value,
+            None => {
+                // Another thread holds the lock (wait), or this thread does, inside `update`'s
+                // closure (waiting would never end).
+                self.assert_not_updating("wrote");
+                self.inner.value.write()
+            }
+        };
         f(&mut value)
     }
 
     /// The weak handle other nodes register on to be invalidated by this signal.
     pub(crate) fn add_dependent(&self, dependent: Weak<dyn Reactive>) {
         add_dependent(&self.inner.dependents, dependent);
+    }
+}
+
+thread_local! {
+    /// The signals whose `update` closure is running on this thread (by address). Only consulted
+    /// when the value lock is found taken, so it costs nothing on the uncontended path.
+    static UPDATING: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Marks a signal as being updated on this thread until dropped.
+struct Updating;
+
+impl Updating {
+    fn enter(signal: usize) -> Updating {
+        let _ = UPDATING.try_with(|list| list.borrow_mut().push(signal));
+        Updating
+    }
+}
+
+impl Drop for Updating {
+    fn drop(&mut self) {
+        let _ = UPDATING.try_with(|list| list.borrow_mut().pop());
     }
 }
 

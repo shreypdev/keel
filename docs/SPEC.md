@@ -252,7 +252,7 @@ entries    count × { handle u64, signal_id u32, op u8, len u32, value bytes }
 ```
 `op`: 0 = full value (`value` is the signal's `T` encoded), 1 = keyed patch (§3.8), 2 = lazy list invalidated (value empty; the host re-pages). `len` lets a host skip an entry it cannot decode.
 
-Ordering guarantee: change-sets are delivered in commit order; a change-set is never split.
+Ordering guarantee: change-sets are delivered in commit order; a change-set is never split. For one store this holds whichever thread commits: the change-sets of a store reach the sink one at a time, in claim order, with strictly increasing `txn_id`s (§16.1, ADR-020).
 
 ### 3.6 Port call and reply
 
@@ -342,7 +342,7 @@ The runtime is dependency-light (no tokio). It provides the executor, the core l
 
 * **Core lock.** A `parking_lot::Mutex<Core>` (native) / `RefCell` (wasm). Whoever holds it *is* the core loop. Sync calls from the host run on the caller's thread holding the lock. Async tasks are polled by the core thread holding the lock. This preserves "one mutator" semantics while keeping sync calls at mutex-acquire cost.
 * **Core thread** (native): one `std::thread` named `keel-core` that owns the executor loop: wait for work → lock → poll ready tasks (bounded batch, max 64) → unlock → repeat.
-* **Blocking pool** (native): `keel_runtime::spawn_blocking(f)` runs `f` on a pool of `min(4, cores)` threads without the lock and resumes the awaiting task via the executor.
+* **Blocking pool** (native): `keel_runtime::spawn_blocking(f)` runs `f` on a pool of `min(4, cores)` threads without the lock and resumes the awaiting task via the executor. `f` must not write signals: debug builds refuse such a write (the runtime installs `keel_signals::set_write_checker`, §16.1).
 * **wasm**: single thread; `keel_poll()` export drives the executor; wakers call the `keel_host_schedule()` import (deduplicated per turn).
 * **Host callbacks** (reply, change-set, port call) are invoked from whatever thread completed the work, **while the core lock may be held**. The host must not call back into the core synchronously from these callbacks except `keel_buf_free`; it enqueues onto its main thread. Violations are detected in debug builds (thread-local re-entrancy flag) and reported as `KeelPanic`-style error `E_REENTRANT`.
 
@@ -768,6 +768,7 @@ impl StoreCell {
         // on: appends one ChangeSet ENTRY per targeted signal (`handle u64, signal_id u32, op u8 = Full, len u32, value`)
         // with its current value, also for already observed ones (re-observing resynchronises a host), and returns the count;
         // the runtime wraps the entries into a payload (`txn_id u64, count u32, entries`). off: stops delivery, returns 0.
+        // on runs inside a transaction (ADR-019): a computed's closure that writes signals while it is evaluated does not commit ahead of the entries; the entries are re-encoded (at most 8 passes) until no target was written meanwhile, so they carry the post-write values and the writes' own commit finds those targets clean. Writes to slots that were not targeted commit normally afterwards.
     pub fn encode_signal(&self, signal_id: u32, out: &mut keel_wire::Writer) -> bool;   // full value, no header; false if unknown
     pub fn encode_snapshot(&self, out: &mut keel_wire::Writer);   // one store record, §5.9: handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value }; computeds left out
 }
@@ -799,7 +800,7 @@ impl<T: SignalValue> Signal<T> {
     pub fn get(&self) -> T;                       // clone
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
     pub fn set(&self, value: T);                  // implicit transaction if none is open
-    pub fn update(&self, f: impl FnOnce(&mut T));
+    pub fn update(&self, f: impl FnOnce(&mut T));  // f runs with the value write-locked: it must not read or write this signal, nor read a Computed derived from it (transitive); a violation panics instead of deadlocking (ADR-021)
     pub fn ptr_eq(&self, other: &Signal<T>) -> bool;
     pub fn is_attached(&self) -> bool;
 }
@@ -808,23 +809,25 @@ impl<T: SignalValue> Computed<T> {
     pub fn new<D: Deps>(deps: D, f: impl for<'a> Fn(D::Values<'a>) -> T + Send + Sync + 'static) -> Computed<T>;
         // Deps: `&Signal<A>` or `&Computed<A>`, or a tuple of up to 6 of them; the closure receives REFERENCES
         // (one reference, or a tuple of references): `Computed::new((&todos, &filter), |(todos, filter)| ..)`.
-    pub fn get(&self) -> T;                       // recomputes lazily when dirty
+    pub fn get(&self) -> T;                       // recomputes lazily when dirty; a cycle through a handle the closure captured (not a declared dependency) panics with "computed cycle detected" instead of overflowing the stack (ADR-021)
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
     pub fn ptr_eq(&self, other: &Computed<T>) -> bool;
     pub fn is_attached(&self) -> bool;
 }
 pub struct Effect;         // Effect::new(deps, f) runs f after each commit that dirtied a dep; dropped or `cancel(self)` = cancelled
 pub fn txn<R>(f: impl FnOnce() -> R) -> R;        // batch; nested calls join the outer transaction; exception safe
-pub trait ChangeSink: Send + Sync { fn deliver(&self, change_set: &[u8]); }
+pub trait ChangeSink: Send + Sync { fn deliver(&self, change_set: &[u8]); fn round_cap_hit(&self, rounds: usize) {} }   // round_cap_hit: default no-op; the runtime's sink logs it at error level (ADR-020)
 pub fn set_sink(sink: Arc<dyn ChangeSink>);      // installed by the runtime; a global, one per process
+pub fn set_write_checker(f: fn() -> bool);       // installed by the runtime; a global. Debug builds assert f() before every write to a signal that is attached or has dependents ("may this thread mutate?"); release builds never call it
+pub fn clear_write_checker();
 pub fn clear_sink();  pub fn with_sink<R>(sink: Arc<dyn ChangeSink>, f: impl FnOnce() -> R) -> R;   // the latter is thread-scoped, for tests
 pub fn next_txn_id() -> u64;
 pub mod testing { pub struct CaptureSink; }      // records change-sets: take(), take_decoded()
 ```
 
-Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries, ordered by `signal_id`, for signals that are observed or `no_coalesce` (keyed lists as a patch when one is possible and worthwhile, else the full value); one `ChangeSet` payload per store per transaction (never split; stores committed by one transaction share a `txn_id`); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery. No lock is held while user code (sink, effect, computed closure, encoder) runs.
+Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries, ordered by `signal_id`, for signals that are observed or `no_coalesce` (keyed lists as a patch when one is possible and worthwhile, else the full value); one `ChangeSet` payload per store per transaction (never split; stores committed by one transaction share a `txn_id`); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery. The claim is transactional (ADR-019): if building or delivering a store's change-set is abandoned (a computed, an encoder or the sink panicked), its slots are remembered as unsent and the keyed baselines among them are dropped, and the next commit that touches the store sends every one of them again as a full value; `observe(on)` of a slot clears its unsent mark. A failed `observe(on)` appends no entries and leaves no target newly observed. An unknown `signal_id` in `observe` is ignored (returns 0) in every build. The only lock held while user code runs is the store's **delivery lock** (ADR-020): a commit takes it when it claims the store's dirty slots and releases it when the sink has returned, so the change-sets of one store reach the sink one at a time, in claim order, with strictly increasing `txn_id` (a transaction id shared by several stores is replaced for a store that has already seen a newer one). Sinks and computed closures therefore run under it: a sink must not wait for another thread that writes the same store (writes made on the sink's own thread are queued and are fine), and the runtime's sink only hands the payload to the host. No other lock is held while user code (sink, effect, computed closure, encoder) runs, and effects run after the delivery lock is released. Writes from two threads do not form one transaction: a write to a slot that another thread has dirty in an open transaction ships with that transaction. Signal writes belong on the core; debug builds enforce it through `set_write_checker`. A commit is bounded: after 1000 rounds (effects, computeds or sinks that keep writing signals that trigger themselves) it stops running effects, delivers the changes that are already dirty one last time, drops the still-queued effects from the queue (a later change queues them again), releases whatever that delivery queued (those slots are remembered as unsent, as for an abandoned change-set), and reports `ChangeSink::round_cap_hit(1000)`. Nothing stays claimed by the capped thread, so other threads' writes to those slots and effects work normally.
 
-Keyed lists (SPEC 3.8): the cell keeps the list as the host last saw it (one clone per *observed* keyed signal) and sends a patch of `Insert`/`Remove`/`Update`/`Move` ops. It sends the full value instead when the lists share no key (including empty to non-empty and back), a key occurs twice, or more than half of the old items were removed. Items with equal keys are compared by their encoded bytes.
+Keyed lists (SPEC 3.8): the cell keeps the list as the host last saw it (one clone per *observed* keyed signal; an unobserved `no_coalesce` keyed list keeps none and is delivered as a full value each time) and sends a patch of `Insert`/`Remove`/`Update`/`Move` ops. It sends the full value instead when the lists share no key (including empty to non-empty and back), a key occurs twice, or more than half of the old items were removed. Items with equal keys are compared by their encoded bytes.
 
 Attach failures leave the failed signal unattached, but signals attached before it stay bound to the discarded cell, so a store whose attach failed is unusable and must not be published. Generated code therefore builds the cell with `?` and the constructor's dispatch arm answers `DispatchResult::BadRequest` with the `SignalsError` text (§16.3).
 

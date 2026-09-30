@@ -196,3 +196,24 @@ Fix first:
    outside the core in debug builds.
 
 Repros: a temporary scratch crate outside the repo; each finding's steps are enough to recreate it.
+
+## Resolution (branch `wt/signals-fixes`)
+
+Every finding above was closed with a regression test that reproduces the review's steps
+(`crates/keel-signals/tests/delivery_integrity.rs`, `tests/write_checker.rs`, and the runtime tests
+named below). Contract changes are in SPEC 16.1 and ADR-019/019/020 (`.10x/adrs/`).
+
+| Finding | Fix | Regression tests |
+|---|---|---|
+| H1 | The commit claim is transactional: abandoned slots go to a per-store *unsent* set that the next commit of the store re-sends in full; keyed baselines are dropped; `observe(on)` rolls back on unwind | `h1_*` |
+| M1 | `observe(on)` and `encode_signal` run inside a transaction; targets are re-encoded (at most 8 passes) until no closure write dirtied them | `m1_*` |
+| M2 | Per-store delivery lock from claim to sink return, strictly ascending `txn_id` per store; `set_write_checker` (debug builds) installed by the runtime, refusing blocking-pool workers | `m2_*` (signals, `write_checker.rs`, runtime `threads.rs`) |
+| M3 | At the round cap: cancel queued effects, deliver the dirty changes, release the rest as unsent, report via `ChangeSink::round_cap_hit` (runtime logs an error) | `m3_*` (signals, runtime `signals.rs`) |
+| L1 | Thread-local recompute stack: a re-entrant recompute panics "computed cycle detected" | `l1_*` |
+| L2 | Unknown `observe` id ignored in every build; the runtime does not record it either | `l2_*` (signals, runtime) |
+| L3 | Documented as transitive; a re-entered `update` panics instead of deadlocking | `l3_*` |
+| L4 | An unobserved `no_coalesce` keyed list sends full values and keeps no baseline | `l4_*` |
+
+Left as they were: notes N1 to N7. Documented trade-offs: a computed that panics on every evaluation
+holds back its store's change-sets until it recovers (ADR-019); a write to a slot that another thread
+has dirty in an open transaction is absorbed into that transaction (ADR-020).

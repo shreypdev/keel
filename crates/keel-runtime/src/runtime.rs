@@ -73,11 +73,43 @@ impl ChangeSink for RuntimeSink {
             rt.deliver_change_set(change_set);
         }
     }
+
+    /// A commit hit `keel-signals`' round cap (effects re-triggering each other): logged at
+    /// error level through the runtime the commit belongs to.
+    fn round_cap_hit(&self, rounds: usize) {
+        if let Some(rt) = current_or_global() {
+            rt.log(
+                ERROR,
+                "keel::signals",
+                &format!(
+                    "effect loop hit the round cap: a commit was cut off after {rounds} rounds; \
+                     the queued effects were dropped and the pending changes delivered"
+                ),
+            );
+        }
+    }
+}
+
+/// The write-context check installed into `keel-signals`: may the calling thread write signals?
+///
+/// No on a blocking-pool worker. It has a runtime *installed* (so `Ctx::current()` works) but
+/// never holds the core lock, and `docs/runtime-internals.md` section 11 forbids it to write
+/// signals: its change-sets would be delivered without the core lock, unordered against the
+/// core's. Yes everywhere else: on the core (a dispatched call, a task poll, `observe`,
+/// `restore`), in an explicit `Ctx::enter` / `Ctx::txn` scope, and on a thread inside no runtime
+/// at all, whose writes reach the global runtime by design (section 12; that is what tests and
+/// embedders' own threads rely on). Debug builds assert this on every write that has
+/// consequences (`keel_signals::set_write_checker`); release builds never evaluate it.
+fn write_allowed() -> bool {
+    !crate::blocking::on_worker_thread()
 }
 
 fn install_sink() {
     static ONCE: Once = Once::new();
-    ONCE.call_once(|| keel_signals::set_sink(Arc::new(RuntimeSink)));
+    ONCE.call_once(|| {
+        keel_signals::set_sink(Arc::new(RuntimeSink));
+        keel_signals::set_write_checker(write_allowed);
+    });
 }
 
 /// What the core lock protects. It is deliberately tiny: the lock's job is mutual exclusion
