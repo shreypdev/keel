@@ -1,0 +1,8 @@
+error: error[keel::E0013]: store `Todos` cannot be restored automatically: `count` is computed or lazy
+         = note: restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed and lazy signals from them
+         = help: add `#[keel::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store
+         = docs: https://keel.dev/errors/E0013
+ --> tests/ui/e0013_store_restore.rs:7:12
+  |
+7 | pub struct Todos {
+  |            ^^^^^

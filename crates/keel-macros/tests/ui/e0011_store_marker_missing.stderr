@@ -1,0 +1,8 @@
+error[E0080]: evaluation panicked: error[keel::E0011]: `Todos` is a `#[keel::store]` but its `#[keel::api]` impl block is not marked as a store
+                = note: the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field
+                = help: write `#[keel::api(store)]` on the impl block
+                = docs: https://keel.dev/errors/E0011
+  --> tests/ui/e0011_store_marker_missing.rs:13:1
+   |
+13 | #[k::api]
+   | ^^^^^^^^^ evaluation of `_` failed here
