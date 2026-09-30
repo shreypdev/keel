@@ -54,19 +54,21 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
 
     let mut run_id = 0_u64;
     let mut addr = args.addr.clone();
-    let mut running = start(&exe, &addr, args.log_level, &mut run_id, &runner_tx, &rx)?;
+    let (first, ready, _) = start(&exe, &addr, args.log_level, &mut run_id, &runner_tx, &rx)?;
+    let mut running = (first, ready);
     let (mut url, hash) = running.1.clone();
-    announce(&session, &url, &hash, args, &core.local_dirs, false);
-    // A port of 0 asked the OS to choose; keep that port across restarts so clients find the
-    // server where they left it.
-    addr = socket_of(&url).unwrap_or(addr);
 
-    // The watcher lives as long as the loop.
+    // The watcher lives as long as the loop. It is running before the banner is printed: the
+    // banner says "Watching", and a save right after it (an editor, a test) must not be missed.
     let _watcher = if args.no_watch {
         None
     } else {
         Some(watch(&core.local_dirs, tx.clone())?)
     };
+    announce(&session, &url, &hash, args, &core.local_dirs, false);
+    // A port of 0 asked the OS to choose; keep that port across restarts so clients find the
+    // server where they left it.
+    addr = socket_of(&url).unwrap_or(addr);
 
     loop {
         match rx.recv() {
@@ -94,7 +96,12 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
                         let (old, _) = running;
                         old.stop();
                         drain_closed(&rx);
-                        running = start(&exe, &addr, args.log_level, &mut run_id, &runner_tx, &rx)?;
+                        let (next, ready, changed) =
+                            start(&exe, &addr, args.log_level, &mut run_id, &runner_tx, &rx)?;
+                        running = (next, ready);
+                        if changed {
+                            let _ = tx.send(Event::Changed);
+                        }
                         let (new_url, new_hash) = running.1.clone();
                         url = new_url;
                         announce(&session, &url, &new_hash, args, &core.local_dirs, true);
@@ -134,7 +141,9 @@ fn handle_runner_event(event: &RunnerEvent, current: &Running) -> Option<Result<
     }
 }
 
-/// Starts a runner and waits for it to listen. Returns it with its URL and schema hash.
+/// Starts a runner and waits for it to listen. Returns it with its URL and schema hash, and
+/// whether a source changed while it started (the caller queues that change again: it may not be
+/// in the build that was just started).
 fn start(
     exe: &Path,
     addr: &str,
@@ -142,17 +151,19 @@ fn start(
     run_id: &mut u64,
     runner_tx: &Sender<RunnerEvent>,
     rx: &Receiver<Event>,
-) -> Result<(Running, (String, String))> {
+) -> Result<(Running, (String, String), bool)> {
     *run_id += 1;
     let id = *run_id;
     let running = runner::spawn(exe, addr, log_level, id, runner_tx.clone())?;
     let deadline = Instant::now() + READY_TIMEOUT;
+    let mut changed = false;
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(left) {
             Ok(Event::Runner(RunnerEvent::Ready { id: got, url, hash })) if got == id => {
-                return Ok((running, (url, hash)));
+                return Ok((running, (url, hash), changed));
             }
+            Ok(Event::Changed) => changed = true,
             Ok(Event::Runner(RunnerEvent::Closed { id: got })) if got == id => {
                 return Err(CliError::new(
                     Code::Dev,
