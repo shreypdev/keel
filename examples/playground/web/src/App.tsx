@@ -20,7 +20,7 @@ function tabFromHash(): TabId {
   return TABS.find((tab) => tab.id === wanted)?.id ?? "todos";
 }
 
-/** Four views over one core. Each reads the signals of its store with `useSignal` and calls its methods. */
+/** Four views over one core. Each reads the signals of its store with `useSignal` (`@keel/runtime/react`) and calls its methods. */
 export function App({ playground }: { readonly playground: Playground }) {
   const [tab, setTab] = useState<TabId>(tabFromHash);
 
@@ -52,7 +52,7 @@ export function App({ playground }: { readonly playground: Playground }) {
       </div>
       <section role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="panel">
         {tab === "todos" && <TodosView todos={playground.todos} />}
-        {tab === "counter" && <CounterView counter={playground.counter} />}
+        {tab === "counter" && <CounterView />}
         {tab === "biglist" && <BigListView bigList={playground.bigList} />}
         {tab === "remote" && <RemoteView playground={playground} />}
       </section>

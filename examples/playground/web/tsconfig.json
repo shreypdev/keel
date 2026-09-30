@@ -29,6 +29,9 @@
       "@playground/core": [
         "../generated/ts/src/index.ts"
       ],
+      "@keel/runtime/react": [
+        "../../../runtimes/ts/@keel/runtime/src/react.ts"
+      ],
       "@keel/runtime": [
         "../../../runtimes/ts/@keel/runtime/src/index.ts"
       ]

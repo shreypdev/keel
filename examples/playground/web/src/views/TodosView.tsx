@@ -1,6 +1,6 @@
+import { useSignal } from "@keel/runtime/react";
 import { type Filter, TodoError, type Todos } from "@playground/core";
 import { useState } from "react";
-import { useSignal } from "../useSignal";
 
 const FILTERS: readonly Filter[] = ["all", "active", "done"];
 

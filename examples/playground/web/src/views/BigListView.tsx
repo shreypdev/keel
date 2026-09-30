@@ -1,6 +1,6 @@
+import { useSignal } from "@keel/runtime/react";
 import { type BigList, ListError } from "@playground/core";
 import { useEffect, useRef, useState } from "react";
-import { useSignal } from "../useSignal";
 
 /** Every row is this tall, so the position of a row is arithmetic and only the visible ones need to exist. */
 const ROW_HEIGHT = 36;
