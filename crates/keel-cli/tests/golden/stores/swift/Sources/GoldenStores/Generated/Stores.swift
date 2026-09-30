@@ -69,7 +69,7 @@ public final class Todos: KeelStore, @unchecked Sendable {
     public private(set) var created: Date = Date(timeIntervalSince1970: 0)
     public private(set) var blob: [UInt8] = []
     public private(set) var total: UInt64 = 0
-    public private(set) var `default`: Bool = false
+    public private(set) var default_: Bool = false
     public private(set) var uuid: UUID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 
     private init(adopting handle: KeelHandle, core: KeelCore) {
@@ -305,7 +305,7 @@ public final class Todos: KeelStore, @unchecked Sendable {
             case 13:
                 switch op {
                 case .fullValue:
-                    self.`default` = try Bool.keelDecode(&reader)
+                    self.default_ = try Bool.keelDecode(&reader)
                     try reader.finish()
                 case .keyedPatch:
                     break
