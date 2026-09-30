@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Keel standard ports: Clock, Rng, Log, Http, Kv, SecureStore, Fs, Timer, Connectivity, Lifecycle, their records, and deterministic fakes"
-
+readme = "README.md"
 keywords = ["keel", "ports", "testing", "fakes", "cross-platform"]
 categories = ["development-tools::testing", "asynchronous"]
 
