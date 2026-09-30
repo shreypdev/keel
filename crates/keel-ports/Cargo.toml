@@ -6,6 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel: ports crate (stub, to be implemented)"
+description = "Keel standard ports: Clock, Rng, Log, Http, Kv, SecureStore, Fs, Timer, Connectivity, Lifecycle, their records, and deterministic fakes"
+
+keywords = ["keel", "ports", "testing", "fakes", "cross-platform"]
+categories = ["development-tools::testing", "asynchronous"]
 
 [dependencies]
+keel-macros = { workspace = true }
+keel-meta = { workspace = true }
+keel-wire = { workspace = true }
+keel-runtime = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

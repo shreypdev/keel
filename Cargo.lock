@@ -192,6 +192,14 @@ dependencies = [
 [[package]]
 name = "keel-ports"
 version = "0.1.0"
+dependencies = [
+ "keel-macros",
+ "keel-meta",
+ "keel-runtime",
+ "keel-wire",
+ "parking_lot",
+ "proptest",
+]
 
 [[package]]
 name = "keel-query"
