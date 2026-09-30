@@ -30,9 +30,21 @@ pub(crate) struct PanicReport {
 /// with `resume_unwind`; keeps the original report intact.
 pub(crate) struct CarriedPanic(pub PanicReport);
 
+/// The per-thread state of the guard: how many guards are active and the last panic recorded
+/// while one was. One thread-local holds both, so entering and leaving a guard (the hot path of
+/// every dispatched call) each cost one thread-local access.
+struct GuardState {
+    depth: Cell<u32>,
+    last: RefCell<Option<PanicReport>>,
+}
+
 thread_local! {
-    static DEPTH: Cell<u32> = const { Cell::new(0) };
-    static LAST: RefCell<Option<PanicReport>> = const { RefCell::new(None) };
+    static STATE: GuardState = const {
+        GuardState {
+            depth: Cell::new(0),
+            last: RefCell::new(None),
+        }
+    };
 }
 
 fn payload_message(payload: &(dyn Any + Send)) -> String {
@@ -58,7 +70,7 @@ fn capture_backtrace() -> String {
 }
 
 fn hook(previous: &(dyn Fn(&PanicHookInfo<'_>) + Send + Sync), info: &PanicHookInfo<'_>) {
-    let guarded = DEPTH.try_with(Cell::get).unwrap_or(0) > 0;
+    let guarded = STATE.try_with(|state| state.depth.get()).unwrap_or(0) > 0;
     if cfg!(target_family = "wasm") {
         let message = payload_message(info.payload());
         crate::runtime::log_fatal_current("keel::panic", &message);
@@ -78,7 +90,7 @@ fn hook(previous: &(dyn Fn(&PanicHookInfo<'_>) + Send + Sync), info: &PanicHookI
         message,
         backtrace: format!("{location}{}", capture_backtrace()),
     };
-    let _ = LAST.try_with(|slot| *slot.borrow_mut() = Some(report));
+    let _ = STATE.try_with(|state| *state.last.borrow_mut() = Some(report));
 }
 
 /// Installs the chained panic hook (once per process).
@@ -96,8 +108,8 @@ fn report_from(payload: Box<dyn Any + Send>) -> PanicReport {
         return carried.0.clone();
     }
     let message = payload_message(&*payload);
-    let recorded = LAST
-        .try_with(|slot| slot.borrow_mut().take())
+    let recorded = STATE
+        .try_with(|state| state.last.borrow_mut().take())
         .ok()
         .flatten();
     // The hook's recording is used only if its message matches the payload's, so a stale
@@ -115,12 +127,16 @@ fn report_from(payload: Box<dyn Any + Send>) -> PanicReport {
 /// Runs `f`, converting a panic into a [`PanicReport`].
 pub(crate) fn guarded<R>(f: impl FnOnce() -> R) -> Result<R, PanicReport> {
     install_hook();
-    if DEPTH.with(Cell::get) == 0 {
-        let _ = LAST.try_with(|slot| *slot.borrow_mut() = None);
-    }
-    DEPTH.with(|d| d.set(d.get() + 1));
+    STATE.with(|state| {
+        if state.depth.get() == 0 {
+            // A recording left over from a panic that user code caught itself must not be
+            // attributed to this guard's panic.
+            *state.last.borrow_mut() = None;
+        }
+        state.depth.set(state.depth.get() + 1);
+    });
     let result = panic::catch_unwind(AssertUnwindSafe(f));
-    DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    STATE.with(|state| state.depth.set(state.depth.get().saturating_sub(1)));
     result.map_err(report_from)
 }
 

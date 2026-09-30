@@ -463,16 +463,30 @@ impl ObjectTable {
         Self::check(&inner, handle).map(|e| e.object.clone())
     }
 
+    /// The type id and type name of the object behind `handle`, without taking a reference to
+    /// the object (the routing step of every call needs only these).
+    pub fn type_of(&self, handle: Handle) -> Result<(u32, &'static str), BadHandle> {
+        let inner = self.inner.read();
+        Self::check(&inner, handle).map(|e| (e.object.keel_type_id(), e.object.keel_type_name()))
+    }
+
     /// Resolves `handle` to a `T`.
     pub fn get<T: Send + Sync + 'static>(&self, handle: Handle) -> Result<Arc<T>, BadHandle> {
-        let object = self.get_dyn(handle)?;
-        object.downcast::<T>().ok_or(BadHandle {
-            handle,
-            reason: BadHandleReason::WrongType {
-                expected: core::any::type_name::<T>(),
-                found: object.keel_type_name(),
-            },
-        })
+        let inner = self.inner.read();
+        let entry = Self::check(&inner, handle)?;
+        // One reference is taken (the `Arc<T>` returned), not two: `shared()` hands out the
+        // concrete object's own `Arc`.
+        entry
+            .object
+            .shared()
+            .downcast::<T>()
+            .map_err(|_| BadHandle {
+                handle,
+                reason: BadHandleReason::WrongType {
+                    expected: core::any::type_name::<T>(),
+                    found: entry.object.keel_type_name(),
+                },
+            })
     }
 
     /// Removes the object behind `handle` and returns it, so the caller can drop it wherever
