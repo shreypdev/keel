@@ -6,12 +6,14 @@
 //! * `fn __keel_dispatch_Type(rt: &dyn Any, call: DispatchCall) -> DispatchOutcome`, which
 //!   downcasts `rt` to `&Runtime`, matches `call.method_id` against per-method constants
 //!   (`ids::method_id`), decodes the arguments in order, resolves `self` with
-//!   `rt.object::<Type>(call.handle)`, runs the method and encodes the outcome as
-//!   `DispatchResult::{Sync, Async, Stream}`; malformed requests and stale handles answer
-//!   `DispatchResult::BadRequest` with a reason, and only an unknown method id answers
-//!   `DispatchResult::Unknown`. The decoded arguments are bound to positional locals
-//!   (`__keel_a0`, ..), never to the user's parameter names, so no parameter name can collide
-//!   with a generated local;
+//!   `rt.object::<Type>(call.handle)`, runs the method and answers a synchronous result with
+//!   `rt.sync_ok(&value)` / `rt.sync_err(&error)` (which write the reply straight into the
+//!   caller's buffer under `call_sync`, ADR-028, and build a `DispatchResult::Sync` anywhere
+//!   else) and an async or stream result as `DispatchResult::{Async, Stream}`; malformed
+//!   requests and stale handles answer `DispatchResult::BadRequest` with a reason, and only an
+//!   unknown method id answers `DispatchResult::Unknown`. The decoded arguments are bound to
+//!   positional locals (`__keel_a0`, ..), never to the user's parameter names, so no parameter
+//!   name can collide with a generated local;
 //! * `static __KEEL_META_Type: ObjectMeta` and its registration;
 //! * the identity checks of `check.rs` for every parameter and return type, and the hidden
 //!   `__KEEL_IS_OBJECT` marker that lets them say "an object cannot be a value" (E0064).
@@ -479,20 +481,18 @@ fn is_stream_ok(ret: &KType) -> bool {
     matches!(ret, KType::Result(ok, _) if matches!(**ok, KType::Stream(_)))
 }
 
-/// The expression of the outcome of a method, function or query-like call as a
-/// `DispatchResult`.
+/// The expression of the outcome of a method, function or query-like call, of type
+/// `DispatchOutcome`.
+///
+/// A synchronous answer goes through `Runtime::sync_ok` / `sync_err`, which encode straight
+/// into the caller's reply buffer under `call_sync` (no heap allocation, ADR-028) and build a
+/// `DispatchResult::Sync` anywhere else. An async future and a stream are boxed as before.
 fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) -> TokenStream {
     let wire = root.wire();
     let runtime = root.runtime();
     let span = m.ident.span();
-    let sync_ok = |value: TokenStream| {
-        let bytes = enc(&wire, &value);
-        quote!(#runtime::DispatchResult::Sync(::core::result::Result::Ok(#bytes)))
-    };
-    let sync_err = |value: TokenStream| {
-        let bytes = enc(&wire, &value);
-        quote!(#runtime::DispatchResult::Sync(::core::result::Result::Err(#bytes)))
-    };
+    let sync_ok = |value: TokenStream| quote!(__rt.sync_ok(&#value, #wire::Encode::encode));
+    let sync_err = |value: TokenStream| quote!(__rt.sync_err(&#value, #wire::Encode::encode));
     let assert_send = |what: TokenStream| quote_spanned!(span=> __keel_assert_send(&#what););
     let out_ok = |value: TokenStream| {
         let bytes = enc(&wire, &value);
@@ -512,7 +512,7 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
             quote! {{
                 let __stream = __KeelMap(::std::boxed::Box::pin(#call));
                 #check
-                #runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream))
+                __keel_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
             }}
         }
         (KType::Stream(_), true) => {
@@ -538,7 +538,7 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
                     )
                 });
                 #check
-                #runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream))
+                __keel_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
             }}
         }
         // `Result<impl Stream, E>`.
@@ -552,7 +552,7 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
                     ::core::result::Result::Ok(__s) => {
                         let __stream = __KeelMap(::std::boxed::Box::pin(__s));
                         #check
-                        #runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream))
+                        __keel_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
                     }
                     ::core::result::Result::Err(__e) => #err,
                 }
@@ -584,7 +584,7 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
                     }
                 });
                 #check
-                #runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream))
+                __keel_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
             }}
         }
         // A value or `Result<T, E>`.
@@ -611,7 +611,7 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
                     }
                 };
                 #check
-                #runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut))
+                __keel_out(#runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)))
             }}
         }
         (_, false) => {
@@ -631,13 +631,14 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
                     #ok
                 };
                 #check
-                #runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut))
+                __keel_out(#runtime::DispatchResult::Async(::std::boxed::Box::pin(__fut)))
             }}
         }
     }
 }
 
-/// The outcome of a constructor: insert the new object and reply with its handle.
+/// The outcome (a `DispatchOutcome`) of a constructor: insert the new object and reply with
+/// its handle.
 fn constructor_result(
     root: &Root,
     m: &FnModel,
@@ -645,9 +646,7 @@ fn constructor_result(
     call: &TokenStream,
 ) -> TokenStream {
     let wire = root.wire();
-    let runtime = root.runtime();
-    let reply = enc(&wire, &quote!(__handle));
-    let ok = quote!(#runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply)));
+    let ok = quote!(__rt.sync_ok(&__handle, #wire::Encode::encode));
     // What to do with the constructed `__value`: publish it and answer its handle. A store
     // first attaches its signals; if that fails the store is never published and the caller
     // gets a bad request carrying the reason (nothing panics).
@@ -661,7 +660,7 @@ fn constructor_result(
                     (*__arc).__keel_set_handle(__handle.0);
                     #ok
                 }
-                ::core::result::Result::Err(__why) => #runtime::DispatchResult::BadRequest(
+                ::core::result::Result::Err(__why) => __keel_bad_request(
                     ::std::format!("store `{}` could not attach its signals: {}", #type_name, __why),
                 ),
             }
@@ -672,14 +671,11 @@ fn constructor_result(
             #ok
         }}
     };
-    let err = enc(&wire, &quote!(__e));
     if matches!(m.ret, KType::Result(..)) {
         quote! {
             match #call {
                 ::core::result::Result::Ok(__value) => #finish,
-                ::core::result::Result::Err(__e) => {
-                    #runtime::DispatchResult::Sync(::core::result::Result::Err(#err))
-                }
+                ::core::result::Result::Err(__e) => __rt.sync_err(&__e, #wire::Encode::encode),
             }
         }
     } else {
@@ -781,7 +777,7 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
         #decode
         #receiver
         #ctx_binding
-        __keel_out(#result)
+        #result
     }
 }
 

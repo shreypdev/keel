@@ -30,9 +30,9 @@ iOS target.
 
 | Row | Operation measured here | Median | iOS target | Host / target | Verdict |
 |---|---|---|---|---|---|
-| Handle method call, primitive args and return | `dispatch/call_sync/add` | 77.8 ns | ≤ 60 ns | 1.30x | **MISS** |
+| Handle method call, primitive args and return | `dispatch/call_sync/add` | 43.9 ns | ≤ 60 ns | 0.73x | within on the host, **open for the device** (Finding 2) |
 | 1 KB record, round trip (codec) | `wire/record1k/roundtrip` | 228.0 ns | ≤ 3 µs | 0.08x | within |
-| 1 KB record, round trip (through a call) | `dispatch/call_sync/echo_record1k` | 279.1 ns | ≤ 3 µs | 0.09x | within |
+| 1 KB record, round trip (through a call) | `dispatch/call_sync/echo_record1k` | 139.5 ns | ≤ 3 µs | 0.05x | within |
 | Change-set, 100 dirty signals (core side: write, build, deliver) | `signals/changeset_100/runtime` | 2.30 µs | ≤ 100 µs | 0.02x | within |
 | Keyed patch on 10,000 items, one insert (recorded list operation) | `signals/keyed_10k/insert` | 6.31 µs | ≤ 20 µs | 0.32x | within |
 | Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 70.87 µs | ≤ 3 ms | 0.02x | within |
@@ -47,7 +47,9 @@ Two more rows have a host proxy, which is a data point and not a verdict:
 | Runtime memory at idle | resident-set growth of a test process after `Runtime::new` with a `keel-core` thread | about 0.45 MB for the first runtime, about 70 KB for each further one (no core thread) | ≤ 2 MB | `ps` RSS, page-granular, so indicative only; a heap counter needs `unsafe` (R2) |
 
 Also measured, not a row: the same handle method call through the C ABI (`keel_call_sync`,
-`boundary/call_sync/add`) is 79.3 ns (84.1 ns in the first of two runs), so the ABI itself adds only a few ns.
+`boundary/call_sync/add`) is 49.8 ns (79.3 ns before ADR-028), so the ABI itself adds about 6 ns (the
+`Runtime::global()` lookup and the `KeelBuf` hand-off). Without the one allocation that hand-off owes, the
+same call is 31.5 ns (`dispatch/call_sync_with/add`).
 
 ## Findings
 
@@ -88,18 +90,51 @@ through the raw `update` is `signals/keyed_10k/raw_update_diff`, 528.7 µs in th
 machine and load), and a transaction that mixes recorded operations with a raw write is diffed as a whole. Its budget is
 guarded at the old level; the two paths are different rows so neither can hide a regression in the other.
 
-### 2. The handle method call is over its iOS target on a faster core, and most of it is the allocator
+### 2. The handle method call: the allocator was 60% of it, ADR-028 took it out, the row is within target on the host
 
-`Runtime::call_sync` of `add(i64, i64)` is 77.8 ns (1.30x the 60 ns target); a free function is
-73.0 ns. An A15 core is slower than this one, so the row is likely missed by more on the device. A sampling
-profile of the call (macOS `sample`, ~4,900 samples of the loop) puts **about 60% of it in the allocator**: `malloc`
-and `free`, plus a `mach_absolute_time` read that this OS's `libmalloc` does inside every allocation (it is the
-top symbol, 23% of the samples). The call allocates at least three times: the encoded return value (`encode_to_vec`),
-the dispatcher's `Box<dyn Any>` outcome, and the `Reply` payload `Vec`; the lock, handle lookup (a
-`RandomState` hash plus an `Any` type-id check), panic guard and payload decode are the remaining ~40%. A
-one-byte `bool` round trip, which is one allocation and a decode, is already 14.7 ns. Getting under 60 ns means
-no heap traffic on the synchronous path: write the reply into a reusable or stack buffer and return the outcome
-by value. That changes the dispatcher ABI (SPEC 16 `DispatchResult`), so it needs an ADR (R11).
+The row was the second miss: `Runtime::call_sync` of `add(i64, i64)` was 77.8 ns when first measured (1.30x the 60 ns
+target) on a core faster than the iOS device's. A sampling profile of the call (macOS `sample`, ~4,900 samples of the
+loop) put **about 60% of it in the allocator**: `malloc` and `free`, plus a `mach_absolute_time` read that this OS's
+`libmalloc` does inside every allocation (the top symbol, 23% of the samples). The call allocated at least three times:
+the dispatcher's encoded return value (`encode_to_vec`), its `Box<dyn Any>` outcome, and the `Reply` payload `Vec`.
+
+ADR-028 removes all three. A generated dispatcher answers a synchronous method with `rt.sync_ok(&value, Encode::encode)`
+(`sync_err` for a typed error): when `call_sync` has armed the thread's reply slot, that encodes the whole `Reply` payload
+(`call_id`, status, value) into one reusable thread-local buffer and returns a zero-sized outcome (boxing a zero-sized
+value does not allocate); `Runtime::call_sync_with` lends the buffer to a closure. `Runtime::call_sync` copies it into the
+`Vec` it returns, which is the one allocation left and the one the C ABI owes (`keel_call_sync` hands that `Vec` over as
+the `KeelBuf` the caller frees). Whatever the buffer cannot serve (`keel_call`, dispatch layers, a call nested in another,
+a second runtime) takes the old allocating path, byte-identical on the wire. `crates/keel-ffi/tests/sync_alloc.rs` counts
+allocations with a global allocator and holds the path to exactly 0 per `call_sync_with`, 1 per `call_sync` and 1 per
+`keel_call_sync`. Four smaller costs on the same path went with it: SipHash on the `u32` dispatch ids, a linear scan of
+the object's method list per call, an `Arc` reference taken twice per receiver lookup, and several thread-local accesses
+in the panic guard.
+
+The parent commit was built in a second worktree and measured back to back with the new build (criterion medians, best of
+three interleaved rounds each; the machine was shared, load average 5 to 20, and the single-threaded rows agreed within
+about 3% between rounds when it was not saturated):
+
+| Benchmark | Before | After |
+|---|---|---|
+| `dispatch/call_sync/add` (returns a `Vec`) | 73.8 ns | 43.9 ns |
+| `dispatch/call_sync_with/add` (new: no allocation at all) | n/a | 31.5 ns |
+| `dispatch/call_sync/function` | 65.4 ns | 35.8 ns |
+| `dispatch/call_sync/echo_record1k` | 268.4 ns | 139.5 ns |
+| `boundary/call_sync/add` (C ABI, one `KeelBuf`) | 79.3 ns | 49.8 ns |
+| `boundary/call_sync/unknown` (status 5: formats a reason, allocates by nature) | 106.8 ns | 107.3 ns |
+| `boundary/call/add` (the async entry; the slot is not armed there) | 102.3 ns | 99.2 ns |
+
+What is left of the 31.5 ns, from a sampling profile of `call_sync_with`: about a quarter is entering and leaving the core
+lock (re-entrancy check, the lock, the current-runtime scope with its `Weak::upgrade`), about a sixth the two receiver
+lookups (the object table's reader lock and an `Arc` reference, once to route and once for the dispatcher), a tenth the
+panic guard, and the rest payload decode, the dispatcher and the reply encode. The cheapest next steps are resolving the
+receiver once per call instead of twice, and a cheaper re-entrancy check (one thread-local read instead of two);
+neither changes a contract.
+
+**The row is not closed.** 43.9 ns against 60 ns is a pass on a core faster than an A15, which is necessary and not
+sufficient: the row passes on the device only if an A15 core runs this path within 1.37x of this core's time (60 / 43.9),
+and this note has no A15 to measure. The verdict belongs to the device phase. `keel_call` (the async entry) still
+allocates its reply; it is not on the synchronous row's path.
 
 ### 3. `Runtime::new` + drop, without `shutdown()`, leaks the runtime and two threads
 
@@ -165,13 +200,14 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 
 ### Dispatch
 
-`Runtime::call_sync` / `Runtime::call` with a prebuilt payload and a host that only counts: `keel_call_sync` without the C ABI. `call_async` includes building the `Call` payload (a host must) and running the executor (`run_pending`) on this thread; there is no thread hop.
+`Runtime::call_sync` / `Runtime::call` with a prebuilt payload and a host that only counts: `keel_call_sync` without the C ABI. `call_sync` returns the reply as a `Vec` (the one allocation the C ABI owes the host); `call_sync_with` lends the reply buffer instead and allocates nothing (ADR-028). `call_async` includes building the `Call` payload (a host must) and running the executor (`run_pending`) on this thread; there is no thread hop.
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
-| `dispatch/call_sync/add` | 77.8 ns | 77.3 ns .. 78.5 ns |
-| `dispatch/call_sync/function` | 73.0 ns | 72.1 ns .. 74.0 ns |
-| `dispatch/call_sync/echo_record1k` | 279.1 ns | 277.2 ns .. 281.4 ns |
+| `dispatch/call_sync/add` | 43.9 ns | 43.8 ns .. 44.0 ns |
+| `dispatch/call_sync_with/add` | 31.5 ns | 31.4 ns .. 31.6 ns |
+| `dispatch/call_sync/function` | 35.8 ns | 35.6 ns .. 36.0 ns |
+| `dispatch/call_sync/echo_record1k` | 139.5 ns | 139.2 ns .. 139.8 ns |
 | `dispatch/call_async/ready_add` | 220.6 ns | 217.6 ns .. 224.8 ns |
 
 ### Signals and stores
@@ -211,11 +247,11 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
-| `boundary/call_sync/add` | 79.3 ns | 79.1 ns .. 79.6 ns |
-| `boundary/call_sync/unknown` | 108.8 ns | 108.3 ns .. 109.4 ns |
-| `boundary/call/add` | 103.9 ns | 103.6 ns .. 104.2 ns |
+| `boundary/call_sync/add` | 49.8 ns | 49.6 ns .. 50.0 ns |
+| `boundary/call_sync/unknown` | 107.3 ns | 106.7 ns .. 108.1 ns |
+| `boundary/call/add` | 99.2 ns | 98.7 ns .. 100.1 ns |
 | `boundary/call/ready_add` | 5.64 µs | 5.50 µs .. 5.80 µs |
-| `boundary/write_observed` | 166.0 ns | 164.9 ns .. 167.2 ns |
+| `boundary/write_observed` | 129.7 ns | 129.3 ns .. 130.2 ns |
 
 ### Query client (`bench/benches/query.rs`)
 
@@ -234,9 +270,10 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 dispatch, signals, snapshot). Each is about **5x** what this machine measures (with a 250 ns floor and two
 significant figures), which is what makes a shared CI runner pass while an operation that became several
 times slower fails. The budgets guard against **regressions on a host**; they are not the section 14 device
-targets, and one of them (the handle method call) sits above its device target today, see Findings. (The
-keyed-patch rows were the second until ADR-027; the insert row's gate is 31 µs, 5x what it measures, and what it
-measures, 6.2 µs, is under the 20 µs device target.) The test takes the best p50 of up to three attempts, runs in `--release` only (a debug build
+targets, and none of them sits above its device target today. (The keyed-patch rows were one miss until
+ADR-027: the insert row's gate is 31 µs, 5x what it measures, and what it measures, 6.2 µs, is under the
+20 µs device target. The handle method call was the other until ADR-028: its budget now guards the 43.9 ns
+it measures, not the allocator.) The test takes the best p50 of up to three attempts, runs in `--release` only (a debug build
 just smoke-runs every operation, so `cargo test --workspace` stays green and fast), and supports
 `KEEL_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
 

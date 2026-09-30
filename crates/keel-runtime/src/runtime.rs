@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
 use std::time::Duration;
 
-use keel_meta::{DispatchCall, DispatchFn, Schema};
+use keel_meta::{DispatchCall, DispatchFn, DispatchOutcome, Schema};
 use keel_signals::ChangeSink;
 use keel_wire::payload::{
     Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
@@ -41,6 +41,7 @@ use crate::ports::{
     PortTable, decode_dispatch_reply, decode_port_reply,
 };
 use crate::stats::{Stats, push_json_string};
+use crate::sync_out::{self, SyncLease, Written};
 use crate::timer::{Sleep, Timers, delay_ms};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
@@ -288,8 +289,17 @@ pub(crate) struct BuildOptions {
 /// What `dispatch` found out about a call.
 enum Dispatched {
     Done(DispatchResult, Handle),
+    /// A synchronous answer written straight into the thread's reply slot (ADR-028): only
+    /// produced while `call_sync_with` has the slot armed.
+    Written,
     Panicked(PanicReport, Handle),
     Bad(String),
+}
+
+/// The reply of a synchronous call: the armed slot holding it, or an owned payload.
+enum SyncReply {
+    Slot(SyncLease),
+    Owned(Vec<u8>),
 }
 
 /// The Keel runtime: one per process (or per embedded instance). See the
@@ -338,6 +348,12 @@ fn reply_payload(call_id: u32, status: ReplyStatus, body: &[u8]) -> Vec<u8> {
         body,
     }
     .encode(&mut w);
+    w.into_vec()
+}
+
+fn encode_to_vec<T>(value: &T, encode: fn(&T, &mut Writer)) -> Vec<u8> {
+    let mut w = Writer::new();
+    encode(value, &mut w);
     w.into_vec()
 }
 
@@ -928,6 +944,8 @@ impl Runtime {
                     self.reply_bad(call_id, "internal: unmapped dispatch result");
                 }
             },
+            // `call` never arms the reply slot, so no dispatcher can have written into it.
+            Dispatched::Written => self.reply_bad(call_id, "internal: unmapped dispatch result"),
         }
         0
     }
@@ -935,24 +953,66 @@ impl Runtime {
     /// Serves a call synchronously and returns the `Reply` payload (SPEC 3.4). Only for sync
     /// methods: an `async` method or a stream is answered with status 5 without being run.
     /// The reply is *not* passed to [`Host::reply`].
+    ///
+    /// The returned `Vec` is the one allocation of the call, made at the very end; the work
+    /// before it does not touch the heap once the thread's reply buffer has warmed up. A caller
+    /// that can read the reply in place (a shim copying it into its own buffer) avoids even that
+    /// with [`call_sync_with`](Runtime::call_sync_with).
     pub fn call_sync(&self, payload: &[u8]) -> Vec<u8> {
+        match self.serve_sync(payload) {
+            SyncReply::Slot(lease) => lease.read(<[u8]>::to_vec),
+            // Already an owned payload (an error reply): no second copy.
+            SyncReply::Owned(bytes) => bytes,
+        }
+    }
+
+    /// Like [`call_sync`](Runtime::call_sync), but lends the `Reply` payload to `read` instead of
+    /// returning it: no heap allocation on the hot path (ADR-028).
+    ///
+    /// The bytes are valid only inside `read`, which runs after the core lock is released, on
+    /// the calling thread. `read` may call the runtime again (that call allocates its reply
+    /// instead of reusing the buffer being read) and may panic (the panic propagates, the
+    /// thread's buffer is released).
+    ///
+    /// ```
+    /// use keel_runtime::Runtime;
+    /// use keel_runtime::testing::TestRuntime;
+    ///
+    /// let rt = TestRuntime::new();
+    /// // A payload the runtime cannot decode is answered with status 5, like any other reply.
+    /// let status = rt.runtime().call_sync_with(&[1, 2, 3], |reply: &[u8]| reply[4]);
+    /// assert_eq!(status, 5);
+    /// ```
+    pub fn call_sync_with<R>(&self, payload: &[u8], read: impl FnOnce(&[u8]) -> R) -> R {
+        match self.serve_sync(payload) {
+            SyncReply::Slot(lease) => lease.read(read),
+            SyncReply::Owned(bytes) => read(&bytes),
+        }
+    }
+
+    /// Runs a synchronous call under the core lock and returns where its reply is.
+    fn serve_sync(&self, payload: &[u8]) -> SyncReply {
         Stats::inc(&self.stats.calls);
         Stats::inc(&self.stats.replies);
         let call = match Call::decode(&mut Reader::new(payload)) {
             Ok(call) => call,
             Err(e) => {
                 Stats::inc(&self.stats.bad_requests);
-                return reply_payload(
+                return SyncReply::Owned(reply_payload(
                     0,
                     ReplyStatus::BadRequest,
                     &string_body(&format!("malformed call payload: {e}")),
-                );
+                ));
             }
         };
         let call_id = call.call_id;
         let bad = |reason: &str| {
             Stats::inc(&self.stats.bad_requests);
-            reply_payload(call_id, ReplyStatus::BadRequest, &string_body(reason))
+            SyncReply::Owned(reply_payload(
+                call_id,
+                ReplyStatus::BadRequest,
+                &string_body(reason),
+            ))
         };
         if self.is_shut_down() {
             return bad("the runtime is shut down");
@@ -964,16 +1024,29 @@ impl Runtime {
         if self.is_shut_down() {
             return bad("the runtime is shut down");
         }
+        // Armed for the dispatcher only; `None` (a call made from inside another call's reply
+        // reader) means the dispatcher takes the allocating path.
+        let lease = SyncLease::acquire(self.id, call_id);
         match self.dispatch(&call, true) {
+            Dispatched::Written => match lease {
+                Some(lease) => SyncReply::Slot(lease),
+                None => bad("internal: a dispatcher wrote a reply nobody asked for"),
+            },
             Dispatched::Bad(reason) => bad(&reason),
             Dispatched::Panicked(report, handle) => {
                 self.note_panic("call_sync", handle, &report);
-                reply_payload(call_id, ReplyStatus::Panic, &encode_panic_body(&report))
+                SyncReply::Owned(reply_payload(
+                    call_id,
+                    ReplyStatus::Panic,
+                    &encode_panic_body(&report),
+                ))
             }
             Dispatched::Done(result, _) => match result {
-                DispatchResult::Sync(Ok(body)) => reply_payload(call_id, ReplyStatus::Ok, &body),
+                DispatchResult::Sync(Ok(body)) => {
+                    SyncReply::Owned(reply_payload(call_id, ReplyStatus::Ok, &body))
+                }
                 DispatchResult::Sync(Err(body)) => {
-                    reply_payload(call_id, ReplyStatus::Error, &body)
+                    SyncReply::Owned(reply_payload(call_id, ReplyStatus::Error, &body))
                 }
                 other => {
                     // A dispatcher that disagrees with its metadata about being async.
@@ -981,6 +1054,51 @@ impl Runtime {
                     bad("this method is asynchronous; call it with call(), not call_sync()")
                 }
             },
+        }
+    }
+
+    /// Answers a synchronous method with `Ok(value)`: what a generated dispatcher returns for
+    /// the success of a method that is not `async` and does not return a stream (status 0).
+    /// `encode` is the value's wire encoder, `Encode::encode` for any wire type.
+    ///
+    /// Under [`call_sync`](Runtime::call_sync) the complete reply is encoded straight into the
+    /// thread's reply buffer and the outcome is a zero-sized marker, so no heap allocation
+    /// happens (ADR-028). Anywhere else (a `call`, a layer, a test calling the dispatcher
+    /// directly) the value is encoded into a `Vec` and the outcome is
+    /// [`DispatchResult::Sync`]`(Ok(..))`, exactly as a hand-written dispatcher would build it.
+    /// The two are byte-identical on the wire.
+    ///
+    /// ```
+    /// use keel_runtime::keel_wire::Encode;
+    /// use keel_runtime::testing::TestRuntime;
+    /// use keel_runtime::DispatchResult;
+    ///
+    /// let t = TestRuntime::new();
+    /// // A generated dispatcher ends with `rt.sync_ok(&value, Encode::encode)`. Outside
+    /// // `call_sync` no reply slot is armed, so the answer is the classic result:
+    /// let outcome = t.runtime().sync_ok(&42_u32, Encode::encode);
+    /// match outcome.downcast::<DispatchResult>() {
+    ///     Ok(DispatchResult::Sync(Ok(bytes))) => assert_eq!(bytes, [42, 0, 0, 0]),
+    ///     _ => unreachable!("not armed, so a DispatchResult::Sync"),
+    /// }
+    /// ```
+    #[inline]
+    pub fn sync_ok<T>(&self, value: &T, encode: fn(&T, &mut Writer)) -> DispatchOutcome {
+        if sync_out::write(self.id, ReplyStatus::Ok, value, encode) {
+            DispatchOutcome::new(Written::new())
+        } else {
+            DispatchOutcome::new(DispatchResult::Sync(Ok(encode_to_vec(value, encode))))
+        }
+    }
+
+    /// Answers a synchronous method with its typed error (status 1); the counterpart of
+    /// [`sync_ok`](Runtime::sync_ok) for `Err(error)`.
+    #[inline]
+    pub fn sync_err<E>(&self, error: &E, encode: fn(&E, &mut Writer)) -> DispatchOutcome {
+        if sync_out::write(self.id, ReplyStatus::Error, error, encode) {
+            DispatchOutcome::new(Written::new())
+        } else {
+            DispatchOutcome::new(DispatchResult::Sync(Err(encode_to_vec(error, encode))))
         }
     }
 
@@ -1012,27 +1130,20 @@ impl Runtime {
                 ),
             },
             CallTarget::Method { handle, method_id } => {
-                let object = match self.objects.get_dyn(handle) {
-                    Ok(object) => object,
+                let (type_id, type_name) = match self.objects.type_of(handle) {
+                    Ok(found) => found,
                     Err(e) => return Dispatched::Bad(e.to_string()),
                 };
-                match self.table.objects.get(&object.keel_type_id()) {
-                    Some(meta) => {
-                        if sync_only {
-                            if let Some(m) = meta.methods.iter().find(|m| m.method_id == method_id)
-                            {
-                                if needs_async(m.is_async, &m.returns) {
-                                    return async_reason(m.name);
-                                }
-                            }
+                match self.table.objects.get(&type_id) {
+                    Some(entry) => {
+                        if sync_only && entry.method_needs_async(method_id) {
+                            return async_reason(entry.name_of(method_id, false));
                         }
-                        (Ok(meta.dispatch), method_id, handle)
+                        (Ok(entry.meta.dispatch), method_id, handle)
                     }
                     None => (
                         Err(format!(
-                            "no dispatcher is registered for `{}` ({:#010x})",
-                            object.keel_type_name(),
-                            object.keel_type_id()
+                            "no dispatcher is registered for `{type_name}` ({type_id:#010x})"
                         )),
                         method_id,
                         handle,
@@ -1041,17 +1152,11 @@ impl Runtime {
             }
             CallTarget::Constructor { type_id, method_id } => {
                 match self.table.objects.get(&type_id) {
-                    Some(meta) => {
-                        if sync_only {
-                            if let Some(m) =
-                                meta.constructors.iter().find(|m| m.method_id == method_id)
-                            {
-                                if needs_async(m.is_async, &m.returns) {
-                                    return async_reason(m.name);
-                                }
-                            }
+                    Some(entry) => {
+                        if sync_only && entry.constructor_needs_async(method_id) {
+                            return async_reason(entry.name_of(method_id, true));
                         }
-                        (Ok(meta.dispatch), method_id, Handle::NULL)
+                        (Ok(entry.meta.dispatch), method_id, Handle::NULL)
                     }
                     None => (
                         Err(format!("unknown object type {type_id:#010x}")),
@@ -1107,19 +1212,35 @@ impl Runtime {
         layered: bool,
     ) -> Option<Dispatched> {
         match guard::guarded(|| dispatch_fn(self as &dyn Any, call)) {
-            Ok(outcome) => match outcome.downcast::<DispatchResult>() {
-                Ok(DispatchResult::BadRequest(reason)) => Some(Dispatched::Bad(reason)),
-                Ok(DispatchResult::Unknown) if layered => None,
-                Ok(DispatchResult::Unknown) => Some(Dispatched::Bad(format!(
-                    "unknown method {:#010x}, or its arguments or receiver were not valid",
-                    call.method_id
-                ))),
-                Ok(result) => Some(Dispatched::Done(result, handle)),
-                Err(_) => Some(Dispatched::Bad(format!(
-                    "the {name} dispatcher returned something other than a keel_runtime::DispatchResult"
-                ))),
+            Ok(outcome) => match outcome.downcast::<Written>() {
+                Ok(Written { .. }) => Some(Dispatched::Written),
+                Err(outcome) => self.classify(name, outcome, call, handle, layered),
             },
             Err(report) => Some(Dispatched::Panicked(report, handle)),
+        }
+    }
+
+    /// Classifies an outcome that is not a written reply: a [`DispatchResult`], or something a
+    /// dispatcher should never have returned.
+    fn classify(
+        &self,
+        name: &str,
+        outcome: DispatchOutcome,
+        call: DispatchCall<'_>,
+        handle: Handle,
+        layered: bool,
+    ) -> Option<Dispatched> {
+        match outcome.downcast::<DispatchResult>() {
+            Ok(DispatchResult::BadRequest(reason)) => Some(Dispatched::Bad(reason)),
+            Ok(DispatchResult::Unknown) if layered => None,
+            Ok(DispatchResult::Unknown) => Some(Dispatched::Bad(format!(
+                "unknown method {:#010x}, or its arguments or receiver were not valid",
+                call.method_id
+            ))),
+            Ok(result) => Some(Dispatched::Done(result, handle)),
+            Err(_) => Some(Dispatched::Bad(format!(
+                "the {name} dispatcher returned something other than a keel_runtime::DispatchResult"
+            ))),
         }
     }
 
@@ -2031,7 +2152,11 @@ impl Runtime {
                     },
                 });
             }
-            let name = self.table.objects.get(&type_id).map_or("store", |m| m.name);
+            let name = self
+                .table
+                .objects
+                .get(&type_id)
+                .map_or("store", |entry| entry.meta.name);
             built.push((s.handle, erased(any, type_id, name, Some(restorer.cell))));
         }
 

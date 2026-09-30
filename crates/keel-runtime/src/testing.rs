@@ -92,6 +92,27 @@ pub fn unchecked_writes<R>(f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// `rt.call_sync(payload)` through the allocating path: the reference the zero-allocation reply
+/// slot (ADR-028) must match byte for byte.
+///
+/// `call_sync` writes the reply of a generated dispatcher straight into a thread-local buffer;
+/// this function keeps that buffer busy, so the same call is answered the way it is for `call`,
+/// for a layer or for a hand-written dispatcher: the dispatcher returns a `DispatchResult` and
+/// the runtime builds the reply from it. A test that compares the two (`call_sync_reference`
+/// against `call_sync`) proves the fast path changed nothing on the wire.
+///
+/// ```
+/// use keel_runtime::testing::{TestRuntime, call_sync_reference};
+///
+/// let t = TestRuntime::new();
+/// let bad = [1, 2, 3];
+/// assert_eq!(call_sync_reference(t.runtime(), &bad), t.runtime().call_sync(&bad));
+/// ```
+pub fn call_sync_reference(rt: &Runtime, payload: &[u8]) -> Vec<u8> {
+    let _busy = crate::sync_out::Occupied::new();
+    rt.call_sync(payload)
+}
+
 /// A decoded `Reply` the host received.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplyRecord {

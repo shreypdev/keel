@@ -24,7 +24,11 @@
 //! # For macro authors: what generated code calls
 //!
 //! A generated dispatcher (`keel_meta::DispatchFn`) receives the runtime as `&dyn Any`,
-//! downcasts it to [`Runtime`] and returns `DispatchOutcome::new(DispatchResult::..)`. It
+//! downcasts it to [`Runtime`] and returns `DispatchOutcome::new(DispatchResult::..)` (async,
+//! stream, bad request, unknown) or, for the answer of a synchronous method,
+//! [`Runtime::sync_ok`] / [`Runtime::sync_err`], which encode straight into the caller's reply
+//! buffer under [`Runtime::call_sync`] and build a [`DispatchResult::Sync`] anywhere else (no heap
+//! allocation on the synchronous path, ADR-028). It
 //! resolves receivers with [`Runtime::object`], stores new objects with
 //! [`Runtime::insert_object`] or [`Runtime::insert_store`] (and encodes the returned
 //! [`Handle`]`.0` as a `u64` in the `Ok` body of a constructor reply),
@@ -37,6 +41,10 @@
 //! * [`DispatchResult`] has a fifth variant, `BadRequest(String)`, for undecodable arguments
 //!   and stale receivers (status 5 with a reason); the spec only has `Unknown`, which cannot
 //!   express "the arguments did not decode".
+//! * [`Runtime::sync_ok`], [`Runtime::sync_err`] and [`Runtime::call_sync_with`] are additions: the
+//!   zero-allocation synchronous path (a per-thread reply slot, ADR-028). [`DispatchResult::Sync`]
+//!   is still what a dispatcher that does not use them returns, and what they return when the slot
+//!   is not armed.
 //! * `StoreRestorer`, `InitHook`, [`Runtime::extension`], [`Runtime::new`] and the typed
 //!   `insert_*`/`object` helpers are additions the spec implies but does not name.
 //! * [`DispatchLayer`] lets a layered crate serve ids that have no static registration
@@ -65,6 +73,7 @@ pub mod object_table;
 mod ports;
 mod runtime;
 mod stats;
+mod sync_out;
 pub mod testing;
 mod timer;
 

@@ -111,7 +111,7 @@ fn __keel_dispatch_Todos(
                 );
             }
             let __ctx = __rt.ctx();
-            __keel_out({
+            {
                 let __value = Todos::new(__ctx);
                 match __value.__keel_attach_all() {
                     ::core::result::Result::Ok(()) => {
@@ -119,14 +119,10 @@ fn __keel_dispatch_Todos(
                         let __handle = __rt
                             .insert_object(::std::sync::Arc::clone(&__arc));
                         (*__arc).__keel_set_handle(__handle.0);
-                        ::keel::runtime::DispatchResult::Sync(
-                            ::core::result::Result::Ok(
-                                ::keel::wire::Encode::encode_to_vec(&__handle),
-                            ),
-                        )
+                        __rt.sync_ok(&__handle, ::keel::wire::Encode::encode)
                     }
                     ::core::result::Result::Err(__why) => {
-                        ::keel::runtime::DispatchResult::BadRequest(
+                        __keel_bad_request(
                             ::std::format!(
                                 "store `{}` could not attach its signals: {}", "Todos",
                                 __why
@@ -134,7 +130,7 @@ fn __keel_dispatch_Todos(
                         )
                     }
                 }
-            })
+            }
         }
         __KEEL_ID_add => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
@@ -166,14 +162,10 @@ fn __keel_dispatch_Todos(
                     );
                 }
             };
-            __keel_out({
+            {
                 let __out = Todos::add(&*__obj, __keel_a0);
-                ::keel::runtime::DispatchResult::Sync(
-                    ::core::result::Result::Ok(
-                        ::keel::wire::Encode::encode_to_vec(&__out),
-                    ),
-                )
-            })
+                __rt.sync_ok(&__out, ::keel::wire::Encode::encode)
+            }
         }
         _ => __keel_unknown(),
     }

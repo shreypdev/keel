@@ -12,9 +12,11 @@
 //! 2. Decodes `call.args` with `keel_wire` (a decode failure is
 //!    [`DispatchResult::BadRequest`] too), and answers [`DispatchResult::Unknown`] for a
 //!    `method_id` it does not implement.
-//! 3. Runs the method and encodes the result: `Ok`/`Err` bytes for
-//!    [`Sync`](DispatchResult::Sync) and [`Async`](DispatchResult::Async), items for
-//!    [`Stream`](DispatchResult::Stream).
+//! 3. Runs the method and encodes the result: for a synchronous method the answer is
+//!    [`Runtime::sync_ok`](crate::Runtime::sync_ok) / [`sync_err`](crate::Runtime::sync_err)
+//!    (written into the caller's reply buffer under `call_sync`, a
+//!    [`Sync`](DispatchResult::Sync) result anywhere else; ADR-028), `Ok`/`Err` bytes for
+//!    [`Async`](DispatchResult::Async), items for [`Stream`](DispatchResult::Stream).
 //! 4. For a constructor, inserts the new object with
 //!    [`Runtime::insert_object`](crate::Runtime::insert_object) /
 //!    [`insert_store`](crate::Runtime::insert_store) and encodes the returned handle (`u64`)
@@ -25,6 +27,7 @@
 
 use core::fmt;
 use core::future::Future;
+use core::hash::{BuildHasherDefault, Hasher};
 use core::pin::Pin;
 use std::collections::HashMap;
 
@@ -37,6 +40,10 @@ pub type DispatchBytes = Result<Vec<u8>, Vec<u8>>;
 /// [`DispatchOutcome`](keel_meta::DispatchOutcome)).
 pub enum DispatchResult {
     /// A synchronous method finished: `Ok` is status 0, `Err` is status 1.
+    ///
+    /// What a hand-written dispatcher or a [`DispatchLayer`] returns, and what
+    /// [`Runtime::sync_ok`](crate::Runtime::sync_ok) builds when no reply slot is armed;
+    /// generated dispatchers call those two instead of building this (ADR-028).
     Sync(DispatchBytes),
     /// An `async` method: the runtime spawns it as a task keyed by `call_id`.
     Async(Pin<Box<dyn Future<Output = DispatchBytes> + Send>>),
@@ -92,11 +99,89 @@ pub struct DispatchLayer {
 
 inventory::collect!(DispatchLayer);
 
+/// Hashes the `u32` ids of the dispatch table: they are already the output of a hash
+/// (`fnv1a32` of a name), so one multiplication to spread them over the high bits `HashMap`
+/// reads is all the hashing they need. The default `SipHash` costs more than the rest of a
+/// lookup, on the path of every call.
+#[derive(Default)]
+pub(crate) struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        // Only `u32` keys are used; fold anything else in without pretending to be good at it.
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+
+    fn write_u32(&mut self, id: u32) {
+        self.0 = u64::from(id).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
+/// A map keyed by a dispatch id.
+pub(crate) type IdMap<V> = HashMap<u32, V, BuildHasherDefault<IdHasher>>;
+
+/// A registered object type and what `call_sync` needs to know about its methods without
+/// scanning them on every call.
+pub(crate) struct ObjectEntry {
+    /// The registration.
+    pub(crate) meta: &'static ObjectMeta,
+    /// The ids of the methods that cannot be served by `call_sync` (`async`, or returning a
+    /// stream); usually none or a few.
+    async_methods: Box<[u32]>,
+    /// The same for constructors.
+    async_constructors: Box<[u32]>,
+}
+
+impl ObjectEntry {
+    fn new(meta: &'static ObjectMeta) -> ObjectEntry {
+        let async_ids = |methods: &'static [keel_meta::MethodMeta]| -> Box<[u32]> {
+            methods
+                .iter()
+                .filter(|m| needs_async(m.is_async, &m.returns))
+                .map(|m| m.method_id)
+                .collect()
+        };
+        ObjectEntry {
+            meta,
+            async_methods: async_ids(meta.methods),
+            async_constructors: async_ids(meta.constructors),
+        }
+    }
+
+    /// Whether method `method_id` cannot be served synchronously (by its metadata).
+    pub(crate) fn method_needs_async(&self, method_id: u32) -> bool {
+        self.async_methods.contains(&method_id)
+    }
+
+    /// Whether constructor `method_id` cannot be served synchronously.
+    pub(crate) fn constructor_needs_async(&self, method_id: u32) -> bool {
+        self.async_constructors.contains(&method_id)
+    }
+
+    /// The name of the method or constructor `method_id`, for the "is asynchronous" reason.
+    pub(crate) fn name_of(&self, method_id: u32, constructor: bool) -> &'static str {
+        let list = if constructor {
+            self.meta.constructors
+        } else {
+            self.meta.methods
+        };
+        list.iter()
+            .find(|m| m.method_id == method_id)
+            .map_or("?", |m| m.name)
+    }
+}
+
 /// The dispatchers registered with `keel-meta`, indexed for lookup by id.
 #[derive(Default)]
 pub(crate) struct DispatchTable {
-    pub(crate) functions: HashMap<u32, &'static FunctionMeta>,
-    pub(crate) objects: HashMap<u32, &'static ObjectMeta>,
+    pub(crate) functions: IdMap<&'static FunctionMeta>,
+    pub(crate) objects: IdMap<ObjectEntry>,
     /// The layers that serve what the two maps above miss, in registration order.
     pub(crate) layers: Vec<&'static DispatchLayer>,
     /// Ids that more than one registration claimed (first wins); reported at init.
@@ -120,9 +205,11 @@ impl DispatchTable {
                 }
                 Registration::Object(meta) => {
                     if let Some(first) = table.objects.get(&meta.type_id) {
-                        table.collisions.push((meta.type_id, first.name, meta.name));
+                        table
+                            .collisions
+                            .push((meta.type_id, first.meta.name, meta.name));
                     } else {
-                        table.objects.insert(meta.type_id, meta);
+                        table.objects.insert(meta.type_id, ObjectEntry::new(meta));
                     }
                 }
                 _ => {}

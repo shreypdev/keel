@@ -182,13 +182,20 @@ don't block) is documented on `Host`.
 4. For `call_sync`, an async-shaped method (by its metadata: `is_async`, `Stream`, `Result<Stream, _>`)
    is refused with status 5 **before** the dispatcher runs, so nothing half-executes.
 5. Run the dispatcher under the panic guard with `&Runtime` erased as `&dyn Any`, then unwrap
-   the `DispatchOutcome` into a `DispatchResult`.
+   the `DispatchOutcome` into a `DispatchResult`, or recognise the zero-sized `Written` marker:
+   under `call_sync` the thread's reply slot (`sync_out.rs`, ADR-028) is armed for the call, a
+   dispatcher that answers with `Runtime::sync_ok` / `sync_err` has already encoded the whole
+   `Reply` payload into it, and `call_sync_with` lends that buffer to the caller after the core
+   lock is released. The slot is a `Cell` state machine in a thread-local (`Free`, `Armed(runtime)`,
+   `Written`, `Reading`); a call that finds it anywhere but `Free`, or a `sync_ok` from another
+   runtime than the one armed, takes the allocating path, so nesting is always safe.
 
 Outcomes:
 
 | Result | `call_sync` | `call` |
 |---|---|---|
 | `Sync(Ok/Err)` | reply status 0 / 1, returned | same reply through `Host::reply`, before `call` returns |
+| `Written` (from `sync_ok` / `sync_err`) | the reply already in the thread's slot, lent to the caller (status 0 / 1) | never (`call` does not arm the slot; `sync_ok` builds a `Sync`) |
 | `Async(fut)` | status 5 (`this method is asynchronous`) | spawn a task; `calls[call_id] = task`; the task replies when it finishes |
 | `Stream(s)` | status 5 | register the stream, send status 4, spawn the driver (section 8) |
 | `Unknown` | status 5 `unknown method 0x...` | same |
@@ -515,6 +522,7 @@ panics instead of hanging when nothing can make progress.
 |---|---|---|---|
 | 5.1 | `Mutex<Core>` guards the core state | `Mutex<CoreState>` where `CoreState` is a counter; bookkeeping has its own locks | wakers, `port_reply`, `timer_fired` and `stream_credit` must not wait for the core lock, and dispatchers need the object table without re-locking (section 2) |
 | 16.2 `DispatchResult` | four variants | five: `BadRequest(String)` added | a dispatcher has no other way to say "the arguments did not decode" (status 5 with a reason) |
+| 5.6 / 16.2 | a sync result is `DispatchResult::Sync(Result<Vec, Vec>)` | generated dispatchers answer `rt.sync_ok` / `rt.sync_err`; under `call_sync` the reply is encoded into a per-thread slot and the outcome is a zero-sized marker; everywhere else it is still a `DispatchResult::Sync` (`call_sync_with`, `testing::call_sync_reference`) | `call_sync` allocated three times (result `Vec`, `Box<dyn Any>` outcome, reply `Vec`), about 60% of a 78 ns call on an M5 Pro (ADR-028) |
 | 5.9 / 16.2 | `restore(ctx, values)`; `StoreRestorer { type_id, restore(ctx, reader) }` | `StoreRestorer { type_id, restore(ctx, handle, reader), cell }` over the store body (section 13) | the `keel-macros` branch generates this shape (it needs the handle to attach the cell and a way to find the cell in a `dyn Any`), and the runtime builds on it |
 | 5.7 | `bind_port<P>(port_id, imp: Arc<dyn Any>)` | implemented, storing `Arc<Arc<dyn Trait>>`; `bind_dyn_port<P: ?Sized>` and `Ctx::rust_port::<dyn Trait>` are the typed entry points | an `Arc<dyn Any>` cannot be downcast to `Arc<dyn Trait>`, so a sized wrapper is stored |
 | new | (none) | `PortDispatcher` / `PortDispatch` (inventory) | a proxy calling a Rust-bound port sends bytes; `#[keel::port]` generates the byte-level entry point (section 9) |
