@@ -59,17 +59,17 @@ impl Calculator {
     }
 
     pub fn add(&self, a: i64, b: i64) -> i64 {
-        self.base + a + b
+        self.base.wrapping_add(a).wrapping_add(b)
     }
 
     pub async fn slow_add(&self, a: i64, b: i64) -> i64 {
         self.ctx.sleep(Duration::from_millis(20)).await;
-        self.base + a + b
+        self.base.wrapping_add(a).wrapping_add(b)
     }
 
     /// An async method that is ready at once: measures the executor hop, not a timer.
     pub async fn ready_add(&self, a: i64, b: i64) -> i64 {
-        self.base + a + b
+        self.base.wrapping_add(a).wrapping_add(b)
     }
 
     pub async fn never(&self) -> i64 {

@@ -1144,7 +1144,11 @@ fn arbitrary_bytes_never_break_the_boundary() {
                 prop_assert_ne!(parsed.unwrap().status, ReplyStatus::Panic);
                 port_reply(payload);
                 event(id, id.rotate_left(7), payload);
-                prop_assert_ne!(restore(payload), 0, "random bytes are not a snapshot");
+                // Bytes that happen to be a valid snapshot (four zero bytes: no stores) would
+                // legitimately restore, and drop the objects the test still uses.
+                if Snapshot::decode(&mut Reader::new(payload)).is_err() {
+                    prop_assert_ne!(restore(payload), 0, "random bytes are not a snapshot");
+                }
             }
             keel_cancel(id);
             keel_stream_credit(id, id);
