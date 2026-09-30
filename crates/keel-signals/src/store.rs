@@ -357,19 +357,14 @@ impl StoreCell {
     /// assert_eq!(change_set.entries[0].signal_id, 0);
     /// ```
     pub fn observe(&self, signal_id: u32, on: bool, out: &mut Writer) -> u32 {
-        let targets = self.targets(signal_id);
+        let targets = self.targets_of(&[signal_id]);
         if targets.is_empty() {
             // An unknown id comes from the host: it is ignored in every build (never asserted),
             // and nothing is counted or logged here.
             return 0;
         }
         if !on {
-            for (_, slot) in &targets {
-                slot.flags.observed.store(false, Ordering::SeqCst);
-                if let SlotKind::Keyed(state) = &slot.kind {
-                    state.forget();
-                }
-            }
+            self.stop_observing(&targets);
             return 0;
         }
 
@@ -377,26 +372,138 @@ impl StoreCell {
         // transaction such writes only queue up, and are committed after the entries are built
         // (the guard is declared first, so it is dropped last).
         let _txn = TxnGuard::enter();
-        let handle = Handle(self.handle());
-        // Nothing is left behind if building the entries panics (a computed's closure or an
-        // encoder): the slots go back to what they were, so the host is not assumed to have
-        // values it never received.
+        let mut rollback = self.start_observing(&targets);
+        let entries = self.encode_settled(&targets);
+        rollback.armed = false;
+        // The host is about to receive the current value of every target, so an earlier
+        // abandoned delivery of one of them no longer needs a retry.
+        self.forget_unsent(targets.iter().map(|(id, _)| *id));
+        out.write_raw(entries.as_slice());
+        u32::try_from(targets.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Starts observing `signal_ids` (any of them may be [`ALL_SIGNALS`]) and hands the host
+    /// their current values as **one complete change-set** (`txn_id u64, count u32, entries`,
+    /// SPEC 3.5) through `deliver`, **under the store's delivery lock**. Returns how many
+    /// entries the change-set holds; when that is `0` (every id unknown) `deliver` is not
+    /// called.
+    ///
+    /// This is [`observe`](StoreCell::observe) plus delivery, done the way a commit does it,
+    /// and it exists for callers that must put the values in front of the host themselves (the
+    /// runtime's `observe` and `restore`). Building the entries and handing them over are one
+    /// step under the lock that orders this store's change-sets, with a transaction id allocated
+    /// inside it (and recorded, so a later commit of the store never reuses or undercuts it).
+    /// A commit of the same store on another thread therefore either delivered completely
+    /// before this change-set, carrying older values, or waits for it and delivers after it, so
+    /// the host's last word on the store is always its newest. Calling `observe` and delivering
+    /// the entries separately cannot promise that: a commit can slip in between and the host
+    /// ends on the older value.
+    ///
+    /// The entries are encoded and settled exactly as [`observe`](StoreCell::observe) does (inside a
+    /// transaction, re-encoded while computed closures write their own targets, at most eight
+    /// passes); writes that remain are committed **after** this call returns and the lock is
+    /// released, as ordinary change-sets, so the host converges on the core's values. Ids are
+    /// deduplicated and the entries are ordered by `signal_id`.
+    ///
+    /// If encoding or `deliver` panics, nothing is left half done: no target stays observed
+    /// because of this call, baselines are dropped, and targets that were already observed are
+    /// remembered as unsent, so the next commit of the store sends their current values.
+    ///
+    /// # Locking
+    ///
+    /// The delivery lock is held while computed closures and encoders run and while `deliver`
+    /// runs, so `deliver` follows the [`ChangeSink`] contract: it must not wait for another
+    /// thread that writes this store, and it must not call back into this cell's `observe`
+    /// family or commit this store from the same thread while the lock is held (writes it makes
+    /// are queued and committed afterwards, as for a sink). A computed closure must not block on
+    /// such a thread either.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use keel_signals::{Signal, StoreCell, ALL_SIGNALS};
+    /// use keel_wire::payload::ChangeSet;
+    /// use keel_wire::Reader;
+    ///
+    /// let cell = StoreCell::new(1);
+    /// let name = Signal::new(String::from("ada"));
+    /// cell.attach(&name, 0).unwrap();
+    /// cell.set_handle(0x0000_0001_0000_0001);
+    ///
+    /// let mut received = Vec::new();
+    /// let count = cell.observe_and_deliver(&[ALL_SIGNALS], |payload| received.push(payload.to_vec()));
+    /// assert_eq!(count, 1);
+    /// let change_set = ChangeSet::decode(&mut Reader::new(&received[0])).unwrap();
+    /// assert_eq!(change_set.entries[0].signal_id, 0);
+    /// ```
+    pub fn observe_and_deliver(&self, signal_ids: &[u32], deliver: impl FnOnce(&[u8])) -> u32 {
+        let targets = self.targets_of(signal_ids);
+        if targets.is_empty() {
+            return 0;
+        }
+        // Declared first, so dropped last: writes that could not settle commit only after the
+        // delivery lock below has been released (the commit takes it again).
+        let _txn = TxnGuard::enter();
+        let _delivery = self.delivery.lock();
+        let mut rollback = self.start_observing(&targets);
+        let entries = self.encode_settled(&targets);
+        let count = u32::try_from(targets.len()).unwrap_or(u32::MAX);
+
+        // Allocated under the lock, after everything delivered before it, and recorded, so
+        // `commit_slots` replaces a shared transaction id that this one has overtaken.
+        let txn = next_txn_id();
+        self.last_txn.store(txn, Ordering::SeqCst);
+        let mut payload = Writer::from_vec(take_buffer());
+        payload.write_u64(txn);
+        payload.write_u32(count);
+        payload.write_raw(entries.as_slice());
+        // A panic in `deliver` leaves the rollback armed: the host may not have these values.
+        deliver(payload.as_slice());
+        rollback.armed = false;
+        recycle_buffer(payload.into_vec());
+        self.forget_unsent(targets.iter().map(|(id, _)| *id));
+        count
+    }
+
+    /// Stops observing `targets`: their baselines are dropped and nothing is delivered for them.
+    fn stop_observing(&self, targets: &[(u32, Arc<Slot>)]) {
+        for (_, slot) in targets {
+            slot.flags.observed.store(false, Ordering::SeqCst);
+            if let SlotKind::Keyed(state) = &slot.kind {
+                state.forget();
+            }
+        }
+    }
+
+    /// Marks `targets` observed and returns the guard that undoes it if building (or delivering)
+    /// the entries unwinds: every target returns to its previous state, its keyed baseline is
+    /// dropped, and a target that was already observed (whose dirty bit is cleared while the
+    /// entries are built) is remembered as unsent.
+    fn start_observing(&self, targets: &[(u32, Arc<Slot>)]) -> ObserveRollback<'_> {
         let mut rollback = ObserveRollback {
             cell: self,
             touched: Vec::with_capacity(targets.len()),
             armed: true,
         };
-        for (id, slot) in &targets {
+        for (id, slot) in targets {
             rollback.touched.push((
                 *id,
                 Arc::clone(slot),
                 slot.flags.observed.swap(true, Ordering::SeqCst),
             ));
         }
+        rollback
+    }
+
+    /// Encodes the current value of every target as change-set entries, re-encoding while a
+    /// computed closure writes one of the targets (at most [`OBSERVE_SETTLE_PASSES`] passes), so
+    /// that the entries hold the post-write values. The caller holds a transaction open.
+    fn encode_settled(&self, targets: &[(u32, Arc<Slot>)]) -> Writer {
+        let handle = Handle(self.handle());
         let mut entries = Writer::new();
         for pass in 1..=OBSERVE_SETTLE_PASSES {
             entries.clear();
-            for (id, slot) in &targets {
+            for (id, slot) in targets {
                 // Clear the dirty bit *before* reading the value: a write that lands in between
                 // is recorded again and delivered by its own commit, instead of being lost.
                 slot.flags.dirty.store(false, Ordering::SeqCst);
@@ -424,12 +531,7 @@ impl StoreCell {
                 break;
             }
         }
-        rollback.armed = false;
-        // The host is about to receive the current value of every target, so an earlier
-        // abandoned delivery of one of them no longer needs a retry.
-        self.forget_unsent(targets.iter().map(|(id, _)| *id));
-        out.write_raw(entries.as_slice());
-        u32::try_from(targets.len()).unwrap_or(u32::MAX)
+        entries
     }
 
     /// Appends the full encoded value of one signal to `out` (no entry header, no length).
@@ -476,20 +578,23 @@ impl StoreCell {
         self.slots.read().get(signal_id as usize).cloned()
     }
 
-    fn targets(&self, signal_id: u32) -> Vec<(u32, Arc<Slot>)> {
+    /// The slots `signal_ids` name (unknown ids are skipped), deduplicated and ordered by id;
+    /// [`ALL_SIGNALS`] stands for every slot.
+    fn targets_of(&self, signal_ids: &[u32]) -> Vec<(u32, Arc<Slot>)> {
         let slots = self.slots.read();
-        if signal_id == ALL_SIGNALS {
-            slots
+        if signal_ids.contains(&ALL_SIGNALS) {
+            return slots
                 .iter()
                 .enumerate()
                 .map(|(i, slot)| (u32::try_from(i).unwrap_or(ALL_SIGNALS), Arc::clone(slot)))
-                .collect()
-        } else {
-            slots
-                .get(signal_id as usize)
-                .map(|slot| vec![(signal_id, Arc::clone(slot))])
-                .unwrap_or_default()
+                .collect();
         }
+        let mut ids = signal_ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into_iter()
+            .filter_map(|id| slots.get(id as usize).map(|slot| (id, Arc::clone(slot))))
+            .collect()
     }
 
     /// Commits the slots `ids` that a transaction dirtied: builds one change-set from those
