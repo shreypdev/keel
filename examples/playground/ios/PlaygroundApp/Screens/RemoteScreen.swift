@@ -10,6 +10,7 @@ struct RemoteScreen: View {
     @State private var draft = ""
     @State private var problem: String?
     @State private var offline = PlaygroundNetwork.shared.isOffline
+    @FocusState private var typing: Bool
 
     var body: some View {
         NavigationStack {
@@ -44,6 +45,7 @@ struct RemoteScreen: View {
                     }
                     HStack {
                         TextField("New item", text: $draft)
+                            .focused($typing)
                             .submitLabel(.done)
                             .onSubmit(add)
                             .accessibilityIdentifier("remote-input")
@@ -94,6 +96,7 @@ struct RemoteScreen: View {
                     .foregroundStyle(.secondary)
             }
             .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("remote-row-pending")
         } else {
             Button {
@@ -113,6 +116,7 @@ struct RemoteScreen: View {
             return
         }
         draft = ""
+        typing = false
         Task {
             do {
                 _ = try await createRemoteTodo(list: KeelBootstrap.inboxList, title: title)

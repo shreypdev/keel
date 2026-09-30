@@ -12,13 +12,29 @@
 		A0A0A0A0A0A0A0A000000003 /* KeelCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* KeelCore.xcframework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		A0A0A0A0A0A0A0A00000206 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A0A0A0A0A0A0A0A000000100 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A0A0A0A0A0A0A0A000000070;
+			remoteInfo = PlaygroundApp;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		A0A0A0A0A0A0A0A00000200 /* PlaygroundAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlaygroundAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0A0A0A0A0A0A0A000000020 /* KeelCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = KeelCore.xcframework; path = "../build/ios/KeelCore.xcframework"; sourceTree = SOURCE_ROOT; };
 		A0A0A0A0A0A0A0A000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0A0A0A0A0A0A0A000000030 /* PlaygroundApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "PlaygroundApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A0A0A0A0A0A0A0A00000201 /* PlaygroundAppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PlaygroundAppUITests;
+			sourceTree = "<group>";
+		};
 		A0A0A0A0A0A0A0A000000040 /* PlaygroundApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "PlaygroundApp";
@@ -27,6 +43,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A0A0A0A0A0A0A0A00000202 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A0A0A0A0A0A0A0A000000050 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -44,6 +67,7 @@
 			isa = PBXGroup;
 			children = (
 				A0A0A0A0A0A0A0A000000040 /* PlaygroundApp */,
+				A0A0A0A0A0A0A0A00000201 /* PlaygroundAppUITests */,
 				A0A0A0A0A0A0A0A000000061 /* Config */,
 				A0A0A0A0A0A0A0A000000062 /* Frameworks */,
 				A0A0A0A0A0A0A0A000000063 /* Products */,
@@ -70,6 +94,7 @@
 			isa = PBXGroup;
 			children = (
 				A0A0A0A0A0A0A0A000000030 /* PlaygroundApp.app */,
+				A0A0A0A0A0A0A0A00000200 /* PlaygroundAppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -77,6 +102,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A0A0A0A0A0A0A0A00000204 /* PlaygroundAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A0A0A0A0A0A0A0A00000207 /* Build configuration list for PBXNativeTarget "PlaygroundAppUITests" */;
+			buildPhases = (
+				A0A0A0A0A0A0A0A00000203 /* Sources */,
+				A0A0A0A0A0A0A0A00000202 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A0A0A0A0A0A0A0A00000205 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A0A0A0A0A0A0A0A00000201 /* PlaygroundAppUITests */,
+			);
+			name = PlaygroundAppUITests;
+			productName = PlaygroundAppUITests;
+			productReference = A0A0A0A0A0A0A0A00000200 /* PlaygroundAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		A0A0A0A0A0A0A0A000000070 /* PlaygroundApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A0A0A0A0A0A0A0A000000080 /* Build configuration list for PBXNativeTarget "PlaygroundApp" */;
@@ -114,6 +159,10 @@
 					A0A0A0A0A0A0A0A000000070 = {
 						CreatedOnToolsVersion = 16.0;
 					};
+					A0A0A0A0A0A0A0A00000204 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = A0A0A0A0A0A0A0A000000070;
+					};
 				};
 			};
 			buildConfigurationList = A0A0A0A0A0A0A0A000000110 /* Build configuration list for PBXProject "PlaygroundApp" */;
@@ -135,6 +184,7 @@
 			projectRoot = "";
 			targets = (
 				A0A0A0A0A0A0A0A000000070 /* PlaygroundApp */,
+				A0A0A0A0A0A0A0A00000204 /* PlaygroundAppUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -150,6 +200,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A0A0A0A0A0A0A0A00000203 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A0A0A0A0A0A0A0A000000090 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -158,6 +215,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A0A0A0A0A0A0A0A00000205 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A0A0A0A0A0A0A0A000000070 /* PlaygroundApp */;
+			targetProxy = A0A0A0A0A0A0A0A00000206 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A0A0A0A0A0A0A0A000000130 /* Debug */ = {
@@ -276,6 +341,38 @@
 			};
 			name = Release;
 		};
+		A0A0A0A0A0A0A0A00000208 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.keel.playground.uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PlaygroundApp;
+			};
+			name = Debug;
+		};
+		A0A0A0A0A0A0A0A00000209 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.keel.playground.uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PlaygroundApp;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -293,6 +390,15 @@
 			buildConfigurations = (
 				A0A0A0A0A0A0A0A000000132 /* Debug */,
 				A0A0A0A0A0A0A0A000000133 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A0A0A0A0A0A0A0A00000207 /* Build configuration list for PBXNativeTarget "PlaygroundAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0A0A0A0A0A0A0A00000208 /* Debug */,
+				A0A0A0A0A0A0A0A00000209 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
