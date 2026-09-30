@@ -146,7 +146,7 @@ impl<Q: QueryDef> QueryHandle<Q> {
         let (key, view) = shared.observe(ctx, query_vtable::<Q>(), bytes, Some((sink_id, sink)));
         // Showing the view the observer joined at: a publication that raced ahead of this is
         // newer and wins (the handle never goes back).
-        inner.apply(&view);
+        ctx.txn(|| inner.apply(&view));
         QueryHandle {
             inner,
             ctx: ctx.clone(),

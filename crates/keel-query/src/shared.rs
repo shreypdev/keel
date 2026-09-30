@@ -221,7 +221,25 @@ pub(crate) struct EntrySnapshot {
     failed: bool,
 }
 
+/// Whether two optional values have the same encoding.
+fn same_bytes(a: &Option<Erased>, b: &Option<Erased>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.bytes == b.bytes,
+        _ => false,
+    }
+}
+
 impl EntrySnapshot {
+    /// What an entry that did not exist looked like.
+    const EMPTY: EntrySnapshot = EntrySnapshot {
+        data: None,
+        error: None,
+        updated_at: None,
+        invalidated: false,
+        failed: false,
+    };
+
     pub(crate) fn of(entry: &Entry) -> EntrySnapshot {
         EntrySnapshot {
             data: entry.data.clone(),
@@ -814,26 +832,18 @@ impl Shared {
                 let Some(entry) = state.entries.get_mut(&key) else {
                     continue;
                 };
-                match before {
-                    Some(snapshot) => {
-                        entry.data_ver += 1;
-                        entry.error_ver += 1;
-                        entry.data = snapshot.data;
-                        entry.error = snapshot.error;
-                        entry.updated_at = snapshot.updated_at;
-                        entry.invalidated = snapshot.invalidated;
-                        entry.failed = snapshot.failed;
-                    }
-                    None => {
-                        entry.data_ver += 1;
-                        entry.error_ver += 1;
-                        entry.data = None;
-                        entry.error = None;
-                        entry.updated_at = None;
-                        entry.invalidated = false;
-                        entry.failed = false;
-                    }
+                let snapshot = before.unwrap_or(EntrySnapshot::EMPTY);
+                if !same_bytes(&entry.data, &snapshot.data) {
+                    entry.data_ver += 1;
                 }
+                if !same_bytes(&entry.error, &snapshot.error) {
+                    entry.error_ver += 1;
+                }
+                entry.data = snapshot.data;
+                entry.error = snapshot.error;
+                entry.updated_at = snapshot.updated_at;
+                entry.invalidated = snapshot.invalidated;
+                entry.failed = snapshot.failed;
                 if entry.observers > 0 && entry.needs_fetch(now) {
                     self.start_fetch(ctx, &key, entry, &mut fx);
                 }

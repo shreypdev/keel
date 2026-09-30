@@ -25,3 +25,4 @@ parking_lot = { workspace = true }
 # cycle only through dev-dependencies, which cargo allows: the tests link the one keel-query.
 keel = { workspace = true }
 proptest = { workspace = true }
+serde_json = { workspace = true }
