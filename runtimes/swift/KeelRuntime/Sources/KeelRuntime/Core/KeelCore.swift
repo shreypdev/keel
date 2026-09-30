@@ -71,6 +71,7 @@ public final class KeelCore: @unchecked Sendable {
     ///
     /// A remote core is reached with a blocking handshake, so call this once at startup, not on
     /// a hot path.
+    @discardableResult
     public static func load(_ options: LoadOptions) throws -> KeelCore {
         let transport: any KeelTransport
         switch options.mode {
