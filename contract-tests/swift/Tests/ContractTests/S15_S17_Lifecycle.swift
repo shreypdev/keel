@@ -1,6 +1,6 @@
 import Foundation
 import KeelFFI
-import KeelRuntime
+@testable import KeelRuntime
 import PlaygroundCore
 import XCTest
 
@@ -99,8 +99,8 @@ extension ContractScenarios {
 
     func testS16_schemaMismatchRejection() async {
         await scenario("S16", "schema mismatch rejection") {
-            // The one core of this process is shut down first: a load while another is loaded is
-            // refused with `alreadyLoaded`, before its hash would even be compared.
+            // The one core of this process is shut down first: the scenario needs a process in which
+            // no core is initialised (`keel_init` is once per process).
             Fixture.shared.shutDown()
             try check(KeelCore.current == nil, "a core is still loaded after shutdown")
             let generated = KeelIds.schemaHash
@@ -118,6 +118,22 @@ extension ContractScenarios {
                           "the message names both hashes in hex: \(message)")
             }
             try check(KeelCore.current == nil, "a failed load left a shared core behind")
+
+            // 1b. "Before the core is initialised" is what the error type shows when something else
+            // already initialised it: `keel_init` would be refused, and a runtime that called it
+            // before comparing the hashes would fail with `coreInitFailed` and never report the
+            // mismatch. The check comes first, so the answer is the same.
+            do {
+                let foreignInit = ContractScenarios.initialiseCoreElsewhere()
+                try checkEqual(foreignInit, 0, "keel_init by another embedder")
+                defer { keel_shutdown() }
+                do {
+                    _ = try KeelCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
+                    throw ScenarioFailure(description: "a load with the wrong schema hash succeeded on an initialised core")
+                } catch let error as KeelSchemaMismatchError {
+                    try checkEqual(error.got, generated, "the core's hash in the error, core initialised elsewhere")
+                }
+            }
 
             // 2. The failed attempt did not leave the process half-initialised: a load with the right hash works.
             let core = try Fixture.shared.core()
@@ -139,6 +155,15 @@ extension ContractScenarios {
                              "Clock", "Rng", "Log", "Http", "Kv", "SecureStore", "Fs", "Timer", "Connectivity", "Lifecycle"] {
                 try check(names.contains(expected), "the exported schema does not list \(expected)")
             }
+        }
+    }
+
+    /// `keel_init` as another embedder of the core would call it, without the runtime; returns its
+    /// status code (0 when the core is running).
+    private static func initialiseCoreElsewhere() -> UInt32 {
+        let config = RuntimeConfigRecord(platform: "macos", mode: "inproc", coreThreads: 1, blockingThreads: 0, logLevel: 2).keelEncoded()
+        return config.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> UInt32 in
+            return keel_init(bytes.baseAddress, UInt32(bytes.count), { _, _, _, _ in }, { _, _, _ in }, { _, _, _, _ in }, nil)
         }
     }
 

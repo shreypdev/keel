@@ -1052,6 +1052,8 @@ public final class KeelCore: @unchecked Sendable {
   public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]
   public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8]   // cancellation-aware
   public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], Error>
+  public func stream<Item: Sendable>(_ target: CallTarget, method: UInt32, args: [UInt8], decode: @escaping @Sendable ([UInt8]) throws -> Item,
+                                     mapError: @escaping @Sendable (Error) -> Error = { $0 }) -> AsyncThrowingStream<Item, Error>   // what generated stream methods return; decodes on demand so credit follows the consumer (§3.7)
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> KeelHandle
   public func observe(_ handle: KeelHandle, signal: UInt32, on: Bool); public func release(_ handle: KeelHandle)
   public let mirror: Mirror        // register(handle) { @MainActor (signalId, op, reader) in … }

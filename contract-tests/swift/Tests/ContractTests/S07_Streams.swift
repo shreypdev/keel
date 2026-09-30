@@ -14,14 +14,9 @@ extension ContractScenarios {
 
             // 1. Read exactly five items of a thousand, then stop reading without cancelling.
             probe.reset()
-            // WORKAROUND(keel-bindgen): the generated `Probe.ticks(count:)` copies the runtime's
-            // pull-based stream into an unbounded `AsyncThrowingStream` from a task of its own, so
-            // the consumer never applies backpressure and the core produces all 1,000 items at
-            // once (the repro is in Findings.swift). The steps that assert backpressure therefore
-            // read `KeelCore.stream`, which is what the generated method wraps.
-            var iterator = self.rawTicks(core, probe, count: 1000).makeAsyncIterator()
+            var iterator = probe.ticks(count: 1000).makeAsyncIterator()
             for expected in 0 ..< 5 {
-                let item = try await iterator.next().map(ContractScenarios.tick)
+                let item = try await iterator.next()
                 try checkEqual(item, UInt32(expected), "item \(expected) of the first five")
             }
 
@@ -29,10 +24,14 @@ extension ContractScenarios {
             try await quietFor(milliseconds: 200)
             let produced = probe.counters().produced
             try check(produced >= 5 && produced <= 5 + 64, "produced is \(produced) after reading 5 and waiting 200 ms, not within 5...69")
+            // The Swift runtime grants 16 items of credit when a stream opens and tops the window up
+            // when fewer than 8 are unread (SPEC 3.7), so with five read the core has sent 16, and
+            // has made at most one more that waits for credit.
+            try check(produced <= 16 + 1, "produced is \(produced) after reading 5 and waiting 200 ms, above the credit window of 16 plus the item waiting for credit")
 
             // 3. Resume: the other 995 arrive in order, the stream ends, and all 1,000 were produced.
             var next: UInt32 = 5
-            while let item = try await iterator.next().map(ContractScenarios.tick) {
+            while let item = try await iterator.next() {
                 try checkEqual(item, next, "the item after \(next - 1)")
                 next += 1
             }
@@ -43,7 +42,7 @@ extension ContractScenarios {
             let openBefore = core.stat("open_streams")
             let producedBefore = probe.counters().produced
             var read = 0
-            for try await _ in self.rawTicks(core, probe, count: 1_000_000) {
+            for try await _ in probe.ticks(count: 1_000_000) {
                 read += 1
                 if read == 3 {
                     break
@@ -55,7 +54,7 @@ extension ContractScenarios {
             let runAhead = probe.counters().produced - producedBefore
             try check(runAhead < 200, "a stream cut after 3 items produced \(runAhead) items (expected < 200)")
 
-            // 5. Short streams end. These use the generated method: no backpressure is involved.
+            // 5. Short streams end.
             var three: [UInt32] = []
             for try await item in probe.ticks(count: 3) {
                 three.append(item)
@@ -67,19 +66,5 @@ extension ContractScenarios {
             }
             try checkEqual(none, [], "ticks(0)")
         }
-    }
-
-    /// `Probe.ticks(count:)` as the runtime offers it: a pull-based stream of encoded items.
-    private func rawTicks(_ core: KeelCore, _ probe: Probe, count: UInt32) -> AsyncThrowingStream<[UInt8], any Error> {
-        return core.stream(
-            .objectMethod(handle: probe.handle, methodId: KeelIds.Objects.Probe.ticks),
-            method: KeelIds.Objects.Probe.ticks,
-            args: encoded { (w: inout KeelWriter) in w.writeU32(count) }
-        )
-    }
-
-    /// One item of a `ticks` stream.
-    private nonisolated static func tick(_ item: [UInt8]) throws -> UInt32 {
-        return try UInt32.keelDecoded(from: item)
     }
 }

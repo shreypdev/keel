@@ -7,7 +7,7 @@ import Observation
 /// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
 /// exercise the boundary.
 @MainActor @Observable
-public final class Bench: KeelStore {
+public final class Bench: KeelStore, @unchecked Sendable {
     public private(set) var rows: [Item] = []
     public private(set) var s000: UInt32 = 0
     public private(set) var s001: UInt32 = 0
@@ -1544,7 +1544,7 @@ public final class Bench: KeelStore {
 
 /// A list of [`LIST_LEN`] items with operations that change one item at a time.
 @MainActor @Observable
-public final class BigList: KeelStore {
+public final class BigList: KeelStore, @unchecked Sendable {
     public private(set) var items: [Item] = []
     /// Computed by the core; read-only.
     public private(set) var count: UInt32 = 0
@@ -1692,7 +1692,7 @@ public final class BigList: KeelStore {
 
 /// A counter with a change tally and a computed parity.
 @MainActor @Observable
-public final class Counter: KeelStore {
+public final class Counter: KeelStore, @unchecked Sendable {
     public private(set) var count: Int32 = 0
     public private(set) var changes: UInt32 = 0
     /// Computed by the core; read-only.
@@ -1817,7 +1817,7 @@ public final class Counter: KeelStore {
 
 /// The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls.
 @MainActor @Observable
-public final class Todos: KeelStore {
+public final class Todos: KeelStore, @unchecked Sendable {
     public private(set) var todos: [Todo] = []
     public private(set) var filter: Filter = .all
     /// Computed by the core; read-only.
