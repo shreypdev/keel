@@ -11,8 +11,8 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,879 passed / 0 failed |
-| TS `npm test` (runtimes/ts/@keel/runtime) | 832 passed |
+| Rust `cargo test --workspace` | 1,910 passed / 0 failed |
+| TS `npm test` (runtimes/ts/@keel/runtime) | 833 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
 
@@ -34,6 +34,15 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 - re-reviews in flight: keel-runtime fixes; adversarial review of keel-ffi.
 
 ## Landed since takeover
+
+- **keel-ffi fix round merged** (ADR-026): port-registration refcounting drains in-flight
+  callbacks before unregister/shutdown returns (H1 UAF, ASan-verified both ways);
+  out_reply is always C-allocator-owned (M1, Miri-clean); keel.h now carries the full
+  host contract incl. the corrected callable-from-callback list; C harness and fresh-dist
+  wasm legs revived and in CI; Log-port reply loop fixed; wasm alloc/reply hardening;
+  runtime Subscription leak fixed (heap flat over 1000 cycles). TS 833. Re-review pending.
+  Local-run note: the C harness rebuilds keel-ffi without `jni`, clobbering the dylib —
+  build `--features jni` immediately before Kotlin runs (CI jobs are isolated).
 
 - **keel-macros fix round merged** (ADR-025): compile-time schema-identity checks
   (E0060/E0061), typed port outcomes via From<PortError> (E0033; HttpError/FsError map
