@@ -829,3 +829,147 @@ fn m3_writes_queued_by_the_last_delivery_are_released_not_stranded() {
         "the host ends up in step with the core"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// L1, L3, L4
+// ---------------------------------------------------------------------------------------------
+
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_default()
+}
+
+#[test]
+fn l1_a_computed_cycle_through_an_untracked_read_panics_instead_of_overflowing_the_stack() {
+    // The review's repro: c1 reads a computed that is created later and handed to it through a
+    // OnceLock, and c2 depends on c1. Reading c2 recursed until the stack overflowed (SIGABRT).
+    let a = Signal::new(1_u32);
+    let later: Arc<std::sync::OnceLock<Computed<u32>>> = Arc::new(std::sync::OnceLock::new());
+    let seen = later.clone();
+    let c1 = Computed::new(&a, move |v: &u32| {
+        *v + seen.get().map_or(0, keel_signals::Computed::get)
+    });
+    let c2 = Computed::new(&c1, |v: &u32| v + 1);
+    later.set(c2.clone()).expect("set once");
+
+    let payload = catch_unwind(AssertUnwindSafe(|| c2.get())).expect_err("a contained panic");
+    let message = panic_text(&*payload);
+    assert!(message.contains("computed cycle detected"), "{message}");
+
+    // The nodes stay stale rather than caching a half-computed value, and the thread is still
+    // usable: reading them again is the same contained panic, and other computeds are fine.
+    assert!(catch_unwind(AssertUnwindSafe(|| c1.get())).is_err());
+    let hollow = Signal::new(0_u32);
+    assert_eq!(Computed::new(&hollow, |v: &u32| v + 1).get(), 1);
+}
+
+#[test]
+fn l1_ordinary_nested_and_diamond_reads_are_not_cycles() {
+    let a = Signal::new(2_u32);
+    let left = Computed::new(&a, |v: &u32| v + 1);
+    let right = Computed::new(&a, |v: &u32| v * 10);
+    let top = Computed::new((&left, &right), |(l, r): (&u32, &u32)| l + r);
+    assert_eq!(top.get(), 23);
+    a.set(3);
+    assert_eq!(top.get(), 34);
+    // A closure may read another computed it did not declare, as long as it is not a cycle.
+    let outside = Computed::new(&a, |v: &u32| v + 100);
+    let reads_it = {
+        let outside = outside.clone();
+        Computed::new(&a, move |v: &u32| v + outside.get())
+    };
+    assert_eq!(reads_it.get(), 106);
+}
+
+#[test]
+fn l3_an_update_closure_that_reads_a_computed_of_the_same_signal_panics_instead_of_hanging() {
+    let a = Signal::new(1_u32);
+    let c = Computed::new(&a, |v: &u32| v * 2);
+    // The review's repro (it hung forever): the closure reads a value derived from the signal it
+    // is updating.
+    let payload = catch_unwind(AssertUnwindSafe(|| a.update(|v| *v = c.get())))
+        .expect_err("a panic, not a deadlock");
+    let message = panic_text(&*payload);
+    assert!(message.contains("Signal::update"), "{message}");
+    assert!(message.contains("deadlock"), "{message}");
+
+    // Nothing is left locked or half-marked: the signal works, and the computed recovers.
+    assert_eq!(a.get(), 1);
+    a.set(5);
+    assert_eq!(c.get(), 10);
+}
+
+#[test]
+fn l3_an_update_closure_that_reads_or_writes_its_own_signal_panics() {
+    let a = Signal::new(1_u32);
+    let same = a.clone();
+    let read = catch_unwind(AssertUnwindSafe(|| {
+        a.update(|_| {
+            let _ = same.get();
+        })
+    }));
+    assert!(read.is_err());
+    let same = a.clone();
+    let write = catch_unwind(AssertUnwindSafe(|| a.update(|_| same.set(9))));
+    assert!(write.is_err());
+    assert_eq!(a.get(), 1, "the value is unchanged");
+    // Other signals are fine inside an update closure.
+    let b = Signal::new(7_u32);
+    a.update(|v| *v = b.get());
+    assert_eq!(a.get(), 7);
+}
+
+#[test]
+fn l3_another_thread_waiting_on_an_update_is_not_a_violation() {
+    let a = Signal::new(0_u32);
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let writer = {
+        let a = a.clone();
+        std::thread::spawn(move || {
+            a.update(|v| {
+                entered_tx.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                *v = 42;
+            });
+        })
+    };
+    entered_rx.recv().unwrap();
+    // The lock is held by the other thread: this read simply waits for it.
+    assert_eq!(a.get(), 42);
+    writer.join().unwrap();
+}
+
+#[test]
+fn l4_an_unobserved_no_coalesce_keyed_list_keeps_no_baseline() {
+    let rig = Rig::new();
+    let rows = Signal::new(todos(3));
+    rig.cell.attach_keyed(&rows, 0, todo_key).unwrap();
+    rig.cell.set_no_coalesce(0).unwrap();
+
+    // Never observed: every delivery is a full value (a patch would need a baseline, which
+    // would be a copy of the list kept for as long as the store lives).
+    rig.run(|| rows.update(|r| r[0].done = true));
+    rig.run(|| rows.update(|r| r.push(todo(4, "t4", false))));
+    let sets = rig.sets();
+    assert_eq!(sets.len(), 2);
+    for set in &sets {
+        assert_eq!(entry(set, 0).op, ChangeOp::Full);
+    }
+    assert_eq!(value_of::<Vec<Todo>>(entry(&sets[1], 0)), rows.get());
+
+    // Observing starts patches (from a full value) and observing off drops the baseline again.
+    let mut host = Host::default();
+    host.apply_entries(&rig.observe_on(0), Some(0));
+    rig.run(|| rows.update(|r| r[1].done = true));
+    let set = rig.one_set();
+    assert_eq!(entry(&set, 0).op, ChangeOp::KeyedPatch);
+    host.apply(&set, Some(0));
+    assert_eq!(host.list, rows.get());
+
+    rig.observe_off(0);
+    rig.run(|| rows.update(|r| r[2].done = true));
+    assert_eq!(entry(&rig.one_set(), 0).op, ChangeOp::Full);
+}

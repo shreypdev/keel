@@ -39,7 +39,11 @@ enum PatchOrFull {
 trait KeyedState: Send + Sync {
     /// Writes what changed since the last call as a patch, or the full value when a patch is
     /// not possible or not worthwhile, and remembers the current list.
-    fn diff(&self, w: &mut Writer) -> PatchOrFull;
+    ///
+    /// With `retain == false` (the slot is delivered only because it is `no_coalesce`, the host
+    /// does not observe it) the full value is always written and no baseline is kept: nobody
+    /// could apply a patch, and the copy of the list would live as long as the store.
+    fn diff(&self, w: &mut Writer, retain: bool) -> PatchOrFull;
     /// Writes the full value and remembers the current list as the host's baseline.
     fn resync(&self, w: &mut Writer);
     /// Drops the baseline (the slot is no longer observed).
@@ -252,6 +256,8 @@ impl StoreCell {
 
     /// Makes changes to signal `signal_id` reach the host even while it is unobserved
     /// (`#[keel(no_coalesce)]`, SPEC 4.3): every commit that dirties the signal is delivered.
+    /// While the signal is unobserved a keyed list is delivered as a full value each time (there
+    /// is no baseline to patch against, and none is kept).
     ///
     /// # Errors
     ///
@@ -584,7 +590,9 @@ impl StoreCell {
             match &slot.kind {
                 SlotKind::Keyed(state) => {
                     scratch.clear();
-                    let op = match state.diff(&mut scratch) {
+                    // Decided once, here: an unobserved (`no_coalesce`) slot keeps no baseline.
+                    let retain = slot.flags.observed.load(Ordering::SeqCst);
+                    let op = match state.diff(&mut scratch, retain) {
                         PatchOrFull::Patch => ChangeOp::KeyedPatch,
                         PatchOrFull::Full => ChangeOp::Full,
                     };
@@ -838,7 +846,11 @@ struct KeyedList<T: ListLike> {
 }
 
 impl<T: SignalValue + ListLike> KeyedState for KeyedList<T> {
-    fn diff(&self, w: &mut Writer) -> PatchOrFull {
+    fn diff(&self, w: &mut Writer, retain: bool) -> PatchOrFull {
+        if !retain {
+            self.signal.with(|current| current.encode(w));
+            return PatchOrFull::Full;
+        }
         // Lock order: baseline, then the signal's value lock. `resync` does the same.
         let mut baseline = self.baseline.lock();
         self.signal.with(|current| {

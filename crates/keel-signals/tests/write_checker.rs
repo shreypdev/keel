@@ -10,7 +10,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Once;
 
 use common::*;
-use keel_signals::{Computed, Signal, set_write_checker};
+#[cfg(debug_assertions)]
+use keel_signals::Computed;
+use keel_signals::{Signal, set_write_checker};
 
 thread_local! {
     /// Whether the current thread pretends to be on the core.
