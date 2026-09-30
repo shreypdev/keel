@@ -630,7 +630,8 @@ fn calls_before_init_fail_softly() {
     port_reply(&[]);
     event(1, 2, &[]);
     let snapshot = take(keel_snapshot());
-    assert_eq!(snapshot, [0; 8], "no stores, generation floor 0");
+    assert_eq!(snapshot.len(), 8, "no stores, then the generation floor");
+    assert_eq!(snapshot[..4], [0; 4]);
     assert_eq!(restore(&snapshot), restore_code::UNAVAILABLE);
     let stats: serde_json::Value = serde_json::from_slice(&take(keel_stats_json())).expect("JSON");
     assert_eq!(stats["initialized"], false);
@@ -1070,6 +1071,46 @@ fn snapshot_and_restore_round_trip_and_reject_garbage() {
     assert_eq!(restore(&hostile), restore_code::BAD_SNAPSHOT);
     let (status, _) = host.sync(method(counter, "Counter", "bump"), &[]);
     assert_eq!(status, ReplyStatus::Ok);
+}
+
+/// L1: the generation counter outlives `keel_shutdown`, so a snapshot taken with no runtime
+/// carries the true process-wide floor (not 0), and a runtime started afterwards continues above
+/// it: a handle from before the shutdown never names anything in the new one (ADR-022).
+#[test]
+fn a_snapshot_with_no_runtime_keeps_the_process_generation_floor() {
+    let host = Embedder::start();
+    let mut last = host.construct("Counter", &[]);
+    for _ in 0..3 {
+        last = host.construct("Counter", &[]);
+    }
+    let floor_of = |bytes: Vec<u8>| {
+        Snapshot::decode(&mut Reader::new(&bytes))
+            .unwrap()
+            .generation_floor
+    };
+    let running = floor_of(take(keel_snapshot()));
+    assert!(running >= last.generation());
+
+    keel_shutdown();
+    let down = take(keel_snapshot());
+    let decoded = Snapshot::decode(&mut Reader::new(&down)).unwrap();
+    assert_eq!(decoded.stores.len(), 0, "a stopped runtime has no stores");
+    assert!(
+        decoded.generation_floor >= running,
+        "floor after shutdown {} fell below the {} of the running runtime",
+        decoded.generation_floor,
+        running
+    );
+
+    // The next runtime issues above it, so the old handle cannot be mistaken for a new object.
+    assert_eq!(init_raw(&config("inproc", 2), &host.cap), init_code::OK);
+    let fresh = host.construct("Counter", &[]);
+    assert!(fresh.generation() > last.generation());
+    assert!(fresh.generation() > decoded.generation_floor);
+    assert_eq!(
+        host.sync(method(last, "Counter", "bump"), &[]).0,
+        ReplyStatus::BadRequest
+    );
 }
 
 /// H1 over the C ABI: a handle the host still holds (here `b`, issued after the snapshot) must

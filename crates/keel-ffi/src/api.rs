@@ -264,18 +264,26 @@ pub(crate) fn poll() {
     );
 }
 
-/// A snapshot of nothing: `count u32 = 0, generation_floor u32 = 0` (SPEC 5.9).
-const EMPTY_SNAPSHOT: [u8; 8] = [0; 8];
+/// A snapshot of nothing: `count u32 = 0, generation_floor u32` (SPEC 5.9), the floor being the
+/// process-wide generation counter: it outlives `keel_shutdown`, so a host that snapshots
+/// between a shutdown and the next init keeps ADR-022's guarantee that a generation it may still
+/// hold is never issued again in this process.
+fn empty_snapshot() -> Vec<u8> {
+    let mut w = Writer::with_capacity(8);
+    w.write_u32(0);
+    w.write_u32(keel_runtime::object_table::process_generation_floor());
+    w.into_vec()
+}
 
-/// `keel_snapshot`: a `Snapshot` payload; an empty one (no stores, generation floor 0) before
-/// init.
+/// `keel_snapshot`: a `Snapshot` payload; with no runtime, an empty one carrying the
+/// process-wide generation floor.
 pub(crate) fn snapshot() -> Vec<u8> {
     guarded(
         "keel_snapshot",
-        |_| EMPTY_SNAPSHOT.to_vec(),
+        |_| empty_snapshot(),
         || match runtime() {
             Some(rt) => rt.snapshot(),
-            None => EMPTY_SNAPSHOT.to_vec(),
+            None => empty_snapshot(),
         },
     )
 }
@@ -328,6 +336,19 @@ mod tests {
     fn decode(reply: &[u8]) -> (u32, ReplyStatus, Vec<u8>) {
         let r = Reply::decode(&mut Reader::new(reply)).expect("a reply payload");
         (r.call_id, r.status, r.body.to_vec())
+    }
+
+    #[test]
+    fn the_empty_snapshot_is_count_zero_then_the_process_floor() {
+        let floor = keel_runtime::object_table::process_generation_floor();
+        let bytes = empty_snapshot();
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(bytes[..4], [0; 4]);
+        let carried = u32::from_le_bytes(bytes[4..].try_into().unwrap());
+        assert!(
+            carried >= floor,
+            "{carried} < {floor}: the floor never goes down"
+        );
     }
 
     #[test]
