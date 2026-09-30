@@ -20,7 +20,7 @@ use std::process::{Command, Stdio};
 
 use crate::cargo::{Build, Profile};
 use crate::error::{CliError, Code, Result};
-use crate::fsutil::{create_dir_all, remove_dir_all, size_of};
+use crate::fsutil::{copy_file, create_dir_all, remove_dir_all, size_of};
 use crate::session::Session;
 use crate::sys::Os;
 use crate::toolchain::Concern;
@@ -155,6 +155,20 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         }
         fat
     };
+
+    // The XCFramework carries the libraries under the name the Xcode project links
+    // (`libundra_core.a`), not under the shim's per-project one (`shim_lib_name`), the way the
+    // Android and host builds copy theirs to `libundra_core.*`.
+    let canonical = |slice: &str, built: PathBuf| -> Result<PathBuf> {
+        if built.file_name().is_some_and(|n| n == "libundra_core.a") {
+            return Ok(built);
+        }
+        let to = stage.join(slice).join("libundra_core.a");
+        copy_file(&built, &to)?;
+        Ok(to)
+    };
+    let device = canonical("device", device)?;
+    let sim = canonical("simulator", sim)?;
 
     let out_dir = session.project.build_dir().join("ios");
     let xcframework = out_dir.join("UndraCore.xcframework");
