@@ -3,6 +3,7 @@
 //! WebSocket client that behaves the way a platform's `remote` transport does.
 #![allow(dead_code)]
 
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -460,6 +461,14 @@ impl TestClient {
             .expect("the send succeeds");
     }
 
+    /// Like [`send`](TestClient::send) but reports a broken connection instead of panicking.
+    pub fn try_send(&mut self, kind: Kind, payload: &[u8]) -> bool {
+        let mut w = Writer::new();
+        Envelope::write(&mut w, kind, self.seq, self.schema, payload);
+        self.seq = self.seq.wrapping_add(1);
+        self.ws.send(Message::Binary(w.into_vec())).is_ok()
+    }
+
     pub fn send_text(&mut self, text: &str) {
         self.ws
             .send(Message::Text(text.into()))
@@ -676,4 +685,156 @@ pub fn change_sets(client: &TestClient) -> Vec<keel::wire::payload::ChangeSet> {
 pub fn stream_item(frame: &Frame) -> (u32, StreamFlag, Vec<u8>) {
     let item = StreamItem::decode(&mut Reader::new(&frame.payload)).unwrap();
     (item.call_id, item.flag, item.body.to_vec())
+}
+
+// ----- a hand-rolled WebSocket client, for framing tungstenite's client will not produce ---------
+
+/// A minimal RFC 6455 client: the upgrade, then whatever frames a test builds by hand.
+pub struct RawWs {
+    pub tcp: TcpStream,
+}
+
+/// One frame the server sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawFrame {
+    pub fin: bool,
+    pub opcode: u8,
+    pub payload: Vec<u8>,
+}
+
+impl RawWs {
+    /// Connects and performs the upgrade; panics unless the server answers `101`.
+    pub fn connect(addr: std::net::SocketAddr) -> RawWs {
+        let mut ws = RawWs::connect_socket(addr);
+        ws.tcp
+            .write_all(
+                format!(
+                    "GET / HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+                     Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0_u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            ws.tcp.read_exact(&mut byte).expect("the upgrade response");
+            head.push(byte[0]);
+        }
+        let head = String::from_utf8_lossy(&head).into_owned();
+        assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+        ws
+    }
+
+    /// Connects the socket without upgrading.
+    pub fn connect_socket(addr: std::net::SocketAddr) -> RawWs {
+        let tcp = TcpStream::connect(addr).expect("the server accepts");
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        tcp.set_nodelay(true).unwrap();
+        RawWs { tcp }
+    }
+
+    /// Writes one frame. `mask` false sends it unmasked, which a client must never do.
+    pub fn frame(&mut self, first_byte: u8, payload: &[u8], mask: bool) {
+        let mut out = vec![first_byte];
+        let flag = if mask { 0x80 } else { 0 };
+        match payload.len() {
+            n if n < 126 => out.push(flag | n as u8),
+            n if n < 65_536 => {
+                out.push(flag | 126);
+                out.extend_from_slice(&(n as u16).to_be_bytes());
+            }
+            n => {
+                out.push(flag | 127);
+                out.extend_from_slice(&(n as u64).to_be_bytes());
+            }
+        }
+        if mask {
+            let key = [0x12_u8, 0x34, 0x56, 0x78];
+            out.extend_from_slice(&key);
+            out.extend(payload.iter().enumerate().map(|(i, b)| b ^ key[i % 4]));
+        } else {
+            out.extend_from_slice(payload);
+        }
+        self.tcp.write_all(&out).unwrap();
+    }
+
+    /// A masked, final binary frame.
+    pub fn binary(&mut self, payload: &[u8]) {
+        self.frame(0x82, payload, true);
+    }
+
+    /// Reads server frames until the connection ends or `limit` passes.
+    pub fn frames_until_end(&mut self, limit: Duration) -> Vec<RawFrame> {
+        let deadline = Instant::now() + limit;
+        let mut frames = Vec::new();
+        while Instant::now() < deadline {
+            let mut head = [0_u8; 2];
+            if self.tcp.read_exact(&mut head).is_err() {
+                break;
+            }
+            let (fin, opcode) = (head[0] & 0x80 != 0, head[0] & 0x0f);
+            let mut len = u64::from(head[1] & 0x7f);
+            if len == 126 {
+                let mut b = [0_u8; 2];
+                if self.tcp.read_exact(&mut b).is_err() {
+                    break;
+                }
+                len = u64::from(u16::from_be_bytes(b));
+            } else if len == 127 {
+                let mut b = [0_u8; 8];
+                if self.tcp.read_exact(&mut b).is_err() {
+                    break;
+                }
+                len = u64::from_be_bytes(b);
+            }
+            let mut payload = vec![0_u8; len as usize];
+            if self.tcp.read_exact(&mut payload).is_err() {
+                break;
+            }
+            frames.push(RawFrame {
+                fin,
+                opcode,
+                payload,
+            });
+        }
+        frames
+    }
+
+    /// The code of the Close frame among `frames`, if any.
+    pub fn close_code(frames: &[RawFrame]) -> Option<u16> {
+        frames.iter().find(|f| f.opcode == 8).map(|f| {
+            if f.payload.len() >= 2 {
+                u16::from_be_bytes([f.payload[0], f.payload[1]])
+            } else {
+                1005
+            }
+        })
+    }
+}
+
+/// A small deterministic PRNG for the byte-fuzz tests (xorshift64*).
+pub struct Rng(pub u64);
+
+impl Rng {
+    pub fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    pub fn below(&mut self, n: usize) -> usize {
+        (self.next() % n.max(1) as u64) as usize
+    }
+
+    /// Up to `max` (exclusive) random bytes.
+    pub fn junk(&mut self, max: usize) -> Vec<u8> {
+        let len = self.below(max);
+        self.bytes(len)
+    }
+
+    pub fn bytes(&mut self, len: usize) -> Vec<u8> {
+        (0..len).map(|_| self.next() as u8).collect()
+    }
 }
