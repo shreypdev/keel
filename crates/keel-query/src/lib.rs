@@ -42,9 +42,13 @@
 //!   schema are dropped. A garbage-collected entry leaves its persisted copy in the store.
 //! * **Mutations** (`ctx.mutate(M, input)`, see [`MutationBuilder`]) run an optional
 //!   *optimistic* update inside one transaction, so observers see the result at once; on failure
-//!   every entry it touched is restored exactly, in one more transaction; on success the
-//!   mutation's own `key` (rendered with its input) and the `invalidates` targets are marked stale
-//!   and the observed ones refetch. A mutation retries `RETRY` times (default 0) with the same
+//!   the entries it wrote are restored exactly, in one more transaction, unless something else has
+//!   written them since (a later optimistic mutation, a fetch result, a `set`; compared by a
+//!   per-entry write stamp): those keep the newer write, so a rollback never removes the
+//!   placeholder of a mutation that started after the failed one (see
+//!   [`MutationBuilder::optimistic`] for the exact semantics); on success the mutation's own
+//!   `key` (rendered with its input) and the `invalidates` targets are marked stale and the
+//!   observed ones refetch. A mutation retries `RETRY` times (default 0) with the same
 //!   backoff as a query.
 //! * **The offline queue.** An `idempotent` mutation that fails with an `HttpError::Network` (its
 //!   own error type usually wraps it; the client looks inside) **while the client believes the

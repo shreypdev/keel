@@ -669,6 +669,75 @@ fn an_optimistic_update_is_one_change_set_and_its_rollback_is_one_more_that_rest
     );
 }
 
+#[test]
+fn a_rollback_that_leaves_an_entry_another_mutation_wrote_is_still_one_transaction() {
+    let p = Platform::new();
+    for n in 0..3_u32 {
+        p.h.serve_page(n, vec![todo(n as u8 + 1, "milk")]);
+    }
+    let handles: Vec<Handle> = (0..3_u32).map(|n| p.construct::<TodosQuery>(&n)).collect();
+    for handle in &handles {
+        p.observe(*handle);
+    }
+    p.t().run_pending();
+    p.change_sets();
+    p.h.fakes.http.respond_sequence(
+        keel_ports::fakes::Matcher::post(format!("{API}/todos")),
+        [
+            Ok(keel_ports::HttpResponse::new(422, b"no".to_vec())),
+            Ok(ok(&todo(9, "b"))),
+        ],
+    );
+
+    // A writes pages 0, 1 and 2 and is refused after 100 ms; B writes page 2 and is accepted
+    // after 600 ms.
+    let (a, _) = spawn(
+        &p.h,
+        p.h.ctx()
+            .mutate::<SlowAddMutation>(("a".to_owned(), 100))
+            .optimistic(|cache| {
+                for n in 0..3_u32 {
+                    cache.update::<TodosQuery>((n,), |page| page.items.push(todo(7, "a")));
+                }
+            }),
+    );
+    let (b, _) = spawn(
+        &p.h,
+        p.h.ctx()
+            .mutate::<SlowAddMutation>(("b".to_owned(), 600))
+            .optimistic(|cache| {
+                cache.update::<TodosQuery>((2,), |page| page.items.push(todo(8, "b")));
+            }),
+    );
+    p.t().run_pending();
+    assert_eq!(
+        p.change_sets().len(),
+        4,
+        "A's write is one transaction (three stores), B's one more (one store)"
+    );
+
+    p.h.advance_ms(100);
+    assert_eq!(take(&a), Some(Err(TodoError::Rejected("no".into()))));
+    assert!(take(&b).is_none());
+    let rollback = p.change_sets();
+    let mut restored: Vec<Handle> = rollback
+        .iter()
+        .flat_map(|cs| cs.entries.iter().map(|e| e.handle))
+        .collect();
+    restored.sort_by_key(|handle| handle.0);
+    restored.dedup();
+    assert_eq!(
+        restored,
+        handles[..2],
+        "pages 0 and 1 are restored; page 2 belongs to B now and is not touched"
+    );
+    assert_eq!(rollback.len(), 2, "one change-set per restored store");
+    assert_eq!(
+        rollback[0].txn_id, rollback[1].txn_id,
+        "the restores are one transaction"
+    );
+}
+
 // ----- the raw bytes, straight from SPEC 3.3 and 3.4 -----------------------------------------------
 
 #[test]

@@ -514,3 +514,356 @@ fn an_optimistic_closure_that_panics_halfway_gets_its_writes_undone() {
     );
     assert_eq!(handle.status().get(), QueryStatus::Success);
 }
+
+// ----- concurrent optimistic mutations: a rollback undoes only its own changes ------------------
+//
+// Mutation A writes the cache optimistically and is still running when mutation B writes the
+// cache optimistically too. A's failure must not take B's placeholder away (the playground
+// finding: a failed toggle removed the item an add had just put on screen).
+
+type Patch = Box<dyn FnOnce(&mut keel_query::CacheView<'_>) + Send>;
+
+/// Retitles the first item of page 0, like a toggle changing an item that is already there.
+fn retitle_first(title: &'static str) -> Patch {
+    Box::new(move |cache| {
+        assert!(cache.update::<TodosQuery>((0,), |page| page.items[0].title = title.to_owned()));
+    })
+}
+
+/// Appends an item to page 0, like an add showing its placeholder.
+fn append(n: u8, title: &'static str) -> Patch {
+    Box::new(move |cache| {
+        assert!(cache.update::<TodosQuery>((0,), |page| {
+            page.items.push(todo(n, title));
+            page.total += 1;
+        }));
+    })
+}
+
+fn titles(handle: &keel_query::QueryHandle<TodosQuery>) -> Vec<String> {
+    handle
+        .data()
+        .get()
+        .expect("the page has data")
+        .items
+        .into_iter()
+        .map(|todo| todo.title)
+        .collect()
+}
+
+type Reply = Result<HttpResponse, HttpError>;
+
+fn refused() -> Reply {
+    Ok(HttpResponse::new(500, b"no".to_vec()))
+}
+
+fn accepted(todo: &Todo) -> Reply {
+    Ok(ok(todo))
+}
+
+/// A `slow_add` that takes `ms` before its request, with `patch` as its optimistic update.
+fn slow(h: &Harness, title: &str, ms: u32, patch: Patch) -> Slot<Result<Todo, TodoError>> {
+    spawn(
+        h,
+        h.ctx()
+            .mutate::<SlowAddMutation>((title.to_owned(), ms))
+            .optimistic(patch),
+    )
+    .0
+}
+
+/// From now on the server's page 0 is `items` (and nothing else is scripted yet).
+fn server_page_is(h: &Harness, items: Vec<Todo>) {
+    h.fakes.http.reset();
+    h.serve_page(0, items);
+}
+
+/// The server answers the POSTs in the order the requests arrive.
+fn answer_posts(h: &Harness, replies: impl IntoIterator<Item = Reply>) {
+    h.fakes.http.respond_sequence(post_todos(), replies);
+}
+
+#[test]
+fn a_failed_mutation_keeps_the_placeholder_of_a_later_one_on_the_same_entry() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    // The server's page, once B is accepted, has B's item and no trace of the failed toggle.
+    server_page_is(&h, vec![todo(1, "milk"), todo(3, "walk")]);
+    // A (a toggle of `milk`) is refused after 100 ms; B (an add) is accepted after 600 ms.
+    answer_posts(&h, [refused(), accepted(&todo(3, "walk"))]);
+    let a = slow(&h, "toggle", 100, retitle_first("milk (done)"));
+    let b = slow(&h, "walk", 600, append(3, "walk"));
+    h.t.run_pending();
+    assert_eq!(titles(&handle), ["milk (done)", "walk"]);
+
+    h.advance_ms(100);
+    assert_eq!(take(&a), Some(Err(TodoError::Rejected("no".into()))));
+    assert!(take(&b).is_none(), "B is still in flight");
+    assert_eq!(
+        titles(&handle),
+        ["milk (done)", "walk"],
+        "B's placeholder survives A's rollback; A's own change is inside B's value until B settles"
+    );
+
+    // B settles: the server's page takes over.
+    h.advance_ms(500);
+    assert_eq!(take(&b), Some(Ok(todo(3, "walk"))));
+    assert_eq!(titles(&handle), ["milk", "walk"]);
+    assert_eq!(handle.status().get(), QueryStatus::Success);
+}
+
+#[test]
+fn when_both_mutations_fail_the_entry_goes_back_to_before_both() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    let before = (handle.data().get(), handle.updated_at().get());
+    h.advance_ms(5_000);
+    answer_posts(&h, [refused(), refused()]);
+    let a = slow(&h, "toggle", 100, retitle_first("milk (done)"));
+    let b = slow(&h, "walk", 600, append(3, "walk"));
+    h.t.run_pending();
+
+    h.advance_ms(100);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!(titles(&handle), ["milk (done)", "walk"]);
+    h.advance_ms(500);
+    assert!(take(&b).unwrap().is_err());
+    assert_eq!(
+        (handle.data().get(), handle.updated_at().get()),
+        before,
+        "A's failed change did not outlive both rollbacks"
+    );
+    assert_eq!(handle.status().get(), QueryStatus::Success);
+}
+
+#[test]
+fn rollbacks_in_reverse_order_undo_one_layer_at_a_time() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    let before = (handle.data().get(), handle.updated_at().get());
+    h.advance_ms(5_000);
+    // B (started last) fails first, at 100 ms; A fails at 600 ms.
+    answer_posts(&h, [refused(), refused()]);
+    let a = slow(&h, "toggle", 600, retitle_first("milk (done)"));
+    let b = slow(&h, "walk", 100, append(3, "walk"));
+    h.t.run_pending();
+
+    h.advance_ms(100);
+    assert!(take(&b).unwrap().is_err());
+    assert_eq!(
+        titles(&handle),
+        ["milk (done)"],
+        "B's rollback leaves what A wrote"
+    );
+    h.advance_ms(500);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!((handle.data().get(), handle.updated_at().get()), before);
+}
+
+#[test]
+fn a_failed_mutation_leaves_an_entry_another_mutation_wrote_and_restores_its_own() {
+    let h = Harness::new();
+    let page0 = observed_page(&h);
+    let before = (page0.data().get(), page0.updated_at().get());
+    h.advance_ms(5_000);
+    answer_posts(&h, [refused(), accepted(&todo(9, "x"))]);
+    // A writes page 0; B, started after it, writes page 7 (and creates it).
+    let a = slow(&h, "toggle", 100, retitle_first("milk (done)"));
+    let b = slow(
+        &h,
+        "x",
+        600,
+        Box::new(|cache| cache.set::<TodosQuery>((7,), page(vec![todo(9, "phantom")]))),
+    );
+    h.t.run_pending();
+    assert_eq!(titles(&page0), ["milk (done)"]);
+
+    h.advance_ms(100);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!((page0.data().get(), page0.updated_at().get()), before);
+    assert_eq!(
+        h.query().get::<TodosQuery>((7,)),
+        Some(page(vec![todo(9, "phantom")])),
+        "B's entry was not A's to undo"
+    );
+    h.advance_ms(500);
+    assert!(take(&b).unwrap().is_ok());
+    assert_eq!(h.query().cached_entries(), 2);
+}
+
+#[test]
+fn a_failure_after_the_later_mutation_settled_does_not_undo_the_server_data_it_brought() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    server_page_is(&h, vec![todo(1, "milk"), todo(3, "walk")]);
+    // B (an add) is accepted after 100 ms and refetches the page; A (a toggle) fails at 600 ms.
+    answer_posts(&h, [accepted(&todo(3, "walk")), refused()]);
+    let a = slow(&h, "toggle", 600, retitle_first("milk (done)"));
+    let b = slow(&h, "walk", 100, append(3, "walk"));
+    h.t.run_pending();
+
+    h.advance_ms(100);
+    assert_eq!(take(&b), Some(Ok(todo(3, "walk"))));
+    assert_eq!(
+        titles(&handle),
+        ["milk", "walk"],
+        "the refetch after B brought the server's page"
+    );
+    h.advance_ms(500);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!(
+        titles(&handle),
+        ["milk", "walk"],
+        "A's snapshot (the page before both) is older than the server's page and stays unused"
+    );
+    assert_eq!(handle.status().get(), QueryStatus::Success);
+}
+
+#[test]
+fn a_failure_does_not_overwrite_a_fetch_that_landed_after_its_write() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    // The server has a new item by the time somebody refetches the page.
+    server_page_is(&h, vec![todo(1, "milk"), todo(4, "bread")]);
+    answer_posts(&h, [refused(), refused()]);
+    let a = slow(&h, "toggle", 100, retitle_first("milk (done)"));
+    h.t.run_pending();
+    handle.refetch();
+    h.t.run_pending();
+    assert_eq!(titles(&handle), ["milk", "bread"]);
+    // B starts on top of that page.
+    let b = slow(&h, "walk", 600, append(3, "walk"));
+    h.t.run_pending();
+    assert_eq!(titles(&handle), ["milk", "bread", "walk"]);
+
+    h.advance_ms(100);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!(titles(&handle), ["milk", "bread", "walk"]);
+    h.advance_ms(500);
+    assert!(take(&b).unwrap().is_err());
+    assert_eq!(
+        titles(&handle),
+        ["milk", "bread"],
+        "B goes back to the fetched page, not to the page from before A"
+    );
+}
+
+#[test]
+fn a_failure_does_not_overwrite_a_value_set_after_its_write() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    answer_posts(&h, [refused()]);
+    let a = slow(&h, "toggle", 100, retitle_first("milk (done)"));
+    h.t.run_pending();
+    h.query()
+        .set::<TodosQuery>((0,), page(vec![todo(1, "milk"), todo(5, "set")]));
+    h.advance_ms(100);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!(titles(&handle), ["milk", "set"]);
+}
+
+#[test]
+fn an_entry_a_failed_mutation_created_stays_while_a_later_one_writes_it_and_goes_with_it() {
+    let h = Harness::new();
+    let _page0 = observed_page(&h);
+    answer_posts(&h, [refused(), refused()]);
+    let fresh: Patch = Box::new(|cache| cache.set::<TodosQuery>((7,), page(vec![todo(7, "a")])));
+    let on_top: Patch = Box::new(|cache| {
+        assert!(cache.update::<TodosQuery>((7,), |page| page.items.push(todo(8, "b"))));
+    });
+    let a = slow(&h, "a", 100, fresh);
+    let b = slow(&h, "b", 600, on_top);
+    h.t.run_pending();
+    assert_eq!(h.query().cached_entries(), 2);
+
+    h.advance_ms(100);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!(
+        h.query().get::<TodosQuery>((7,)).map(|p| p.items.len()),
+        Some(2),
+        "B is still using the entry"
+    );
+    h.advance_ms(500);
+    assert!(take(&b).unwrap().is_err());
+    assert_eq!(h.query().get::<TodosQuery>((7,)), None);
+    assert_eq!(
+        h.query().cached_entries(),
+        1,
+        "neither left anything behind"
+    );
+}
+
+#[test]
+fn a_failure_after_a_later_mutation_succeeded_does_not_undo_that_mutations_writes() {
+    let h = Harness::new();
+    let handle = observed_page(&h);
+    let mine = Uuid([1; 16]);
+    h.fakes.http.respond(
+        Matcher::post(format!("{API}/todos/{mine}")),
+        HttpResponse::new(204, Vec::new()),
+    );
+    answer_posts(&h, [refused()]);
+    // A fails at 600 ms. B is accepted at once and only invalidates `todo:<id>`, not the page, so
+    // nothing refetches the page: what B wrote optimistically is all the page shows.
+    let a = slow(&h, "toggle", 600, retitle_first("milk (done)"));
+    let (b, _) = spawn(
+        &h,
+        h.ctx()
+            .mutate::<RenameTodoMutation>((mine, "milk".to_owned()))
+            .optimistic(append(3, "walk")),
+    );
+    h.t.run_pending();
+    assert_eq!(take(&b), Some(Ok(())));
+    assert_eq!(titles(&handle), ["milk (done)", "walk"]);
+
+    h.advance_ms(600);
+    assert!(take(&a).unwrap().is_err());
+    assert_eq!(
+        titles(&handle),
+        ["milk (done)", "walk"],
+        "B's settled write is not A's to undo"
+    );
+}
+
+#[test]
+fn the_playground_flow_offline_a_queued_add_keeps_its_placeholder_when_an_earlier_toggle_fails() {
+    // Offline is turned on while a toggle is in flight; an add is made and parked in the queue
+    // (idempotent, network error). The toggle then fails: the add's item must stay on screen
+    // until the replay settles it.
+    let h = Harness::new();
+    h.settle();
+    let handle = observed_page(&h);
+    h.fakes.connectivity.go_offline();
+    assert!(!h.query().is_online());
+    // The add's request is the first to go out (it fails at once: no network); the toggle's goes
+    // out after 100 ms and is refused.
+    answer_posts(&h, [Err(network_down()), refused()]);
+    let a = slow(&h, "toggle", 100, retitle_first("milk (done)"));
+    let (b, _) = spawn(
+        &h,
+        h.ctx()
+            .mutate::<AddTodoMutation>(("walk".to_owned(),))
+            .optimistic(append(3, "walk")),
+    );
+    h.t.run_pending();
+    assert_eq!(h.query().pending_mutations(), 1, "the add is parked");
+    assert!(take(&b).is_none());
+
+    h.advance_ms(100);
+    assert!(take(&a).unwrap().is_err(), "the toggle failed");
+    assert_eq!(
+        titles(&handle),
+        ["milk (done)", "walk"],
+        "the parked add is still on screen"
+    );
+
+    // Back online: the add is replayed and accepted, and the page is refetched.
+    h.fakes.http.reset();
+    h.fakes.http.respond(post_todos(), ok(&todo(3, "walk")));
+    h.serve_page(0, vec![todo(1, "milk"), todo(3, "walk")]);
+    h.fakes.connectivity.go_online(keel_ports::NetKind::Wifi);
+    h.advance_ms(0);
+    assert_eq!(take(&b), Some(Ok(todo(3, "walk"))));
+    assert_eq!(h.query().pending_mutations(), 0);
+    assert_eq!(titles(&handle), ["milk", "walk"]);
+}

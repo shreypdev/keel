@@ -8,6 +8,7 @@ import { waitFor } from "../src/wait.js";
 // Defects found in the merged runtime while writing the scenarios. Each is a minimal repro that
 // is written as the behaviour it should have and marked `fails`: it passes while the defect is
 // there, and starts failing (telling whoever fixes it to delete the mark) once it is fixed.
+// A repro whose defect has been fixed loses the mark and stays here as a regression test.
 // They are not scenarios: the reporter ignores them.
 
 const fullValue = (n: number): Uint8Array =>
@@ -35,14 +36,15 @@ test.fails("FINDING a change-set enqueued by a subscriber during the flush is ap
   expect(seen).toEqual([1, 2]);
 });
 
-// FINDING keel-query/optimistic rollback: a failed mutation restores the snapshot of the cache
-// entry it took before it ran (SPEC 9: "the pre-mutation entries are restored"). A mutation that
-// started after it, on the same list, has put its own optimistic item into that entry by then, and
-// the restore takes the item away again while its request is still in flight (offline, while it is
-// queued, the item is gone until the replay succeeds). The playground web app hits it by turning
-// Offline on while a toggle's PATCH is still in flight and then adding an item. Expected: the later
-// mutation's placeholder survives the earlier one's rollback.
-test.fails("FINDING the rollback of one mutation keeps the placeholder of a later one", async () => {
+// FIXED keel-query/optimistic rollback: a failed mutation used to restore the snapshot of the cache
+// entry it took before it ran. A mutation that started after it, on the same list, had put its own
+// optimistic item into that entry by then, and the restore took the item away again while its request
+// was still in flight (offline, while it was queued, the item was gone until the replay succeeded).
+// The playground web app hit it by turning Offline on while a toggle's PATCH was still in flight and
+// then adding an item. The rollback is now the inverse of the failed mutation's own writes: an entry
+// that something else has written since (by write stamp) is left as it is, so the later mutation's
+// placeholder survives the earlier one's rollback (SPEC 9).
+test("the rollback of one mutation keeps the placeholder of a later one", async () => {
   const { core, server } = await boot();
   await configureRemote({ baseUrl: BASE_URL }, core);
   const url = `${BASE_URL}/lists/find/todos`;
