@@ -71,7 +71,7 @@ written in the code (`src/impl_/check.rs`): a user type called `Bytes`, an alias
 (`use m::Item as Todo`) is an error in the user's crate (E0060, E0061), not a schema that disagrees
 with its own wire layout. The proxy of a port method returning `Result<T, E>` reports an unavailable
 port as `E::from(PortError)` (E0033 if `E` lacks the impl) instead of panicking; a method without an
-error channel panics with a message that says how to bind the port (E0062). See ADR-023.
+error channel panics with a message that says how to bind the port (E0062). See ADR-025.
 
 Generated code names its dependencies as `::keel::{wire, meta, runtime, signals, query}`;
 `#[keel(crate = "path")]` on the item (or `crate = "path"` in the macro arguments) replaces

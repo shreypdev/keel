@@ -1,4 +1,4 @@
-# ADR-023: an unavailable port is a typed outcome, and the schema names the type the wire carries
+# ADR-025: an unavailable port is a typed outcome, and the schema names the type the wire carries
 
 Status: accepted (2026-09-30). Touches SPEC 2.1, 4.2, 5.7, 8, 12 and 16.3 (generated code shapes).
 Origin: `.10x/reviews/2026-09-30-keel-macros-review.md`, findings H2 (proxies panic on a port outcome
