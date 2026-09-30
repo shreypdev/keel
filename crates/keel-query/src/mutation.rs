@@ -15,17 +15,41 @@
 //!
 //! 1. The `optimistic` closure runs inside one transaction with a [`CacheView`]. Whatever it
 //!    changes is visible to observers immediately, in one change-set per store, and is
-//!    remembered so it can be undone.
+//!    remembered (per entry: what it looked like before, and the write stamp the closure left)
+//!    so it can be undone.
 //! 2. The mutation runs, up to `1 + RETRY` times with the standard backoff between attempts.
 //! 3. On success the optimistic writes stay, and the mutation's own key (its `key = ".."`, rendered
 //!    with the input) together with the `invalidates` targets are marked stale; the observed
 //!    ones refetch.
-//! 4. On failure every entry the closure touched is restored to exactly what it was, in one
-//!    transaction, and the error is returned. The exception is the offline queue (see the crate
-//!    documentation): an idempotent mutation that failed for lack of a network while the client is
-//!    offline is queued and keeps waiting, its optimistic writes staying visible; the awaited
-//!    result is that of the replay.
+//! 4. On failure the entries the closure wrote are restored, in one transaction, to exactly what
+//!    they were before it wrote them, and the error is returned. Only the closure's own writes are
+//!    undone: an entry something else has written since (a later optimistic mutation, a fetch
+//!    result, a `set`) is left as it is (see [`MutationBuilder::optimistic`]). The exception is
+//!    the offline queue (see the crate documentation): an idempotent mutation that failed for
+//!    lack of a network while the client is offline is queued and keeps waiting, its optimistic
+//!    writes staying visible; the awaited result is that of the replay.
 //! 5. Dropping the future (a cancelled call) rolls the optimistic writes back too.
+//!
+//! # Concurrent optimistic mutations
+//!
+//! A rollback is the inverse of the failed mutation's own writes, not a restore of a snapshot of
+//! the whole cache. Each entry has a **write stamp**: a number nobody has had before, taken anew
+//! by every write of the entry (an optimistic write, `QueryClient::set`, a fetch result or
+//! error). The entry also remembers, for each optimistic mutation that has written it and not
+//! yet settled, the state before that mutation's first write and the stamp its last write left.
+//! When a mutation fails:
+//!
+//! * if the entry still has the stamp the mutation left, nobody wrote it since, and it is
+//!   restored (with its old stamp, so an earlier mutation's rollback can still recognise it);
+//! * otherwise it is left as it is. The stamp is compared, never the bytes: a fetch that
+//!   returned the very value the mutation wrote is still newer than the mutation.
+//!
+//! When the later write was made by another optimistic mutation, directly on top of the failed
+//! one's result, the later mutation takes over the failed one's restore point. So with A then B
+//! on one entry: if A fails first, B's value stays (and still contains A's change, which cannot
+//! be taken out of a value the core only knows as bytes); if B then fails too the entry goes back
+//! to before A; if B succeeds, what B invalidates is refetched, and the entry shows the
+//! server's answer.
 
 use core::future::IntoFuture;
 use std::collections::HashSet;
@@ -39,7 +63,7 @@ use crate::erased::{Erased, Failure, mutation_vtable, query_vtable};
 use crate::key::{Invalidate, QueryKey};
 use crate::queue::{is_network_error, scoped};
 use crate::retry::{new_uuid, with_retries};
-use crate::shared::{EntrySnapshot, Shared};
+use crate::shared::Shared;
 
 /// Typed access to the query cache inside an optimistic update (SPEC 9). Every change is applied
 /// inside the mutation's transaction and recorded so a failed mutation can undo it.
@@ -103,27 +127,47 @@ impl CacheView<'_> {
     }
 }
 
-/// What an optimistic update changed, in the order it changed it.
-#[derive(Default)]
+/// Which entries an optimistic update wrote, in the order it first wrote them. What each one
+/// looked like before, and whether it is still as the update left it, is kept by the entry itself
+/// (a [`Layer`](crate::shared::Layer) under the update's `owner` id).
 pub(crate) struct UndoLog {
+    owner: u64,
     seen: HashSet<QueryKey>,
-    log: Vec<(QueryKey, Option<EntrySnapshot>)>,
+    keys: Vec<QueryKey>,
 }
 
 impl UndoLog {
-    /// Remembers what `key` looked like before its first change (`None`: it did not exist).
-    pub(crate) fn record(&mut self, key: &QueryKey, before: Option<EntrySnapshot>) {
+    /// An empty log for the mutation `owner` (an id from `Shared::new_stamp`).
+    pub(crate) fn new(owner: u64) -> UndoLog {
+        UndoLog {
+            owner,
+            seen: HashSet::new(),
+            keys: Vec::new(),
+        }
+    }
+
+    /// The mutation this log belongs to.
+    pub(crate) fn owner(&self) -> u64 {
+        self.owner
+    }
+
+    /// Remembers that `key` was written (only its first write is noted).
+    pub(crate) fn touch(&mut self, key: &QueryKey) {
         if self.seen.insert(key.clone()) {
-            self.log.push((key.clone(), before));
+            self.keys.push(key.clone());
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.log.is_empty()
+        self.keys.is_empty()
     }
 
-    pub(crate) fn into_entries(self) -> Vec<(QueryKey, Option<EntrySnapshot>)> {
-        self.log
+    pub(crate) fn keys(&self) -> &[QueryKey] {
+        &self.keys
+    }
+
+    pub(crate) fn into_keys(self) -> Vec<QueryKey> {
+        self.keys
     }
 }
 
@@ -138,7 +182,11 @@ struct Rollback {
 impl Rollback {
     /// The optimistic writes are final.
     fn disarm(&mut self) {
-        self.undo = None;
+        if let Some(undo) = self.undo.take() {
+            if !undo.is_empty() {
+                self.shared.commit(&undo);
+            }
+        }
     }
 
     /// Restores every touched entry now, in one transaction.
@@ -185,8 +233,31 @@ impl<M: MutationDef> MutationBuilder<M> {
     }
 
     /// Applies `update` to the cache before the mutation runs, so the UI shows the result at
-    /// once. It runs inside one transaction; if the mutation fails everything it changed is
-    /// restored in another. Several calls run in order.
+    /// once. It runs inside one transaction. Several calls run in order.
+    ///
+    /// # If the mutation fails
+    ///
+    /// What the update wrote is undone in one more transaction: each entry it wrote goes back
+    /// to what it was before the update wrote it, and an entry it created is removed. The
+    /// rollback is the inverse of **this update's own writes**, not a restore of the cache as it
+    /// was when the mutation started, so a mutation that ran in between is not undone with it.
+    /// Every entry has a write stamp that changes with each write of it; an entry is restored
+    /// only if it still has the stamp this update left, and is otherwise **left as it is**:
+    ///
+    /// * A later optimistic mutation's write survives, on another entry and on the same entry:
+    ///   a placeholder shown for an add stays until that add settles. On the same entry the
+    ///   value that stays was built on top of this update's result, so it may still show this
+    ///   update's change until the later mutation settles.
+    /// * A fetch result, or `QueryClient::set`, that landed after this update's write is newer
+    ///   than it and stays (even when it holds the very bytes the update wrote).
+    /// * If the later write belongs to another optimistic mutation that wrote directly on top of
+    ///   this one's result, it takes over this update's restore point: if it fails too, the
+    ///   entry goes back to before both. If it succeeds, the entries it invalidates are
+    ///   refetched, which is the last word on what the entry shows, so a mutation should
+    ///   invalidate the entries it writes optimistically.
+    ///
+    /// Rolling back several entries is one transaction, and entries that are left alone are not
+    /// published: a store whose entry stays sees no change-set.
     pub fn optimistic(
         mut self,
         update: impl FnOnce(&mut CacheView<'_>) + Send + 'static,
@@ -237,7 +308,7 @@ async fn run<M: MutationDef>(builder: MutationBuilder<M>) -> Result<M::Output, M
     let mut rollback = Rollback {
         shared: shared.clone(),
         ctx: ctx.clone(),
-        undo: Some(UndoLog::default()),
+        undo: Some(UndoLog::new(shared.new_stamp())),
     };
     if let Some(update) = optimistic {
         let now = shared.now(&ctx);
@@ -322,20 +393,16 @@ mod tests {
     }
 
     #[test]
-    fn the_undo_log_keeps_the_first_state_of_each_key_in_order() {
-        let mut log = UndoLog::default();
+    fn the_undo_log_keeps_each_key_once_in_the_order_of_its_first_write() {
+        let mut log = UndoLog::new(7);
         assert!(log.is_empty());
-        log.record(&key(1), None);
-        log.record(&key(2), None);
-        // A second touch of a key must not overwrite what it looked like before the first.
-        log.record(&key(1), Some(EntrySnapshot::EMPTY));
-        let entries = log.into_entries();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0, key(1));
-        assert!(
-            entries[0].1.is_none(),
-            "the first record of key 1 (it did not exist) wins"
-        );
-        assert_eq!(entries[1].0, key(2));
+        assert_eq!(log.owner(), 7);
+        log.touch(&key(1));
+        log.touch(&key(2));
+        // A second write of a key is not a second entry.
+        log.touch(&key(1));
+        assert!(!log.is_empty());
+        assert_eq!(log.keys(), [key(1), key(2)]);
+        assert_eq!(log.into_keys(), [key(1), key(2)]);
     }
 }

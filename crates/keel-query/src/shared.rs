@@ -140,6 +140,14 @@ pub(crate) struct Entry {
     /// Tasks waiting for the fetch to finish.
     pub(crate) settle: Vec<Waker>,
     pub(crate) seq: u64,
+    /// The write stamp: identifies the last write of the entry's data, error and freshness. Every
+    /// such write (a fetch result, `set`, an optimistic write) takes a new, never-used stamp from
+    /// the client, so an entry that shows the same stamp twice has not been written in between.
+    /// A rollback puts the stamp back together with the state it restores. `0` until the entry is
+    /// first written.
+    pub(crate) stamp: u64,
+    /// The optimistic mutations that wrote this entry and have not settled yet, oldest first.
+    pub(crate) layers: Vec<Layer>,
 }
 
 impl Entry {
@@ -162,6 +170,8 @@ impl Entry {
             sinks: Vec::new(),
             settle: Vec::new(),
             seq: 0,
+            stamp: 0,
+            layers: Vec::new(),
         }
     }
 
@@ -247,7 +257,7 @@ impl Entry {
 /// Who shows an entry, and what to show them.
 pub(crate) type Publication = (Vec<Arc<dyn Sink>>, View);
 
-/// The pre-mutation state of an entry, kept by an optimistic write so it can be restored.
+/// The state of an entry before an optimistic write, kept so the write can be undone.
 #[derive(Clone)]
 pub(crate) struct EntrySnapshot {
     data: Option<Erased>,
@@ -255,6 +265,8 @@ pub(crate) struct EntrySnapshot {
     updated_at: Option<i64>,
     invalidated: bool,
     failed: bool,
+    /// The write stamp the entry had.
+    stamp: u64,
 }
 
 /// Whether two optional values have the same encoding.
@@ -274,6 +286,7 @@ impl EntrySnapshot {
         updated_at: None,
         invalidated: false,
         failed: false,
+        stamp: 0,
     };
 
     pub(crate) fn of(entry: &Entry) -> EntrySnapshot {
@@ -283,7 +296,99 @@ impl EntrySnapshot {
             updated_at: entry.updated_at,
             invalidated: entry.invalidated,
             failed: entry.failed,
+            stamp: entry.stamp,
         }
+    }
+}
+
+/// What one optimistic mutation did to one entry, and what undoes it.
+///
+/// A mutation's layer exists from its first write of the entry until it settles (succeeds, or
+/// rolls back). Layers are what make a rollback the inverse of the mutation's *own* changes: the
+/// `stamp` says whether the entry is still exactly as the mutation left it, and `before` is where
+/// to go back to if it is.
+pub(crate) struct Layer {
+    /// The mutation (`UndoLog::owner`).
+    owner: u64,
+    /// The entry as it was before the owner's first write.
+    before: EntrySnapshot,
+    /// The write stamp of the owner's latest write.
+    stamp: u64,
+}
+
+/// What a rollback did to one entry.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Unwound {
+    /// The mutation has no layer here (the entry was collected and made again, say).
+    NoLayer,
+    /// The entry was exactly as the mutation left it and is now as it was before.
+    Restored,
+    /// Something wrote the entry after the mutation, so it is left as it is.
+    Kept,
+}
+
+impl Entry {
+    /// Records that mutation `owner` wrote this entry, which was `before` then, and that the
+    /// write left it with write stamp `stamp`.
+    pub(crate) fn record_optimistic_write(
+        &mut self,
+        owner: u64,
+        before: EntrySnapshot,
+        stamp: u64,
+    ) {
+        self.stamp = stamp;
+        match self.layers.iter_mut().find(|l| l.owner == owner) {
+            // A second write by the same mutation: the restore point stays the first one.
+            Some(layer) => layer.stamp = stamp,
+            None => self.layers.push(Layer {
+                owner,
+                before,
+                stamp,
+            }),
+        }
+    }
+
+    /// The mutation `owner` succeeded: its writes are final and there is nothing to undo.
+    pub(crate) fn commit(&mut self, owner: u64) {
+        self.layers.retain(|l| l.owner != owner);
+    }
+
+    /// Undoes mutation `owner`'s writes of this entry, if nothing has written it since.
+    ///
+    /// The entry is compared by write stamp, not by content: a later optimistic write, a fetch
+    /// result or a `set` each leave a different stamp even when they wrote the same bytes, and
+    /// each is newer than the owner's write, so none of them is overwritten. An entry that is
+    /// left as it is may still show the owner's change inside the later write's value; when the
+    /// later write is another optimistic mutation's and was made directly on top of the owner's,
+    /// that mutation inherits the owner's restore point, so if it fails too the entry goes back
+    /// to before both.
+    pub(crate) fn unwind(&mut self, owner: u64) -> Unwound {
+        let Some(at) = self.layers.iter().position(|l| l.owner == owner) else {
+            return Unwound::NoLayer;
+        };
+        let layer = self.layers.remove(at);
+        if self.stamp != layer.stamp {
+            if let Some(next) = self.layers.get_mut(at) {
+                if next.before.stamp == layer.stamp {
+                    next.before = layer.before;
+                }
+            }
+            return Unwound::Kept;
+        }
+        let before = layer.before;
+        if !same_bytes(&self.data, &before.data) {
+            self.data_ver += 1;
+        }
+        if !same_bytes(&self.error, &before.error) {
+            self.error_ver += 1;
+        }
+        self.data = before.data;
+        self.error = before.error;
+        self.updated_at = before.updated_at;
+        self.invalidated = before.invalidated;
+        self.failed = before.failed;
+        self.stamp = before.stamp;
+        Unwound::Restored
     }
 }
 
@@ -359,6 +464,8 @@ pub(crate) struct Shared {
     pub(crate) gc_ms: AtomicU64,
     next_gen: AtomicU64,
     next_sink: AtomicU64,
+    /// Source of write stamps and of optimistic-mutation ids (see [`Entry::stamp`]).
+    next_stamp: AtomicU64,
     /// The last time read from the `Clock` port, used if the port fails.
     last_now: AtomicI64,
 }
@@ -372,6 +479,7 @@ impl Shared {
             gc_ms: AtomicU64::new(DEFAULT_GC_MS),
             next_gen: AtomicU64::new(0),
             next_sink: AtomicU64::new(0),
+            next_stamp: AtomicU64::new(0),
             last_now: AtomicI64::new(0),
         }
     }
@@ -384,6 +492,12 @@ impl Shared {
 
     pub(crate) fn new_sink_id(&self) -> u64 {
         self.next_sink.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// A number nobody has been given before (never `0`): a write stamp, or the id of an
+    /// optimistic mutation.
+    pub(crate) fn new_stamp(&self) -> u64 {
+        self.next_stamp.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     pub(crate) fn is_online(&self) -> bool {
@@ -525,6 +639,9 @@ impl Shared {
                 return;
             }
             entry.inflight = None;
+            // Whatever the answer is, it is newer than any optimistic write before it, so a
+            // rollback of one must not put its older snapshot on top.
+            entry.stamp = self.new_stamp();
             match outcome {
                 Ok(value) => {
                     let unchanged = entry
@@ -574,6 +691,7 @@ impl Shared {
             }
             entry.inflight = None;
             entry.failed = true;
+            entry.stamp = self.new_stamp();
             fx.publish(entry);
         }
         Shared::log(
@@ -788,7 +906,8 @@ impl Shared {
 
     /// Writes `value` as the data of the entry (created if missing), as if a fetch had
     /// returned it. An in-flight fetch is cancelled: its answer would overwrite the write with
-    /// older data. With an `undo` log the entry's previous state is recorded first.
+    /// older data. With an `undo` log the write is an optimistic one: the entry's previous state
+    /// is recorded first (in a [`Layer`] of the entry), and the log remembers the key.
     pub(crate) fn write(
         self: &Arc<Self>,
         ctx: &Ctx,
@@ -820,16 +939,13 @@ impl Shared {
                     entry.seed(&persisted);
                 }
             }
-            if let Some(undo) = undo {
-                undo.record(
-                    &key,
-                    if fresh {
-                        None
-                    } else {
-                        Some(EntrySnapshot::of(entry))
-                    },
-                );
-            }
+            let before = undo.is_some().then(|| {
+                if fresh {
+                    EntrySnapshot::EMPTY
+                } else {
+                    EntrySnapshot::of(entry)
+                }
+            });
             if let Some(inflight) = entry.inflight.take() {
                 fx.cancel(inflight.task);
             }
@@ -846,6 +962,14 @@ impl Shared {
             }
             entry.failed = false;
             entry.updated_at = Some(now);
+            let stamp = self.new_stamp();
+            match (undo, before) {
+                (Some(undo), Some(before)) => {
+                    undo.touch(&key);
+                    entry.record_optimistic_write(undo.owner(), before, stamp);
+                }
+                _ => entry.stamp = stamp,
+            }
             if persist_now && vt.persist {
                 self.schedule_persist(ctx, &key, entry);
             }
@@ -857,41 +981,49 @@ impl Shared {
         fx.run(ctx);
     }
 
-    /// Puts entries back as an optimistic mutation found them, all in one transaction. Entries
-    /// the mutation created are removed (or emptied, if something observes them); an observed
-    /// entry that ends up stale, or whose fetch the write had cancelled, fetches again.
+    /// Undoes an optimistic mutation's writes, all in one transaction: every entry that is still
+    /// exactly as the mutation left it (by write stamp, see [`Entry::unwind`]) goes back to what it
+    /// was; an entry something else has written since is left alone. Entries the mutation created
+    /// are removed (or emptied, if something observes them); an observed entry that ends up stale,
+    /// or whose fetch the write had cancelled, fetches again.
     pub(crate) fn rollback(self: &Arc<Self>, ctx: &Ctx, undo: crate::mutation::UndoLog) {
         let now = self.now(ctx);
         let mut fx = Fx::default();
         {
             let mut state = self.state.lock();
-            for (key, before) in undo.into_entries().into_iter().rev() {
+            let owner = undo.owner();
+            for key in undo.into_keys().into_iter().rev() {
                 let Some(entry) = state.entries.get_mut(&key) else {
                     continue;
                 };
-                let snapshot = before.unwrap_or(EntrySnapshot::EMPTY);
-                if !same_bytes(&entry.data, &snapshot.data) {
-                    entry.data_ver += 1;
+                if entry.unwind(owner) != Unwound::Restored {
+                    continue;
                 }
-                if !same_bytes(&entry.error, &snapshot.error) {
-                    entry.error_ver += 1;
-                }
-                entry.data = snapshot.data;
-                entry.error = snapshot.error;
-                entry.updated_at = snapshot.updated_at;
-                entry.invalidated = snapshot.invalidated;
-                entry.failed = snapshot.failed;
                 if entry.observers > 0 && entry.needs_fetch(now) {
                     self.start_fetch(ctx, &key, entry, &mut fx);
                 }
                 fx.publish(entry);
             }
-            // Entries the mutation created and nobody observes are dropped with their timers.
+            // Entries the mutation created and nobody observes are dropped with their timers
+            // (unless another optimistic mutation still has a write on them).
             state.entries.retain(|_, entry| {
-                entry.observers > 0 || entry.data.is_some() || entry.error.is_some()
+                entry.observers > 0
+                    || entry.data.is_some()
+                    || entry.error.is_some()
+                    || !entry.layers.is_empty()
             });
         }
         fx.run(ctx);
+    }
+
+    /// An optimistic mutation succeeded: its writes stay, and it no longer has anything to undo.
+    pub(crate) fn commit(&self, undo: &crate::mutation::UndoLog) {
+        let mut state = self.state.lock();
+        for key in undo.keys() {
+            if let Some(entry) = state.entries.get_mut(key) {
+                entry.commit(undo.owner());
+            }
+        }
     }
 
     /// Waits until the fetch of `key` has finished (returns at once if none is running).
@@ -1287,6 +1419,132 @@ mod tests {
         assert_eq!(snapshot.updated_at, Some(42));
         assert!(snapshot.invalidated && !snapshot.failed);
         assert!(EntrySnapshot::EMPTY.data.is_none() && EntrySnapshot::EMPTY.updated_at.is_none());
+    }
+
+    // ----- layers and stamps: a rollback is the inverse of the mutation's own writes -----------
+
+    /// What `Shared::write` does to an entry for an optimistic write by `owner`.
+    fn optimistic_write(e: &mut Entry, owner: u64, value: u32, stamp: u64) {
+        let before = EntrySnapshot::of(e);
+        e.data = Some(Erased::new(value));
+        e.data_ver += 1;
+        e.record_optimistic_write(owner, before, stamp);
+    }
+
+    /// What a fetch result (or a plain `set`) does: new data, a new stamp, no layer.
+    fn foreign_write(e: &mut Entry, value: u32, stamp: u64) {
+        e.data = Some(Erased::new(value));
+        e.data_ver += 1;
+        e.stamp = stamp;
+    }
+
+    fn value(e: &Entry) -> Option<u32> {
+        e.data.as_ref().and_then(|d| d.typed::<u32>())
+    }
+
+    #[test]
+    fn unwinding_an_entry_as_the_owner_left_it_restores_it_with_its_stamp() {
+        let mut e = with_data(entry(), 42);
+        e.stamp = 3;
+        let ver = e.data_ver;
+        optimistic_write(&mut e, 10, 6, 11);
+        assert_eq!((value(&e), e.stamp), (Some(6), 11));
+
+        assert_eq!(e.unwind(10), Unwound::Restored);
+        assert_eq!((value(&e), e.stamp, e.updated_at), (Some(5), 3, Some(42)));
+        assert!(e.data_ver > ver, "observers are told the data changed");
+        assert!(e.layers.is_empty());
+        assert_eq!(
+            e.unwind(10),
+            Unwound::NoLayer,
+            "a second unwind finds nothing"
+        );
+    }
+
+    #[test]
+    fn an_entry_written_since_is_left_alone_even_if_it_was_written_with_the_same_bytes() {
+        let mut e = with_data(entry(), 42);
+        optimistic_write(&mut e, 10, 6, 11);
+        // A fetch returns exactly what the optimistic write said. It is still newer.
+        foreign_write(&mut e, 6, 12);
+        let ver = e.data_ver;
+        assert_eq!(e.unwind(10), Unwound::Kept);
+        assert_eq!((value(&e), e.stamp, e.data_ver), (Some(6), 12, ver));
+        assert!(e.layers.is_empty(), "the layer is gone either way");
+    }
+
+    #[test]
+    fn a_later_optimistic_write_survives_and_inherits_the_restore_point() {
+        let mut e = with_data(entry(), 42);
+        e.stamp = 3;
+        optimistic_write(&mut e, 10, 6, 11); // A
+        optimistic_write(&mut e, 20, 7, 21); // B, made on top of A's result
+
+        assert_eq!(e.unwind(10), Unwound::Kept, "A fails: B's value stays");
+        assert_eq!(value(&e), Some(7));
+        assert_eq!(e.layers.len(), 1);
+
+        // B fails too: the entry goes back to before A, not to A's failed value.
+        assert_eq!(e.unwind(20), Unwound::Restored);
+        assert_eq!((value(&e), e.stamp), (Some(5), 3));
+    }
+
+    #[test]
+    fn the_later_write_inherits_nothing_if_something_else_wrote_in_between() {
+        let mut e = with_data(entry(), 42);
+        optimistic_write(&mut e, 10, 6, 11); // A
+        foreign_write(&mut e, 9, 12); // a fetch result
+        optimistic_write(&mut e, 20, 10, 21); // B, on top of the fetch result
+
+        assert_eq!(e.unwind(10), Unwound::Kept);
+        // B's restore point is still the fetch result, not what the entry was before A.
+        assert_eq!(e.unwind(20), Unwound::Restored);
+        assert_eq!(value(&e), Some(9));
+    }
+
+    #[test]
+    fn rollbacks_in_reverse_order_restore_step_by_step() {
+        let mut e = with_data(entry(), 42);
+        optimistic_write(&mut e, 10, 6, 11);
+        optimistic_write(&mut e, 20, 7, 21);
+        assert_eq!(e.unwind(20), Unwound::Restored);
+        assert_eq!(value(&e), Some(6), "B's rollback puts A's value back");
+        assert_eq!(e.stamp, 11, "and A's stamp with it");
+        assert_eq!(e.unwind(10), Unwound::Restored, "so A can still restore");
+        assert_eq!(value(&e), Some(5));
+    }
+
+    #[test]
+    fn a_committed_mutation_has_nothing_left_to_undo() {
+        let mut e = with_data(entry(), 42);
+        optimistic_write(&mut e, 10, 6, 11); // A
+        optimistic_write(&mut e, 20, 7, 21); // B
+        e.commit(20);
+        assert_eq!(e.layers.len(), 1);
+        assert_eq!(e.unwind(20), Unwound::NoLayer);
+        // A fails after B succeeded: B's value stays.
+        assert_eq!(e.unwind(10), Unwound::Kept);
+        assert_eq!(value(&e), Some(7));
+    }
+
+    #[test]
+    fn a_second_write_by_the_same_mutation_keeps_its_first_restore_point() {
+        let mut e = with_data(entry(), 42);
+        optimistic_write(&mut e, 10, 6, 11);
+        optimistic_write(&mut e, 10, 7, 12);
+        assert_eq!(e.layers.len(), 1);
+        assert_eq!(e.unwind(10), Unwound::Restored);
+        assert_eq!(value(&e), Some(5), "the value before the first write");
+    }
+
+    #[test]
+    fn an_entry_the_mutation_created_goes_back_to_empty() {
+        let mut e = entry();
+        let before = EntrySnapshot::EMPTY;
+        e.data = Some(Erased::new(1_u32));
+        e.record_optimistic_write(10, before, 4);
+        assert_eq!(e.unwind(10), Unwound::Restored);
+        assert!(e.data.is_none() && e.updated_at.is_none() && e.stamp == 0);
     }
 
     #[test]
