@@ -1,0 +1,944 @@
+{
+  "keel_version": "1.0.0",
+  "crate_name": "playground-core",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "uuid"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false,
+          "docs": "Shown in the list."
+        },
+        {
+          "name": "done",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": true
+        },
+        {
+          "name": "tags",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "due",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "timestamp"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "priority",
+          "ty": {
+            "kind": "named",
+            "of": "Priority"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A todo item."
+    },
+    {
+      "name": "Page",
+      "type_id": 3896349078,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "total",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false
+        }
+      ],
+      "docs": "One page of todos."
+    },
+    {
+      "name": "HttpRequest",
+      "type_id": 3149688402,
+      "fields": [
+        {
+          "name": "method",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "url",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "headers",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "string"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "bytes"
+            }
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "HttpResponse",
+      "type_id": 3427097086,
+      "fields": [
+        {
+          "name": "status",
+          "ty": {
+            "kind": "u16"
+          },
+          "default": false
+        },
+        {
+          "name": "headers",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "string"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "bytes"
+          },
+          "default": false
+        },
+        {
+          "name": "elapsed",
+          "ty": {
+            "kind": "duration"
+          },
+          "default": false
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "Priority",
+      "type_id": 3868041001,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Low",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Normal",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "High",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    },
+    {
+      "name": "Filter",
+      "type_id": 4104765591,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "All",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Active",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Done",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ],
+      "docs": "Which todos the list shows."
+    },
+    {
+      "name": "Shape",
+      "type_id": 1132518854,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Circle",
+          "index": 0,
+          "fields": [
+            {
+              "name": "radius",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Rect",
+          "index": 1,
+          "fields": [
+            {
+              "name": "w",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            },
+            {
+              "name": "h",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Empty",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    },
+    {
+      "name": "NetKind",
+      "type_id": 57766314,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Wifi",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Cellular",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "None",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    },
+    {
+      "name": "HttpError",
+      "type_id": 3999515121,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Timeout",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "timed out"
+        },
+        {
+          "name": "Status",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "u16"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "status {0}"
+        }
+      ]
+    },
+    {
+      "name": "TodoError",
+      "type_id": 787313993,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "EmptyTitle",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "title cannot be empty"
+        },
+        {
+          "name": "Http",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "HttpError"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "NotFound",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "todo {0} not found"
+        },
+        {
+          "name": "Storage",
+          "index": 3,
+          "fields": [
+            {
+              "name": "reason",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": "storage failure ({reason})"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "name": "Calculator",
+      "type_id": 1461820269,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 853962117,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Calculator"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "add",
+          "method_id": 2353348832,
+          "params": [
+            {
+              "name": "a",
+              "ty": {
+                "kind": "i32"
+              }
+            },
+            {
+              "name": "b",
+              "ty": {
+                "kind": "i32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "i32"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "fetch",
+          "method_id": 1347344663,
+          "params": [
+            {
+              "name": "url",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "named",
+                "of": "HttpError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "ticks",
+          "method_id": 260737561,
+          "params": [],
+          "returns": {
+            "kind": "stream",
+            "of": {
+              "kind": "u32"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "watch",
+          "method_id": 1927980436,
+          "params": [
+            {
+              "name": "priority",
+              "ty": {
+                "kind": "named",
+                "of": "Priority"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "stream",
+                "of": {
+                  "kind": "named",
+                  "of": "Todo"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "TodoError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "store": null,
+      "docs": "Adds numbers."
+    },
+    {
+      "name": "TodoStore",
+      "type_id": 4270792358,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 2731993302,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "TodoStore"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "open",
+          "method_id": 3164653632,
+          "params": [
+            {
+              "name": "path",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "TodoStore"
+              },
+              {
+                "kind": "named",
+                "of": "TodoError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "set_filter",
+          "method_id": 593687287,
+          "params": [
+            {
+              "name": "f",
+              "ty": {
+                "kind": "named",
+                "of": "Filter"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "add",
+          "method_id": 3890886667,
+          "params": [
+            {
+              "name": "title",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Todo"
+              },
+              {
+                "kind": "named",
+                "of": "TodoError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "toggle",
+          "method_id": 4153928452,
+          "params": [
+            {
+              "name": "id",
+              "ty": {
+                "kind": "uuid"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "todos",
+            "signal_id": 0,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            },
+            "computed": false,
+            "key": "id"
+          },
+          {
+            "name": "filter",
+            "signal_id": 1,
+            "ty": {
+              "kind": "named",
+              "of": "Filter"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "visible",
+            "signal_id": 2,
+            "ty": {
+              "kind": "vec",
+              "of": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            },
+            "computed": true,
+            "key": "id"
+          },
+          {
+            "name": "remaining",
+            "signal_id": 3,
+            "ty": {
+              "kind": "u32"
+            },
+            "computed": true,
+            "key": null
+          },
+          {
+            "name": "selected",
+            "signal_id": 4,
+            "ty": {
+              "kind": "option",
+              "of": {
+                "kind": "named",
+                "of": "Todo"
+              }
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "The todo list store."
+    }
+  ],
+  "functions": [
+    {
+      "name": "greet",
+      "method_id": 93641134,
+      "params": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "string"
+      },
+      "is_async": false,
+      "takes_ctx": false
+    },
+    {
+      "name": "ping",
+      "method_id": 1625714901,
+      "params": [],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "unit"
+          },
+          {
+            "kind": "named",
+            "of": "TodoError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": false
+    }
+  ],
+  "ports": [
+    {
+      "name": "Clock",
+      "port_id": 3449406606,
+      "kind": "sync",
+      "methods": [
+        {
+          "name": "now_ms",
+          "method_id": 3435744656,
+          "params": [],
+          "returns": {
+            "kind": "i64"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "monotonic_ns",
+          "method_id": 749909183,
+          "params": [],
+          "returns": {
+            "kind": "u64"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ]
+    },
+    {
+      "name": "Http",
+      "port_id": 515815688,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "request",
+          "method_id": 1796529958,
+          "params": [
+            {
+              "name": "req",
+              "ty": {
+                "kind": "named",
+                "of": "HttpRequest"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "HttpResponse"
+              },
+              {
+                "kind": "named",
+                "of": "HttpError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ]
+    },
+    {
+      "name": "Kv",
+      "port_id": 1401491725,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "get",
+          "method_id": 4031822618,
+          "params": [
+            {
+              "name": "key",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "option",
+            "of": {
+              "kind": "bytes"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "set",
+          "method_id": 1648523350,
+          "params": [
+            {
+              "name": "key",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "value",
+              "ty": {
+                "kind": "bytes"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": true,
+          "takes_ctx": false
+        }
+      ]
+    },
+    {
+      "name": "Connectivity",
+      "port_id": 535820031,
+      "kind": "event",
+      "methods": [
+        {
+          "name": "changed",
+          "method_id": 3035799568,
+          "params": [
+            {
+              "name": "online",
+              "ty": {
+                "kind": "bool"
+              }
+            },
+            {
+              "name": "kind",
+              "ty": {
+                "kind": "named",
+                "of": "NetKind"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "name": "todos",
+      "query_id": 1411423356,
+      "kind": "query",
+      "key": "todos:{page}",
+      "params": [
+        {
+          "name": "page",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Page"
+          },
+          {
+            "kind": "named",
+            "of": "TodoError"
+          }
+        ]
+      },
+      "stale_ms": 30000,
+      "persist": true,
+      "idempotent": false
+    },
+    {
+      "name": "add_todo",
+      "query_id": 1253773000,
+      "kind": "mutation",
+      "key": "todos",
+      "params": [
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Todo"
+          },
+          {
+            "kind": "named",
+            "of": "TodoError"
+          }
+        ]
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    }
+  ]
+}
