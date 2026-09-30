@@ -11,8 +11,8 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,572 passed / 0 failed |
-| TS `npm test` (runtimes/ts/@keel/runtime) | 830 passed (20 files) |
+| Rust `cargo test --workspace` | 1,763 passed / 0 failed |
+| TS `npm test` (runtimes/ts/@keel/runtime) | 831 passed (21 files) |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
 
@@ -30,10 +30,28 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- keel-cli (init/build/dev/bindgen/doctor/adopt + packaging) — worktree `wt/keel-cli` (agent).
-- keel-signals review fixes (H1, M1-M3, lows) — worktree `wt/signals-fixes` (agent).
+- keel-runtime review fixes (H1 restore generations, M1-M3, lows; ADR-022) — `wt/runtime-fixes`.
+- keel-macros review fixes (H1 schema-identity checks, H2 typed port errors; ADR-023) — `wt/macros-fixes`.
+- bindgen standard-library filter (ADR-024) — `wt/stdlib-filter`.
 
 ## Landed since takeover
+
+- **keel-cli** merged after review: init/bindgen/build/dev/doctor/adopt; XCFramework,
+  16KB-aligned Android .so, wasm-opt'd wasm; teaching C00NN errors. The generated shells
+  RAN on the iOS 26.5 simulator, an Android emulator and Chrome against the real core.
+  Sizes: wasm 85 KB gz (budget 120), Android 831 KB (budget 1.2 MB). Also fixed a real
+  browser bug in the TS mirror (queueMicrotask receiver → change-sets dropped; TS 831).
+  Deviation accepted: dlopen unsafe in cli's schema.rs (SPEC §13) — CLAUDE.md R2 amended.
+  Open: keel_schema_json is canonical (docs dropped) → --docs uses the runner; Swift
+  Package stand-in core needs KEEL_LINK_CORE=1 under Xcode-from-Dock; no Android remote
+  mode in the Kotlin runtime; dev clients don't auto-reconnect.
+- **keel-signals fix round closed**: all 8 findings fixed + re-reviewed (original reviewer,
+  own repros); residual R2 fixed by the integrator (observe txn across delivery), R1/R3
+  documented. keel-signals is the most battle-tested crate in the repo.
+- **Facade/schema decision**: every core linking keel-ports carries the standard ports in
+  its schema (R1); bindgen will filter std definitions from per-app generated code
+  (ADR-024, in flight) because the runtimes hand-implement exactly those types (R3).
+  Interim: cli's embedded template schema regenerated; everything green.
 
 - **keel-query** (SPEC §9, ADR-018) merged after review: QueryClient (staleness, dedup,
   retry w/ Rng jitter, gc), QueryHandle serving the bindgen-golden wire shape (ids

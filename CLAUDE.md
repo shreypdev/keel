@@ -10,7 +10,7 @@ Read, in this order, before writing code:
 ## The constitution (non-negotiable)
 
 R1  The schema is the only truth. A public type or function exists only if `keel-meta` can describe it. Every language's output is derived from that description.
-R2  `unsafe` lives in `crates/keel-ffi` only. Every block has a `// SAFETY:` comment. Every other crate has `#![forbid(unsafe_code)]`.
+R2  `unsafe` lives in `crates/keel-ffi` only — plus the one schema loader in `keel-cli` that `dlopen`s the built core (SPEC §13). Every block has a `// SAFETY:` comment. Every other crate has `#![forbid(unsafe_code)]`; `keel-cli` holds `deny(unsafe_code)` everywhere outside that loader.
 R3  Generated code must pass native review: a Swift / Kotlin / TypeScript engineer who has never seen Rust would write it that way. Golden files lock the output.
 R4  Every feature lands whole: unit tests, contract scenario coverage, a benchmark if the boundary is touched, docs on every `pub` item.
 R5  Reads never cross the boundary; writes cross once per transaction. No generated getter calls into the core.
