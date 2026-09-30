@@ -14,7 +14,7 @@ use undra_meta::{
     TypeRefMeta, ids,
 };
 use undra_runtime::testing::{TestRuntime, call_payload, call_sync_reference, decode_reply};
-use undra_runtime::{DispatchLayer, DispatchResult, Handle, UndraObject, Runtime, inventory};
+use undra_runtime::{DispatchLayer, DispatchResult, Handle, Runtime, UndraObject, inventory};
 use undra_wire::payload::{CallTarget, ReplyStatus};
 use undra_wire::{Decode, Encode, Reader, Writer};
 

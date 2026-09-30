@@ -544,7 +544,9 @@ mod tests {
     fn unknown_option_is_e0008() {
         let message = first_error(vec![parse_quote!(#[undra(bogus)])], Site::FIELD);
         assert!(message.starts_with("error[undra::E0008]: unknown option `bogus`"));
-        assert!(message.contains("= docs: https://shreypdev.github.io/undra/docs/errors.html#E0008"));
+        assert!(
+            message.contains("= docs: https://shreypdev.github.io/undra/docs/errors.html#E0008")
+        );
     }
 
     #[test]

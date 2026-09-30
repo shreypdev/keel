@@ -11,9 +11,9 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use common::{Project, init_project};
+use tungstenite::{Message, WebSocket};
 use undra_wire::payload::{Call, CallTarget, Hello, Reply};
 use undra_wire::{Decode, Encode, Envelope, Kind, Reader, Writer};
-use tungstenite::{Message, WebSocket};
 
 /// A running `undra dev`.
 struct Dev {

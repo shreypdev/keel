@@ -548,7 +548,10 @@ mod tests {
             "{out}"
         );
         assert!(
-            has(&out, "__undra_same::<Box<Todo>, ::std::boxed::Box<Todo>>();"),
+            has(
+                &out,
+                "__undra_same::<Box<Todo>, ::std::boxed::Box<Todo>>();"
+            ),
             "{out}"
         );
     }

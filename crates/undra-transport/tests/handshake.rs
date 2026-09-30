@@ -8,7 +8,7 @@ use std::time::Duration;
 use common::*;
 use undra::wire::payload::{Hello, ReplyStatus};
 use undra::wire::{Kind, Reader};
-use undra_transport::{ClientInfo, UNDRA_VERSION, ServerConfig, close};
+use undra_transport::{ClientInfo, ServerConfig, UNDRA_VERSION, close};
 
 #[test]
 fn the_server_answers_the_clients_hello_with_its_own_as_sequence_zero() {

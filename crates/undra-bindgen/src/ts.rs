@@ -1546,7 +1546,11 @@ impl<'a> Ctx<'a> {
     fn object(&mut self, w: &mut CodeWriter, o: &ObjectDef) {
         self.ids();
         let is_store = o.store.is_some();
-        let base = if is_store { "UndraStore" } else { "UndraObject" };
+        let base = if is_store {
+            "UndraStore"
+        } else {
+            "UndraObject"
+        };
         self.rt_value(base);
         self.rt_value("UndraCore");
         jsdoc(w, &o.docs, &[]);
@@ -1567,16 +1571,19 @@ impl<'a> Ctx<'a> {
             if !signals.is_empty() {
                 w.blank();
             }
-            w.block("private constructor(core: UndraCore, handle: bigint)", |w| {
-                w.line("super(core, handle);");
-                if !signals.is_empty() {
-                    let list: Vec<String> = signals
-                        .iter()
-                        .map(|g| format!("this.{}", signal_prop(g)))
-                        .collect();
-                    array_assignment(w, "this._signals", &list);
-                }
-            });
+            w.block(
+                "private constructor(core: UndraCore, handle: bigint)",
+                |w| {
+                    w.line("super(core, handle);");
+                    if !signals.is_empty() {
+                        let list: Vec<String> = signals
+                            .iter()
+                            .map(|g| format!("this.{}", signal_prop(g)))
+                            .collect();
+                        array_assignment(w, "this._signals", &list);
+                    }
+                },
+            );
             for c in &o.constructors {
                 w.blank();
                 self.constructor(w, o, c, is_store);

@@ -169,8 +169,14 @@ fn the_accessor_returns_a_proxy_when_nothing_is_bound_in_rust() {
     }))
     .unwrap();
     assert_eq!(response.status, 202);
-    assert_eq!(response.body, Bytes(b"https://shreypdev.github.io/undra/".to_vec()));
-    assert_eq!(*seen.lock().unwrap(), ["request https://shreypdev.github.io/undra/"]);
+    assert_eq!(
+        response.body,
+        Bytes(b"https://shreypdev.github.io/undra/".to_vec())
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["request https://shreypdev.github.io/undra/"]
+    );
 }
 
 #[test]

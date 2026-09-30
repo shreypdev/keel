@@ -7,11 +7,11 @@ mod common;
 use std::sync::Arc;
 
 use common::*;
+use proptest::prelude::*;
 use undra_signals::testing::CaptureSink;
 use undra_signals::{ALL_SIGNALS, Computed, Signal, StoreCell, txn, with_sink};
 use undra_wire::Reader;
 use undra_wire::payload::{ChangeEntry, ChangeOp, ChangeSet};
-use proptest::prelude::*;
 
 const LIST: u32 = 0;
 const COUNT: u32 = 1;

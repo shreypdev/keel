@@ -9,7 +9,7 @@ use std::sync::Arc;
 use undra_meta::{DispatchCall, DispatchOutcome, ids};
 use undra_runtime::testing::TestRuntime;
 use undra_runtime::{
-    AnyObject, DispatchLayer, DispatchResult, Handle, UndraObjectDyn, Runtime, RuntimeConfig,
+    AnyObject, DispatchLayer, DispatchResult, Handle, Runtime, RuntimeConfig, UndraObjectDyn,
     inventory,
 };
 use undra_signals::{Signal, StoreCell};

@@ -1,7 +1,7 @@
 //! [`SeededRng`]: a deterministic random number generator.
 
-use undra_wire::Bytes;
 use parking_lot::Mutex;
+use undra_wire::Bytes;
 
 use crate::Rng;
 

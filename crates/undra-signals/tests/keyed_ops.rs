@@ -15,11 +15,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::*;
+use proptest::prelude::*;
 use undra_signals::testing::CaptureSink;
 use undra_signals::{ALL_SIGNALS, Computed, Signal, StoreCell, txn, with_sink};
 use undra_wire::payload::{ChangeEntry, ChangeOp, ChangeSet};
 use undra_wire::{KeyedPatch, PatchOp, Reader};
-use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------------------------
 // The wire: what each operation sends

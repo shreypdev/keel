@@ -16,8 +16,8 @@ mod validate;
 mod fixtures;
 
 pub use def::{
-    EnumDef, FieldDef, FunctionDef, UNDRA_VERSION, MethodDef, ObjectDef, ParamDef, PortDef,
-    PortKind, QueryDef, QueryKind, RecordDef, Schema, SignalDef, StoreDef, VariantDef,
+    EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, QueryDef,
+    QueryKind, RecordDef, Schema, SignalDef, StoreDef, UNDRA_VERSION, VariantDef,
 };
 pub use dispatch::{DispatchCall, DispatchFn, DispatchOutcome};
 pub use meta::{

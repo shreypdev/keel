@@ -4,7 +4,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{TempDir, undra, run_err, run_ok};
+use common::{TempDir, run_err, run_ok, undra};
 
 fn fixture() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stores.schema.json")

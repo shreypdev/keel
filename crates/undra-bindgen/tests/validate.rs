@@ -107,7 +107,13 @@ fn a_port_named_like_a_type_is_e0050() {
 #[test]
 fn a_type_named_like_a_generated_or_standard_name_is_e0050() {
     for reserved in [
-        "Map", "String", "UndraCore", "UndraIds", "Codec", "Signal", "Date",
+        "Map",
+        "String",
+        "UndraCore",
+        "UndraIds",
+        "Codec",
+        "Signal",
+        "Date",
     ] {
         let mut s = Schema::new("t");
         s.records.push(record(reserved, "", vec![]));

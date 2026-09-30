@@ -16,8 +16,8 @@ use undra_meta::{
 };
 use undra_runtime::testing::{ReplyRecord, TestRuntime, call_payload, decode_reply};
 use undra_runtime::{
-    Ctx, DispatchBytes, DispatchResult, UndraObject, LazyList, PortError, Runtime, StoreObject,
-    StoreRestorer,
+    Ctx, DispatchBytes, DispatchResult, LazyList, PortError, Runtime, StoreObject, StoreRestorer,
+    UndraObject,
 };
 use undra_signals::{Signal, StoreCell};
 use undra_wire::payload::{CallTarget, ReplyStatus};

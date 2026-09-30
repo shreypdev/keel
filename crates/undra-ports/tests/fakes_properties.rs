@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::ready;
+use proptest::prelude::*;
 use undra_ports::fakes::{FakeClock, FakeHttp, MemFs, MemKv, SeededRng};
 use undra_ports::{Clock, Fs, FsError, Http, HttpError, HttpRequest, HttpResponse, Kv, Rng, Timer};
 use undra_wire::Bytes;
-use proptest::prelude::*;
 
 // ---- MemKv against a BTreeMap ------------------------------------------------------------------
 

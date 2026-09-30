@@ -21,10 +21,10 @@ use undra::wire::payload::{
 };
 use undra::wire::{Decode, Encode, Reader, Writer};
 use undra_ffi::{
-    UndraBuf, init_code, undra_abi_version, undra_buf_free, undra_call, undra_call_sync, undra_cancel,
-    undra_event, undra_init, undra_observe, undra_port_register, undra_port_reply, undra_release,
-    undra_restore, undra_schema_hash, undra_schema_json, undra_shutdown, undra_snapshot,
-    undra_stats_json, undra_stream_credit, undra_timer_fired, restore_code,
+    UndraBuf, init_code, restore_code, undra_abi_version, undra_buf_free, undra_call,
+    undra_call_sync, undra_cancel, undra_event, undra_init, undra_observe, undra_port_register,
+    undra_port_reply, undra_release, undra_restore, undra_schema_hash, undra_schema_json,
+    undra_shutdown, undra_snapshot, undra_stats_json, undra_stream_credit, undra_timer_fired,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -683,7 +683,10 @@ fn shutdown_is_idempotent_and_init_can_follow() {
     let host = Embedder::start();
     let (status, body) = host.sync(function("version"), &[]);
     assert_eq!(status, ReplyStatus::Ok);
-    assert_eq!(String::decode_exact(&body).unwrap(), "undra-ffi test core 1");
+    assert_eq!(
+        String::decode_exact(&body).unwrap(),
+        "undra-ffi test core 1"
+    );
     undra_shutdown();
     undra_shutdown();
     // Calls after shutdown are answered with status 5 / refused.

@@ -779,8 +779,9 @@ mod tests {
     fn computed_needs_a_restore_hook() {
         let message = expand("struct S { a: Signal<i32>, b: Computed<i32> }").unwrap_err();
         assert!(
-            message
-                .starts_with("error[undra::E0013]: store `S` cannot be restored automatically: `b`"),
+            message.starts_with(
+                "error[undra::E0013]: store `S` cannot be restored automatically: `b`"
+            ),
             "{message}"
         );
         let out = expand_with_hook("struct S { a: Signal<i32>, b: Computed<i32> }").unwrap();

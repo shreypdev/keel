@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use undra::meta::{Registration, TypeRef, collect_schema, ids};
-use undra::runtime::{Ctx, UndraObject, Stream};
+use undra::runtime::{Ctx, Stream, UndraObject};
 use undra::wire::{Decode, Encode, Handle, Writer};
 use undra_macros as k;
 

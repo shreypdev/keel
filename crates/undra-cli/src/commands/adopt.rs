@@ -171,7 +171,9 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
         .map_err(|name| {
             CliError::new(
                 Code::ToolFailed,
-                format!("an undra-cli template uses the placeholder @@{name}@@ and nothing sets it"),
+                format!(
+                    "an undra-cli template uses the placeholder @@{name}@@ and nothing sets it"
+                ),
                 "this is a bug in undra-cli, not in your arguments",
                 "report it at https://github.com/shreypdev/undra/issues",
             )

@@ -5,12 +5,12 @@
 //! assert), so a reordered field, a renumbered variant or a changed width fails here before it
 //! fails on a device.
 
+use proptest::prelude::*;
 use undra_ports::{
     AppState, FsError, Header, HttpError, HttpMethod, HttpRequest, HttpResponse, NetKind,
     encode_connectivity_changed_event, encode_lifecycle_changed_event,
 };
 use undra_wire::{Bytes, Decode, Encode, Writer};
-use proptest::prelude::*;
 
 /// `"0000 01000000 75"` to bytes; whitespace is ignored.
 fn hex(text: &str) -> Vec<u8> {

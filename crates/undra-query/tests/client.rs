@@ -820,8 +820,8 @@ fn nothing_keeps_a_runtime_alive_once_the_app_lets_go_of_it() {
 
 #[test]
 fn handle_signals_compose_with_computed_and_effects_in_the_core() {
-    use undra::prelude::{Computed, Effect};
     use std::sync::{Arc, Mutex};
+    use undra::prelude::{Computed, Effect};
 
     let h = Harness::new();
     h.serve_page(0, vec![todo(1, "milk"), todo(2, "eggs")]);

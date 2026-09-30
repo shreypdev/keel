@@ -657,8 +657,8 @@ fn restore_detaches_stores_that_tasks_still_hold() {
 #[test]
 fn restore_reentrancy_is_refused_not_deadlocked() {
     // A host that restores from inside a reply callback (which runs under the core lock).
-    use undra_runtime::{Host, PortCallOutcome};
     use std::sync::OnceLock;
+    use undra_runtime::{Host, PortCallOutcome};
     struct Restoring {
         rt: OnceLock<std::sync::Weak<Runtime>>,
         result: parking_lot::Mutex<Option<Result<(), RestoreError>>>,

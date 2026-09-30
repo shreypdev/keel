@@ -21,8 +21,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use undra_wire::{Encode, Writer};
 use parking_lot::RwLock;
+use undra_wire::{Encode, Writer};
 
 use crate::object::UndraObject;
 

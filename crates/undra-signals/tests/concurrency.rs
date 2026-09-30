@@ -10,10 +10,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::*;
-use undra_signals::testing::{CaptureSink, decode};
-use undra_signals::{ChangeSink, Computed, Signal, StoreCell, clear_sink, set_sink, txn, with_sink};
-use undra_wire::Writer;
 use parking_lot::Mutex;
+use undra_signals::testing::{CaptureSink, decode};
+use undra_signals::{
+    ChangeSink, Computed, Signal, StoreCell, clear_sink, set_sink, txn, with_sink,
+};
+use undra_wire::Writer;
 
 static SERIAL: Mutex<()> = Mutex::new(());
 

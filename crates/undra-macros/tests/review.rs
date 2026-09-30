@@ -141,11 +141,11 @@ fn l2_port_proxies_and_dispatchers_accept_parameters_named_like_generated_locals
 
     // Through the Rust-side dispatcher of a fake.
     let fake: Arc<dyn L2Port> = Arc::new(L2Fake);
-    let reply = match __undra_port_dispatch_L2Port(&fake, id("L2Port", "send"), &u32s(&[1, 2, 3, 4]))
-    {
-        PortDispatch::Sync(bytes) => bytes,
-        PortDispatch::Async(future) => block_on(future),
-    };
+    let reply =
+        match __undra_port_dispatch_L2Port(&fake, id("L2Port", "send"), &u32s(&[1, 2, 3, 4])) {
+            PortDispatch::Sync(bytes) => bytes,
+            PortDispatch::Async(future) => block_on(future),
+        };
     assert_eq!((reply[0], u32::decode_exact(&reply[1..]).unwrap()), (0, 10));
 }
 

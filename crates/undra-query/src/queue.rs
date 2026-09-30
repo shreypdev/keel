@@ -25,12 +25,12 @@ use core::task::{Context, Poll};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use parking_lot::Mutex;
 use undra_ports::{CtxPorts, HttpError};
 use undra_runtime::Ctx;
 use undra_runtime::executor::Notify;
 use undra_runtime::log::{DEBUG, WARN};
 use undra_wire::{Bytes, Uuid};
-use parking_lot::Mutex;
 
 use crate::defs::BoxFuture;
 use crate::erased::{Erased, Failure, MutationVTable, Outcome, registered_mutation};
@@ -412,10 +412,10 @@ async fn run_replay(shared: Arc<Shared>, ctx: Ctx) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use undra_runtime::executor::yield_now;
-    use undra_runtime::testing::TestRuntime;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::task::Waker;
+    use undra_runtime::executor::yield_now;
+    use undra_runtime::testing::TestRuntime;
 
     fn poll<T>(fut: &mut BoxFuture<T>) -> Poll<T> {
         fut.as_mut().poll(&mut Context::from_waker(Waker::noop()))

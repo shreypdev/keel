@@ -12,7 +12,7 @@ use undra_bindgen::Generator;
 
 use crate::bindgen::{self, Plan, canonicalize_lenient};
 use crate::cli::InitArgs;
-use crate::config::{UNDRA_VERSION, Platform, ProjectConfig};
+use crate::config::{Platform, ProjectConfig, UNDRA_VERSION};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{self, create_dir_all, is_empty_dir, make_executable, write_if_changed};
 use crate::names::{Names, portable, relative_path, validate_app_id, validate_project_name};
@@ -538,8 +538,9 @@ fn next_steps(setup: &Setup) -> String {
     out.push_str("\nThen run an app:\n");
     for platform in &setup.config.platforms {
         match platform {
-            Platform::Ios => out
-                .push_str("  iOS      open ios/ in Xcode (README.md: the UNDRA_LINK_CORE=1 note)\n"),
+            Platform::Ios => out.push_str(
+                "  iOS      open ios/ in Xcode (README.md: the UNDRA_LINK_CORE=1 note)\n",
+            ),
             Platform::Android => out.push_str(
                 "  Android  open android/ in Android Studio, or ./gradlew :app:installDebug\n",
             ),
@@ -723,7 +724,8 @@ mod tests {
         );
         let settings = std::fs::read_to_string(root.join("android/settings.gradle.kts")).unwrap();
         assert!(
-            settings.contains("includeBuild(") && settings.contains("runtimes/kotlin/undra-runtime"),
+            settings.contains("includeBuild(")
+                && settings.contains("runtimes/kotlin/undra-runtime"),
             "{settings}"
         );
         assert!(

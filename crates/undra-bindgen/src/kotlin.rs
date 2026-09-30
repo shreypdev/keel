@@ -1238,7 +1238,11 @@ impl<'a> Ctx<'a> {
 
     fn object(&mut self, w: &mut CodeWriter, o: &ObjectDef) {
         let is_store = o.store.is_some();
-        let base = if is_store { "UndraStore" } else { "UndraObject" };
+        let base = if is_store {
+            "UndraStore"
+        } else {
+            "UndraObject"
+        };
         self.import("dev.undra.runtime.UndraCore");
         self.import(&format!("dev.undra.runtime.{base}"));
         let signals: Vec<&SignalDef> = o.store.iter().flat_map(|s| s.signals.iter()).collect();

@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::*;
+use parking_lot::Mutex;
 use undra_signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, txn, with_sink};
 use undra_wire::payload::{ChangeEntry, ChangeOp, ChangeSet};
 use undra_wire::{Encode, Writer};
-use parking_lot::Mutex;
 
 /// What a host knows about a store: a keyed list at signal 0 and `u32` values elsewhere.
 #[derive(Default)]

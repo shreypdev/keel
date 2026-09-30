@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{TempDir, undra, repo_root, run_ok};
+use common::{TempDir, repo_root, run_ok, undra};
 
 fn write(root: &std::path::Path, path: &str, text: &str) {
     let file = root.join(path);

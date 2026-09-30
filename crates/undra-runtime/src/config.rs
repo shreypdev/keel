@@ -97,7 +97,9 @@ impl fmt::Display for InitError {
                     "invalid runtime mode {mode:?}: expected \"inproc\" or \"dev\""
                 )
             }
-            InitError::Spawn(reason) => write!(f, "could not start the undra-core thread: {reason}"),
+            InitError::Spawn(reason) => {
+                write!(f, "could not start the undra-core thread: {reason}")
+            }
         }
     }
 }

@@ -7,10 +7,10 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use common::*;
+use parking_lot::Mutex;
 use undra_runtime::testing::{RecordingHost, TestRuntime, call_payload, decode_reply};
 use undra_runtime::{Host, PortCallOutcome, PortError, Runtime, RuntimeConfig};
 use undra_wire::payload::{ReplyStatus, StreamFlag};
-use parking_lot::Mutex;
 
 const LONG: Duration = Duration::from_secs(60);
 

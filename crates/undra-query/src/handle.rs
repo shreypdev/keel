@@ -32,10 +32,10 @@ use core::task::{Context, Poll};
 use std::any::Any;
 use std::sync::{Arc, OnceLock, Weak};
 
+use parking_lot::Mutex;
 use undra_runtime::{AnyObject, Ctx, UndraObjectDyn};
 use undra_signals::{Signal, SignalsError, StoreCell};
 use undra_wire::Timestamp;
-use parking_lot::Mutex;
 
 use crate::defs::QueryDef;
 use crate::erased::{Erased, query_vtable};

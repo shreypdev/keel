@@ -10,14 +10,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use common::*;
+use tungstenite::Message;
+use tungstenite::protocol::CloseFrame;
+use tungstenite::protocol::frame::coding::CloseCode;
 use undra::runtime::testing::call_payload;
 use undra::runtime::{InitError, Runtime, RuntimeConfig};
 use undra::wire::payload::{CallTarget, ReplyStatus};
 use undra::wire::{Bytes, Handle, Kind};
 use undra_transport::{ServeError, Server, ServerConfig, close};
-use tungstenite::Message;
-use tungstenite::protocol::CloseFrame;
-use tungstenite::protocol::frame::coding::CloseCode;
 
 // ----- what a disconnect cleans up -----------------------------------------------------------
 

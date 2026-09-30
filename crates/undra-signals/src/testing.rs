@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use undra_wire::payload::ChangeSet;
 use undra_wire::{Reader, WireError};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 

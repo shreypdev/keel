@@ -147,7 +147,8 @@ pub(crate) fn drop_guarded<T>(value: T) -> Result<(), PanicReport> {
 
 /// Encodes a report as the body of a status 2 reply: `String message, String backtrace`.
 pub(crate) fn encode_panic_body(report: &PanicReport) -> Vec<u8> {
-    let mut w = undra_wire::Writer::with_capacity(8 + report.message.len() + report.backtrace.len());
+    let mut w =
+        undra_wire::Writer::with_capacity(8 + report.message.len() + report.backtrace.len());
     w.write_str(&report.message);
     w.write_str(&report.backtrace);
     w.into_vec()

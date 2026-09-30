@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use tungstenite::{Message, WebSocket};
 use undra::meta::ids;
 use undra::prelude::*;
 use undra::runtime::testing::call_payload;
@@ -21,7 +22,6 @@ use undra::wire::payload::{
 };
 use undra::wire::{Decode, Encode, Envelope, Kind, Reader, Writer};
 use undra_transport::{Bridge, Server, ServerConfig};
-use tungstenite::{Message, WebSocket};
 
 /// Runs `f` on the runtime's core (as a spawned task) and waits for it: the way an embedding app
 /// writes signals into its own core. A write from the app's own thread would not hold the core

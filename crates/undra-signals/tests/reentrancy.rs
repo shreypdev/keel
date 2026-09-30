@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use common::*;
+use parking_lot::Mutex;
 use undra_signals::testing::CaptureSink;
 use undra_signals::{ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
 use undra_wire::payload::ChangeSet;
 use undra_wire::{Encode, Writer};
-use parking_lot::Mutex;
 
 /// A store with `a` (0) and `b` (1), both observed.
 struct Two {

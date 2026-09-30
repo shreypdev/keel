@@ -32,9 +32,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
+use parking_lot::{Mutex, RwLock};
 use undra_wire::payload::{PortReply, PortStatus};
 use undra_wire::{Reader, WireError};
-use parking_lot::{Mutex, RwLock};
 
 use crate::log::WARN;
 use crate::runtime::Runtime;

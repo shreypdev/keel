@@ -524,8 +524,8 @@ fn spawn_blocking_results_and_panics_reach_the_awaiting_call() {
 
 #[test]
 fn a_panic_in_a_host_callback_is_contained_like_any_other() {
-    use undra_runtime::{Host, PortCallOutcome};
     use std::sync::Arc;
+    use undra_runtime::{Host, PortCallOutcome};
     struct Bomb;
     impl Host for Bomb {
         fn reply(&self, _: u32, _: &[u8]) {

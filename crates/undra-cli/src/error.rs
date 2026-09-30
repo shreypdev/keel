@@ -186,7 +186,10 @@ impl CliError {
     /// The documentation URL of the code.
     #[must_use]
     pub fn docs_url(&self) -> String {
-        format!("https://shreypdev.github.io/undra/docs/errors.html#{}", self.code.as_str())
+        format!(
+            "https://shreypdev.github.io/undra/docs/errors.html#{}",
+            self.code.as_str()
+        )
     }
 }
 

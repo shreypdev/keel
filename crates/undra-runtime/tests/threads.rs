@@ -10,13 +10,13 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use common::*;
+use parking_lot::Mutex;
 use undra_runtime::testing::{
     RecordingHost, ReplyRecord, call_payload, decode_reply, port_reply_ok,
 };
 use undra_runtime::{Host, PortCallOutcome, Runtime, RuntimeConfig};
 use undra_wire::payload::{CallTarget, ReplyStatus};
 use undra_wire::{Decode, Encode, Reader};
-use parking_lot::Mutex;
 
 const LONG: Duration = Duration::from_secs(60);
 
@@ -741,7 +741,12 @@ struct Issued {
 }
 
 /// One thread of the stress test: a seeded random walk over every host entry point.
-fn stress_thread(rt: &Runtime, shared: &[undra_runtime::Handle], thread: u32, ops: usize) -> Issued {
+fn stress_thread(
+    rt: &Runtime,
+    shared: &[undra_runtime::Handle],
+    thread: u32,
+    ops: usize,
+) -> Issued {
     // `UNDRA_STRESS_SEED` varies the walk for soak runs; the default keeps CI reproducible.
     let seed = std::env::var("UNDRA_STRESS_SEED")
         .ok()

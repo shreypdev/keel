@@ -476,7 +476,8 @@ fn kotlin_qualifies_a_standard_type_that_a_variant_shadows() {
     );
     // Inside the hierarchy `HttpError` is the variant; the runtime's type is spelled in full.
     assert!(
-        kotlin.contains("data class Http(override val cause: dev.undra.runtime.adapters.HttpError)"),
+        kotlin
+            .contains("data class Http(override val cause: dev.undra.runtime.adapters.HttpError)"),
         "{kotlin}"
     );
     assert!(kotlin.contains("dev.undra.runtime.adapters.HttpError.encode(w, v.cause)"));

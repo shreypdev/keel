@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use undra_wire::Bytes;
 use parking_lot::Mutex;
+use undra_wire::Bytes;
 
 use crate::{Fs, FsError};
 

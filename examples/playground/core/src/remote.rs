@@ -22,9 +22,9 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use serde::{Deserialize, Serialize};
 use undra::ports::{HttpError, HttpMethod, HttpRequest};
 use undra::prelude::*;
-use serde::{Deserialize, Serialize};
 
 /// Where the server is: what an app supplies once, at start-up.
 #[undra::api]

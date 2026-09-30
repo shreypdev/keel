@@ -3,8 +3,8 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Weak};
 
-use undra_runtime::{Port, Runtime};
 use parking_lot::Mutex;
+use undra_runtime::{Port, Runtime};
 
 use crate::{
     AppState, Connectivity, Lifecycle, NetKind, encode_connectivity_changed_event,

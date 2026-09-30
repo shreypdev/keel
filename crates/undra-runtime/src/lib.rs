@@ -82,11 +82,9 @@ pub use ctx::{Ctx, CtxScope};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::InitHook;
 pub use host::{Host, PortCallOutcome};
-pub use undra_meta::{DispatchCall, DispatchOutcome};
-pub use undra_wire::Handle;
 pub use lazy::{LazyList, LazyListInner};
 pub use object::{
-    AnyObject, CellFn, UndraObject, UndraObjectDyn, RestoreFn, StoreObject, StoreRestorer, plain,
+    AnyObject, CellFn, RestoreFn, StoreObject, StoreRestorer, UndraObject, UndraObjectDyn, plain,
     store,
 };
 pub use ports::{
@@ -94,6 +92,8 @@ pub use ports::{
     Subscription, port_call_sync,
 };
 pub use runtime::Runtime;
+pub use undra_meta::{DispatchCall, DispatchOutcome};
+pub use undra_wire::Handle;
 
 /// Re-export so generated code can name the stream trait as `::undra::runtime::Stream`.
 pub use futures_core::Stream;

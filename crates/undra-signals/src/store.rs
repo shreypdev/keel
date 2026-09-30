@@ -5,9 +5,9 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use parking_lot::{Mutex, RwLock};
 use undra_wire::payload::{ChangeEntry, ChangeOp, ChangeSetBuilder, StoreSnapshot};
 use undra_wire::{Handle, KeyedPatch, Writer};
-use parking_lot::{Mutex, RwLock};
 
 use crate::computed::Computed;
 use crate::error::SignalsError;

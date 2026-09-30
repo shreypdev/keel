@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use undra::meta::{DispatchCall, DispatchFn, Registration, ids};
 use undra::runtime::testing::port_reply;
 use undra::runtime::{
-    Ctx, DispatchResult, Host, InitError, UndraObject, MODE_INPROC, PortCallOutcome, PortError,
-    RuntimeConfig, Stream,
+    Ctx, DispatchResult, Host, InitError, MODE_INPROC, PortCallOutcome, PortError, RuntimeConfig,
+    Stream, UndraObject,
 };
 use undra::wire::Reader;
 use undra::wire::payload::{ChangeSet, PortStatus};

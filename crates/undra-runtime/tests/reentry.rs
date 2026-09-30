@@ -14,10 +14,10 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use common::*;
+use parking_lot::Mutex;
 use undra_runtime::testing::{ReplyRecord, call_payload, decode_reply, unchecked_writes};
 use undra_runtime::{Host, PortCallOutcome, Runtime, RuntimeConfig};
 use undra_wire::payload::ReplyStatus;
-use parking_lot::Mutex;
 
 /// A host that, from the callback it is armed for, calls `Runtime::call_sync` and `observe` and
 /// records what came back.

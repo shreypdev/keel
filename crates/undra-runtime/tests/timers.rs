@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use undra_runtime::testing::TestRuntime;
 use parking_lot::Mutex;
+use undra_runtime::testing::TestRuntime;
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)

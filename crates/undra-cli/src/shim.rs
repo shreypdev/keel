@@ -186,7 +186,10 @@ pub fn write_shim(
 pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> Result<PathBuf> {
     let dir = runner_dir(target_dir, project_root);
     let ports_dep = if core.links_ports {
-        format!("undra-ports = {}", core.undra.dependency("undra-ports", &[]))
+        format!(
+            "undra-ports = {}",
+            core.undra.dependency("undra-ports", &[])
+        )
     } else {
         String::new()
     };

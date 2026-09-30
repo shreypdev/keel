@@ -27,13 +27,13 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
+use parking_lot::Mutex;
 use undra_meta::ids::fnv1a64;
 use undra_ports::{CtxPorts, Kv};
 use undra_runtime::executor::TaskId;
 use undra_runtime::log::{DEBUG, ERROR, WARN};
 use undra_runtime::{Ctx, Port, PortError, Runtime};
 use undra_wire::{Bytes, Decode, Encode};
-use parking_lot::Mutex;
 
 use crate::erased::{Erased, Failure, Outcome, QueryVTable};
 use crate::key::{Invalidate, QueryKey};
@@ -1196,9 +1196,9 @@ mod tests {
     use super::*;
     use crate::defs::{BoxFuture, QueryDef};
     use crate::erased::query_vtable;
-    use undra_runtime::testing::TestRuntime;
     use std::sync::atomic::AtomicUsize;
     use std::task::Wake;
+    use undra_runtime::testing::TestRuntime;
 
     struct Dummy;
 

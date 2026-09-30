@@ -124,9 +124,9 @@ pub(crate) fn new_uuid(ctx: &Ctx) -> Uuid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::{prop_assert, proptest};
     use undra_ports::{Rng, fakes};
     use undra_runtime::testing::TestRuntime;
-    use proptest::prelude::{prop_assert, proptest};
 
     #[test]
     fn jitter_comes_from_the_rng_port_and_is_reproducible() {

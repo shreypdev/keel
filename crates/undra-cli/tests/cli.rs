@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{TempDir, undra, run_err, run_ok};
+use common::{TempDir, run_err, run_ok, undra};
 
 #[test]
 fn top_level_help_teaches_the_workflow() {
@@ -90,7 +90,10 @@ fn outside_a_project_the_error_says_what_why_and_how_to_fix() {
         stderr.contains("= note:") && stderr.contains("= help:") && stderr.contains("undra init"),
         "{stderr}"
     );
-    assert!(stderr.contains("https://shreypdev.github.io/undra/docs/errors.html#C0001"), "{stderr}");
+    assert!(
+        stderr.contains("https://shreypdev.github.io/undra/docs/errors.html#C0001"),
+        "{stderr}"
+    );
 }
 
 #[test]

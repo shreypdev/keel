@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use common::*;
+use parking_lot::{Condvar, Mutex};
 use undra_signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, txn, with_sink};
 use undra_wire::payload::ChangeSet;
 use undra_wire::{Decode, Encode, Reader, Writer};
-use parking_lot::{Condvar, Mutex};
 
 fn decode_set(payload: &[u8]) -> ChangeSet {
     let mut r = Reader::new(payload);

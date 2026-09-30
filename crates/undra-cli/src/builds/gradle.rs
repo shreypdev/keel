@@ -351,7 +351,10 @@ mod tests {
         );
         let expected = root.join("build/android/jniLibs");
         for abi in ["arm64-v8a", "x86_64"] {
-            write(&format!("build/android/jniLibs/{abi}/libundra_core.so"), abi);
+            write(
+                &format!("build/android/jniLibs/{abi}/libundra_core.so"),
+                abi,
+            );
         }
         (root, expected)
     }

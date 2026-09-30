@@ -25,8 +25,8 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use undra_wire::PatchOp;
 use parking_lot::Mutex;
+use undra_wire::PatchOp;
 
 /// The fewest ops a log keeps before it gives up and lets the commit diff: a list so long that
 /// this many ops is a small fraction of it raises the limit to its length (see `arm`).

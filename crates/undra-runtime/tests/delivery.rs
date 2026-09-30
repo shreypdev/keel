@@ -12,13 +12,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use common::*;
+use parking_lot::{Condvar, Mutex};
 use undra_meta::ids;
 use undra_runtime::testing::{TestRuntime, unchecked_writes};
-use undra_runtime::{Ctx, UndraObject, StoreObject, StoreRestorer};
+use undra_runtime::{Ctx, StoreObject, StoreRestorer, UndraObject};
 use undra_signals::{ALL_SIGNALS, Computed, Signal, StoreCell};
 use undra_wire::payload::ChangeSet;
 use undra_wire::{Decode, Encode, Reader, WireError, Writer};
-use parking_lot::{Condvar, Mutex};
 
 // ----- M1: an observe racing a commit ---------------------------------------------------------
 

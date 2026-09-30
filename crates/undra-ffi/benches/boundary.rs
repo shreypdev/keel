@@ -24,8 +24,8 @@ use undra::runtime::RuntimeConfig;
 use undra::wire::payload::{Call, CallTarget};
 use undra::wire::{Decode, Encode, Writer};
 use undra_ffi::{
-    UndraBuf, undra_buf_free, undra_call, undra_call_sync, undra_init, undra_observe, undra_port_register,
-    undra_shutdown,
+    UndraBuf, undra_buf_free, undra_call, undra_call_sync, undra_init, undra_observe,
+    undra_port_register, undra_shutdown,
 };
 
 #[path = "../tests/common/core.rs"]

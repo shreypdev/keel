@@ -36,9 +36,9 @@ use std::sync::{Arc, Weak};
 use std::task::Wake;
 use std::time::Duration;
 
-use undra_wire::Handle;
 use parking_lot::{Condvar, Mutex};
 use slab::Slab;
+use undra_wire::Handle;
 
 use crate::ctx::Ctx;
 use crate::host::Host;
