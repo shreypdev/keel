@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ports &amp; adapters · Keel docs</title>
+<meta name="description" content="The ten standard ports, the default adapter on each platform, how to supply your own, what happens when one is missing, and the deterministic fakes for tests.">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://shreypdev.github.io/keel/docs/ports.html">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap">
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a class="hide-sm" href=".././">Home</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    </nav>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html" aria-current="page">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html" aria-current="page">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <article id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1 class="display">Ports &amp; adapters</h1>
+    <p class="lede">The core never touches the outside world directly. Time, randomness, the network, storage and the app's lifecycle all come through ports: traits the platform implements and the core calls.</p>
+<h2 id="what-a-port-is">What a port is<a class="anchor" href="#what-a-port-is" aria-label="Link to this section">#</a></h2>
+<p>A port is a Rust trait marked <code>#[keel::port]</code>. The platform implements it (an adapter), or a Rust fake does in a test. The core calls it through the context, for example <code>ctx.http().request(req).await</code>, and does not know or care what is behind it. That is what keeps the core deterministic (rule R12): it has no wall clock, no random source and no threads outside the <code>Clock</code>, <code>Rng</code> and <code>Timer</code> ports and the runtime.</p>
+<p>There are three kinds, and the kind decides how a call travels:</p>
+<div class="table-wrap"><table><thead><tr><th>Kind</th><th>Meaning</th></tr></thead><tbody><tr><td><strong>sync</strong></td><td>the platform answers before the call returns. A port is sync only if every method is sync</td></tr><tr><td><strong>async</strong></td><td>the platform answers later; the core's task waits, and can be cancelled</td></tr><tr><td><strong>event</strong></td><td>fire and forget from the platform into the core, such as "connectivity changed"</td></tr></tbody></table></div>
+<h2 id="the-ten-standard-ports">The ten standard ports<a class="anchor" href="#the-ten-standard-ports" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Port</th><th>Kind</th><th>Methods</th></tr></thead><tbody><tr><td><code>Clock</code></td><td>sync</td><td><code>now_ms() -&gt; i64</code>, <code>monotonic_ns() -&gt; u64</code></td></tr><tr><td><code>Rng</code></td><td>sync</td><td><code>fill(len) -&gt; Bytes</code></td></tr><tr><td><code>Log</code></td><td>sync</td><td><code>log(level, target, message)</code></td></tr><tr><td><code>Http</code></td><td>async</td><td><code class="wrap">request(HttpRequest) -&gt; Result&lt;HttpResponse, HttpError&gt;</code></td></tr><tr><td><code>Kv</code></td><td>async</td><td><code>get</code>, <code>set</code>, <code>delete</code>, <code>list(prefix)</code></td></tr><tr><td><code>SecureStore</code></td><td>async</td><td>the same shape as <code>Kv</code>, for secrets</td></tr><tr><td><code>Fs</code></td><td>async</td><td><code>read</code>, <code>write</code>, <code>delete</code>, <code>list</code>, each returning <code>Result&lt;_, FsError&gt;</code></td></tr><tr><td><code>Timer</code></td><td>sync</td><td><code>set(timer_id, delay_ms)</code>; the platform answers later with a timer-fired event</td></tr><tr><td><code>Connectivity</code></td><td>event</td><td><code>changed(online, kind)</code> with <code>NetKind</code> of <code>Wifi</code>, <code>Cellular</code>, <code>Wired</code>, <code>Unknown</code> or <code>None</code></td></tr><tr><td><code>Lifecycle</code></td><td>event</td><td><code>changed(state)</code> with <code>AppState</code> of <code>Active</code>, <code>Inactive</code> or <code>Background</code></td></tr></tbody></table></div>
+<p>They exchange a small set of types: <code>HttpRequest</code> (method, url, headers, optional body, optional timeout), <code>HttpResponse</code> (status, headers, body), <code>HttpError</code> (<code>Network</code>, <code>Timeout</code>, <code>Cancelled</code>, <code>InvalidUrl</code>), <code>Header</code>, <code>FsError</code> (<code>NotFound</code>, <code>Denied</code>, <code>Io</code>), <code>NetKind</code> and <code>AppState</code>.</p>
+<p>These ports and types ship inside each platform runtime and are <strong>not</strong> generated into your app's bindings. Every core links <code>keel-ports</code>, so its schema contains them and the schema hash covers them, but the generator leaves them out and the generated code refers to the runtime's own types. That is why your app can have its own record called <code>Timer</code> or <code>Log</code>.</p>
+<h2 id="default-adapters">Default adapters<a class="anchor" href="#default-adapters" aria-label="Link to this section">#</a></h2>
+<p>Each runtime ships an adapter for every port, so a new app works without adapter code.</p>
+<div class="table-wrap"><table><thead><tr><th>Port</th><th>Swift</th><th>Kotlin (Android)</th><th>TypeScript (browser)</th></tr></thead><tbody><tr><td><code>Http</code></td><td><code>URLSession</code></td><td><code>OkHttp</code> (optional dependency) or <code>HttpURLConnection</code></td><td><code>fetch</code></td></tr><tr><td><code>Kv</code></td><td>files in Application Support</td><td><code>SharedPreferences</code>-backed files</td><td>IndexedDB</td></tr><tr><td><code>SecureStore</code></td><td>Keychain</td><td><code>EncryptedFile</code> (Keystore)</td><td>IndexedDB with WebCrypto</td></tr><tr><td><code>Fs</code></td><td><code>FileManager</code></td><td><code>Context.filesDir</code></td><td>OPFS</td></tr><tr><td><code>Clock</code>, <code>Rng</code>, <code>Log</code></td><td>Foundation, <code>SecRandom</code>, <code>os_log</code></td><td><code>System</code>, <code>SecureRandom</code>, <code>Log</code></td><td>built in</td></tr><tr><td><code>Timer</code></td><td><code>DispatchQueue</code></td><td><code>Handler</code>, <code>ScheduledExecutor</code></td><td><code>setTimeout</code></td></tr><tr><td><code>Connectivity</code>, <code>Lifecycle</code></td><td><code>NWPathMonitor</code>, <code>scenePhase</code></td><td><code>ConnectivityManager</code>, <code>ProcessLifecycleOwner</code></td><td><code>navigator.onLine</code>, <code>visibilitychange</code></td></tr></tbody></table></div>
+<p>On the JVM without Android, <code>Connectivity</code> and <code>Lifecycle</code> are stubs. On the web, <code>Clock</code>, <code>Rng</code> and <code>Log</code> are bound to imports of the wasm module, so a web app needs no adapter code for them.</p>
+<h2 id="supplying-your-own-adapter">Supplying your own adapter<a class="anchor" href="#supplying-your-own-adapter" aria-label="Link to this section">#</a></h2>
+<p>You replace a default when you load the core. The playground replaces <code>Http</code> with an in-memory server (so it needs no backend) and <code>Kv</code> with a map:</p>
+<div class="code"><div class="code-bar"><span>web/src/keel.ts</span></div><pre><code data-lang="ts">const adapters = { http: server, kv: memoryKv() };
+await KeelCore.load({
+  mode: "wasm-main",
+  wasm: new URL(wasmUrl, location.href),
+  expectedSchemaHash: KeelIds.schemaHash,
+  adapters,
+});</code></pre></div>
+<div class="code"><div class="code-bar"><span>ios/PlaygroundApp/KeelBootstrap.swift</span></div><pre><code data-lang="swift">let adapters = Adapters.platformDefault
+    .removing(portId: fnv1a32("port.Connectivity"))
+    .replacing(PlaygroundNetwork.shared)
+    .replacing(KvAdapter(directory: store))
+try KeelCore.load(.inproc(adapters: adapters, expectedSchemaHash: KeelIds.schemaHash))</code></pre></div>
+<div class="code"><div class="code-bar"><span>android/.../KeelApp.kt</span></div><pre><code data-lang="kotlin">KeelCore.load(
+    LoadOptions(
+        expectedSchemaHash = KeelIds.SCHEMA_HASH,
+        adapters = mapOf(
+            StandardPorts.Http.PORT_ID to server.portImpl(),
+            StandardPorts.Kv.PORT_ID to InMemoryKv().portImpl(),
+        ),
+    ),
+)</code></pre></div>
+<p>Register the ports your core needs at load time. A core's start-up work (query hydration reads the <code>Kv</code> port) runs as soon as the runtime exists, so a port registered later can be missed by that work.</p>
+<h2 id="when-a-port-is-missing">When a port is missing<a class="anchor" href="#when-a-port-is-missing" aria-label="Link to this section">#</a></h2>
+<p>An unavailable port is a normal outcome, not a bug. A port nobody registered behaves as unavailable, a call can be cancelled, and a host can reply with bytes that do not decode. The core handles all three without panicking:</p>
+<ul><li>If the port method returns <code>Result&lt;T, E&gt;</code>, the failure becomes an <code>E</code>. <code>HttpError</code> and <code>FsError</code> implement <code>From&lt;PortError&gt;</code>, so an unavailable <code>Http</code> port is <code class="wrap">Network("the Http port has no adapter registered")</code>. Your own error type needs the same conversion, and the macro checks it at compile time (<code>E0033</code>).</li><li>If the method has no error channel, there is no typed way to say "unavailable", so the call panics with a message that names the port and method and says how to bind one (<code>E0062</code>). The runtime contains that panic at the boundary. Give optional ports a <code>Result</code>, or register them.</li></ul>
+<h2 id="writing-your-own-port">Writing your own port<a class="anchor" href="#writing-your-own-port" aria-label="Link to this section">#</a></h2>
+<p>Mark a trait with <code>#[keel::port]</code>. The macro registers it in the schema and generates a proxy type, so the core calls your trait like any other, and the platform gets a protocol or interface to implement. This one is made up, to show the shape:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[keel::port(sync)]
+pub trait Haptics {
+    fn tap(&amp;self, strength: u8);
+}</code></pre></div>
+<p>A port method's parameters must be wire types (<code>E0030</code>), and an <code>event</code> port's methods cannot return a value (<code>E0031</code>).</p>
+<h2 id="testing-with-fakes">Testing with fakes<a class="anchor" href="#testing-with-fakes" aria-label="Link to this section">#</a></h2>
+<p>Every standard port has a deterministic Rust fake in <code>keel::ports::fakes</code>. They are all <code>Send + Sync</code>, keep state behind a lock, and never read the system clock, a random source or a thread.</p>
+<div class="table-wrap"><table><thead><tr><th>Fake</th><th>Port</th><th>Behaviour</th></tr></thead><tbody><tr><td><code>FakeHttp</code></td><td><code>Http</code></td><td>scripted replies chosen by a matcher; every request recorded</td></tr><tr><td><code>MemKv</code>, <code>MemSecureStore</code></td><td><code>Kv</code>, <code>SecureStore</code></td><td>in-memory ordered maps; operations recorded</td></tr><tr><td><code>MemFs</code></td><td><code>Fs</code></td><td>in-memory tree with the platform adapters' error semantics</td></tr><tr><td><code>FakeClock</code></td><td><code>Clock</code> and <code>Timer</code></td><td>settable time; <code>advance</code> fires due timers</td></tr><tr><td><code>SeededRng</code></td><td><code>Rng</code></td><td><code>xorshift64*</code>; the same seed gives the same bytes</td></tr><tr><td><code>CaptureLog</code></td><td><code>Log</code></td><td>keeps every record</td></tr><tr><td><code>ScriptedConnectivity</code>, <code>ScriptedLifecycle</code></td><td><code>Connectivity</code>, <code>Lifecycle</code></td><td>push scripted events into a runtime</td></tr></tbody></table></div>
+<p><code>TestRuntime::new()</code> runs the executor on the test thread and lets you drive it with <code>run_until(fut)</code> and <code>run_pending()</code>. Installing the fakes binds all of them into it. The doctest of <code>FakeHttp</code> shows the style:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">use keel_ports::{Http, HttpError, HttpRequest, HttpResponse};
+use keel_ports::fakes::FakeHttp;
+use keel_runtime::testing::TestRuntime;
+
+let http = FakeHttp::new();
+// A flaky endpoint: two timeouts, then success for ever after.
+http.respond_sequence("https://x.test/a", [Err(HttpError::Timeout), Err(HttpError::Timeout)]);
+http.respond("https://x.test/a", HttpResponse::new(200, b"ok".to_vec()));
+
+let t = TestRuntime::new();
+let get = || HttpRequest::get("https://x.test/a");
+assert_eq!(t.run_until(http.request(get())), Err(HttpError::Timeout));
+assert_eq!(t.run_until(http.request(get())), Err(HttpError::Timeout));
+assert_eq!(t.run_until(http.request(get())).unwrap().status, 200);
+assert_eq!(http.call_count(), 3);</code></pre></div>
+<p>Time works the same way. <code>FakeClock</code> is the single source of time for both <code>Clock</code> and <code>Timer</code>, so <code>ctx.sleep</code> asks for a timer and advancing the fake clock serves it: sleeps wake at exactly their deadline. On a runtime with the fakes installed, advance time with <code>Fakes::advance</code>, not <code>TestRuntime::advance</code>.</p>
+<p>The platforms get the same treatment. The <a href="https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md" rel="noopener">contract scenarios</a> run every platform runtime against the real core with a manual clock, an in-memory <code>Http</code> server, an in-memory <code>Kv</code> and a test that emits connectivity events itself.</p>
+
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="queries.html"><span>Previous</span><b>Queries &amp; mutations</b></a>
+    <a class="next" href="cli.html"><span>Next</span><b>The CLI</b></a>
+  </nav>
+  </article>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#what-a-port-is">What a port is</a></li><li><a href="#the-ten-standard-ports">The ten standard ports</a></li><li><a href="#default-adapters">Default adapters</a></li><li><a href="#supplying-your-own-adapter">Supplying your own adapter</a></li><li><a href="#when-a-port-is-missing">When a port is missing</a></li><li><a href="#writing-your-own-port">Writing your own port</a></li><li><a href="#testing-with-fakes">Testing with fakes</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

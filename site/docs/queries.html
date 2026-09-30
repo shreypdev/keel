@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Queries &amp; mutations · Keel docs</title>
+<meta name="description" content="The data layer in the core: cached queries with staleness and dedup, retry with jitter, optimistic mutations with precise rollback, persistence and an offline queue.">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://shreypdev.github.io/keel/docs/queries.html">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap">
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a class="hide-sm" href=".././">Home</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    </nav>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html" aria-current="page">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html" aria-current="page">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <article id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1 class="display">Queries &amp; mutations</h1>
+    <p class="lede">Data fetching, caching and offline behaviour are not something each platform reimplements. They live in the core, next to the state they feed, and every platform observes the same cache.</p>
+<h2 id="why-the-data-layer-is-in-the-core">Why the data layer is in the core<a class="anchor" href="#why-the-data-layer-is-in-the-core" aria-label="Link to this section">#</a></h2>
+<p>Fetching, caching, retrying, optimistic updates and offline queues are logic, and logic is what Keel writes once. The core never opens a socket: every request goes through the <code>Http</code> port, which is <code>URLSession</code>, OkHttp or <code>fetch</code> in an app and a scripted fake in a test. The query client keeps one cache that all platforms observe, so the to-do list on the iPhone and the one in a Chrome tab agree about what is fresh.</p>
+<h2 id="defining-a-query">Defining a query<a class="anchor" href="#defining-a-query" aria-label="Link to this section">#</a></h2>
+<p>A query is an <code>async fn</code> whose first parameter is the <code>Ctx</code>, marked with <code>#[keel::query]</code>. This is the playground's remote to-do list, a <code>GET</code> that is cached per list:</p>
+<div class="code"><div class="code-bar"><span>core/src/remote.rs</span></div><pre><code data-lang="rust">/// The items of the server's list `list`: `GET {base}/lists/{list}/todos`.
+#[keel::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
+pub async fn remote_todos(ctx: &amp;Ctx, list: String) -&gt; Result&lt;Vec&lt;RemoteTodo&gt;, RemoteError&gt; {
+    let url = endpoint(ctx, &amp;format!("/lists/{list}/todos"))?;
+    parse(&amp;send(ctx, HttpRequest::get(url)).await?)
+}</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th>Argument</th><th>Meaning</th></tr></thead><tbody><tr><td><code>key = "…"</code></td><td>the cache key; <code>{param}</code> placeholders name parameters, so two lists are two independent entries</td></tr><tr><td><code>stale = "30s"</code></td><td>how long a successful result stays fresh</td></tr><tr><td><code>persist</code></td><td>write the entry to the <code>Kv</code> port so it survives a restart</td></tr><tr><td><code>retry = 3</code></td><td>how many times to retry a failed fetch</td></tr><tr><td><code>idempotent</code></td><td>(mutations) the request is safe to repeat, which makes it eligible for the offline queue</td></tr></tbody></table></div>
+<p>The signature is checked when you compile: it must be <code>async</code>, take <code>ctx: &amp;Ctx</code> first, and return <code>Result&lt;T, E&gt;</code>. A query whose success value is <code>()</code> or an <code>Option</code> is rejected, because a query caches a value and effects belong in a mutation (<code>E0040</code> to <code>E0042</code>).</p>
+<h2 id="observing-a-query">Observing a query<a class="anchor" href="#observing-a-query" aria-label="Link to this section">#</a></h2>
+<p>Platforms observe a query through a generated <strong>query handle</strong>, which is an ordinary store. For <code>remote_todos</code> it is <code>RemoteTodosQueryHandle</code>, and it has five signals:</p>
+<div class="table-wrap"><table><thead><tr><th>Signal</th><th>Holds</th></tr></thead><tbody><tr><td><code>data</code></td><td>the latest successful result, or nothing yet</td></tr><tr><td><code>status</code></td><td><code>idle</code>, <code>fetching</code>, <code>success</code> or <code>error</code></td></tr><tr><td><code>error</code></td><td>the error of the latest failed fetch, cleared by the next success</td></tr><tr><td><code>fetching</code></td><td>whether a request is in flight, also true while refetching stale data</td></tr><tr><td><code>updatedAt</code></td><td>when <code>data</code> last changed</td></tr></tbody></table></div>
+<p>Constructing the handle registers an observer and starts a fetch if the entry is missing or stale. Releasing it removes the observer; when the last observer goes, the in-flight fetch is cancelled and the entry is kept for five minutes before it is garbage collected. The handle also has <code>refetch()</code> (fetch now, even if fresh) and <code>invalidate()</code> (mark stale; it refetches while observed).</p>
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">const inbox = await RemoteTodosQueryHandle.create("inbox");   // observe
+const items = useSignal(inbox.data);                          // in a component
+const busy = useSignal(inbox.fetching);</code></pre></div>
+<h2 id="staleness-refetch-and-dedup">Staleness, refetch and dedup<a class="anchor" href="#staleness-refetch-and-dedup" aria-label="Link to this section">#</a></h2>
+<p>An observed entry refetches when it is stale and something happens:</p>
+<ul><li>an observer is added while it is stale,</li><li>the app becomes <code>Active</code> again (the <code>Lifecycle</code> port),</li><li>connectivity returns (the <code>Connectivity</code> port),</li><li>its optional interval elapses, or</li><li>it is invalidated, by key prefix.</li></ul>
+<p><strong>One fetch per key at a time.</strong> If five screens observe the same list, they share one in-flight request.</p>
+<h2 id="retry-with-jitter">Retry with jitter<a class="anchor" href="#retry-with-jitter" aria-label="Link to this section">#</a></h2>
+<p>A failed fetch is retried <code>retry</code> times (three by default) with exponential backoff, <code>min(1000 × 2ⁿ, 30000)</code> milliseconds, with plus or minus 20% jitter. The jitter comes from the <code>Rng</code> port and the delay from the <code>Timer</code> port, so a test with fakes sees exactly the schedule it scripts.</p>
+<h2 id="mutations">Mutations<a class="anchor" href="#mutations" aria-label="Link to this section">#</a></h2>
+<p>A mutation is an <code>async fn</code> marked <code>#[keel::mutation]</code>. It shares its cache key with the query it affects. Call it through the context:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">ctx.mutate::&lt;PostRemoteTodoMutation&gt;((list, title))
+    .optimistic(move |cache| {
+        cache.update::&lt;RemoteTodosQuery&gt;((cached,), |items| items.push(placeholder));
+    })
+    .invalidates(/* keys to mark stale */)
+    .await</code></pre></div>
+<p><code>optimistic</code> runs inside a transaction with typed access to cache entries (<code>get</code>, <code>set</code>, <code>update</code>), so the UI shows the new item at once. On success the <code>invalidates</code> keys are marked stale and refetched if observed, which replaces the placeholder with the server's item. The playground wraps this in <code>create_remote_todo</code> and <code>set_remote_done</code>, which are what its three UIs call.</p>
+<h3 id="precise-rollback">Precise rollback<a class="anchor" href="#precise-rollback" aria-label="Link to this section">#</a></h3>
+<p>If the mutation fails, the optimistic write is undone, but only <strong>the writes that mutation made</strong>. Every cache entry carries a write stamp that changes with each write: an optimistic write, a <code>set</code>, or a fetch result. When a mutation fails, each entry it wrote is restored to what it was before, <em>unless something else has written that entry since</em>. An entry that was written since keeps that write.</p>
+<p>That rule is what makes concurrent mutations safe:</p>
+<ul><li>a later optimistic mutation's placeholder survives an earlier mutation's rollback, even on the same entry;</li><li>a fetch result that arrived in the meantime is newer than the failed closure and is kept;</li><li>a later mutation that wrote directly on top of the failed one inherits its restore point, so if it fails too the entry goes back to before both.</li></ul>
+<p>Stamps are compared, never contents, so two writes of equal data are still distinguishable. This behaviour is covered by the optimistic-rollback contract scenario on all three platforms.</p>
+<h2 id="the-offline-queue">The offline queue<a class="anchor" href="#the-offline-queue" aria-label="Link to this section">#</a></h2>
+<p>A mutation marked <code>idempotent</code> that fails with a network error while the <code>Connectivity</code> port says the device is offline is not lost. It is appended to a persisted queue (the <code>Kv</code> key <code>keel.query.queue</code>) with its parameters and an idempotency key, and replayed in order when connectivity returns. The request carries an <code>Idempotency-Key</code> header that stays the same across retries and replays, so a server can tell a repeat from a second item.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[keel::mutation(key = "remote-todos:{list}", idempotent)]
+pub async fn post_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt; Result&lt;RemoteTodo, RemoteError&gt; {
+    // …
+    if let Some(key) = keel::query::idempotency_key() {
+        request = request.with_header("Idempotency-Key", key.to_string());
+    }
+    // …
+}</code></pre></div>
+<p>A mutation that is not <code>idempotent</code> fails immediately when offline. While a queued call waits, the optimistic placeholder stays visible, and the caller's <code>await</code> keeps waiting until the network returns and the request is replayed.</p>
+<h2 id="persistence">Persistence<a class="anchor" href="#persistence" aria-label="Link to this section">#</a></h2>
+<p>Entries marked <code>persist</code> are written to the <code>Kv</code> port after each successful fetch (debounced, 250 ms) and read back when the core starts. Each entry stores the schema hash it was written under, and an entry from a different schema is dropped rather than decoded wrongly.</p>
+<h2 id="testing-without-a-network">Testing without a network<a class="anchor" href="#testing-without-a-network" aria-label="Link to this section">#</a></h2>
+<p>Because the network is a port, a query is tested with a scripted fake and no sockets. <code>FakeHttp</code> answers from rules and records every request, including a flaky endpoint:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">let http = FakeHttp::new();
+// two timeouts, then success for ever after
+http.respond_sequence("https://x.test/a", [Err(HttpError::Timeout), Err(HttpError::Timeout)]);
+http.respond("https://x.test/a", HttpResponse::new(200, b"ok".to_vec()));</code></pre></div>
+<p>Pair it with <code>FakeClock</code> to advance time and <code>ScriptedConnectivity</code> to go offline. <a href="ports.html">Ports &amp; adapters</a> lists them all.</p>
+<h2 id="see-it-run">See it run<a class="anchor" href="#see-it-run" aria-label="Link to this section">#</a></h2>
+<p>The playground's <strong>Remote</strong> tab on every platform is this page in motion: a cached query, optimistic adds that roll back when the server refuses, and an <strong>Offline</strong> switch that queues writes and replays them on reconnect. Its source is <a href="https://github.com/shreypdev/keel/blob/main/examples/playground/core/src/remote.rs" rel="noopener"><code class="wrap">examples/playground/core/src/remote.rs</code></a>.</p>
+
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="concepts.html"><span>Previous</span><b>Core concepts</b></a>
+    <a class="next" href="ports.html"><span>Next</span><b>Ports &amp; adapters</b></a>
+  </nav>
+  </article>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#why-the-data-layer-is-in-the-core">Why the data layer is in the core</a></li><li><a href="#defining-a-query">Defining a query</a></li><li><a href="#observing-a-query">Observing a query</a></li><li><a href="#staleness-refetch-and-dedup">Staleness, refetch and dedup</a></li><li><a href="#retry-with-jitter">Retry with jitter</a></li><li><a href="#mutations">Mutations</a></li><li><a href="#the-offline-queue">The offline queue</a></li><li><a href="#persistence">Persistence</a></li><li><a href="#testing-without-a-network">Testing without a network</a></li><li><a href="#see-it-run">See it run</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

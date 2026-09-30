@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API overview, Swift · Keel docs</title>
+<meta name="description" content="What Keel's generated Swift looks like: records, enums, errors, objects, stores, query handles and ports, and how the KeelRuntime package loads the core.">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://shreypdev.github.io/keel/docs/api-swift.html">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap">
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a class="hide-sm" href=".././">Home</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    </nav>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html" aria-current="page">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html" aria-current="page">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <article id="main" class="prose">
+    <p class="crumb">API overview</p>
+    <h1 class="display">API overview, Swift</h1>
+    <p class="lede">Generated Swift is written the way a Swift engineer would write it by hand: value types, typed throws, async/await, AsyncSequence and an @Observable store. Swift 6 language mode, strict concurrency, no Objective-C.</p>
+<p><code>keel bindgen</code> writes a Swift package (<code>Sources/&lt;Module&gt;/Generated/*.swift</code> and a <code>Package.swift</code>) that depends only on <code>KeelRuntime</code>. The shapes below come from the playground's generated code and the specification (§10.1).</p>
+<h2 id="loading-the-core">Loading the core<a class="anchor" href="#loading-the-core" aria-label="Link to this section">#</a></h2>
+<p>Attach the app to its core once, before any store is created. The runtime checks the core's schema hash against the one the bindings were generated from and throws a clear error if they differ.</p>
+<div class="code"><div class="code-bar"><span>KeelBootstrap.swift</span></div><pre><code data-lang="swift">import KeelRuntime
+import PlaygroundCore
+
+@MainActor
+static func start() throws {
+    let adapters = Adapters.platformDefault              // URLSession, Keychain, files, …
+        .replacing(PlaygroundNetwork.shared)             // swap one port
+    try KeelCore.load(.inproc(adapters: adapters, expectedSchemaHash: KeelIds.schemaHash))
+}</code></pre></div>
+<p>In debug builds you can attach to the core that <code>keel dev</code> serves instead, with <code class="wrap">KeelCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: KeelIds.schemaHash))</code>. After loading, every generated type defaults to the shared core: <code>try Todos()</code> is <code>try Todos(ctx: .shared)</code>.</p>
+<h2 id="type-mapping">Type mapping<a class="anchor" href="#type-mapping" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>Rust</th><th>Swift</th></tr></thead><tbody><tr><td><code>bool</code>, <code>f32</code>, <code>f64</code></td><td><code>Bool</code>, <code>Float</code>, <code>Double</code></td></tr><tr><td><code>i8</code> … <code>i64</code>, <code>u8</code> … <code>u64</code></td><td><code>Int8</code> … <code>Int64</code>, <code>UInt8</code> … <code>UInt64</code></td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>String</code>, <code>[UInt8]</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Date</code>, <code>UUID</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T?</code>, <code>[T]</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>[K: V]</code></td></tr><tr><td>record, enum, error</td><td><code>struct</code>, <code>enum</code>, <code>enum</code> conforming to <code>Error</code></td></tr></tbody></table></div>
+<p>Names follow the platform: Rust <code>snake_case</code> becomes <code>camelCase</code> for methods and fields and <code>PascalCase</code> for types, and enum variants become <code>lowerCamel</code> cases.</p>
+<h2 id="records">Records<a class="anchor" href="#records" aria-label="Link to this section">#</a></h2>
+<p>A record is a <code>struct</code>: <code>Sendable</code>, <code>Hashable</code> and <code>Codable</code>, with a memberwise initializer.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">/// One item of the to-do list.
+public struct Todo: KeelRecord, Sendable, Hashable, Codable {
+    public var id: UUID
+    public var title: String
+    public var done: Bool
+
+    public init(id: UUID, title: String, done: Bool)
+}</code></pre></div>
+<p>The wire codec (<code>keelEncode</code>, <code>keelDecode</code>) is generated beside it and is not something you call.</p>
+<h2 id="enums">Enums<a class="anchor" href="#enums" aria-label="Link to this section">#</a></h2>
+<p>A unit enum is a <code>UInt16</code>-backed <code>enum</code> that is also <code>CaseIterable</code>, so it works directly in a <code>Picker</code>. A data enum carries its fields as associated values.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">public enum Filter: UInt16, KeelEnum, CaseIterable, Sendable, Codable {
+    case all = 0, active = 1, done = 2
+}
+
+public enum Figure: KeelEnum, Sendable, Hashable {
+    case circle(radius: Double)
+    case rect(width: Double, height: Double)
+    case label(String)
+    case empty
+}</code></pre></div>
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
+<p>A Rust <code>#[keel::error]</code> becomes a Swift <code>enum</code> conforming to <code>Error</code> (and <code>LocalizedError</code>, with the message from <code>#[error("…")]</code>). Functions that can fail use <strong>typed throws</strong>.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">public enum TodoError: KeelError, Error, Sendable, Hashable {
+    case emptyTitle            // "the title cannot be empty"
+    // a variant that wraps another error carries it: case http(HttpError)
+}
+
+do {
+    let todo = try await todos.add(title: draft)
+} catch {
+    // `error` is a TodoError, not a string to parse
+    print(error.localizedDescription)
+}</code></pre></div>
+<p>Typed throws needs Swift 6. <code>keel.toml</code> has <code>swift_typed_throws = false</code> for code that must still emit plain <code>throws</code>. A failure the shape of the API cannot express (a core panic, a malformed reply, schema drift) stops the process with a message, because it means the core and the bindings disagree.</p>
+<h2 id="objects-and-functions">Objects and functions<a class="anchor" href="#objects-and-functions" aria-label="Link to this section">#</a></h2>
+<p>An object is a <code>final class</code> holding a handle into the core. Sync methods are plain functions, async methods are <code>async</code>, and stream methods return an <code>AsyncThrowingStream</code>. A free Rust function is a free Swift function that takes the core last.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">public final class Probe: KeelObject, @unchecked Sendable {
+    public init(ctx: KeelCore = .shared) throws            // the constructor `new`
+    public func counters() -&gt; ProbeCounters                // sync
+    public func wait(ms: UInt32) async throws -&gt; UInt32    // async
+    public func ticks(count: UInt32) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;   // stream
+}
+
+public func add(a: Int32, b: Int32, ctx: KeelCore = .shared) -&gt; Int32
+public func area(_ figure: Figure, ctx: KeelCore = .shared) throws(LabError) -&gt; Double</code></pre></div>
+<p>Sync methods on an in-process core call straight into the core (<code>keel_call_sync</code>). Streams apply real backpressure: the generated code grants credit as your loop consumes items, and dropping the stream stops it in the core.</p>
+<p>Release an object with <code>close()</code>, which is idempotent. <code>deinit</code> is only a backstop for objects that go out of scope without it, so hold an object for as long as you need its state.</p>
+<h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
+<p>A store is an <code>@Observable</code> class on the <code>MainActor</code>. Every signal is a <code>public private(set) var</code>, so SwiftUI tracks reads and re-renders when a change-set is applied. Computed signals are read-only properties the core keeps up to date.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">@MainActor @Observable
+public final class Todos: KeelStore {
+    public private(set) var todos: [Todo]
+    public private(set) var filter: Filter
+    public private(set) var visible: [Todo]        // computed by the core
+    public private(set) var remaining: UInt32      // computed by the core
+
+    public init(ctx: KeelCore = .shared) throws
+    public func setFilter(_ f: Filter)
+    public func add(title: String) async throws(TodoError) -&gt; Todo
+}</code></pre></div>
+<p>Reading <code>todos.visible</code> is a plain property read: it never calls into the core. The initial values are decoded from the change-set the core emits when the store starts observing during <code>init</code>.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">struct TodosScreen: View {
+    let todos: Todos
+    var body: some View {
+        List(todos.visible, id: \.id) { todo in
+            Button(todo.title) { todos.toggle(id: todo.id) }
+        }
+        .toolbar { ToolbarItem(placement: .principal) { Text("\(todos.remaining) left") } }
+    }
+}</code></pre></div>
+<h2 id="query-handles">Query handles<a class="anchor" href="#query-handles" aria-label="Link to this section">#</a></h2>
+<p>A <code>#[keel::query]</code> becomes a store with five signals: <code>data</code>, <code>status</code>, <code>error</code>, <code>fetching</code> and <code>updatedAt</code>, plus <code>refetch()</code> and <code>invalidate()</code>. Construct one to observe the query; it fetches when the data is missing or stale.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let inbox = try RemoteTodosQueryHandle(list: "inbox")
+// inbox.data: [RemoteTodo]?, inbox.status, inbox.fetching, inbox.error, inbox.updatedAt</code></pre></div>
+<p>See <a href="queries.html">Queries &amp; mutations</a> for what the core does behind it.</p>
+<h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
+<p>The ten standard ports are implemented by <code>KeelRuntime</code> (<code>URLSession</code>, Keychain, <code>FileManager</code>, <code>NWPathMonitor</code> and so on) and are not generated into your module. A port you define yourself becomes a protocol your app implements and registers with the adapters:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">public protocol Http: KeelPort {
+    func request(_ req: HttpRequest) async throws(HttpError) -&gt; HttpResponse
+}</code></pre></div>
+<p>See <a href="ports.html">Ports &amp; adapters</a> for the defaults and for swapping one.</p>
+<h2 id="threading-and-lifetime">Threading and lifetime<a class="anchor" href="#threading-and-lifetime" aria-label="Link to this section">#</a></h2>
+<ul><li>Change-sets are applied on the <code>MainActor</code>, with per-frame coalescing, so observable properties only ever change on the main thread.</li><li>Stores and objects release their handle on <code>close()</code>, with <code>deinit</code> as the backstop. <code>KeelCore.stats()</code> exposes live handle counts for tests.</li><li>Swift 6 strict concurrency is on. Generated stores are <code>@MainActor</code>; objects are <code>@unchecked Sendable</code> because the core serializes access behind its lock.</li></ul>
+
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="architecture.html"><span>Previous</span><b>Architecture</b></a>
+    <a class="next" href="api-kotlin.html"><span>Next</span><b>Kotlin</b></a>
+  </nav>
+  </article>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#loading-the-core">Loading the core</a></li><li><a href="#type-mapping">Type mapping</a></li><li><a href="#records">Records</a></li><li><a href="#enums">Enums</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects-and-functions">Objects and functions</a></li><li><a href="#stores">Stores</a></li><li><a href="#query-handles">Query handles</a></li><li><a href="#ports">Ports</a></li><li><a href="#threading-and-lifetime">Threading and lifetime</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core concepts · Keel docs</title>
+<meta name="description" content="Stores, signals, computeds, transactions, change-sets and keyed lists, and why a list write costs the change and not the list.">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://shreypdev.github.io/keel/docs/concepts.html">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap">
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a class="hide-sm" href=".././">Home</a>
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    </nav>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html" aria-current="page">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html" aria-current="page">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <article id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1 class="display">Core concepts</h1>
+    <p class="lede">State in Keel lives in the Rust core as signals inside stores. Platforms hold a local mirror, reads never cross the boundary, and a write crosses once per transaction.</p>
+<h2 id="the-building-blocks">The building blocks<a class="anchor" href="#the-building-blocks" aria-label="Link to this section">#</a></h2>
+<p>Everything a platform can see is one of eight kinds of thing, each declared with an attribute. They cross the boundary in one of two ways: by value (copied) or by handle (a reference to something that stays in the core).</p>
+<div class="table-wrap"><table><thead><tr><th>Concept</th><th>Declared with</th><th>Crosses</th></tr></thead><tbody><tr><td>Record</td><td><code>#[keel::api]</code> on a <code>struct</code></td><td>by value</td></tr><tr><td>Enum</td><td><code>#[keel::api]</code> on an <code>enum</code>, unit or data variants</td><td>by value</td></tr><tr><td>Error</td><td><code>#[keel::error]</code> on an <code>enum</code>; adds <code>Display</code> and <code>std::error::Error</code></td><td>by value</td></tr><tr><td>Object</td><td><code>#[keel::api]</code> on an <code>impl</code> block; methods are sync or async</td><td>by handle</td></tr><tr><td>Store</td><td>an object whose struct has <code>#[keel::store]</code>; its signals are mirrored</td><td>by handle</td></tr><tr><td>Port</td><td><code>#[keel::port]</code> on a trait; implemented by the platform or by a Rust fake</td><td>the core calls out to it</td></tr><tr><td>Query, mutation</td><td><code>#[keel::query]</code>, <code>#[keel::mutation]</code> on an <code>async fn</code></td><td>managed by the query client</td></tr><tr><td>Function</td><td><code>#[keel::api]</code> on a free <code>fn</code></td><td>like a method with no receiver</td></tr></tbody></table></div>
+<p>The rest of this page is about stores, because that is where reactive state lives.</p>
+<h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
+<p>A store is a struct of signals with an <code>impl</code> block that says what the platforms can call. The to-do list from the playground is a complete example:</p>
+<div class="code"><div class="code-bar"><span>core/src/todos.rs</span></div><pre><code data-lang="rust">#[keel::store(restore = "Self::assemble")]
+pub struct Todos {
+    next: AtomicU64,                       // private state: not a signal
+    #[keel(key = "id")]
+    todos: Signal&lt;Vec&lt;Todo&gt;&gt;,              // signal 0
+    filter: Signal&lt;Filter&gt;,                // signal 1
+    visible: Computed&lt;Vec&lt;Todo&gt;&gt;,          // signal 2, derived
+    remaining: Computed&lt;u32&gt;,              // signal 3, derived
+}
+
+#[keel::api(store)]
+impl Todos {
+    pub fn new(ctx: Ctx) -&gt; Self { /* … */ }
+    pub async fn add(&amp;self, title: String) -&gt; Result&lt;Todo, TodoError&gt; { /* … */ }
+    pub fn toggle(&amp;self, id: Uuid) { /* … */ }
+    pub fn set_filter(&amp;self, filter: Filter) { self.filter.set(filter); }
+}</code></pre></div>
+<p>A few rules worth knowing up front:</p>
+<ul><li><strong>Signals are the fields of type <code>Signal&lt;T&gt;</code> and <code>Computed&lt;T&gt;</code></strong>, numbered in declaration order (0, 1, 2, …). Other fields are private state: a <code>Ctx</code>, a counter, configuration.</li><li><strong>A store needs a constructor</strong>, a <code>pub fn</code> returning <code>Self</code> or <code>Result&lt;Self, E&gt;</code>. Generated code calls it to create the object in the core and gets back a handle.</li><li><strong>Receivers are <code>&amp;self</code>.</strong> Objects are shared, so mutation goes through signals or a lock. <code>&amp;mut self</code> is rejected with a teaching error (<code>E0020</code>).</li><li><strong>Method arguments and results are wire types</strong>: numbers, strings, bytes, options, vectors, maps, your records and enums, and <code>Result&lt;T, E&gt;</code> where <code>E</code> is a <code>#[keel::error]</code> enum.</li></ul>
+<h2 id="signals">Signals<a class="anchor" href="#signals" aria-label="Link to this section">#</a></h2>
+<p>A <code>Signal&lt;T&gt;</code> holds a value. You read it with <code>get()</code> (a clone) or <code>with(|v| …)</code> (a borrow), and write it with <code>set(value)</code> or <code>update(|v| …)</code>.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">self.filter.set(Filter::Done);                       // replace
+self.todos.update(|list| list.retain(|t| !t.done));  // edit in place
+let open = self.todos.with(|list| list.iter().filter(|t| !t.done).count());</code></pre></div>
+<p>A write outside a transaction is an implicit single-write transaction, so the change is committed and delivered at once. Inside <code>update</code>, the closure holds the value's write lock: it must not read or write the same signal, or read a computed derived from it. A violation panics with a clear message instead of deadlocking.</p>
+<h2 id="computeds">Computeds<a class="anchor" href="#computeds" aria-label="Link to this section">#</a></h2>
+<p>A <code>Computed&lt;T&gt;</code> is a value derived from signals. You name its inputs and give it a function of them:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">let visible = Computed::new((&amp;todos, &amp;filter), |(todos, filter)| {
+    todos.iter().filter(|t| filter.matches(t)).cloned().collect()
+});
+let remaining = Computed::new(&amp;todos, |todos| todos.iter().filter(|t| !t.done).count() as u32);</code></pre></div>
+<p>Inputs are <code>&amp;Signal&lt;A&gt;</code> or <code>&amp;Computed&lt;A&gt;</code>, or a tuple of up to six of them, and the closure receives references. A computed is recomputed in the core, in dependency order, and <strong>pushed in the same change-set as the write that caused it</strong>. The UI never derives anything itself, so it cannot disagree with the core about, say, how many items are left.</p>
+<p>Because a store with computeds cannot be rebuilt from its plain signals automatically, you name a function that assembles it: <code class="wrap">#[keel::store(restore = "Self::assemble")]</code>. The macro tells you when you forget (<code>E0013</code>).</p>
+<h2 id="transactions">Transactions<a class="anchor" href="#transactions" aria-label="Link to this section">#</a></h2>
+<p>When several signals change together, group the writes. Everything inside <code>ctx.txn</code> commits as one transaction, so observers see one consistent change-set and never a half-applied state. The playground's counter changes two signals and derives a third:</p>
+<div class="code"><div class="code-bar"><span>core/src/counter.rs</span></div><pre><code data-lang="rust">pub fn add(&amp;self, amount: i32) {
+    self.ctx.txn(|| {
+        self.count.update(|c| *c = c.saturating_add(amount));
+        self.changes.update(|n| *n = n.saturating_add(1));
+    });   // one change-set carries count, changes and parity
+}</code></pre></div>
+<p>Transactions nest: an inner <code>txn</code> joins the outer one. A change-set is never split, and change-sets are delivered in commit order; for one store they reach the platform one at a time with strictly increasing transaction ids.</p>
+<h2 id="change-sets-and-observation">Change-sets and observation<a class="anchor" href="#change-sets-and-observation" aria-label="Link to this section">#</a></h2>
+<p>A platform does not receive everything. It <strong>observes</strong> signals, and only observed signals that changed are sent. Two details follow from that:</p>
+<ul><li><strong>Observing sends the current value right away</strong>, before the call returns in-process, so a store's initial state arrives as an ordinary change-set. A signal written while unobserved is remembered as pending and sent when someone starts observing it.</li><li><strong>Only what changed is sent.</strong> Writing <code>filter</code> in the to-do store ships <code>filter</code> and the recomputed <code>visible</code>, and nothing else, because <code>todos</code> did not change.</li></ul>
+<p>A signal marked <code>#[keel(no_coalesce)]</code> is delivered on every commit instead of being folded into the latest value. A change-set is a compact binary structure, described on the <a href="architecture.html#the-wire">architecture page</a>.</p>
+<p>For side effects that belong in the core, <code>Effect::new(deps, f)</code> runs <code>f</code> after each commit that dirtied one of its dependencies, and is cancelled when dropped.</p>
+<h2 id="keyed-lists">Keyed lists<a class="anchor" href="#keyed-lists" aria-label="Link to this section">#</a></h2>
+<p>A <code>Signal&lt;Vec&lt;T&gt;&gt;</code> marked <code>#[keel(key = "field")]</code> is a <strong>keyed list</strong>. The key is the identity of a row, and the core sends changes to it as a patch of positional operations instead of the whole list.</p>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Meaning</th></tr></thead><tbody><tr><td><code>Insert { index, item }</code></td><td>put the item at <code>index</code></td></tr><tr><td><code>Remove { index }</code></td><td>take the row at <code>index</code> out</td></tr><tr><td><code>Update { index, item }</code></td><td>replace the row at <code>index</code></td></tr><tr><td><code>Move { from, to }</code></td><td>take the row at <code>from</code>, then place it so it ends at <code>to</code></td></tr><tr><td><code>Clear</code></td><td>empty the list</td></tr></tbody></table></div>
+<p>The platform applies the operations in order to its own copy of the list. If a patch ever disagrees with that copy (an index out of bounds), the platform treats the signal as out of sync and observes it again, which resends the full value.</p>
+<h3 id="why-a-list-write-costs-the-change-not-the-list">Why a list write costs the change, not the list<a class="anchor" href="#why-a-list-write-costs-the-change-not-the-list" aria-label="Link to this section">#</a></h3>
+<p>How the core produces the patch decides the cost. There are two ways.</p>
+<p><strong>Recorded operations</strong> are the fast path. <code>Signal&lt;Vec&lt;T&gt;&gt;</code> has <code>push</code>, <code>insert</code>, <code>remove</code>, <code>update_at</code>, <code>move_item</code> and <code>clear</code>. Each one mutates the list and appends the operation it performed to a log; at commit, that log <em>is</em> the patch. No key is hashed and no item is compared, so the cost is the change, not the length of the list.</p>
+<div class="code"><div class="code-bar"><span>examples/playground/core/src/biglist.rs</span></div><pre><code data-lang="rust">/// Inserts a new row so that it ends at `index`. One keyed `Insert`.
+pub fn insert_at(&amp;self, index: u32, label: String) -&gt; Result&lt;u32, ListError&gt; {
+    // …check the index…
+    let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+    self.items.insert(index as usize, Item { id, label, version: 0 });
+    Ok(id)
+}</code></pre></div>
+<p><strong>Raw writes</strong> (<code>set</code>, <code>update</code>, <code>replace</code>) are the fallback. They are always correct, but the core cannot know what you did, so at commit it diffs the new list against what the platform has: hash every key, compare the surviving rows. That is O(list). It also falls back to sending the whole value when the two lists share no key, a key occurs twice, or more than half of the old rows were removed.</p>
+<p>The difference is measured. On a 10,000-row observed list, median times from the benchmark suite (host-measured, Apple M5 Pro):</p>
+<div class="table-wrap"><table><thead><tr><th>One change to 10,000 rows</th><th>Diffed</th><th>Recorded</th></tr></thead><tbody><tr><td>Insert</td><td>536.16 µs</td><td><strong>6.31 µs</strong></td></tr><tr><td>Update</td><td>532.32 µs</td><td><strong>272.3 ns</strong></td></tr><tr><td>Move</td><td>702.95 µs</td><td><strong>9.74 µs</strong></td></tr></tbody></table></div>
+<p>What remains at 10,000 rows is the memory move of the vector's tail, which <code>Vec::insert</code> needs in the core and which is paid twice (the list and its baseline): about 0.6 ns per row. The same insert into 100 rows is 359 ns and into 1,000 rows is 770 ns. The decision record is <a href="https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md" rel="noopener">ADR-027</a>.</p>
+<div class="callout"><p><strong>Rule of thumb.</strong> Inside a store, reach for <code>push</code>, <code>insert</code>, <code>remove</code>, <code>update_at</code> and <code>move_item</code> when you change one row. Use <code>set</code> or <code>update</code> when you genuinely replace the list (a refresh from the server) or make an edit no recorded operation can express. A transaction that mixes both is diffed as a whole.</p>
+</div>
+<h2 id="what-the-platforms-see">What the platforms see<a class="anchor" href="#what-the-platforms-see" aria-label="Link to this section">#</a></h2>
+<p>Each platform runtime holds a <strong>mirror</strong>: store handle, then signal id, then the decoded value. Generated code exposes the mirror in the platform's own idiom (an <code>@Observable</code> property, a <code>StateFlow</code>, a <code>Signal</code> with <code>useSignal</code>), so reading is a local memory read that never calls into the core.</p>
+<p>Change-sets are applied on the main thread with per-frame coalescing: Swift on the <code>MainActor</code>, Kotlin on <code>Dispatchers.Main.immediate</code>, and TypeScript by batching into one flush per macrotask. A store is an object with a lifetime: release it explicitly with <code>close()</code> (Swift and Kotlin use <code>deinit</code> and a <code>Cleaner</code> as backstops, TypeScript a <code>FinalizationRegistry</code>), and <code>KeelCore.stats()</code> shows live handle counts.</p>
+<h2 id="snapshot-and-restore">Snapshot and restore<a class="anchor" href="#snapshot-and-restore" aria-label="Link to this section">#</a></h2>
+<p>The core can snapshot every store's plain signals (computeds are left out and recomputed) and restore them, which is how a web page recovers after a crash and how tests rebuild state. Restore keeps the same handles valid, so the platform's references keep working, and it cancels calls that were running on the stores it replaced. This is why the <code>restore</code> function above rebuilds computeds from signals, and why the to-do store continues its id counter above the largest id in the snapshot.</p>
+<h2 id="determinism">Determinism<a class="anchor" href="#determinism" aria-label="Link to this section">#</a></h2>
+<p>The core reads no clock and no random source and starts no thread of its own. Time comes from the <code>Clock</code> port, delays from <code>ctx.sleep</code> (which goes through the <code>Timer</code> port), randomness from <code>Rng</code>, the network from <code>Http</code>. That is rule R12, and it is why every scenario can be driven with deterministic fakes in Rust and with in-memory adapters on each platform. The to-do store's ids come from a counter for the same reason. See <a href="ports.html">Ports &amp; adapters</a>.</p>
+
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="getting-started.html"><span>Previous</span><b>Getting started</b></a>
+    <a class="next" href="queries.html"><span>Next</span><b>Queries &amp; mutations</b></a>
+  </nav>
+  </article>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-building-blocks">The building blocks</a></li><li><a href="#stores">Stores</a></li><li><a href="#signals">Signals</a></li><li><a href="#computeds">Computeds</a></li><li><a href="#transactions">Transactions</a></li><li><a href="#change-sets-and-observation">Change-sets and observation</a></li><li><a href="#keyed-lists">Keyed lists</a></li><li><a href="#what-the-platforms-see">What the platforms see</a></li><li><a href="#snapshot-and-restore">Snapshot and restore</a></li><li><a href="#determinism">Determinism</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>
