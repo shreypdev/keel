@@ -98,10 +98,10 @@ macro_rules! bench_store {
             /// one row per call; `bench_list_reset` starts over.
             pub fn bench_list_insert(&self, i: u32) {
                 let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-                self.rows.update(|rows| {
-                    let at = (i as usize).min(rows.len());
-                    rows.insert(at, Item::numbered(id));
-                });
+                // The recorded insert keeps the change-set O(change) (ADR-027): this hook is
+                // what the device benchmarks time.
+                let at = (i as usize).min(self.rows.with(Vec::len));
+                self.rows.insert(at, Item::numbered(id));
             }
 
             /// Puts the list back to its [`ROWS`] starting rows and writes zero to every counter,
