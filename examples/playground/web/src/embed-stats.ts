@@ -264,16 +264,22 @@ export const STATS_INTERVAL_MS = 500;
 
 /**
  * Starts measuring `mirror` and posts a {@link StatsMessage} to `parent` every
- * {@link STATS_INTERVAL_MS}. Call it once the stores are created, so their loading is not
- * measured. Returns a function that stops both the posting and the measuring.
+ * {@link STATS_INTERVAL_MS}, addressed to `targetOrigin` (the embedding page's origin; the
+ * landing page is served from this page's own origin, so `location.origin` is exact and a frame
+ * from anywhere else never receives the message). Call it once the stores are created, so their
+ * loading is not measured. Returns a function that stops both the posting and the measuring.
  */
-export function startStatsPoster(mirror: MirrorLike, parent: MessageTarget, now: () => number = () => performance.now()): () => void {
+export function startStatsPoster(
+  mirror: MirrorLike,
+  parent: MessageTarget,
+  now: () => number = () => performance.now(),
+  targetOrigin = "*",
+): () => void {
   const resolutionUs = timerResolutionUs(now);
   const stats = new StatsWindow({ now });
   const uninstall = instrumentMirror(mirror, (us, changeSets) => stats.record(us, changeSets), now);
   const timer = setInterval(() => {
-    // The numbers are not secret and the landing page's origin is not known here, hence "*".
-    parent.postMessage(toStatsMessage(stats.snapshot(), resolutionUs), "*");
+    parent.postMessage(toStatsMessage(stats.snapshot(), resolutionUs), targetOrigin);
   }, STATS_INTERVAL_MS);
   return () => {
     clearInterval(timer);

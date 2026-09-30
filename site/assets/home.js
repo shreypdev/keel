@@ -11,7 +11,11 @@
   if (live) {
     var mount = $("[data-live-mount]", live), note = $("[data-live-note]", live), src = mount && mount.getAttribute("data-src");
     var stat = { rate: $('[data-stat="rate"]', live), p50: $('[data-stat="p50"]', live), p99: $('[data-stat="p99"]', live) };
-    var pushBtn = $("[data-push-it]", live), frame = null, gotStats = false, giveUp = 0, step = 0;
+    // Browsers clamp performance.now() to a step of at least 100 µs unless the page is cross-origin isolated (Chrome:
+    // 5 µs then), and GitHub Pages cannot send the isolating headers. The playground measures its own step, but a
+    // frozen or unmeasurable clock reports 0, so the floor below is what is known and the counters never claim finer.
+    var floorUs = window.crossOriginIsolated ? 5 : 100;
+    var pushBtn = $("[data-push-it]", live), frame = null, gotStats = false, giveUp = 0, step = floorUs;
     var theme = function () { return doc.documentElement.dataset.theme === "light" ? "light" : "dark"; };
     var fmt = function (us) {
       if (!isFinite(us) || us < 0) return "–";
@@ -39,7 +43,7 @@
       var r = Number(d.changeSetsPerSec), a = Number(d.applyP50Us), b = Number(d.applyP99Us);
       if (!isFinite(r) || !isFinite(a) || !isFinite(b)) return;
       if (!gotStats) { gotStats = true; clearTimeout(giveUp); if (note) note.hidden = true; }
-      if (isFinite(Number(d.timerResolutionUs))) step = Number(d.timerResolutionUs);
+      if (isFinite(Number(d.timerResolutionUs))) step = Math.max(floorUs, Number(d.timerResolutionUs));
       stat.rate.textContent = r.toFixed(1); stat.p50.textContent = fmt(a); stat.p99.textContent = fmt(b);
     });
     doc.addEventListener("keel:theme", function (e) {

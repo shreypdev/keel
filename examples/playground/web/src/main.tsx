@@ -20,7 +20,8 @@ const root = createRoot(document.getElementById("root") as HTMLElement);
 startKeel().then(
   (playground) => {
     // After the stores exist, so loading them is not among the measured change-sets.
-    if (parent !== null) startStatsPoster(KeelCore.shared.mirror, parent);
+    // The landing page embeds this page from the same origin; a frame from any other origin gets no stats.
+    if (parent !== null) startStatsPoster(KeelCore.shared.mirror, parent, () => performance.now(), location.origin);
     root.render(
       <StrictMode>
         <App playground={playground} params={params} />

@@ -427,6 +427,13 @@ describe("startStatsPoster", () => {
     stop();
     vi.advanceTimersByTime(5000);
     expect(posted).toHaveLength(3);
+
+    // The page passes its own origin, so the message is addressed to the embedding page and nowhere else.
+    posted.length = 0;
+    const stopScoped = startStatsPoster(mirror, { postMessage: (message, origin) => posted.push({ message, origin }) }, clock.now, "https://example.test");
+    vi.advanceTimersByTime(500);
+    expect(posted.map((p) => p.origin)).toEqual(["https://example.test"]);
+    stopScoped();
   });
 
   test("the messages carry the measured numbers", () => {

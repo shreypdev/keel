@@ -88,7 +88,7 @@ The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the
 
 ## 2. Install the CLI
 
-Pick one channel. Homebrew, the curl installer and npm put a prebuilt `keel` binary on your machine; cargo builds it from source with Rust 1.85 or newer.
+Pick one channel. Homebrew, the curl installer and npm put a prebuilt `keel` binary on your machine; cargo builds it from source with Rust 1.85 or newer. The prebuilt channels install the latest tagged release, so they work from v1.0.0 onwards; cargo builds from the repository at any time.
 
 | Channel | Command |
 | --- | --- |
@@ -2088,7 +2088,7 @@ planned
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
 - crates.io publishingPublish the crates under a registry-safe prefix; needs its own ADR for the renames.
-- Frame-coalesced deliveryPlanned in ADR-031, not shipped. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed.
+- Frame-coalesced deliveryNot shipped, and a runtime-model change that needs an ADR first. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed.
 - Maven Central for the Kotlin runtimeDepend on it from Gradle without a local build.
 - Windows CLIRelease binaries and docs for the keel command on Windows.
 - keel upgradeMove a project to a newer Keel version.

@@ -101,6 +101,9 @@ All live in `site/scripts/` and run from the repository root.
   global pass when the registry scope is final.
 * **Pages that are linked before they exist** go in `data/pending.json`; the checker reports those links as notes
   instead of failures and tells you to remove the entry once the page exists.
+* **The install block's release note** (`.install-note`, in both install blocks of `index.html`, and the matching
+  sentence in `docs/getting-started.html`) says that brew, npm and curl need the first tagged release. Remove it
+  when v1.0.0 is out and the three channels have been smoke-tested.
 
 ## The CI flow (`.github/workflows/site.yml`)
 
@@ -159,5 +162,8 @@ accessibility, best practices and SEO); run Lighthouse against the deployed URL 
 
 * The live demo's apply time comes from `performance.now()`, which browsers round (about 0.1 ms in Chrome when
   the page is not cross-origin isolated, about 1 ms in Firefox and Safari). GitHub Pages cannot send the headers
-  that lift this, so the landing page shows "under" the clock step for the smallest values and says so.
+  that lift this, so the landing page shows "under" the clock step for the smallest values and says so. The
+  playground measures the step it sees and reports it with the stats; `home.js` never trusts a step below 100 µs
+  (5 µs when the page is cross-origin isolated), because a frozen or unmeasurable clock reports 0 and the counter
+  must not turn that into a sub-microsecond claim.
 * Device-measured benchmark rows are not claimed anywhere on the site; they are a roadmap item.

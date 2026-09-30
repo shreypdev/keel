@@ -46,7 +46,7 @@
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
     <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="docs/">Docs</a>
       <a href="blog/">Blog</a>
@@ -83,6 +83,7 @@
         <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @undra/cli</code><button class="copy" type="button" data-copy="npm install -g @undra/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/undra/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/undra undra-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/undra undra-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <p class="install-note">brew, npm and curl ship with the v1.0.0 release; until it is tagged, use cargo.</p>
       </div>
     </div>
 
@@ -316,7 +317,7 @@
       <div class="live-frame">
         <div class="frame-bar"><span>playground · 10k list</span></div>
         <div class="frame-body" data-live-mount data-src="playground/?screen=list&amp;stream=1&amp;embed=1">
-          <p class="live-fallback" data-live-note>The demo loads as you scroll.</p>
+          <p class="live-fallback" data-live-note><span>The demo loads as you scroll.</span><noscript>The live demo needs JavaScript.</noscript></p>
         </div>
       </div>
       <div class="live-side">
@@ -631,6 +632,7 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
         <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @undra/cli</code><button class="copy" type="button" data-copy="npm install -g @undra/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/undra/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
         <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/undra undra-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/undra undra-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <p class="install-note">brew, npm and curl ship with the v1.0.0 release; until it is tagged, use cargo.</p>
       </div>
       <div class="cta-row">
         <a class="btn btn-primary" href="docs/getting-started.html">Read the docs</a>
@@ -646,7 +648,7 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
   <div class="wrap">
     <div class="footer-grid">
       <div>
-        <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
         <p class="footer-note">The Rust core for native apps. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>

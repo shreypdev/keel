@@ -40,7 +40,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
     <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="../docs/" aria-current="page">Docs</a>
       <a href="../blog/">Blog</a>
@@ -85,7 +85,7 @@ sudo xcodebuild -license accept
 xcodebuild -downloadPlatform iOS        # simulator runtime, one time, large</code></pre></div>
 <p>The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the emulator and a system image). The <a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">onboarding guide</a> has the exact <code>sdkmanager</code> line and an <code>avdmanager</code> line that creates the <code>keel</code> emulator used throughout the project.</p>
 <h2 id="2-install-the-cli">2. Install the CLI<a class="anchor" href="#2-install-the-cli" aria-label="Link to this section">#</a></h2>
-<p>Pick one channel. Homebrew, the curl installer and npm put a prebuilt <code>keel</code> binary on your machine; cargo builds it from source with Rust 1.85 or newer.</p>
+<p>Pick one channel. Homebrew, the curl installer and npm put a prebuilt <code>keel</code> binary on your machine; cargo builds it from source with Rust 1.85 or newer. The prebuilt channels install the latest tagged release, so they work from v1.0.0 onwards; cargo builds from the repository at any time.</p>
 <div class="table-wrap"><table><thead><tr><th>Channel</th><th>Command</th></tr></thead><tbody><tr><td>Homebrew</td><td><code class="cw">brew install shreypdev/keel/keel</code></td></tr><tr><td>npm</td><td><code class="cw">npm install -g @keel/cli</code></td></tr><tr><td>curl</td><td><code class="cw">curl -fsSL https://shreypdev.github.io/keel/install.sh | sh</code></td></tr><tr><td>cargo</td><td><code class="cw">cargo install --git https://github.com/shreypdev/keel keel-cli</code></td></tr></tbody></table></div>
 <p>The curl installer detects your OS and architecture, verifies the download against the release checksums, installs to <code>~/.keel/bin</code> and prints the line to add to your <code>PATH</code>. It never uses <code>sudo</code>.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel --version
@@ -146,7 +146,7 @@ cd examples/playground/web &amp;&amp; npm install &amp;&amp; npm run dev</code><
   <div class="wrap">
     <div class="footer-grid">
       <div>
-        <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
         <p class="footer-note">The Rust core for native apps. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>

@@ -37,6 +37,7 @@
 .cmd code::-webkit-scrollbar { display: none; }
 .cmd code::before { content: "$ "; color: var(--accent); user-select: none; }
 .cmd .copy { height: 32px; padding: 0 10px; border-color: var(--line); background: var(--surface); }
+.install-note { margin: 10px 2px 0; font: 400 .78rem/1.5 var(--font-mono); color: var(--text-3); }
 
 /* the stage (hero diagram, driven by hero.js) */
 .stage-wrap { margin-top: clamp(40px, 6vw, 72px); }
@@ -135,6 +136,7 @@
 .frame-body { position: relative; height: 470px; background: var(--bg); }
 .frame-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .live-fallback { position: absolute; inset: 0; z-index: 1; margin: 0; padding: 24px; display: grid; place-content: center; text-align: center; font-size: .95rem; color: var(--text-2); background: var(--bg); }
+html:not(.js) .live-fallback > span { display: none; }
 .counters { display: grid; gap: 10px; margin: 0; }
 .counters > div { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .counters dt { font: 500 .72rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); }
@@ -256,4 +258,5 @@
 .final-card h2 { font-size: clamp(2.1rem, 5vw, 3.6rem); max-width: 16ch; margin-inline: auto; }
 .final-card .install { max-width: 620px; margin: 28px auto 0; }
 .final-card .install .tabs-head { justify-content: center; }
+.final-card .install-note { text-align: center; }
 .final-card .cta-row { justify-content: center; }
