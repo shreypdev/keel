@@ -1269,16 +1269,8 @@ impl Runtime {
                 ),
             );
         }
-        match self.host_port_call(port_id, method_id, id, &args) {
-            PortCallOutcome::Sync(reply) => {
-                let result = decode_port_reply(id, &reply);
-                self.finish_port_call(id, result);
-            }
-            PortCallOutcome::Unavailable => {
-                self.finish_port_call(id, Err(PortError::Unavailable));
-            }
-            PortCallOutcome::Async => {}
-        }
+        let outcome = self.host_port_call(port_id, method_id, id, &args);
+        self.apply_port_outcome(id, outcome);
         future
     }
 
@@ -1298,23 +1290,31 @@ impl Runtime {
         }
         let (id, slot) = self.ports.begin(self.timers.now_ns());
         let mut future = PortFuture::new(slot, self.ports.clone(), id);
-        match self.host_port_call(port_id, method_id, id, args) {
-            PortCallOutcome::Sync(reply) => {
-                let result = decode_port_reply(id, &reply);
-                self.finish_port_call(id, result);
-            }
-            PortCallOutcome::Unavailable => {
-                self.finish_port_call(id, Err(PortError::Unavailable));
-            }
-            PortCallOutcome::Async => {}
-        }
+        let outcome = self.host_port_call(port_id, method_id, id, args);
+        self.apply_port_outcome(id, outcome);
         // Dropping `future` abandons a call that has not been answered.
         future.try_take().unwrap_or(Err(PortError::Unavailable))
     }
 
-    fn finish_port_call(&self, id: u32, result: Result<Vec<u8>, PortError>) {
-        Stats::inc(&self.stats.port_replies);
-        if let Completion::Delivered { started_ns } = self.ports.complete(id, result) {
+    /// Applies the host's immediate answer to port call `id`.
+    fn apply_port_outcome(&self, id: u32, outcome: PortCallOutcome) {
+        match outcome {
+            PortCallOutcome::Sync(reply) => {
+                Stats::inc(&self.stats.port_replies);
+                self.finish_port_call(id, decode_port_reply(id, &reply));
+            }
+            PortCallOutcome::Unavailable => {
+                self.finish_port_call(id, Err(PortError::Unavailable));
+            }
+            // The reply will arrive through `port_reply`.
+            PortCallOutcome::Async => {}
+        }
+    }
+
+    /// Completes port call `id` and logs its duration in dev mode (SPEC 5.10).
+    fn finish_port_call(&self, id: u32, result: Result<Vec<u8>, PortError>) -> Completion {
+        let completion = self.ports.complete(id, result);
+        if let Completion::Delivered { started_ns } = completion {
             if self.dev {
                 let elapsed = self.timers.now_ns().saturating_sub(started_ns);
                 self.log(
@@ -1324,6 +1324,7 @@ impl Runtime {
                 );
             }
         }
+        completion
     }
 
     /// The host answers a port call (`PortReply` payload, SPEC 3.6). Never takes the core
@@ -1350,17 +1351,8 @@ impl Runtime {
         };
         Stats::inc(&self.stats.port_replies);
         let id = reply.port_call_id;
-        match self.ports.complete(id, result) {
-            Completion::Delivered { started_ns } => {
-                if self.dev {
-                    let elapsed = self.timers.now_ns().saturating_sub(started_ns);
-                    self.log(
-                        DEBUG,
-                        "keel::devtools",
-                        &format!("port call id={id} completed in {elapsed} ns"),
-                    );
-                }
-            }
+        match self.finish_port_call(id, result) {
+            Completion::Delivered { .. } => {}
             Completion::Discarded => self.log(
                 DEBUG,
                 "keel::runtime",

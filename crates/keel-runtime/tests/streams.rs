@@ -227,3 +227,60 @@ fn stream_reply_precedes_every_item() {
     assert_eq!(t.host().reply_count(), 1);
     assert!(t.host().take_stream_items().is_empty());
 }
+
+/// A host that grants credit from inside the callback that announces the stream, the way a
+/// generated binding does ("grant 16 on subscribe"). `stream_credit` needs no core lock, so
+/// this is allowed, and it only works if the call is registered before status 4 is sent.
+struct CreditOnOpen {
+    rt: std::sync::OnceLock<std::sync::Weak<keel_runtime::Runtime>>,
+    items: parking_lot::Mutex<Vec<(StreamFlag, Vec<u8>)>>,
+}
+
+impl keel_runtime::Host for CreditOnOpen {
+    fn reply(&self, call_id: u32, payload: &[u8]) {
+        let reply = keel_runtime::testing::decode_reply(payload);
+        if reply.status == ReplyStatus::StreamOpened {
+            if let Some(rt) = self.rt.get().and_then(std::sync::Weak::upgrade) {
+                rt.stream_credit(call_id, 100);
+            }
+        }
+    }
+    fn change_set(&self, _: &[u8]) {}
+    fn stream_item(&self, _: u32, payload: &[u8]) {
+        let item = keel_wire::payload::StreamItem::decode(&mut Reader::new(payload)).unwrap();
+        self.items.lock().push((item.flag, item.body.to_vec()));
+    }
+    fn port_call(&self, _: u32, _: u32, _: u32, _: &[u8]) -> keel_runtime::PortCallOutcome {
+        keel_runtime::PortCallOutcome::Unavailable
+    }
+    fn log(&self, _: u8, _: &str, _: &str) {}
+}
+
+#[test]
+fn credit_granted_from_inside_the_status_4_callback_is_not_lost() {
+    let host = std::sync::Arc::new(CreditOnOpen {
+        rt: std::sync::OnceLock::new(),
+        items: parking_lot::Mutex::new(Vec::new()),
+    });
+    let rt = keel_runtime::Runtime::new(
+        keel_runtime::RuntimeConfig {
+            core_threads: 0,
+            ..keel_runtime::RuntimeConfig::default()
+        },
+        host.clone(),
+    )
+    .unwrap();
+    host.rt.set(std::sync::Arc::downgrade(&rt)).unwrap();
+    let handle = new_counter_rt(&rt, 0, "");
+    assert_eq!(
+        rt.call(&counter_call_payload(handle, TICKS, 5, &enc(&3_u32))),
+        0
+    );
+    rt.run_pending();
+    assert_eq!(
+        *host.items.lock(),
+        [item(0), item(1), item(2), end()],
+        "the credit granted during the reply reached the stream"
+    );
+    rt.shutdown();
+}

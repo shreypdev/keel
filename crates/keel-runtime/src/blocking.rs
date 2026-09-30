@@ -144,6 +144,12 @@ mod native {
             self.shared.queue.lock().spawned
         }
 
+        /// Workers currently waiting for a job.
+        #[cfg(test)]
+        pub(crate) fn shared_idle(&self) -> usize {
+            self.shared.queue.lock().idle
+        }
+
         /// Queues `job`; starts a worker if none is idle and the pool is below its maximum.
         /// Returns `false` (dropping the job) after shutdown.
         pub(crate) fn submit(&self, job: Job) -> bool {
@@ -153,7 +159,11 @@ mod native {
                     return false;
                 }
                 q.jobs.push_back(job);
-                if q.idle == 0 && q.spawned < self.max {
+                // Start a worker when more jobs are queued than idle workers can take. (An
+                // idle worker that has been notified but has not yet woken still counts as
+                // idle, so "no idle workers" alone would leave a second job waiting behind
+                // the first.)
+                if q.jobs.len() > q.idle && q.spawned < self.max {
                     q.spawned += 1;
                     Some(q.spawned)
                 } else {
@@ -354,6 +364,36 @@ mod tests {
         assert!(pool.spawned_threads() <= 2);
         pool.shutdown();
         assert!(!pool.submit(Box::new(|| {})), "no jobs after shutdown");
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn two_jobs_submitted_back_to_back_to_an_idle_pool_run_concurrently() {
+        // One idle worker exists; two jobs that need each other (a barrier) arrive together.
+        // If the second waited behind the first the barrier could never be crossed.
+        for _ in 0..50 {
+            let pool = native::Pool::new(2);
+            let (warm_tx, warm_rx) = std::sync::mpsc::channel();
+            pool.submit(Box::new(move || warm_tx.send(()).unwrap()));
+            warm_rx.recv().unwrap();
+            while pool.shared_idle() == 0 {
+                std::thread::yield_now();
+            }
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let (tx, rx) = std::sync::mpsc::channel();
+            for _ in 0..2 {
+                let (barrier, tx) = (barrier.clone(), tx.clone());
+                pool.submit(Box::new(move || {
+                    barrier.wait();
+                    tx.send(()).unwrap();
+                }));
+            }
+            for _ in 0..2 {
+                rx.recv_timeout(std::time::Duration::from_secs(20))
+                    .expect("both jobs ran at the same time");
+            }
+            pool.shutdown();
+        }
     }
 
     #[cfg(not(target_family = "wasm"))]
