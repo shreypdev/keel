@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,813 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,836 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 832 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -31,9 +31,18 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 ## In progress
 
 - keel-macros review fixes (H1 schema-identity checks, H2 typed port errors; ADR-023) — `wt/macros-fixes`.
-- bindgen standard-library filter (ADR-024) — `wt/stdlib-filter`.
+- playground: core + 3 apps + §14 contract scenarios ×3 — `wt/playground` (agent).
+- re-reviews in flight: keel-runtime fixes; adversarial review of keel-ffi.
 
 ## Landed since takeover
+
+- **bindgen stdlib filter merged** (ADR-024): per-app bindings no longer duplicate the
+  standard ports/records — references point at each runtime's own types (exact-shape
+  matching; E0052 for a name collision with a foreign id). Template bindings 2,836→942
+  lines. New `stdlib` golden compiled+run for TS and Kotlin. Open (recorded in ADR-024):
+  Swift runtime could make its Port* types public to drop the reachable-only fallback.
+- **CI workflows added** (.github/workflows/ci.yml): Linux rust gates, TS, Kotlin+JNI,
+  wasm acceptance, macOS Swift + C ABI + iOS cross-checks, Android cargo-ndk, Miri+ASan.
 
 - **keel-runtime fix round merged** (ADR-022, ADR-023): global generation counter +
   `generation_floor` in the Snapshot payload (all three platform codecs updated); observe
