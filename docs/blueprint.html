@@ -1,0 +1,1241 @@
+<title>Keel Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky top bar with a reading-progress line, a left rail of section links, one measured prose column; figures, tables and code may break wider. Monochrome dark, one deliberate theme shared with the xfn studio architecture page. */
+:root,:root[data-theme="light"],:root[data-theme="dark"]{
+  color-scheme:dark;
+  --k0:#000000;--k1:#080808;--k2:#0F0F0F;--k3:#161616;--k4:#1E1E1E;--k5:#2A2A2A;--k6:#3D3D3D;--k7:#5C5C5C;
+  --t1:#F2F2F2;--t2:#B4B4B4;--t3:#8A8A8A;--hi:#FFFFFF;
+  --code-fg:#D6D6D6;--code-com:#7A7A7A;--dot:#232323;
+  --display:"Bricolage Grotesque","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+  --body:"Atkinson Hyperlegible",Verdana,"Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --measure:72ch;--wide:980px;--rail:15.5rem;--barh:3.2rem;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--k0);scroll-padding-top:calc(env(safe-area-inset-top,0px) + 4rem);-webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{margin:0;background:var(--k0);color:var(--t1);font-family:var(--body);font-size:clamp(1rem,.96rem + .2vw,1.06rem);line-height:1.6;overflow-wrap:break-word;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration-color:var(--k7);text-decoration-thickness:.08em;text-underline-offset:.2em}
+a:hover{text-decoration-color:var(--hi)}
+:focus-visible{outline:2px solid var(--hi);outline-offset:3px;border-radius:4px}
+h1,h2,h3,h4{font-family:var(--display);text-wrap:balance;margin:0;color:var(--t1)}
+
+/* top bar */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:rgba(0,0,0,.82);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--k5)}
+.bar-in{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.6rem 20px;max-width:1280px;margin:0 auto}
+.brand{font-family:var(--mono);font-weight:600;font-size:.85rem;text-decoration:none;white-space:nowrap}
+.bar-meta{font-size:.82rem;color:var(--t3);white-space:nowrap}
+@media(max-width:480px){.bar-meta{display:none}}
+.progress{height:2px}
+.progress i{display:block;height:100%;width:0;background:var(--hi)}
+
+/* shell */
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);gap:0;max-width:1280px;margin:0 auto;padding-inline:20px;padding-block:0 6rem}
+@media (max-width:1000px){.shell{grid-template-columns:minmax(0,1fr)}}
+
+/* rail */
+.rail{position:sticky;top:calc(env(safe-area-inset-top,0px) + var(--barh) + .5rem);align-self:start;max-height:calc(100vh - var(--barh) - 1rem);max-height:calc(100dvh - var(--barh) - 1rem);overflow:auto;padding-block:2rem 2rem;padding-right:1.2rem;font-size:.9rem}
+.rail .brand-block{margin:0 0 .2rem}
+.rail .brand-block b{display:block;font-family:var(--display);font-weight:800;font-stretch:84%;font-size:1.35rem;letter-spacing:-.01em}
+.rail .brand-block small{display:block;font-family:var(--mono);font-size:.72rem;color:var(--t3);margin-top:.25rem}
+.rail ol{list-style:none;margin:1.2rem 0 0;padding:0}
+.rail li{margin:0}
+.rail a{display:flex;gap:.6rem;padding:.32rem .6rem;color:var(--t3);text-decoration:none;line-height:1.35;border-left:1px solid var(--k5);border-radius:0}
+.rail a .n{font-family:var(--mono);font-size:.72rem;color:var(--k7);min-width:1.5rem;padding-top:.15rem}
+.rail a:hover{color:var(--t1)}
+.rail a.active{color:var(--hi);border-left-color:var(--hi)}
+.rail a.active .n{color:var(--hi)}
+.rail .group{margin:.9rem 0 .2rem;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding-left:.6rem}
+@media (max-width:1000px){
+  .rail{position:static;max-height:none;padding:1rem 0 .5rem;border-bottom:1px solid var(--k5)}
+  .rail details{border:1px solid var(--k5);border-radius:12px;background:var(--k1)}
+  .rail details summary{cursor:pointer;padding:.7rem .9rem;font-weight:700;font-family:var(--display);font-stretch:88%;font-size:1.05rem;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  .rail details summary::after{content:"Contents";font-family:var(--body);font-weight:400;font-size:.78rem;color:var(--t3);letter-spacing:.06em;text-transform:uppercase}
+  .rail details > div{padding:0 .6rem .8rem}
+  .rail .brand-block{display:none}
+  .rail ol{columns:2;column-gap:1rem;margin-top:.4rem}
+}
+@media (min-width:1001px){.rail details summary{display:none}.rail details{display:contents}}
+
+/* main and masthead */
+main{padding-block:0;min-width:0}
+@media (min-width:1001px){main{padding-left:3rem}}
+.masthead{position:relative;padding-block:clamp(2.4rem,6vw,4.5rem) clamp(2rem,4vw,3rem);border-bottom:1px solid var(--k5);overflow:hidden}
+.masthead::before{content:"";position:absolute;inset:0;background-image:radial-gradient(circle at 1px 1px,var(--dot) 1px,transparent 1.5px);background-size:26px 26px;-webkit-mask-image:radial-gradient(ellipse 90% 80% at 70% 0%,#000 10%,transparent 70%);mask-image:radial-gradient(ellipse 90% 80% at 70% 0%,#000 10%,transparent 70%);pointer-events:none}
+.masthead > *{position:relative}
+.eyebrow{display:inline-block;font-size:.88rem;color:var(--t2);border:1px solid var(--k6);border-radius:999px;padding:.2rem .8rem;margin:0 0 1.3rem;background:var(--k2)}
+h1{font-weight:800;font-stretch:80%;font-size:clamp(2.8rem,7.6vw,5.4rem);line-height:.95;letter-spacing:-.025em;margin:0 0 1.2rem}
+.tagline{font-family:var(--body);font-size:clamp(1.12rem,1rem + .6vw,1.35rem);line-height:1.45;max-width:42ch;color:var(--t1);margin:0 0 1.2rem}
+.facts{display:flex;flex-wrap:wrap;gap:.5rem 1.3rem;font-size:.9rem;color:var(--t3);align-items:center}
+.facts b{color:var(--t1);font-weight:700}
+.facts .pill{display:inline-block;padding:.2rem .75rem;border-radius:999px;background:var(--hi);color:#000;font-weight:700;font-size:.82rem}
+
+/* sections and prose */
+section{padding-block:clamp(2.4rem,4.5vw,3.6rem) .6rem;scroll-margin-top:calc(env(safe-area-inset-top,0px) + 4rem)}
+section + section{border-top:1px solid var(--k5)}
+h2{font-weight:750;font-stretch:84%;font-size:clamp(1.9rem,1.3rem + 2.4vw,2.9rem);line-height:1.02;letter-spacing:-.02em;margin:0 0 .6rem}
+h2 .sn{display:block;font-family:var(--mono);font-size:.78rem;font-weight:600;font-stretch:100%;letter-spacing:.06em;color:var(--t3);margin-bottom:.6rem}
+h3{font-weight:700;font-stretch:90%;font-size:1.3rem;line-height:1.15;letter-spacing:-.01em;margin:2rem 0 .5rem}
+h4{font-family:var(--body);font-weight:700;font-size:.95rem;margin:1.3rem 0 .4rem}
+p,ul,ol{max-width:var(--measure)}
+p{margin:0 0 1rem;color:var(--t2)}
+p strong,li strong{color:var(--t1);font-weight:700}
+.lede{font-size:clamp(1.08rem,1rem + .4vw,1.22rem);line-height:1.5;color:var(--t1);margin:.4rem 0 1.2rem}
+ul,ol{padding-left:1.25rem;margin:0 0 1rem;color:var(--t2)}
+li{margin-bottom:.4rem}
+li::marker{color:var(--t3)}
+code{font-family:var(--mono);font-size:.86em;background:var(--k3);border:1px solid var(--k5);border-radius:5px;padding:.05em .35em;color:var(--t1)}
+pre{max-width:var(--wide);background:var(--k1);border:1px solid var(--k5);color:var(--code-fg);font:400 .8rem/1.65 var(--mono);padding:.95rem 1.05rem;border-radius:12px;overflow-x:auto;margin:.7rem 0 1.3rem;position:relative;tab-size:2}
+pre code{background:none;border:0;padding:0;font-size:inherit;color:inherit}
+pre[data-lang]::before{content:attr(data-lang);position:absolute;top:.55rem;right:.8rem;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+.k{color:var(--hi);font-weight:600}.s{color:var(--t1)}.c{color:var(--code-com);font-style:italic}
+@media(max-width:700px){pre{font-size:.74rem}}
+
+.callout{max-width:var(--wide);border:1px dashed var(--k6);background:var(--k1);border-radius:12px;padding:.95rem 1.05rem;margin:1rem 0 1.4rem}
+.callout p{color:var(--t2)}
+.callout p:last-child{margin-bottom:0}
+.callout.verdict{border:1px solid var(--hi);background:var(--k3)}
+.callout.verdict p{color:var(--t1)}
+.callout.warn{border-style:dashed;border-color:var(--k7)}
+.callout.bad{border-color:var(--k7)}
+.callout .label{display:block;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:var(--t3);margin-bottom:.4rem}
+.callout.verdict .label{color:var(--hi)}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.8rem;max-width:var(--wide);margin:.8rem 0 1.4rem}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.8rem;max-width:var(--wide);margin:.8rem 0 1.4rem}
+.tile{min-width:0;border:1px solid var(--k5);background:var(--k1);border-radius:12px;padding:1rem 1.05rem}
+.tile h4{margin:0 0 .4rem;font-family:var(--display);font-stretch:90%;font-size:1.1rem;font-weight:700}
+.tile p{font-size:.93rem;margin:0;color:var(--t2)}
+.tile .kicker{font-family:var(--mono);font-size:.72rem;color:var(--t3);letter-spacing:.04em;margin-bottom:.45rem;display:block}
+
+.scroll{max-width:var(--wide);overflow-x:auto;margin:.8rem 0 1.4rem;border:1px solid var(--k5);border-radius:12px;background:var(--k1)}
+table{border-collapse:collapse;width:100%;font-size:.88rem;line-height:1.45;min-width:40rem}
+th,td{text-align:left;vertical-align:top;padding:.6rem .8rem;border-top:1px solid var(--k5)}
+th{font-weight:700;font-size:.82rem;color:var(--t2);background:var(--k3);white-space:nowrap}
+tr:first-child th{border-top:0}
+td{color:var(--t2)}
+td:first-child{color:var(--t1)}
+td code{white-space:nowrap}
+td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{display:inline-block;font-size:.74rem;font-weight:700;letter-spacing:.04em;padding:.12rem .55rem;border-radius:999px;border:1px solid var(--k6);background:var(--k2);color:var(--t2);white-space:nowrap}
+.tag.good{background:var(--hi);color:#000;border-color:var(--hi)}
+.tag.warn{border-style:dashed;color:var(--t1)}
+.tag.bad{background:repeating-linear-gradient(135deg,var(--k3) 0 6px,var(--k0) 6px 12px);color:var(--t1);border-color:var(--k7)}
+.tag.acc{border-color:var(--hi);color:var(--hi)}
+
+figure{max-width:var(--wide);margin:1.2rem 0 1.6rem;padding:0}
+figure .d{display:block;width:100%;height:auto;max-width:100%}
+figure .frame{border:1px solid var(--k5);border-radius:12px;background:var(--k1);padding:1rem;overflow-x:auto}
+figcaption{font-size:.88rem;color:var(--t3);margin-top:.6rem;line-height:1.5;max-width:var(--measure)}
+figcaption b{color:var(--t1);font-weight:700}
+/* diagram palette: monochrome, white marks the thing under discussion */
+.d{font-family:var(--body);font-size:12px;color:var(--t2)}
+.d text{fill:var(--t1)}
+.d .mono{font-family:var(--mono);font-size:11px}
+.d .small{font-size:10.5px}
+.d .muted{fill:var(--t3)}
+.d .box{fill:var(--k2);stroke:var(--k6);stroke-width:1}
+.d .box2{fill:var(--k1);stroke:var(--k5);stroke-width:1}
+.d .you{fill:var(--k3);stroke:var(--hi);stroke-width:1.2}
+.d .accfill{fill:var(--hi)}
+.d .acc{stroke:var(--hi);stroke-width:1.4}
+.d .acctext{fill:var(--hi);font-weight:700}
+.d .onhi{fill:#000;font-weight:700}
+.d .warnfill{fill:var(--k2);stroke:var(--t3);stroke-width:1.2;stroke-dasharray:4 3}
+.d .badfill{fill:var(--k0);stroke:var(--t2);stroke-width:1.2;stroke-dasharray:1.5 3}
+.d .goodfill{fill:var(--k4);stroke:var(--t3);stroke-width:1}
+.d .ln{stroke:var(--k7);stroke-width:1.25;fill:none}
+.d .dash{stroke-dasharray:4 3}
+.d .thin{stroke:var(--k5);stroke-width:1;fill:none}
+.d .band{fill:var(--hi);stroke:none}
+.d .head{font-weight:700}
+.d .bar{fill:var(--k5)}
+.d marker path{fill:var(--k7)}
+.d marker.hi path{fill:var(--hi)}
+
+.rules{list-style:none;padding:0;max-width:var(--wide);display:grid;gap:.6rem}
+.rules li{border:1px solid var(--k5);background:var(--k1);border-radius:12px;padding:.8rem .9rem .8rem 1rem;display:grid;grid-template-columns:2.2rem minmax(0,1fr);gap:.6rem;font-size:.93rem;color:var(--t2);margin:0}
+.rules li .r{font-family:var(--mono);color:var(--hi);font-size:.76rem;font-weight:600;padding-top:.2rem}
+.rules li b{display:block;font-weight:700;color:var(--t1);margin-bottom:.15rem}
+
+.phase{max-width:var(--wide);border:1px solid var(--k6);border-radius:14px;background:var(--k1);padding:1.05rem 1.15rem;margin:0 0 .8rem}
+.phase .ph{display:flex;flex-wrap:wrap;gap:.4rem 1rem;align-items:baseline;margin-bottom:.4rem}
+.phase .ph b{font-family:var(--display);font-stretch:88%;font-size:1.2rem;font-weight:700;color:var(--t1)}
+.phase .ph .when{font-family:var(--mono);font-size:.76rem;color:var(--t3)}
+.phase ul{margin:.4rem 0 .7rem;font-size:.93rem}
+.phase .done{font-size:.9rem;border-top:1px solid var(--hi);padding-top:.6rem;color:var(--t1)}
+.phase .done b{font-weight:700;color:var(--hi)}
+
+.tree{font:400 .8rem/1.6 var(--mono);white-space:pre;background:var(--k1);border:1px solid var(--k5);border-radius:12px;padding:.95rem 1.05rem;max-width:var(--wide);overflow-x:auto;margin:.7rem 0 1.3rem;color:var(--code-fg)}
+.tree i{color:var(--t3);font-style:normal}
+
+.adr{max-width:var(--wide);display:grid;gap:.5rem}
+.adr details{border:1px solid var(--k5);border-radius:12px;background:var(--k1)}
+.adr summary{cursor:pointer;padding:.7rem .9rem;font-weight:700;font-size:.93rem;display:flex;gap:.7rem;align-items:baseline;color:var(--t1)}
+.adr summary .id{font-family:var(--mono);font-size:.74rem;font-weight:600;color:var(--hi);min-width:4rem}
+.adr details > div{padding:0 .9rem .8rem 5.6rem;font-size:.9rem;color:var(--t2)}
+.adr details > div p{margin-bottom:.5rem}
+@media (max-width:600px){.adr details > div{padding-left:.9rem}}
+
+.footer{margin-top:3.5rem;padding-top:1.2rem;border-top:1px solid var(--k5);font-size:.88rem;color:var(--t3);max-width:var(--measure)}
+</style>
+
+<header class="bar">
+  <div class="bar-in">
+    <a class="brand" href="#verdict">keel / blueprint v0.1</a>
+    <span class="bar-meta">Design document · September 2026</span>
+  </div>
+  <div class="progress" aria-hidden="true"><i id="prog"></i></div>
+</header>
+
+<div class="shell">
+<aside class="rail" aria-label="Contents">
+<details open>
+<summary>Keel</summary>
+<div>
+<p class="brand-block"><b>Keel</b><small>blueprint · v0.1 · 2026-09</small></p>
+<ol id="toc">
+<li class="group">Decision</li>
+<li><a href="#verdict"><span class="n">00</span>Verdict</a></li>
+<li><a href="#thesis"><span class="n">01</span>Thesis</a></li>
+<li><a href="#landscape"><span class="n">02</span>Landscape</a></li>
+<li class="group">Experience</li>
+<li><a href="#dx"><span class="n">03</span>Fifteen minutes</a></li>
+<li><a href="#migration"><span class="n">04</span>Migration ladder</a></li>
+<li class="group">Architecture</li>
+<li><a href="#arch"><span class="n">05</span>System shape</a></li>
+<li><a href="#types"><span class="n">06</span>Type system</a></li>
+<li><a href="#state"><span class="n">07</span>Reactive state</a></li>
+<li><a href="#data"><span class="n">08</span>Data layer</a></li>
+<li><a href="#ports"><span class="n">09</span>Ports &amp; adapters</a></li>
+<li><a href="#ffi"><span class="n">10</span>Boundary &amp; runtimes</a></li>
+<li><a href="#threads"><span class="n">11</span>Threading</a></li>
+<li><a href="#errors"><span class="n">12</span>Errors &amp; crashes</a></li>
+<li><a href="#devloop"><span class="n">13</span>Dev loop</a></li>
+<li class="group">Execution</li>
+<li><a href="#perf"><span class="n">14</span>Budgets</a></li>
+<li><a href="#constitution"><span class="n">15</span>Constitution</a></li>
+<li><a href="#repo"><span class="n">16</span>Repository</a></li>
+<li><a href="#roadmap"><span class="n">17</span>Roadmap</a></li>
+<li><a href="#adrs"><span class="n">18</span>Decisions</a></li>
+<li><a href="#risks"><span class="n">19</span>Risks</a></li>
+<li><a href="#horizon"><span class="n">20</span>Horizon</a></li>
+</ol>
+</div>
+</details>
+</aside>
+
+<main>
+<header class="masthead">
+<span class="eyebrow">Design document · working name · prepared for Shrey</span>
+<h1>Keel</h1>
+<p class="tagline">One Rust core under native iOS, Android and web apps. Everything below the pixels, with nothing to apologize for.</p>
+<div class="facts">
+<span class="pill">Verdict: build it</span>
+<span><b>Scope</b> logic + state + data + dev loop</span>
+<span><b>UI</b> stays SwiftUI, Compose, React</span>
+<span><b>Replaces</b> UniFFI, Crux, and KMP's shared-logic role</span>
+</div>
+</header>
+
+<section id="verdict">
+<h2><span class="sn">§00</span>Verdict: build it, with one scope decision</h2>
+<div class="callout verdict">
+<span class="label">Go</span>
+<p>The gap is real and nobody is closing it. UniFFI generates bindings and stops. Crux gives you an architecture and a thin toolchain. Neither has a web story a frontend team would accept, neither has devtools, neither has a migration path for an existing app. KMP owns Android teams because it is Kotlin, and its iOS and web stories are its weakest parts. There is room for one framework that owns the whole workflow end to end, and the workflow is where the pain is.</p>
+</div>
+<p class="lede">The scope decision: Keel owns everything under the pixels. Domain logic, state, data fetching and caching, persistence, offline, auth flows, the dev loop. The UI stays SwiftUI, Jetpack Compose and React. This is the only scope in which "zero compromise" is a true statement rather than a slogan.</p>
+<p>The moment a cross-platform framework paints pixels on three platforms it becomes Flutter, and inherits Flutter's compromises: a non-native feel, accessibility drift, and a permanent lag behind each platform's newest UI features. KMP's Compose Multiplatform on iOS is a real product now, and it makes exactly this trade. We refuse it. A SwiftUI view bound to Rust state is indistinguishable from a SwiftUI view bound to Swift state, and that is the bar.</p>
+<p>Refusing the pixels still leaves us most of the app. The code below the UI is where the three platforms disagree, where the subtle bugs live, and where every company re-implements the same cache, retry policy, offline queue, pagination and session refresh three times and gets three different answers. That is the code Keel takes over, and taking it over once is what makes teams forget the alternatives.</p>
+<h3>The thesis in one sentence</h3>
+<div class="callout">
+<p><strong>Reads never cross the boundary. Writes cross once per transaction. Native UI binds to Rust state as if it were native state.</strong> Every architectural decision in this document follows from that sentence, and most of the performance story is that sentence.</p>
+</div>
+<h3>What would make me stop</h3>
+<p>A plan that cannot fail is not a plan. These are the kill criteria, checked at the end of the phase named in the roadmap. If any of them fails and cannot be fixed within two weeks, we stop and write up why.</p>
+<ul>
+<li><strong>Phase 1:</strong> a handle method call with primitive arguments costs more than 500 ns on Android after JNI tuning. The batching design tolerates slow calls, but not that slow.</li>
+<li><strong>Phase 1:</strong> the generated Swift cannot compile warning-free under Swift 6 strict concurrency with every generated type <code>Sendable</code>.</li>
+<li><strong>Phase 2:</strong> a state transaction touching 100 signals cannot be applied on the main thread inside 150 µs on a mid-range Android phone.</li>
+<li><strong>Phase 4:</strong> three engineers with no Rust background cannot go from zero to a running three-platform app in 15 minutes using only the docs.</li>
+</ul>
+</section>
+
+<section id="thesis">
+<h2><span class="sn">§01</span>Thesis: what makes teams trust a framework with their eyes closed</h2>
+<p class="lede">Blind trust is never given to a pitch. It is given to a tool that has been boring for long enough. Keel earns it with three product claims and five habits.</p>
+<div class="grid3">
+<div class="tile"><span class="kicker">claim 1</span><h4>State is the product</h4><p>Calling a Rust function from Swift was solved years ago. What no one has shipped is Rust state that SwiftUI, Compose and React observe natively, with one FFI crossing per change instead of one per value. Keel's reactive core is the moat; bindings are table stakes.</p></div>
+<div class="tile"><span class="kicker">claim 2</span><h4>Idiomatic or nothing</h4><p>Generated Swift must pass review by a Swift engineer who does not know Rust exists: typed throws, <code>async</code>, <code>@Observable</code>, <code>Sendable</code>. Same for Kotlin (sealed interfaces, <code>suspend</code>, <code>Flow</code>, Compose <code>State</code>) and TypeScript (discriminated unions, <code>Promise</code>, hooks). No <code>RustBuffer</code> in anyone's autocomplete.</p></div>
+<div class="tile"><span class="kicker">claim 3</span><h4>The dev loop is the feature</h4><p>Change a Rust function and see it in the running iOS app in about a second without rebuilding the app. Time-travel any transaction in a devtools inspector on any platform. Test the whole core with <code>cargo test</code> and fake ports. This is what KMP cannot do and what makes engineers evangelize.</p></div>
+</div>
+<h3>Five habits that build trust</h3>
+<ol>
+<li><strong>One contract suite, three platforms.</strong> Every feature ships with a behavioral test that runs on the iOS simulator, an Android emulator and a headless browser. If the platforms disagree, CI is red.</li>
+<li><strong>Benchmarks are tests.</strong> The budgets in §14 are asserted in CI against UniFFI and KMP baselines, and the numbers are published on the site every release.</li>
+<li><strong>Compatibility is a promise.</strong> A core built with Keel 1.x loads against bindings from any Keel 1.x; a mismatch fails at startup with a message, never with undefined behavior.</li>
+<li><strong>Error messages teach.</strong> Every macro error says what is wrong, why, and the fix, with a link. The compiler is the onboarding.</li>
+<li><strong>We ship on it first.</strong> A real store app with auth, offline cart and sync is built on public Keel APIs only, and it ships to TestFlight, Play internal testing and the web on every release.</li>
+</ol>
+</section>
+
+<section id="landscape">
+<h2><span class="sn">§02</span>Landscape: where the incumbents actually stand</h2>
+<p class="lede">This table is deliberately fair to the competition. A framework that misdescribes its rivals gets caught in its first Hacker News thread.</p>
+<div class="scroll">
+<table>
+<thead><tr><th></th><th>KMP</th><th>UniFFI</th><th>Crux</th><th>Flutter / RN</th><th>Keel</th></tr></thead>
+<tbody>
+<tr><td><b>Language</b></td><td>Kotlin</td><td>Rust</td><td>Rust</td><td>Dart / JS</td><td>Rust</td></tr>
+<tr><td><b>What is shared</b></td><td>Logic; optionally UI via Compose Multiplatform</td><td>Functions, objects, records</td><td>Logic + state (Elm-style app), effects via capabilities</td><td>Everything including UI</td><td>Logic, reactive state, data layer, persistence, dev loop</td></tr>
+<tr><td><b>iOS story</b></td><td>Kotlin/Native compiles to a framework exposed through an Objective-C header; Swift export still maturing; GC and binary size costs</td><td>Generated Swift over a C ABI; solid, used in Firefox</td><td>UniFFI underneath</td><td>Own renderer (Flutter) or bridge (RN)</td><td>Generated Swift package, <code>@Observable</code>, typed throws, <code>Sendable</code>, XCFramework</td></tr>
+<tr><td><b>Android story</b></td><td>Native. This is why KMP wins Android teams</td><td>Kotlin over JNA; serialization on every call</td><td>UniFFI underneath</td><td>Own renderer / bridge</td><td>Kotlin over JNI with registered natives, Compose <code>State</code>, coroutines, <code>Flow</code></td></tr>
+<tr><td><b>Web story</b></td><td>Kotlin/JS or Kotlin/Wasm; still maturing, weak in frontend teams</td><td>No first-class web target</td><td>wasm-bindgen, hand-wired per app</td><td>Flutter web is canvas-based; RN web is a port</td><td>npm package with <code>.d.ts</code>, core in a Web Worker by default, React / Vue / Svelte / Solid bindings</td></tr>
+<tr><td><b>Reactive state</b></td><td>Bring your own (Flow, ViewModel)</td><td>None</td><td>Whole view model re-emitted on every event</td><td>Own UI state</td><td>Fine-grained signals mirrored to each platform's native observable; one crossing per transaction</td></tr>
+<tr><td><b>Data layer</b></td><td>Ktor + SQLDelight + your glue</td><td>None</td><td>None</td><td>Ecosystem packages</td><td>Built in: query cache, mutations, optimistic updates, persistence, offline queue</td></tr>
+<tr><td><b>Dev loop</b></td><td>Gradle; Compose hot reload on desktop</td><td>Rebuild app</td><td>Rebuild app</td><td>Hot reload (their strongest asset)</td><td>Remote core: Rust hot reload into the running native app; devtools with time travel</td></tr>
+<tr><td><b>Migration into an existing app</b></td><td>Natural on Android, awkward on iOS</td><td>Manual</td><td>All-or-nothing architecture</td><td>Rewrite</td><td>Ladder of five levels, each shippable (§04)</td></tr>
+<tr><td><b>Where it wins</b></td><td>Android-heavy orgs with Kotlin talent</td><td>Rust teams that need bindings and nothing else</td><td>Teams that want Elm on mobile</td><td>Startups that want one UI codebase</td><td>Teams that want one correct core and truly native UI</td></tr>
+<tr><td><b>Where Keel loses to it</b></td><td>A team with no Rust and no reason to learn it</td><td>A tiny library with three functions</td><td>Never, if we execute; Crux's ideas are absorbed</td><td>An app that is 90% UI and 10% logic</td><td></td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout warn">
+<span class="label">Say it out loud</span>
+<p>Keel's adoption wall is hiring, not technology. Most mobile teams have zero Rust engineers. The product answer is that a Keel core reads like TypeScript with types that mean something: the macros hide lifetimes, the runtime hides threads, and the docs assume the reader has never opened a Rust book. The commercial answer is that the first customers are the companies already running Rust cores by hand (fintech, security, messaging, infrastructure-adjacent) who are paying three teams to maintain the glue.</p>
+</div>
+</section>
+
+<section id="dx">
+<h2><span class="sn">§03</span>Fifteen minutes from nothing to three running apps</h2>
+<p class="lede">The onboarding is measured with a stopwatch and real engineers, and the number is a release gate. Here is what those fifteen minutes look like.</p>
+<pre data-lang="shell"><code>$ cargo install keel-cli                     <span class="c"># or: brew install keel</span>
+$ keel init acme-core --targets ios,android,web
+$ cd acme-core &amp;&amp; keel dev                   <span class="c"># core runs on your laptop; apps connect over the wire</span>
+$ keel build --release                       <span class="c"># AcmeCore.xcframework + Swift package</span>
+                                             <span class="c"># acme-core.aar + Kotlin sources</span>
+                                             <span class="c"># @acme/core: ESM + .d.ts + .wasm</span>
+$ keel adopt ios ../AcmeApp.xcodeproj        <span class="c"># adds the package and a bootstrap; touches nothing else</span>
+$ keel doctor                                <span class="c"># toolchains, SDKs, signing, on one screen, with fixes</span></code></pre>
+<h3>The core you write</h3>
+<p>One attribute, <code>#[keel::api]</code>, marks anything that crosses the boundary. A few specialized attributes add semantics: <code>#[keel::error]</code>, <code>#[keel::store]</code>, <code>#[keel::port]</code>. There is no IDL file; the Rust source is the schema and <code>rustc</code> checks it.</p>
+<pre data-lang="rust"><code><span class="k">use</span> keel::prelude::*;
+
+<span class="c">// Records become Swift structs, Kotlin data classes, TS interfaces.</span>
+#[keel::api] #[derive(Clone)]
+<span class="k">pub struct</span> Todo { <span class="k">pub</span> id: Uuid, <span class="k">pub</span> title: String, <span class="k">pub</span> done: bool }
+
+#[keel::api]
+<span class="k">pub enum</span> Filter { All, Active, Done }
+
+<span class="c">// Typed errors: Swift typed throws, Kotlin sealed exceptions, TS error classes.</span>
+#[keel::error]
+<span class="k">pub enum</span> TodoError {
+    #[error(<span class="s">"title cannot be empty"</span>)] EmptyTitle,
+    #[error(transparent)] Http(#[from] HttpError),
+}
+
+<span class="c">// A store: signals the UI observes, commands the UI calls.</span>
+#[keel::store]
+<span class="k">pub struct</span> Todos {
+    ctx: Ctx,
+    todos: Signal&lt;Vec&lt;Todo&gt;&gt;,
+    filter: Signal&lt;Filter&gt;,
+    visible: Computed&lt;Vec&lt;Todo&gt;&gt;,
+}
+
+#[keel::api]
+<span class="k">impl</span> Todos {
+    <span class="k">pub fn</span> new(ctx: Ctx) -&gt; Self {
+        <span class="k">let</span> todos = Signal::new(vec![]);
+        <span class="k">let</span> filter = Signal::new(Filter::All);
+        <span class="k">let</span> visible = Computed::new((&amp;todos, &amp;filter), |(t, f)| {
+            t.iter().filter(|x| f.matches(x)).cloned().collect()
+        });
+        Self { ctx, todos, filter, visible }
+    }
+
+    <span class="k">pub fn</span> set_filter(&amp;self, f: Filter) { self.filter.set(f) }
+
+    <span class="k">pub async fn</span> add(&amp;self, title: String) -&gt; Result&lt;Todo, TodoError&gt; {
+        <span class="k">let</span> title = title.trim().to_owned();
+        <span class="k">if</span> title.is_empty() { <span class="k">return</span> Err(TodoError::EmptyTitle); }
+        <span class="k">let</span> todo = Todo { id: self.ctx.rng().uuid(), title, done: <span class="k">false</span> };
+        self.todos.update(|list| list.push(todo.clone()));          <span class="c">// transaction 1 → UI</span>
+        self.ctx.mutate(SaveTodo(todo.clone())).optimistic().await?; <span class="c">// transaction 2 on ack or rollback</span>
+        Ok(todo)
+    }
+}</code></pre>
+<h3>What each platform engineer sees</h3>
+<p>Notice what is absent: no buffers, no handles, no callbacks, no "bridge" object. Reading <code>visible</code> is a plain property read in every language, because the value is mirrored on the platform side and never crosses the boundary on read.</p>
+<pre data-lang="swift"><code><span class="k">import</span> AcmeCore
+
+<span class="k">struct</span> TodoScreen: View {
+    @State <span class="k">private var</span> todos = Todos(ctx: .shared)   <span class="c">// generated @Observable final class</span>
+    @State <span class="k">private var</span> draft = <span class="s">""</span>
+
+    <span class="k">var</span> body: <span class="k">some</span> View {
+        List(todos.visible) { Text($0.title) }        <span class="c">// property read, zero FFI calls</span>
+        TextField(<span class="s">"New todo"</span>, text: $draft).onSubmit {
+            Task { <span class="k">try await</span> todos.add(title: draft) } <span class="c">// async throws(TodoError)</span>
+        }
+    }
+}</code></pre>
+<pre data-lang="kotlin"><code>@Composable
+<span class="k">fun</span> TodoScreen(todos: Todos = rememberKeel { Todos(ctx = Keel.shared) }) {
+    <span class="k">val</span> visible <span class="k">by</span> todos.visible                 <span class="c">// Compose State&lt;List&lt;Todo&gt;&gt;, zero FFI calls</span>
+    <span class="k">val</span> scope = rememberCoroutineScope()
+    <span class="k">var</span> draft <span class="k">by</span> remember { mutableStateOf(<span class="s">""</span>) }
+
+    LazyColumn { items(visible, key = { it.id }) { Text(it.title) } }
+    TextField(draft, onValueChange = { draft = it })
+    Button(onClick = { scope.launch { todos.add(draft) } }) { Text(<span class="s">"Add"</span>) }  <span class="c">// suspend, throws TodoError</span>
+}</code></pre>
+<pre data-lang="tsx"><code><span class="k">import</span> { Todos, TodoError } <span class="k">from</span> <span class="s">"@acme/core"</span>;
+<span class="k">import</span> { useKeel, useSignal } <span class="k">from</span> <span class="s">"@acme/core/react"</span>;
+
+<span class="k">export function</span> TodoScreen() {
+  <span class="k">const</span> todos = useKeel(Todos);               <span class="c">// core runs in a Worker; you never notice</span>
+  <span class="k">const</span> visible = useSignal(todos.visible);   <span class="c">// useSyncExternalStore, no round trip</span>
+  <span class="k">const</span> [draft, setDraft] = useState(<span class="s">""</span>);
+  <span class="k">return</span> (
+    &lt;form onSubmit={<span class="k">async</span> e =&gt; { e.preventDefault(); <span class="k">await</span> todos.add(draft); }}&gt;
+      &lt;ul&gt;{visible.map(t =&gt; &lt;li key={t.id}&gt;{t.title}&lt;/li&gt;)}&lt;/ul&gt;
+      &lt;input value={draft} onChange={e =&gt; setDraft(e.target.value)} /&gt;
+    &lt;/form&gt;
+  );
+}</code></pre>
+<h3>When you get it wrong, the compiler explains</h3>
+<p>Every rejected type produces an error in the style of rustc's best diagnostics. This is the single highest-leverage onboarding investment we can make, because it is the one every engineer hits on day one.</p>
+<pre data-lang="rustc"><code><span class="k">error[keel::E0012]</span>: `Vec&lt;Box&lt;dyn Any&gt;&gt;` cannot cross the boundary
+  --&gt; src/cart.rs:14:5
+   |
+14 |     pub items: Vec&lt;Box&lt;dyn Any&gt;&gt;,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ trait objects have no wire representation
+   |
+   = <span class="s">help</span>: make `items` a concrete `#[keel::api]` type, or an enum listing the cases you need
+   = <span class="s">docs</span>: https://keel.dev/errors/E0012</code></pre>
+</section>
+
+<section id="migration">
+<h2><span class="sn">§04</span>Migration ladder: every rung ships</h2>
+<p class="lede">Nobody rewrites a working app. Keel is adopted feature by feature, and each level is a state a company can stay in forever. The framework is designed so that the existing Swift, Kotlin and TypeScript code never has to know a migration is happening.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 330" role="img" aria-label="Five migration levels drawn as ascending steps: three codebases, pure functions, one feature store, data layer, core-first. Under the steps a bar shows the share of logic in Rust growing from none to almost all.">
+<defs><marker id="ar7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box2" x="20" y="200" width="160" height="70" rx="6"/>
+<text x="32" y="222" class="mono muted">L0</text>
+<text x="32" y="242" class="head">Three codebases</text>
+<text x="32" y="259" class="small muted">where you are today</text>
+
+<rect class="box" x="196" y="165" width="160" height="105" rx="6"/>
+<text x="208" y="187" class="mono muted">L1 · days</text>
+<text x="208" y="207" class="head">Pure functions</text>
+<text x="208" y="224" class="small">pricing, validation, parsing,</text>
+<text x="208" y="238" class="small">crypto, formatting</text>
+<text x="208" y="258" class="small muted">no state, no risk</text>
+
+<rect class="box" x="372" y="130" width="160" height="140" rx="6"/>
+<text x="384" y="152" class="mono muted">L2 · one sprint</text>
+<text x="384" y="172" class="head">One feature store</text>
+<text x="384" y="189" class="small">state + commands for</text>
+<text x="384" y="203" class="small">one screen; UI rebinds</text>
+<text x="384" y="223" class="small muted">old logic and new core</text>
+<text x="384" y="237" class="small muted">coexist via the bridge</text>
+
+<rect class="you" x="548" y="95" width="160" height="175" rx="6"/>
+<text x="560" y="117" class="mono acctext">L3 · a quarter</text>
+<text x="560" y="137" class="head">Data layer</text>
+<text x="560" y="154" class="small">Query cache, auth session,</text>
+<text x="560" y="168" class="small">offline queue, persistence</text>
+<text x="560" y="188" class="small muted">the biggest payoff:</text>
+<text x="560" y="202" class="small muted">one cache, one retry policy,</text>
+<text x="560" y="216" class="small muted">one offline behavior</text>
+
+<rect class="box" x="724" y="60" width="160" height="210" rx="6"/>
+<text x="736" y="82" class="mono muted">L4 · ongoing</text>
+<text x="736" y="102" class="head">Core-first</text>
+<text x="736" y="119" class="small">platforms own views,</text>
+<text x="736" y="133" class="small">navigation, platform APIs</text>
+<text x="736" y="153" class="small muted">new features start in Rust</text>
+
+<line class="ln" x1="180" y1="210" x2="196" y2="177" marker-end="url(#ar7)"/>
+<line class="ln" x1="356" y1="175" x2="372" y2="142" marker-end="url(#ar7)"/>
+<line class="ln" x1="532" y1="140" x2="548" y2="107" marker-end="url(#ar7)"/>
+<line class="ln" x1="708" y1="105" x2="724" y2="72" marker-end="url(#ar7)"/>
+<text x="188" y="168" class="small muted" text-anchor="middle">ship</text>
+<text x="364" y="133" class="small muted" text-anchor="middle">ship</text>
+<text x="540" y="98" class="small muted" text-anchor="middle">ship</text>
+<text x="716" y="63" class="small muted" text-anchor="middle">ship</text>
+
+<text x="20" y="298" class="small muted">Share of app logic living in the Rust core</text>
+<rect class="bar" x="20" y="306" width="160" height="10" rx="2" opacity=".35"/>
+<rect class="bar" x="196" y="306" width="160" height="10" rx="2" opacity=".35"/><rect class="accfill" x="196" y="306" width="24" height="10" rx="2"/>
+<rect class="bar" x="372" y="306" width="160" height="10" rx="2" opacity=".35"/><rect class="accfill" x="372" y="306" width="56" height="10" rx="2"/>
+<rect class="bar" x="548" y="306" width="160" height="10" rx="2" opacity=".35"/><rect class="accfill" x="548" y="306" width="104" height="10" rx="2"/>
+<rect class="bar" x="724" y="306" width="160" height="10" rx="2" opacity=".35"/><rect class="accfill" x="724" y="306" width="144" height="10" rx="2"/>
+</svg>
+</div>
+<figcaption><b>The ladder.</b> Each level is independently shippable and reversible. L3 is where most teams should aim first: the data layer is the code that is most duplicated, most subtle and least platform-specific, so moving it buys the most correctness per week.</figcaption>
+</figure>
+<h3>How coexistence works</h3>
+<p>At L1 and L2 the existing app keeps its own state management. The generated store class exposes signals that the old code can read like any other property, and the old code can push events into the core through ordinary commands. There is no "bridge" object to learn; a Kotlin <code>ViewModel</code> holding a Keel store next to its own <code>StateFlow</code>s is unremarkable code. The <code>keel adopt</code> command adds the package dependency and a one-line bootstrap, and edits nothing else in the project.</p>
+<p>The migration guides are written per source: "from KMP shared module", "from UniFFI", "from Crux", "from a TypeScript monorepo". Each is a checklist with a worked example and a codemod where one is possible (UniFFI's <code>.udl</code> maps mechanically onto <code>#[keel::api]</code>, so that one is automated).</p>
+</section>
+
+<section id="arch">
+<h2><span class="sn">§05</span>System shape: who writes what</h2>
+<p class="lede">The most useful architecture diagram answers one question for a new engineer: which parts do I write, which parts are generated, and which parts does the framework ship. Here it is.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 500" role="img" aria-label="Layered system diagram. Per platform column: native views you write, a generated package, a Keel runtime. A boundary band with one wire format. Below it the Rust core with your domain code next to signals, query and the runtime, a row of port traits, and platform adapters that implement the ports.">
+<defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<!-- left gutter labels -->
+<text x="20" y="46" class="small acctext">You write</text>
+<text x="20" y="112" class="small muted">Generated</text>
+<text x="20" y="180" class="small muted">Keel ships</text>
+<text x="20" y="310" class="small acctext">You write</text>
+<text x="20" y="324" class="small muted">+ Keel ships</text>
+<text x="20" y="446" class="small muted">Keel ships,</text>
+<text x="20" y="460" class="small muted">overridable</text>
+
+<!-- column headers row: views -->
+<rect class="you" x="120" y="20" width="240" height="44" rx="6"/>
+<text x="240" y="38" text-anchor="middle" class="head">iOS · SwiftUI views</text>
+<text x="240" y="54" text-anchor="middle" class="small">navigation, platform UI, animations</text>
+<rect class="you" x="380" y="20" width="240" height="44" rx="6"/>
+<text x="500" y="38" text-anchor="middle" class="head">Android · Compose views</text>
+<text x="500" y="54" text-anchor="middle" class="small">navigation, platform UI, animations</text>
+<rect class="you" x="640" y="20" width="240" height="44" rx="6"/>
+<text x="760" y="38" text-anchor="middle" class="head">Web · React / Vue / Svelte</text>
+<text x="760" y="54" text-anchor="middle" class="small">routing, DOM, CSS</text>
+
+<!-- generated -->
+<rect class="box" x="120" y="84" width="240" height="56" rx="6"/>
+<text x="240" y="104" text-anchor="middle" class="head">AcmeCore · Swift package</text>
+<text x="240" y="120" text-anchor="middle" class="small">@Observable stores · async throws · structs, enums</text>
+<text x="240" y="133" text-anchor="middle" class="small muted">Sendable · typed throws · XCFramework inside</text>
+<rect class="box" x="380" y="84" width="240" height="56" rx="6"/>
+<text x="500" y="104" text-anchor="middle" class="head">acme-core · AAR + Kotlin</text>
+<text x="500" y="120" text-anchor="middle" class="small">Compose State · suspend · Flow · sealed</text>
+<text x="500" y="133" text-anchor="middle" class="small muted">data classes · AutoCloseable handles</text>
+<rect class="box" x="640" y="84" width="240" height="56" rx="6"/>
+<text x="760" y="104" text-anchor="middle" class="head">@acme/core · npm</text>
+<text x="760" y="120" text-anchor="middle" class="small">signals + hooks · Promise · AsyncIterable</text>
+<text x="760" y="133" text-anchor="middle" class="small muted">.d.ts · discriminated unions · ESM</text>
+
+<!-- runtimes -->
+<rect class="box2" x="120" y="160" width="240" height="40" rx="6"/>
+<text x="240" y="177" text-anchor="middle" class="head">Keel runtime · Swift</text>
+<text x="240" y="191" text-anchor="middle" class="small muted">handles · continuations · mirror · main-thread apply</text>
+<rect class="box2" x="380" y="160" width="240" height="40" rx="6"/>
+<text x="500" y="177" text-anchor="middle" class="head">Keel runtime · Kotlin</text>
+<text x="500" y="191" text-anchor="middle" class="small muted">JNI registered natives · coroutines · mirror</text>
+<rect class="box2" x="640" y="160" width="240" height="40" rx="6"/>
+<text x="760" y="177" text-anchor="middle" class="head">Keel runtime · TS</text>
+<text x="760" y="191" text-anchor="middle" class="small muted">wasm loader · Worker proxy · mirror</text>
+
+<!-- vertical arrows views<->generated: reads -->
+<line class="thin" x1="240" y1="64" x2="240" y2="84"/><line class="thin" x1="500" y1="64" x2="500" y2="84"/><line class="thin" x1="760" y1="64" x2="760" y2="84"/>
+<line class="thin" x1="240" y1="140" x2="240" y2="160"/><line class="thin" x1="500" y1="140" x2="500" y2="160"/><line class="thin" x1="760" y1="140" x2="760" y2="160"/>
+
+<!-- boundary band -->
+<rect class="band" x="120" y="220" width="760" height="30" rx="4"/>
+<text x="500" y="239" text-anchor="middle" class="onhi">FFI boundary · one binary wire format · schema-hashed · commands go down, change-sets come up</text>
+<line class="acc" x1="200" y1="200" x2="200" y2="220" marker-end="url(#ar1)"/>
+<line class="acc" x1="280" y1="220" x2="280" y2="200" marker-end="url(#ar1)"/>
+<line class="acc" x1="460" y1="200" x2="460" y2="220" marker-end="url(#ar1)"/>
+<line class="acc" x1="540" y1="220" x2="540" y2="200" marker-end="url(#ar1)"/>
+<line class="acc" x1="720" y1="200" x2="720" y2="220" marker-end="url(#ar1)"/>
+<line class="acc" x1="800" y1="220" x2="800" y2="200" marker-end="url(#ar1)"/>
+<text x="176" y="214" class="small muted" text-anchor="end">cmd</text>
+<text x="304" y="214" class="small muted">Δ</text>
+
+<!-- core -->
+<rect class="box" x="120" y="270" width="760" height="140" rx="8"/>
+<text x="134" y="290" class="head">Keel core · Rust · one cdylib per mobile target, one .wasm for web</text>
+<rect class="you" x="134" y="300" width="176" height="52" rx="5"/>
+<text x="222" y="320" text-anchor="middle" class="head">Your domain</text>
+<text x="222" y="335" text-anchor="middle" class="small">stores · commands · rules</text>
+<rect class="box2" x="322" y="300" width="176" height="52" rx="5"/>
+<text x="410" y="320" text-anchor="middle" class="head">Signals</text>
+<text x="410" y="335" text-anchor="middle" class="small">transactions · change-sets</text>
+<rect class="box2" x="510" y="300" width="176" height="52" rx="5"/>
+<text x="598" y="320" text-anchor="middle" class="head">Query</text>
+<text x="598" y="335" text-anchor="middle" class="small">cache · mutations · offline</text>
+<rect class="box2" x="698" y="300" width="168" height="52" rx="5"/>
+<text x="782" y="320" text-anchor="middle" class="head">Runtime</text>
+<text x="782" y="335" text-anchor="middle" class="small">core loop · tasks · panic guard</text>
+<rect class="box2" x="134" y="364" width="732" height="34" rx="5"/>
+<text x="500" y="385" text-anchor="middle" class="small">Ports (traits the core needs): Http · Kv · SecureStore · Fs · Clock · Rng · Log · Connectivity · Lifecycle · Push</text>
+
+<!-- adapters -->
+<rect class="box" x="120" y="432" width="240" height="46" rx="6"/>
+<text x="240" y="450" text-anchor="middle" class="head">Adapters · iOS</text>
+<text x="240" y="466" text-anchor="middle" class="small muted">URLSession · Keychain · SQLite · os_log</text>
+<rect class="box" x="380" y="432" width="240" height="46" rx="6"/>
+<text x="500" y="450" text-anchor="middle" class="head">Adapters · Android</text>
+<text x="500" y="466" text-anchor="middle" class="small muted">OkHttp · Keystore · SQLite · Logcat</text>
+<rect class="box" x="640" y="432" width="240" height="46" rx="6"/>
+<text x="760" y="450" text-anchor="middle" class="head">Adapters · Web</text>
+<text x="760" y="466" text-anchor="middle" class="small muted">fetch · WebCrypto · IndexedDB · console</text>
+<line class="ln dash" x1="240" y1="432" x2="240" y2="398" marker-end="url(#ar1)"/>
+<line class="ln dash" x1="500" y1="432" x2="500" y2="398" marker-end="url(#ar1)"/>
+<line class="ln dash" x1="760" y1="432" x2="760" y2="398" marker-end="url(#ar1)"/>
+<text x="252" y="420" class="small muted">implements</text>
+</svg>
+</div>
+<figcaption><b>Ownership map.</b> Engineers write the tinted boxes: native views on top, domain code in the core. Everything else is generated from the Rust source or shipped by Keel. Adapters are shipped defaults that any app can replace with its own implementation of the port trait, in Swift, Kotlin or TypeScript.</figcaption>
+</figure>
+<h3>Layer responsibilities</h3>
+<div class="grid2">
+<div class="tile"><h4>Native views</h4><p>Own navigation, gestures, animation, accessibility, platform APIs with a UI surface (camera, share sheet, widgets). They read store signals as properties and call store commands. They hold only view-local state (text field drafts, scroll position).</p></div>
+<div class="tile"><h4>Generated package</h4><p>One class per store and object, one type per record and enum. Contains no logic, only the mapping between platform idioms and the wire. Regenerated on every core build; never edited by hand; checked into the app repo so builds are reproducible.</p></div>
+<div class="tile"><h4>Platform runtime</h4><p>The only code that knows about the FFI. Owns handle lifetimes, the async bridge, the state mirror, main-thread delivery, and the default adapters. Versioned in lockstep with the core's wire format.</p></div>
+<div class="tile"><h4>Core</h4><p>Pure Rust with no platform SDK linked in. Talks to the world only through ports, which makes it testable with <code>cargo test</code> and fake adapters, and runnable on a laptop for the remote dev loop.</p></div>
+</div>
+</section>
+
+<section id="types">
+<h2><span class="sn">§06</span>Type system: what crosses the boundary and what it becomes</h2>
+<p class="lede">The mapping is the API contract of the whole framework. Every row has a golden-file test in three languages and a documented cost, so no one is surprised by what a type does to the boundary.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Rust</th><th>Swift</th><th>Kotlin</th><th>TypeScript</th><th>Boundary cost</th></tr></thead>
+<tbody>
+<tr><td><code>bool, i8…i32, u8…u32, f32, f64</code></td><td><code>Bool, Int8…Int32, UInt8…UInt32, Float, Double</code></td><td><code>Boolean, Byte…Int, UByte…UInt, Float, Double</code></td><td><code>boolean, number</code></td><td>register</td></tr>
+<tr><td><code>i64, u64</code></td><td><code>Int64, UInt64</code></td><td><code>Long, ULong</code></td><td><code>bigint</code>; <code>#[keel(js_number)]</code> opts into <code>number</code> with a range check</td><td>register</td></tr>
+<tr><td><code>String</code></td><td><code>String</code></td><td><code>String</code></td><td><code>string</code></td><td>copy; UTF-8 to UTF-16 on JVM and JS</td></tr>
+<tr><td><code>Bytes</code></td><td><code>Data</code></td><td><code>ByteArray</code> or direct <code>ByteBuffer</code></td><td><code>Uint8Array</code></td><td>zero-copy view in process; copy over a transport</td></tr>
+<tr><td><code>Option&lt;T&gt;</code></td><td><code>T?</code></td><td><code>T?</code></td><td><code>T | undefined</code></td><td>1-byte tag</td></tr>
+<tr><td><code>Vec&lt;T&gt;</code></td><td><code>[T]</code></td><td><code>List&lt;T&gt;</code></td><td><code>T[]</code></td><td>O(n) encode; use <code>Lazy&lt;Vec&lt;T&gt;&gt;</code> to page instead</td></tr>
+<tr><td><code>HashMap&lt;K, V&gt;</code></td><td><code>[K: V]</code></td><td><code>Map&lt;K, V&gt;</code></td><td><code>Map&lt;K, V&gt;</code></td><td>O(n) encode</td></tr>
+<tr><td><code>struct</code> (record)</td><td><code>struct: Sendable, Hashable, Codable</code></td><td><code>data class</code></td><td><code>readonly</code> interface</td><td>fields in declaration order</td></tr>
+<tr><td><code>enum</code>, unit variants</td><td><code>enum: CaseIterable</code></td><td><code>enum class</code></td><td>string union</td><td>u16 tag</td></tr>
+<tr><td><code>enum</code>, data variants</td><td><code>enum</code> with associated values</td><td><code>sealed interface</code></td><td>discriminated union on <code>kind</code></td><td>u16 tag + payload</td></tr>
+<tr><td><code>Result&lt;T, E&gt;</code></td><td><code>throws(E)</code> typed throws</td><td><code>throws E</code>, sealed exception hierarchy</td><td><code>Promise</code> rejects with an <code>E</code> class, <code>instanceof</code>-able</td><td>tag + payload</td></tr>
+<tr><td>object (<code>impl</code> block)</td><td><code>final class: Sendable</code></td><td><code>class: AutoCloseable</code></td><td><code>class</code> with <code>[Symbol.dispose]</code></td><td>8-byte handle; refcounted</td></tr>
+<tr><td><code>#[keel::port] trait</code></td><td><code>protocol</code></td><td><code>interface</code></td><td><code>interface</code></td><td>vtable of callbacks</td></tr>
+<tr><td><code>Signal&lt;T&gt;</code></td><td><code>@Observable</code> stored property</td><td>Compose <code>State&lt;T&gt;</code>, plus <code>StateFlow&lt;T&gt;</code></td><td><code>Signal&lt;T&gt;</code> with framework hooks</td><td>mirrored: read is free; updates ride the change-set</td></tr>
+<tr><td><code>Computed&lt;T&gt;</code></td><td>read-only property</td><td><code>State&lt;T&gt;</code></td><td><code>ReadonlySignal&lt;T&gt;</code></td><td>same as Signal</td></tr>
+<tr><td><code>async fn</code></td><td><code>async throws</code></td><td><code>suspend</code></td><td><code>Promise</code></td><td>continuation; cancellable from either side</td></tr>
+<tr><td><code>impl Stream&lt;Item = T&gt;</code></td><td><code>AsyncThrowingStream&lt;T, E&gt;</code></td><td><code>Flow&lt;T&gt;</code></td><td><code>AsyncIterable&lt;T&gt;</code></td><td>pull-based with credit; backpressure built in</td></tr>
+<tr><td><code>Duration</code></td><td><code>Duration</code></td><td><code>kotlin.time.Duration</code></td><td><code>number</code> ms</td><td>i64 nanos</td></tr>
+<tr><td><code>Timestamp</code></td><td><code>Date</code></td><td><code>kotlinx.datetime.Instant</code></td><td><code>Date</code></td><td>i64 unix ms</td></tr>
+<tr><td><code>Uuid</code></td><td><code>UUID</code></td><td><code>java.util.UUID</code></td><td><code>string</code></td><td>16 bytes</td></tr>
+</tbody>
+</table>
+</div>
+<h3>Rules the macro enforces</h3>
+<ul>
+<li><strong>Closed world.</strong> A type crosses only if it is in this table or is itself <code>#[keel::api]</code>. Generics are monomorphized per use; trait objects, lifetimes in public signatures, raw pointers and <code>Box&lt;dyn Fn&gt;</code> are rejected with a fix-it.</li>
+<li><strong>Newtypes stay typed.</strong> <code>struct UserId(Uuid)</code> becomes a distinct Swift struct, a Kotlin value class and a branded TypeScript type, so IDs do not get mixed up across the boundary either.</li>
+<li><strong>Keyed collections.</strong> <code>#[keel(key = "id")]</code> on a <code>Vec&lt;T&gt;</code> field of a store tells the mirror to send keyed patches (insert, remove, move, update) instead of the whole list, and gives SwiftUI, Compose and React stable identity for animations.</li>
+<li><strong>Lazy collections.</strong> <code>Lazy&lt;Vec&lt;T&gt;&gt;</code> crosses as a handle with paged access, so a 50,000-row table is never serialized. Virtualized lists on every platform pull pages through it.</li>
+<li><strong>Evolvable records.</strong> Fields can be added with <code>#[keel(default)]</code> and removed with <code>#[keel(deprecated = "1.4")]</code>; the schema hash covers layout, so mixing versions fails loudly at load instead of silently misreading bytes.</li>
+</ul>
+</section>
+
+<section id="state">
+<h2><span class="sn">§07</span>Reactive state: signals, transactions, one crossing per change</h2>
+<p class="lede">This is the part no incumbent has. Fine-grained signals in the core, a mirror of observed values on each platform, and a change-set protocol that turns any number of signal writes into a single crossing and a single render pass.</p>
+<h3>The model</h3>
+<ul>
+<li><code>Signal&lt;T&gt;</code> holds a value. <code>Computed&lt;T&gt;</code> derives lazily from other signals with automatic dependency tracking, in the style of Solid and Leptos. <code>Effect</code> runs core-side reactions (persist on change, log, schedule a refetch) and never exists on the platform side.</li>
+<li>Every write happens inside a <strong>transaction</strong>. A bare <code>set</code> or <code>update</code> is its own transaction; <code>ctx.txn(|t| …)</code> batches many. Transactions commit on the core loop in order, so the mirror always reflects a transaction-consistent snapshot and never half a change.</li>
+<li>At commit, the runtime computes the dirty set (signals written, plus computeds that depend on them and are observed somewhere) and encodes a <strong>change-set</strong>: an ordered list of (signal id, value or keyed patch). One buffer, one crossing.</li>
+<li>Each platform runtime holds a <strong>mirror</strong>: decoded current values for every observed signal. Reads on the platform are plain memory reads. The mirror is updated on the main thread in one hop, which SwiftUI, Compose and React each turn into exactly one render pass.</li>
+<li>Observation is <strong>per store, batched</strong>: the runtime tells the core which signals have at least one observer, and the core stops encoding values nobody is looking at. Computeds that nobody observes are never evaluated.</li>
+</ul>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 360" role="img" aria-label="Sequence diagram of one command. The UI calls a store method; the platform runtime sends one command across the boundary; the core loop runs a transaction, spawns network work on the task pool, and sends one change-set back; the runtime applies it to the mirror on the main thread; the UI reads the new value locally with no crossing. Later the network acknowledgement produces a second transaction and a second change-set.">
+<defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box" x="40" y="10" width="140" height="30" rx="5"/><text x="110" y="30" text-anchor="middle" class="head">UI · main thread</text>
+<rect class="box" x="230" y="10" width="140" height="30" rx="5"/><text x="300" y="30" text-anchor="middle" class="head">Platform runtime</text>
+<rect class="box" x="490" y="10" width="140" height="30" rx="5"/><text x="560" y="30" text-anchor="middle" class="head">Core loop</text>
+<rect class="box" x="710" y="10" width="140" height="30" rx="5"/><text x="780" y="30" text-anchor="middle" class="head">Task pool</text>
+<line class="thin" x1="110" y1="40" x2="110" y2="350"/>
+<line class="thin" x1="300" y1="40" x2="300" y2="350"/>
+<line class="thin" x1="560" y1="40" x2="560" y2="350"/>
+<line class="thin" x1="780" y1="40" x2="780" y2="350"/>
+<line class="acc dash" x1="430" y1="8" x2="430" y2="352"/>
+<text x="430" y="62" text-anchor="middle" class="small acctext">FFI boundary</text>
+
+<line class="ln" x1="110" y1="80" x2="300" y2="80" marker-end="url(#ar2)"/>
+<text x="205" y="74" text-anchor="middle" class="mono">todos.add("Milk")</text>
+<line class="acc" x1="300" y1="104" x2="560" y2="104" marker-end="url(#ar2)"/>
+<text x="430" y="98" text-anchor="middle" class="small acctext">command #17 on the wire · crossing 1</text>
+<rect class="box2" x="566" y="118" width="190" height="30" rx="4"/>
+<text x="661" y="131" text-anchor="middle" class="small">txn 1: todos.push(todo)</text>
+<text x="661" y="143" text-anchor="middle" class="small muted">dirty = {todos, visible}</text>
+<line class="ln" x1="560" y1="164" x2="780" y2="164" marker-end="url(#ar2)"/>
+<text x="670" y="158" text-anchor="middle" class="small">spawn SaveTodo (Http port)</text>
+<line class="acc" x1="560" y1="188" x2="300" y2="188" marker-end="url(#ar2)"/>
+<text x="430" y="182" text-anchor="middle" class="small acctext">change-set {todos: patch, visible} · crossing 2</text>
+<line class="ln" x1="300" y1="212" x2="110" y2="212" marker-end="url(#ar2)"/>
+<text x="205" y="206" text-anchor="middle" class="small">apply to mirror, one main-thread hop</text>
+<rect class="goodfill" x="46" y="228" width="200" height="30" rx="4"/>
+<text x="146" y="241" text-anchor="middle" class="small">UI reads todos.visible</text>
+<text x="146" y="253" text-anchor="middle" class="small">local memory · crossings: 0</text>
+<line class="ln" x1="780" y1="280" x2="560" y2="280" marker-end="url(#ar2)"/>
+<text x="670" y="274" text-anchor="middle" class="small">201 Created</text>
+<rect class="box2" x="566" y="292" width="190" height="20" rx="4"/>
+<text x="661" y="306" text-anchor="middle" class="small">txn 2: mark synced</text>
+<line class="acc" x1="560" y1="330" x2="300" y2="330" marker-end="url(#ar2)"/>
+<text x="430" y="324" text-anchor="middle" class="small acctext">change-set · crossing 3</text>
+<line class="ln" x1="300" y1="346" x2="110" y2="346" marker-end="url(#ar2)"/>
+</svg>
+</div>
+<figcaption><b>One command, three crossings, two render passes.</b> The same flow in a per-value binding design costs one crossing per signal per read. In a whole-view-model design (Crux) it re-sends the entire screen state on every event. Keel sends what changed, once, and never pays for reads.</figcaption>
+</figure>
+<h3>Why this design and not the alternatives</h3>
+<div class="grid2">
+<div class="tile"><h4>Not callbacks per signal</h4><p>A screen with forty bound values would cross the boundary forty times per change and re-render forty times. Change-sets are the difference between "works in a demo" and "works in the settings screen of a real app."</p></div>
+<div class="tile"><h4>Not a whole view model</h4><p>Re-emitting all state on every event is simple and it is what Crux does. It is also O(screen) per keystroke and makes stable list identity impossible. Keyed patches cost O(change) and keep animations correct.</p></div>
+<div class="tile"><h4>Not synchronous reads across the boundary</h4><p>If reads crossed, worker mode on the web and the remote core in development would both be impossible, because both make every crossing asynchronous. Local reads are what let one API work in-process, in a Worker, and over a socket.</p></div>
+<div class="tile"><h4>Coalescing is on by default</h4><p>Change-sets committed before the platform's next main-thread hop are merged, so a burst of transactions from a network response becomes one render. Apps that need every intermediate state (progress bars) opt out per signal.</p></div>
+</div>
+<h3>Time travel comes for free</h3>
+<p>Every transaction has an id, a parent and a change-set. Record them and you have a log that replays deterministically, because the core reads time and randomness only through ports (§15, rule 12). A snapshot is the encoded state of every signal. The devtools inspector (§13) scrubs through transactions on any platform, and crash recovery (§12) restores from the last snapshot plus the log. None of this needed extra design; it fell out of the transaction model.</p>
+</section>
+
+<section id="data">
+<h2><span class="sn">§08</span>Data layer: TanStack Query semantics, one implementation, three platforms</h2>
+<p class="lede">The most-loved library in web frontend exists because async server state is hard to get right. Keel ships those semantics in the core, so caching, staleness, retries, optimistic updates, persistence and the offline queue behave identically on every platform and are written once.</p>
+<pre data-lang="rust"><code>#[keel::query(key = <span class="s">"todos"</span>, stale = <span class="s">"30s"</span>, persist)]
+<span class="k">async fn</span> todos(ctx: &amp;Ctx) -&gt; Result&lt;Vec&lt;Todo&gt;, HttpError&gt; {
+    ctx.http().get(<span class="s">"/todos"</span>).json().await
+}
+
+#[keel::mutation(idempotent)]
+<span class="k">async fn</span> save_todo(ctx: &amp;Ctx, todo: Todo) -&gt; Result&lt;Todo, HttpError&gt; {
+    ctx.http().post(<span class="s">"/todos"</span>).json(&amp;todo).send().await
+}
+
+<span class="c">// In a store command: optimistic patch, automatic rollback, targeted invalidation.</span>
+ctx.mutate(SaveTodo(todo.clone()))
+   .optimistic(|cache| cache.todos().push(todo.clone()))
+   .invalidates([Todos::KEY])
+   .await?;</code></pre>
+<p>A query is exposed to the platforms as a small object of signals: <code>data</code>, <code>status</code>, <code>error</code>, <code>fetching</code>, <code>updated_at</code>. Because they are signals, the UI binds to them exactly as it binds to any store, and a refetch is just another change-set.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 330" role="img" aria-label="Query lifecycle state machine: idle, fetching, fresh, stale, with refetch triggers looping stale back to fetching and an error state with retries. Below, the mutation path: optimistic patch as a transaction, request through the Http port, then either commit and invalidate, or rollback. Offline requests are queued with an idempotency key and replayed on reconnect.">
+<defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<text x="20" y="22" class="small muted">QUERIES</text>
+<rect class="box2" x="40" y="40" width="130" height="44" rx="22"/><text x="105" y="66" text-anchor="middle" class="head">Idle</text>
+<rect class="box" x="250" y="40" width="130" height="44" rx="22"/><text x="315" y="66" text-anchor="middle" class="head">Fetching</text>
+<rect class="goodfill" x="470" y="40" width="130" height="44" rx="22"/><text x="535" y="66" text-anchor="middle" class="head">Fresh</text>
+<rect class="warnfill" x="690" y="40" width="130" height="44" rx="22"/><text x="755" y="66" text-anchor="middle" class="head">Stale</text>
+<line class="ln" x1="170" y1="62" x2="250" y2="62" marker-end="url(#ar3)"/><text x="210" y="54" text-anchor="middle" class="small">first observer</text>
+<line class="ln" x1="380" y1="62" x2="470" y2="62" marker-end="url(#ar3)"/><text x="425" y="54" text-anchor="middle" class="small">ok · set cache</text>
+<line class="ln" x1="600" y1="62" x2="690" y2="62" marker-end="url(#ar3)"/><text x="645" y="54" text-anchor="middle" class="small">staleTime elapses</text>
+<path class="ln" d="M755 84 V116 H315 V84" marker-end="url(#ar3)" fill="none"/>
+<text x="535" y="131" text-anchor="middle" class="small">refetch on: observer mount · app foreground · reconnect · interval · invalidate</text>
+<path class="ln" d="M300 40 V22 H345 V40" marker-end="url(#ar3)" fill="none"/>
+<text x="400" y="26" class="small muted">in-flight dedup</text>
+<rect class="badfill" x="250" y="150" width="130" height="40" rx="6"/><text x="315" y="167" text-anchor="middle" class="head">Error</text><text x="315" y="181" text-anchor="middle" class="small">retry ×3, backoff</text>
+<line class="ln" x1="290" y1="84" x2="290" y2="150" marker-end="url(#ar3)"/>
+<line class="ln" x1="340" y1="150" x2="340" y2="84" marker-end="url(#ar3)"/>
+<text x="352" y="120" class="small muted">last data kept</text>
+
+<text x="20" y="222" class="small muted">MUTATIONS</text>
+<rect class="box" x="40" y="240" width="150" height="44" rx="6"/><text x="115" y="258" text-anchor="middle" class="head">mutate(input)</text><text x="115" y="273" text-anchor="middle" class="small muted">idempotency key</text>
+<rect class="box" x="240" y="240" width="160" height="44" rx="6"/><text x="320" y="258" text-anchor="middle" class="head">optimistic patch</text><text x="320" y="273" text-anchor="middle" class="small muted">a transaction → UI now</text>
+<rect class="box" x="450" y="240" width="140" height="44" rx="6"/><text x="520" y="258" text-anchor="middle" class="head">Http port</text><text x="520" y="273" text-anchor="middle" class="small muted">or queued if offline</text>
+<rect class="goodfill" x="650" y="222" width="220" height="36" rx="6"/><text x="760" y="245" text-anchor="middle" class="small">ack · commit · invalidate keys → Stale</text>
+<rect class="badfill" x="650" y="270" width="220" height="36" rx="6"/><text x="760" y="293" text-anchor="middle" class="small">error · rollback txn · surface typed error</text>
+<line class="ln" x1="190" y1="262" x2="240" y2="262" marker-end="url(#ar3)"/>
+<line class="ln" x1="400" y1="262" x2="450" y2="262" marker-end="url(#ar3)"/>
+<line class="ln" x1="590" y1="256" x2="650" y2="242" marker-end="url(#ar3)"/>
+<line class="ln" x1="590" y1="268" x2="650" y2="286" marker-end="url(#ar3)"/>
+<path class="ln dash" d="M760 222 V150 H755 V84" fill="none" marker-end="url(#ar3)"/>
+<text x="20" y="320" class="small muted">Offline: the request is persisted in the queue with its idempotency key and replayed in order on reconnect; the optimistic state survives app restarts.</text>
+</svg>
+</div>
+<figcaption><b>Query and mutation lifecycle.</b> Every state transition is a transaction, so it reaches the UI through the same change-set path as everything else. The offline queue is persisted through the Kv port, which is why an optimistic cart survives a force-quit on all three platforms.</figcaption>
+</figure>
+<h3>Included in v1</h3>
+<ul>
+<li>Cache keyed by structured keys with prefix invalidation; <code>stale_time</code>, <code>gc_time</code>, in-flight dedup, request cancellation when the last observer leaves.</li>
+<li>Retry policy with jittered exponential backoff, per query or global; refetch on focus, reconnect and interval, driven by the Lifecycle and Connectivity ports.</li>
+<li>Mutations with optimistic patches, rollback, invalidation, and an idempotent offline queue with ordering guarantees.</li>
+<li>Infinite queries with cursor pages, exposed as a keyed <code>Lazy</code> list so virtualized UIs never hold the whole thing.</li>
+<li>Persistence of the cache and queue via Kv with schema-hash versioning; hydration completes before the first render within a startup budget (§14).</li>
+<li>Devtools view of the whole cache with staleness, observers and last fetch, on every platform.</li>
+</ul>
+<p>Not in v1 and deliberately so: a full sync engine with conflict resolution. It belongs on this foundation and is the first item on the horizon (§20), but it is a product in its own right and would double the surface area of 1.0.</p>
+</section>
+
+<section id="ports">
+<h2><span class="sn">§09</span>Ports and adapters: the core never links a platform SDK</h2>
+<p class="lede">The core declares what it needs as traits. Keel ships a default implementation of each on every platform, and an app can replace any of them in Swift, Kotlin or TypeScript by implementing the generated protocol. Tests replace them with fakes. This one rule is what makes the core runnable on a laptop, testable in milliseconds, and portable to a fourth platform later.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 300" role="img" aria-label="Hexagonal diagram: the core on the left exposes port sockets for Http, Kv, SecureStore, Clock, Rng, Log, Fs, Connectivity and Lifecycle. On the right, four rows of adapters implement the ports: iOS defaults, Android defaults, web defaults, and test fakes.">
+<defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<polygon class="box" points="150,40 250,40 300,150 250,260 150,260 100,150"/>
+<text x="200" y="120" text-anchor="middle" class="head">Keel core</text>
+<text x="200" y="140" text-anchor="middle" class="small">your stores + Query</text>
+<text x="200" y="156" text-anchor="middle" class="small muted">no platform SDK linked</text>
+<text x="200" y="176" text-anchor="middle" class="small muted">talks only through ports</text>
+<g class="mono small">
+<circle class="accfill" cx="300" cy="70" r="4"/><text x="310" y="74">Http</text>
+<circle class="accfill" cx="300" cy="94" r="4"/><text x="310" y="98">Kv</text>
+<circle class="accfill" cx="300" cy="118" r="4"/><text x="310" y="122">SecureStore</text>
+<circle class="accfill" cx="300" cy="142" r="4"/><text x="310" y="146">Fs</text>
+<circle class="accfill" cx="300" cy="166" r="4"/><text x="310" y="170">Clock · Rng</text>
+<circle class="accfill" cx="300" cy="190" r="4"/><text x="310" y="194">Log · Telemetry</text>
+<circle class="accfill" cx="300" cy="214" r="4"/><text x="310" y="218">Connectivity</text>
+<circle class="accfill" cx="300" cy="238" r="4"/><text x="310" y="242">Lifecycle · Push</text>
+</g>
+<line class="thin" x1="410" y1="56" x2="410" y2="252"/>
+<rect class="box" x="450" y="36" width="430" height="50" rx="6"/>
+<text x="462" y="52" class="head">iOS defaults</text>
+<text x="462" y="66" class="small muted">URLSession · SQLite · Keychain · FileManager · mach clock · SecRandom</text>
+<text x="462" y="79" class="small muted">os_log · NWPathMonitor · scenePhase · APNs</text>
+<rect class="box" x="450" y="92" width="430" height="50" rx="6"/>
+<text x="462" y="108" class="head">Android defaults</text>
+<text x="462" y="122" class="small muted">OkHttp · SQLite · Keystore-wrapped DataStore · files dir · SystemClock · SecureRandom</text>
+<text x="462" y="135" class="small muted">Logcat · ConnectivityManager · ProcessLifecycle · FCM</text>
+<rect class="box" x="450" y="148" width="430" height="50" rx="6"/>
+<text x="462" y="164" class="head">Web defaults</text>
+<text x="462" y="178" class="small muted">fetch · IndexedDB · WebCrypto + IndexedDB (weaker, documented) · OPFS · performance.now</text>
+<text x="462" y="191" class="small muted">crypto · console · navigator.onLine · visibilitychange · Web Push</text>
+<rect class="goodfill" x="450" y="204" width="430" height="50" rx="6"/>
+<text x="462" y="220" class="head">Test fakes, shipped</text>
+<text x="462" y="234" class="small muted">recorded and replayed Http · in-memory Kv · fake clock you can advance</text>
+<text x="462" y="247" class="small muted">seeded Rng · scripted connectivity and lifecycle</text>
+<line class="ln" x1="450" y1="61" x2="414" y2="61" marker-end="url(#ar4)"/>
+<line class="ln" x1="450" y1="115" x2="414" y2="115" marker-end="url(#ar4)"/>
+<line class="ln" x1="450" y1="169" x2="414" y2="169" marker-end="url(#ar4)"/>
+<line class="ln" x1="450" y1="229" x2="414" y2="229" marker-end="url(#ar4)"/>
+<text x="432" y="276" text-anchor="middle" class="small muted">implements</text>
+<text x="665" y="276" text-anchor="middle" class="small">Any adapter is replaceable per app by implementing the generated protocol / interface.</text>
+</svg>
+</div>
+<figcaption><b>Ports and adapters.</b> Rust declares the port as a <code>#[keel::port]</code> trait; the generated package exposes it as a Swift protocol, a Kotlin interface and a TypeScript interface. The default adapters are ordinary code in the runtime packages, so replacing one is a normal class, not a plugin system.</figcaption>
+</figure>
+<h3>Design notes</h3>
+<ul>
+<li><strong>Kv is Rust-owned on native.</strong> The default Kv adapter on iOS and Android is a bundled SQLite driven from Rust through the Fs port, so persistence semantics (transactions, migrations, corruption handling) are identical on both. Web uses IndexedDB because SQLite-in-wasm with OPFS is still too uneven across browsers to be a default; it is available as an opt-in adapter.</li>
+<li><strong>SecureStore is honest about the web.</strong> There is no Keychain equivalent in a browser. The web adapter uses WebCrypto with a non-extractable key in IndexedDB, and the docs say plainly what that protects against and what it does not.</li>
+<li><strong>Ports are async and cancellable</strong> by construction, so a port implementation never blocks the core loop, and a command that is cancelled cancels its port calls.</li>
+<li><strong>Port calls are observable.</strong> Every call is a span in the Telemetry port and a row in devtools, and can be recorded to a file and replayed in a test. A production bug reproduces on a laptop from its recording.</li>
+</ul>
+</section>
+
+<section id="ffi">
+<h2><span class="sn">§10</span>The boundary and the three runtimes</h2>
+<p class="lede">One wire format is the ABI. Swift, Kotlin and TypeScript codecs are generated from the schema, so the platform runtimes are thin, identical in behavior, and testable against each other with property-based round trips.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 160" role="img" aria-label="Byte layout of a wire message: magic, version, schema hash, kind, sequence, length, then payload. Below, the payload encoding rules for records, strings, options, vectors, enums, bytes and handles.">
+<g class="mono small">
+<rect class="box2" x="20" y="30" width="80" height="40" rx="3"/><text x="60" y="48" text-anchor="middle">"KEEL"</text><text x="60" y="62" text-anchor="middle" class="muted">4 B</text>
+<rect class="box2" x="100" y="30" width="70" height="40" rx="3"/><text x="135" y="48" text-anchor="middle">version</text><text x="135" y="62" text-anchor="middle" class="muted">u16</text>
+<rect class="you" x="170" y="30" width="150" height="40" rx="3"/><text x="245" y="48" text-anchor="middle">schema hash</text><text x="245" y="62" text-anchor="middle" class="muted">u64 · checked at load</text>
+<rect class="box2" x="320" y="30" width="70" height="40" rx="3"/><text x="355" y="48" text-anchor="middle">kind</text><text x="355" y="62" text-anchor="middle" class="muted">u8</text>
+<rect class="box2" x="390" y="30" width="80" height="40" rx="3"/><text x="430" y="48" text-anchor="middle">seq</text><text x="430" y="62" text-anchor="middle" class="muted">u32</text>
+<rect class="box2" x="470" y="30" width="80" height="40" rx="3"/><text x="510" y="48" text-anchor="middle">len</text><text x="510" y="62" text-anchor="middle" class="muted">u32</text>
+<rect class="box" x="550" y="30" width="330" height="40" rx="3"/><text x="715" y="48" text-anchor="middle">payload</text><text x="715" y="62" text-anchor="middle" class="muted">command · reply · change-set · port call · credit</text>
+</g>
+<text x="20" y="20" class="small muted">HEADER · little-endian · 21 bytes</text>
+<g class="small">
+<text x="20" y="98">record: fields in declaration order, no names, no padding</text>
+<text x="20" y="116">string: u32 len + UTF-8 · Option: u8 tag + value · Vec: u32 len + items · enum: u16 tag + payload</text>
+<text x="20" y="134">bytes in-process: (ptr, len) borrowed until the call returns · over a transport: inline · handle: u64 with a generation tag</text>
+<text x="20" y="152" class="muted">Versioned by the schema hash: layout changes fail at load with a message that names both versions; nothing is ever misread.</text>
+</g>
+</svg>
+</div>
+<figcaption><b>The wire.</b> A boring, dense, fuzzed binary format. It is transport-agnostic on purpose: the same bytes go through a C call in-process, through <code>postMessage</code> to a Worker, and through a WebSocket to the remote dev core.</figcaption>
+</figure>
+<h3>iOS</h3>
+<ul>
+<li>The core is a <code>cdylib</code> with a C ABI of a dozen exported functions (call, cancel, subscribe, release, restore) packaged as an XCFramework for device arm64 and simulator arm64/x86_64, inside a Swift Package with the generated sources. No Objective-C anywhere.</li>
+<li>Stores are generated as <code>@MainActor @Observable final class</code>; records are value types that are <code>Sendable</code>, <code>Hashable</code>, <code>Codable</code>. The mirror lives on the main actor, which is also what makes the whole package compile clean under Swift 6 strict concurrency.</li>
+<li>Async calls use <code>withCheckedThrowingContinuation</code>; the Rust future completes through a C callback carrying the continuation. Task cancellation calls <code>keel_cancel(call_id)</code>, which drops the future.</li>
+<li>Objects are generation-tagged handles into a slab, never raw pointers, so a stale handle is an error rather than a use-after-free. <code>deinit</code> releases; explicit <code>close()</code> is available for deterministic cleanup.</li>
+</ul>
+<h3>Android</h3>
+<ul>
+<li>JNI, with natives registered in <code>JNI_OnLoad</code> so there is no name lookup per call. Primitives cross as JNI primitives; change-sets arrive in a direct <code>ByteBuffer</code> that Kotlin decodes without a copy. Strings cross as UTF-8 bytes and are decoded in Kotlin, which is both faster than modified UTF-8 and correct for supplementary characters.</li>
+<li>Stores expose Compose <code>State&lt;T&gt;</code> properties, with a <code>StateFlow&lt;T&gt;</code> view for non-Compose code. Mirror updates are posted to <code>Dispatchers.Main.immediate</code>.</li>
+<li>Commands are <code>suspend</code> functions over <code>suspendCancellableCoroutine</code>; coroutine cancellation calls <code>keel_cancel</code>. Handles are <code>AutoCloseable</code> and registered with <code>java.lang.ref.Cleaner</code> as a backstop.</li>
+<li>Built with NDK r27 or newer, 16 KB page-size aligned, ABIs arm64-v8a and x86_64 by default, armeabi-v7a opt-in. The AAR carries the <code>.so</code> files and the generated Kotlin.</li>
+</ul>
+<h3>Web</h3>
+<ul>
+<li>Target <code>wasm32-unknown-unknown</code>. wasm-bindgen is used only for the runtime's dozen edge functions; per-type glue is generated from the schema as TypeScript codecs, identical in shape to the Swift and Kotlin ones. Output is an ESM package with <code>.d.ts</code>, built with LTO and <code>wasm-opt -Oz</code>, loaded with streaming compilation.</li>
+<li>The core runs in a Web Worker by default, so parsing a large response never janks the main thread. Worker mode is possible only because reads are local (§07); commands are already async, so nothing in the API changes.</li>
+<li>Main-thread mode is one flag away for SSR, tests and small apps; there the codecs read <code>Uint8Array</code> views straight from wasm memory with no copy. Node, Bun and Deno are supported targets for server rendering and CI.</li>
+<li>Framework bindings are thin: <code>useKeel</code> and <code>useSignal</code> for React (over <code>useSyncExternalStore</code>), a <code>toRef</code> adapter for Vue, the store contract for Svelte, passthrough for Solid.</li>
+</ul>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 200" role="img" aria-label="Web worker mode: on the main thread, React components read from the Keel proxy's mirror synchronously and enqueue commands; the proxy exchanges wire bytes with a Web Worker over postMessage; the Worker runs the wasm core and the fetch and IndexedDB adapters.">
+<defs><marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box2" x="20" y="20" width="400" height="150" rx="8"/>
+<text x="34" y="40" class="head">Main thread</text>
+<rect class="you" x="40" y="54" width="360" height="40" rx="5"/>
+<text x="220" y="72" text-anchor="middle" class="head">React / Vue / Svelte components</text>
+<text x="220" y="86" text-anchor="middle" class="small">read signals synchronously · call commands</text>
+<rect class="box" x="40" y="112" width="360" height="44" rx="5"/>
+<text x="220" y="130" text-anchor="middle" class="head">Keel proxy</text>
+<text x="220" y="145" text-anchor="middle" class="small">mirror of observed signals · command queue · codecs</text>
+<line class="thin" x1="220" y1="94" x2="220" y2="112"/>
+<rect class="box2" x="480" y="20" width="400" height="150" rx="8"/>
+<text x="494" y="40" class="head">Web Worker</text>
+<rect class="box" x="500" y="54" width="360" height="44" rx="5"/>
+<text x="680" y="72" text-anchor="middle" class="head">wasm core (Rust)</text>
+<text x="680" y="87" text-anchor="middle" class="small">core loop = the Worker's event loop</text>
+<rect class="box" x="500" y="112" width="360" height="44" rx="5"/>
+<text x="680" y="130" text-anchor="middle" class="head">Adapters</text>
+<text x="680" y="145" text-anchor="middle" class="small">fetch · IndexedDB · WebCrypto run here, off the UI thread</text>
+<line class="acc" x1="420" y1="88" x2="480" y2="88" marker-end="url(#ar5)"/>
+<line class="acc" x1="480" y1="104" x2="420" y2="104" marker-end="url(#ar5)"/>
+<text x="450" y="80" text-anchor="middle" class="small acctext">cmd</text>
+<text x="450" y="118" text-anchor="middle" class="small acctext">Δ</text>
+<text x="450" y="150" text-anchor="middle" class="small muted">postMessage</text>
+<text x="20" y="192" class="small muted">Wire bytes cross as Transferables. Main-thread mode for SSR and tests replaces the proxy with direct calls into wasm memory; nothing in the app changes.</text>
+</svg>
+</div>
+<figcaption><b>Worker mode.</b> Because the API never reads across the boundary, moving the core to another thread costs nothing in the app's code. The same property makes the remote development core (§13) possible.</figcaption>
+</figure>
+</section>
+
+<section id="threads">
+<h2><span class="sn">§11</span>Threading: one place mutates state</h2>
+<p class="lede">Every hard concurrency bug in a mobile app is two threads disagreeing about state. Keel removes the disagreement: exactly one thread owns signal state, and everyone else sends it messages.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 250" role="img" aria-label="Threading model: the main thread sends commands to the core loop and receives coalesced change-sets; the core loop, the only thread that mutates signals, spawns I/O futures on async workers and CPU work on a blocking pool, and both return values that the core loop commits as transactions.">
+<defs><marker id="ar6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box" x="20" y="70" width="200" height="70" rx="6"/>
+<text x="120" y="96" text-anchor="middle" class="head">Main thread</text>
+<text x="120" y="112" text-anchor="middle" class="small">UI · mirror · adapters with UI</text>
+<text x="120" y="126" text-anchor="middle" class="small muted">never blocks on the core</text>
+<rect class="you" x="320" y="70" width="240" height="70" rx="6"/>
+<text x="440" y="94" text-anchor="middle" class="head">Core loop · one thread</text>
+<text x="440" y="110" text-anchor="middle" class="small">owns every signal · runs transactions in order</text>
+<text x="440" y="126" text-anchor="middle" class="small muted">the only code that mutates state</text>
+<rect class="box" x="660" y="20" width="220" height="56" rx="6"/>
+<text x="770" y="42" text-anchor="middle" class="head">Async workers</text>
+<text x="770" y="58" text-anchor="middle" class="small">I/O futures: Http, Kv, Fs, timers</text>
+<rect class="box" x="660" y="134" width="220" height="56" rx="6"/>
+<text x="770" y="156" text-anchor="middle" class="head">Blocking pool</text>
+<text x="770" y="172" text-anchor="middle" class="small">CPU: parsing, crypto, diffing, search</text>
+<line class="ln" x1="220" y1="92" x2="320" y2="92" marker-end="url(#ar6)"/>
+<text x="270" y="86" text-anchor="middle" class="small">commands</text>
+<line class="acc" x1="320" y1="118" x2="220" y2="118" marker-end="url(#ar6)"/>
+<text x="270" y="134" text-anchor="middle" class="small acctext">change-sets, coalesced</text>
+<line class="ln" x1="560" y1="86" x2="660" y2="52" marker-end="url(#ar6)"/>
+<text x="596" y="58" text-anchor="middle" class="small">spawn</text>
+<line class="ln" x1="660" y1="66" x2="560" y2="100" marker-end="url(#ar6)"/>
+<text x="630" y="92" text-anchor="middle" class="small">value → txn</text>
+<line class="ln" x1="560" y1="118" x2="660" y2="152" marker-end="url(#ar6)"/>
+<text x="596" y="148" text-anchor="middle" class="small">spawn_blocking</text>
+<line class="ln" x1="660" y1="166" x2="560" y2="132" marker-end="url(#ar6)"/>
+<text x="640" y="182" text-anchor="middle" class="small">value → txn</text>
+<text x="20" y="220" class="small muted">Native: tokio multi-thread runtime, core loop is a dedicated thread. Web: the Worker's event loop is the core loop; workers are wasm-bindgen futures on the same thread;</text>
+<text x="20" y="236" class="small muted">the blocking pool becomes wasm threads when the page is cross-origin isolated, and cooperative chunking otherwise.</text>
+</svg>
+</div>
+<figcaption><b>Actor-shaped, without the ceremony.</b> App code never sees a lock. A command is an <code>async fn</code> on a store; awaiting a port call inside it yields the core loop to other commands, and the write it makes afterwards is committed in order. Signals are internally <code>Send + Sync</code> so reads from a worker are allowed, but writes commit only through the loop.</figcaption>
+</figure>
+<ul>
+<li><strong>Ordering guarantee:</strong> transactions commit in the order they complete on the core loop, and change-sets are delivered in commit order. A platform never observes state from transaction 8 before transaction 7.</li>
+<li><strong>Reentrancy:</strong> a command may call another store's command; a port adapter may not call back into the core synchronously. The runtime enforces the second rule with a debug assertion and a devtools warning.</li>
+<li><strong>Priorities:</strong> commands carry a priority (user-interactive, default, background). The core loop drains user-interactive first, which keeps a typing indicator responsive during a bulk sync.</li>
+</ul>
+</section>
+
+<section id="errors">
+<h2><span class="sn">§12</span>Errors, panics and crash recovery</h2>
+<p class="lede">The host app must never die because the core did. A panic in Rust becomes a typed error on the platform, the state stays consistent, and on the web the core can restart itself from a snapshot faster than a user can notice.</p>
+<div class="grid2">
+<div class="tile"><h4>Errors are values</h4><p><code>Result&lt;T, E&gt;</code> with <code>#[keel::error]</code> enums becomes typed throws in Swift, a sealed exception hierarchy in Kotlin, and error classes in TypeScript. No stringly-typed errors, ever. Error enums may carry data, and <code>#[from]</code> conversions keep the Rust ergonomic.</p></div>
+<div class="tile"><h4>Panics are contained</h4><p>On native the core builds with <code>panic = "unwind"</code> and every boundary entry is wrapped in <code>catch_unwind</code>. A panic becomes <code>KeelPanic { message, backtrace }</code>, delivered as an error to the caller and as an event to the Telemetry port. The app keeps running.</p></div>
+<div class="tile"><h4>Transactions are atomic</h4><p>Signal writes inside a transaction go to a copy-on-write overlay and are committed at the end. A panic mid-transaction discards the overlay, so a half-applied state is impossible even when code is wrong.</p></div>
+<div class="tile"><h4>Web restarts from snapshot</h4><p>wasm has no unwinding, so a panic traps. The runtime catches the <code>RuntimeError</code>, re-instantiates the module, restores the last snapshot and replays the transaction log since then, typically in well under 100 ms. The UI sees a <code>recovering</code> signal flip and nothing else.</p></div>
+</div>
+<h3>Symbols and observability</h3>
+<p><code>keel build</code> emits symbol files for every target: Rust frames appear in the iOS dSYM, Android gets stripped <code>.so</code> files plus symbol files ready for Play Console and Crashlytics upload, and the wasm build gets a source map. A Rust backtrace in a crash report reads like a Rust backtrace, with file and line. The Telemetry port emits spans for every command, transaction, query fetch and port call, and the default adapters forward them to OpenTelemetry-compatible exporters, so an app's existing tracing sees inside the core on day one.</p>
+</section>
+
+<section id="devloop">
+<h2><span class="sn">§13</span>The dev loop: the reason engineers will evangelize</h2>
+<p class="lede">Flutter's most persuasive feature has always been hot reload. Keel gets the same effect for the core without owning the UI, because the core can run anywhere the wire reaches.</p>
+<figure>
+<div class="frame">
+<svg class="d" viewBox="0 0 900 230" role="img" aria-label="Remote core development: on the laptop, cargo watch rebuilds the core as a native process next to the devtools inspector; the phone runs the real app with generated bindings whose transport is swapped from in-process FFI to a WebSocket; commands and change-sets travel over the socket, and port calls travel back to the phone's real adapters.">
+<defs><marker id="ar8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="box2" x="20" y="20" width="400" height="180" rx="8"/>
+<text x="34" y="40" class="head">Laptop · keel dev</text>
+<rect class="box" x="40" y="54" width="170" height="52" rx="5"/>
+<text x="125" y="74" text-anchor="middle" class="head">cargo watch</text>
+<text x="125" y="90" text-anchor="middle" class="small">rebuild core in ≈1 s</text>
+<rect class="you" x="230" y="54" width="170" height="52" rx="5"/>
+<text x="315" y="74" text-anchor="middle" class="head">core as a process</text>
+<text x="315" y="90" text-anchor="middle" class="small">state restored across reloads</text>
+<line class="ln" x1="210" y1="80" x2="230" y2="80" marker-end="url(#ar8)"/>
+<rect class="box" x="40" y="122" width="360" height="62" rx="5"/>
+<text x="220" y="141" text-anchor="middle" class="head">DevTools inspector · localhost:7777</text>
+<text x="220" y="157" text-anchor="middle" class="small">transaction timeline · time travel · signal graph</text>
+<text x="220" y="171" text-anchor="middle" class="small">query cache · port log · crossing counter</text>
+<rect class="box2" x="520" y="20" width="360" height="180" rx="8"/>
+<text x="534" y="40" class="head">Phone / browser · the real app</text>
+<rect class="you" x="540" y="54" width="320" height="52" rx="5"/>
+<text x="700" y="74" text-anchor="middle" class="head">Native UI + generated bindings</text>
+<text x="700" y="90" text-anchor="middle" class="small">unchanged code; not rebuilt</text>
+<rect class="box" x="540" y="126" width="320" height="52" rx="5"/>
+<text x="700" y="146" text-anchor="middle" class="head">Runtime, transport swapped</text>
+<text x="700" y="162" text-anchor="middle" class="small">in-process FFI → WebSocket in dev · real adapters stay here</text>
+<line class="acc" x1="420" y1="72" x2="520" y2="72" marker-end="url(#ar8)"/>
+<line class="acc" x1="520" y1="88" x2="420" y2="88" marker-end="url(#ar8)"/>
+<text x="470" y="64" text-anchor="middle" class="small acctext">Δ change-sets</text>
+<text x="470" y="102" text-anchor="middle" class="small acctext">commands</text>
+<line class="ln dash" x1="420" y1="152" x2="520" y2="152" marker-end="url(#ar8)"/>
+<line class="ln dash" x1="520" y1="166" x2="420" y2="166" marker-end="url(#ar8)"/>
+<text x="470" y="144" text-anchor="middle" class="small">port calls</text>
+<text x="470" y="180" text-anchor="middle" class="small">port replies</text>
+<text x="20" y="222" class="small muted">Same wire, same codecs, same API. The app cannot tell whether the core is a library inside it or a process on your desk.</text>
+</svg>
+</div>
+<figcaption><b>Remote core.</b> Edit a Rust function, save, and the running iOS app reflects it about a second later with its state intact. Port calls are routed back to the device, so the Keychain, the network stack and the file system are the real ones.</figcaption>
+</figure>
+<h3>DevTools</h3>
+<p>One inspector, connected to any platform, showing the transaction timeline with time-travel scrubbing, the signal dependency graph with which platform observes what, the query cache with staleness and observers, the port call log with timings, live handle counts, and a per-screen FFI crossing counter with the budget from §14 drawn on it. The crossing counter is the feature that turns performance from a belief into a number a junior engineer can watch.</p>
+<h3>Testing, in the shape of a pyramid</h3>
+<ul>
+<li><strong>Core unit tests</strong> (most of them): plain <code>cargo test</code> with the shipped fakes. Advance the fake clock, script connectivity, assert on transactions. Milliseconds each.</li>
+<li><strong>Contract tests</strong> (generated): property-based round trips of every schema type through each language's codec, and behavioral tests of async, cancellation, streams and change-sets that run on the iOS simulator, an Android emulator and headless Chromium. This suite is the definition of "the platforms agree."</li>
+<li><strong>Record and replay</strong>: a port session recorded in production (with consent, through the Telemetry port) replays on a laptop with the same core build and reproduces the bug deterministically.</li>
+<li><strong>App integration tests</strong> (few): the platform's own UI test tooling against the real core, kept to smoke coverage because everything below the UI is already tested faster elsewhere.</li>
+</ul>
+</section>
+
+<section id="perf">
+<h2><span class="sn">§14</span>Performance and size budgets, enforced in CI</h2>
+<p class="lede">These are targets, not achievements. Each row is a benchmark in the repository that fails the build when it regresses, and the numbers are published against UniFFI and KMP baselines on every release. "Zero compromise" is a claim we intend to prove with a table, not a paragraph.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Measure</th><th>iOS (A15-class)</th><th>Android (mid-range 2022)</th><th>Web (Chromium)</th><th>Why it matters</th></tr></thead>
+<tbody>
+<tr><td>Handle method call, primitive args and return</td><td class="n">≤ 60 ns</td><td class="n">≤ 250 ns</td><td class="n">≤ 80 ns in-thread; ≤ 1 frame in Worker mode</td><td>The floor of every command</td></tr>
+<tr><td>1 KB record, round trip</td><td class="n">≤ 3 µs</td><td class="n">≤ 8 µs</td><td class="n">≤ 4 µs</td><td>Typical command payload</td></tr>
+<tr><td>Change-set with 100 dirty signals, applied on the main thread</td><td class="n">≤ 100 µs</td><td class="n">≤ 150 µs</td><td class="n">≤ 120 µs</td><td>A dense screen after a network response, under one frame</td></tr>
+<tr><td>Keyed patch on a 10,000-item list, one insert</td><td class="n">≤ 20 µs</td><td class="n">≤ 40 µs</td><td class="n">≤ 30 µs</td><td>Lists must be O(change), not O(list)</td></tr>
+<tr><td>Core cold start with 100 KB snapshot restore</td><td class="n">≤ 3 ms</td><td class="n">≤ 5 ms</td><td class="n">≤ 8 ms after wasm compile</td><td>App launch is the first impression</td></tr>
+<tr><td>Hello-world size added to the app</td><td class="n">≤ 900 KB (arm64, LTO, stripped)</td><td class="n">≤ 1.2 MB per ABI</td><td class="n">≤ 120 KB gz wasm + ≤ 8 KB gz runtime</td><td>Size is the first objection every mobile lead raises</td></tr>
+<tr><td>Runtime memory at idle</td><td class="n">≤ 2 MB</td><td class="n">≤ 2 MB</td><td class="n">≤ 3 MB</td><td>Background-kill thresholds</td></tr>
+<tr><td>Incremental core rebuild in <code>keel dev</code></td><td class="n" colspan="3">≤ 3 s for a 20k-line core on an M-series laptop</td><td>The dev loop promise</td></tr>
+<tr><td>Web crash recovery from snapshot</td><td class="n" colspan="3">≤ 100 ms for a 1 MB state</td><td>Invisible to the user</td></tr>
+</tbody>
+</table>
+</div>
+<p>How the budgets are met is mostly the architecture: reads are local, so the majority of what a UI does costs nothing at the boundary; change-sets amortize the per-crossing cost across every signal in a transaction; keyed patches keep lists proportional to change; and the wire format is dense and generated, with no reflection on any platform. The remaining work is ordinary engineering: registered JNI natives, direct buffers, borrowed byte slices, no allocations on the hot path, and a benchmark harness that runs on real devices in CI.</p>
+</section>
+
+<section id="constitution">
+<h2><span class="sn">§15</span>Engineering constitution</h2>
+<p class="lede">This project will be built largely by AI coding agents working from this document. Agents drift unless the rules are explicit, checkable and few. These twelve are non-negotiable; each has a CI check or a review checklist item behind it.</p>
+<ol class="rules">
+<li><span class="r">R1</span><div><b>The schema is the only truth.</b> A public type or function exists only if <code>keel-meta</code> can describe it. Every language's output is derived from that description; nothing is hand-written per platform except the runtimes.</div></li>
+<li><span class="r">R2</span><div><b>Unsafe lives in two crates.</b> <code>unsafe</code> is permitted only in <code>keel-ffi</code> and <code>keel-wire</code>, every block carries a <code>// SAFETY:</code> comment, and both crates run under Miri and the sanitizers in CI. A PR that adds <code>unsafe</code> elsewhere is closed without review.</div></li>
+<li><span class="r">R3</span><div><b>Generated code must pass native review.</b> A Swift, Kotlin or TypeScript engineer who has never seen Rust approves the generated package as code they would write. Golden-file snapshot tests lock the output; changing a snapshot requires a reviewer from that language.</div></li>
+<li><span class="r">R4</span><div><b>Every feature lands whole.</b> Rust unit tests, contract tests on all three platforms, a benchmark if the boundary is touched, and a docs page. A feature missing any of these is not merged, however good the code.</div></li>
+<li><span class="r">R5</span><div><b>Reads never cross; writes cross once.</b> No generated getter may call into the core. A transaction produces at most one change-set. A test counts crossings per scenario and fails on any increase.</div></li>
+<li><span class="r">R6</span><div><b>Nothing escapes as a panic or an abort.</b> Every boundary entry is guarded; every error is a typed value; the host app is never terminated by the core.</div></li>
+<li><span class="r">R7</span><div><b>Compatibility is checked at load and at build.</b> The schema hash is verified when the core loads; <code>cargo semver-checks</code> runs on every public crate; a breaking change to the wire is a major version and a written migration.</div></li>
+<li><span class="r">R8</span><div><b>Macro errors teach.</b> Every rejection names the problem, the reason and the fix, with a stable error code and a docs link. A new error code is added with its docs page in the same PR.</div></li>
+<li><span class="r">R9</span><div><b>Budgets are tests.</b> The §14 table lives in the repo as benchmarks; a regression past a budget fails CI. Numbers are published per release.</div></li>
+<li><span class="r">R10</span><div><b>We ship on it first.</b> The reference store app uses only public APIs and is released to TestFlight, Play internal testing and the web on every tagged release. If dogfooding hurts, that pain is the next milestone.</div></li>
+<li><span class="r">R11</span><div><b>Boundary changes need an ADR.</b> Anything that touches the wire, the runtime model, the threading model or the generated public shape is decided in a short written record before code, appended to §18.</div></li>
+<li><span class="r">R12</span><div><b>The core is deterministic.</b> No wall-clock reads outside the Clock port, no randomness outside the Rng port, no ambient I/O. This is what makes replay, time travel and record-and-replay debugging correct rather than approximate.</div></li>
+</ol>
+</section>
+
+<section id="repo">
+<h2><span class="sn">§16</span>Repository layout</h2>
+<p class="lede">A single monorepo, one workspace, three runtime packages, one CLI. Crate boundaries follow the constitution: the two unsafe crates are isolated, the schema crate has no dependencies, and the runtime crates never import codegen.</p>
+<div class="tree">keel/
+├─ crates/
+│  ├─ keel            <i>facade: prelude, re-exports, docs entry point</i>
+│  ├─ keel-macros     <i>#[keel::api] · error · store · port · query · mutation; diagnostics with codes</i>
+│  ├─ keel-meta       <i>schema types, schema hash, wire spec constants; zero dependencies</i>
+│  ├─ keel-wire       <i>binary codec, borrowed and owned variants; fuzz targets; unsafe allowed</i>
+│  ├─ keel-signals    <i>signals, computed, effects, transactions, change-sets, keyed patches</i>
+│  ├─ keel-runtime    <i>core loop, task runtime (tokio / wasm), priorities, panic guard, snapshots</i>
+│  ├─ keel-query      <i>cache, queries, mutations, offline queue, persistence</i>
+│  ├─ keel-ports      <i>port traits + shipped fakes: recorded Http, memory Kv, fake Clock, seeded Rng</i>
+│  ├─ keel-ffi        <i>C ABI, handle slab, callback vtables, cancellation; unsafe allowed</i>
+│  ├─ keel-transport  <i>WebSocket and in-process transports for remote core and worker mode</i>
+│  ├─ keel-bindgen    <i>codegen engine; templates for swift, kotlin, ts; golden tests</i>
+│  ├─ keel-devtools   <i>inspector protocol, server, time-travel log</i>
+│  └─ keel-cli        <i>keel init · dev · build · adopt · doctor · bench · migrate</i>
+├─ runtimes/
+│  ├─ swift/KeelRuntime        <i>Swift package: handles, continuations, mirror, @Observable glue, default adapters</i>
+│  ├─ kotlin/keel-runtime      <i>AAR: JNI glue, coroutines, Compose State, Flow, default adapters</i>
+│  └─ ts/@keel/runtime         <i>ESM: wasm loader, Worker proxy, signals, react/vue/svelte/solid, default adapters</i>
+├─ contract-tests/             <i>schema-driven suites executed on simulator, emulator and headless browser</i>
+├─ bench/                      <i>FFI microbenchmarks, device harness, size budgets, baselines vs UniFFI and KMP</i>
+├─ examples/
+│  ├─ todo                     <i>the fifteen-minute app</i>
+│  ├─ offline-notes            <i>Query, persistence, offline queue</i>
+│  └─ store                    <i>the dogfood app: auth, catalog, cart, checkout, sync; ships every release</i>
+├─ docs/                       <i>site source, error code pages, migration guides</i>
+└─ rfcs/                       <i>ADRs, numbered</i></div>
+</section>
+
+<section id="roadmap">
+<h2><span class="sn">§17</span>Roadmap: six phases, each with a definition of done</h2>
+<p class="lede">The order is chosen so that the riskiest assumptions are tested first (the boundary and the budgets), the moat is built second (state), and the polish that wins hearts comes when there is something to polish. Durations assume a small team with agents doing most of the typing.</p>
+<div class="phase">
+<div class="ph"><b>Phase 0 · Foundations</b><span class="when">weeks 1–3</span></div>
+<ul>
+<li><code>keel-meta</code> schema, <code>keel-wire</code> codec with fuzzing, <code>keel-macros</code> for records, enums, errors, functions and objects.</li>
+<li><code>keel-ffi</code> handle slab and C ABI; <code>keel-bindgen</code> for Swift only; hello world on the iOS simulator end to end.</li>
+</ul>
+<div class="done"><b>Done when:</b> the Swift contract suite passes on the simulator, the call-overhead benchmark runs on a device, and the generated Swift compiles clean under Swift 6 strict concurrency.</div>
+</div>
+<div class="phase">
+<div class="ph"><b>Phase 1 · Three platforms</b><span class="when">weeks 4–8</span></div>
+<ul>
+<li>Kotlin and TypeScript codegen and runtimes; async with cancellation; streams with credit-based backpressure; typed errors everywhere.</li>
+<li><code>keel init</code> and <code>keel build</code> producing an XCFramework and Swift package, an AAR, and an npm package from CI.</li>
+</ul>
+<div class="done"><b>Done when:</b> one contract suite is green on simulator, emulator and headless Chromium; packages publish from a tag; kill criteria for Android call cost and Swift 6 are checked and passed.</div>
+</div>
+<div class="phase">
+<div class="ph"><b>Phase 2 · Reactive core</b><span class="when">weeks 9–14</span></div>
+<ul>
+<li><code>keel-signals</code>: signals, computed, transactions, change-sets, keyed patches, coalescing; <code>#[keel::store]</code>.</li>
+<li>Mirrors and bindings: <code>@Observable</code>, Compose <code>State</code>, TS signals with React, Vue, Svelte and Solid adapters; Worker mode on the web.</li>
+</ul>
+<div class="done"><b>Done when:</b> the todo example runs with shared state on all three platforms, the crossing counter proves one crossing per transaction, and the 100-signal change-set budget is met on the reference Android device.</div>
+</div>
+<div class="phase">
+<div class="ph"><b>Phase 3 · Data layer and ports</b><span class="when">weeks 15–22</span></div>
+<ul>
+<li><code>keel-query</code>: cache, staleness, retry, dedup, mutations with optimistic patches, invalidation, infinite queries, persistence, offline queue.</li>
+<li>All ports with default adapters on every platform, shipped fakes, record and replay.</li>
+</ul>
+<div class="done"><b>Done when:</b> the offline-notes example survives airplane mode and a force-quit on all three platforms with identical behavior, verified by the contract suite.</div>
+</div>
+<div class="phase">
+<div class="ph"><b>Phase 4 · Developer experience</b><span class="when">weeks 23–30</span></div>
+<ul>
+<li><code>keel dev</code> remote core with state-preserving reloads; devtools inspector with time travel; <code>keel adopt</code>, <code>keel doctor</code>, <code>keel migrate</code> from UniFFI.</li>
+<li>Error-message audit of every macro diagnostic; docs site with the error code pages; migration guides.</li>
+</ul>
+<div class="done"><b>Done when:</b> three engineers with no Rust background reach a running three-platform app in under fifteen minutes using only the docs, observed, and the fourth kill criterion is passed.</div>
+</div>
+<div class="phase">
+<div class="ph"><b>Phase 5 · Hardening to 1.0</b><span class="when">weeks 31–40</span></div>
+<ul>
+<li>Budgets in CI on real devices; Miri, ASan and TSan on the unsafe crates; fuzzing in CI; <code>cargo semver-checks</code>; panic containment and snapshot restore; lazy lists; size budgets.</li>
+<li>The store dogfood app ships to TestFlight, Play internal testing and the web; published benchmarks against UniFFI and KMP.</li>
+</ul>
+<div class="done"><b>Done when:</b> the dogfood app has been in external testers' hands for four weeks with no core-attributed crash, and every §14 budget is enforced in CI.</div>
+</div>
+</section>
+
+<section id="adrs">
+<h2><span class="sn">§18</span>Decision log</h2>
+<p class="lede">Short records of the decisions that shape everything else. Each says what was chosen, what was rejected, and why. New ones are appended, never edited.</p>
+<div class="adr">
+<details><summary><span class="id">ADR-001</span>The Rust source is the IDL</summary><div><p><strong>Chosen:</strong> proc-macros emit schema metadata into the compiled artifact; <code>keel-bindgen</code> reads it. <strong>Rejected:</strong> a separate <code>.udl</code> or <code>.idl</code> file. <strong>Why:</strong> one source of truth that <code>rustc</code> type-checks, no drift, no second syntax to learn. UniFFI's proc-macro mode validates the approach.</p></div></details>
+<details><summary><span class="id">ADR-002</span>A binary wire format with generated codecs on every side</summary><div><p><strong>Chosen:</strong> dense little-endian format, versioned by a schema hash, codecs generated per type in Rust, Swift, Kotlin and TypeScript. <strong>Rejected:</strong> JSON (slow, lossy for integers and bytes), Protobuf and FlatBuffers (a second schema language and a dependency on every platform). <strong>Why:</strong> the format is small enough to own, fuzz and keep stable, and generating codecs from our own schema keeps every platform identical.</p></div></details>
+<details><summary><span class="id">ADR-003</span>Objects cross as generation-tagged handles</summary><div><p><strong>Chosen:</strong> <code>Arc&lt;T&gt;</code> in a slab; a u64 handle with a generation tag crosses; foreign finalizers release; explicit <code>close()</code> available. <strong>Rejected:</strong> raw pointers. <strong>Why:</strong> a stale or forged handle is an error, never memory corruption, and leaks are countable in devtools.</p></div></details>
+<details><summary><span class="id">ADR-004</span>One core loop owns all state</summary><div><p><strong>Chosen:</strong> a single thread commits transactions in order; I/O and CPU work run elsewhere and return values. <strong>Rejected:</strong> free-threaded signals with locks. <strong>Why:</strong> deterministic ordering, one change-set per transaction, and no lock a user can misuse. The cost, serialized commits, is invisible at app scale and measured by a budget.</p></div></details>
+<details><summary><span class="id">ADR-005</span>Change-sets, not per-signal callbacks, not whole view models</summary><div><p><strong>Chosen:</strong> the dirty set of observed signals is encoded once per transaction, with keyed patches for lists. <strong>Rejected:</strong> a callback per signal (O(signals) crossings), and re-sending all state (O(screen) per event, no stable identity). <strong>Why:</strong> §07; this is the moat.</p></div></details>
+<details><summary><span class="id">ADR-006</span>Reads are local; commands are async</summary><div><p><strong>Chosen:</strong> every platform holds a mirror of observed values; all boundary calls are asynchronous. <strong>Rejected:</strong> synchronous getters into the core. <strong>Why:</strong> it makes Worker mode and the remote core transparent, keeps the UI thread free, and is what makes "zero crossings on read" true.</p></div></details>
+<details><summary><span class="id">ADR-007</span>Ports are traits; the core links no platform SDK</summary><div><p><strong>Chosen:</strong> hexagonal architecture with shipped default adapters per platform and shipped fakes. <strong>Rejected:</strong> calling platform APIs from Rust via C bindings. <strong>Why:</strong> testability, the remote core, and the fourth platform.</p></div></details>
+<details><summary><span class="id">ADR-008</span>The web core runs in a Worker by default</summary><div><p><strong>Chosen:</strong> Worker mode default, main-thread mode by flag. <strong>Rejected:</strong> main-thread default. <strong>Why:</strong> wasm compute on the main thread is the most common way a wasm app feels worse than a JS one; ADR-006 makes the Worker free for app code.</p></div></details>
+<details><summary><span class="id">ADR-009</span>Remote core is a transport swap, not a separate mode</summary><div><p><strong>Chosen:</strong> the runtime's transport is pluggable; dev builds use WebSocket and route port calls back to the device. <strong>Rejected:</strong> dynamic library reloading on device (impossible on iOS devices, fragile elsewhere). <strong>Why:</strong> it costs nothing that ADR-002 and ADR-006 did not already pay for, and it works on real hardware.</p></div></details>
+<details><summary><span class="id">ADR-010</span>Panics are errors on native and a restart on the web</summary><div><p><strong>Chosen:</strong> <code>catch_unwind</code> at every native entry; trap, re-instantiate and restore from snapshot on wasm. <strong>Rejected:</strong> <code>panic = "abort"</code> on native. <strong>Why:</strong> the host app must never die for a bug in the core, and the transaction model makes restoration exact.</p></div></details>
+<details><summary><span class="id">ADR-011</span>Kv persistence is Rust-owned SQLite on native, IndexedDB on the web</summary><div><p><strong>Chosen:</strong> bundle SQLite for iOS and Android through the Fs port; IndexedDB default on the web with SQLite-in-wasm as an opt-in. <strong>Rejected:</strong> platform stores (Core Data, Room) behind an abstraction. <strong>Why:</strong> identical persistence semantics on both mobile platforms; the web opt-in stays open until OPFS support is uniform.</p></div></details>
+<details><summary><span class="id">ADR-012</span>UI stays native in 1.0</summary><div><p><strong>Chosen:</strong> no shared rendering. <strong>Rejected:</strong> a Rust UI toolkit or shared UI schema. <strong>Why:</strong> §00. This can be revisited in §20 only with evidence from shipped apps that the native-view layer is where teams still hurt.</p></div></details>
+</div>
+</section>
+
+<section id="risks">
+<h2><span class="sn">§19</span>Risks, with mitigations and the ones we cannot mitigate</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th><th>Residual</th></tr></thead>
+<tbody>
+<tr><td>Teams have no Rust engineers</td><td><span class="tag bad">high</span></td><td>Docs written for app engineers; macros hide lifetimes and threads; fifteen-minute onboarding as a gate; first customers are companies already running Rust cores.</td><td>Real. Keel will be a niche before it is a default, and the niche has to be served brilliantly.</td></tr>
+<tr><td>JNI overhead on Android breaks the budgets</td><td><span class="tag warn">medium</span></td><td>Registered natives, direct buffers, UTF-8 strings, batching by design. Kill criterion at the end of Phase 1.</td><td>Low once change-sets exist; the design tolerates a slow call because there are few of them.</td></tr>
+<tr><td>Swift 6 strict concurrency rejects generated code</td><td><span class="tag warn">medium</span></td><td>Stores on the main actor, records as <code>Sendable</code> value types, handles as immutable. Kill criterion at Phase 0.</td><td>Low; the shape is chosen to satisfy the checker rather than fight it.</td></tr>
+<tr><td>wasm cannot unwind panics</td><td><span class="tag warn">medium</span></td><td>Snapshot and replay restart (ADR-010); transactions are atomic so state is never torn.</td><td>A panic inside a port reply is lost and the command reports failure. Acceptable and documented.</td></tr>
+<tr><td>Binary size objections on mobile</td><td><span class="tag warn">medium</span></td><td>Size budgets in CI, LTO, symbol stripping, no heavyweight dependencies in the runtime, published per-release numbers.</td><td>Any Rust core adds under a megabyte; the argument is won with the table.</td></tr>
+<tr><td>Debugging across the boundary is painful</td><td><span class="tag warn">medium</span></td><td>Symbol files per target, devtools, record and replay, typed errors with backtraces.</td><td>Stepping from Swift into Rust in one debugger session is not a v1 feature.</td></tr>
+<tr><td>Maintaining three runtimes drifts</td><td><span class="tag warn">medium</span></td><td>One contract suite defines behavior; runtimes are thin because codecs are generated; golden files lock output.</td><td>Each platform still needs a resident expert reviewer.</td></tr>
+<tr><td>Scope creep into UI</td><td><span class="tag acc">design</span></td><td>ADR-012; the horizon section is the only place UI is discussed.</td><td>None if the constitution is followed.</td></tr>
+<tr><td>Open-source framework with no business</td><td><span class="tag bad">high</span></td><td>§20: the sync engine, hosted devtools sessions and core telemetry are the products; the framework is the funnel, as with Expo and Vercel.</td><td>Requires deciding early which parts are open and which are paid, and never moving that line backwards.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section id="horizon">
+<h2><span class="sn">§20</span>Horizon: what comes after 1.0, and what still does not</h2>
+<p class="lede">Everything here is designed for, and none of it is built in 1.0. The order is by leverage: each item makes the previous ones more valuable.</p>
+<div class="grid2">
+<div class="tile"><span class="kicker">horizon 1</span><h4>Keel Sync</h4><p>A local-first sync engine on top of Query: CRDT-backed documents, per-collection conflict policies, partial replication, end-to-end encryption through SecureStore. This is the product companies pay for, and every piece of 1.0 (transactions, keyed patches, offline queue, deterministic core) is a prerequisite for it.</p></div>
+<div class="tile"><span class="kicker">horizon 2</span><h4>Keel Cloud</h4><p>Hosted sync, shared devtools sessions (a teammate opens the transaction log from your bug report), core telemetry and crash symbolication as a service. The framework stays open source; the services are the business.</p></div>
+<div class="tile"><span class="kicker">horizon 3</span><h4>Desktop and beyond</h4><p>macOS already works through the Swift package. Windows and Linux arrive as a C# runtime and a GTK or Tauri-style shell; the wire and the port model are unchanged, which is the point of ADR-007. Any language with a C FFI can host a Keel core.</p></div>
+<div class="tile"><span class="kicker">horizon 4</span><h4>A port marketplace</h4><p>Payments, analytics, auth providers and feature flags as ports with community adapters, so a Stripe or Auth0 integration is written once in Rust and lands on three platforms with native UI hooks.</p></div>
+</div>
+<h3>What Keel still will not do</h3>
+<p>Render pixels. The question comes up every quarter and the answer is the same until shipped apps show that native views are where teams still lose time. If that evidence arrives, the honest experiment is a shared UI <em>schema</em> for content-heavy screens rendered by native components, never a shared renderer. Until then, a SwiftUI view that reads Rust state is the best possible iOS view, and that is the promise.</p>
+<div class="callout verdict">
+<span class="label">Closing</span>
+<p>The industry has spent a decade proving that sharing UI across platforms is a compromise and sharing logic is a chore. Keel's bet is that the chore is the whole opportunity: make one correct core so pleasant to write, bind, debug and ship that nobody wants to write the same cache a third time. Build the boundary first, then the state, then the dev loop, and measure everything with a stopwatch.</p>
+</div>
+</section>
+
+<p class="footer">Keel is a working name; check trademark and namespace availability before anything public. Timelines assume a small core team with AI agents doing most of the typing and a resident reviewer for each of Swift, Kotlin and TypeScript.</p>
+</main>
+</div>
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('#toc a'));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var sections = Array.prototype.slice.call(document.querySelectorAll('main section[id]'));
+  var current = null;
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting) {
+          if (current) current.classList.remove('active');
+          current = map[e.target.id];
+          if (current) current.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-12% 0px -75% 0px', threshold: 0 });
+    sections.forEach(function(s){ io.observe(s); });
+  }
+  var prog = document.getElementById('prog');
+  function tick(){
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - doc.clientHeight;
+    var pct = max > 0 ? Math.min(100, Math.max(0, (window.scrollY || doc.scrollTop) / max * 100)) : 0;
+    if (prog) prog.style.width = pct + '%';
+  }
+  window.addEventListener('scroll', tick, { passive: true });
+  window.addEventListener('resize', tick);
+  tick();
+})();
+</script>

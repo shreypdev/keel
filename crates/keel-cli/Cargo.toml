@@ -1,0 +1,15 @@
+[package]
+name = "keel-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Keel command-line tool (stub)"
+
+[[bin]]
+name = "keel"
+path = "src/main.rs"
+
+[dependencies]

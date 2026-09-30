@@ -1,0 +1,16 @@
+/target
+**/target
+node_modules
+dist
+.DS_Store
+*.log
+/runtimes/kotlin/**/build
+/runtimes/kotlin/.gradle
+/runtimes/swift/.build
+/examples/playground/ios/**/xcuserdata
+/examples/playground/android/**/build
+/examples/playground/android/.gradle
+/examples/playground/web/node_modules
+.10x/**/.tmp
+*.bundle
+*.xcframework

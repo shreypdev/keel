@@ -1,0 +1,730 @@
+# Keel v1 — Implementation Specification
+
+This is the binding technical specification for Keel v1. Every crate, runtime and generated file conforms to it. When code and this document disagree, the code is wrong until an ADR changes the document.
+
+The product design lives in the blueprint (`docs/BLUEPRINT.md`); this file is the engineering contract that lets independent workers build the pieces in parallel and have them fit.
+
+---
+
+## 0. Scope of v1
+
+In scope: everything under the pixels.
+
+* Rust core crates: `keel-meta`, `keel-wire`, `keel-macros`, `keel-signals`, `keel-runtime`, `keel-ports`, `keel-query`, `keel-ffi`, `keel-transport`, `keel-bindgen`, `keel-cli`, `keel` (facade).
+* Platform runtimes: Swift (`runtimes/swift/KeelRuntime`), Kotlin (`runtimes/kotlin/keel-runtime`), TypeScript (`runtimes/ts/@keel/runtime`).
+* Generated bindings for records, enums, errors, objects, stores, ports, sync/async methods, streams, signals.
+* Reactive state: signals, computed, transactions, change-sets, keyed list patches, observation.
+* Data layer: query cache, mutations with optimistic patches and rollback, invalidation, retry, persistence, offline queue.
+* Ports: Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle. Default adapters on each platform and Rust fakes.
+* Dev loop: `keel dev` remote core over WebSocket; devtools protocol messages (inspector UI is a stretch goal).
+* Playground app on all three platforms, benchmarks, contract tests.
+
+Out of scope for v1: sync engine, hosted services, desktop targets beyond macOS-via-Swift, shared UI of any kind, Rust-owned SQLite (Kv is a foreign port in v1, see ADR-014).
+
+Toolchain baseline: Rust 1.85+ (edition 2024), Swift 6.0 / iOS 17+, Kotlin 2.0 / Android API 26+ (NDK r27, 16 KB pages), TypeScript 5.5 / ES2022, Node 20+.
+
+---
+
+## 1. Core concepts and identifiers
+
+| Concept | Definition |
+|---|---|
+| **Record** | A `struct` with `#[keel::api]`. Crosses by value. |
+| **Enum** | An `enum` with `#[keel::api]`. Unit variants or data variants. Crosses by value. |
+| **Error** | An `enum` with `#[keel::error]`. Like an enum, plus `std::error::Error` + `Display`. |
+| **Object** | A type whose `impl` block has `#[keel::api]`. Crosses by handle. Methods are sync or async. |
+| **Store** | An object whose struct has `#[keel::store]`. Has signal fields the platforms mirror. |
+| **Port** | A trait with `#[keel::port]`. Implemented by the platform (foreign) or by a Rust fake. |
+| **Query / Mutation** | An `async fn` with `#[keel::query]` / `#[keel::mutation]`. Managed by `keel-query`. |
+| **Function** | A free `fn` with `#[keel::api]`. Crosses like a method with no receiver. |
+
+### 1.1 Stable identifiers
+
+All identifiers are computed at compile time by the macros and embedded in the schema, so every platform agrees without a registry lookup.
+
+* `fnv1a32(s)` / `fnv1a64(s)`: FNV-1a over the UTF-8 bytes of `s`, offset basis `0x811c9dc5` / `0xcbf29ce484222325`, prime `0x01000193` / `0x100000001b3`.
+* **type_id** (`u32`) = `fnv1a32("<TypeName>")` where `TypeName` is the Rust identifier, no module path. Type names must be unique within a core crate; the macro cannot check this, `keel-bindgen` does and fails on collision.
+* **method_id** (`u32`) = `fnv1a32("<TypeName>.<method_name>")`; for free functions `fnv1a32("fn.<name>")`.
+* **port_id** (`u32`) = `fnv1a32("port.<TraitName>")`; port method ids = `fnv1a32("<TraitName>.<method>")`.
+* **signal_id** (`u32`) = zero-based index of the signal field in declaration order within the store struct (non-signal fields are skipped). `u32::MAX` means "all signals of the store".
+* **query_id** (`u32`) = `fnv1a32("query.<fn_name>")`; mutation ids `fnv1a32("mutation.<fn_name>")`.
+* **schema_hash** (`u64`) = `fnv1a64(canonical_schema_json)`, see §2.3.
+
+### 1.2 Handles
+
+A handle is a `u64`: low 32 bits = slot index, high 32 bits = generation (starts at 1). `0` is the null handle. Handles are issued by the runtime's object table (§5.4) and are only meaningful inside the runtime instance that issued them.
+
+### 1.3 Call ids
+
+`call_id: u32` is chosen by the **foreign side** (monotonically increasing per runtime instance, wrapping allowed, `0` reserved). `port_call_id: u32` is chosen by the **core**. Both are unique among in-flight calls in their direction.
+
+---
+
+## 2. Schema (`keel-meta`)
+
+`keel-meta` has zero dependencies except `serde` + `serde_json` (feature `serde`, on by default). It defines the data model below, JSON (de)serialization, the canonical form, the hash, and the FNV helpers. `keel-macros` emits it, `keel-bindgen` consumes it, `keel-ffi` exports it.
+
+### 2.1 Type references
+
+```rust
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "of", rename_all = "snake_case")]
+pub enum TypeRef {
+    Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64,
+    String, Bytes, Unit, Duration, Timestamp, Uuid,
+    Option(Box<TypeRef>),
+    Vec(Box<TypeRef>),
+    Map(Box<TypeRef>, Box<TypeRef>),
+    Lazy(Box<TypeRef>),                    // lazy list handle, item type
+    Named(String),                          // record, enum, error, object (by TypeName)
+    Result(Box<TypeRef>, Box<TypeRef>),     // only as a return type
+    Stream(Box<TypeRef>),                   // only as a return type
+}
+```
+
+Serialized JSON examples: `{"kind":"string"}`, `{"kind":"option","of":{"kind":"named","of":"Todo"}}`, `{"kind":"map","of":[{"kind":"string"},{"kind":"i32"}]}`.
+
+Rules enforced by the macro (error codes in §12): map keys must be `String`, integers, `Bool` or `Uuid`; `Result` and `Stream` only in return position; `Option<Option<T>>` allowed; `Lazy<T>` only as a store signal type.
+
+### 2.2 Definitions
+
+```rust
+pub struct Schema {
+    pub keel_version: String,          // "1.0.0"
+    pub crate_name: String,            // Cargo package name of the core
+    pub records: Vec<RecordDef>,
+    pub enums: Vec<EnumDef>,           // includes errors (is_error = true)
+    pub objects: Vec<ObjectDef>,       // includes stores (store = Some(..))
+    pub functions: Vec<FunctionDef>,
+    pub ports: Vec<PortDef>,
+    pub queries: Vec<QueryDef>,
+}
+
+pub struct RecordDef { pub name: String, pub type_id: u32, pub fields: Vec<FieldDef>, pub docs: String }
+pub struct FieldDef  { pub name: String, pub ty: TypeRef, pub default: bool /* #[keel(default)] */, pub docs: String }
+
+pub struct EnumDef { pub name: String, pub type_id: u32, pub is_error: bool, pub variants: Vec<VariantDef>, pub docs: String }
+pub struct VariantDef { pub name: String, pub index: u16, pub fields: Vec<FieldDef> /* empty = unit; named or tuple */, pub tuple: bool, pub message: Option<String> /* #[error("...")] */, pub docs: String }
+
+pub struct ObjectDef {
+    pub name: String, pub type_id: u32,
+    pub constructors: Vec<MethodDef>,  // fns returning Self / Result<Self, E>
+    pub methods: Vec<MethodDef>,
+    pub store: Option<StoreDef>,
+    pub docs: String,
+}
+pub struct MethodDef {
+    pub name: String, pub method_id: u32,
+    pub params: Vec<ParamDef>,         // excludes self and Ctx
+    pub returns: TypeRef,              // Unit | T | Result<T,E> | Stream<T> | Result<Stream<T>,E>
+    pub is_async: bool,
+    pub takes_ctx: bool,               // first param is `ctx: Ctx` or `&Ctx` (constructors and free fns only)
+    pub docs: String,
+}
+pub struct ParamDef { pub name: String, pub ty: TypeRef }
+
+pub struct StoreDef { pub signals: Vec<SignalDef> }
+pub struct SignalDef { pub name: String, pub signal_id: u32, pub ty: TypeRef, pub computed: bool, pub key: Option<String> /* #[keel(key = "id")] */ }
+
+pub struct FunctionDef { pub name: String, pub method_id: u32, pub params: Vec<ParamDef>, pub returns: TypeRef, pub is_async: bool, pub takes_ctx: bool, pub docs: String }
+
+pub struct PortDef { pub name: String, pub port_id: u32, pub kind: PortKind /* Sync | Async | Event */, pub methods: Vec<MethodDef>, pub docs: String }
+
+pub struct QueryDef { pub name: String, pub query_id: u32, pub kind: QueryKind /* Query | Mutation */, pub key: String, pub params: Vec<ParamDef>, pub returns: TypeRef, pub stale_ms: Option<u64>, pub persist: bool, pub idempotent: bool }
+```
+
+### 2.3 Canonical JSON and the hash
+
+Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**. `schema_hash = fnv1a64(canonical_bytes)`. `keel-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or field order in source (records keep declaration order for wire layout, so record field order *is* part of the hash; only the top-level lists are sorted).
+
+### 2.4 Registration (`inventory`)
+
+Each macro emits `inventory::submit! { keel_meta::Registration::Record(&RECORD_DEF) }` etc., where the def is a `static` built from `const` data (`&'static str`, `&'static [..]`). `keel_meta::Registration` is:
+
+```rust
+pub enum Registration { Record(&'static RecordMeta), Enum(&'static EnumMeta), Object(&'static ObjectMeta), Function(&'static FunctionMeta), Port(&'static PortMeta), Query(&'static QueryMeta) }
+inventory::collect!(Registration);
+pub fn collect_schema(crate_name: &str) -> Schema  // builds the owned Schema from all registrations
+```
+
+`*Meta` are `'static`, const-constructible mirrors of the `*Def` types (using `&'static [T]` instead of `Vec`) so they can live in statics. `keel-meta` provides `impl From<&RecordMeta> for RecordDef` etc.
+
+On `wasm32-unknown-unknown` the TS runtime calls the exported `_initialize` (or `__wasm_call_ctors`) once after instantiation so `inventory` registrations run (see §7).
+
+Dispatch registration uses the same mechanism: `Registration::Object` carries a `dispatch: fn(&Runtime, DispatchCall) -> DispatchResult` pointer and `Registration::Function` likewise (§5.6).
+
+---
+
+## 3. Wire format (`keel-wire`)
+
+Little-endian throughout. No alignment, no padding. All lengths are `u32`. Encoders write into `Writer` (a `Vec<u8>` wrapper); decoders read from `Reader<'a>` (a `&'a [u8]` + cursor). Decoding never panics on malformed input; it returns `WireError`.
+
+### 3.1 Value encoding
+
+| Type | Encoding |
+|---|---|
+| `bool` | `u8` 0/1; decoder rejects other values |
+| `i8..i64`, `u8..u64` | fixed width, two's complement, LE |
+| `f32`, `f64` | IEEE 754 LE bits |
+| `Unit` | nothing |
+| `String` | `u32` byte length + UTF-8 bytes (decoder validates UTF-8) |
+| `Bytes` | `u32` length + raw bytes |
+| `Option<T>` | `u8` tag 0 = None, 1 = Some + `T` |
+| `Vec<T>` | `u32` count + items |
+| `Map<K,V>` | `u32` count + (`K`,`V`) pairs; encoder sorts by encoded key bytes for determinism |
+| `Duration` | `i64` nanoseconds |
+| `Timestamp` | `i64` milliseconds since Unix epoch |
+| `Uuid` | 16 raw bytes, big-endian as per RFC 4122 |
+| Record | fields in declaration order |
+| Enum / Error | `u16` variant index + variant fields in order |
+| `Result<T,E>` | `u8` 0 = Ok + `T`, 1 = Err + `E` |
+| Handle (object) | `u64` |
+| `Lazy<T>` | `u64` handle of a lazy-list object |
+| `Signal<T>` | never encoded as a value; appears only in change-sets |
+
+Records with `#[keel(default)]` fields: the wire layout still contains the field; `default` affects only construction ergonomics in generated code and schema evolution rules (a field added with `default` bumps the schema hash like any other change; the *runtime* still refuses mismatched hashes. Evolution across hash mismatch is a v2 feature).
+
+### 3.2 Envelope (transports only)
+
+Used on WebSocket and Worker transports. In-process calls pass `kind` implicitly through the function they call and carry only the payload.
+
+```
+magic      4 bytes  "KEEL"
+version    u16      1
+schema     u64      schema_hash of the core that produced/expects this message
+kind       u8       see table
+seq        u32      per-direction monotonically increasing, for ordering and debugging
+len        u32      payload length
+payload    len bytes
+```
+Header size is 23 bytes.
+
+| kind | name | direction | payload |
+|---|---|---|---|
+| 1 | Call | host→core | §3.3 |
+| 2 | Reply | core→host | §3.4 |
+| 3 | ChangeSet | core→host | §3.5 |
+| 4 | PortCall | core→host | §3.6 |
+| 5 | PortReply | host→core | §3.6 |
+| 6 | Cancel | host→core | `call_id u32` |
+| 7 | StreamCredit | host→core | `call_id u32, credit u32` |
+| 8 | StreamItem | core→host | §3.7 |
+| 9 | Observe | host→core | `handle u64, signal_id u32, on u8` |
+| 10 | Release | host→core | `handle u64` |
+| 11 | Event | host→core | `port_id u32, method_id u32, payload` |
+| 12 | Hello | both | `keel_version String, schema_hash u64, platform String, mode String` |
+| 13 | Log | core→host | `level u8, target String, message String` |
+| 14 | TimerFired | host→core | `timer_id u32` |
+| 15 | Snapshot | core→host | §5.9 |
+| 16 | Restore | host→core | §5.9 |
+
+### 3.3 Call payload
+
+```
+target     u8    0 = free function, 1 = object method, 2 = constructor, 3 = lazy-list page
+handle     u64   0 for targets 0 and 2
+method_id  u32   (type_id for target 2 identifies the object type; method_id selects the constructor)
+call_id    u32
+args       encoded params in declaration order
+```
+For target 2 the layout is `target u8, type_id u32, method_id u32, call_id u32, args`.
+For target 3: `target u8, handle u64, offset u32, limit u32, call_id u32`.
+
+### 3.4 Reply payload
+
+```
+call_id  u32
+status   u8   0 = ok, 1 = error (typed), 2 = panic, 3 = cancelled, 4 = stream_opened, 5 = bad_request
+body     status 0: the return value (Unit = empty; for `Result<T,E>` the `T`)
+         status 1: the `E` value (for `Result<T,E>`); for a non-Result method this status cannot occur
+         status 2: String message + String backtrace
+         status 3: empty
+         status 4: empty; items follow as StreamItem
+         status 5: String reason (unknown method, decode failure, schema mismatch)
+```
+
+### 3.5 ChangeSet payload
+
+```
+txn_id     u64
+count      u32
+entries    count × { handle u64, signal_id u32, op u8, len u32, value bytes }
+```
+`op`: 0 = full value (`value` is the signal's `T` encoded), 1 = keyed patch (§3.8), 2 = lazy list invalidated (value empty; the host re-pages). `len` lets a host skip an entry it cannot decode.
+
+Ordering guarantee: change-sets are delivered in commit order; a change-set is never split.
+
+### 3.6 Port call and reply
+
+PortCall payload: `port_id u32, method_id u32, port_call_id u32, args` (params in order).
+PortReply payload: `port_call_id u32, status u8 (0 ok, 1 error, 2 unavailable), body` where the body is the port method's return value (`Result<T,E>` collapses into status 0/1 like §3.4).
+
+### 3.7 StreamItem payload
+
+```
+call_id  u32
+flag     u8    0 = item, 1 = end, 2 = error
+body     flag 0: item T; flag 2: error E (or String if the stream has no error type)
+```
+Flow control: the core sends at most `credit` items beyond what has been credited; the host grants credit with StreamCredit. Initial credit is 0; generated bindings grant 16 on subscribe and top up when consumption drops below 8. A Cancel with the stream's `call_id` closes it.
+
+### 3.8 Keyed patch
+
+For `Signal<Vec<T>>` with `#[keel(key = "field")]`. Encoded as:
+```
+count  u32
+ops    count × { op u8, ... }
+   0 Insert  { index u32, item T }
+   1 Remove  { index u32 }
+   2 Update  { index u32, item T }
+   3 Move    { from u32, to u32 }
+   4 Clear   { }
+```
+Ops are applied sequentially to the host's current list; indices refer to the list state after the previous op. The core computes patches by key equality and full-item encoded equality; a change that removes more than 50% of items or has no key overlap is sent as `op = 0` (full value) instead.
+
+### 3.9 Rust API
+
+```rust
+pub struct Writer { buf: Vec<u8> }              // write_u8 .. write_f64, write_bool, write_str, write_bytes, write_len(u32), into_vec()
+pub struct Reader<'a> { buf: &'a [u8], pos: usize } // read_* mirrors; read_str returns &'a str; read_bytes returns &'a [u8]; remaining(); finish() -> Result<(), WireError> (errors if trailing bytes)
+pub trait Encode { fn encode(&self, w: &mut Writer); }
+pub trait Decode: Sized { fn decode(r: &mut Reader<'_>) -> Result<Self, WireError>; }
+pub enum WireError { UnexpectedEof { needed: usize, at: usize }, InvalidUtf8 { at: usize }, InvalidTag { tag: u32, at: usize, ty: &'static str }, LengthTooLarge { len: u32, at: usize }, TrailingBytes { count: usize }, BadMagic, UnsupportedVersion(u16), SchemaMismatch { expected: u64, got: u64 } }
+pub struct Envelope<'a> { pub kind: Kind, pub seq: u32, pub schema: u64, pub payload: &'a [u8] }  // parse(&[u8]) / write(&mut Writer, ..)
+```
+`Encode`/`Decode` are implemented for all primitives, `String`, `Vec<u8>` (as Bytes via newtype `Bytes(pub Vec<u8>)`), `Option<T>`, `Vec<T>`, `HashMap<K,V>`/`BTreeMap`, `Duration`, `Timestamp`, `Uuid`, `Result<T,E>`, tuples up to 4, and `()`.
+
+`keel-wire` contains no `unsafe`. It has proptest round-trip tests for every type and a byte-fuzz test (random bytes never panic the decoder).
+
+---
+
+## 4. Macros (`keel-macros`)
+
+All attribute macros are re-exported from the `keel` facade as `keel::api`, `keel::error`, `keel::store`, `keel::port`, `keel::query`, `keel::mutation`. They must produce clear diagnostics (§12) and never silently ignore an item.
+
+### 4.1 `#[keel::api]`
+
+* On `struct` (record): generates `impl Encode`, `impl Decode`, `impl KeelRecord` (type_id), and registers `RecordMeta`. Requires all field types to be wire types. Fields may be `pub` or not; all are encoded.
+* On `enum`: generates `Encode`/`Decode` (u16 index + fields) and registers `EnumMeta`.
+* On `impl Type { .. }` (object): every `pub fn` becomes a method; `pub fn new(..) -> Self`/`Result<Self,E>` and any fn returning `Self` becomes a constructor. Generates the dispatch function (§5.6), `impl KeelObject for Type` (type_id, name), and registers `ObjectMeta`. Receiver must be `&self` (objects are shared: `Arc<Type>`; interior mutability via signals or `Mutex`). `&mut self` is rejected (E0020).
+* On free `fn`: generates a dispatch entry and registers `FunctionMeta`.
+
+Method rules: parameters are wire types, or `ctx: &Ctx` / `ctx: Ctx` as the first parameter (constructors and free fns only; methods get `Ctx` from the object via `self.ctx` convention or `Ctx::current()`); return type is `T`, `Result<T,E>`, `impl Stream<Item = T>`, or `Result<impl Stream<Item = T>, E>`; `async fn` marks `is_async`.
+
+### 4.2 `#[keel::error]`
+
+On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{field}` interpolation, `transparent`). Generates `Display`, `std::error::Error`, `From` for `#[from]` fields, plus everything `#[keel::api]` does with `is_error = true`. Also generates `impl From<E> for keel::Error` so `?` works inside commands.
+
+### 4.3 `#[keel::store]`
+
+On a struct. Fields of type `Signal<T>`, `Computed<T>`, `Lazy<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). Generates `impl StoreObject for Type` (signal slot table, `apply_observe`, `encode_signal`, `restore`), registers `StoreDef` inside the object meta (the struct must also have a `#[keel::api] impl` block with at least one constructor). Attributes: `#[keel(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[keel(no_coalesce)]` forces every commit of this signal to be delivered.
+
+### 4.4 `#[keel::port]`
+
+On a trait. Attribute args: `sync` (default for methods without `async`; a port is Sync iff all methods are sync), `event` (methods return `()` and are fire-and-forget host→core). Generates: `PortMeta` registration, a proxy type `<Trait>Proxy` that encodes calls and routes them through the runtime's port table (§5.7), `impl <Trait> for <Trait>Proxy`, and `keel::ports::<Trait>` accessor `Ctx::port::<dyn Trait>()`. Async port methods are `async fn` in the trait (Rust 1.75+ AFIT); the proxy implements them.
+
+### 4.5 `#[keel::query]` and `#[keel::mutation]`
+
+On an `async fn(ctx: &Ctx, ..params) -> Result<T, E>`. Args: `key = "literal"` (may include `{param}` placeholders), `stale = "30s"`, `persist`, `retry = 3`, `idempotent`. Generates a `struct <Name>Query` implementing `keel_query::QueryDef`, and registers `QueryMeta`. See §9.
+
+### 4.6 Emitted metadata
+
+Statics are emitted as `static __KEEL_META_<TypeName>: keel_meta::RecordMeta = RecordMeta { name: "Todo", type_id: 0x…, fields: &[ FieldMeta { name: "id", ty: TypeRef::Uuid, default: false } ] };` using `const`-constructible types. `TypeRef` must therefore be const-constructible: `keel-meta` provides a `const`-friendly mirror `TypeRefMeta` (`&'static`-based, e.g. `TypeRefMeta::Option(&TypeRefMeta::String)`), with `From<&TypeRefMeta> for TypeRef`.
+
+---
+
+## 5. Runtime (`keel-runtime`)
+
+The runtime is dependency-light (no tokio). It provides the executor, the core lock, the object table, transactions, change-sets, ports, timers, panic guard, and snapshots. `keel-ffi` (native) and the wasm exports are thin shells over it.
+
+### 5.1 Threading model
+
+* **Core lock.** A `parking_lot::Mutex<Core>` (native) / `RefCell` (wasm). Whoever holds it *is* the core loop. Sync calls from the host run on the caller's thread holding the lock. Async tasks are polled by the core thread holding the lock. This preserves "one mutator" semantics while keeping sync calls at mutex-acquire cost.
+* **Core thread** (native): one `std::thread` named `keel-core` that owns the executor loop: wait for work → lock → poll ready tasks (bounded batch, max 64) → unlock → repeat.
+* **Blocking pool** (native): `keel_runtime::spawn_blocking(f)` runs `f` on a pool of `min(4, cores)` threads without the lock and resumes the awaiting task via the executor.
+* **wasm**: single thread; `keel_poll()` export drives the executor; wakers call the `keel_host_schedule()` import (deduplicated per turn).
+* **Host callbacks** (reply, change-set, port call) are invoked from whatever thread completed the work, **while the core lock may be held**. The host must not call back into the core synchronously from these callbacks except `keel_buf_free`; it enqueues onto its main thread. Violations are detected in debug builds (thread-local re-entrancy flag) and reported as `KeelPanic`-style error `E_REENTRANT`.
+
+### 5.2 Executor
+
+Own minimal executor: tasks are `Pin<Box<dyn Future<Output = ()> + Send>>` in a slab; a `Waker` pushes the task id onto an MPSC ready queue and nudges the core thread (Condvar) / host scheduler (wasm). Each in-flight call is one task; cancellation drops the task (which drops the future, cancelling awaited port calls: the `PortFuture` `Drop` sends a port cancel notification — v1 marks the port call as abandoned so a late reply is discarded).
+
+### 5.3 Ctx
+
+```rust
+pub struct Ctx(Arc<RuntimeInner>);
+impl Ctx {
+    pub fn port<P: Port + ?Sized>(&self) -> Arc<P>;          // typed proxy or fake
+    pub fn http(&self) -> Arc<dyn Http>; pub fn kv(&self) -> …; pub fn clock(&self) -> …; pub fn rng(&self) -> …; pub fn log(&self) -> …; // convenience
+    pub fn txn<R>(&self, f: impl FnOnce() -> R) -> R;        // batch writes into one transaction
+    pub fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static);
+    pub fn spawn_blocking<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> impl Future<Output = T>;
+    pub fn sleep(&self, d: Duration) -> impl Future<Output = ()>; // via Timer port
+    pub fn query(&self) -> &QueryClient;                      // keel-query
+    pub fn mutate<M: MutationDef>(&self, input: M::Input) -> MutationBuilder<M>;
+    pub fn events(&self) -> &Events;                          // subscribe to Connectivity/Lifecycle events
+    pub fn current() -> Ctx;                                  // thread-local, valid inside any dispatched call
+}
+```
+
+### 5.4 Object table
+
+`Slab<Entry { generation: u32, object: Arc<dyn AnyObject> }>`. `AnyObject: Any + Send + Sync + KeelObject`. `insert(Arc<T>) -> Handle`, `get::<T>(handle) -> Result<Arc<T>, BadHandle>`, `release(handle)`. Release decrements; the `Arc` may outlive the handle if a task holds it. Stores additionally register in the `stores` index for change-set routing. Debug builds keep a count of live handles readable via `keel_stats()`.
+
+### 5.5 Transactions and change-sets
+
+* Every signal write outside `ctx.txn` is an implicit single-write transaction.
+* A transaction is thread-local depth + a dirty set `(store_handle, signal_id)`. On commit (depth → 0): for each dirty store, recompute observed dirty computeds (dependency order), build the change-set of **observed** signals only (plus `no_coalesce` signals always), assign `txn_id` (monotonic u64), and invoke the sink. Unobserved dirty signals are recorded in the store's `pending_dirty` so that a later `observe` emits the current value.
+* Writes are applied directly to the signal cell (no overlay) **but** are wrapped in a panic guard at the dispatch boundary: on panic the runtime marks the store `poisoned`, emits `Log(error)` and the dispatch returns status 2. A poisoned store keeps working (values are still consistent per write); poisoning is informational in v1 (ADR-017 explains why a copy-on-write overlay is deferred).
+* `keel_observe(handle, signal_id, 1)` immediately emits a change-set with the current value(s) of the newly observed signal(s) (synchronously, before returning, in-process; asynchronously over a transport).
+
+### 5.6 Dispatch
+
+The macro-generated dispatch function has the signature
+```rust
+fn dispatch(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult
+pub struct DispatchCall<'a> { pub method_id: u32, pub call_id: u32, pub handle: Handle, pub args: &'a [u8] }
+pub enum DispatchResult { Sync(Result<Vec<u8>, Vec<u8>>) /* ok bytes / err bytes */, Async(Pin<Box<dyn Future<Output = Result<Vec<u8>, Vec<u8>>> + Send>>), Stream(Pin<Box<dyn Stream<Item = Result<Vec<u8>, Vec<u8>>> + Send>>), Unknown }
+```
+The runtime looks up the object by handle (`Arc<dyn AnyObject>`), downcasts inside the generated dispatcher, decodes args (status 5 on failure), runs the method, encodes the result. For `Sync` results of a `keel_call_sync`, the bytes are returned directly; for `keel_call` the reply callback is invoked. `Async` results are spawned as a task keyed by `call_id`. Panics are caught by `std::panic::catch_unwind` (`AssertUnwindSafe`) at this boundary on native.
+
+### 5.7 Ports
+
+The runtime holds a `PortTable`: `port_id → PortBinding { Foreign { cb, user_data } | Rust(Arc<dyn Any>) }`. Proxies generated by `#[keel::port]` encode args and call `runtime.port_call(port_id, method_id, args) -> PortFuture` (async) or `runtime.port_call_sync(..) -> Result<Vec<u8>, PortError>` (sync). Foreign bindings: the runtime invokes the registered callback (§6.3); sync ports must return synchronously (status 0) or the call fails with `PortError::Unavailable`. Rust bindings (fakes, and the built-in native `Timer`) are called directly. Events: `runtime.deliver_event(port_id, method_id, payload)` fans out to `Events` subscribers on the core loop.
+
+Standard ports and their methods are defined in `keel-ports` (§8).
+
+### 5.8 Timers
+
+`Timer` is a port with one method `set(timer_id: u32, delay_ms: u64)` (event-ish: host→core `TimerFired(timer_id)` when due). Native default binding: a Rust timer thread inside `keel-runtime` (`BinaryHeap` + `Condvar`), used unless the host registers a foreign Timer. wasm: the TS runtime registers itself (`setTimeout`). Tests: `FakeClock` implements both `Clock` and `Timer` and fires timers when advanced.
+
+### 5.9 Snapshot and restore
+
+`Snapshot` payload: `count u32, stores × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value bytes } }` (computed signals excluded; restored by recomputation). `keel_restore(bytes)` rebuilds each store via its generated `restore(ctx, values)` and re-issues the same handles (the table is rebuilt from the snapshot, so handles held by the host remain valid). Objects that are not stores are not snapshotted; their handles become invalid after restore (status 5 `stale_handle`). Restore emits change-sets for all observed signals.
+
+### 5.10 Devtools protocol (transport only, optional)
+
+When a transport is attached with `mode = "dev"`, the core additionally emits `Log` messages for every transaction commit (`txn_id`, dirty count, bytes), every port call (timing), and every panic. The inspector is a consumer of the same envelope stream; no separate protocol.
+
+---
+
+## 6. Native C ABI (`keel-ffi`)
+
+Exported with `#[unsafe(no_mangle)] pub extern "C"`, C-compatible types only. All `*const u8, u32` pairs are borrowed for the duration of the call unless stated. All functions are thread-safe. `keel-ffi` is the only crate besides the JNI shim allowed to contain `unsafe`, and every block has a `// SAFETY:` comment.
+
+```c
+typedef struct { uint8_t *ptr; uint32_t len; uint32_t cap; } KeelBuf;        // owned by the core; free with keel_buf_free
+typedef void (*keel_reply_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);
+typedef void (*keel_changeset_cb)(void *user, const uint8_t *ptr, uint32_t len);
+typedef uint8_t (*keel_port_cb)(void *user, uint32_t port_id, uint32_t method_id, uint32_t port_call_id, const uint8_t *ptr, uint32_t len, KeelBuf *out_reply); // returns 0 = replied synchronously into out_reply, 1 = will reply async, 2 = unavailable
+typedef void (*keel_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);  // StreamItem payload
+
+uint32_t keel_abi_version(void);                       // 1
+uint64_t keel_schema_hash(void);
+KeelBuf  keel_schema_json(void);                       // owned copy
+uint32_t keel_init(const uint8_t *cfg, uint32_t len, keel_reply_cb reply, keel_changeset_cb changes, keel_stream_cb stream, void *user); // idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok
+void     keel_shutdown(void);
+uint32_t keel_call(const uint8_t *ptr, uint32_t len);  // Call payload (§3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods.
+KeelBuf  keel_call_sync(const uint8_t *ptr, uint32_t len); // Reply payload (§3.4) returned directly; only for sync methods (async → status 5)
+void     keel_cancel(uint32_t call_id);
+void     keel_stream_credit(uint32_t call_id, uint32_t credit);
+void     keel_observe(uint64_t handle, uint32_t signal_id, uint8_t on);
+void     keel_release(uint64_t handle);
+void     keel_port_register(uint32_t port_id, keel_port_cb cb, void *user);
+void     keel_port_reply(const uint8_t *ptr, uint32_t len);   // PortReply payload
+void     keel_event(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
+void     keel_timer_fired(uint32_t timer_id);
+KeelBuf  keel_snapshot(void);
+uint32_t keel_restore(const uint8_t *ptr, uint32_t len);
+KeelBuf  keel_stats_json(void);                        // live handles, tasks, txn count, crossings
+void     keel_buf_free(KeelBuf buf);
+```
+
+`RuntimeConfig` record: `{ platform: String, mode: String /* "inproc" | "dev" */, core_threads: u8, blocking_threads: u8, log_level: u8 }`.
+
+Callback threading: `reply_cb`, `changeset_cb`, `stream_cb` and `port_cb` may be invoked on the core thread, a blocking thread, or the caller's thread (sync path), possibly while the core lock is held. See §5.1 for the re-entrancy rule.
+
+### 6.1 JNI shim (feature `jni`)
+
+`keel-ffi` with feature `jni` exports `Java_dev_keel_runtime_KeelNative_<name>` natives registered via `JNI_OnLoad` → `RegisterNatives` (no per-call lookup). Java signatures (class `dev.keel.runtime.KeelNative`):
+
+```java
+static native int    abiVersion();
+static native long   schemaHash();
+static native byte[] schemaJson();
+static native int    init(byte[] cfg, KeelNative.Callbacks cb);   // cb.onReply(int callId, ByteBuffer reply), cb.onChangeSet(ByteBuffer), cb.onStream(int callId, ByteBuffer), int cb.onPortCall(int portId, int methodId, int portCallId, ByteBuffer args) returns 0/1/2, byte[] cb.portSyncReply() (read after a 0 return)
+static native int    call(byte[] payload);
+static native byte[] callSync(byte[] payload);
+static native void   cancel(int callId);
+static native void   streamCredit(int callId, int credit);
+static native void   observe(long handle, int signalId, boolean on);
+static native void   release(long handle);
+static native void   portReply(byte[] payload);
+static native void   event(int portId, int methodId, byte[] payload);
+static native void   timerFired(int timerId);
+static native byte[] snapshot();
+static native int    restore(byte[] snapshot);
+static native String statsJson();
+```
+`ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`.
+
+### 6.2 Swift
+
+Swift calls the C ABI through a module map (`KeelFFI` C module inside the XCFramework). `KeelRuntime` wraps it; generated code never touches C.
+
+### 6.3 Port callback contract
+
+For **sync** ports the host must fill `out_reply` with a PortReply payload and return 0 before returning. For **async** ports the host returns 1 and later calls `keel_port_reply`. Returning 2 fails the call with `PortError::Unavailable`. A port that is not registered behaves as 2.
+
+---
+
+## 7. wasm ABI (`keel-ffi`, target `wasm32-unknown-unknown`)
+
+No wasm-bindgen. Exports and imports use only `i32`/`i64`/`f64`. Memory is the module's exported `memory`. `_initialize` is exported when present (reactor); the host calls it once after instantiation.
+
+Exports:
+```
+keel_alloc(len: i32) -> i32 ptr           keel_free(ptr: i32, len: i32)
+keel_abi_version() -> i32                  keel_schema_hash() -> i64
+keel_schema_json() -> i32 (ptr to KeelBuf struct { ptr i32, len i32, cap i32 })
+keel_init(cfg_ptr, cfg_len) -> i32
+keel_call(ptr, len) -> i32                 keel_call_sync(ptr, len) -> i32 (KeelBuf*)
+keel_cancel(call_id)                       keel_stream_credit(call_id, credit)
+keel_observe(handle_lo: i32, handle_hi: i32, signal_id, on)   // u64 split to avoid BigInt requirement
+keel_release(handle_lo, handle_hi)
+keel_port_reply(ptr, len)                  keel_event(port_id, method_id, ptr, len)
+keel_timer_fired(timer_id)                 keel_poll()                                // drive the executor
+keel_snapshot() -> i32 (KeelBuf*)          keel_restore(ptr, len) -> i32
+keel_buf_free(buf_ptr)                     keel_stats_json() -> i32 (KeelBuf*)
+```
+Imports (module `"keel"`):
+```
+reply(call_id, ptr, len)        changeset(ptr, len)        stream(call_id, ptr, len)
+port_call(port_id, method_id, port_call_id, ptr, len) -> i32 (0 sync: host wrote reply via keel_port_reply *before returning*; 1 async; 2 unavailable)
+schedule()                      // host must call keel_poll() on the next microtask
+timer_set(timer_id, delay_ms_lo, delay_ms_hi)
+log(level, ptr, len)
+now_ms() -> f64                 // Date.now()
+random(ptr, len)                // crypto.getRandomValues into memory
+```
+The Clock/Rng/Log ports have built-in wasm bindings over these imports so a web app needs no adapter code for them. All ports remain overridable.
+
+Build: `--release`, `-C panic=abort`, `-C opt-level=z` or `s` (measured), `-C lto=fat`, `-Z`-free. `wasm-opt -Oz` when available. Panics call the `log` import with level 5 (fatal) before trapping so the host can restart from snapshot.
+
+---
+
+## 8. Standard ports (`keel-ports`)
+
+```rust
+#[keel::port(sync)]  pub trait Clock { fn now_ms(&self) -> i64; fn monotonic_ns(&self) -> u64; }
+#[keel::port(sync)]  pub trait Rng   { fn fill(&self, len: u32) -> Bytes; }
+#[keel::port(sync)]  pub trait Log   { fn log(&self, level: u8, target: String, message: String); }
+#[keel::port]        pub trait Http  { async fn request(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>; }
+#[keel::port]        pub trait Kv    { async fn get(&self, key: String) -> Option<Bytes>; async fn set(&self, key: String, value: Bytes); async fn delete(&self, key: String); async fn list(&self, prefix: String) -> Vec<String>; }
+#[keel::port]        pub trait SecureStore { /* same as Kv */ }
+#[keel::port]        pub trait Fs    { async fn read(&self, path: String) -> Result<Bytes, FsError>; async fn write(&self, path: String, data: Bytes) -> Result<(), FsError>; async fn delete(&self, path: String) -> Result<(), FsError>; async fn list(&self, dir: String) -> Result<Vec<String>, FsError>; }
+#[keel::port]        pub trait Timer { fn set(&self, timer_id: u32, delay_ms: u64); }          // sync fire-and-forget; completion via TimerFired
+#[keel::port(event)] pub trait Connectivity { fn changed(&self, online: bool, kind: NetKind); }
+#[keel::port(event)] pub trait Lifecycle    { fn changed(&self, state: AppState); }            // Active | Background | Inactive
+```
+Records: `HttpRequest { method: HttpMethod, url: String, headers: Vec<Header>, body: Option<Bytes>, timeout_ms: Option<u32> }`, `HttpResponse { status: u16, headers: Vec<Header>, body: Bytes }`, `HttpError { Network(String), Timeout, Cancelled, InvalidUrl(String) }`, `Header { name: String, value: String }`, `FsError { NotFound, Denied, Io(String) }`, `NetKind { Wifi, Cellular, Wired, Unknown, None }`, `AppState { Active, Inactive, Background }`.
+
+Fakes (all in `keel-ports::fakes`, `Send + Sync`): `FakeHttp` (script responses by matcher; records calls), `MemKv`, `MemSecureStore`, `MemFs`, `FakeClock` (settable `now`, `advance(d)` fires due timers; implements `Clock` + `Timer`), `SeededRng` (xorshift64\*), `CaptureLog`, `ScriptedConnectivity`, `ScriptedLifecycle`. `TestRuntime::new()` installs all fakes and runs the executor on the test thread (`run_until(fut)` / `run_pending()`).
+
+---
+
+## 9. Query (`keel-query`)
+
+* `QueryClient` lives in the runtime. Cache: `HashMap<QueryKey, Entry>`; `QueryKey = (query_id, encoded_params_bytes)`; `Entry { data: Option<Vec<u8>>, error: Option<Vec<u8>>, status: Status /* Idle | Fetching | Success | Error */, updated_at_ms, stale_ms, observers: u32, inflight: Option<TaskId>, persist: bool, gc_at: Option<i64> }`.
+* A query is observed through a **QueryHandle object** (a store generated by the macro): signals `data: Option<T>` (0), `status: QueryStatus` (1), `error: Option<E>` (2), `fetching: bool` (3), `updated_at: Option<Timestamp>` (4). Constructing the handle registers an observer and triggers a fetch if stale or missing; releasing it decrements; when observers hit 0 the in-flight fetch is cancelled and `gc_at = now + gc_ms` (default 5 min).
+* Refetch triggers: observer added while stale; `Lifecycle::Active` (all observed stale); `Connectivity online` (all observed); `interval_ms` if set; `invalidate(prefix)`.
+* Retry: `retry` attempts (default 3) with backoff `min(1000 × 2^n, 30000)` ms ± 20% jitter (via `SeededRng`/`Rng`), via `Timer`.
+* Dedup: one in-flight fetch per key; concurrent observers share it.
+* Mutations: `ctx.mutate(M(input)).optimistic(|cache| ..).invalidates([..]).await`. Optimistic closure runs inside a transaction with `CacheView` giving typed access to entries (`cache.get::<TodosQuery>(params) -> Option<T>`, `set`, `update`). On error, the pre-mutation entries are restored in one transaction. On success, `invalidates` keys are marked stale and refetched if observed.
+* Offline queue: mutations marked `idempotent` that fail with `HttpError::Network` while `Connectivity` is offline are appended to the persisted queue (`Kv` key `keel.query.queue`) with `mutation_id, params bytes, idempotency_key (Uuid)`, and replayed FIFO on `online`. Non-idempotent mutations fail immediately when offline.
+* Persistence: entries with `persist` are written to `Kv` under `keel.query.cache.<query_id>.<fnv1a64(params)>` as `{ schema_hash u64, updated_at i64, data bytes }` after each successful fetch (debounced 250 ms), and hydrated at `QueryClient::hydrate()` (called by `keel_init`); mismatched `schema_hash` entries are dropped.
+
+---
+
+## 10. Generated code shapes (`keel-bindgen`)
+
+`keel-bindgen` takes a `Schema` and emits three trees. Each generator is a Rust module with `write_*` functions and a golden-file test suite (`crates/keel-bindgen/tests/golden/<case>/{schema.json, swift/, kotlin/, ts/}`). Emitted code depends only on the matching runtime package. Naming: Rust `snake_case` → Swift/Kotlin/TS `camelCase` for methods and fields, `PascalCase` for types; enum variants → Swift `lowerCamel` cases, Kotlin `UPPER_SNAKE` for unit enums and `PascalCase` classes for data enums, TS string-literal `"camelCase"` / `kind: "camelCase"`.
+
+### 10.1 Swift
+
+```swift
+// record
+public struct Todo: KeelRecord, Sendable, Hashable, Codable {
+    public var id: UUID; public var title: String; public var done: Bool
+    public init(id: UUID, title: String, done: Bool)
+    public static func keelDecode(_ r: inout KeelReader) throws -> Todo
+    public func keelEncode(_ w: inout KeelWriter)
+}
+// unit enum
+public enum Filter: UInt16, KeelEnum, CaseIterable, Sendable, Codable { case all = 0, active = 1, done = 2 }
+// data enum
+public enum Shape: KeelEnum, Sendable, Hashable { case circle(radius: Double); case rect(w: Double, h: Double) }
+// error
+public enum TodoError: KeelError, Error, Sendable, Hashable { case emptyTitle; case http(HttpError) }   // description from #[error]
+// object
+public final class Calculator: KeelObject, @unchecked Sendable {
+    public init(ctx: KeelCore = .shared) throws           // constructor `new`
+    public func add(a: Int32, b: Int32) -> Int32           // sync
+    public func fetch(url: String) async throws(HttpError) -> String   // async Result
+    public func ticks() -> AsyncThrowingStream<UInt32, Error>          // stream
+}
+// store
+@MainActor @Observable public final class Todos: KeelStore {
+    public private(set) var todos: [Todo]; public private(set) var filter: Filter; public private(set) var visible: [Todo]
+    public init(ctx: KeelCore = .shared) throws
+    public func setFilter(_ f: Filter)
+    public func add(title: String) async throws(TodoError) -> Todo
+}
+// port
+public protocol Http: KeelPort { func request(_ req: HttpRequest) async throws(HttpError) -> HttpResponse }
+```
+Sync methods in `inproc` mode call `keel_call_sync`. Store initial values are decoded from the change-set emitted by `keel_observe` during `init`. Typed throws require Swift 6; the generator also has a `--swift-typed-throws=false` flag that emits plain `throws`.
+
+### 10.2 Kotlin
+
+```kotlin
+data class Todo(val id: UUID, val title: String, val done: Boolean) : KeelRecord { companion object : KeelCodec<Todo> }
+enum class Filter(val index: UShort) : KeelEnum { ALL(0u), ACTIVE(1u), DONE(2u) }
+sealed interface Shape : KeelEnum { data class Circle(val radius: Double) : Shape; data class Rect(val w: Double, val h: Double) : Shape }
+sealed class TodoError : KeelException() { data object EmptyTitle : TodoError(); data class Http(val cause: HttpError) : TodoError() }
+class Calculator(ctx: KeelCore = KeelCore.shared) : KeelObject(ctx) {
+    fun add(a: Int, b: Int): Int
+    suspend fun fetch(url: String): String            // throws HttpError
+    fun ticks(): Flow<UInt>
+}
+class Todos(ctx: KeelCore = KeelCore.shared) : KeelStore(ctx) {
+    val todos: StateFlow<List<Todo>>; val filter: StateFlow<Filter>; val visible: StateFlow<List<Todo>>
+    fun setFilter(f: Filter)
+    suspend fun add(title: String): Todo                // throws TodoError
+}
+interface Http : KeelPort { suspend fun request(req: HttpRequest): HttpResponse }   // throws HttpError
+```
+Compose consumers use `collectAsState()` on the `StateFlow`s (no extra module). `KeelStore` and `KeelObject` implement `AutoCloseable`; a `Cleaner` releases leaked handles.
+
+### 10.3 TypeScript
+
+```ts
+export interface Todo { id: string; title: string; done: boolean }
+export type Filter = "all" | "active" | "done";
+export type Shape = { kind: "circle"; radius: number } | { kind: "rect"; w: number; h: number };
+export class TodoError extends KeelError { readonly kind: "emptyTitle" | "http"; readonly cause?: HttpError }   // subclasses TodoError.EmptyTitle, TodoError.Http for instanceof
+export class Calculator extends KeelObject {
+  static create(core?: KeelCore): Promise<Calculator>;
+  add(a: number, b: number): Promise<number>;
+  fetch(url: string): Promise<string>;                    // rejects with HttpError
+  ticks(): AsyncIterable<number>;
+}
+export class Todos extends KeelStore {
+  static create(core?: KeelCore): Promise<Todos>;
+  readonly todos: Signal<Todo[]>; readonly filter: Signal<Filter>; readonly visible: Signal<Todo[]>;
+  setFilter(f: Filter): Promise<void>;
+  add(title: string): Promise<Todo>;
+}
+export interface Http extends KeelPort { request(req: HttpRequest): Promise<HttpResponse> }
+```
+All methods return `Promise` (uniform across main-thread, worker and remote modes). `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@keel/runtime/react` exports `useKeel(Class)` and `useSignal(signal)`; `vue`, `svelte`, `solid` adapters are thin files. `i64`/`u64` → `bigint`; `#[keel(js_number)]` → `number`.
+
+### 10.4 Codecs
+
+Each runtime ships `KeelWriter`/`KeelReader` mirroring §3.9 and the generated code implements per-type encode/decode. Generated codecs must be allocation-conscious: decode records into constructors directly, decode `Vec` with a preallocated capacity, and never go through JSON.
+
+---
+
+## 11. Platform runtimes
+
+Shared responsibilities (each runtime): load/attach the core; own `call_id` allocation; map replies to continuations/promises; hold the **mirror** (store handle → signal id → decoded value) and apply change-sets on the main thread with per-frame coalescing; implement `Observe`/`Release`; provide default adapters; expose a `Transport` abstraction with `inproc` and `remote` (WebSocket) implementations (TS adds `worker`); implement the wire codecs; enforce the schema-hash check at attach with a clear error (`KeelSchemaMismatch { expected, got }`).
+
+Main-thread delivery: Swift `MainActor`; Kotlin `Dispatchers.Main.immediate` (falls back to a single-thread executor on JVM without Android); TS `queueMicrotask` batching into one `flush()` per macrotask.
+
+Handle lifetime: explicit `close()`/`[Symbol.dispose]`; finalizers (`deinit`, `Cleaner`, `FinalizationRegistry`) as backstop; `KeelCore.stats()` exposes live handle counts.
+
+Default adapters:
+| Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) |
+|---|---|---|---|---|---|
+| Http | URLSession | OkHttp (optional dep) or HttpURLConnection | HttpURLConnection | fetch | fetch |
+| Kv / SecureStore | files in Application Support / Keychain | SharedPreferences-backed files / EncryptedFile (Keystore) | files | IndexedDB / IndexedDB + WebCrypto | files |
+| Fs | FileManager | Context.filesDir | java.io | OPFS | fs |
+| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / Log | same | built-in (§7) | built-in |
+| Timer | DispatchQueue | Handler / ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
+| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ProcessLifecycleOwner | stubs | navigator.onLine / visibilitychange | stubs |
+
+---
+
+## 12. Diagnostics
+
+Macro errors use stable codes and a fixed shape: `error[keel::E00NN]: <what>` + a note `<why>` + `help: <fix>` + `docs: https://keel.dev/errors/E00NN`. Initial catalogue:
+
+| Code | Trigger |
+|---|---|
+| E0001 | unsupported type in a public position (lists the type and the allowed set) |
+| E0002 | generic parameter on a `#[keel::api]` item |
+| E0003 | lifetime in a public signature |
+| E0004 | trait object / `dyn` / `Box<dyn Fn>` |
+| E0005 | `Result` or `Stream` outside return position |
+| E0006 | map key type not allowed |
+| E0010 | `#[keel::error]` variant without `#[error(..)]` |
+| E0011 | `#[keel::store]` without a `#[keel::api] impl` block (checked by bindgen) |
+| E0012 | trait object in a record field (the blueprint example) |
+| E0020 | `&mut self` receiver |
+| E0021 | `self` by value |
+| E0022 | non-`Send` future in an async method |
+| E0030 | port method with a non-wire parameter |
+| E0031 | event port method with a return type |
+| E0040 | query without `key` / mutation with `stale` |
+| E0050 | duplicate type name (bindgen) |
+
+---
+
+## 13. Crate and package layout
+
+```
+Cargo.toml (workspace, resolver 3)
+crates/keel-meta        no unsafe; deps: serde, serde_json, inventory
+crates/keel-wire        no unsafe; deps: none (proptest dev-dep)
+crates/keel-macros      proc-macro; deps: syn 2 (full), quote, proc-macro2
+crates/keel-signals     no unsafe; deps: keel-wire, parking_lot
+crates/keel-runtime     no unsafe; deps: keel-meta, keel-wire, keel-signals, parking_lot, slab, inventory, futures-core, pin-project-lite
+crates/keel-ports       no unsafe; deps: keel-runtime, keel-macros (uses its own macros)
+crates/keel-query       no unsafe; deps: keel-runtime, keel-ports
+crates/keel-ffi         unsafe allowed; deps: keel-runtime; features: jni (jni crate), wasm
+crates/keel-transport   no unsafe; deps: keel-runtime, tungstenite (feature server); WebSocket server + framing
+crates/keel-bindgen     no unsafe; deps: keel-meta, serde_json, heck
+crates/keel-cli         deps: keel-bindgen, clap, notify, libloading (loads the host cdylib to extract the schema)
+crates/keel             facade: re-exports prelude, macros, runtime, ports, query; `dev::serve()`
+runtimes/swift/KeelRuntime          Package.swift, Sources/KeelRuntime, Sources/KeelFFI (module map), Tests
+runtimes/kotlin/keel-runtime        settings.gradle.kts; modules: runtime (JVM+Android), android-adapters
+runtimes/ts/@keel/runtime           package.json (ESM, exports: ., ./react, ./vue, ./svelte, ./solid, ./worker, ./node), src/, test/
+examples/playground/core            the Rust core used by every playground app and by the contract tests
+examples/playground/{ios,android,web}
+contract-tests/                     schema fixture + per-language runners + the shared scenario list
+bench/                              criterion (Rust), node bench, JVM bench, iOS bench target notes
+```
+
+Schema extraction: `keel-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `keel_schema_json`, and runs bindgen. Fallback: `keel bindgen --schema schema.json`.
+
+---
+
+## 14. Quality gates
+
+* `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`, `cargo doc --no-deps` warning-free.
+* `#![forbid(unsafe_code)]` in every crate except `keel-ffi`.
+* proptest round-trips for every wire type; byte-fuzz on `Reader`, `Envelope::parse`, change-set and patch decoders.
+* Golden tests for bindgen (three languages).
+* Contract scenarios (`contract-tests/scenarios.md`) executed by each runtime's test suite against the playground core: primitives round-trip, records/enums/errors, sync call, async call, error propagation, cancellation, stream with backpressure, store observe → initial change-set, transaction → single change-set, keyed patch, computed, query fetch/stale/refetch, optimistic mutation rollback, offline queue replay, snapshot/restore, schema mismatch rejection, panic containment.
+* Benchmarks (criterion): wire encode/decode per type, dispatch overhead, change-set build for 100 signals, keyed patch on 10k items. Cross-boundary benchmarks per runtime with the numbers written to `bench/RESULTS.md`.
+* Every `pub` item documented. Every crate has a README with a 30-line example.
+
+---
+
+## 15. Conventions
+
+* Edition 2024. `#[unsafe(no_mangle)]` spelling. MSRV 1.85.
+* Errors: `thiserror`-style enums; no `anyhow` in library crates.
+* No `println!`; use the `Log` port through `keel_runtime::log!`.
+* Determinism: no `std::time::SystemTime::now()`, `Instant::now()`, `rand`, or threads spawned outside `keel-runtime`; Clock/Rng/Timer ports only (Constitution R12). The one exception is the native default `Timer`/`Clock` binding inside `keel-runtime`, gated behind `cfg(not(target_family = "wasm"))`.
+* Commit messages: `type(scope): summary` — `feat`, `fix`, `test`, `docs`, `bench`, `state`, `chore`.

@@ -1,0 +1,76 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/keel-meta",
+  "crates/keel-wire",
+  "crates/keel-macros",
+  "crates/keel-signals",
+  "crates/keel-runtime",
+  "crates/keel-ports",
+  "crates/keel-query",
+  "crates/keel-ffi",
+  "crates/keel-transport",
+  "crates/keel-bindgen",
+  "crates/keel-cli",
+  "crates/keel",
+  "examples/playground/core",
+  "bench",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/shreypdev/keel"
+authors = ["Shrey <shreypdev@gmail.com>"]
+
+[workspace.dependencies]
+keel-meta = { path = "crates/keel-meta", version = "0.1.0" }
+keel-wire = { path = "crates/keel-wire", version = "0.1.0" }
+keel-macros = { path = "crates/keel-macros", version = "0.1.0" }
+keel-signals = { path = "crates/keel-signals", version = "0.1.0" }
+keel-runtime = { path = "crates/keel-runtime", version = "0.1.0" }
+keel-ports = { path = "crates/keel-ports", version = "0.1.0" }
+keel-query = { path = "crates/keel-query", version = "0.1.0" }
+keel-ffi = { path = "crates/keel-ffi", version = "0.1.0" }
+keel-transport = { path = "crates/keel-transport", version = "0.1.0" }
+keel-bindgen = { path = "crates/keel-bindgen", version = "0.1.0" }
+keel = { path = "crates/keel", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+inventory = "0.3"
+parking_lot = "0.12"
+slab = "0.4"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+pin-project-lite = "0.2"
+proptest = "1"
+criterion = { version = "0.5", default-features = false }
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+heck = "0.5"
+clap = { version = "4", features = ["derive"] }
+libloading = "0.8"
+notify = "7"
+tungstenite = "0.24"
+jni = "0.21"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+panic = "unwind"
+strip = "symbols"
+debug = false
+
+[profile.release-wasm]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+debug = true
+strip = "none"
