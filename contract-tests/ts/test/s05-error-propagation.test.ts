@@ -70,10 +70,7 @@ test("S05 error propagation", async () => {
 
     const past = await failure(() => list.insertAt(10_001, "x"));
     expect(past).toBeInstanceOf(ListError.OutOfRange);
-    // WORKAROUND(playground-core): `BigList::insert_at` validates against `len + 1` and reports that number,
-    // so the error says `len=10001` for a list of 10,000 items; scenarios.md says `len=10000`. The repro is
-    // in findings.test.ts; until the core (or scenarios.md) changes, this scenario accepts what the core does.
-    expect(past).toMatchObject({ index: 10_001, len: 10_001 });
+    expect(past).toMatchObject({ index: 10_001, len: 10_000 });
     // The refused insert did not use up an identity.
     expect(await list.insertAt(0, "y")).toBe(10_001);
     expect(list.items.peek()[0]).toEqual({ id: 10_001, label: "y", version: 0 });
