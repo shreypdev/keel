@@ -6,6 +6,22 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel: query crate (stub, to be implemented)"
+description = "Keel query client: a typed query cache with staleness, dedup, retry, optimistic mutations, an offline queue and persistence"
+readme = "README.md"
+keywords = ["keel", "query", "cache", "cross-platform"]
+categories = ["caching", "asynchronous"]
 
 [dependencies]
+keel-meta = { workspace = true }
+keel-wire = { workspace = true }
+keel-signals = { workspace = true }
+keel-runtime = { workspace = true }
+keel-ports = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+# The integration tests and the doc examples use the real macros through the facade
+# (`#[keel::query]`, `#[keel::mutation]`, `#[keel::error]`). The facade depends on this crate, a
+# cycle only through dev-dependencies, which cargo allows: the tests link the one keel-query.
+keel = { workspace = true }
+proptest = { workspace = true }

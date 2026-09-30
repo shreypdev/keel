@@ -142,6 +142,7 @@ dependencies = [
  "keel-bindgen",
  "keel-macros",
  "keel-meta",
+ "keel-query",
  "keel-runtime",
  "keel-signals",
  "keel-wire",
@@ -205,6 +206,16 @@ dependencies = [
 [[package]]
 name = "keel-query"
 version = "0.1.0"
+dependencies = [
+ "keel",
+ "keel-meta",
+ "keel-ports",
+ "keel-runtime",
+ "keel-signals",
+ "keel-wire",
+ "parking_lot",
+ "proptest",
+]
 
 [[package]]
 name = "keel-runtime"
