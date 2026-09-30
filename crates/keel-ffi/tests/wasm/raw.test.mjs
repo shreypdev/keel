@@ -190,9 +190,11 @@ test("async calls run from keel_poll after schedule; timers are host-owned (lo/h
   assert.equal(core.takeReply(id), undefined, "no reply before the executor runs");
   assert.ok(core.schedules > 0, "the core asked to be polled");
   core.drain();
-  assert.equal(core.timers.length, 1, "the sleep asked the host for a timer");
-  assert.equal(core.timers[0].delayMs, 20n);
-  core.x.keel_timer_fired(core.timers[0].timerId);
+  // Background work (keel-query's hydration retry) may arm its own timers, so the
+  // sleep's timer is found by its delay rather than assumed to be the only one.
+  const slept = core.timers.filter((t) => t.delayMs === 20n);
+  assert.equal(slept.length, 1, "the sleep asked the host for a timer");
+  core.x.keel_timer_fired(slept[0].timerId);
   core.drain();
   const reply = core.takeReply(id);
   assert.equal(reply.status, Status.Ok);
@@ -204,7 +206,7 @@ test("async calls run from keel_poll after schedule; timers are host-owned (lo/h
   const ms = (1n << 32n) + 7n;
   assert.equal(core.submit(call.method(calc, ids.method(CALC, "sleep_wide"), wide, i64(ms))), 0);
   core.drain();
-  assert.equal(core.timers[0].delayMs, ms);
+  assert.ok(core.timers.some((t) => t.delayMs === ms), "the wide delay crossed as lo/hi");
   // Cancelling answers status 3 exactly once.
   core.x.keel_cancel(wide);
   assert.equal(core.takeReply(wide).status, Status.Cancelled);
