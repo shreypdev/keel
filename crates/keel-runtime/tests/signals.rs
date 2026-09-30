@@ -380,6 +380,9 @@ fn snapshot_is_a_wire_snapshot_of_the_stores_only() {
     assert_ne!(lazy, h1);
 
     let snap = snapshot_of(&t);
+    // Three handles were issued (two stores and the lazy list), so the floor is generation 3.
+    assert_eq!(snap.generation_floor, lazy.generation());
+    assert_eq!(snap.generation_floor, 3);
     assert_eq!(
         snap.stores,
         [
@@ -400,7 +403,8 @@ fn snapshot_is_a_wire_snapshot_of_the_stores_only() {
 #[test]
 fn snapshot_of_an_empty_runtime_is_an_empty_snapshot() {
     let t = TestRuntime::new();
-    assert_eq!(t.runtime().snapshot(), [0, 0, 0, 0]);
+    // `count u32 = 0, generation_floor u32 = 0` (nothing was ever issued).
+    assert_eq!(t.runtime().snapshot(), [0; 8]);
 }
 
 // ----- restore ----------------------------------------------------------------------------
@@ -533,7 +537,11 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
 
     let encode = |stores: Vec<StoreSnapshot>| {
         let mut w = Writer::new();
-        Snapshot { stores }.encode(&mut w);
+        Snapshot {
+            generation_floor: 1,
+            stores,
+        }
+        .encode(&mut w);
         w.into_vec()
     };
     let store = |handle: Handle, type_id: u32| StoreSnapshot {
@@ -552,7 +560,13 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
         })
     );
     // Null, generation-0 and duplicate handles; absurd indices.
-    for bad in [Handle::NULL, Handle::new(1, 0), Handle::new(u32::MAX, 1)] {
+    for bad in [
+        Handle::NULL,
+        Handle::new(1, 0),
+        Handle::new(u32::MAX, 1),
+        // A generation of u32::MAX would leave the counter nothing to issue (review T8).
+        Handle::new(1, u32::MAX),
+    ] {
         assert_eq!(
             t.runtime().restore(&encode(vec![store(bad, counter_type)])),
             Err(RestoreError::BadHandle { handle: bad.0 }),
@@ -566,6 +580,17 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
             store(dup, counter_type)
         ])),
         Err(RestoreError::BadHandle { handle: dup.0 })
+    );
+    // A floor of u32::MAX could never issue another handle: refused, not obeyed.
+    let mut w = Writer::new();
+    Snapshot {
+        generation_floor: u32::MAX,
+        stores: vec![],
+    }
+    .encode(&mut w);
+    assert_eq!(
+        t.runtime().restore(w.as_slice()),
+        Err(RestoreError::GenerationFloor { floor: u32::MAX })
     );
     // A store's own decoder rejecting its values, and one that panics.
     let mut broken = store(Handle::new(3, 1), counter_type);
@@ -610,10 +635,7 @@ fn restore_rejects_bad_snapshots_and_leaves_the_runtime_unchanged() {
 fn restore_after_shutdown_is_an_error() {
     let t = TestRuntime::new();
     t.runtime().shutdown();
-    assert_eq!(
-        t.runtime().restore(&[0, 0, 0, 0]),
-        Err(RestoreError::ShutDown)
-    );
+    assert_eq!(t.runtime().restore(&[0; 8]), Err(RestoreError::ShutDown));
 }
 
 #[test]
@@ -644,7 +666,7 @@ fn restore_reentrancy_is_refused_not_deadlocked() {
     impl Host for Restoring {
         fn reply(&self, _: u32, _: &[u8]) {
             if let Some(rt) = self.rt.get().and_then(std::sync::Weak::upgrade) {
-                *self.result.lock() = Some(rt.restore(&[0, 0, 0, 0]));
+                *self.result.lock() = Some(rt.restore(&[0; 8]));
             }
         }
         fn change_set(&self, _: &[u8]) {}

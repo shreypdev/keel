@@ -801,12 +801,17 @@ public object Payloads {
 
     /**
      * core to host (envelope kind SNAPSHOT), and host to core to restore it (kind RESTORE, same
-     * layout): `count u32, stores × { handle u64, type_id u32, signal_count u32, signals × {
-     * signal_id u32, len u32, value } }`. Computed signals are excluded.
+     * layout): `count u32, generation_floor u32, stores × { handle u64, type_id u32,
+     * signal_count u32, signals × { signal_id u32, len u32, value } }`. Computed signals are
+     * excluded.
      *
+     * @property generationFloor the highest handle generation the core had issued when the snapshot
+     *   was taken. A restore resumes the core's generation counter above it, so no handle issued before
+     *   the snapshot (or between it and the restore) is issued again to another object (ADR-022). Opaque
+     *   to the host: pass it back unchanged.
      * @property stores every snapshotted store.
      */
-    public data class Snapshot(val stores: List<Store>) : Payload {
+    public data class Snapshot(val generationFloor: UInt, val stores: List<Store>) : Payload {
 
         /**
          * One store of a [Snapshot].
@@ -834,6 +839,7 @@ public object Payloads {
 
         override fun encode(w: KeelWriter) {
             w.writeLen(stores.size)
+            w.writeU32(generationFloor)
             for (s in stores) {
                 w.writeI64(s.handle.raw)
                 w.writeU32(s.typeId)
@@ -855,6 +861,7 @@ public object Payloads {
             /** Reads a snapshot from [r], copying every signal value. */
             public fun decode(r: KeelReader): Snapshot {
                 val storeCount = r.readLen(MIN_STORE_BYTES)
+                val generationFloor = r.readU32()
                 val stores = ArrayList<Store>(storeCount)
                 for (i in 0 until storeCount) {
                     val handle = Handle(r.readI64())
@@ -867,7 +874,7 @@ public object Payloads {
                     }
                     stores.add(Store(handle, typeId, signals))
                 }
-                return Snapshot(stores)
+                return Snapshot(generationFloor, stores)
             }
 
             /** Decodes a whole snapshot message. */

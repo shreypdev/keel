@@ -549,7 +549,7 @@ fn calls_before_init_fail_softly() {
     port_reply(&[]);
     event(1, 2, &[]);
     let snapshot = take(keel_snapshot());
-    assert_eq!(snapshot, [0, 0, 0, 0]);
+    assert_eq!(snapshot, [0; 8], "no stores, generation floor 0");
     assert_eq!(restore(&snapshot), restore_code::UNAVAILABLE);
     let stats: serde_json::Value = serde_json::from_slice(&take(keel_stats_json())).expect("JSON");
     assert_eq!(stats["initialized"], false);
@@ -921,6 +921,10 @@ fn snapshot_and_restore_round_trip_and_reject_garbage() {
     let decoded = Snapshot::decode(&mut Reader::new(&snapshot)).unwrap();
     assert_eq!(decoded.stores.len(), 1);
     assert_eq!(decoded.stores[0].handle, counter);
+    assert!(
+        decoded.generation_floor >= counter.generation(),
+        "the snapshot carries the generation counter (ADR-022)"
+    );
     // Change the state, then restore: the same handle is valid and shows the old value.
     host.sync(method(counter, "Counter", "bump"), &[]);
     assert_eq!(restore(&snapshot), 0);
@@ -935,8 +939,37 @@ fn snapshot_and_restore_round_trip_and_reject_garbage() {
     ] {
         assert_eq!(restore(bad), restore_code::BAD_SNAPSHOT);
     }
+    // A generation floor of u32::MAX would leave nothing to issue: refused like any bad snapshot.
+    let mut hostile = snapshot.clone();
+    hostile[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(restore(&hostile), restore_code::BAD_SNAPSHOT);
     let (status, _) = host.sync(method(counter, "Counter", "bump"), &[]);
     assert_eq!(status, ReplyStatus::Ok);
+}
+
+/// H1 over the C ABI: a handle the host still holds (here `b`, issued after the snapshot) must
+/// never name an object created after the restore.
+#[test]
+fn restore_never_reissues_a_generation_the_host_may_hold() {
+    let host = Embedder::start();
+    let a = host.construct("Counter", &[]);
+    let snapshot = take(keel_snapshot());
+    keel_release(a.0);
+    let b = host.construct("Counter", &[]);
+    assert_eq!(b.index(), a.index(), "the slot is reused");
+    assert_eq!(restore(&snapshot), 0);
+
+    let (stale, _) = host.sync(method(b, "Counter", "bump"), &[]);
+    assert_eq!(stale, ReplyStatus::BadRequest, "b was not in the snapshot");
+    keel_release(a.0);
+    let c = host.construct("Counter", &[]);
+    assert_eq!(c.index(), b.index());
+    assert_ne!(c, b, "the stale handle must not name the new object");
+    assert!(c.generation() > b.generation());
+    let (still_stale, _) = host.sync(method(b, "Counter", "bump"), &[]);
+    assert_eq!(still_stale, ReplyStatus::BadRequest);
+    let (live, _) = host.sync(method(c, "Counter", "bump"), &[]);
+    assert_eq!(live, ReplyStatus::Ok);
 }
 
 #[test]

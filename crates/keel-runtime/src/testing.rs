@@ -7,7 +7,12 @@
 //!   [`advance`](TestRuntime::advance);
 //! * a **manual clock**: `sleep` only completes when [`advance`](TestRuntime::advance) moves
 //!   time past its deadline, so timing tests are exact and instant;
-//! * `spawn_blocking` runs its closure inline, synchronously.
+//! * `spawn_blocking` runs its closure on a **real pool thread**, like a native runtime, so a
+//!   closure that writes signals (forbidden: it does not hold the core lock) fails in a test
+//!   exactly as it does in a native debug build. [`run_pending`](TestRuntime::run_pending),
+//!   [`run_until`](TestRuntime::run_until) and [`advance`](TestRuntime::advance) wait for the
+//!   closures to finish and run the tasks they wake, so a test sees their results without
+//!   waiting by hand.
 //!
 //! The [`RecordingHost`] records every reply, change-set, stream item, log line and port call
 //! the runtime emits, and answers port calls from a scriptable table (unscripted ports are
@@ -37,7 +42,11 @@
 //! Change-sets are routed to the runtime that is current on the writing thread (see
 //! `docs/runtime-internals.md`, section 12). Writes made inside a dispatched call, a task, or
 //! [`Ctx::txn`] find the test runtime by themselves; a direct `signal.set(..)` in the test body
-//! needs `let _scope = t.ctx().enter();` first, or its change-set has nowhere to go.
+//! needs `let _scope = t.ctx().enter();` first, or its change-set has nowhere to go. The thread
+//! that created the `TestRuntime` may write signals directly; any other thread (a
+//! `std::thread::spawn` in a test) trips the write-context check in debug builds, the way a host
+//! thread would in production. A test that has to prove what happens when such a write does
+//! reach the runtime (release-build behaviour) wraps it in [`unchecked_writes`].
 
 use core::future::Future;
 use core::task::{Context, Poll, Waker};
@@ -56,7 +65,32 @@ use parking_lot::{Condvar, Mutex};
 use crate::config::{MODE_INPROC, RuntimeConfig};
 use crate::ctx::Ctx;
 use crate::host::{Host, PortCallOutcome};
-use crate::runtime::{BuildOptions, Runtime};
+use crate::runtime::{BuildOptions, Runtime, UncheckedWrites};
+
+/// How long [`TestRuntime::run_pending`] waits for one blocking closure to finish.
+const BLOCKING_SETTLE_LIMIT: Duration = Duration::from_secs(10);
+
+/// Declares the calling thread a test driver: it plays the core, so its direct signal writes are
+/// allowed (see the [module documentation](self)). `TestRuntime::new` does this for the thread
+/// that creates it; call it yourself from a harness that builds a real `Runtime` without a core
+/// thread and drives dispatchers and futures directly on the test thread. The declaration lasts
+/// for the life of the thread, which for a test is the test.
+pub fn drive_from_this_thread() {
+    crate::runtime::mark_test_driver_thread();
+}
+
+/// Runs `f` on the calling thread with the debug write-context check lifted, so `f` can write
+/// signals the way a release-build embedder thread can.
+///
+/// For tests that prove the runtime's lock-level guarantees hold without the checker: a signal
+/// write from a thread that does not hold the core lock panics in debug builds otherwise
+/// (see the [module documentation](self)). It lifts the check only; to have the write delivered
+/// to a particular runtime, enter its scope too (`let _scope = ctx.enter();`). Production code
+/// never needs this; it should move the write onto the core (a task or a dispatched call).
+pub fn unchecked_writes<R>(f: impl FnOnce() -> R) -> R {
+    let _unchecked = UncheckedWrites::enter();
+    f()
+}
 
 /// A decoded `Reply` the host received.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -460,6 +494,8 @@ impl TestRuntime {
     ///
     /// Panics if `config.mode` is invalid.
     pub fn with_config(config: RuntimeConfig) -> TestRuntime {
+        // The creating thread is this test's driver: its direct signal writes are allowed.
+        drive_from_this_thread();
         let host = Arc::new(RecordingHost::new());
         let rt = match Runtime::build(
             config,
@@ -506,9 +542,26 @@ impl TestRuntime {
         decode_reply(&self.rt.call_sync(&call_payload(target, call_id, args)))
     }
 
-    /// Polls until no task is ready; returns the number of polls.
+    /// Polls until no task is ready and no blocking closure is still running; returns the
+    /// number of polls. Blocking closures (`Ctx::spawn_blocking`) run on a real pool thread, so
+    /// this waits (up to ten seconds per closure) for them to finish and runs the tasks they
+    /// wake: when it returns, a test sees the same state as if they had run inline.
     pub fn run_pending(&self) -> usize {
-        self.rt.run_pending()
+        self.settle()
+    }
+
+    /// `Runtime::run_pending`, then waits for blocking closures and repeats until neither
+    /// has anything left.
+    fn settle(&self) -> usize {
+        let mut polled = 0;
+        loop {
+            polled += self.rt.run_pending();
+            if self.rt.blocking_in_flight() == 0
+                || !self.rt.wait_blocking_progress(BLOCKING_SETTLE_LIMIT)
+            {
+                return polled;
+            }
+        }
     }
 
     /// Removes and returns the replies recorded so far.
@@ -541,13 +594,15 @@ impl TestRuntime {
             if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
                 return value;
             }
-            let polled = self.rt.run_pending();
+            let polled = self.settle();
             if polled == 0 && !flag.0.load(Ordering::SeqCst) {
                 panic!(
                     "TestRuntime::run_until: the future is pending and nothing can make progress \
-                     ({} timer(s) pending: use advance(); {} port call(s) pending: use port_reply())",
+                     ({} timer(s) pending: use advance(); {} port call(s) pending: use port_reply(); \
+                     {} blocking closure(s) still running)",
                     self.rt.pending_timers(),
                     self.host.port_calls().len(),
+                    self.rt.blocking_in_flight(),
                 );
             }
         }
@@ -582,11 +637,11 @@ impl TestRuntime {
     pub fn advance(&self, duration: Duration) -> usize {
         let rt = &self.rt;
         // Tasks that are ready run at the current time, before any time passes.
-        rt.run_pending();
+        self.settle();
         let fired = rt.advance_clock(duration, || {
-            rt.run_pending();
+            self.settle();
         });
-        rt.run_pending();
+        self.settle();
         fired
     }
 }

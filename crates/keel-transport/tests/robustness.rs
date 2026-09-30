@@ -484,7 +484,7 @@ fn mutated_valid_frames_never_panic_the_server() {
             make(Kind::Release, enc(&0x0000_0001_0000_0001_u64)),
             make(Kind::Cancel, enc(&1_u32)),
             make(Kind::PortReply, [enc(&1_u32), vec![0]].concat()),
-            make(Kind::Restore, vec![0, 0, 0, 0]),
+            make(Kind::Restore, vec![0; 8]),
             make(Kind::Event, [enc(&1_u32), enc(&2_u32), vec![1]].concat()),
         ]
     };

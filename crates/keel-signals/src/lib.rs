@@ -15,6 +15,8 @@
 //! transaction ids. Each store has a delivery lock that a commit holds from the moment it
 //! claims the store's dirty slots until the sink has returned (see [`ChangeSink`]: the sink is
 //! called under it, so a sink must not wait for another thread that writes the same store).
+//! [`StoreCell::observe_and_deliver`] takes the same lock for an observe, so the values an
+//! observer hands the host cannot be overtaken by a commit of the same store.
 //! Nothing orders the change-sets of different stores against each other, and the writes of two
 //! threads do not form one transaction: if a slot is already dirty in a transaction another
 //! thread has open, a write from this thread is delivered with that thread's transaction, not

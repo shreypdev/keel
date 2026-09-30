@@ -127,10 +127,8 @@ fn objects_survive_a_disconnect_when_release_on_disconnect_is_off_but_observatio
     assert_eq!(stat(&f.rt, "live_handles"), 1, "the object is still there");
 
     // Nobody observes it any more: a write produces no change-set.
-    {
-        let _scope = f.rt.ctx().enter();
-        f.rt.object::<Counter>(handle).expect("still live").add(1);
-    }
+    let counter = f.rt.object::<Counter>(handle).expect("still live");
+    on_core(&f.rt, move || counter.add(1));
     assert_eq!(
         stat(&f.rt, "change_sets"),
         before,

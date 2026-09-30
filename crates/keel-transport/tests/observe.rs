@@ -156,13 +156,10 @@ fn a_write_made_from_outside_any_client_is_forwarded_to_the_attached_one() {
     client.observe(handle, COUNT_SIGNAL, true);
     client.recv_kind(Kind::ChangeSet);
     // The embedding app writes into its own core; the client observing it sees the change.
-    {
-        let _scope = f.rt.ctx().enter();
-        let counter =
-            f.rt.object::<Counter>(handle)
-                .expect("the client's counter is in the object table");
-        counter.add(4);
-    }
+    let counter =
+        f.rt.object::<Counter>(handle)
+            .expect("the client's counter is in the object table");
+    on_core(&f.rt, move || counter.add(4));
     let cs = change_set(&client.recv_kind(Kind::ChangeSet));
     assert_eq!(count_of(&cs), 4);
 }

@@ -1,7 +1,8 @@
 # ADR-020: keel-signals orders delivery per store and polices the write context
 
-Status: accepted (2026-09-30). Touches SPEC 3.5, 5.1, 16.1 (`ChangeSink`, commit algorithm,
-`set_write_checker`). Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, findings M2 and
+Status: accepted (2026-09-30); the write-checker policy (decision 2's runtime checker and
+alternative (c)) is superseded by ADR-023 section 5, which makes it an allowlist. Touches SPEC 3.5,
+5.1, 16.1 (`ChangeSink`, commit algorithm, `set_write_checker`). Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, findings M2 and
 M3.
 
 ## M2: writes from two threads reached the host out of order

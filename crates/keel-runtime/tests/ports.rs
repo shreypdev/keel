@@ -650,3 +650,51 @@ fn events_from_inside_the_core_are_refused_not_deadlocked() {
         "{logs:?}"
     );
 }
+
+// ----- abandoned calls are capped (review finding L7) ------------------------------------------
+
+/// A host that never answers the calls its core gave up on used to leave one id per call in the
+/// table for good. The set is capped, with a warning, and stats show it.
+#[test]
+fn l7_abandoned_port_calls_are_capped_and_the_eviction_is_logged() {
+    let t = TestRuntime::new();
+    t.host().script_port_async(TEST_PORT, ASK);
+    let rt = t.runtime().clone();
+    t.host().take_logs();
+    let cap = keel_runtime::MAX_ABANDONED;
+    for _ in 0..cap + 50 {
+        drop(rt.port_call(TEST_PORT, ASK, Vec::new())); // the future is dropped: abandoned
+    }
+    let stats: serde_json::Value = serde_json::from_str(&rt.stats_json()).unwrap();
+    assert_eq!(stats["abandoned_port_calls"], cap as u64);
+    assert_eq!(stats["pending_port_calls"], 0);
+    let warnings: Vec<_> = t
+        .host()
+        .take_logs()
+        .into_iter()
+        .filter(|l| l.level == 3 && l.message.contains("abandoned calls"))
+        .collect();
+    assert_eq!(warnings.len(), 50, "one warning per eviction");
+
+    // A late reply to a call that is still remembered is discarded quietly and its id is freed;
+    // one to a forgotten call is logged as unknown.
+    let calls = t.host().take_port_calls();
+    let (oldest, newest) = (calls[0].port_call_id, calls[calls.len() - 1].port_call_id);
+    rt.port_reply(&keel_runtime::testing::port_reply_ok(newest, &[]));
+    rt.port_reply(&keel_runtime::testing::port_reply_ok(oldest, &[]));
+    let logs = t.host().take_logs();
+    assert!(
+        logs.iter().any(|l| l
+            .message
+            .contains(&format!("no port call {oldest} is pending"))),
+        "{logs:?}"
+    );
+    assert!(
+        !logs.iter().any(|l| l
+            .message
+            .contains(&format!("no port call {newest} is pending"))),
+        "{logs:?}"
+    );
+    let stats: serde_json::Value = serde_json::from_str(&rt.stats_json()).unwrap();
+    assert_eq!(stats["abandoned_port_calls"], cap as u64 - 1);
+}

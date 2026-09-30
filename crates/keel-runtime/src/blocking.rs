@@ -105,12 +105,18 @@ mod native {
         jobs: VecDeque<Job>,
         idle: usize,
         spawned: usize,
+        /// Jobs a worker has taken and not finished.
+        running: usize,
+        /// Jobs finished so far (tells a waiter that something completed).
+        completed: u64,
         shutdown: bool,
     }
 
     struct Shared {
         queue: Mutex<Queue>,
         cv: Condvar,
+        /// Notified after each job completes (`Pool::wait_for_progress`).
+        progress: Condvar,
     }
 
     pub(crate) struct Pool {
@@ -127,9 +133,12 @@ mod native {
                         jobs: VecDeque::new(),
                         idle: 0,
                         spawned: 0,
+                        running: 0,
+                        completed: 0,
                         shutdown: false,
                     }),
                     cv: Condvar::new(),
+                    progress: Condvar::new(),
                 }),
                 max: max.max(1),
                 workers: Mutex::new(Vec::new()),
@@ -142,6 +151,35 @@ mod native {
 
         pub(crate) fn spawned_threads(&self) -> usize {
             self.shared.queue.lock().spawned
+        }
+
+        /// Jobs queued or running.
+        pub(crate) fn in_flight(&self) -> usize {
+            let q = self.shared.queue.lock();
+            q.jobs.len() + q.running
+        }
+
+        /// Waits until a job finishes, for at most `timeout`. `false` if nothing is in flight or
+        /// the time ran out first. A job's result has been delivered (its waiter woken) by the
+        /// time it counts as finished.
+        pub(crate) fn wait_for_progress(&self, timeout: std::time::Duration) -> bool {
+            let deadline = std::time::Instant::now() + timeout;
+            let mut q = self.shared.queue.lock();
+            let seen = q.completed;
+            if q.jobs.len() + q.running == 0 {
+                return false;
+            }
+            while q.completed == seen {
+                if self
+                    .shared
+                    .progress
+                    .wait_until(&mut q, deadline)
+                    .timed_out()
+                {
+                    return q.completed != seen;
+                }
+            }
+            true
         }
 
         /// Workers currently waiting for a job.
@@ -190,8 +228,13 @@ mod native {
                                     Vec::new()
                                 }
                             };
+                            let ran = orphaned.len() as u64;
                             for job in orphaned {
                                 job();
+                            }
+                            if ran > 0 {
+                                self.shared.queue.lock().completed += ran;
+                                self.shared.progress.notify_all();
                             }
                             self.shared.cv.notify_one();
                         }
@@ -222,18 +265,7 @@ mod native {
         }
     }
 
-    thread_local! {
-        /// Set for the whole life of a pool worker thread.
-        static WORKER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-
-    /// Whether the calling thread is a blocking-pool worker.
-    pub(super) fn on_worker_thread() -> bool {
-        WORKER.try_with(std::cell::Cell::get).unwrap_or(false)
-    }
-
     fn worker(shared: &Shared) {
-        let _ = WORKER.try_with(|w| w.set(true));
         loop {
             let job = {
                 let mut q = shared.queue.lock();
@@ -242,6 +274,7 @@ mod native {
                         return;
                     }
                     if let Some(job) = q.jobs.pop_front() {
+                        q.running += 1;
                         break job;
                     }
                     q.idle += 1;
@@ -250,26 +283,20 @@ mod native {
                 }
             };
             job();
+            {
+                let mut q = shared.queue.lock();
+                q.running -= 1;
+                q.completed += 1;
+            }
+            shared.progress.notify_all();
         }
-    }
-}
-
-/// Whether the calling thread is a blocking-pool worker: it runs user closures without the core
-/// lock, so it must not write signals (the runtime's write-context check refuses it).
-pub(crate) fn on_worker_thread() -> bool {
-    #[cfg(not(target_family = "wasm"))]
-    {
-        native::on_worker_thread()
-    }
-    #[cfg(target_family = "wasm")]
-    {
-        false
     }
 }
 
 /// Where blocking closures run.
 pub(crate) enum Blocking {
-    /// Run inline at the `spawn` call (wasm, test runtimes).
+    /// Run inline at the `spawn` call (wasm, which has no thread to run on).
+    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
     Inline,
     /// A pool of worker threads.
     #[cfg(not(target_family = "wasm"))]
@@ -314,6 +341,28 @@ impl Blocking {
             Blocking::Inline => {}
             #[cfg(not(target_family = "wasm"))]
             Blocking::Pool(pool) => pool.shutdown(),
+        }
+    }
+
+    /// Closures queued or running on the pool (always `0` for the inline runner).
+    pub(crate) fn in_flight(&self) -> usize {
+        match self {
+            Blocking::Inline => 0,
+            #[cfg(not(target_family = "wasm"))]
+            Blocking::Pool(pool) => pool.in_flight(),
+        }
+    }
+
+    /// Waits up to `timeout` for one closure to finish; `false` if none is in flight or the
+    /// time ran out.
+    pub(crate) fn wait_for_progress(&self, timeout: std::time::Duration) -> bool {
+        match self {
+            Blocking::Inline => {
+                let _ = timeout;
+                false
+            }
+            #[cfg(not(target_family = "wasm"))]
+            Blocking::Pool(pool) => pool.wait_for_progress(timeout),
         }
     }
 

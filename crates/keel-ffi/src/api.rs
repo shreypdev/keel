@@ -250,14 +250,18 @@ pub(crate) fn poll() {
     );
 }
 
-/// `keel_snapshot`: a `Snapshot` payload; an empty one (no stores) before init.
+/// A snapshot of nothing: `count u32 = 0, generation_floor u32 = 0` (SPEC 5.9).
+const EMPTY_SNAPSHOT: [u8; 8] = [0; 8];
+
+/// `keel_snapshot`: a `Snapshot` payload; an empty one (no stores, generation floor 0) before
+/// init.
 pub(crate) fn snapshot() -> Vec<u8> {
     guarded(
         "keel_snapshot",
-        |_| 0_u32.to_le_bytes().to_vec(),
+        |_| EMPTY_SNAPSHOT.to_vec(),
         || match runtime() {
             Some(rt) => rt.snapshot(),
-            None => 0_u32.to_le_bytes().to_vec(),
+            None => EMPTY_SNAPSHOT.to_vec(),
         },
     )
 }
@@ -272,7 +276,8 @@ pub(crate) fn restore_code(result: &Result<(), RestoreError>) -> u32 {
             RestoreError::Decode(_)
             | RestoreError::UnknownStoreType { .. }
             | RestoreError::Store { .. }
-            | RestoreError::BadHandle { .. },
+            | RestoreError::BadHandle { .. }
+            | RestoreError::GenerationFloor { .. },
         ) => restore_code::BAD_SNAPSHOT,
     }
 }
@@ -334,6 +339,7 @@ mod tests {
             RestoreError::Decode(WireError::BadMagic),
             RestoreError::UnknownStoreType { type_id: 1 },
             RestoreError::BadHandle { handle: 0 },
+            RestoreError::GenerationFloor { floor: u32::MAX },
             RestoreError::Store {
                 type_id: 1,
                 source: WireError::BadMagic,

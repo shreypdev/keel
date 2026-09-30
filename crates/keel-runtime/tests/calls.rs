@@ -700,9 +700,13 @@ fn stats_json_parses_and_tracks_crossings() {
     assert_eq!(stats["crossings"]["port_calls"], 1);
     assert_eq!(stats["crossings"]["port_replies"], 1);
     assert!(stats["schema_hash"].as_str().unwrap().starts_with("0x"));
+    assert!(
+        stats["blocking_threads"]["max"].as_u64().unwrap() >= 1,
+        "test runtimes run blocking closures on a real pool (ADR-023)"
+    );
     assert_eq!(
-        stats["blocking_threads"]["max"], 0,
-        "inline blocking in test runtimes"
+        stats["blocking_threads"]["started"], 0,
+        "started on demand: nothing ran yet"
     );
 }
 

@@ -23,6 +23,18 @@ use keel::wire::{Decode, Encode, Envelope, Kind, Reader, Writer};
 use keel_transport::{Bridge, Server, ServerConfig};
 use tungstenite::{Message, WebSocket};
 
+/// Runs `f` on the runtime's core (as a spawned task) and waits for it: the way an embedding app
+/// writes signals into its own core. A write from the app's own thread would not hold the core
+/// lock, which the runtime's write-context check refuses in debug builds (ADR-023).
+pub fn on_core<R: Send + 'static>(rt: &Runtime, f: impl FnOnce() -> R + Send + 'static) -> R {
+    let (tx, rx) = std::sync::mpsc::channel();
+    rt.ctx().spawn(async move {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(Duration::from_secs(10))
+        .expect("the task ran on the core")
+}
+
 // ----- the core under test -------------------------------------------------------------------
 
 /// Counts how often each of the fixture's futures and streams was dropped, which is how the

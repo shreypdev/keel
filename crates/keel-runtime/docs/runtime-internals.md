@@ -33,7 +33,7 @@ Contents
 | **caller threads** (host UI thread, JNI threads, Swift tasks, test threads) | by the host | run `call_sync`, `call`, `cancel`, `observe`, `release`, `event`, `snapshot`, `restore` | yes, for the duration of the call, except `port_reply`, `timer_fired`, `stream_credit` and `stats_json`, which never take it |
 | **`keel-core`** | `Runtime::init` / `Runtime::new`, unless `core_threads == 0` or wasm | the executor loop: wait for ready tasks, lock, poll up to 64, unlock fairly, repeat | yes, while polling a batch |
 | **`keel-timer`** | first `sleep` that needs the internal timer (native, not test runtimes) | sleeps until the earliest deadline in a `BinaryHeap`, completes sleepers | never |
-| **`keel-blocking-N`** (up to `min(4, cores)`, or `blocking_threads`) | on demand by `spawn_blocking` | run blocking closures | never |
+| **`keel-blocking-N`** (up to `min(4, cores)`, or `blocking_threads`; test runtimes too) | on demand by `spawn_blocking` | run blocking closures | never |
 
 There is **one mutator at a time**: whoever holds the core lock *is* the core loop. That holds
 whether the holder is the `keel-core` thread polling a task or a caller's thread running a
@@ -108,8 +108,17 @@ Rules that follow, each enforced by review and by the stress tests:
 ## 4. Re-entrancy: `E_REENTRANT`
 
 SPEC 5.1 forbids the host from calling back into the core from a callback. A plain mutex
-would deadlock; instead `enter_core` checks a thread-local set of held runtime ids and fails
-with `Reentrant`. What each entry point does then:
+would deadlock; instead `enter_core` fails with `Reentrant` when either thread-local says the
+thread may not enter: `HELD` (this runtime's core lock is held by this thread) or `IN_HOST` (this
+thread is inside a `Host` callback of this runtime). Every host callback (`reply`, `change_set`,
+`stream_item`, `port_call`, `timer_set`, `log`, `schedule`) runs under a `HostCall` marker, set
+by `guard_host` and the executor's `schedule_host`. The second condition covers a callback that
+runs on a thread that does *not* hold the core lock, which `HELD` alone missed: an off-core
+commit delivers its change-set under the store's delivery lock (lock graph: core to delivery
+lock, because a dispatch that writes the store takes the delivery lock while it holds the core).
+A host thread that waited for the core from inside that callback would be the other half of an
+ABBA deadlock; it now gets the error instead (ADR-023, review finding M2). The marker is per
+runtime id, so a callback of runtime A may use runtime B. What each entry point does then:
 
 | Entry point | Result |
 |---|---|
@@ -120,7 +129,10 @@ with `Reentrant`. What each entry point does then:
 | `snapshot`, `stats_json` | allowed: read-only, and the thread already holds the lock |
 | `port_reply`, `timer_fired`, `stream_credit` | allowed: they never take the core lock |
 
-This check is always on (the spec asks for it in debug builds; it costs one thread-local read).
+`snapshot` from inside a callback on a thread that does not hold the core lock runs without the
+lock (best effort: the view may be torn across stores if the core is mutating); it never waits.
+
+This check is always on (the spec asks for it in debug builds; it costs a thread-local read).
 It only detects re-entry on the *same thread*. A host that blocks its callback thread on
 another thread which calls the runtime will still deadlock; the host contract (enqueue,
 don't block) is documented on `Host`.
@@ -209,6 +221,15 @@ deregisters its timer.
 
 `Ctx::cancel_task` does the same for detached tasks.
 
+The runtime also cancels calls itself (`Runtime::abort_call`, same gate: whoever removes the
+`calls` entry owns the terminal message): on `restore`, every call whose receiver the restore
+replaced or invalidated (ADR-023, finding M3), and on `shutdown`, every call that is still in
+flight (finding L1). A plain call is answered with status 3; a stream gets a `StreamItem` with
+flag 2 (error) and a `String` body that starts with `"cancelled: "` (the host did not ask for
+the end, so flag 1 would read as a clean completion, and all three platform runtimes end the
+stream on flag 2). The task is dropped under the panic guard. A call that has no receiver (a free
+function or a constructor) is not touched by a restore.
+
 ## 8. Streams and credit
 
 `DispatchResult::Stream` becomes one task, `drive_stream`:
@@ -260,7 +281,11 @@ loop {
   already arrived* during the host call; otherwise the id is abandoned.
 * **Abandoned ids**: `PortTable.abandoned` holds ids whose future was dropped; `begin` never
   hands one out again while it is there; a late reply removes it. Ids wrap, skip `0`, and
-  skip anything live or abandoned.
+  skip anything live or abandoned. The host is never told about an abandonment (v1), so a host
+  that drops such requests would leak one id per cancel: the set is capped at `MAX_ABANDONED`
+  (4096), oldest first (`abandoned_order`, a FIFO that is compacted when it holds more than
+  twice the cap of stale ids), and each eviction logs a WARN through the owning runtime; a late
+  reply to a forgotten id is logged as unknown like any other unknown id (ADR-023, L7).
 * **`port_reply`** decodes, completes the slot, wakes the task. No core lock.
 * **`Events`**: subscribers run in `Runtime::event` under the core lock, in subscription order,
   each under the panic guard. `Subscription::drop` unsubscribes.
@@ -293,14 +318,17 @@ lock**), stores the result, and wakes the awaiting task. A panic in `f` is carri
 awaiting task and re-raised there with `resume_unwind` (the original message and backtrace
 are preserved in a `CarriedPanic`), where the ordinary guard turns it into a status 2 reply.
 
-wasm and test runtimes have no pool: `f` runs **inline, synchronously, inside the
-`spawn_blocking` call**, and the returned future is already complete.
+wasm has no pool: `f` runs **inline, synchronously, inside the `spawn_blocking` call**, and the
+returned future is already complete. Test runtimes use the real pool (ADR-023), so a test
+exercises the no-writes rule; `TestRuntime::run_pending`, `run_until` and `advance` wait for the
+closures to finish and run the tasks they wake, so tests still see results without waiting by
+hand.
 
 `f` must not write signals or call host entry points: it does not hold the core lock. Debug
-builds enforce the first half: the runtime installs a `keel_signals::set_write_checker` that
-refuses signal writes (with consequences: to an attached signal, or one with dependents) on a
-pool worker thread, so such a write panics in the closure, and the panic reaches the awaiting
-task like any other. Release builds do not check.
+builds enforce the first half: the runtime installs a `keel_signals::set_write_checker` (an
+allowlist, see section 12) that refuses signal writes (with consequences: to an attached signal,
+or one with dependents) on a pool worker thread, so such a write panics in the closure, and the
+panic reaches the awaiting task like any other. Release builds do not check.
 
 ## 12. Change-sets, the sink and ordering
 
@@ -321,24 +349,36 @@ Consequences:
   The sink deliberately never takes the core lock: `keel-signals` may call it while holding
   its own lock, and a thread holding that lock that waited for the core while the core
   waited for it would deadlock.
-* Writes from a **blocking-pool thread** are refused in debug builds (section 11); in release
-  builds they are delivered from that thread without the core lock. `keel-signals` still
+* Debug builds refuse a signal write with consequences on any thread that does not hold a
+  runtime's core lock (an **allowlist**, ADR-023): a pool worker, a host or embedder thread and a
+  thread inside no runtime are refused; the holders of the core lock, a `TestRuntime` driver
+  thread (the thread that created it, or one that called `testing::drive_from_this_thread`) and
+  `testing::unchecked_writes` are allowed. Embedders write by spawning onto the runtime
+  (`ctx.spawn`) or calling in. In release builds the check does not run and an off-core write is
+  delivered from that thread without the core lock. `keel-signals` still
   delivers the change-sets of one store one at a time, in claim order, but a write from another
   thread is not part of the core's transaction (if the slot is already dirty in an open
   transaction it ships with that transaction). Keep signal writes on the core (send the result
   back to a task).
-* `observe` delivers the initial change-set synchronously (before `observe` returns) by asking
-  the cell to append entries for the newly observed signals and wrapping them with a fresh
-  `txn_id`.
+* `observe` delivers the initial change-set synchronously (before `observe` returns) through
+  `StoreCell::observe_and_deliver`: the cell builds the entries, allocates the `txn_id` and calls
+  the runtime's delivery function, all under the store's delivery lock, inside a
+  `keel_signals::txn` (so writes a computed makes that do not settle commit afterwards). A commit
+  of the same store on another thread therefore either delivers before it or after it, never
+  in between with the observe's older values (ADR-023, finding M1). Restore phase 3 uses the same
+  path, once per re-observed store.
 * A change-set is delivered before the `Reply` of the call that caused it (the write happens
   inside the dispatch, the reply after).
 
 ## 13. Objects, snapshot and restore
 
-**Object table**: a `Vec` of slots with `generation: u32` (starting at 1), a free list (LIFO) and
-a `BTreeSet` index of stores (so snapshots are in handle order). Releasing bumps the slot's
-generation (skipping 0 on wrap), so a stale handle is rejected (`Stale`) instead of aliasing the
-next object. A slot holds an `Arc<dyn AnyObject>`; the object outlives its handle while a task
+**Object table**: a `Vec` of slots, a free list (LIFO) and a `BTreeSet` index of stores (so
+snapshots are in handle order). Every inserted object takes a fresh generation from one counter
+(`Generations`: a `u32` holding the highest generation issued, `fetch_update`, never wrapping; one
+process-wide instance shared by real runtimes, a private one per `TestRuntime` so its handles are
+deterministic). A released or cleared slot is just vacant, so its old handles stay stale for good
+(`Stale`) instead of aliasing the next object. When all `u32::MAX` generations are spent, `insert`
+logs FATAL once and panics with a clear message (ADR-022). A slot holds an `Arc<dyn AnyObject>`; the object outlives its handle while a task
 holds the `Arc`. Inserting a store calls `StoreCell::set_handle`; releasing (or a restore
 replacing it) calls `set_handle(0)`, so a store that a task still holds stops delivering
 change-sets under a handle it no longer owns.
@@ -354,13 +394,17 @@ runtime asks the cell for `StoreCell::encode_snapshot`, which writes a whole sto
 the cell knowing its own handle and type id). The runtime decodes that record and re-encodes it
 with the object table's handle and type id, so the snapshot is right even if a cell's handle is
 stale (a store restored from an older snapshot, a handle reissued after release). The result is
-a valid `keel_wire::payload::Snapshot` (tested by decoding it). A cell that panics or writes a
-malformed record is skipped and logged. Non-store objects are not included.
+a valid `keel_wire::payload::Snapshot` (tested by decoding it): `count u32`, then
+`generation_floor u32` (the generation counter's high-water mark, read after the stores were
+listed, so it is at least every generation in the snapshot), then the records. A cell that panics
+or writes a malformed record is skipped and logged. Non-store objects are not included.
 
 **Restore** (`Runtime::restore`), all-or-nothing:
 
-1. Decode and validate the snapshot: no null handle, no generation 0, no duplicate handle, index
-   at most 2^20 (a corrupt snapshot cannot make the table allocate gigabytes).
+1. Decode and validate the snapshot: no null handle, no generation 0 or `u32::MAX`, no duplicate
+   handle, index at most 2^20 (a corrupt snapshot cannot make the table allocate gigabytes), and a
+   `generation_floor` below `u32::MAX` (a floor of `u32::MAX` would leave the counter nothing to
+   issue: `RestoreError::GenerationFloor`).
 2. Build every store through its `StoreRestorer` (`{ type_id, restore, cell }`, one per store
    type, submitted through `inventory` by `#[keel::store]`): `restore(ctx, handle, reader)`
    gets a `Reader` over the **body** only (`signal_count u32`, then `{ signal_id, len, value }`
@@ -368,12 +412,18 @@ malformed record is skipped and logged. Non-store objects are not included.
    handle, tells the new store's cell that handle, and returns it. The runtime checks that the
    reader is fully consumed. Nothing has been touched yet, so any failure
    (`UnknownStoreType`, `Store`, `Panicked`, `Decode`) leaves the runtime unchanged.
-3. Replace the table: clear it (every old handle becomes stale; old stores are detached;
-   the observed sets are remembered per handle), raise the generation floor to
-   `max snapshot generation + 1` (so a handle the host held from *before a crash* cannot alias a
-   new object), and `insert_at` every store at its original index and generation.
+3. Replace the table (and cancel the calls whose receiver it replaced, section 7): raise the generation counter to
+   `max(current, snapshot.generation_floor, every generation in it)` (never lowering it, so nothing
+   issued before the snapshot, between it and the restore, or before a crash can be issued again,
+   ADR-022), clear the table (every old handle becomes stale; old stores are detached; the observed
+   sets are remembered per handle), and `insert_at` every store at its original index and
+   generation.
 4. Re-observe, for every restored store whose handle had observations before, exactly those
-   signals, and deliver **one** change-set with all their current values.
+   signals: inside one `keel_signals::txn`, one `StoreCell::observe_and_deliver` per store, so
+   each store gets **one change-set** with its signals' current values, built and handed to the
+   host under that store's delivery lock (the same path as `observe`, ADR-023). Writes a computed
+   makes that do not settle commit when the transaction ends, after every store's entries, and
+   the host converges on the core's values.
 
 Restoring into a fresh runtime (after a crash) has no memory of observations; the host
 re-observes what it mirrors.
@@ -399,14 +449,37 @@ error item), a level 5 log record, `stats.panics += 1`, and the receiver object 
 
 ## 15. Lifetime, shutdown and reference cycles
 
-`Ctx` is an `Arc<Runtime>`. A store that keeps a `Ctx`, and every in-flight async call, is
-therefore a **reference cycle** with the runtime that owns it. `Runtime::shutdown` breaks
-them: it stops the executor, joins the `keel-core`, timer and blocking threads (not from
-inside a callback, where it would wait for itself), fails pending port calls with
-`Cancelled`, then, under the core lock, drops every task and object under the panic guard.
+`Ctx` is an `Arc<Runtime>`. A store that keeps a `Ctx`, an event subscriber or Rust port
+binding that captured one, and every in-flight async call, is therefore a **reference cycle**
+with the runtime that owns it. `Runtime::shutdown` breaks them, in this order (ADR-023, L1):
+
+1. flag the runtime shut down (later `call`s answer 5) and close the executor (`Executor::shutdown`
+   sets `closed` under the `tasks` lock, so a racing `spawn` is refused instead of landing after
+   the final `clear`);
+2. **under the core lock, before anything slow is joined**: `cancel_all_calls`, which for every
+   entry of the call table sends status 3 (a stream: a flag 2 item, `"cancelled: the runtime shut
+   down"`) and drops its task (`abort_call`, the same exactly-once gate as cancel). Taking the
+   lock here means no poll is running and no `call` is half way through its dispatch: a call
+   either registered before (and is answered) or sees the flag and is refused;
+3. join the `keel-core`, timer and blocking threads (not when the caller is the core or inside a
+   callback; debug builds assert that this is never the case, L5);
+4. fail pending port calls with `Cancelled`, clear event subscribers and Rust port bindings
+   (`release_user_references`, dropped outside their locks under the panic guard);
+5. under the core lock, `teardown`: drain deferred drops, drop every remaining task and object.
+   `Runtime::extension` values stay (they are handed out as `&T`; one that holds a `Ctx` must let go
+   of it itself).
+
 After `shutdown` a runtime that nothing else references is freed; before it, an idle
 runtime with no stores holding a `Ctx` is also freed when the last `Arc` drops (its `Drop`
-runs the same teardown without locks, since nothing else can be running).
+runs the same teardown without locks, since nothing else can be running). `spawn`, `sleep`,
+`port_call` and `event` on a surviving `Ctx` do nothing but log a WARN (the first eight per
+runtime; `warn_shut_down`): `spawn` drops the future unpolled and returns `TaskId::dead()`,
+`sleep` completes at once, `port_call` resolves to `PortError::Cancelled`, `event` returns.
+
+**Cancelled futures drop on the core (L6).** `cancel_task` drops the cancelled future with the core
+lock held: on the spot when the caller already is the core, else under `try_enter_core` if the
+lock is free, else it is queued in `deferred_drops` and the core is nudged (a dead task id in the
+ready queue), so the drop happens at the start of its next turn. It never waits for the core.
 
 * `Runtime::init` puts a strong reference in the global slot, so a global runtime lives until
   `shutdown` (dropping your own `Arc` does not stop it).
@@ -430,7 +503,9 @@ clippy-checked with a fake `--cfg target_family="wasm"` on the host target; CI c
 target.
 
 `testing::TestRuntime` is a real `Runtime` built in "manual" mode: inline executor, manual clock,
-inline blocking, no init hooks. `RecordingHost` records everything the runtime emits and
+the real blocking pool (started on demand; the driving calls wait for its closures), a private
+generation counter (deterministic handles), no init hooks. The thread that creates it is marked a
+test driver, whose direct signal writes the write-context check allows. `RecordingHost` records everything the runtime emits and
 answers port calls from a script table. `run_until` drives a future on the test thread and
 panics instead of hanging when nothing can make progress.
 
@@ -443,7 +518,7 @@ panics instead of hanging when nothing can make progress.
 | 5.9 / 16.2 | `restore(ctx, values)`; `StoreRestorer { type_id, restore(ctx, reader) }` | `StoreRestorer { type_id, restore(ctx, handle, reader), cell }` over the store body (section 13) | the `keel-macros` branch generates this shape (it needs the handle to attach the cell and a way to find the cell in a `dyn Any`), and the runtime builds on it |
 | 5.7 | `bind_port<P>(port_id, imp: Arc<dyn Any>)` | implemented, storing `Arc<Arc<dyn Trait>>`; `bind_dyn_port<P: ?Sized>` and `Ctx::rust_port::<dyn Trait>` are the typed entry points | an `Arc<dyn Any>` cannot be downcast to `Arc<dyn Trait>`, so a sized wrapper is stored |
 | new | (none) | `PortDispatcher` / `PortDispatch` (inventory) | a proxy calling a Rust-bound port sends bytes; `#[keel::port]` generates the byte-level entry point (section 9) |
-| 5.1 | re-entrancy detected "in debug builds" | detected in every build | a deadlock in release is worse than a status 5 |
+| 5.1 | re-entrancy detected "in debug builds" | detected in every build, for the core lock and for every host callback (`IN_HOST`) | a deadlock in release is worse than a status 5; a callback on an off-core thread could deadlock without the second half (ADR-023) |
 | 5.2 | task cancellation drops the future | also drops what it awaits (`PortFuture`, `Sleep`) and replies status 3 exactly once | see section 7 |
 | new | (none) | `InitHook`, `Runtime::extension`, `Runtime::new` | `keel-query` needs a hydrate hook and a place to keep the `QueryClient` (SPEC 9) |
 | new | (none) | `Notify`, `LazyList`, `StoreRestorer`, `Ctx::enter` | required by the task; see the crate docs |
@@ -456,9 +531,18 @@ Known limitations, each deliberate for v1:
   forever makes it run forever. `poll` is bounded (one turn of at most 64 polls).
 * `stream_credit` is not synchronised with a `call` that is still in progress on another thread
   for the same `call_id` (the host must grant credit after it has issued the call).
-* Signal writes from blocking threads are not ordered with core writes (section 12).
+* Signal writes from off-core threads (release builds only; debug builds refuse them, section 12)
+  are not ordered with core writes.
 * An `Arc<Runtime>` held only by your code does not stop a global runtime, and a store's `Ctx`
   keeps a runtime alive until `shutdown` (section 15).
+* Generations are a process-wide `u32` counter: 2^32 - 1 handles per process, then object creation
+  fails loudly (section 13, ADR-022).
+* `Runtime::extension` values are not released by `shutdown`; one that holds a `Ctx` pins the
+  runtime until it lets go (section 15).
+* A host that calls `release` or `observe` from inside a callback gets the logged no-op, not a
+  deferred retry (review note N8).
+* `InitHook`s run before the embedder can bind ports (review finding L2); the C ABI's
+  documentation of port registration (SPEC 6) says how hosts cope.
 
 ## 18. How it is tested
 

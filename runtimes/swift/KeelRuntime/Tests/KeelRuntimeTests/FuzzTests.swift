@@ -238,7 +238,7 @@ final class FuzzTests: XCTestCase {
             Wire.ChangeEntry(handle: handle, signalId: 1, op: .lazyListInvalidated),
         ])
         seeds.append(changeSet.encode())
-        let snapshot = Wire.Snapshot(stores: [
+        let snapshot = Wire.Snapshot(generationFloor: 1, stores: [
             Wire.SnapshotStore(handle: handle, typeId: 5, signals: [Wire.SnapshotSignal(signalId: 0, value: ArraySlice(value))]),
         ])
         seeds.append(snapshot.encode())

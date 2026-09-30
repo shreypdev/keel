@@ -17,22 +17,31 @@
 //! # Abandoned calls
 //!
 //! Dropping a [`PortFuture`] before it completes (a cancelled call, a dropped task) marks its
-//! `port_call_id` abandoned; a late reply from the host is recognised and discarded.
+//! `port_call_id` abandoned; a late reply from the host is recognised and discarded, and the id
+//! is forgotten. The host is never told about the abandonment (v1), so a host that never answers
+//! such a call would leave its id in the set for good: the set is **capped at
+//! [`MAX_ABANDONED`] ids** and the oldest is forgotten first (FIFO), with a WARN log. A late
+//! reply for a forgotten id is then logged as unknown instead of discarded quietly.
 
 use core::any::Any;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 use keel_wire::payload::{PortReply, PortStatus};
 use keel_wire::{Reader, WireError};
 use parking_lot::{Mutex, RwLock};
 
+use crate::log::WARN;
 use crate::runtime::Runtime;
+
+/// The most abandoned port call ids kept waiting for a late host reply (see the module
+/// documentation). Far above the number of calls a healthy host leaves unanswered.
+pub const MAX_ABANDONED: usize = 4096;
 
 /// A `#[keel::port]` trait.
 pub trait Port: Send + Sync + 'static {
@@ -154,6 +163,10 @@ struct PendingCall {
 struct Pending {
     calls: HashMap<u32, PendingCall>,
     abandoned: HashSet<u32>,
+    /// `abandoned` in the order the ids were added, oldest first. May hold ids whose late reply
+    /// already arrived (removed from the set); they are skipped when evicting and dropped when
+    /// the queue outgrows twice the cap.
+    abandoned_order: VecDeque<u32>,
     next_id: u32,
 }
 
@@ -174,9 +187,19 @@ pub(crate) enum Completion {
 pub(crate) struct PortTable {
     bindings: RwLock<HashMap<u32, PortBinding>>,
     pending: Mutex<Pending>,
+    /// The runtime the table belongs to, to log an eviction through.
+    owner: Weak<Runtime>,
 }
 
 impl PortTable {
+    /// A table whose warnings go through `owner`'s host.
+    pub(crate) fn with_owner(owner: Weak<Runtime>) -> PortTable {
+        PortTable {
+            owner,
+            ..PortTable::default()
+        }
+    }
+
     pub(crate) fn bind(&self, port_id: u32, binding: PortBinding) {
         self.bindings.write().insert(port_id, binding);
     }
@@ -240,11 +263,45 @@ impl PortTable {
         }
     }
 
-    /// Marks call `id` abandoned (its future was dropped) so a late reply is discarded.
+    /// Marks call `id` abandoned (its future was dropped) so a late reply is discarded. Keeps at
+    /// most [`MAX_ABANDONED`] ids: the oldest are forgotten first, with a warning.
     pub(crate) fn abandon(&self, id: u32) {
-        let mut pending = self.pending.lock();
-        if pending.calls.remove(&id).is_some() {
+        let evicted = {
+            let mut guard = self.pending.lock();
+            let pending = &mut *guard;
+            if pending.calls.remove(&id).is_none() {
+                return;
+            }
             pending.abandoned.insert(id);
+            pending.abandoned_order.push_back(id);
+            let mut evicted = 0_u32;
+            while pending.abandoned.len() > MAX_ABANDONED {
+                let Some(oldest) = pending.abandoned_order.pop_front() else {
+                    break;
+                };
+                if pending.abandoned.remove(&oldest) {
+                    evicted += 1;
+                }
+            }
+            if pending.abandoned_order.len() > 2 * MAX_ABANDONED {
+                let live = &pending.abandoned;
+                pending.abandoned_order.retain(|id| live.contains(id));
+            }
+            evicted
+        };
+        if evicted > 0 {
+            // Outside the lock: logging calls the host.
+            if let Some(runtime) = self.owner.upgrade() {
+                runtime.log(
+                    WARN,
+                    "keel::runtime",
+                    &format!(
+                        "port calls: {MAX_ABANDONED} abandoned calls are still waiting for a late \
+                         host reply; forgot the {evicted} oldest (a late reply to one of them will \
+                         be logged as unknown)"
+                    ),
+                );
+            }
         }
     }
 
@@ -254,6 +311,16 @@ impl PortTable {
 
     pub(crate) fn abandoned_count(&self) -> usize {
         self.pending.lock().abandoned.len()
+    }
+
+    /// Removes every binding (shutdown): they may hold a `Ctx`. Returned for the caller to drop
+    /// outside the lock.
+    pub(crate) fn clear_bindings(&self) -> Vec<PortBinding> {
+        self.bindings
+            .write()
+            .drain()
+            .map(|(_, binding)| binding)
+            .collect()
     }
 
     /// Fails every pending call with `Cancelled` (shutdown).
@@ -524,6 +591,17 @@ impl Events {
             .map_or(0, Vec::len)
     }
 
+    /// Removes every subscriber (shutdown); a [`Subscription`] dropped later finds nothing to
+    /// remove. The callbacks are returned for the caller to drop outside the lock: they may
+    /// hold a `Ctx`, which would otherwise keep the runtime alive.
+    pub(crate) fn clear(&self) -> Vec<Arc<Callback>> {
+        let drained: Vec<_> = self.inner.subs.lock().drain().collect();
+        drained
+            .into_iter()
+            .flat_map(|(_, subs)| subs.into_iter().map(|(_, callback)| callback))
+            .collect()
+    }
+
     /// The callbacks for an event, cloned out so none runs under the table's lock.
     pub(crate) fn callbacks(&self, port_id: u32, method_id: u32) -> Vec<Arc<Callback>> {
         self.inner
@@ -639,6 +717,42 @@ mod tests {
         assert_eq!(slot_a.take(), Some(Ok(vec![1])));
         assert_eq!(table.complete(a, Ok(vec![2])), Completion::Unknown);
         assert_eq!(table.pending_count(), 1);
+    }
+
+    #[test]
+    fn the_abandoned_set_is_capped_and_forgets_the_oldest_first() {
+        let table = PortTable::default();
+        let mut ids = Vec::new();
+        for _ in 0..MAX_ABANDONED + 25 {
+            let (id, _slot) = table.begin(0);
+            table.abandon(id);
+            ids.push(id);
+        }
+        assert_eq!(table.pending_count(), 0);
+        assert_eq!(table.abandoned_count(), MAX_ABANDONED);
+        // The 25 oldest were forgotten: a late reply for one is unknown, for a newer one discarded.
+        assert_eq!(table.complete(ids[0], Ok(vec![])), Completion::Unknown);
+        assert_eq!(table.complete(ids[24], Ok(vec![])), Completion::Unknown);
+        assert_eq!(table.complete(ids[25], Ok(vec![])), Completion::Discarded);
+        assert_eq!(
+            table.complete(*ids.last().unwrap(), Ok(vec![])),
+            Completion::Discarded
+        );
+        assert_eq!(table.abandoned_count(), MAX_ABANDONED - 2);
+    }
+
+    #[test]
+    fn answered_abandonments_do_not_grow_the_eviction_queue_without_bound() {
+        let table = PortTable::default();
+        for _ in 0..4 * MAX_ABANDONED {
+            let (id, _slot) = table.begin(0);
+            table.abandon(id);
+            // The host replies promptly: the id leaves the set at once.
+            assert_eq!(table.complete(id, Ok(vec![])), Completion::Discarded);
+        }
+        assert_eq!(table.abandoned_count(), 0);
+        let queued = table.pending.lock().abandoned_order.len();
+        assert!(queued <= 2 * MAX_ABANDONED + 1, "{queued} stale ids kept");
     }
 
     #[test]

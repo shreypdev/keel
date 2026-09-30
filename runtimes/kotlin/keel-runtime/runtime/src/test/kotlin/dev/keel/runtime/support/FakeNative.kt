@@ -46,7 +46,7 @@ internal class FakeNative : NativeApi {
     @Volatile var onCallSync: (Payloads.Call) -> ByteArray = { replyPayload(it.callId, ReplyStatus.OK) }
     @Volatile var onObserve: (Long, Int, Boolean) -> Unit = { _, _, _ -> }
     @Volatile var callResult: Int = 0
-    @Volatile var snapshotBytes: ByteArray = byteArrayOf(0, 0, 0, 0)
+    @Volatile var snapshotBytes: ByteArray = ByteArray(8)
     @Volatile var restoreResult: Int = 0
     @Volatile var stats: String = "{\"live_handles\":0}"
 

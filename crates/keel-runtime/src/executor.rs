@@ -58,6 +58,15 @@ pub struct TaskId {
 }
 
 impl TaskId {
+    /// An id that names no task, ever: what `Ctx::spawn` returns after shutdown. Cancelling it
+    /// is a no-op.
+    pub(crate) const fn dead() -> TaskId {
+        TaskId {
+            key: u32::MAX,
+            serial: 0,
+        }
+    }
+
     /// The id as a single number, for logs.
     pub fn as_u64(self) -> u64 {
         (u64::from(self.serial) << 32) | u64::from(self.key)
@@ -123,6 +132,12 @@ pub(crate) struct Shared {
     queue: Mutex<Queue>,
     cv: Condvar,
     inline: bool,
+    /// Set by [`Executor::shutdown`]: no task is accepted from then on. Checked under the
+    /// `tasks` lock, the same lock [`Executor::clear`] drains under, so a spawn that races the
+    /// teardown either lands before the drain (and is dropped by it) or is refused.
+    closed: AtomicBool,
+    /// The owning runtime's id, to mark `Host::schedule` as a host callback.
+    runtime_id: u64,
     host: Arc<dyn Host>,
     live: AtomicUsize,
 }
@@ -131,7 +146,10 @@ impl Shared {
     /// Asks the host to poll soon. A panicking host is ignored: wakers run in arbitrary
     /// contexts and must not unwind.
     fn schedule_host(&self) {
-        let _ = crate::guard::guarded(|| self.host.schedule());
+        let _ = crate::guard::guarded(|| {
+            let _call = crate::runtime::HostCall::enter(self.runtime_id);
+            self.host.schedule();
+        });
     }
 
     fn push_ready(&self, id: TaskId) {
@@ -195,7 +213,7 @@ pub(crate) enum CancelOutcome {
 
 impl Executor {
     /// `inline`: no core thread; wakes request `Host::schedule` instead of notifying a condvar.
-    pub(crate) fn new(host: Arc<dyn Host>, inline: bool) -> Executor {
+    pub(crate) fn new(runtime_id: u64, host: Arc<dyn Host>, inline: bool) -> Executor {
         Executor {
             shared: Arc::new(Shared {
                 tasks: Mutex::new(Slab::new()),
@@ -207,6 +225,8 @@ impl Executor {
                 }),
                 cv: Condvar::new(),
                 inline,
+                closed: AtomicBool::new(false),
+                runtime_id,
                 host,
                 live: AtomicUsize::new(0),
             }),
@@ -218,11 +238,15 @@ impl Executor {
         self.shared.clone()
     }
 
-    /// Adds a task and marks it ready for its first poll.
-    pub(crate) fn spawn(&self, future: BoxFuture, kind: TaskKind) -> TaskId {
+    /// Adds a task and marks it ready for its first poll. After [`shutdown`](Executor::shutdown)
+    /// the task is refused and its future is handed back for the caller to drop.
+    pub(crate) fn try_spawn(&self, future: BoxFuture, kind: TaskKind) -> Result<TaskId, BoxFuture> {
         let serial = self.shared.next_serial.fetch_add(1, Ordering::Relaxed);
         let id = {
             let mut tasks = self.shared.tasks.lock();
+            if self.shared.closed.load(Ordering::SeqCst) {
+                return Err(future);
+            }
             let vacant = tasks.vacant_entry();
             let id = TaskId {
                 key: u32::try_from(vacant.key()).unwrap_or(u32::MAX),
@@ -246,7 +270,16 @@ impl Executor {
         };
         self.shared.live.fetch_add(1, Ordering::Relaxed);
         self.shared.push_ready(id);
-        id
+        Ok(id)
+    }
+
+    /// [`try_spawn`](Executor::try_spawn) for tests, which never shut the executor down first.
+    #[cfg(test)]
+    pub(crate) fn spawn(&self, future: BoxFuture, kind: TaskKind) -> TaskId {
+        match self.try_spawn(future, kind) {
+            Ok(id) => id,
+            Err(_) => panic!("the executor is shut down"),
+        }
     }
 
     /// Takes up to `max` ready ids without blocking.
@@ -397,8 +430,19 @@ impl Executor {
         self.shared.live.load(Ordering::Relaxed)
     }
 
-    /// Stops `wait_batch`; the core thread exits.
+    /// Wakes the core for a turn with nothing to poll (a dead id in the ready queue), so that
+    /// work queued for it (deferred drops) is not left waiting for unrelated tasks.
+    pub(crate) fn nudge(&self) {
+        self.shared.push_ready(TaskId::dead());
+    }
+
+    /// Stops `wait_batch` (the core thread exits) and refuses every task spawned from now on.
     pub(crate) fn shutdown(&self) {
+        {
+            // Under the `tasks` lock so that the flag is ordered against `try_spawn`'s check.
+            let _tasks = self.shared.tasks.lock();
+            self.shared.closed.store(true, Ordering::SeqCst);
+        }
         self.shared.queue.lock().shutdown = true;
         self.shared.cv.notify_all();
     }
@@ -577,7 +621,7 @@ mod tests {
         let host = Arc::new(NullHost {
             schedules: AtomicUsize::new(0),
         });
-        (Executor::new(host.clone(), true), host)
+        (Executor::new(0, host.clone(), true), host)
     }
 
     /// Polls every ready task once, like a turn without the core lock.
@@ -793,7 +837,7 @@ mod tests {
         let host = Arc::new(NullHost {
             schedules: AtomicUsize::new(0),
         });
-        let exec = Executor::new(host, false);
+        let exec = Executor::new(0, host, false);
         let shared = exec.shared();
         let waiter = std::thread::spawn(move || shared.wait_batch(BATCH));
         std::thread::sleep(Duration::from_millis(20));
@@ -806,7 +850,7 @@ mod tests {
         let host = Arc::new(NullHost {
             schedules: AtomicUsize::new(0),
         });
-        let exec = Executor::new(host, false);
+        let exec = Executor::new(0, host, false);
         let shared = exec.shared();
         let waiter = std::thread::spawn(move || shared.wait_batch(BATCH));
         std::thread::sleep(Duration::from_millis(20));

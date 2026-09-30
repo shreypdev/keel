@@ -81,8 +81,8 @@ pub use object::{
     store,
 };
 pub use ports::{
-    EventHandler, Events, Port, PortDispatch, PortDispatcher, PortError, PortFuture, Subscription,
-    port_call_sync,
+    EventHandler, Events, MAX_ABANDONED, Port, PortDispatch, PortDispatcher, PortError, PortFuture,
+    Subscription, port_call_sync,
 };
 pub use runtime::Runtime;
 

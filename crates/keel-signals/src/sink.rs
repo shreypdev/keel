@@ -24,6 +24,9 @@ use parking_lot::RwLock;
 /// the delivery lock and neither would progress. Handing the payload to a queue, or writing
 /// signals on the calling thread, is fine. Different stores do not exclude each other.
 ///
+/// [`StoreCell::observe_and_deliver`](crate::StoreCell::observe_and_deliver) takes the same lock and
+/// calls the caller's closure under it, so the same rule applies to that closure.
+///
 /// The runtime's sink only hands the payload to the host, which is why it can run under the lock.
 pub trait ChangeSink: Send + Sync {
     /// Handles one change-set payload.

@@ -129,10 +129,17 @@ pub enum RestoreError {
         /// The panic message.
         message: String,
     },
-    /// The snapshot contains the null handle or the same handle twice.
+    /// The snapshot contains the null handle, the same handle twice, a generation of `0` or
+    /// `u32::MAX`, or a slot index implausibly far beyond the table.
     BadHandle {
         /// The offending raw handle.
         handle: u64,
+    },
+    /// The snapshot's generation floor is `u32::MAX`: every generation had been issued when it
+    /// was taken, so a runtime restored from it could never create an object (ADR-022).
+    GenerationFloor {
+        /// The floor from the snapshot.
+        floor: u32,
     },
     /// The runtime has been shut down.
     ShutDown,
@@ -154,8 +161,15 @@ impl fmt::Display for RestoreError {
                 write!(f, "restoring store {type_id:#010x} panicked: {message}")
             }
             RestoreError::BadHandle { handle } => {
-                write!(f, "snapshot has a null or duplicate handle {handle:#018x}")
+                write!(
+                    f,
+                    "snapshot has an invalid or duplicate handle {handle:#018x}"
+                )
             }
+            RestoreError::GenerationFloor { floor } => write!(
+                f,
+                "snapshot generation floor {floor:#010x} leaves no generation to issue"
+            ),
             RestoreError::ShutDown => f.write_str("the runtime is shut down"),
             RestoreError::Reentrant => {
                 f.write_str("E_REENTRANT: restore called from inside a host callback")

@@ -694,18 +694,25 @@ extension Wire {
         }
     }
 
-    /// The persisted state of every store (docs/SPEC.md section 5.9): `count u32, count x store`.
-    /// Computed signals are excluded. The same layout is the payload of a `Restore` (kind 16)
-    /// message and of `keel_restore`.
+    /// The persisted state of every store (docs/SPEC.md section 5.9):
+    /// `count u32, generation_floor u32, count x store`. Computed signals are excluded. The same
+    /// layout is the payload of a `Restore` (kind 16) message and of `keel_restore`.
     public struct Snapshot: KeelPayload, Equatable {
+        /// The highest handle generation the core had issued when the snapshot was taken. A
+        /// restore resumes the core's generation counter above it, so no handle issued before the
+        /// snapshot (or between it and the restore) is issued again to another object (ADR-022).
+        /// Opaque to the host: pass it back unchanged.
+        public var generationFloor: UInt32
         public var stores: [SnapshotStore]
 
-        public init(stores: [SnapshotStore]) {
+        public init(generationFloor: UInt32, stores: [SnapshotStore]) {
+            self.generationFloor = generationFloor
             self.stores = stores
         }
 
         public static func keelDecode(_ r: inout KeelReader) throws -> Snapshot {
             let storeCount = try r.readLen()
+            let generationFloor = try r.readU32()
             var stores: [SnapshotStore] = []
             stores.reserveCapacity(Swift.min(storeCount, keelMaxPreallocatedElements))
             var storeIndex = 0
@@ -726,11 +733,12 @@ extension Wire {
                 stores.append(SnapshotStore(handle: KeelHandle(rawValue: rawHandle), typeId: typeId, signals: signals))
                 storeIndex += 1
             }
-            return Snapshot(stores: stores)
+            return Snapshot(generationFloor: generationFloor, stores: stores)
         }
 
         public func keelEncode(_ w: inout KeelWriter) {
             w.writeLen(stores.count)
+            w.writeU32(generationFloor)
             for store in stores {
                 w.writeU64(store.handle.rawValue)
                 w.writeU32(store.typeId)

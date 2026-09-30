@@ -57,8 +57,13 @@ impl StoreSnapshot {
 
 /// A snapshot of every store (kind `Snapshot`, SPEC 5.9).
 ///
-/// Layout: `count u32, count x StoreSnapshot`. Objects that are not stores are not part of a
-/// snapshot.
+/// Layout: `count u32, generation_floor u32, count x StoreSnapshot`, all little-endian. Objects
+/// that are not stores are not part of a snapshot.
+///
+/// `generation_floor` is the highest handle generation the core had issued when the snapshot
+/// was taken (`0` if it had issued none). A restore raises the core's generation counter to at
+/// least that, so no handle issued before the snapshot (or between it and the restore) can be
+/// issued again to a different object (ADR-022).
 ///
 /// # Example
 ///
@@ -67,6 +72,7 @@ impl StoreSnapshot {
 /// use keel_wire::{Handle, Reader, Writer};
 ///
 /// let snap = Snapshot {
+///     generation_floor: 1,
 ///     stores: vec![StoreSnapshot {
 ///         handle: Handle::new(3, 1),
 ///         type_id: 0xc0ffee,
@@ -79,6 +85,9 @@ impl StoreSnapshot {
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Snapshot {
+    /// The highest handle generation issued when the snapshot was taken; every store's
+    /// generation is at most this. Restore resumes the generation counter above it.
+    pub generation_floor: u32,
     /// The stores, in the order the runtime produced them.
     pub stores: Vec<StoreSnapshot>,
 }
@@ -87,6 +96,7 @@ impl Snapshot {
     /// Appends the payload to `w`.
     pub fn encode(&self, w: &mut Writer) {
         w.write_len(len_u32(self.stores.len()));
+        w.write_u32(self.generation_floor);
         for store in &self.stores {
             store.encode(w);
         }
@@ -95,11 +105,15 @@ impl Snapshot {
     /// Reads a payload.
     pub fn decode(r: &mut Reader<'_>) -> Result<Self, WireError> {
         let count = r.read_count(STORE_MIN_LEN)?;
+        let generation_floor = r.read_u32()?;
         let mut stores = Vec::with_capacity(count.min(1024));
         for _ in 0..count {
             stores.push(StoreSnapshot::decode(r)?);
         }
-        Ok(Snapshot { stores })
+        Ok(Snapshot {
+            generation_floor,
+            stores,
+        })
     }
 }
 
@@ -112,6 +126,7 @@ mod tests {
 
     fn sample() -> Snapshot {
         Snapshot {
+            generation_floor: 5,
             stores: vec![
                 StoreSnapshot {
                     handle: Handle::new(1, 1),
@@ -136,6 +151,7 @@ mod tests {
     #[test]
     fn layout_matches_the_spec() {
         let snap = Snapshot {
+            generation_floor: 0x0102_0304,
             stores: vec![StoreSnapshot {
                 handle: Handle::new(1, 1),
                 type_id: 7,
@@ -146,6 +162,7 @@ mod tests {
             encode(&snap),
             [
                 1, 0, 0, 0, // store count
+                4, 3, 2, 1, // generation_floor
                 1, 0, 0, 0, 1, 0, 0, 0, // handle
                 7, 0, 0, 0, // type_id
                 1, 0, 0, 0, // signal_count
@@ -167,7 +184,7 @@ mod tests {
     #[test]
     fn empty_snapshot() {
         let b = encode(&Snapshot::default());
-        assert_eq!(b, [0, 0, 0, 0]);
+        assert_eq!(b, [0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(
             Snapshot::decode(&mut Reader::new(&b)),
             Ok(Snapshot::default())
@@ -177,7 +194,7 @@ mod tests {
     #[test]
     fn hostile_counts_are_rejected() {
         // Store count larger than the input could hold.
-        let b = [0xff, 0xff, 0xff, 0xff];
+        let b = [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0];
         assert!(matches!(
             Snapshot::decode(&mut Reader::new(&b)),
             Err(WireError::LengthTooLarge { .. })
@@ -185,12 +202,23 @@ mod tests {
         // Signal count larger than the input could hold.
         let mut b = Vec::new();
         b.extend_from_slice(&1_u32.to_le_bytes());
+        b.extend_from_slice(&1_u32.to_le_bytes()); // generation_floor
         b.extend_from_slice(&1_u64.to_le_bytes());
         b.extend_from_slice(&1_u32.to_le_bytes());
         b.extend_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
             Snapshot::decode(&mut Reader::new(&b)),
             Err(WireError::LengthTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn a_pre_floor_snapshot_is_refused() {
+        // The layout before ADR-022 (`count u32, stores`): an empty one is four bytes, which
+        // now ends where the floor should be.
+        assert!(matches!(
+            Snapshot::decode(&mut Reader::new(&[0, 0, 0, 0])),
+            Err(WireError::UnexpectedEof { .. })
         ));
     }
 

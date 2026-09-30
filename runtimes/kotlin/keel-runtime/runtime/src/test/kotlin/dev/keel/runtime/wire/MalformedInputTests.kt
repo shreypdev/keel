@@ -161,7 +161,7 @@ class MalformedInputTests : Suite() {
             assertWire<WireException.TrailingBytes> { Payloads.TimerFired.decode(ByteArray(5)) }
             assertWire<WireException.TrailingBytes> { Payloads.Hello.decode(Payloads.Hello("v", 1uL, "p", "m").toByteArray() + 0) }
             assertWire<WireException.TrailingBytes> { Payloads.Log.decode(Payloads.Log(1u, "t", "m").toByteArray() + 0) }
-            assertWire<WireException.TrailingBytes> { Payloads.Snapshot.decode(bytesOf(0, 0, 0, 0, 1)) }
+            assertWire<WireException.TrailingBytes> { Payloads.Snapshot.decode(bytesOf(0, 0, 0, 0, 0, 0, 0, 0, 1)) }
             assertWire<WireException.TrailingBytes> { Payloads.ChangeSet.decode(Payloads.ChangeSet(1u, emptyList()).toByteArray() + 0) }
             assertWire<WireException.TrailingBytes> { KeyedPatch.decodePatch(bytesOf(0, 0, 0, 0, 1), Codecs.u8) }
         }

@@ -162,6 +162,7 @@ method_ids! {
     EVEN_MORE = "not_in_metadata";
     SPAWN_LATER = "spawn_later";
     THREADS = "threads";
+    BLOCKING_SET = "blocking_set";
 }
 
 fn counter_dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome {
@@ -301,6 +302,20 @@ fn counter_call(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
                 Ok(enc(&format!("{body}|{blocking}|{}", name())))
             }))
         }
+        BLOCKING_SET => {
+            // The forbidden thing: a signal written from a blocking closure, which does not hold
+            // the core lock.
+            let n: i32 = match decode_args(&call) {
+                Ok(v) => v,
+                Err(bad) => return bad,
+            };
+            let ctx = rt.ctx();
+            DispatchResult::Async(Box::pin(async move {
+                let target = counter.clone();
+                ctx.spawn_blocking(move || target.count.set(n)).await;
+                Ok(enc(&counter.count.get()))
+            }))
+        }
         SPAWN_LATER => {
             // Fire-and-forget: a detached task adds 100 after a yield.
             let ctx = rt.ctx();
@@ -428,6 +443,13 @@ static COUNTER_META: ObjectMeta = ObjectMeta {
         ),
         method("spawn_later", SPAWN_LATER, &[], TypeRefMeta::Unit, false),
         method("threads", THREADS, &[], TypeRefMeta::String, true),
+        method(
+            "blocking_set",
+            BLOCKING_SET,
+            &[param("n", TypeRefMeta::I32)],
+            TypeRefMeta::I32,
+            true,
+        ),
     ],
     store: Some(StoreMeta {
         signals: &[

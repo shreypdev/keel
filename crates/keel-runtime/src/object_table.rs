@@ -1,8 +1,12 @@
 //! The object table: a generation-tagged slab that issues and resolves handles (SPEC 1.2, 5.4).
 //!
 //! A [`Handle`] packs a slot index (low 32 bits) and a generation (high 32 bits, starting at
-//! 1). Releasing an object bumps its slot's generation, so a stale handle is rejected instead
-//! of aliasing whatever object reuses the slot.
+//! 1). Every handle the table issues gets a **fresh generation from one process-wide,
+//! monotonically increasing counter**, so a `(slot, generation)` pair is never issued twice in a
+//! process: a stale handle is rejected instead of aliasing whatever object reuses the slot, and
+//! that holds across [`restore`](crate::Runtime::restore) too (a snapshot carries the counter's
+//! high-water mark, ADR-022). The counter has 2^32 - 1 values; when it is spent the table
+//! refuses to issue more handles (a v1 limit, see ADR-022).
 //!
 //! The table has its own reader-writer lock and is safe to use from anywhere, including from
 //! inside a dispatcher that runs under the core lock. Objects are `Arc`s, so an object
@@ -32,6 +36,7 @@
 use core::fmt;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use parking_lot::RwLock;
 
@@ -94,7 +99,8 @@ impl std::error::Error for BadHandle {}
 /// Why [`ObjectTable::insert_at`] refused a handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InsertAtError {
-    /// The null handle, or a generation of `0`.
+    /// The null handle, a generation of `0`, or a generation of `u32::MAX` (which would leave
+    /// the generation counter nothing to issue).
     Invalid,
     /// The slot is occupied.
     Occupied,
@@ -105,7 +111,7 @@ pub enum InsertAtError {
 impl fmt::Display for InsertAtError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            InsertAtError::Invalid => "null handle or generation 0",
+            InsertAtError::Invalid => "null handle, generation 0 or generation u32::MAX",
             InsertAtError::Occupied => "the slot is occupied",
             InsertAtError::IndexTooFar => "the slot index is too far beyond the table",
         })
@@ -179,17 +185,50 @@ struct Inner {
     free: Vec<u32>,
     live: usize,
     stores: BTreeSet<u32>,
-    /// Generation given to slots that are created without an object (gaps, fresh slots after
-    /// a restore); raised by restore so handles from before it cannot alias new objects.
-    min_generation: u32,
 }
 
-fn next_generation(generation: u32) -> u32 {
-    match generation.wrapping_add(1) {
-        0 => 1,
-        n => n,
+/// The source of handle generations: a counter of the highest generation issued so far
+/// (`0` = none yet). Issuing is one atomic increment; generation `0` is never issued (it is
+/// the invalid value) and the counter never wraps: at `u32::MAX` it is exhausted for good.
+pub(crate) struct Generations {
+    last: AtomicU32,
+    /// The exhaustion has been reported (the FATAL record is written once per counter).
+    exhaustion_reported: AtomicBool,
+}
+
+impl Generations {
+    const fn new() -> Generations {
+        Generations {
+            last: AtomicU32::new(0),
+            exhaustion_reported: AtomicBool::new(false),
+        }
+    }
+
+    /// The next generation, or `None` if all `u32::MAX` of them have been issued.
+    fn issue(&self) -> Option<u32> {
+        self.last
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |last| {
+                last.checked_add(1)
+            })
+            .ok()
+            .map(|previous| previous + 1)
+    }
+
+    /// The highest generation issued so far.
+    fn last(&self) -> u32 {
+        self.last.load(Ordering::Acquire)
+    }
+
+    /// Makes sure nothing at or below `floor` is issued from now on. Never lowers the counter.
+    fn raise_to(&self, floor: u32) {
+        self.last.fetch_max(floor, Ordering::AcqRel);
     }
 }
+
+/// The counter every runtime of the process shares, so that a handle from one runtime (or from
+/// an earlier `init`/`shutdown` cycle of this process) cannot be mistaken for a handle of
+/// another.
+static PROCESS_GENERATIONS: Generations = Generations::new();
 
 /// What [`ObjectTable::clear`] took out of the table.
 pub(crate) struct Cleared {
@@ -201,6 +240,9 @@ pub(crate) struct Cleared {
 /// The generation-tagged slab of live objects. See the [module documentation](self).
 pub struct ObjectTable {
     inner: RwLock<Inner>,
+    /// `None`: the process-wide counter. Tables built with [`ObjectTable::isolated`] own one
+    /// (unit tests that need exact generations).
+    own_generations: Option<Generations>,
 }
 
 impl Default for ObjectTable {
@@ -210,7 +252,8 @@ impl Default for ObjectTable {
 }
 
 impl ObjectTable {
-    /// Creates an empty table.
+    /// Creates an empty table whose handles take their generations from the process-wide
+    /// counter (see the [module documentation](self)).
     pub fn new() -> ObjectTable {
         ObjectTable {
             inner: RwLock::new(Inner {
@@ -218,8 +261,67 @@ impl ObjectTable {
                 free: Vec::new(),
                 live: 0,
                 stores: BTreeSet::new(),
-                min_generation: 1,
             }),
+            own_generations: None,
+        }
+    }
+
+    /// A table with a generation counter of its own, starting at 1: the same behaviour with
+    /// values that do not depend on what else the process has done. Test runtimes use it, so
+    /// the handles a test sees (and may put in a golden file) are the same on every run, however
+    /// many tests run in parallel.
+    pub(crate) fn isolated() -> ObjectTable {
+        ObjectTable {
+            own_generations: Some(Generations::new()),
+            ..ObjectTable::new()
+        }
+    }
+
+    /// An isolated table whose counter has already issued `last` generations.
+    #[cfg(test)]
+    pub(crate) fn isolated_after(last: u32) -> ObjectTable {
+        let table = ObjectTable::isolated();
+        table.raise_generation_floor(last);
+        table
+    }
+
+    fn generations(&self) -> &Generations {
+        self.own_generations
+            .as_ref()
+            .unwrap_or(&PROCESS_GENERATIONS)
+    }
+
+    /// The highest generation issued so far (what a snapshot records as its floor).
+    pub(crate) fn generation_floor(&self) -> u32 {
+        self.generations().last()
+    }
+
+    /// Raises the generation counter to at least `floor` (restore). Never lowers it.
+    pub(crate) fn raise_generation_floor(&self, floor: u32) {
+        self.generations().raise_to(floor);
+    }
+
+    /// Takes the next generation, or panics with a clear message once the counter is spent.
+    fn issue_generation(&self) -> u32 {
+        let generations = self.generations();
+        match generations.issue() {
+            Some(generation) => generation,
+            None => {
+                if !generations
+                    .exhaustion_reported
+                    .swap(true, Ordering::Relaxed)
+                {
+                    crate::runtime::log_fatal_current(
+                        "keel::runtime",
+                        "handle generations exhausted: 2^32 - 1 handles have been issued in this \
+                         process; no further object can be created (restart the core)",
+                    );
+                }
+                panic!(
+                    "keel-runtime: handle generations are exhausted (2^32 - 1 handles have been \
+                     issued in this process); restart the core"
+                )
+            }
         }
     }
 
@@ -228,10 +330,15 @@ impl ObjectTable {
     ///
     /// # Panics
     ///
-    /// Panics if the table would need more than `u32::MAX` slots.
+    /// Panics if the table would need more than `u32::MAX` slots, or once the process has
+    /// issued `u32::MAX` handles and the generation counter is spent (logged at FATAL first;
+    /// ADR-022). Both are contained at the runtime's entry points like any other panic.
     pub fn insert(&self, object: Arc<dyn AnyObject>) -> Handle {
         let is_store = object.as_store().is_some();
         let cell = object.as_store().cloned();
+        // Before any lock is taken and before the table is touched, so a refusal (which logs)
+        // leaves it exactly as it was and calls out with no lock held.
+        let generation = self.issue_generation();
         let handle = {
             let mut inner = self.inner.write();
             let index = match inner.free.pop() {
@@ -239,21 +346,21 @@ impl ObjectTable {
                 None => {
                     let index = u32::try_from(inner.slots.len())
                         .unwrap_or_else(|_| panic!("keel-runtime: object table is full"));
-                    let generation = inner.min_generation;
                     inner.slots.push(Slot {
-                        generation,
+                        generation: 0,
                         entry: None,
                     });
                     index
                 }
             };
             let slot = &mut inner.slots[index as usize];
+            slot.generation = generation;
             slot.entry = Some(Entry {
                 object,
                 poisoned: false,
                 observed: Observed::default(),
             });
-            let handle = Handle::new(index, slot.generation);
+            let handle = Handle::new(index, generation);
             inner.live += 1;
             if is_store {
                 inner.stores.insert(index);
@@ -267,13 +374,15 @@ impl ObjectTable {
     }
 
     /// Stores `object` at exactly `handle`: the restore path (SPEC 5.9). Fails if the slot is
-    /// occupied. Slots below `handle.index()` that do not exist yet are created vacant.
+    /// occupied. Slots below `handle.index()` that do not exist yet are created vacant. The
+    /// generation counter is raised to the handle's generation, so the table never issues a
+    /// generation that a live handle already carries.
     pub fn insert_at(
         &self,
         handle: Handle,
         object: Arc<dyn AnyObject>,
     ) -> Result<(), InsertAtError> {
-        if handle.is_null() || handle.generation() == 0 {
+        if handle.is_null() || handle.generation() == 0 || handle.generation() == u32::MAX {
             return Err(InsertAtError::Invalid);
         }
         let index = handle.index() as usize;
@@ -286,9 +395,8 @@ impl ObjectTable {
             }
             while inner.slots.len() <= index {
                 let new_index = inner.slots.len();
-                let generation = inner.min_generation;
                 inner.slots.push(Slot {
-                    generation,
+                    generation: 0,
                     entry: None,
                 });
                 if new_index != index {
@@ -300,6 +408,7 @@ impl ObjectTable {
             }
             // The slot may have been on the free list (it existed and was vacant).
             inner.free.retain(|&i| i as usize != index);
+            self.generations().raise_to(handle.generation());
             let slot = &mut inner.slots[index];
             slot.generation = handle.generation();
             slot.entry = Some(Entry {
@@ -352,14 +461,13 @@ impl ObjectTable {
     }
 
     /// Removes the object behind `handle` and returns it, so the caller can drop it wherever
-    /// it wants (the runtime drops it under the core lock). The slot's generation is bumped
-    /// and the slot becomes reusable.
+    /// it wants (the runtime drops it under the core lock). The slot becomes reusable; the next
+    /// object placed in it gets a fresh generation, so `handle` stays stale for good.
     pub fn release(&self, handle: Handle) -> Result<Arc<dyn AnyObject>, BadHandle> {
         let mut inner = self.inner.write();
         Self::check(&inner, handle)?;
         let slot = &mut inner.slots[handle.index() as usize];
         let entry = slot.entry.take();
-        slot.generation = next_generation(slot.generation);
         inner.free.push(handle.index());
         inner.live -= 1;
         inner.stores.remove(&handle.index());
@@ -439,8 +547,9 @@ impl ObjectTable {
             .map(|e| f(&mut e.observed))
     }
 
-    /// Empties the table: every slot becomes vacant with a bumped generation, so every handle
-    /// issued so far is stale. Returns what was in it.
+    /// Empties the table: every slot becomes vacant, so every handle issued so far is stale
+    /// (a slot's next occupant gets a generation no earlier handle carries, or, in a restore,
+    /// exactly the generation the snapshot recorded). Returns what was in it.
     pub(crate) fn clear(&self) -> Vec<Cleared> {
         let mut inner = self.inner.write();
         let mut out = Vec::with_capacity(inner.live);
@@ -452,7 +561,6 @@ impl ObjectTable {
                     object: entry.object,
                     observed: entry.observed,
                 });
-                slot.generation = next_generation(slot.generation);
             }
             free.push(index as u32);
         }
@@ -461,21 +569,6 @@ impl ObjectTable {
         inner.live = 0;
         inner.stores.clear();
         out
-    }
-
-    /// Raises the generation used for slots created from now on (never lowers it).
-    pub(crate) fn raise_min_generation(&self, generation: u32) {
-        let mut inner = self.inner.write();
-        if generation > inner.min_generation {
-            inner.min_generation = generation;
-        }
-        let floor = inner.min_generation;
-        // Vacant slots keep the higher of their own generation and the floor.
-        for slot in inner.slots.iter_mut() {
-            if slot.entry.is_none() && slot.generation < floor {
-                slot.generation = floor;
-            }
-        }
     }
 }
 
@@ -503,7 +596,7 @@ mod tests {
 
     #[test]
     fn first_handle_is_index_zero_generation_one() {
-        let t = ObjectTable::new();
+        let t = ObjectTable::isolated();
         let h = t.insert(a(1));
         assert_eq!((h.index(), h.generation()), (0, 1));
         assert!(!h.is_null());
@@ -527,7 +620,7 @@ mod tests {
 
     #[test]
     fn released_handle_is_stale_and_slot_is_reused_with_a_new_generation() {
-        let t = ObjectTable::new();
+        let t = ObjectTable::isolated();
         let h1 = t.insert(a(1));
         assert_eq!(t.release(h1).unwrap().downcast::<A>().unwrap().0, 1);
         assert_eq!(t.live(), 0);
@@ -566,14 +659,64 @@ mod tests {
     }
 
     #[test]
-    fn generation_wraps_past_zero() {
-        assert_eq!(next_generation(1), 2);
-        assert_eq!(next_generation(u32::MAX), 1);
+    fn the_counter_is_shared_by_every_table_of_the_process() {
+        let (t1, t2) = (ObjectTable::new(), ObjectTable::new());
+        let first = t1.insert(a(1));
+        let second = t2.insert(a(2));
+        let third = t1.insert(a(3));
+        assert!(
+            first.generation() < second.generation() && second.generation() < third.generation(),
+            "{first:?} {second:?} {third:?}"
+        );
+        // A handle of one table means nothing in the other, even at the same index.
+        assert_eq!(first.index(), second.index());
+        assert!(t2.get::<A>(first).is_err());
+    }
+
+    #[test]
+    fn a_slot_never_gets_a_generation_twice_however_often_it_is_recycled() {
+        let t = ObjectTable::isolated();
+        let mut seen = std::collections::BTreeSet::new();
+        for n in 0..200 {
+            let h = t.insert(a(n));
+            assert_eq!(h.index(), 0, "the lone slot is recycled");
+            assert!(
+                seen.insert(h.generation()),
+                "generation {} reissued",
+                h.generation()
+            );
+            t.release(h).unwrap();
+        }
+        assert_eq!(seen.len(), 200);
+    }
+
+    #[test]
+    fn the_counter_is_spent_after_u32_max_handles_and_refuses_cleanly() {
+        let t = ObjectTable::isolated_after(u32::MAX - 2);
+        let last = t.insert(a(1));
+        let last2 = t.insert(a(2));
+        assert_eq!(
+            (last.generation(), last2.generation()),
+            (u32::MAX - 1, u32::MAX)
+        );
+        let refused = crate::guard::guarded(|| t.insert(a(3))).unwrap_err();
+        assert!(
+            refused.message.contains("generations are exhausted"),
+            "{}",
+            refused.message
+        );
+        // Nothing was half done: the two live objects are intact and handles still resolve.
+        assert_eq!(t.live(), 2);
+        assert_eq!(t.get::<A>(last).unwrap().0, 1);
+        assert_eq!(t.get::<A>(last2).unwrap().0, 2);
+        // And it stays refused: releasing does not free up a generation.
+        t.release(last).unwrap();
+        assert!(crate::guard::guarded(|| t.insert(a(4))).is_err());
     }
 
     #[test]
     fn insert_at_restores_index_and_generation() {
-        let t = ObjectTable::new();
+        let t = ObjectTable::isolated();
         t.insert_at(Handle::new(3, 7), a(3)).unwrap();
         assert_eq!(t.live(), 1);
         assert_eq!(t.get::<A>(Handle::new(3, 7)).unwrap().0, 3);
@@ -598,10 +741,15 @@ mod tests {
 
     #[test]
     fn insert_at_rejects_bad_handles_and_occupied_slots() {
-        let t = ObjectTable::new();
+        let t = ObjectTable::isolated();
         assert_eq!(t.insert_at(Handle::NULL, a(0)), Err(InsertAtError::Invalid));
         assert_eq!(
             t.insert_at(Handle::new(4, 0), a(0)),
+            Err(InsertAtError::Invalid)
+        );
+        // A generation of u32::MAX would leave the counter nothing to issue.
+        assert_eq!(
+            t.insert_at(Handle::new(4, u32::MAX), a(0)),
             Err(InsertAtError::Invalid)
         );
         t.insert_at(Handle::new(1, 1), a(1)).unwrap();
@@ -618,7 +766,7 @@ mod tests {
 
     #[test]
     fn clear_invalidates_every_handle_and_returns_the_objects() {
-        let t = ObjectTable::new();
+        let t = ObjectTable::isolated();
         let h1 = t.insert(a(1));
         let h2 = t.insert(a(2));
         let cleared = t.clear();
@@ -629,21 +777,38 @@ mod tests {
         assert!(t.get::<A>(h1).is_err() && t.get::<A>(h2).is_err());
         let h3 = t.insert(a(3));
         assert_eq!(h3.index(), 0);
-        assert_eq!(h3.generation(), 2);
+        assert_eq!(
+            h3.generation(),
+            3,
+            "a cleared slot never gets an old generation back"
+        );
+        assert!(t.get::<A>(h1).is_err() && t.get::<A>(h3).is_ok());
     }
 
     #[test]
-    fn raised_generation_floor_protects_gaps_and_fresh_slots() {
-        let t = ObjectTable::new();
-        t.raise_min_generation(10);
+    fn a_raised_floor_moves_every_later_generation_above_it_and_never_lowers() {
+        let t = ObjectTable::isolated();
+        t.raise_generation_floor(10);
+        assert_eq!(t.generation_floor(), 10);
         t.insert_at(Handle::new(2, 4), a(0)).unwrap();
+        assert_eq!(
+            t.generation_floor(),
+            10,
+            "a restored generation below the floor changes nothing"
+        );
+        assert_eq!(t.insert(a(1)).generation(), 11);
+        t.raise_generation_floor(3);
+        assert_eq!(t.generation_floor(), 11, "never lowered");
+        assert_eq!(t.insert(a(2)).generation(), 12);
+    }
+
+    #[test]
+    fn insert_at_keeps_the_counter_above_every_live_generation() {
+        let t = ObjectTable::isolated();
+        t.insert_at(Handle::new(1, 50), a(0)).unwrap();
+        assert_eq!(t.generation_floor(), 50);
         let fresh = t.insert(a(1));
-        // Gap slots 0 and 1 were created at the floor.
-        assert_eq!(fresh.generation(), 10);
-        let fresh2 = t.insert(a(2));
-        assert_eq!(fresh2.generation(), 10);
-        let after = t.insert(a(3));
-        assert_eq!((after.index(), after.generation()), (3, 10));
+        assert_eq!(fresh.generation(), 51);
     }
 
     #[test]
@@ -674,7 +839,7 @@ mod tests {
 
     #[test]
     fn with_observed_and_poison_flags_need_a_live_handle() {
-        let t = ObjectTable::new();
+        let t = ObjectTable::isolated();
         let h = t.insert(a(1));
         assert_eq!(t.with_observed(h, |o| o.record(0, true, 1)), Some(()));
         assert!(t.mark_poisoned(h));

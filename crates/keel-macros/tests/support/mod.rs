@@ -81,6 +81,9 @@ impl Runtime {
         };
         let rt = keel::runtime::Runtime::new(config, platform.clone())
             .unwrap_or_else(|e: InitError| panic!("the test runtime did not start: {e}"));
+        // The tests call dispatchers and poll futures directly on this thread, which therefore
+        // plays the core: its signal writes are allowed.
+        keel::runtime::testing::drive_from_this_thread();
         Runtime { rt, platform }
     }
 

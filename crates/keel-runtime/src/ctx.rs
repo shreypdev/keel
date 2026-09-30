@@ -109,13 +109,16 @@ impl Ctx {
     }
 
     /// Spawns a detached task. It runs on the core loop; its output is `()`. Returns an id for
-    /// [`cancel_task`](Ctx::cancel_task).
+    /// [`cancel_task`](Ctx::cancel_task). After the runtime was shut down this is a logged
+    /// no-op: the future is dropped unpolled and the id names nothing.
     pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) -> TaskId {
         self.0.spawn(future)
     }
 
     /// Cancels a task spawned with [`spawn`](Ctx::spawn): its future is dropped and it is never
-    /// polled again. A no-op for a task that has finished.
+    /// polled again. A no-op for a task that has finished. The future is dropped **on the core**
+    /// (with the core lock held, or queued for the core's next turn if the lock is busy), so
+    /// user `Drop` code never runs concurrently with core code; this call never waits for the core.
     pub fn cancel_task(&self, id: TaskId) {
         self.0.cancel_task(id);
     }
@@ -131,7 +134,7 @@ impl Ctx {
     }
 
     /// Completes after `duration` (through the host's timer if it owns one, else the
-    /// internal timer).
+    /// internal timer). After the runtime was shut down it completes at once (and logs a warning).
     pub fn sleep(&self, duration: Duration) -> Sleep {
         self.0.sleep(duration)
     }
@@ -141,7 +144,9 @@ impl Ctx {
         self.0.events()
     }
 
-    /// Calls a platform-implemented async port method. The generated proxy encodes `args`.
+    /// Calls a platform-implemented async port method. The generated proxy encodes `args`. After
+    /// the runtime was shut down nothing is sent: the future resolves to
+    /// [`PortError::Cancelled`] (and a warning is logged).
     pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture {
         self.0.port_call(port_id, method_id, args)
     }
