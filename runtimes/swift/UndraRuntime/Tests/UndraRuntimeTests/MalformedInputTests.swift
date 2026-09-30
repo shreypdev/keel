@@ -325,7 +325,7 @@ final class MalformedInputTests: XCTestCase {
             "length 100 at offset 4 exceeds the remaining input"
         )
         XCTAssertEqual(WireError.trailingBytes(count: 3).description, "3 trailing byte(s) after the end of the value")
-        XCTAssertEqual(WireError.badMagic.description, "bad envelope magic (expected \"UNDRA\")")
+        XCTAssertEqual(WireError.badMagic.description, "bad envelope magic (expected 4b45454c)")
         XCTAssertEqual(
             WireError.unsupportedVersion(2).description,
             "unsupported envelope version 2 (this runtime speaks version 1)"

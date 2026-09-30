@@ -1,5 +1,5 @@
 // GENERATED FILE, DO NOT EDIT. Regenerate with scripts/gen-vectors.py.
-// Source: contract-tests/wire-vectors.json (sha256 c3705059f72a7c25db8ae03b96afa899bd2d4ada248a82e29fed56a60b213427)
+// Source: contract-tests/wire-vectors.json (sha256 8126c7acd47ea533745e844ff9160aa399873b0a4fbf30a42a85501799b912d9)
 package dev.undra.runtime.wire
 
 import dev.undra.runtime.testing.JV
@@ -37,7 +37,7 @@ internal object WireVectors {
         WireVector("handle", "handle", JV.Str("4294967297"), "0100000001000000", "index 1, generation 1"),
         WireVector("envelope_call", "envelope", JV.Obj(listOf("kind" to JV.Num("1"), "seq" to JV.Num("7"), "schema" to JV.Str("72623859790382856"), "payload_hex" to JV.Str("aabbcc"))), "4b45454c01000807060504030201010700000003000000aabbcc", "header is 23 bytes"),
         WireVector("fnv1a32_calculator_add", "fnv1a32(\"Calculator.add\")", JV.Str("2353348832"), "e040458c", ""),
-        WireVector("fnv1a64_undra", "fnv1a64(\"undra\")", JV.Str("6367360722358687308"), "4cd6f65cd7685d58", ""),
+        WireVector("fnv1a64_undra", "fnv1a64(\"undra\")", JV.Str("12206477163874244763"), "9b58a4cf4e1e66a9", ""),
         WireVector("call_method", "call payload", JV.Obj(listOf("target" to JV.Num("1"), "handle" to JV.Str("4294967297"), "method_id" to JV.Str("2353348832"), "call_id" to JV.Num("9"), "args" to JV.Arr(listOf(JV.Num("2"), JV.Num("3"))))), "010100000001000000e040458c090000000200000003000000", ""),
         WireVector("reply_ok", "reply payload", JV.Obj(listOf("call_id" to JV.Num("9"), "status" to JV.Num("0"), "body" to JV.Num("5"))), "090000000005000000", ""),
         WireVector("changeset_one", "changeset payload", JV.Obj(listOf("txn_id" to JV.Str("42"), "entries" to JV.Arr(listOf(JV.Obj(listOf("handle" to JV.Str("4294967297"), "signal_id" to JV.Num("0"), "op" to JV.Num("0"), "value" to JV.Arr(listOf(JV.Num("1"), JV.Num("2"))))))))), "2a0000000000000001000000010000000100000000000000000c000000020000000100000002000000", ""),

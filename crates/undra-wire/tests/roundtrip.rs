@@ -8,9 +8,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use undra_wire::{Bytes, Decode, Encode, Handle, Reader, Timestamp, Uuid, WireError, Writer};
 use proptest::collection::{btree_map, hash_map, vec};
 use proptest::prelude::*;
+use undra_wire::{Bytes, Decode, Encode, Handle, Reader, Timestamp, Uuid, WireError, Writer};
 
 /// Checks everything that must hold for one value of a type with a canonical encoding:
 ///

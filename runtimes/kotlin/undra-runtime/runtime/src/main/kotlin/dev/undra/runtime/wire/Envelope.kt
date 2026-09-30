@@ -5,7 +5,7 @@ package dev.undra.runtime.wire
  * the payload alone).
  *
  * ```
- * magic    4 bytes  "UNDRA"
+ * magic    4 bytes  4B 45 45 4C (fixed by the wire format)
  * version  u16      1
  * schema   u64      schema hash of the core that produced / expects this message
  * kind     u8       see [Kind]
@@ -157,7 +157,7 @@ public class Envelope(
          * @param expectedSchema when non-null, the schema hash the message must carry. It is checked
          *   as soon as the header field is read, before the rest of the frame is trusted.
          * @throws WireException.UnexpectedEof if [bytes] is shorter than the header.
-         * @throws WireException.BadMagic if the magic is not `UNDRA`.
+         * @throws WireException.BadMagic if the magic is not `4B 45 45 4C`.
          * @throws WireException.UnsupportedVersion if the version is not [VERSION].
          * @throws WireException.SchemaMismatch if [expectedSchema] is given and differs.
          * @throws WireException.InvalidTag if the kind code is unknown.

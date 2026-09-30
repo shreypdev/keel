@@ -25,8 +25,8 @@ class EnvelopeTests : Suite() {
             assertEq(23, Envelope.encode(Envelope.Kind.CANCEL, 0u, 0uL, ByteArray(0)).size, "an empty payload is just the header")
         }
 
-        case("magic is the ASCII bytes UNDRA") {
-            assertEq("UNDRA", String(sample, 0, 4, Charsets.US_ASCII))
+        case("magic is the four bytes 4b 45 45 4c") {
+            assertBytes("4b45454c", sample.copyOfRange(0, 4))
         }
 
         case("Kind has the 16 values of the spec table, in order, with their wire codes") {
@@ -94,7 +94,7 @@ class EnvelopeTests : Suite() {
             val e = assertWire<WireException.BadMagic> { Envelope.decode(patched(3, 'X'.code)) }
             assertEq("4b454558", e.found)
             assertEq("00000000", assertWire<WireException.BadMagic> { Envelope.decode(ByteArray(30)) }.found)
-            assertEq("6b65656c", assertWire<WireException.BadMagic> { Envelope.decode(sample.copyOf().also { "undra".toByteArray().copyInto(it) }) }.found)
+            assertEq("6b65656c", assertWire<WireException.BadMagic> { Envelope.decode(sample.copyOf().also { byteArrayOf(0x6B, 0x65, 0x65, 0x6C).copyInto(it) }) }.found)
             assertWire<WireException.BadMagic>("magic is checked before the version") { Envelope.decode(ByteArray(30) { 0xFF.toByte() }) }
         }
 

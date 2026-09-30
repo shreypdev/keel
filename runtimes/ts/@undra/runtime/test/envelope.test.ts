@@ -43,9 +43,9 @@ describe("encodeEnvelope", () => {
     expect(encodeEnvelope(Kind.Hello, 0, 0n, new Uint8Array(10)).length).toBe(33);
   });
 
-  it("starts with the ASCII magic UNDRA", () => {
+  it("starts with the magic bytes 4b 45 45 4c", () => {
     const bytes = encodeEnvelope(Kind.Log, 0, 0n, new Uint8Array(0));
-    expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe("UNDRA");
+    expect(toHex(bytes.subarray(0, 4))).toBe("4b45454c");
   });
 
   it("returns a tight array (its buffer is exactly as long as the message)", () => {
@@ -149,7 +149,8 @@ describe("decodeEnvelope", () => {
 
   it("rejects a wrong magic", () => {
     const valid = encodeEnvelope(Kind.Call, 7, SCHEMA, new Uint8Array(0));
-    for (const magic of ["KEEK", "undra", "\u0000\u0000\u0000\u0000", "LEEK", "KEE\u0000"]) {
+    // Near misses: one byte off, the right letters in lower case, all zero, truncated by a NUL.
+    for (const magic of ["KEEK", "\u006b\u0065\u0065\u006c", "\u0000\u0000\u0000\u0000", "LEEK", "KEE\u0000"]) {
       const bytes = valid.slice();
       bytes.set(new TextEncoder().encode(magic), 0);
       expectWireError(() => decodeEnvelope(bytes), "bad_magic");

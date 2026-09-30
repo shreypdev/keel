@@ -189,7 +189,7 @@ Records with `#[undra(default)]` fields: the wire layout still contains the fiel
 Used on WebSocket and Worker transports. In-process calls pass `kind` implicitly through the function they call and carry only the payload.
 
 ```
-magic      4 bytes  "UNDRA"
+magic      4 bytes  4B 45 45 4C  (fixed tag; it stays as it was when the product was renamed)
 version    u16      1
 schema     u64      schema_hash of the core that produced/expects this message
 kind       u8       see table

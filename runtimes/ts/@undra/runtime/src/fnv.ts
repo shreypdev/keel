@@ -47,7 +47,7 @@ export function fnv1a32(s: string): number {
  * 64-bit FNV-1a of the UTF-8 encoding of `s`, as a `bigint`. The arithmetic
  * runs on two 32-bit halves, so hashing does not allocate a `BigInt` per byte.
  *
- * `fnv1a64("undra") === 6367360722358687308n`.
+ * `fnv1a64("undra") === 12206477163874244763n`.
  */
 export function fnv1a64(s: string): bigint {
   let bytes = SCRATCH;

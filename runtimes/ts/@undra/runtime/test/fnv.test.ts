@@ -63,7 +63,7 @@ describe("fnv1a32", () => {
 
 describe("fnv1a64", () => {
   it("matches the spec vector", () => {
-    expect(fnv1a64("undra")).toBe(6367360722358687308n);
+    expect(fnv1a64("undra")).toBe(12206477163874244763n);
   });
 
   it("matches the published FNV test vectors", () => {

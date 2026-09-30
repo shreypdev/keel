@@ -86,7 +86,7 @@ assert_eq!(received.hash(), schema.hash());
 
 // 4. Stable ids are just FNV-1a of the names.
 assert_eq!(ids::fnv1a32("Calculator.add"), 2_353_348_832);
-assert_eq!(ids::fnv1a64(b"undra"), 6_367_360_722_358_687_308);
+assert_eq!(ids::fnv1a64(b"undra"), 12_206_477_163_874_244_763);
 ```
 
 ## The schema hash

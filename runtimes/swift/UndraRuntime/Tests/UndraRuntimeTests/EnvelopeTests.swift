@@ -27,7 +27,7 @@ final class EnvelopeTests: XCTestCase {
     }
 
     func testMagicAndVersionConstants() {
-        XCTAssertEqual(Envelope.magic, Array("UNDRA".utf8))
+        XCTAssertEqual(Envelope.magic, [0x4B, 0x45, 0x45, 0x4C])
         XCTAssertEqual(Envelope.version, 1)
         let bytes = validEnvelope()
         XCTAssertEqual(Array(bytes[0 ..< 4]), Envelope.magic)

@@ -6,7 +6,7 @@ package dev.undra.runtime.wire
  *
  * ```kotlin
  * Fnv.fnv1a32("Calculator.add")  // 2353348832u  (a method_id)
- * Fnv.fnv1a64("undra")            // 6367360722358687308uL
+ * Fnv.fnv1a64("undra")            // 12206477163874244763uL
  * ```
  */
 public object Fnv {

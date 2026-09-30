@@ -5,8 +5,9 @@ use crate::macros::wire_u8_enum;
 use crate::writer::len_u32;
 use crate::{Reader, WireError, Writer};
 
-/// The four magic bytes every envelope starts with.
-pub const MAGIC: [u8; 4] = *b"UNDRA";
+/// The four magic bytes every envelope starts with: `4B 45 45 4C`. They are fixed by the wire
+/// format (SPEC 3.2) and were not renamed with the product.
+pub const MAGIC: [u8; 4] = [0x4B, 0x45, 0x45, 0x4C];
 
 /// The envelope protocol version this crate reads and writes.
 pub const VERSION: u16 = 1;

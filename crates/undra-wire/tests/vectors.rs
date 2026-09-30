@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use common::{hex, unhex};
+use serde_json::Value;
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, ChangeEntry, ChangeOp, ChangeSet, ChangeSetRef, Reply, ReplyStatus,
 };
@@ -17,7 +18,6 @@ use undra_wire::{
     Bytes, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp, Uuid,
     Writer,
 };
-use serde_json::Value;
 
 /// Vectors this crate does not cover, with the reason. Everything else must be covered, so a
 /// new vector cannot be silently ignored.

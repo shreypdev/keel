@@ -21,7 +21,7 @@ public enum WireError: Error, Sendable, Equatable {
     /// A decode that must consume its whole input left `count` unread bytes.
     case trailingBytes(count: Int)
 
-    /// An envelope does not start with the magic bytes `UNDRA`.
+    /// An envelope does not start with the magic bytes `4B 45 45 4C`.
     case badMagic
 
     /// An envelope carries a protocol version other than 1.
@@ -51,7 +51,7 @@ extension WireError: CustomStringConvertible {
         case .trailingBytes(let count):
             return "\(count) trailing byte(s) after the end of the value"
         case .badMagic:
-            return "bad envelope magic (expected \"UNDRA\")"
+            return "bad envelope magic (expected 4b45454c)"
         case .unsupportedVersion(let version):
             return "unsupported envelope version \(version) (this runtime speaks version 1)"
         case .schemaMismatch(let expected, let got):

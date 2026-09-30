@@ -173,7 +173,7 @@ describe("WireError", () => {
       "wire: 1 trailing byte after the end of the message",
     );
     expect(message(() => decodeEnvelope(fromHex("00000000")))).toBe(
-      'wire: bad magic: envelope does not start with "UNDRA"',
+      'wire: bad magic: envelope does not start with 4b45454c',
     );
     expect(message(() => decodeEnvelope(corrupt(validEnvelope(), 4, 2)))).toBe("wire: unsupported wire version 2");
     expect(message(() => decodeEnvelope(validEnvelope(), 7n))).toBe(

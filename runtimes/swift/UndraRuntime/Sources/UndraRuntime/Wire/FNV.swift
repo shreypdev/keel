@@ -21,7 +21,7 @@ public func fnv1a32(_ s: String) -> UInt32 {
 /// prime `0x100000001b3`).
 ///
 /// ```swift
-/// fnv1a64("undra")             // 6367360722358687308
+/// fnv1a64("undra")             // 12206477163874244763
 /// ```
 public func fnv1a64(_ s: String) -> UInt64 {
     var hash: UInt64 = 0xcbf2_9ce4_8422_2325

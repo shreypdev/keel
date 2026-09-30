@@ -6,7 +6,7 @@ import UndraRuntime
 final class FNVTests: XCTestCase {
     func testContractVectors() {
         XCTAssertEqual(fnv1a32("Calculator.add"), 2_353_348_832)
-        XCTAssertEqual(fnv1a64("undra"), 6_367_360_722_358_687_308)
+        XCTAssertEqual(fnv1a64("undra"), 12_206_477_163_874_244_763)
     }
 
     func testEmptyStringIsTheOffsetBasis() {

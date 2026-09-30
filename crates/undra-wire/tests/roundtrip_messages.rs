@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use common::Rng;
+use proptest::collection::vec;
+use proptest::prelude::*;
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, Cancel, ChangeEntry, ChangeOp, ChangeSet, ChangeSetBuilder,
     ChangeSetRef, Event, Hello, Log, Observe, PortCall, PortReply, PortStatus, Release, Reply,
@@ -14,8 +16,6 @@ use undra_wire::payload::{
 use undra_wire::{
     Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, WireError, Writer,
 };
-use proptest::collection::vec;
-use proptest::prelude::*;
 
 fn handle() -> impl Strategy<Value = Handle> {
     any::<u64>().prop_map(Handle)

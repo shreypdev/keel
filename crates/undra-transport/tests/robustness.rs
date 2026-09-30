@@ -41,7 +41,7 @@ fn rejected(f: &Fixture, bytes: Vec<u8>) -> (u16, String) {
 }
 
 fn frame(kind: u8, seq: u32, schema: u64, len: u32, payload: &[u8]) -> Vec<u8> {
-    let mut v = b"UNDRA".to_vec();
+    let mut v = undra::wire::MAGIC.to_vec();
     v.extend_from_slice(&1_u16.to_le_bytes());
     v.extend_from_slice(&schema.to_le_bytes());
     v.push(kind);

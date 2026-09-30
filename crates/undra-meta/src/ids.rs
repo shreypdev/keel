@@ -65,7 +65,7 @@ pub const fn fnv1a32(s: &str) -> u32 {
 /// canonical schema JSON.
 ///
 /// ```
-/// assert_eq!(undra_meta::ids::fnv1a64(b"undra"), 6_367_360_722_358_687_308);
+/// assert_eq!(undra_meta::ids::fnv1a64(b"undra"), 12_206_477_163_874_244_763);
 /// assert_eq!(undra_meta::ids::fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
 /// ```
 #[must_use]
@@ -141,7 +141,7 @@ pub const fn mutation_id(name: &str) -> u32 {
 const _: () = {
     assert!(fnv1a32("Calculator.add") == 2_353_348_832);
     assert!(method_id("Calculator", "add") == 2_353_348_832);
-    assert!(fnv1a64_str("undra") == 6_367_360_722_358_687_308);
+    assert!(fnv1a64_str("undra") == 12_206_477_163_874_244_763);
     assert!(function_id("greet") == fnv1a32("fn.greet"));
     assert!(port_id("Clock") == fnv1a32("port.Clock"));
     assert!(query_id("todos") == fnv1a32("query.todos"));
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn shared_wire_vectors() {
         assert_eq!(fnv1a32("Calculator.add"), 2_353_348_832);
-        assert_eq!(fnv1a64(b"undra"), 6_367_360_722_358_687_308);
+        assert_eq!(fnv1a64(b"undra"), 12_206_477_163_874_244_763);
         assert_eq!(fnv1a64_str("undra"), fnv1a64(b"undra"));
     }
 

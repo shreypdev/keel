@@ -24,7 +24,7 @@ class FnvTests : Suite() {
     init {
         case("the vectors from contract-tests/wire-vectors.json") {
             assertEq(2353348832u, Fnv.fnv1a32("Calculator.add"))
-            assertEq(6367360722358687308uL, Fnv.fnv1a64("undra"))
+            assertEq(12206477163874244763uL, Fnv.fnv1a64("undra"))
         }
 
         case("the published FNV-1a test vectors, 32-bit") {

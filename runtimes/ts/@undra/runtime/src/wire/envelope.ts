@@ -49,7 +49,7 @@ export const HEADER_LEN = 23;
 /** The wire version this runtime speaks. */
 export const WIRE_VERSION = 1;
 
-/** `"UNDRA"` read as a little-endian `u32`. */
+/** The magic bytes `4B 45 45 4C` read as a little-endian `u32`. */
 const MAGIC = 0x4c45454b;
 const U32_MAX = 0xffff_ffff;
 
