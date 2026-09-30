@@ -230,12 +230,15 @@ class DispatcherTests : Suite() {
             val main = KeelDispatchers.mainThread()
             val order = CopyOnWriteArrayList<Int>()
             val done = CountDownLatch(1)
+            val gate = CountDownLatch(1)
+            main.post(Runnable { gate.await() }) // holds the queue so that both tasks below are queued before either runs
             main.post(Runnable {
-                // Posted from the main thread itself: still queued, not run in place.
+                // Posted from the main thread itself: still queued behind task 2, not run in place.
                 main.post(Runnable { order.add(3); done.countDown() })
                 order.add(1)
             })
             main.post(Runnable { order.add(2) })
+            gate.countDown()
             assertTrue(done.await(10, TimeUnit.SECONDS))
             assertEq(listOf(1, 2, 3), order.toList())
         }

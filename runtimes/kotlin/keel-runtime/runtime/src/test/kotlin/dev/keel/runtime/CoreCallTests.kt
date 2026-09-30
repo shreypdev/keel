@@ -192,7 +192,8 @@ class CoreCallTests : Suite() {
 
         case("a continuation that would run inline is resumed off the core thread, so no application code runs there") {
             val t = FakeTransport()
-            t.onCall = { call -> t.replyOnCore(call.callId, ReplyStatus.OK, string("x")) }
+            // The reply comes after the caller has suspended (a reply that beat the suspension would simply not suspend it).
+            t.onCall = { call -> t.onCore { Thread.sleep(150); t.events.onReply(call.callId, ReplyStatus.OK, string("x")) } }
             attach(t).use { core ->
                 val thread = runBlocking(Dispatchers.Unconfined) {
                     core.call(TARGET, METHOD, ARGS)
@@ -305,6 +306,8 @@ class CoreCallTests : Suite() {
             assertThrows<KeelException>("observe after close") { core.observe(1L, 0u, true) }
             core.close() // twice is fine
             core.release(1L) // and releasing after close is a quiet no-op
+            core.timerFired(3u) // as is a timer that comes due late
+            assertEq(0, t.timers.size)
         }
 
         case("a core that was never loaded refuses shared, and a base KeelCore is an inert test double") {

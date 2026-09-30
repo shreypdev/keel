@@ -178,7 +178,7 @@ public open class KeelCore protected constructor() : AutoCloseable {
     /** Sends a host-to-core event of an event port (`Connectivity.changed`, `Lifecycle.changed`, ...). */
     public open fun event(portId: UInt, methodId: UInt, payload: ByteArray): Unit = throw unsupported("event")
 
-    /** Tells the core that the timer [timerId] set through the `Timer` port came due. Timer adapters call it. */
+    /** Tells the core that the timer [timerId] set through the `Timer` port came due. Timer adapters call it; after [close] it does nothing. */
     public open fun timerFired(timerId: UInt): Unit = throw unsupported("timerFired")
 
     private val inertMirror: Mirror by lazy { Mirror() }

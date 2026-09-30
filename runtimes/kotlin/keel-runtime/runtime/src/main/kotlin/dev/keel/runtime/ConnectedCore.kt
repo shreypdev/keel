@@ -262,7 +262,8 @@ internal class ConnectedCore(
     }
 
     override fun timerFired(timerId: UInt) {
-        ensureOpen()
+        // A timer that comes due after close() has nobody to tell; timer adapters race with close, so this is not an error.
+        if (closed.get()) return
         transport.timerFired(timerId)
     }
 
