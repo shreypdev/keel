@@ -13,12 +13,14 @@
 //! | [`wire`] | `keel-wire`: the binary codec |
 //! | [`meta`] | `keel-meta`: the schema every language is generated from |
 //! | [`query`](mod@query) | `keel-query`: the traits `#[keel::query]` and `#[keel::mutation]` implement, and `ctx.query()` / `ctx.mutate(..)` |
+//! | [`ports`] | `keel-ports`: the standard ports (`Http`, `Kv`, `Clock`, ...), their records and the deterministic fakes |
 //!
 //! The code the macros generate names everything through `::keel::{wire, meta, runtime,
 //! signals, query}` (SPEC 16.3), which is why an application depends on this crate alone.
 
 pub use keel_macros::{api, error, mutation, port, query, store};
 pub use keel_meta as meta;
+pub use keel_ports as ports;
 pub use keel_runtime as runtime;
 pub use keel_signals as signals;
 pub use keel_wire as wire;
@@ -31,11 +33,14 @@ pub mod query;
 /// handle (`Ctx`), the wire scalars a public signature may use (`Bytes`, `Uuid`, `Timestamp`,
 /// `Duration`, and `Handle` for object references) and the six attribute macros
 /// (`#[keel::api]` and friends are also reachable as `keel::api`, ...). It also brings
-/// [`CtxQuery`](crate::query::CtxQuery), so `ctx.query()` and `ctx.mutate(..)` work.
+/// [`CtxQuery`](crate::query::CtxQuery), so `ctx.query()` and `ctx.mutate(..)` work, and
+/// [`CtxPorts`](keel_ports::CtxPorts), so `ctx.http()`, `ctx.kv()` and the other standard
+/// port accessors work.
 pub mod prelude {
     pub use core::time::Duration;
 
     pub use keel_macros::{api, error, mutation, port, query, store};
+    pub use keel_ports::CtxPorts;
     pub use keel_query::CtxQuery;
     pub use keel_runtime::Ctx;
     pub use keel_signals::{Computed, Effect, Signal, txn};

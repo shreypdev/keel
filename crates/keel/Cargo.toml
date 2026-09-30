@@ -18,6 +18,7 @@ keel-wire = { workspace = true }
 keel-signals = { workspace = true }
 keel-runtime = { workspace = true }
 keel-query = { workspace = true }
+keel-ports = { workspace = true }
 
 [dev-dependencies]
 keel-bindgen = { workspace = true }
