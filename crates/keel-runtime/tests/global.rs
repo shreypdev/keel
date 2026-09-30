@@ -87,12 +87,15 @@ fn the_global_runtime_lifecycle() {
         "shutting down another runtime leaves the global alone"
     );
 
-    // A signal written on a thread that is inside no runtime reaches the global runtime.
+    // A signal written on a thread that is inside no runtime reaches the global runtime, where
+    // the write-context check is not in the way (release builds; debug builds refuse such a
+    // write, ADR-023, which the second half of this block checks).
     let h = new_counter_rt(&rt, 1, "");
     rt.observe(h.0, ALL_SIGNALS, true);
     host.take_change_sets();
     let counter = rt.object::<Counter>(h.0).unwrap();
-    std::thread::spawn(move || counter.count.set(2))
+    let unscoped = counter.clone();
+    std::thread::spawn(move || keel_runtime::testing::unchecked_writes(|| unscoped.count.set(2)))
         .join()
         .unwrap();
     assert_eq!(
@@ -100,6 +103,11 @@ fn the_global_runtime_lifecycle() {
         1,
         "routed to the global runtime's host"
     );
+    if cfg!(debug_assertions) {
+        let refused = std::thread::spawn(move || counter.count.set(3)).join();
+        assert!(refused.is_err(), "debug builds refuse a write off the core");
+        assert_eq!(host.take_decoded_change_sets().len(), 0);
+    }
 
     // So do log records emitted outside any call.
     host.take_logs();

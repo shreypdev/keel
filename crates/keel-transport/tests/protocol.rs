@@ -239,21 +239,24 @@ fn change_sets_from_a_busy_core_thread_arrive_complete_and_in_order() {
     client.observe(handle, COUNT_SIGNAL, true);
     client.recv_kind(Kind::ChangeSet);
 
-    let writer = {
-        let rt = f.rt.clone();
-        std::thread::spawn(move || {
-            let _scope = rt.ctx().enter();
-            let counter = rt.object::<Counter>(handle).unwrap();
-            for _ in 0..500 {
-                counter.add(1);
-            }
-        })
-    };
+    // The writer is a task on the core thread: it commits 500 times, yielding between commits,
+    // so the client's calls (taking the core lock on the connection's thread) interleave.
+    let (done, finished) = std::sync::mpsc::channel();
+    let counter = f.rt.object::<Counter>(handle).unwrap();
+    f.rt.ctx().spawn(async move {
+        for _ in 0..500 {
+            counter.add(1);
+            keel::runtime::executor::yield_now().await;
+        }
+        let _ = done.send(());
+    });
     // Calls from the client interleave with the writer's commits.
     for _ in 0..50 {
         client.method(handle, GET, &[]);
     }
-    writer.join().unwrap();
+    finished
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the writer finished");
     while change_sets(&client).len() < 501 {
         match client.recv_within(Duration::from_secs(5)) {
             Received::Frame(_) => {}

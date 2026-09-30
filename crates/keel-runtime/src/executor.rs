@@ -123,6 +123,8 @@ pub(crate) struct Shared {
     queue: Mutex<Queue>,
     cv: Condvar,
     inline: bool,
+    /// The owning runtime's id, to mark `Host::schedule` as a host callback.
+    runtime_id: u64,
     host: Arc<dyn Host>,
     live: AtomicUsize,
 }
@@ -131,7 +133,10 @@ impl Shared {
     /// Asks the host to poll soon. A panicking host is ignored: wakers run in arbitrary
     /// contexts and must not unwind.
     fn schedule_host(&self) {
-        let _ = crate::guard::guarded(|| self.host.schedule());
+        let _ = crate::guard::guarded(|| {
+            let _call = crate::runtime::HostCall::enter(self.runtime_id);
+            self.host.schedule();
+        });
     }
 
     fn push_ready(&self, id: TaskId) {
@@ -195,7 +200,7 @@ pub(crate) enum CancelOutcome {
 
 impl Executor {
     /// `inline`: no core thread; wakes request `Host::schedule` instead of notifying a condvar.
-    pub(crate) fn new(host: Arc<dyn Host>, inline: bool) -> Executor {
+    pub(crate) fn new(runtime_id: u64, host: Arc<dyn Host>, inline: bool) -> Executor {
         Executor {
             shared: Arc::new(Shared {
                 tasks: Mutex::new(Slab::new()),
@@ -207,6 +212,7 @@ impl Executor {
                 }),
                 cv: Condvar::new(),
                 inline,
+                runtime_id,
                 host,
                 live: AtomicUsize::new(0),
             }),
@@ -577,7 +583,7 @@ mod tests {
         let host = Arc::new(NullHost {
             schedules: AtomicUsize::new(0),
         });
-        (Executor::new(host.clone(), true), host)
+        (Executor::new(0, host.clone(), true), host)
     }
 
     /// Polls every ready task once, like a turn without the core lock.
@@ -793,7 +799,7 @@ mod tests {
         let host = Arc::new(NullHost {
             schedules: AtomicUsize::new(0),
         });
-        let exec = Executor::new(host, false);
+        let exec = Executor::new(0, host, false);
         let shared = exec.shared();
         let waiter = std::thread::spawn(move || shared.wait_batch(BATCH));
         std::thread::sleep(Duration::from_millis(20));
@@ -806,7 +812,7 @@ mod tests {
         let host = Arc::new(NullHost {
             schedules: AtomicUsize::new(0),
         });
-        let exec = Executor::new(host, false);
+        let exec = Executor::new(0, host, false);
         let shared = exec.shared();
         let waiter = std::thread::spawn(move || shared.wait_batch(BATCH));
         std::thread::sleep(Duration::from_millis(20));

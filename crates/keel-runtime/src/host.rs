@@ -23,8 +23,13 @@ pub enum PortCallOutcome {
 /// commonly invoked while the core lock is held**, so an implementation must not call back
 /// into the runtime synchronously from them (with the exception of
 /// [`Runtime::port_reply`](crate::Runtime::port_reply), which never takes the core lock).
-/// Hosts enqueue onto their own thread instead. A re-entrant call on the same thread is
-/// detected and rejected with `E_REENTRANT` (see `docs/runtime-internals.md`).
+/// Hosts enqueue onto their own thread instead. The runtime marks the calling thread for the
+/// duration of **every** callback below (`reply`, `change_set`, `stream_item`, `port_call`, `log`,
+/// `schedule`, `timer_set`), and a call into the same runtime from inside one is detected and
+/// rejected with `E_REENTRANT` whichever thread the callback runs on, whether or not that thread
+/// holds the core lock (see `docs/runtime-internals.md`). That includes a callback delivered on an
+/// embedder thread while a store's delivery lock is held: waiting for the core there could
+/// deadlock against a core that is waiting for that lock.
 pub trait Host: Send + Sync + 'static {
     /// A call finished: `payload` is a `Reply` (SPEC 3.4).
     fn reply(&self, call_id: u32, payload: &[u8]);

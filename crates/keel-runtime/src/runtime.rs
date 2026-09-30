@@ -5,7 +5,7 @@ use core::any::Any;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
@@ -49,6 +49,73 @@ static GLOBAL: Mutex<Option<Arc<Runtime>>> = Mutex::new(None);
 thread_local! {
     /// Ids of the runtimes whose core lock this thread currently holds.
     static HELD: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    /// Ids of the runtimes whose `Host` callback this thread is currently inside, innermost
+    /// last (ADR-023, finding M2).
+    static IN_HOST: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    /// Nesting depth of `testing::unchecked_writes` scopes on this thread.
+    static UNCHECKED_WRITES: Cell<u32> = const { Cell::new(0) };
+    /// This thread created a `TestRuntime`, so it is that test's driver.
+    static TEST_DRIVER: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Lifts the write-context check on this thread until dropped (`testing::unchecked_writes`).
+pub(crate) struct UncheckedWrites(());
+
+impl UncheckedWrites {
+    pub(crate) fn enter() -> UncheckedWrites {
+        let _ = UNCHECKED_WRITES.try_with(|depth| depth.set(depth.get() + 1));
+        UncheckedWrites(())
+    }
+}
+
+impl Drop for UncheckedWrites {
+    fn drop(&mut self) {
+        let _ = UNCHECKED_WRITES.try_with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Records that the calling thread drives a `TestRuntime` (it created one): its direct signal
+/// writes are the test's own and are allowed.
+pub(crate) fn mark_test_driver_thread() {
+    let _ = TEST_DRIVER.try_with(|driver| driver.set(true));
+}
+
+/// Marks the calling thread as running a `Host` callback of one runtime until it is dropped.
+///
+/// While the mark is set, the runtime's core-lock entry points refuse the thread with
+/// `E_REENTRANT` exactly as they do for a thread that holds the core lock. The core lock alone is
+/// not enough: a callback that runs on a thread that does not hold it (an off-core commit
+/// delivering a change-set under a store's delivery lock) could otherwise wait for the core while
+/// the core waits for that delivery lock.
+pub(crate) struct HostCall {
+    runtime: u64,
+}
+
+impl HostCall {
+    /// Enters a callback of runtime `runtime`.
+    pub(crate) fn enter(runtime: u64) -> HostCall {
+        let _ = IN_HOST.try_with(|stack| stack.borrow_mut().push(runtime));
+        HostCall { runtime }
+    }
+
+    /// Whether this thread is inside a host callback of runtime `runtime`.
+    pub(crate) fn active(runtime: u64) -> bool {
+        IN_HOST
+            .try_with(|stack| stack.borrow().contains(&runtime))
+            .unwrap_or(false)
+    }
+}
+
+impl Drop for HostCall {
+    fn drop(&mut self) {
+        let runtime = self.runtime;
+        let _ = IN_HOST.try_with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if let Some(at) = stack.iter().rposition(|&id| id == runtime) {
+                stack.remove(at);
+            }
+        });
+    }
 }
 
 /// The runtime executing on this thread, else the global one.
@@ -59,7 +126,7 @@ pub(crate) fn current_or_global() -> Option<Arc<Runtime>> {
 /// Logs a fatal record through the current runtime (the wasm panic hook).
 pub(crate) fn log_fatal_current(target: &str, message: &str) {
     if let Some(rt) = current_or_global() {
-        rt.host.log(FATAL, target, message);
+        rt.log(FATAL, target, message);
     }
 }
 
@@ -92,16 +159,24 @@ impl ChangeSink for RuntimeSink {
 
 /// The write-context check installed into `keel-signals`: may the calling thread write signals?
 ///
-/// No on a blocking-pool worker. It has a runtime *installed* (so `Ctx::current()` works) but
-/// never holds the core lock, and `docs/runtime-internals.md` section 11 forbids it to write
-/// signals: its change-sets would be delivered without the core lock, unordered against the
-/// core's. Yes everywhere else: on the core (a dispatched call, a task poll, `observe`,
-/// `restore`), in an explicit `Ctx::enter` / `Ctx::txn` scope, and on a thread inside no runtime
-/// at all, whose writes reach the global runtime by design (section 12; that is what tests and
-/// embedders' own threads rely on). Debug builds assert this on every write that has
-/// consequences (`keel_signals::set_write_checker`); release builds never evaluate it.
+/// An allowlist (ADR-023): yes on a thread that holds a runtime's core lock (a dispatched call,
+/// a task poll, an event subscriber, `observe`, `restore`: everything entered through the
+/// runtime's entry points), on a `TestRuntime`'s driver thread (the test's own direct writes) and
+/// inside `testing::unchecked_writes`. No on every other thread: a blocking-pool worker, a host
+/// or embedder thread, a thread inside no runtime at all. Such a write would be delivered
+/// without the core lock, unordered against the core's transactions (and, with no runtime
+/// scope, dropped or misrouted). Signal writes belong on the core: send the result back to a
+/// task or a dispatched call instead. Debug builds assert this on every write that has
+/// consequences (`keel_signals::set_write_checker`); release builds never evaluate it, so the
+/// lock-level guarantees (the store's delivery lock) are what protects them.
 fn write_allowed() -> bool {
-    !crate::blocking::on_worker_thread()
+    UNCHECKED_WRITES
+        .try_with(|depth| depth.get() > 0)
+        .unwrap_or(false)
+        || HELD
+            .try_with(|held| !held.borrow().is_empty())
+            .unwrap_or(false)
+        || TEST_DRIVER.try_with(Cell::get).unwrap_or(false)
 }
 
 fn install_sink() {
@@ -343,17 +418,16 @@ impl Runtime {
                 .or_insert(dispatcher);
         }
 
+        let id = NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed);
         let rt = Arc::new_cyclic(|weak| Runtime {
-            id: NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed),
+            id,
             weak: weak.clone(),
             dev,
-            exec: Executor::new(host.clone(), inline),
+            exec: Executor::new(id, host.clone(), inline),
             timers: Timers::new(opts.manual),
-            blocking: if opts.manual {
-                Blocking::Inline
-            } else {
-                Blocking::threaded(pool_size)
-            },
+            // Test runtimes use the real pool too (ADR-023), so a test exercises the rule that a
+            // blocking closure never writes signals and never runs on the core.
+            blocking: Blocking::threaded(pool_size),
             host,
             config,
             schema,
@@ -568,14 +642,22 @@ impl Runtime {
         if level >= self.config.log_level {
             // A panicking `Host::log` must not take the runtime down, and there is nowhere
             // left to report it.
-            let _ = guard::guarded(|| self.host.log(level, target, message));
+            let _ = guard::guarded(|| {
+                let _call = HostCall::enter(self.id);
+                self.host.log(level, target, message);
+            });
         }
     }
 
     /// Runs a host callback under the panic guard: a host that panics is logged and the
     /// runtime carries on.
     fn guard_host<R>(&self, what: &str, f: impl FnOnce() -> R) -> Option<R> {
-        match guard::guarded(f) {
+        let id = self.id;
+        match guard::guarded(move || {
+            // Every host callback is marked, so the host cannot re-enter this runtime from it.
+            let _call = HostCall::enter(id);
+            f()
+        }) {
             Ok(value) => Some(value),
             Err(report) => {
                 self.log_panic(&format!("{what} panicked"), &report);
@@ -620,11 +702,19 @@ impl Runtime {
             .unwrap_or(false)
     }
 
+    /// Whether the calling thread may not enter this runtime: it holds the core lock, or it is
+    /// inside one of this runtime's host callbacks (whichever lock it holds there).
+    fn is_reentrant(&self) -> bool {
+        self.holds_core() || HostCall::active(self.id)
+    }
+
     /// Takes the core lock and makes this runtime current on the thread. Fails, instead of
-    /// deadlocking, when this thread already holds the lock: that is a host callback (or
-    /// user code) calling back into the runtime, which SPEC 5.1 forbids (`E_REENTRANT`).
+    /// deadlocking, when this thread already holds the lock or is inside a host callback of this
+    /// runtime: that is the host (or user code) calling back into the runtime, which SPEC 5.1
+    /// forbids (`E_REENTRANT`). The callback test covers host threads that do *not* hold the
+    /// core lock, such as an off-core commit delivering a change-set (ADR-023).
     pub(crate) fn enter_core(&self) -> Result<CoreGuard<'_>, Reentrant> {
-        if self.holds_core() {
+        if self.is_reentrant() {
             return Err(Reentrant);
         }
         let guard = self.core.lock();
@@ -1214,7 +1304,7 @@ impl Runtime {
     /// are ready, asks the host to call `poll` again ([`Host::schedule`]). This is how wasm
     /// and manually driven runtimes make progress.
     pub fn poll(&self) {
-        if self.holds_core() {
+        if self.is_reentrant() {
             self.reentrant("poll");
             return;
         }
@@ -1229,7 +1319,7 @@ impl Runtime {
     /// waiting for a timer, a port reply or credit stay parked. A task that re-wakes itself
     /// forever makes this run forever.
     pub fn run_pending(&self) -> usize {
-        if self.holds_core() {
+        if self.is_reentrant() {
             self.reentrant("run_pending");
             return 0;
         }
@@ -1784,6 +1874,18 @@ impl Runtime {
     /// Number of live sleepers (tests).
     pub(crate) fn pending_timers(&self) -> usize {
         self.timers.pending()
+    }
+
+    /// Blocking closures queued or running (test runtimes settle these before they report
+    /// that nothing is left to do).
+    pub(crate) fn blocking_in_flight(&self) -> usize {
+        self.blocking.in_flight()
+    }
+
+    /// Waits up to `timeout` for one blocking closure to finish; `false` if none is in flight
+    /// or the time ran out.
+    pub(crate) fn wait_blocking_progress(&self, timeout: Duration) -> bool {
+        self.blocking.wait_for_progress(timeout)
     }
 }
 
