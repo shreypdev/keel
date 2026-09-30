@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,913 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,926 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 833 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -30,10 +30,20 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
+- O(change) keyed-list ops (ADR-027) — `wt/keyed-ops` (bench found diff O(list), 27x miss).
+- No-alloc sync dispatch (ADR-028) — `wt/fast-dispatch` (bench: 60% allocator, 1.3x miss).
 - playground: core + 3 apps + §14 contract scenarios ×3 — `wt/playground` (agent).
 - re-reviews in flight: keel-runtime fixes; adversarial review of keel-ffi.
 
 ## Landed since takeover
+
+- **bench harness merged**: 45 gated ops sharing one workload source with the criterion
+  benches; budgets.toml at 5x quiet-host medians; bench.yml CI gate; RESULTS.md v1 table.
+  Honest misses recorded and now in flight as ADR'd fixes (keyed diff, sync-call allocs).
+  Also surfaced: dropping a Runtime without shutdown() keeps its threads up to ~5 s (the
+  query hydrate task's bounded Kv retry holds a Ctx). All shipped embedders call
+  shutdown(); WeakCtx-based task handles are v1.x debt — document in Runtime docs after
+  the dispatch piece merges.
 
 - **keel-ffi fix round merged** (ADR-026): port-registration refcounting drains in-flight
   callbacks before unregister/shutdown returns (H1 UAF, ASan-verified both ways);
