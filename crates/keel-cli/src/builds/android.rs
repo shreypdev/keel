@@ -70,7 +70,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
 
     let manifest = session.shim_manifest()?;
     let target_dir = session.target_dir();
-    let staging = target_dir.join("keel/android-ndk");
+    let staging = crate::shim::android_stage_dir(&target_dir, &session.project.root);
     remove_dir_all(&staging)?;
 
     let mut cmd = Command::new(&cargo);

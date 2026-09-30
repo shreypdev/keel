@@ -30,5 +30,8 @@ notify = { workspace = true }
 libloading = { workspace = true }
 
 [dev-dependencies]
-# The `keel dev` smoke test speaks to the served core with a raw WebSocket client, as a platform does.
+# The `keel dev` tests speak to the served core with a raw WebSocket client and the wire codec, as
+# a platform runtime does.
 tungstenite = { workspace = true }
+keel-wire = { workspace = true }
+serde_json = { workspace = true }

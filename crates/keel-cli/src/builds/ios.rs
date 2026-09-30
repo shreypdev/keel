@@ -77,7 +77,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     let manifest = session.shim_manifest()?;
     let profile = if release { Profile::Release } else { Profile::Dev };
     let target_dir = session.target_dir();
-    let stage = target_dir.join("keel/ios").join(profile.dir_name());
+    let stage = crate::shim::ios_stage_dir(&target_dir, &session.project.root).join(profile.dir_name());
     let env = vec![(
         "IPHONEOS_DEPLOYMENT_TARGET".to_owned(),
         session.project.config.ios.deployment_target.clone(),

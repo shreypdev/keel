@@ -607,6 +607,7 @@ dependencies = [
  "clap",
  "keel-bindgen",
  "keel-meta",
+ "keel-wire",
  "libloading",
  "notify",
  "serde_json",

@@ -5,14 +5,15 @@
 //! platforms is built from two generated crates instead, so those decisions are made once, here,
 //! and cannot drift between projects:
 //!
-//! * the **shim** (`target/keel/shim`) links the core and `keel-ffi` into one library named
+//! * the **shim** (`target/keel/<project>/shim`) links the core and `keel-ffi` into one library named
 //!   `keel_core` (the name the Kotlin runtime loads), with the release profiles of SPEC 7. It is
 //!   built as a `cdylib` (host, Android, web) or a `staticlib` (iOS);
-//! * the **dev runner** (`target/keel/dev-runner`) links the core, `keel-runtime` and
+//! * the **dev runner** (`target/keel/<project>/dev-runner`) links the core, `keel-runtime` and
 //!   `keel-transport` into an executable that serves the core over a WebSocket (`keel dev`).
 //!
 //! Both are separate workspaces that share the project's target directory, so the core and the
-//! Keel crates compile once. Both depend on the core by path and on Keel from wherever the core
+//! Keel crates compile once; each lives in a directory named for its project, so projects that
+//! share a `CARGO_TARGET_DIR` do not overwrite each other's. Both depend on the core by path and on Keel from wherever the core
 //! gets it, which keeps exactly one copy of `keel-runtime` in the build.
 
 use std::path::{Path, PathBuf};
@@ -28,16 +29,44 @@ const SHIM_LIB: &str = include_str!("../templates/shim/lib.rs");
 const RUNNER_MANIFEST: &str = include_str!("../templates/runner/Cargo.toml");
 const RUNNER_MAIN: &str = include_str!("../templates/runner/main.rs");
 
+/// A directory name unique to the project: its folder name and a hash of its full path. The target
+/// directory can be shared by many projects (`CARGO_TARGET_DIR` set globally), and each needs its
+/// own generated crates: they name *its* core by path.
+#[must_use]
+pub fn project_key(project_root: &Path) -> String {
+    let name: String = project_root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let hash = keel_meta::ids::fnv1a32(&project_root.to_string_lossy());
+    format!("{name}-{hash:08x}")
+}
+
 /// The directory the shim is generated into.
 #[must_use]
-pub fn shim_dir(target_dir: &Path) -> PathBuf {
-    target_dir.join("keel").join("shim")
+pub fn shim_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
+    target_dir.join("keel").join(project_key(project_root)).join("shim")
 }
 
 /// The directory the dev runner is generated into.
 #[must_use]
-pub fn runner_dir(target_dir: &Path) -> PathBuf {
-    target_dir.join("keel").join("dev-runner")
+pub fn runner_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
+    target_dir.join("keel").join(project_key(project_root)).join("dev-runner")
+}
+
+/// The staging directory for Android builds of this project (`cargo ndk -o`).
+#[must_use]
+pub fn android_stage_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
+    target_dir.join("keel").join(project_key(project_root)).join("android-ndk")
+}
+
+/// The staging directory for iOS builds of this project.
+#[must_use]
+pub fn ios_stage_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
+    target_dir.join("keel").join(project_key(project_root)).join("ios")
 }
 
 fn common_vars(core: &CoreInfo) -> Vars {
@@ -79,7 +108,7 @@ fn seed_lockfile(dir: &Path, project_root: &Path) {
 ///
 /// `C0010` when it cannot be written.
 pub fn write_shim(target_dir: &Path, project_root: &Path, core: &CoreInfo, wasm_opt_level: &str) -> Result<PathBuf> {
-    let dir = shim_dir(target_dir);
+    let dir = shim_dir(target_dir, project_root);
     let vars = common_vars(core)
         .with("KEEL_FFI", core.keel.dependency("keel-ffi", &[]))
         .with("WASM_OPT_LEVEL", wasm_opt_level);
@@ -95,7 +124,7 @@ pub fn write_shim(target_dir: &Path, project_root: &Path, core: &CoreInfo, wasm_
 ///
 /// `C0010` when it cannot be written.
 pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> Result<PathBuf> {
-    let dir = runner_dir(target_dir);
+    let dir = runner_dir(target_dir, project_root);
     let ports_dep = if core.links_ports {
         format!("keel-ports = {}", core.keel.dependency("keel-ports", &[]))
     } else {
@@ -158,6 +187,19 @@ mod tests {
     }
 
     #[test]
+    fn projects_sharing_a_target_directory_get_their_own_crates() {
+        let target = Path::new("/shared/target");
+        let a = shim_dir(target, Path::new("/work/app"));
+        let b = shim_dir(target, Path::new("/other/app"));
+        assert_ne!(a, b, "same folder name, different projects");
+        let text = a.to_string_lossy();
+        assert!(text.starts_with("/shared/target/keel/app-") && text.ends_with("/shim"), "{a:?}");
+        assert_eq!(a, shim_dir(target, Path::new("/work/app")), "stable");
+        assert_ne!(runner_dir(target, Path::new("/work/app")), a);
+        assert!(project_key(Path::new("/w/My App!")).starts_with("My_App_-"));
+    }
+
+    #[test]
     fn blocks_are_kept_or_removed_whole() {
         let text = "a\n// @x:begin\nb\n  // @x:begin\nc\n// @x:end\nd\n// @x:end\ne\n";
         assert_eq!(strip_block(text, "x", true), "a\nb\nc\nd\ne\n");
@@ -186,15 +228,15 @@ mod tests {
     fn the_runner_binds_native_ports_only_when_the_core_links_them() {
         let dir = crate::fsutil::unique_temp_dir("runner-gen");
         write_runner(&dir, Path::new("/nonexistent"), &core(false)).unwrap();
-        let without = std::fs::read_to_string(runner_dir(&dir).join("src/main.rs")).unwrap();
-        let manifest = std::fs::read_to_string(runner_dir(&dir).join("Cargo.toml")).unwrap();
+        let without = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("src/main.rs")).unwrap();
+        let manifest = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml")).unwrap();
         assert!(!without.contains("NativeClock") && !without.contains("bind_native_ports"), "{without}");
         assert!(!manifest.contains("keel-ports"), "{manifest}");
         assert!(manifest.contains("keel-transport = { path = \"/src/keel/crates/keel-transport\" }"), "{manifest}");
 
         write_runner(&dir, Path::new("/nonexistent"), &core(true)).unwrap();
-        let with = std::fs::read_to_string(runner_dir(&dir).join("src/main.rs")).unwrap();
-        let manifest = std::fs::read_to_string(runner_dir(&dir).join("Cargo.toml")).unwrap();
+        let with = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("src/main.rs")).unwrap();
+        let manifest = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml")).unwrap();
         assert!(with.contains("bind_native_ports(&runtime)") && with.contains("NativeClock"), "{with}");
         assert!(manifest.contains("keel-ports = { path = \"/src/keel/crates/keel-ports\" }"), "{manifest}");
         assert!(with.contains("collect_schema(\"todo-core\")"), "{with}");
