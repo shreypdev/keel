@@ -680,3 +680,67 @@ fn restore_reentrancy_is_refused_not_deadlocked() {
     assert_eq!(*host.result.lock(), Some(Err(RestoreError::Reentrant)));
     rt.shutdown();
 }
+
+// ----- observe under a self-writing computed (signals re-review R2) -----------------------
+
+/// A store whose computed writes its own input until it reaches 50: `observe` cannot settle
+/// it within its pass cap, so the entries go out capped and the runtime's transaction must
+/// deliver the rest as follow-up change-sets. The host applies everything in order and must
+/// end exactly where the core is.
+#[test]
+fn r2_observe_past_the_pass_cap_converges_through_follow_up_change_sets() {
+    use keel_runtime::StoreObject;
+    use keel_signals::{Computed, Signal, StoreCell};
+
+    struct Chaser {
+        cell: Arc<StoreCell>,
+        n: Signal<i32>,
+        _chase: Computed<i32>,
+    }
+    impl keel_runtime::KeelObject for Chaser {
+        const TYPE_ID: u32 = ids::type_id("Chaser");
+        const NAME: &'static str = "Chaser";
+    }
+    impl StoreObject for Chaser {
+        fn cell(&self) -> &Arc<StoreCell> {
+            &self.cell
+        }
+        fn restore(_ctx: keel_runtime::Ctx, _r: &mut Reader<'_>) -> Result<Self, WireError> {
+            unreachable!("not snapshotted in this test")
+        }
+    }
+
+    let t = TestRuntime::new();
+    let cell = StoreCell::new(<Chaser as keel_runtime::KeelObject>::TYPE_ID);
+    let n = Signal::new(0_i32);
+    let writer = n.clone();
+    let chase = Computed::new((&n,), move |(v,): (&i32,)| {
+        let v = *v;
+        if v < 50 {
+            writer.set(v + 1);
+        }
+        v
+    });
+    cell.attach(&n, 0).unwrap();
+    cell.attach_computed(&chase, 1).unwrap();
+    let handle = t.runtime().insert_store(Arc::new(Chaser {
+        cell,
+        n,
+        _chase: chase,
+    }));
+
+    t.runtime().observe(handle.0, ALL_SIGNALS, true);
+    t.run_pending();
+
+    // Replay every delivery in order; the last value the host holds for signal 0 must be the
+    // core's settled value, however many change-sets it took to get there.
+    let mut host_n = None;
+    for cs in t.host().take_decoded_change_sets() {
+        for e in cs.entries {
+            if e.handle == handle && e.signal_id == 0 {
+                host_n = Some(Reader::new(&e.value).read_i32().unwrap());
+            }
+        }
+    }
+    assert_eq!(host_n, Some(50), "the host converged on the core's value");
+}

@@ -217,3 +217,65 @@ named below). Contract changes are in SPEC 16.1 and ADR-019/019/020 (`.10x/adrs/
 Left as they were: notes N1 to N7. Documented trade-offs: a computed that panics on every evaluation
 holds back its store's change-sets until it recovers (ADR-019); a write to a slot that another thread
 has dirty in an open transaction is absorbed into that transaction (ADR-020).
+
+## Re-review (fix round merged at `5a887de`)
+
+Method: the original scratch repros rebuilt against the merged checkout, plus new probes.
+`keel-signals`, `keel-query`, `keel-runtime`: 634 tests green; clippy clean.
+
+| # | Verdict | Evidence (original repro, re-run) |
+|---|---|---|
+| H1 | CLOSED | Keyed drift: next commit resends a full value, host = core `[(1,99),(2,2),(3,3)]`. Plain: host `a=5, c=5` = core. Failed `observe(ALL)`: `is_observed(0)=false`, no patch to an unbased host. |
+| M1 | CLOSED* | `hits` repro: host 1 = core 1. *Except at the pass cap (R2). |
+| M2 | CLOSED | A held 300 ms inside `deliver` while B commits the same store: arrival `[txn 1, txn 2]`, host = core. Cross-thread absorption remains, now documented in SPEC 16.1. The write checker is debug-only and flags blocking-pool threads only. |
+| M3 | CLOSED | Capped thread exits, then host `x=y=109` = core; watcher effect runs 10/10. |
+| L1 | CLOSED | Catchable panic "computed cycle detected" instead of SIGABRT. |
+| L2 | CLOSED | `observe(7)` does not panic in debug; the runtime's `Observed::record` ignores unknown ids. |
+| L3 | CLOSED | Panics at once (0.01 s) instead of hanging. |
+| L4 | CLOSED | Unobserved `no_coalesce` keyed list sends `[Full, Full]`; no baseline kept. |
+
+Your questions:
+- **(a) Deadlocks:** no crate-internal deadlock. 4 threads × 3000 writes across two stores with
+  cross-reading computeds and sinks that `observe`/`encode_signal` the other store finish in
+  0.07 s under a 20 s watchdog. Only `run_round` takes the delivery lock and commits never nest.
+  One user-level deadlock is new: R1.
+- **(b) Unsent drain vs. concurrent commits:** no regression; the drain runs under the delivery
+  lock. Stress (200 rounds × 2 threads × 400 writes, ~20% of change-sets abandoned by a panicking
+  computed): after a quiescent commit host = core, no out-of-bounds op, txn ids strictly ascend
+  (debug and release).
+- **(c) Observe pass loop:** always terminates (≤ 8 passes); what ships at the cap is R2.
+- **(d) keel-query handles:** no break found. Handle cells hold only plain signals, writes go
+  through `ctx.txn` on the core, and release is serialized with commits by the core lock. A commit
+  after release sees handle 0 and consumes its claims and unsent list; release-mid-fetch wire
+  tests pass.
+
+New findings (all confirmed):
+- **R1 (Low): deadlock under the delivery lock.** Computed closures now run under it. Repro: a
+  computed (id 2) runs `thread::scope(|s| { s.spawn(|| log.set(7)); })` with `log` at id 1 of the
+  same store; `src.set(2)` never returns (3 s watchdog), where it completed before the fix round.
+  SPEC 16.1 states the rule for sinks only; `computed.rs:35` and the `store.rs:537` comment still
+  say closures run with no lock held. Fix: evaluate claimed computeds before taking the lock, or
+  document the rule for closures.
+- **R2 (Low): `observe` ships stale entries at the pass cap.** Writes still pending after pass 8
+  commit at observe's own `TxnGuard` drop, before the runtime delivers the entries
+  (`runtime.rs:1089-1090`). Repro: a computed over `n` doing `if v < 50 { n.set(v + 1) }`;
+  `observe(ALL)` sends 43 change-sets, then entries with `n=7`. Host ends at `n=7`, core `n=50`,
+  stale until the next write. Fix: the runtime holds `keel_signals::txn` across `cell.observe`
+  and `deliver_entries`.
+- **R3 (Note): a computed that keeps panicking blocks its whole store.** ADR-019 accepts this;
+  SPEC 5.5 still says a poisoned store "keeps working". Repro: `divisor=0`, then 5 writes to an
+  unrelated `title` give 5 re-raised panics, 0 change-sets, host `title=0` vs core 5 (before the
+  fix round: 5 deliveries). Fix: catch per slot and keep only the failing one unsent.
+
+Verdict: every original finding is closed and nothing new is above Low. R2 is a one-line runtime
+change and should land with v1; R1 and R3 are a doc fix or a v1.x refinement.
+
+## Integrator resolution of the re-review (same day)
+
+* **R2 fixed**: `Runtime::observe` holds `keel_signals::txn` across entry building *and*
+  delivery, so pass-cap leftovers commit as follow-up change-sets after the entries; the host
+  converges. Regression: `keel-runtime/tests/signals.rs::r2_observe_past_the_pass_cap_converges_through_follow_up_change_sets`.
+* **R1 documented**: `Computed`'s docs now state the closure runs under its store's delivery
+  lock during a commit and must not wait on another thread writing the same store (ADR-020).
+* **R3 documented**: SPEC §5.5 now matches ADR-019 (a panicking computed holds back its
+  store's deliveries loudly; per-signal isolation is a v1.x refinement).

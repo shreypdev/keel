@@ -1086,8 +1086,17 @@ impl Runtime {
         self.objects
             .with_observed(handle, |o| o.record(signal_id, on, signal_count));
         let mut entries = Writer::new();
-        match guard::guarded(|| cell.observe(signal_id, on, &mut entries)) {
-            Ok(count) => self.deliver_entries(&entries, count),
+        // The transaction outlives the delivery: writes made by computed closures during
+        // `observe` that do not settle within its pass cap commit after the entries went out,
+        // so the host converges on the core's values instead of keeping the capped snapshot
+        // (signals re-review R2).
+        match guard::guarded(|| {
+            keel_signals::txn(|| {
+                let count = cell.observe(signal_id, on, &mut entries);
+                self.deliver_entries(&entries, count);
+            })
+        }) {
+            Ok(()) => {}
             Err(report) => self.note_panic("observe", handle, &report),
         }
     }
