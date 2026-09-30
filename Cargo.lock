@@ -193,6 +193,7 @@ dependencies = [
 name = "keel-ports"
 version = "0.1.0"
 dependencies = [
+ "keel-bindgen",
  "keel-macros",
  "keel-meta",
  "keel-runtime",

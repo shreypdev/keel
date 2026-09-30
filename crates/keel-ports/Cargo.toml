@@ -20,3 +20,5 @@ parking_lot = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+# Only to prove the standard schema generates Swift, Kotlin and TypeScript (tests/schema.rs).
+keel-bindgen = { workspace = true }
