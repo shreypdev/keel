@@ -215,9 +215,9 @@ final class PlaygroundTourTests: XCTestCase {
 
     func testTabBarSwitchesScreens() {
         let app = launch(tab: "todos")
-        for (label, marker) in [("Counter", "counter-value"), ("10k list", "biglist-count"), ("Remote", "remote-status"), ("Todos", "remaining")] {
-            app.tabBars.buttons[label].tap()
-            wait(for: app.staticTexts[marker], "the \(label) screen")
+        for (id, marker) in [("counter", "counter-value"), ("biglist", "biglist-count"), ("remote", "remote-status"), ("todos", "remaining")] {
+            app.tabBars.buttons["tab-\(id)"].tap()
+            wait(for: app.staticTexts[marker], "the \(id) screen")
         }
     }
 }

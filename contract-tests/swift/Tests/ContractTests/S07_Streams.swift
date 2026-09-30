@@ -21,7 +21,7 @@ extension ContractScenarios {
             // read `KeelCore.stream`, which is what the generated method wraps.
             var iterator = self.rawTicks(core, probe, count: 1000).makeAsyncIterator()
             for expected in 0 ..< 5 {
-                let item = try await iterator.next()
+                let item = try await iterator.next().map(ContractScenarios.tick)
                 try checkEqual(item, UInt32(expected), "item \(expected) of the first five")
             }
 
@@ -32,7 +32,7 @@ extension ContractScenarios {
 
             // 3. Resume: the other 995 arrive in order, the stream ends, and all 1,000 were produced.
             var next: UInt32 = 5
-            while let item = try await iterator.next() {
+            while let item = try await iterator.next().map(ContractScenarios.tick) {
                 try checkEqual(item, next, "the item after \(next - 1)")
                 next += 1
             }
@@ -69,19 +69,17 @@ extension ContractScenarios {
         }
     }
 
-    /// `Probe.ticks(count:)` as the runtime offers it: a pull-based stream of 4-byte items.
-    private func rawTicks(_ core: KeelCore, _ probe: Probe, count: UInt32) -> AsyncThrowingStream<UInt32, any Error> {
-        let source = core.stream(
+    /// `Probe.ticks(count:)` as the runtime offers it: a pull-based stream of encoded items.
+    private func rawTicks(_ core: KeelCore, _ probe: Probe, count: UInt32) -> AsyncThrowingStream<[UInt8], any Error> {
+        return core.stream(
             .objectMethod(handle: probe.handle, methodId: KeelIds.Objects.Probe.ticks),
             method: KeelIds.Objects.Probe.ticks,
             args: encoded { (w: inout KeelWriter) in w.writeU32(count) }
         )
-        var bytes = source.makeAsyncIterator()
-        return AsyncThrowingStream<UInt32, any Error>(unfolding: {
-            guard let item = try await bytes.next() else {
-                return nil
-            }
-            return try UInt32.keelDecoded(from: item)
-        })
+    }
+
+    /// One item of a `ticks` stream.
+    private nonisolated static func tick(_ item: [UInt8]) throws -> UInt32 {
+        return try UInt32.keelDecoded(from: item)
     }
 }
