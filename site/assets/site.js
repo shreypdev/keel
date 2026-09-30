@@ -149,6 +149,8 @@
   /* ---------- reveals, stat bars, count-up ---------- */
   function fmt(v, dec) { return dec ? v.toFixed(dec) : String(Math.round(v)); }
   function countUp(el) {
+    if (el.getAttribute("data-counted")) return;
+    el.setAttribute("data-counted", "1");
     var target = parseFloat(el.getAttribute("data-count")), dec = parseInt(el.getAttribute("data-dec") || "0", 10);
     if (reduce || isNaN(target)) { el.textContent = el.getAttribute("data-final") || fmt(target, dec); return; }
     var start = null, dur = 900;
@@ -160,19 +162,28 @@
     });
   }
   var targets = $$(".reveal, [data-bar], [data-count]");
+  function reveal(el) {
+    el.classList.add("in");
+    if (el.hasAttribute("data-count")) countUp(el);
+    $$("[data-count]", el).forEach(countUp);
+  }
   if ("IntersectionObserver" in window && targets.length) {
+    // What is already on screen is revealed before the hidden state applies, so nothing flickers.
+    var vh = window.innerHeight, pending = [];
+    targets.forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      if (r.top < vh * 0.92 && r.bottom > 0) reveal(el); else pending.push(el);
+    });
+    root.classList.add("reveal-ready");
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (en) {
         if (!en.isIntersecting) return;
-        var el = en.target; io.unobserve(el);
-        el.classList.add("in");
-        if (el.hasAttribute("data-count")) countUp(el);
-        $$("[data-count]", el).forEach(countUp);
+        io.unobserve(en.target); reveal(en.target);
       });
     }, { rootMargin: "0px 0px -8% 0px", threshold: 0.12 });
-    targets.forEach(function (el) { io.observe(el); });
+    pending.forEach(function (el) { io.observe(el); });
   } else {
-    targets.forEach(function (el) { el.classList.add("in"); });
+    targets.forEach(reveal);
   }
 
   /* ---------- docs: mark the current section in the on-this-page list ---------- */
