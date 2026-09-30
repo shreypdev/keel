@@ -268,4 +268,4 @@ td code { white-space: nowrap; }
 
 /* no-JS: the theme toggle cannot work, so it is not shown */
 html:not(.js) [data-theme-toggle] { display: none; }
-:not(pre) > code.wrap { white-space: break-spaces; overflow-wrap: anywhere; }
+:not(pre) > code.cw { white-space: break-spaces; overflow-wrap: anywhere; }

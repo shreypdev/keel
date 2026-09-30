@@ -74,7 +74,7 @@ let open = self.todos.with(|list| list.iter().filter(|t| !t.done).count());</cod
 });
 let remaining = Computed::new(&amp;todos, |todos| todos.iter().filter(|t| !t.done).count() as u32);</code></pre></div>
 <p>Inputs are <code>&amp;Signal&lt;A&gt;</code> or <code>&amp;Computed&lt;A&gt;</code>, or a tuple of up to six of them, and the closure receives references. A computed is recomputed in the core, in dependency order, and <strong>pushed in the same change-set as the write that caused it</strong>. The UI never derives anything itself, so it cannot disagree with the core about, say, how many items are left.</p>
-<p>Because a store with computeds cannot be rebuilt from its plain signals automatically, you name a function that assembles it: <code class="wrap">#[keel::store(restore = "Self::assemble")]</code>. The macro tells you when you forget (<code>E0013</code>).</p>
+<p>Because a store with computeds cannot be rebuilt from its plain signals automatically, you name a function that assembles it: <code class="cw">#[keel::store(restore = "Self::assemble")]</code>. The macro tells you when you forget (<code>E0013</code>).</p>
 <h2 id="transactions">Transactions<a class="anchor" href="#transactions" aria-label="Link to this section">#</a></h2>
 <p>When several signals change together, group the writes. Everything inside <code>ctx.txn</code> commits as one transaction, so observers see one consistent change-set and never a half-applied state. The playground's counter changes two signals and derives a third:</p>
 <div class="code"><div class="code-bar"><span>core/src/counter.rs</span></div><pre><code data-lang="rust">pub fn add(&amp;self, amount: i32) {

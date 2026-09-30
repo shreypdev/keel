@@ -96,7 +96,7 @@ http.respond_sequence("https://x.test/a", [Err(HttpError::Timeout), Err(HttpErro
 http.respond("https://x.test/a", HttpResponse::new(200, b"ok".to_vec()));</code></pre></div>
 <p>Pair it with <code>FakeClock</code> to advance time and <code>ScriptedConnectivity</code> to go offline. <a href="ports.html">Ports &amp; adapters</a> lists them all.</p>
 <h2 id="see-it-run">See it run<a class="anchor" href="#see-it-run" aria-label="Link to this section">#</a></h2>
-<p>The playground's <strong>Remote</strong> tab on every platform is this page in motion: a cached query, optimistic adds that roll back when the server refuses, and an <strong>Offline</strong> switch that queues writes and replays them on reconnect. Its source is <a href="https://github.com/shreypdev/keel/blob/main/examples/playground/core/src/remote.rs" rel="noopener"><code class="wrap">examples/playground/core/src/remote.rs</code></a>.</p>
+<p>The playground's <strong>Remote</strong> tab on every platform is this page in motion: a cached query, optimistic adds that roll back when the server refuses, and an <strong>Offline</strong> switch that queues writes and replays them on reconnect. Its source is <a href="https://github.com/shreypdev/keel/blob/main/examples/playground/core/src/remote.rs" rel="noopener"><code class="cw">examples/playground/core/src/remote.rs</code></a>.</p>
 
 <nav class="pager" aria-label="Previous and next">
     <a class="prev" href="concepts.html"><span>Previous</span><b>Core concepts</b></a>
