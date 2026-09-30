@@ -42,6 +42,29 @@ the "Landed" notes below and .10x/reviews resolutions.
 
 ## Landed since takeover
 
+- **cdylib schema/JNI dead-strip fixed** (ADR-029, `wt/schema-strip`): on a clean macOS dev
+  build `keel build --platform host` produced a `libkeel_core.dylib` that reported the empty
+  schema `0x98754cbea76a32b2` and exported no JNI symbols — the app core's `inventory`
+  registrations and keel-ffi's `#[no_mangle]` JNI exports (both in dependency rlibs, linked with
+  rustc's `--start-lib` lazy semantics) were dead-stripped, because incremental compilation (the
+  dev default, and worst of all a polluting incremental core rlib left by a plain `cargo build`) is
+  the trigger. `keel bindgen`'s dlopen path read empty and the Kotlin contract column failed
+  (`UnsatisfiedLinkError` / S16 schema mismatch); Swift hid it (its test binary references keel
+  symbols), ELF (Linux/Android `.so`) is unaffected, release and iOS (`-force_load`) hid it because
+  they are non-incremental. Fix: the shim's `[profile.dev]` is `incremental = false`, and `keel
+  build` compiles the **host** library in a target directory of its own
+  (`<target>/keel/<project>/host-lib`) with `CARGO_INCREMENTAL=0` — so it never reuses a
+  stripping-prone incremental rlib a plain `cargo build`/`cargo test` left in the shared target
+  (decision 6). Only the host library needs the private dir (Android is ELF, iOS is `-force_load`ed).
+  Verified robust across the clean / `cargo build` / `cargo test --workspace` / inherited-
+  `CARGO_INCREMENTAL=1` matrix (fat LTO, `codegen-units=1`, and `incremental=false` alone each failed
+  part of it). Clean verification: host cdylib reads `0x0f95cc4a…` + JNI present, `keel bindgen
+  --docs --check` green, contract-tests 51/51 on all three columns, wasm + workspace (2,109) green;
+  host build ~5 s clean / <1 s cached. Regression: `crates/keel-cli/tests/schema_retention.rs`
+  (gated, in CI on Linux + macOS). The pre-existing v1.x item "`keel_schema_json` full-JSON variant"
+  is unrelated (docs in the dlopen path), and the flaky load-sensitive
+  `keel-transport::lifecycle::a_chatty_client_is_never_pinged` is unchanged by this work.
+
 - **fast-dispatch merged** (ADR-028): a per-thread reply slot (no unsafe, no ABI change)
   makes call_sync allocation-free on the hot path — 73.8 -> 43.9 ns (31.5 ns via the new
   call_sync_with), C ABI 79.3 -> 49.8 ns; replies byte-identical under a counting

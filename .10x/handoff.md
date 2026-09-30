@@ -7,7 +7,14 @@ definition it meets. `main` can fast-forward to this branch.
 For whoever picks this up next:
 1. Read status.md (the "Landed since takeover" ledger is the project history) and the
    four review files under .10x/reviews/ — every re-review verdict is recorded there.
-2. ADRs 018–028 cover every decision made since the takeover.
+2. ADRs 018–029 cover every decision made since the takeover. ADR-029 (branch
+   `wt/schema-strip`) fixes a macOS dead-strip: the loaded host cdylib lost its schema `inventory`
+   registrations and keel-ffi's JNI exports (both in dependency rlibs, linked lazily by rustc's
+   `--start-lib`, dropped when built incrementally). The shim's `[profile.dev]` is now
+   `incremental = false` and `keel build` compiles the host library in a target directory of its own
+   (`<target>/keel/<project>/host-lib`) with `CARGO_INCREMENTAL=0`, so it never reuses a
+   stripping-prone rlib a plain `cargo build`/`cargo test` left in the shared target. Guarded by
+   `crates/keel-cli/tests/schema_retention.rs` and the contract suite.
 3. The v1.x queue, in rough priority: device-measured bench rows (run the playground
    Bench hooks on an iPhone + Android device + Chromium and fill bench/RESULTS.md's
    device section); macros diagnostic polish (query-in-impl, split-impl follow-ons,

@@ -86,3 +86,37 @@ tungstenite, keel-wire. No `toml` crate: `keel.toml` uses the small reader in `t
    `<project>/target`. The shim's `Cargo.lock` is seeded from the project's lock file or that workspace's, so the
    shim resolves the versions the workspace was tested with (no index update). The playground no longer builds
    a second 1.4 GB dependency tree in `examples/playground/target`.
+
+## The loadable cdylib is non-incremental (ADR-029)
+
+`keel build --platform host`/`--platform android` and `keel bindgen`'s dlopen path produce/consume a
+cdylib that is *loaded* with no link-time reference to it. On a clean **macOS** dev build the app
+core's `inventory` registrations (the whole schema) and keel-ffi's `#[no_mangle]` JNI exports
+(`JNI_OnLoad`, `Java_dev_keel_runtime_KeelNative_*`) were dead-stripped: they live in dependency
+rlibs, rustc links rlibs with `--start-lib` (lazy) semantics, and incremental compilation (the dev
+default) partitions them into codegen units nothing references. `keel_schema_hash` then returned the
+empty-schema hash `0x98754cbea76a32b2` (bindings, stamped from the dev runner at the real
+`0x0f95cc4a…`, disagreed with it → contract S16 mismatch) and `System.loadLibrary` failed with
+`UnsatisfiedLinkError` (contract Kotlin column). Swift hid it (its test binary links the dylib and
+references keel symbols, retaining them); ELF (Linux/Android `.so`) keeps them regardless; the iOS
+staticlib is the same class, already fixed with `-force_load` (builds/ios.rs); release hid it (it is
+already non-incremental + LTO).
+
+Fix (ADR-029): the shim's `[profile.dev]` is `incremental = false`, and `keel build` compiles the
+**host** library in a target directory of its own (`crate::shim::host_lib_target_dir` =
+`<target>/keel/<project>/host-lib`) with `CARGO_INCREMENTAL=0`. Non-incremental keeps the objects
+(an incremental build partitions the dependency rlibs into codegen units the macOS `--start-lib`
+linker drops); the private directory stops `keel build` reusing a stripping-prone incremental rlib
+that a plain `cargo build`/`cargo test` left in the shared target (decision 6). Only the host library
+needs the private dir — Android `.so` is ELF (symbols kept) and iOS is `-force_load`ed, so both keep
+sharing the target. Chosen over the tries that were not robust across the clean / `cargo build` /
+`cargo test --workspace` / inherited-`CARGO_INCREMENTAL=1` matrix: `incremental = false` alone (cargo
+reused the polluting rlib), `codegen-units = 1` (a `cargo test --workspace`-polluted target still
+stripped), fat LTO (`failed to get bitcode ...` in a shared target with non-bitcode rlibs),
+`-force_load`/`-all_load` (defeated by `--start-lib`), a `#[used]` anchor (cannot name the anonymous
+statics). Cost: the host library's deps compile once in its own dir (~5 s clean, <1 s cached), a
+second copy of the Keel crates scoped to the host library. `keel dev` is unaffected (dev *runner*,
+an executable, in the shared target). Regression: `crates/keel-cli/tests/schema_retention.rs` (gated
+`#[ignore]`, in CI on Linux + macOS) builds the playground through the real `keel` binary and asserts
+the loaded `libkeel_core` has the full schema and exports `JNI_OnLoad` + the `KeelNative` natives;
+the three-column contract suite is the end-to-end acceptance.
