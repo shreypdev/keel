@@ -135,7 +135,7 @@ pub struct QueryDef { pub name: String, pub query_id: u32, pub kind: QueryKind /
 
 ### 2.3 Canonical JSON and the hash
 
-Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**. `schema_hash = fnv1a64(canonical_bytes)`. `keel-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or field order in source (records keep declaration order for wire layout, so record field order *is* part of the hash; only the top-level lists are sorted).
+Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**. `schema_hash = fnv1a64(canonical_bytes)`. `keel-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or source order of *unordered* things. Ordered (part of the wire layout, kept in declaration order): record fields, variant fields, params, signals (signal_id), variants (index). Unordered (sorted by name in canonical form): the six top-level lists, object methods and constructors, port methods. `crate_name` and `keel_version` are labels and are **excluded** from the canonical form (they do not change the wire).
 
 ### 2.4 Registration (`inventory`)
 
@@ -166,7 +166,7 @@ Little-endian throughout. No alignment, no padding. All lengths are `u32`. Encod
 | `bool` | `u8` 0/1; decoder rejects other values |
 | `i8..i64`, `u8..u64` | fixed width, two's complement, LE |
 | `f32`, `f64` | IEEE 754 LE bits |
-| `Unit` | nothing |
+| `Unit` | nothing. `Unit` is legal only as a return type or a variant with no fields; `Vec<Unit>`, `Option<Unit>` and `Map<_, Unit>` are rejected (E0001) because zero-width items defeat length validation. |
 | `String` | `u32` byte length + UTF-8 bytes (decoder validates UTF-8) |
 | `Bytes` | `u32` length + raw bytes |
 | `Option<T>` | `u8` tag 0 = None, 1 = Some + `T` |
@@ -227,7 +227,7 @@ method_id  u32   (type_id for target 2 identifies the object type; method_id sel
 call_id    u32
 args       encoded params in declaration order
 ```
-For target 2 the layout is `target u8, type_id u32, method_id u32, call_id u32, args`.
+For target 2 the layout is `target u8, type_id u32, method_id u32, call_id u32, args` (no handle field). For target 0 the handle field is present and written as 0; decoders ignore its value.
 For target 3: `target u8, handle u64, offset u32, limit u32, call_id u32`.
 
 ### 3.4 Reply payload
@@ -257,7 +257,7 @@ Ordering guarantee: change-sets are delivered in commit order; a change-set is n
 ### 3.6 Port call and reply
 
 PortCall payload: `port_id u32, method_id u32, port_call_id u32, args` (params in order).
-PortReply payload: `port_call_id u32, status u8 (0 ok, 1 error, 2 unavailable), body` where the body is the port method's return value (`Result<T,E>` collapses into status 0/1 like §3.4).
+PortReply payload: `port_call_id u32, status u8 (0 ok, 1 error, 2 unavailable), body` where the body is the port method's return value (`Result<T,E>` collapses into status 0/1 like §3.4). Status 2 carries an empty body.
 
 ### 3.7 StreamItem payload
 
@@ -280,7 +280,7 @@ ops    count × { op u8, ... }
    3 Move    { from u32, to u32 }
    4 Clear   { }
 ```
-Ops are applied sequentially to the host's current list; indices refer to the list state after the previous op. The core computes patches by key equality and full-item encoded equality; a change that removes more than 50% of items or has no key overlap is sent as `op = 0` (full value) instead.
+Ops are applied sequentially to the host's current list; indices refer to the list state after the previous op. `Move` means remove the item at `from`, then insert it so that it ends at index `to` (both indices valid in the list before the op). A host that hits an out-of-bounds op treats the signal as desynchronised and re-observes it. The core computes patches by key equality and full-item encoded equality; a change that removes more than 50% of items or has no key overlap is sent as `op = 0` (full value) instead.
 
 ### 3.9 Rust API
 
@@ -289,7 +289,8 @@ pub struct Writer { buf: Vec<u8> }              // write_u8 .. write_f64, write_
 pub struct Reader<'a> { buf: &'a [u8], pos: usize } // read_* mirrors; read_str returns &'a str; read_bytes returns &'a [u8]; remaining(); finish() -> Result<(), WireError> (errors if trailing bytes)
 pub trait Encode { fn encode(&self, w: &mut Writer); }
 pub trait Decode: Sized { fn decode(r: &mut Reader<'_>) -> Result<Self, WireError>; }
-pub enum WireError { UnexpectedEof { needed: usize, at: usize }, InvalidUtf8 { at: usize }, InvalidTag { tag: u32, at: usize, ty: &'static str }, LengthTooLarge { len: u32, at: usize }, TrailingBytes { count: usize }, BadMagic, UnsupportedVersion(u16), SchemaMismatch { expected: u64, got: u64 } }
+pub enum WireError { UnexpectedEof { needed: usize /* bytes the failing read asked for */, at: usize }, InvalidUtf8 { at: usize /* offset of the string body */ }, InvalidTag { tag: u32, at: usize, ty: &'static str }, LengthTooLarge { len: u32, at: usize }, TrailingBytes { count: usize }, BadMagic, UnsupportedVersion(u16), SchemaMismatch { expected: u64, got: u64 }, DuplicateKey { at: usize }, NegativeDuration { at: usize }, NestingTooDeep { at: usize } }
+// TS additionally has `unsafe_integer` (a u64/i64 read as `number` outside the safe range); Kotlin additionally has `PatchOutOfBounds`. Decoders reject counts that cannot fit in the remaining bytes (using each item's minimum encoded length; 1 for unknown types).
 pub struct Envelope<'a> { pub kind: Kind, pub seq: u32, pub schema: u64, pub payload: &'a [u8] }  // parse(&[u8]) / write(&mut Writer, ..)
 ```
 `Encode`/`Decode` are implemented for all primitives, `String`, `Vec<u8>` (as Bytes via newtype `Bytes(pub Vec<u8>)`), `Option<T>`, `Vec<T>`, `HashMap<K,V>`/`BTreeMap`, `Duration`, `Timestamp`, `Uuid`, `Result<T,E>`, tuples up to 4, and `()`.
@@ -728,3 +729,182 @@ Schema extraction: `keel-cli` builds the core for the host as a cdylib, `dlopen`
 * No `println!`; use the `Log` port through `keel_runtime::log!`.
 * Determinism: no `std::time::SystemTime::now()`, `Instant::now()`, `rand`, or threads spawned outside `keel-runtime`; Clock/Rng/Timer ports only (Constitution R12). The one exception is the native default `Timer`/`Clock` binding inside `keel-runtime`, gated behind `cfg(not(target_family = "wasm"))`.
 * Commit messages: `type(scope): summary` — `feat`, `fix`, `test`, `docs`, `bench`, `state`, `chore`.
+
+---
+
+## 16. Internal Rust contracts (between keel-signals, keel-runtime, keel-macros)
+
+These are the exact names the macros emit and the runtime consumes. Change them only together.
+
+### 16.1 keel-signals
+
+```rust
+pub struct StoreCell { .. }                      // one per store instance; Send + Sync
+impl StoreCell {
+    pub fn new(type_id: u32) -> Arc<StoreCell>;
+    pub fn attach<T: SignalValue>(self: &Arc<Self>, signal: &Signal<T>, signal_id: u32, key: Option<KeyFn<T>>);  // binds a field; called by generated code once per field in declaration order
+    pub fn attach_computed<T: SignalValue>(self: &Arc<Self>, computed: &Computed<T>, signal_id: u32);
+    pub fn set_handle(&self, handle: u64);       // called by the runtime when the store enters the object table
+    pub fn handle(&self) -> u64;
+    pub fn type_id(&self) -> u32;
+    pub fn observe(&self, signal_id: u32 /* or ALL_SIGNALS */, on: bool, out: &mut keel_wire::Writer) -> u32; // appends ChangeSet entries (current values) for newly observed signals; returns entry count
+    pub fn encode_signal(&self, signal_id: u32, out: &mut keel_wire::Writer) -> bool; // full value
+    pub fn encode_snapshot(&self, out: &mut keel_wire::Writer);   // §5.9 store body (non-computed signals)
+    pub fn signal_count(&self) -> u32;
+}
+pub type KeyFn<T> = fn(&<T as ListLike>::Item) -> u64;   // keyed lists: key hashed to u64 by generated code (fnv1a64 of the encoded key)
+pub trait SignalValue: keel_wire::Encode + Clone + Send + Sync + 'static {}
+impl<T: keel_wire::Encode + Clone + Send + Sync + 'static> SignalValue for T {}
+
+pub struct Signal<T>;      // Clone = same signal
+impl<T: SignalValue> Signal<T> {
+    pub fn new(value: T) -> Signal<T>;
+    pub fn get(&self) -> T;                       // clone
+    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
+    pub fn set(&self, value: T);                  // implicit transaction if none is open
+    pub fn update(&self, f: impl FnOnce(&mut T));
+}
+pub struct Computed<T>;
+impl<T: SignalValue> Computed<T> {
+    pub fn new<D: Deps>(deps: D, f: impl Fn(D::Values<'_>) -> T + Send + Sync + 'static) -> Computed<T>;  // Deps implemented for (&Signal<A>,), (&Signal<A>, &Signal<B>), … up to 6 and for &Computed<A>
+    pub fn get(&self) -> T;                       // recomputes lazily when dirty
+    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
+}
+pub struct Effect;                                // Effect::new(deps, f) runs f after each commit that dirtied a dep; dropped = cancelled
+pub fn txn<R>(f: impl FnOnce() -> R) -> R;        // batch; nested calls join the outer transaction
+pub trait ChangeSink: Send + Sync { fn deliver(&self, change_set: &[u8]); }
+pub fn set_sink(sink: Arc<dyn ChangeSink>);      // installed by the runtime; a global, one per process (wasm: one per instance)
+pub fn next_txn_id() -> u64;
+```
+Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries for observed dirty signals (keyed lists as patches when `diff` returns `Some`, else full); one `ChangeSet` payload per store per transaction is acceptable in v1 (spec §3.5 "never split" applies per store); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery.
+
+### 16.2 keel-runtime
+
+```rust
+pub struct Runtime;                                 // one per process/instance; Runtime::global() after init
+pub struct RuntimeConfig { platform: String, mode: String, core_threads: u8, blocking_threads: u8, log_level: u8 }  // #[keel::api]-free hand-written Encode/Decode
+pub trait Host: Send + Sync + 'static {            // implemented by keel-ffi, the wasm shell and the transport server
+    fn reply(&self, call_id: u32, payload: &[u8]);
+    fn change_set(&self, payload: &[u8]);
+    fn stream_item(&self, call_id: u32, payload: &[u8]);
+    fn port_call(&self, port_id: u32, method_id: u32, port_call_id: u32, args: &[u8]) -> PortCallOutcome;  // Sync(Vec<u8> reply payload) | Async | Unavailable
+    fn log(&self, level: u8, target: &str, message: &str);
+    fn schedule(&self) {}                           // wasm: ask the host to call poll() soon
+    fn timer_set(&self, timer_id: u32, delay_ms: u64) -> bool { false } // true if the host owns timers (wasm)
+}
+impl Runtime {
+    pub fn init(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError>;   // builds executor, object table, port table, installs the change sink, hydrates the query client
+    pub fn global() -> Option<Arc<Runtime>>;
+    pub fn shutdown(&self);
+    pub fn call(&self, payload: &[u8]) -> u32;            // §3.3; 0 accepted / 5 bad request; replies through Host::reply
+    pub fn call_sync(&self, payload: &[u8]) -> Vec<u8>;   // §3.4 reply payload
+    pub fn cancel(&self, call_id: u32);
+    pub fn stream_credit(&self, call_id: u32, credit: u32);
+    pub fn observe(&self, handle: u64, signal_id: u32, on: bool);   // delivers the initial change-set synchronously through Host::change_set
+    pub fn release(&self, handle: u64);
+    pub fn port_reply(&self, payload: &[u8]);
+    pub fn event(&self, port_id: u32, method_id: u32, payload: &[u8]);
+    pub fn timer_fired(&self, timer_id: u32);
+    pub fn poll(&self);                                   // drive the executor (wasm and tests)
+    pub fn snapshot(&self) -> Vec<u8>;
+    pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;
+    pub fn stats_json(&self) -> String;
+    pub fn schema(&self) -> &keel_meta::Schema; pub fn schema_hash(&self) -> u64;
+    pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn core::any::Any + Send + Sync>); // Rust-side port binding (fakes, built-ins)
+    pub fn ctx(&self) -> Ctx;
+}
+pub struct Ctx(..);   // §5.3; `Ctx::current()` reads a thread-local set by dispatch and by the executor while polling a task
+pub enum DispatchResult { Sync(Result<Vec<u8>, Vec<u8>>), Async(Pin<Box<dyn Future<Output = Result<Vec<u8>, Vec<u8>>> + Send>>), Stream(Pin<Box<dyn futures_core::Stream<Item = Result<Vec<u8>, Vec<u8>>> + Send>>), Unknown }
+// Generated dispatchers receive `&dyn Any` that downcasts to `&Runtime` and return `DispatchOutcome(Box::new(DispatchResult::..))`.
+pub trait KeelObject: Send + Sync + 'static { const TYPE_ID: u32; const NAME: &'static str; }
+pub trait StoreObject: KeelObject { fn cell(&self) -> &Arc<keel_signals::StoreCell>; fn restore(ctx: Ctx, r: &mut keel_wire::Reader<'_>) -> Result<Self, keel_wire::WireError> where Self: Sized; }
+pub trait Port: Send + Sync + 'static { const PORT_ID: u32; const NAME: &'static str; const KIND: keel_meta::PortKind; }
+pub struct PortFuture;    // Future<Output = Result<Vec<u8>, PortError>>; created by Runtime::port_call(port_id, method_id, args: Vec<u8>)
+pub fn port_call_sync(rt: &Runtime, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
+pub enum PortError { Unavailable, Cancelled, Decode(keel_wire::WireError), Failed(Vec<u8> /* encoded E */) }
+pub struct Events;        // ctx.events().subscribe(port_id, method_id, Box<dyn Fn(&[u8]) + Send + Sync>) -> Subscription
+pub mod object_table;     // Handle issue/lookup/release, generation-tagged slab
+pub mod log { pub fn log(level: u8, target: &str, msg: &str); }  macro_rules! keel_log! (info!/warn!/error!/debug! helpers)
+pub mod executor;         // spawn(fut) -> TaskId, spawn_blocking, sleep(Duration) (via Timer port), cancel(TaskId)
+pub mod testing { pub struct TestRuntime; }  // in-process runtime with fake host: captures replies/change-sets, `run_until(fut)`, `run_pending()`, `advance(Duration)`; used by keel-ports/keel-query/macro tests
+```
+`keel-runtime` re-exports `keel_signals`, `keel_wire`, `keel_meta` so generated code can use `::keel::runtime::…` paths. The `keel` facade re-exports `keel_runtime as runtime`, `keel_signals as signals`, `keel_wire as wire`, `keel_meta as meta`, `keel_ports as ports`, `keel_query as query`, the macros, and `prelude::*` = `{Signal, Computed, Effect, Ctx, Bytes, Uuid, Timestamp, Duration, txn}` plus the macros.
+
+### 16.3 What the macros emit (paths)
+
+Generated code uses absolute paths through the facade: `::keel::wire::{Encode, Decode, Writer, Reader, WireError}`, `::keel::meta::{inventory, Registration, RecordMeta, …, ids}`, `::keel::runtime::{Runtime, DispatchResult, DispatchCall, KeelObject, StoreObject, Port, Ctx}`, `::keel::signals::{Signal, Computed, StoreCell}`. A `#[keel(crate = "path")]` attribute overrides the root (for keel-ports and tests inside the workspace, which use `::keel_runtime` directly).
+
+---
+
+## 17. Platform runtime base API (what generated code depends on)
+
+Generated code calls only these names. Runtimes implement them; bindgen golden files pin the usage.
+
+### 17.1 TypeScript (`@keel/runtime`)
+
+```ts
+export class KeelCore {
+  static load(opts: LoadOptions): Promise<KeelCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint }
+  static get shared(): KeelCore;                               // set by the first load; throws if none
+  callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw KeelModeError
+  call(target: CallTarget, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;   // resolves with reply body (status ok) or rejects with KeelReplyError { status, body }
+  stream(target: CallTarget, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;   // handles credit
+  construct(typeId: number, methodId: number, args: Uint8Array): Promise<bigint>;     // returns handle
+  observe(handle: bigint, signalId: number, on: boolean): void;
+  release(handle: bigint): void;
+  mirror: Mirror;      // mirror.register(handle, applyFn: (signalId, op, value: Uint8Array) => void); mirror.unregister(handle)
+  registerPort(portId: number, impl: PortImpl): void;          // PortImpl = { methods: Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>, sync: boolean }
+  stats(): Promise<KeelStats>;
+}
+export abstract class KeelObject { protected constructor(core: KeelCore, handle: bigint); readonly core; readonly handle; close(): void; [Symbol.dispose](): void }
+export abstract class KeelStore extends KeelObject { protected _signals: Signal<unknown>[]; protected _apply(signalId: number, op: ChangeOp, value: Uint8Array): void /* implemented by generated code */; }
+export class Signal<T> { get(): T; peek(): T; subscribe(fn: (v: T) => void): () => void; /* internal */ _set(v: T): void }
+export class KeelError extends Error { readonly kind: string }
+export class KeelReplyError extends KeelError { status: ReplyStatus; body: Uint8Array }
+export interface KeelPort {}
+```
+Ports: generated port interfaces are plain TS interfaces; `core.registerPort(id, generatedAdapter(impl))` wraps an implementation with codecs (bindgen emits the adapter).
+
+### 17.2 Kotlin (`dev.keel.runtime`)
+
+```kotlin
+class KeelCore private constructor(...) {
+  companion object { fun load(options: LoadOptions): KeelCore; val shared: KeelCore }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong)
+  fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray            // reply body or throws KeelReplyException
+  suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray         // cancellable
+  fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>
+  fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long                        // sync in INPROC
+  fun observe(handle: Long, signalId: UInt, on: Boolean); fun release(handle: Long)
+  val mirror: Mirror                                                                        // register(handle) { signalId, op, reader -> }
+  fun registerPort(portId: UInt, impl: PortImpl)
+  fun stats(): KeelStats
+}
+abstract class KeelObject(val core: KeelCore, val handle: Long) : AutoCloseable
+abstract class KeelStore(core: KeelCore, handle: Long) : KeelObject(core, handle) { protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: KeelReader); protected fun <T> signal(initial: T): MutableStateFlow<T> }
+open class KeelException(message: String) : RuntimeException(message)
+class KeelReplyException(val status: ReplyStatus, val body: ByteArray) : KeelException(..)
+interface KeelPort
+```
+Main-thread delivery through `KeelDispatchers.main` (Android: `Dispatchers.Main.immediate`; JVM: a single-thread executor).
+
+### 17.3 Swift (`KeelRuntime`)
+
+```swift
+public final class KeelCore: @unchecked Sendable {
+  public static func load(_ options: LoadOptions) throws -> KeelCore     // .inproc(adapters:) | .remote(url:adapters:), expectedSchemaHash
+  public static var shared: KeelCore { get }
+  public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]
+  public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8]   // cancellation-aware
+  public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], Error>
+  public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> KeelHandle
+  public func observe(_ handle: KeelHandle, signal: UInt32, on: Bool); public func release(_ handle: KeelHandle)
+  public let mirror: Mirror        // register(handle) { @MainActor (signalId, op, reader) in … }
+  public func registerPort(_ id: UInt32, _ impl: PortImpl)
+  public func stats() -> KeelStats
+}
+open class KeelObject: @unchecked Sendable { public init(core: KeelCore, handle: KeelHandle); public func close() }
+@MainActor open class KeelStore: KeelObject { open func apply(signal: UInt32, op: ChangeOp, reader: inout KeelReader) }   // generated subclass is @Observable
+public struct KeelReplyError: Error { public let status: ReplyStatus; public let body: [UInt8] }
+public protocol KeelRecord: KeelCodec, Sendable, Hashable {}; public protocol KeelEnum: KeelCodec, Sendable, Hashable {}; public protocol KeelError: KeelCodec, Error, Sendable, Hashable {}; public protocol KeelPort {}
+```
+Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, …) to avoid clashing with generated port protocols.
