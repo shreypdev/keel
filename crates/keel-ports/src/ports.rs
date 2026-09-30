@@ -28,47 +28,38 @@ use keel_wire::Bytes;
 
 use crate::records::{AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind};
 
-/// Wall-clock and monotonic time.
-///
-/// The core never reads the system clock itself (CLAUDE.md R12); it asks this port. Tests bind
-/// a [`FakeClock`](crate::fakes::FakeClock).
+/// Wall-clock and monotonic time. The core asks this port instead of reading the system clock.
 #[keel_macros::port(sync)]
 #[keel(crate = "crate::root")]
 pub trait Clock {
-    /// Milliseconds since the Unix epoch (`Timestamp` resolution).
+    /// Milliseconds since the Unix epoch.
     fn now_ms(&self) -> i64;
     /// A monotonic counter in nanoseconds. Only differences between two readings mean anything.
     fn monotonic_ns(&self) -> u64;
 }
 
-/// A source of random bytes.
-///
-/// Platforms answer from a cryptographically secure generator; tests bind a
-/// [`SeededRng`](crate::fakes::SeededRng).
+/// A source of random bytes. Answer from a cryptographically secure generator.
 #[keel_macros::port(sync)]
 #[keel(crate = "crate::root")]
 pub trait Rng {
-    /// `len` random bytes.
+    /// Returns `len` random bytes.
     fn fill(&self, len: u32) -> Bytes;
 }
 
 /// Where the core's log records go.
-///
-/// `level` is 0 trace, 1 debug, 2 info, 3 warn, 4 error, 5 fatal (the constants in
-/// `keel_runtime::log`).
 #[keel_macros::port(sync)]
 #[keel(crate = "crate::root")]
 pub trait Log {
-    /// Records one line.
+    /// Records one line. `level` is 0 trace, 1 debug, 2 info, 3 warn, 4 error, 5 fatal.
     fn log(&self, level: u8, target: String, message: String);
 }
 
-/// HTTP requests, served by `URLSession`, OkHttp, `fetch`, ...
+/// Performs HTTP requests.
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait Http {
     /// Performs `req`. Any status is a response; only failures before a response exists are an
-    /// [`HttpError`].
+    /// `HttpError`.
     async fn request(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>;
 }
 
@@ -86,7 +77,7 @@ pub trait Kv {
     async fn list(&self, prefix: String) -> Vec<String>;
 }
 
-/// A key-value store for secrets (Keychain, Keystore, ...). Same methods as [`Kv`], its own id.
+/// A key-value store for secrets. Same methods as `Kv`, under its own port id.
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait SecureStore {
@@ -115,9 +106,8 @@ pub trait Fs {
 }
 
 /// Arms timers. Fire-and-forget: the platform later reports `TimerFired(timer_id)` to the
-/// runtime, which completes the matching sleep.
-///
-/// Timer ids are allocated by the runtime; a platform never invents one.
+/// runtime, which completes the matching sleep. Timer ids are allocated by the runtime; a
+/// platform never invents one.
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait Timer {
@@ -125,15 +115,15 @@ pub trait Timer {
     fn set(&self, timer_id: u32, delay_ms: u64);
 }
 
-/// Connectivity changes, pushed by the platform (host to core).
+/// Connectivity changes, pushed by the platform to the core.
 #[keel_macros::port(event)]
 #[keel(crate = "crate::root")]
 pub trait Connectivity {
-    /// The device went `online` or offline, on network `kind`.
+    /// The device went online or offline, on a network of kind `kind`.
     fn changed(&self, online: bool, kind: NetKind);
 }
 
-/// App lifecycle changes, pushed by the platform (host to core).
+/// App lifecycle changes, pushed by the platform to the core.
 #[keel_macros::port(event)]
 #[keel(crate = "crate::root")]
 pub trait Lifecycle {

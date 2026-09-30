@@ -19,10 +19,9 @@ use core::fmt;
 
 use keel_wire::Bytes;
 
-/// The method of an [`HttpRequest`].
-///
-/// SPEC 8 names this type without listing its variants; the three platform runtimes number
-/// them in the order below, so this declaration order is the wire contract.
+/// The method of an `HttpRequest`.
+// SPEC 8 names this type without listing its variants; the three platform runtimes number
+// them in the order below, so this declaration order is the wire contract.
 #[keel_macros::api]
 #[keel(crate = "crate::root")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -86,17 +85,6 @@ impl Header {
 }
 
 /// An HTTP request the core asks the platform to perform.
-///
-/// ```
-/// use keel_ports::{HttpMethod, HttpRequest};
-///
-/// let request = HttpRequest::new(HttpMethod::Post, "https://example.com/todos")
-///     .with_header("content-type", "application/json")
-///     .with_body(br#"{"title":"milk"}"#.to_vec())
-///     .with_timeout_ms(5_000);
-/// assert_eq!(request.method, HttpMethod::Post);
-/// assert_eq!(request.timeout_ms, Some(5_000));
-/// ```
 #[keel_macros::api]
 #[keel(crate = "crate::root")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -109,12 +97,23 @@ pub struct HttpRequest {
     pub headers: Vec<Header>,
     /// The request body, if any.
     pub body: Option<Bytes>,
-    /// The timeout of the whole request in milliseconds; `None` leaves it to the platform.
+    /// The timeout of the whole request in milliseconds; absent leaves it to the platform.
     pub timeout_ms: Option<u32>,
 }
 
 impl HttpRequest {
     /// A request with no headers, no body and no timeout.
+    ///
+    /// ```
+    /// use keel_ports::{HttpMethod, HttpRequest};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Post, "https://example.com/todos")
+    ///     .with_header("content-type", "application/json")
+    ///     .with_body(br#"{"title":"milk"}"#.to_vec())
+    ///     .with_timeout_ms(5_000);
+    /// assert_eq!(request.method, HttpMethod::Post);
+    /// assert_eq!(request.timeout_ms, Some(5_000));
+    /// ```
     pub fn new(method: HttpMethod, url: impl Into<String>) -> HttpRequest {
         HttpRequest {
             method,
@@ -163,15 +162,7 @@ impl HttpRequest {
 }
 
 /// An HTTP response. Any status, including 4xx and 5xx, is a response; only failures before a
-/// response exists are an [`HttpError`].
-///
-/// ```
-/// use keel_ports::HttpResponse;
-///
-/// let response = HttpResponse::new(200, b"ok".to_vec()).with_header("Content-Type", "text/plain");
-/// assert!(response.is_success());
-/// assert_eq!(response.header("content-type"), Some("text/plain"));
-/// ```
+/// response exists are an `HttpError`.
 #[keel_macros::api]
 #[keel(crate = "crate::root")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -186,6 +177,14 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     /// A response with `status`, no headers and `body`.
+    ///
+    /// ```
+    /// use keel_ports::HttpResponse;
+    ///
+    /// let response = HttpResponse::new(200, b"ok".to_vec()).with_header("Content-Type", "text/plain");
+    /// assert!(response.is_success());
+    /// assert_eq!(response.header("content-type"), Some("text/plain"));
+    /// ```
     pub fn new(status: u16, body: impl Into<Bytes>) -> HttpResponse {
         HttpResponse {
             status,
@@ -276,10 +275,9 @@ pub enum NetKind {
 }
 
 /// Where the app is in its lifecycle.
-///
-/// SPEC 8 lists the type as `Active, Inactive, Background` (its trait comment lists
-/// `Active | Background | Inactive`); the platform runtimes and this crate follow the type
-/// definition.
+// SPEC 8 lists the type as `Active, Inactive, Background` (its trait comment lists
+// `Active | Background | Inactive`); the platform runtimes and this crate follow the type
+// definition.
 #[keel_macros::api]
 #[keel(crate = "crate::root")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
