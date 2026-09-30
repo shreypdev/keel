@@ -26,9 +26,12 @@ use serde::{Deserialize, Serialize};
 /// );
 /// ```
 ///
-/// `Result` and `Stream` are only legal in return position and `Lazy` only as
-/// a store signal type; [`Schema::validate`](crate::Schema::validate) enforces
-/// this, the type itself does not.
+/// `Result` and `Stream` are only legal in return position, `Lazy` only as a
+/// store signal type, and `Unit` only as a return type or as a variant with no
+/// fields (never inside `Option`, `Vec`, map values or `Lazy`, and never as a
+/// field, parameter or signal type).
+/// [`Schema::validate`](crate::Schema::validate) enforces this, the type
+/// itself does not.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "of", rename_all = "snake_case")]
 pub enum TypeRef {

@@ -2,26 +2,55 @@
 //! (SPEC §2.3).
 //!
 //! * [`Schema::to_json_pretty`] and [`Schema::from_json`] are the
-//!   human-facing exchange format (`schema.json`, `keel_schema_json`). Docs are
-//!   included when present.
-//! * [`Schema::canonical_json`] is the form the hash is computed over: docs
-//!   stripped, the six top-level lists sorted by name, enum variants sorted by
-//!   index, no whitespace, struct fields in declaration order.
+//!   human-facing exchange format (`schema.json`, `keel_schema_json`). They
+//!   carry everything, including the `keel_version` and `crate_name` labels and
+//!   docs when present.
+//! * [`Schema::canonical_json`] is the form the hash is computed over. It
+//!   contains only the six top-level lists (`records`, `enums`, `objects`,
+//!   `functions`, `ports`, `queries`), with docs stripped, no whitespace and
+//!   struct fields in declaration order. `keel_version` and `crate_name` are
+//!   labels: they do not change the wire, so they are excluded.
 //! * [`Schema::hash`] is `fnv1a64` of the canonical bytes.
 //!
-//! What is deliberately *not* normalised, because it is significant on the
-//! wire or to generated code: record and variant field order, parameter order,
-//! signal order (a `signal_id` is its index), and the order of methods and
-//! constructors within an object or port.
+//! # What is sorted and what is not
+//!
+//! *Unordered* things are sorted by name so that source order never changes the
+//! hash: the six top-level lists, the `constructors` and `methods` of an
+//! object, and the `methods` of a port. Enum variants are sorted by `index`.
+//!
+//! *Ordered* things are part of the wire layout and keep their declared order:
+//! record fields, variant fields, parameters and signals (a `signal_id` is its
+//! index).
+
+use serde::Serialize;
 
 use crate::ids::fnv1a64;
-use crate::{Schema, VariantDef};
+use crate::{EnumDef, FunctionDef, ObjectDef, PortDef, QueryDef, RecordDef, Schema, VariantDef};
+
+/// The value the canonical JSON is serialized from: the schema without its
+/// labels. Field order here is the key order of the canonical JSON.
+#[derive(Serialize)]
+struct Canonical<'a> {
+    records: &'a [RecordDef],
+    enums: &'a [EnumDef],
+    objects: &'a [ObjectDef],
+    functions: &'a [FunctionDef],
+    ports: &'a [PortDef],
+    queries: &'a [QueryDef],
+}
 
 impl Schema {
     /// The canonical JSON the schema hash is computed over (SPEC §2.3).
     ///
     /// Two schemas with the same public surface produce identical output
-    /// regardless of doc comments or of the order of top-level items.
+    /// regardless of doc comments, of the `crate_name` and `keel_version`
+    /// labels (which are omitted), or of the source order of unordered items:
+    /// the six top-level lists, object constructors and methods, and port
+    /// methods are sorted by name and enum variants by index, while record and
+    /// variant fields, parameters and signals keep their declared order.
+    ///
+    /// The result is not a full [`Schema`] document and cannot be read back
+    /// with [`Schema::from_json`]; it exists to be hashed and compared.
     ///
     /// ```
     /// use keel_meta::Schema;
@@ -29,12 +58,20 @@ impl Schema {
     /// let schema = Schema::new("demo");
     /// assert_eq!(
     ///     schema.canonical_json(),
-    ///     r#"{"keel_version":"1.0.0","crate_name":"demo","records":[],"enums":[],"objects":[],"functions":[],"ports":[],"queries":[]}"#
+    ///     r#"{"records":[],"enums":[],"objects":[],"functions":[],"ports":[],"queries":[]}"#
     /// );
     /// ```
     #[must_use]
     pub fn canonical_json(&self) -> String {
-        let canonical = self.canonicalized();
+        let s = self.canonicalized();
+        let canonical = Canonical {
+            records: &s.records,
+            enums: &s.enums,
+            objects: &s.objects,
+            functions: &s.functions,
+            ports: &s.ports,
+            queries: &s.queries,
+        };
         // Serializing these types cannot fail: they contain only strings,
         // integers, booleans, options and sequences, and the writer is an
         // in-memory `String`.
@@ -43,20 +80,22 @@ impl Schema {
 
     /// The schema hash: `fnv1a64(canonical_json())` (SPEC §1.1).
     ///
+    /// The `crate_name` and `keel_version` labels do not contribute:
+    ///
     /// ```
     /// use keel_meta::Schema;
     ///
     /// let a = Schema::new("demo");
-    /// let b = Schema::new("other");
-    /// assert_eq!(a.hash(), Schema::new("demo").hash());
-    /// assert_ne!(a.hash(), b.hash());
+    /// let b = Schema::new("renamed");
+    /// assert_eq!(a.hash(), b.hash());
     /// ```
     #[must_use]
     pub fn hash(&self) -> u64 {
         fnv1a64(self.canonical_json().as_bytes())
     }
 
-    /// Pretty-printed JSON, with docs, for humans and `schema.json` files.
+    /// Pretty-printed JSON, with labels and docs, for humans and `schema.json`
+    /// files.
     ///
     /// The output is *not* canonical; use [`Schema::canonical_json`] for
     /// hashing and comparisons.
@@ -66,11 +105,13 @@ impl Schema {
         serde_json::to_string_pretty(self).expect("schema types always serialize to JSON")
     }
 
-    /// Parses a schema from JSON (canonical or pretty).
+    /// Parses a schema from JSON as produced by [`Schema::to_json_pretty`]
+    /// (or `serde_json::to_string` on a [`Schema`]).
     ///
     /// Missing `docs` become empty strings. Unknown fields are ignored.
     /// This only checks the JSON shape; call [`Schema::validate`] for the
-    /// semantic rules.
+    /// semantic rules. The canonical form omits the labels and is not
+    /// accepted.
     ///
     /// # Errors
     ///
@@ -90,8 +131,8 @@ impl Schema {
         serde_json::from_str(json)
     }
 
-    /// A doc-stripped, sorted clone: the value the canonical JSON is
-    /// serialized from.
+    /// A doc-stripped clone with every unordered list sorted: the value the
+    /// canonical JSON is serialized from.
     fn canonicalized(&self) -> Schema {
         let mut s = self.clone();
 
@@ -117,6 +158,8 @@ impl Schema {
             {
                 method.docs.clear();
             }
+            object.constructors.sort_by(|a, b| a.name.cmp(&b.name));
+            object.methods.sort_by(|a, b| a.name.cmp(&b.name));
         }
         for function in &mut s.functions {
             function.docs.clear();
@@ -126,6 +169,7 @@ impl Schema {
             for method in &mut port.methods {
                 method.docs.clear();
             }
+            port.methods.sort_by(|a, b| a.name.cmp(&b.name));
         }
 
         s.records.sort_by(|a, b| a.name.cmp(&b.name));
@@ -157,20 +201,23 @@ mod tests {
     fn json_round_trip_of_representative_schema() {
         let schema = representative_schema();
         let pretty = schema.to_json_pretty();
-        assert_eq!(Schema::from_json(&pretty).unwrap(), schema);
-        let canonical = schema.canonical_json();
-        // The canonical form has no docs, so it round-trips to the doc-less
-        // schema, and its own canonical form is a fixed point.
-        let back = Schema::from_json(&canonical).unwrap();
-        assert_eq!(back.canonical_json(), canonical);
+        let back = Schema::from_json(&pretty).unwrap();
+        assert_eq!(back, schema);
+        assert_eq!(back.canonical_json(), schema.canonical_json());
+        assert_eq!(back.hash(), schema.hash());
+        // The compact serde form round-trips too.
+        let compact = serde_json::to_string(&schema).unwrap();
+        assert_eq!(Schema::from_json(&compact).unwrap(), schema);
     }
 
     #[test]
-    fn round_trip_preserves_docs_in_pretty_json() {
+    fn round_trip_preserves_docs_and_labels_in_pretty_json() {
         let schema = with_docs(representative_schema());
         let back = Schema::from_json(&schema.to_json_pretty()).unwrap();
         assert_eq!(back, schema);
         assert!(back.records[0].docs.contains("todo"));
+        assert_eq!(back.crate_name, "playground-core");
+        assert_eq!(back.keel_version, crate::KEEL_VERSION);
     }
 
     #[test]
@@ -195,13 +242,102 @@ mod tests {
     }
 
     #[test]
-    fn canonical_json_is_compact_and_docs_free() {
+    fn canonical_json_is_compact_docs_free_and_label_free() {
         let canonical = with_docs(representative_schema()).canonical_json();
         assert!(!canonical.contains("docs"));
         assert!(!canonical.contains('\n'));
         assert!(!canonical.contains(": "));
         assert!(!canonical.contains(", "));
         assert!(!canonical.contains("todo item"));
+        assert!(!canonical.contains("keel_version"));
+        assert!(!canonical.contains("crate_name"));
+        assert!(!canonical.contains("playground-core"));
+        assert!(canonical.starts_with(r#"{"records":["#), "{canonical}");
+    }
+
+    #[test]
+    fn canonical_json_has_exactly_the_six_lists_in_order() {
+        let value: serde_json::Value =
+            serde_json::from_str(&representative_schema().canonical_json()).unwrap();
+        let keys: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut sorted_keys = keys.clone();
+        sorted_keys.sort_unstable();
+        assert_eq!(
+            sorted_keys,
+            [
+                "enums",
+                "functions",
+                "objects",
+                "ports",
+                "queries",
+                "records"
+            ]
+        );
+        // serde_json without `preserve_order` sorts object keys on parse, so
+        // check the textual order too.
+        let text = representative_schema().canonical_json();
+        let positions: Vec<usize> = [
+            "records",
+            "enums",
+            "objects",
+            "functions",
+            "ports",
+            "queries",
+        ]
+        .iter()
+        .map(|k| text.find(&format!(r#""{k}":["#)).unwrap())
+        .collect();
+        assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+    }
+
+    #[test]
+    fn canonical_json_sorts_unordered_lists_and_keeps_ordered_ones() {
+        let value: serde_json::Value =
+            serde_json::from_str(&representative_schema().canonical_json()).unwrap();
+        let names = |v: &serde_json::Value| -> Vec<String> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x["name"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        // Top-level lists are name-sorted.
+        assert_eq!(
+            names(&value["records"]),
+            ["HttpRequest", "HttpResponse", "Page", "Todo"]
+        );
+        assert_eq!(names(&value["queries"]), ["add_todo", "todos"]);
+        // Object methods and constructors are name-sorted...
+        let calc = &value["objects"][0];
+        assert_eq!(calc["name"], "Calculator");
+        assert_eq!(
+            names(&calc["methods"]),
+            ["add", "fetch", "reset", "ticks", "watch"]
+        );
+        let store = &value["objects"][1];
+        assert_eq!(names(&store["constructors"]), ["new", "open"]);
+        // ...as are port methods.
+        let clock = value["ports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == "Clock")
+            .unwrap();
+        assert_eq!(names(&clock["methods"]), ["monotonic_ns", "now_ms"]);
+        // Ordered lists keep declaration order: params, signals, record fields.
+        let add = &calc["methods"][0];
+        assert_eq!(names(&add["params"]), ["a", "b"]);
+        assert_eq!(
+            names(&store["store"]["signals"]),
+            ["todos", "filter", "remaining", "archive", "selected"]
+        );
+        let todo = &value["records"][3];
+        assert_eq!(names(&todo["fields"])[..3], ["id", "title", "done"]);
     }
 
     #[test]
@@ -229,7 +365,7 @@ mod tests {
         assert_eq!(
             schema.canonical_json(),
             concat!(
-                r#"{"keel_version":"1.0.0","crate_name":"golden","records":["#,
+                r#"{"records":["#,
                 r#"{"name":"Todo","type_id":7,"fields":["#,
                 r#"{"name":"id","ty":{"kind":"uuid"},"default":false},"#,
                 r#"{"name":"tags","ty":{"kind":"map","of":[{"kind":"string"},"#,
@@ -254,7 +390,7 @@ mod tests {
         // changed: that is a breaking change (CLAUDE.md R7) and needs an ADR.
         // The value was cross-checked with an independent FNV-1a
         // implementation over the canonical JSON bytes.
-        assert_eq!(representative_schema().hash(), 0xc4d7_de51_1114_3c8a);
+        assert_eq!(representative_schema().hash(), 0xd5b8_c3a3_afbd_bc33);
     }
 
     #[test]
@@ -263,6 +399,24 @@ mod tests {
             representative_schema().hash(),
             with_docs(representative_schema()).hash()
         );
+    }
+
+    #[test]
+    fn hash_ignores_the_crate_name_and_keel_version_labels() {
+        let base = representative_schema();
+        let mut renamed = base.clone();
+        renamed.crate_name = "some-other-crate".into();
+        assert_eq!(base.hash(), renamed.hash());
+        assert_eq!(base.canonical_json(), renamed.canonical_json());
+
+        let mut reversioned = base.clone();
+        reversioned.keel_version = "1.2.3".into();
+        assert_eq!(base.hash(), reversioned.hash());
+        assert_eq!(base.canonical_json(), reversioned.canonical_json());
+
+        // The labels still travel in the exchange format.
+        assert_ne!(base.to_json_pretty(), renamed.to_json_pretty());
+        assert_ne!(base, renamed);
     }
 
     #[test]
@@ -278,6 +432,26 @@ mod tests {
         assert_ne!(base, shuffled, "the fixture must have >1 item per list");
         assert_eq!(base.hash(), shuffled.hash());
         assert_eq!(base.canonical_json(), shuffled.canonical_json());
+    }
+
+    #[test]
+    fn hash_ignores_method_constructor_and_port_method_order() {
+        let base = representative_schema();
+        let mut reordered = base.clone();
+        let mut touched = 0;
+        for object in &mut reordered.objects {
+            object.methods.reverse();
+            object.constructors.reverse();
+            touched += usize::from(object.methods.len() > 1 || object.constructors.len() > 1);
+        }
+        for port in &mut reordered.ports {
+            port.methods.reverse();
+            touched += usize::from(port.methods.len() > 1);
+        }
+        assert!(touched >= 3, "the fixture must have reorderable lists");
+        assert_ne!(base, reordered);
+        assert_eq!(base.canonical_json(), reordered.canonical_json());
+        assert_eq!(base.hash(), reordered.hash());
     }
 
     #[test]
@@ -311,14 +485,46 @@ mod tests {
     }
 
     #[test]
+    fn hash_changes_on_variant_field_param_and_signal_order() {
+        let base = representative_schema();
+
+        let mut variant_fields = base.clone();
+        let shape = variant_fields
+            .enums
+            .iter_mut()
+            .find(|e| e.name == "Shape")
+            .unwrap();
+        let rect = shape
+            .variants
+            .iter_mut()
+            .find(|v| v.name == "Rect")
+            .unwrap();
+        rect.fields.swap(0, 1);
+        assert_ne!(base.hash(), variant_fields.hash(), "variant field order");
+
+        let mut params = base.clone();
+        let add = params.objects[0]
+            .methods
+            .iter_mut()
+            .find(|m| m.name == "add")
+            .unwrap();
+        add.params.swap(0, 1);
+        assert_ne!(base.hash(), params.hash(), "param order");
+
+        let mut signals = base.clone();
+        let store = signals
+            .objects
+            .iter_mut()
+            .find_map(|o| o.store.as_mut())
+            .unwrap();
+        store.signals.swap(0, 1);
+        assert_ne!(base.hash(), signals.hash(), "signal order");
+    }
+
+    #[test]
     fn hash_changes_on_any_wire_relevant_edit() {
         let base = representative_schema();
         let edits: Vec<Edit> = vec![
-            ("crate name", Box::new(|s| s.crate_name.push('x'))),
-            (
-                "keel version",
-                Box::new(|s| s.keel_version = "1.0.1".into()),
-            ),
             (
                 "field type",
                 Box::new(|s| s.records[0].fields[0].ty = TypeRef::I64),
@@ -337,6 +543,10 @@ mod tests {
             (
                 "method async flag",
                 Box::new(|s| s.objects[0].methods[0].is_async ^= true),
+            ),
+            (
+                "method rename",
+                Box::new(|s| s.objects[0].methods[0].name.push('2')),
             ),
             (
                 "method param order",
@@ -381,6 +591,12 @@ mod tests {
         ] {
             assert!(Schema::from_json(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn from_json_does_not_accept_the_label_free_canonical_form() {
+        let canonical = representative_schema().canonical_json();
+        assert!(Schema::from_json(&canonical).is_err());
     }
 
     #[test]
@@ -438,17 +654,23 @@ mod tests {
         });
         let back = Schema::from_json(&schema.to_json_pretty()).unwrap();
         assert_eq!(back, schema);
-        let from_canonical = Schema::from_json(&schema.canonical_json()).unwrap();
-        assert_eq!(from_canonical.hash(), schema.hash());
+        assert_eq!(back.hash(), schema.hash());
+        // The canonical form is valid JSON and keeps the escapes intact.
+        let value: serde_json::Value = serde_json::from_str(&schema.canonical_json()).unwrap();
+        assert_eq!(
+            value["records"][0]["fields"][0]["name"],
+            "na\u{00ef}ve \"quoted\"\n"
+        );
     }
 
     #[test]
-    fn empty_schema_hash_is_stable_across_calls() {
+    fn empty_schema_canonical_form_and_hash_are_stable() {
         let schema = Schema::new("");
         assert_eq!(schema.hash(), schema.hash());
+        assert_eq!(schema.hash(), Schema::new("anything").hash());
         assert_eq!(
             schema.canonical_json(),
-            r#"{"keel_version":"1.0.0","crate_name":"","records":[],"enums":[],"objects":[],"functions":[],"ports":[],"queries":[]}"#
+            r#"{"records":[],"enums":[],"objects":[],"functions":[],"ports":[],"queries":[]}"#
         );
     }
 }
