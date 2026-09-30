@@ -16,10 +16,16 @@
 //!
 //! * `impl Port for dyn Trait` (`PORT_ID`, `NAME`, `KIND`);
 //! * `pub struct <Trait>Proxy(Ctx)` implementing the trait by encoding the arguments and calling
-//!   `ctx.port_call(..).await` / `ctx.port_call_sync(..)`; `PortError::Failed(bytes)` is decoded
-//!   into the method's `E`. A port that is unavailable, or a reply that cannot be decoded, is a
-//!   bug in the host binding and panics with a message naming the port and method (the runtime
-//!   turns panics at the dispatch boundary into typed replies);
+//!   `ctx.port_call(..).await` / `ctx.port_call_sync(..)`. A port is allowed to be unavailable
+//!   (SPEC 6.3: a port nobody registered answers "unavailable"), so the proxy never panics where
+//!   the method has an error channel: for a method returning `Result<T, E>`, `PortError::Failed`
+//!   carries the encoded `E` and every other outcome (unavailable, cancelled, a reply that does
+//!   not decode) becomes `E::from(PortError)`, which `E: From<PortError>` provides (E0033 when
+//!   it does not). A method without an error channel has no typed way to say "unavailable": it
+//!   panics with a message that names the port and method and says how to bind one (E0062, a
+//!   runtime message; the runtime contains the panic at the dispatch boundary, and on wasm it
+//!   traps the core). The generated locals are prefixed `__keel_`, so no parameter name can
+//!   collide with them;
 //! * `pub fn <trait_snake>(ctx: &Ctx) -> Arc<dyn Trait>`: the Rust binding if one is bound
 //!   (fakes, built-ins), else the proxy;
 //! * `pub fn __keel_port_dispatch_<Trait>(imp: &Arc<dyn Trait>, method_id, args) -> PortDispatch`
@@ -39,10 +45,12 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{FnArg, ItemImpl, ItemTrait, Pat, ReturnType, TraitItem, Type};
 
-use super::attrs::{Site, docs, parse_args, root_arg, take};
+use super::attrs::{Site, docs, flag, parse_args, root_arg, take};
+use super::check::{Checks, on_unimplemented};
 use super::common::{check_generics, derived, item_root, param_meta, submit};
-use super::diag::{Diag, Errors, code};
+use super::diag::{DOCS_BASE, Diag, Errors, code};
 use super::naming::{fnv1a32, snake_case, unraw};
+use super::object::arg_local;
 use super::paths::Root;
 use super::types::{Allow, KType, Pos, map_return, map_type, ty_string};
 
@@ -121,6 +129,7 @@ fn port_param_error(err: super::types::TyErr, method: &str, param: &str) -> syn:
 fn analyze_method(
     method: &mut syn::TraitItemFn,
     requested: Requested,
+    checks: &mut Checks,
     errors: &mut Errors,
 ) -> Option<PortMethod> {
     take(&mut method.attrs, Site::NOTHING, errors);
@@ -215,6 +224,10 @@ fn analyze_method(
             KType::Unit
         }
     };
+    for p in &params {
+        checks.ty(&p.ty, &p.kty);
+    }
+    checks.ret(&method.sig.output, &ret);
     if matches!(ret, KType::Stream(_))
         || matches!(&ret, KType::Result(ok_ty, _) if matches!(**ok_ty, KType::Stream(_)))
     {
@@ -287,10 +300,11 @@ pub(crate) fn expand_trait(
     let vis = item.vis.clone();
 
     let mut methods: Vec<PortMethod> = Vec::new();
+    let mut checks = Checks::new();
     for trait_item in &mut item.items {
         match trait_item {
             TraitItem::Fn(method) => {
-                if let Some(model) = analyze_method(method, requested, &mut errors) {
+                if let Some(model) = analyze_method(method, requested, &mut checks, &mut errors) {
                     methods.push(model);
                 }
             }
@@ -410,11 +424,13 @@ pub(crate) fn expand_trait(
     } else {
         call_helpers(&root, &vis, &name, &name_str, &snake, &methods)
     };
+    let checks = checks.emit(&root);
     Ok(quote! {
         #item
         #port_impl
         #meta_item
         #extras
+        #checks
     })
 }
 
@@ -432,7 +448,7 @@ fn call_helpers(
     let wire = root.wire();
     let derived = derived();
     let proxy = format_ident!("{}Proxy", name_str);
-    let accessor = format_ident!("{}", snake);
+    let accessor = ident_or_raw(snake);
     let dispatch_fn = format_ident!("__keel_port_dispatch_{}", name_str);
     let erased_fn = format_ident!("__keel_port_dispatch_erased_{}", name_str);
     let proxy_doc = format!(
@@ -446,6 +462,9 @@ fn call_helpers(
     );
 
     // --- proxy methods ---------------------------------------------------------------------
+    let port_error_trait = format_ident!("__KeelPortError_{}", name_str);
+    let failure_fn = format_ident!("__keel_port_failure_{}", name_str);
+    let needs_error_trait = methods.iter().any(|m| matches!(m.ret, KType::Result(..)));
     let proxy_methods = methods.iter().map(|m| {
         let sig = &m.sig;
         let mname = &m.name;
@@ -453,93 +472,206 @@ fn call_helpers(
         let method_id = quote!(#meta::ids::port_method_id(#name_str, #mname));
         let encodes = m.params.iter().map(|p| {
             let ident = &p.ident;
-            quote_spanned!(p.ty.span()=> #wire::Encode::encode(&#ident, &mut __w);)
+            quote_spanned!(p.ty.span()=> #wire::Encode::encode(&#ident, &mut __keel_w);)
         });
-        let failed = quote! {
-            ::core::panic!(
-                "keel: port call `{}.{}` failed: {:?}",
-                #name_str,
-                #mname,
-                __error,
-            )
-        };
+        // What a method with no error channel does with an outcome it cannot return: a
+        // contained panic whose message says how to fix it (E0062).
+        let failed = quote!(#failure_fn(#mname, __keel_error));
         let undecodable = |ty: &Type| {
             quote_spanned! {ty.span()=>
-                match <#ty as #wire::Decode>::decode_exact(&__bytes) {
-                    ::core::result::Result::Ok(__value) => __value,
-                    ::core::result::Result::Err(__error) => ::core::panic!(
-                        "keel: port `{}.{}` replied with a value that does not decode: {:?}",
-                        #name_str,
+                match <#ty as #wire::Decode>::decode_exact(&__keel_bytes) {
+                    ::core::result::Result::Ok(__keel_value) => __keel_value,
+                    ::core::result::Result::Err(__keel_error) => #failure_fn(
                         #mname,
-                        __error,
+                        #runtime::PortError::Decode(__keel_error),
                     ),
                 }
             }
         };
         let (ok_ty, err_ty) = result_types(&m.sig.output, m.is_async);
         let reply = match (&m.ret, ok_ty, err_ty) {
+            // A method with an error channel turns every outcome into a value: the encoded `E`
+            // the adapter reported, or `E::from(PortError)` for an unavailable port, a
+            // cancelled call or a reply that does not decode.
             (KType::Result(ok, _), ok_ty, Some(err_ty)) => {
-                let ok_value = if ok.is_unit() {
-                    quote!(::core::result::Result::Ok(()))
-                } else {
-                    let decode = undecodable(&ok_ty.expect("result has an ok type"));
-                    quote!(::core::result::Result::Ok(#decode))
+                let to_err = quote_spanned! {err_ty.span()=>
+                    fn __keel_port_error(__keel_e: #runtime::PortError) -> #err_ty {
+                        <#err_ty as #port_error_trait>::__keel_from_port_error(__keel_e)
+                    }
                 };
-                let err_decode = undecodable(&err_ty);
-                quote! {
-                    match __reply {
-                        ::core::result::Result::Ok(__bytes) => #ok_value,
-                        ::core::result::Result::Err(#runtime::PortError::Failed(__bytes)) => {
-                            ::core::result::Result::Err(#err_decode)
+                let ok_arm = if ok.is_unit() {
+                    quote!(::core::result::Result::Ok(_) => ::core::result::Result::Ok(()),)
+                } else {
+                    let ok_ty = ok_ty.expect("result has an ok type");
+                    quote_spanned! {ok_ty.span()=>
+                        ::core::result::Result::Ok(__keel_bytes) => {
+                            match <#ok_ty as #wire::Decode>::decode_exact(&__keel_bytes) {
+                                ::core::result::Result::Ok(__keel_value) => {
+                                    ::core::result::Result::Ok(__keel_value)
+                                }
+                                ::core::result::Result::Err(__keel_error) => {
+                                    ::core::result::Result::Err(__keel_port_error(
+                                        #runtime::PortError::Decode(__keel_error),
+                                    ))
+                                }
+                            }
                         }
-                        ::core::result::Result::Err(__error) => #failed,
+                    }
+                };
+                let failed_arm = quote_spanned! {err_ty.span()=>
+                    ::core::result::Result::Err(#runtime::PortError::Failed(__keel_bytes)) => {
+                        match <#err_ty as #wire::Decode>::decode_exact(&__keel_bytes) {
+                            ::core::result::Result::Ok(__keel_value) => {
+                                ::core::result::Result::Err(__keel_value)
+                            }
+                            ::core::result::Result::Err(__keel_error) => {
+                                ::core::result::Result::Err(__keel_port_error(
+                                    #runtime::PortError::Decode(__keel_error),
+                                ))
+                            }
+                        }
+                    }
+                };
+                quote! {
+                    #to_err
+                    match __keel_reply {
+                        #ok_arm
+                        #failed_arm
+                        ::core::result::Result::Err(__keel_other) => {
+                            ::core::result::Result::Err(__keel_port_error(__keel_other))
+                        }
                     }
                 }
             }
             (ret, ok_ty, _) if ret.is_unit() => {
                 let _ = ok_ty;
                 quote! {
-                    match __reply {
+                    match __keel_reply {
                         ::core::result::Result::Ok(_) => (),
-                        ::core::result::Result::Err(__error) => #failed,
+                        ::core::result::Result::Err(__keel_error) => #failed,
                     }
                 }
             }
             (_, ok_ty, _) => {
                 let decode = undecodable(&ok_ty.expect("plain return has a type"));
                 quote! {
-                    match __reply {
-                        ::core::result::Result::Ok(__bytes) => #decode,
-                        ::core::result::Result::Err(__error) => #failed,
+                    match __keel_reply {
+                        ::core::result::Result::Ok(__keel_bytes) => #decode,
+                        ::core::result::Result::Err(__keel_error) => #failed,
                     }
                 }
             }
         };
         let body = if m.is_async {
             quote! {
-                let __ctx = ::core::clone::Clone::clone(&self.0);
+                let __keel_ctx = ::core::clone::Clone::clone(&self.0);
                 ::std::boxed::Box::pin(async move {
-                    let __reply = __ctx.port_call(#port_id, #method_id, __args).await;
+                    let __keel_reply = __keel_ctx
+                        .port_call(#port_id, #method_id, __keel_args)
+                        .await;
                     #reply
                 })
             }
         } else {
             quote! {
-                let __reply = self.0.port_call_sync(#port_id, #method_id, &__args);
+                let __keel_reply = self.0.port_call_sync(#port_id, #method_id, &__keel_args);
                 #reply
             }
         };
         quote! {
             #sig {
-                let __args = {
-                    let mut __w = #wire::Writer::new();
+                let __keel_args = {
+                    let mut __keel_w = #wire::Writer::new();
                     #(#encodes)*
-                    __w.into_vec()
+                    __keel_w.into_vec()
                 };
                 #body
             }
         }
     });
+    let proxy_methods: Vec<TokenStream> = proxy_methods.collect();
+
+    // The error channel's bound, with the branded message (E0033), and the panic of a method
+    // that has none (E0062).
+    let error_trait_attr = on_unimplemented(
+        &Diag::new(
+            code::E0033,
+            format!(
+                "the error type `{{Self}}` of a method of the `{name_str}` port cannot represent a port that is unavailable"
+            ),
+            "a port nobody registered, a cancelled call and a reply that does not decode are ordinary outcomes (SPEC 6.3), and a method that returns `Result<T, E>` reports them as its error instead of panicking; that needs `From<PortError>` for the error type",
+            "implement `From<keel::runtime::PortError>` for `{Self}`, mapping it to a variant such as `Unavailable`, or to the `Display` text of the `PortError`",
+        ),
+        "`From<PortError>` is not implemented for this error type",
+    );
+    let error_trait = if needs_error_trait {
+        quote! {
+            #[doc(hidden)]
+            #[allow(non_camel_case_types, dead_code)]
+            #error_trait_attr
+            trait #port_error_trait: ::core::marker::Sized {
+                fn __keel_from_port_error(__keel_e: #runtime::PortError) -> Self;
+            }
+            impl<__KeelE: ::core::convert::From<#runtime::PortError>> #port_error_trait for __KeelE {
+                fn __keel_from_port_error(__keel_e: #runtime::PortError) -> Self {
+                    <__KeelE as ::core::convert::From<#runtime::PortError>>::from(__keel_e)
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
+    let failure_docs = format!("{DOCS_BASE}/{}", code::E0062);
+    let failure = quote! {
+        #[doc(hidden)]
+        #[cold]
+        #[inline(never)]
+        #[allow(non_snake_case, dead_code)]
+        fn #failure_fn(__keel_method: &str, __keel_error: #runtime::PortError) -> ! {
+            let (__keel_what, __keel_how) = match &__keel_error {
+                #runtime::PortError::Unavailable => (
+                    ::std::format!(
+                        "the `{}` port has no adapter registered (method `{}`)",
+                        #name_str,
+                        __keel_method,
+                    ),
+                    "Register one with core.registerPort(..) (TypeScript, Kotlin, Swift) / keel_port_register (C), or bind a Rust implementation (`keel::ports::fakes` in tests)",
+                ),
+                #runtime::PortError::Cancelled => (
+                    ::std::format!(
+                        "a call to the `{}` port (method `{}`) was cancelled",
+                        #name_str,
+                        __keel_method,
+                    ),
+                    "A method without an error type cannot report an abandoned call; give it a `Result<T, E>` return type",
+                ),
+                #runtime::PortError::Decode(__keel_why) => (
+                    ::std::format!(
+                        "the `{}` port (method `{}`) replied with bytes that do not decode: {}",
+                        #name_str,
+                        __keel_method,
+                        __keel_why,
+                    ),
+                    "The adapter's reply does not match the schema; check its codec for this method",
+                ),
+                __keel_other => (
+                    ::std::format!(
+                        "a call to the `{}` port (method `{}`) failed: {}",
+                        #name_str,
+                        __keel_method,
+                        __keel_other,
+                    ),
+                    "A method without an error type cannot report a failed call; give it a `Result<T, E>` return type",
+                ),
+            };
+            ::core::panic!(
+                "keel: {}. {}. On the web this traps the core. docs: {}",
+                __keel_what,
+                __keel_how,
+                #failure_docs,
+            )
+        }
+    };
 
     // --- Rust-side dispatcher ---------------------------------------------------------------
     let unavailable = quote!(#runtime::PortDispatch::Sync(::std::vec![2u8]));
@@ -559,17 +691,18 @@ fn call_helpers(
     let dispatch_arms = methods.iter().map(|m| {
         let id = format_ident!("__KEEL_ID_{}", m.name);
         let ident = &m.ident;
-        let decodes = m.params.iter().map(|p| {
-            let pident = &p.ident;
+        // Positional locals: no parameter name can collide with the generated ones.
+        let decodes = m.params.iter().enumerate().map(|(index, p)| {
+            let local = arg_local(index);
             let ty = &p.ty;
             quote_spanned! {p.ty.span()=>
-                let #pident: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
+                let #local: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
                     ::core::result::Result::Ok(__v) => __v,
                     ::core::result::Result::Err(_) => return #unavailable,
                 };
             }
         });
-        let call_args = m.params.iter().map(|p| &p.ident);
+        let call_args = (0..m.params.len()).map(arg_local);
         let call = quote!(#ident( #(#call_args),* ));
         let (ok_bytes, err_bytes) = (reply_bytes(0, quote!(__v)), reply_bytes(1, quote!(__e)));
         let unit_bytes = quote!(::std::vec![0u8]);
@@ -625,6 +758,9 @@ fn call_helpers(
     });
 
     quote! {
+        #error_trait
+        #failure
+
         #[doc = #proxy_doc]
         #vis struct #proxy(#runtime::Ctx);
 
@@ -685,16 +821,39 @@ fn call_helpers(
     }
 }
 
+/// `snake` as an identifier, raw (`r#match`) when it is a keyword. `self`, `super` and `crate`
+/// cannot be raw identifiers; they get a trailing underscore.
+fn ident_or_raw(snake: &str) -> syn::Ident {
+    if syn::parse_str::<syn::Ident>(snake).is_ok() {
+        return syn::Ident::new(snake, Span::call_site());
+    }
+    if matches!(snake, "self" | "super" | "crate") {
+        return syn::Ident::new(&format!("{snake}_"), Span::call_site());
+    }
+    syn::Ident::new_raw(snake, Span::call_site())
+}
+
+/// `(T)` and `Group` wrappers around a type are transparent.
+fn strip_parens(mut ty: &Type) -> &Type {
+    loop {
+        match ty {
+            Type::Paren(inner) => ty = &inner.elem,
+            Type::Group(inner) => ty = &inner.elem,
+            _ => return ty,
+        }
+    }
+}
+
 /// The types `T` and `E` of a method's declared return type. For an `async fn` rewritten to
 /// a boxed future, the original output type is inside the `Future<Output = ..>` bound.
 fn result_types(output: &ReturnType, is_async: bool) -> (Option<Type>, Option<Type>) {
     let ReturnType::Type(_, ty) = output else {
         return (None, None);
     };
-    let mut ty: &Type = ty;
+    let mut ty: &Type = strip_parens(ty);
     if is_async {
         if let Some(inner) = boxed_future_output(ty) {
-            ty = inner;
+            ty = strip_parens(inner);
         }
     }
     if let Type::Path(path) = ty {
@@ -782,7 +941,7 @@ fn event_helpers(
             }
         });
         let encodes = tys.iter().zip(&idents).map(|(ty, ident)| {
-            quote_spanned!(ty.span()=> #wire::Encode::encode(&#ident, &mut __w);)
+            quote_spanned!(ty.span()=> #wire::Encode::encode(&#ident, &mut __keel_w);)
         });
         let params = m.params.iter().map(|p| {
             let ident = &p.ident;
@@ -811,9 +970,9 @@ fn event_helpers(
 
             #[doc = #encode_doc]
             #vis fn #encode_fn( #(#params),* ) -> ::std::vec::Vec<u8> {
-                let mut __w = #wire::Writer::new();
+                let mut __keel_w = #wire::Writer::new();
                 #(#encodes)*
-                __w.into_vec()
+                __keel_w.into_vec()
             }
         }
     });
@@ -853,6 +1012,15 @@ pub(crate) fn parse_port_args(attr: TokenStream) -> syn::Result<(Option<Root>, R
                 root = Some(root_arg(meta)?);
                 Ok(true)
             } else if meta.path.is_ident("sync") || meta.path.is_ident("event") {
+                flag(
+                    meta,
+                    code::E0008,
+                    if meta.path.is_ident("sync") {
+                        "sync"
+                    } else {
+                        "event"
+                    },
+                )?;
                 let this = if meta.path.is_ident("sync") {
                     Requested::Sync
                 } else {

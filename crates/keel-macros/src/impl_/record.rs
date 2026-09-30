@@ -2,12 +2,15 @@
 //!
 //! For a record the macro emits, next to the item as written:
 //!
-//! * `impl Todo { pub const KEEL_TYPE_ID: u32 }`
+//! * `impl Todo { pub const KEEL_TYPE_ID: u32 }` (enums also `KEEL_IS_ERROR`)
 //! * `impl Encode` (fields in declaration order) and `impl Decode`
 //!   (with an exact `MIN_ENCODED_LEN`, so `Vec<Todo>` decoders can reject impossible counts),
-//! * `static __KEEL_META_Todo: RecordMeta` and its `inventory` registration.
+//! * `static __KEEL_META_Todo: RecordMeta` and its `inventory` registration;
+//! * the identity checks of `check.rs` for every field type (a user type called `Bytes` or an
+//!   aliased import must not pass for the type the schema names).
 //!
-//! Enums are the same with a `u16` variant index in front of the variant's fields.
+//! Enums are the same with a `u16` variant index in front of the variant's fields. A record
+//! must have at least one field (E0007): zero-width items defeat length validation (SPEC 3.1).
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
@@ -15,6 +18,7 @@ use syn::spanned::Spanned;
 use syn::{Fields, ItemEnum, ItemStruct};
 
 use super::attrs::{Site, take};
+use super::check::Checks;
 use super::common::{check_generics, derived, derives, field_meta, item_root, submit};
 use super::diag::{Diag, Errors, code};
 use super::error::{ErrorAttr, take_field_attrs, take_message};
@@ -80,6 +84,14 @@ fn parse_fields<'a>(
         let (from, source) = if mode == Mode::Error {
             take_field_attrs(&mut field.attrs)
         } else {
+            let (from, source) = take_field_attrs(&mut field.attrs);
+            if from || source {
+                errors.push(error_attribute_misplaced(
+                    &name,
+                    if from { "from" } else { "source" },
+                    &field.ty,
+                ));
+            }
             (false, false)
         };
         let kty = match map_field(&field.ty, &name, self_name) {
@@ -107,6 +119,22 @@ fn item_shape(what: &str, node: &impl quote::ToTokens, why: &str, help: &str) ->
     Diag::new(code::E0007, what, why, help).on(node)
 }
 
+/// `#[error]`, `#[from]` or `#[source]` on a plain `#[keel::api]` enum: rustc would say "cannot
+/// find attribute", which does not say where the attribute lives.
+fn error_attribute_misplaced(
+    what: &str,
+    attribute: &str,
+    node: &impl quote::ToTokens,
+) -> syn::Error {
+    Diag::new(
+        code::E0010,
+        format!("`#[{attribute}]` on `{what}` belongs to `#[keel::error]`, not `#[keel::api]`"),
+        "`#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[keel::api]` enum has no messages, `Display` or `From` impls",
+        "change the enum's attribute to `#[keel::error]`, or remove the helper attribute",
+    )
+    .on(node)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Records
 // ---------------------------------------------------------------------------------------------
@@ -120,13 +148,31 @@ pub(crate) fn expand_struct(
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     check_generics(&item.generics, &item.ident.to_string(), &mut errors);
     let fields = match &mut item.fields {
-        Fields::Named(named) => parse_fields(
-            named.named.iter_mut(),
-            &unraw(&item.ident),
-            Mode::Api,
-            &mut errors,
-        ),
-        Fields::Unit => Vec::new(),
+        Fields::Named(named) => {
+            if named.named.is_empty() {
+                errors.push(item_shape(
+                    &format!("record `{}` has no fields", item.ident),
+                    &item.ident,
+                    "a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message",
+                    "add a field, or use an enum with a unit variant if you need a marker",
+                ));
+            }
+            parse_fields(
+                named.named.iter_mut(),
+                &unraw(&item.ident),
+                Mode::Api,
+                &mut errors,
+            )
+        }
+        Fields::Unit => {
+            errors.push(item_shape(
+                &format!("unit struct `{}` cannot be a record", item.ident),
+                &item.ident,
+                "a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message",
+                "add a field, or use an enum with a unit variant if you need a marker",
+            ));
+            Vec::new()
+        }
         Fields::Unnamed(unnamed) => {
             errors.push(item_shape(
                 &format!("tuple struct `{}` cannot be a record", item.ident),
@@ -164,6 +210,11 @@ pub(crate) fn expand_struct(
         .map(|f| field_meta(&meta, &f.name, &f.kty, f.default, &f.docs));
     let derived = derived();
     let registration = submit(&root, "Record", &meta_static);
+    let mut checks = Checks::for_type(name);
+    for f in &fields {
+        checks.ty(&f.ty, &f.kty);
+    }
+    let checks = checks.emit(&root);
 
     Ok(quote! {
         #item
@@ -199,6 +250,8 @@ pub(crate) fn expand_struct(
             docs: #docs,
         };
         #registration
+
+        #checks
     })
 }
 
@@ -270,6 +323,18 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
         let error = if mode == Mode::Error {
             take_message(&mut variant.attrs, &variant.ident, shape, &fields, errors)
         } else {
+            let (misplaced, kept): (Vec<syn::Attribute>, Vec<syn::Attribute>) =
+                std::mem::take(&mut variant.attrs)
+                    .into_iter()
+                    .partition(|attr| attr.path().is_ident("error"));
+            variant.attrs = kept;
+            for attr in &misplaced {
+                errors.push(error_attribute_misplaced(
+                    &variant.ident.to_string(),
+                    "error",
+                    attr,
+                ));
+            }
             None
         };
         out.push(VariantModel {
@@ -407,6 +472,11 @@ pub(crate) fn expand_enum(
     };
     let derived = derived();
     let registration = submit(&root, "Enum", &meta_static);
+    let mut checks = Checks::for_type(&name);
+    for f in variants.iter().flat_map(|v| &v.fields) {
+        checks.ty(&f.ty, &f.kty);
+    }
+    let checks = checks.emit(&root);
 
     Ok(quote! {
         #item
@@ -414,6 +484,9 @@ pub(crate) fn expand_enum(
         impl #name {
             /// The stable Keel type id: `fnv1a32` of the type name.
             pub const KEEL_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
+            /// Whether this is a `#[keel::error]` enum (what a `Result` may throw).
+            #[doc(hidden)]
+            pub const KEEL_IS_ERROR: bool = #is_error;
         }
 
         #derived
@@ -453,6 +526,8 @@ pub(crate) fn expand_enum(
         #registration
 
         #extras
+
+        #checks
     })
 }
 

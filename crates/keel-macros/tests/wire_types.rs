@@ -135,7 +135,7 @@ pub struct Everything {
     pub n: Duration,
     pub o: Timestamp,
     pub p: Uuid,
-    pub q: Option<Option<i32>>,
+    pub q: Option<Vec<i32>>,
     pub r: Vec<Vec<u8>>,
     pub s: HashMap<String, i32>,
     pub t: BTreeMap<u32, Vec<String>>,
@@ -161,7 +161,7 @@ fn every_type_maps_and_round_trips() {
         n: Duration::new(3, 500),
         o: Timestamp(1_700_000_000_123),
         p: Uuid([9; 16]),
-        q: Some(None),
+        q: Some(vec![]),
         r: vec![vec![1], vec![]],
         s: HashMap::from([("x".to_owned(), 1), ("y".to_owned(), 2)]),
         t: BTreeMap::from([(2, vec!["b".to_owned()]), (1, vec![])]),
@@ -191,45 +191,13 @@ fn every_type_maps_and_round_trips() {
             TypeRef::Duration,
             TypeRef::Timestamp,
             TypeRef::Uuid,
-            TypeRef::option(TypeRef::option(TypeRef::I32)),
+            TypeRef::option(TypeRef::vec(TypeRef::I32)),
             TypeRef::vec(TypeRef::vec(TypeRef::U8)),
             TypeRef::map(TypeRef::String, TypeRef::I32),
             TypeRef::map(TypeRef::U32, TypeRef::vec(TypeRef::String)),
             TypeRef::map(TypeRef::Uuid, TypeRef::Bool),
         ]
     );
-}
-
-/// A record without fields.
-#[k::api]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Empty;
-
-/// A record with braces and no fields.
-#[k::api]
-#[derive(Clone, Debug, PartialEq)]
-pub struct AlsoEmpty {}
-
-/// A record holding empty records.
-#[k::api]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Holder {
-    pub items: Vec<Empty>,
-}
-
-#[test]
-fn empty_records_encode_to_nothing() {
-    assert!(Empty.encode_to_vec().is_empty());
-    assert_eq!(Empty::decode_exact(&[]).unwrap(), Empty);
-    assert_eq!(AlsoEmpty::decode_exact(&[]).unwrap(), AlsoEmpty {});
-    assert_eq!(<Empty as Decode>::MIN_ENCODED_LEN, 0);
-    let holder = Holder {
-        items: vec![Empty, Empty, Empty],
-    };
-    let bytes = holder.encode_to_vec();
-    assert_eq!(bytes, [3, 0, 0, 0]);
-    assert_eq!(Holder::decode_exact(&bytes).unwrap(), holder);
-    assert!(record_def("Empty").fields.is_empty());
 }
 
 /// A recursive record.
@@ -537,7 +505,7 @@ pub enum TodoError {
     Http(#[from] NetError),
     #[error("storage failed")]
     Storage(#[source] NetError),
-    #[error("{{literal}} {}")]
+    #[error("{{literal}} {0}")]
     Braces(u8),
     #[error("only the second: {1}")]
     Second(String, u8),

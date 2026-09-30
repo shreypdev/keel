@@ -52,3 +52,21 @@ static __KEEL_META_Point: ::keel_runtime::meta::RecordMeta = ::keel_runtime::met
 ::keel_runtime::meta::inventory::submit! {
     ::keel_runtime::meta::Registration::Record(& __KEEL_META_Point)
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<f64, ::core::primitive::f64>();
+    }
+};

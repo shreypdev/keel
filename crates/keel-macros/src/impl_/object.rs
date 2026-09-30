@@ -7,9 +7,18 @@
 //!   downcasts `rt` to `&Runtime`, matches `call.method_id` against per-method constants
 //!   (`ids::method_id`), decodes the arguments in order, resolves `self` with
 //!   `rt.object::<Type>(call.handle)`, runs the method and encodes the outcome as
-//!   `DispatchResult::{Sync, Async, Stream}`; malformed requests, bad handles and unknown
-//!   methods answer `DispatchResult::Unknown`;
-//! * `static __KEEL_META_Type: ObjectMeta` and its registration.
+//!   `DispatchResult::{Sync, Async, Stream}`; malformed requests and stale handles answer
+//!   `DispatchResult::BadRequest` with a reason, and only an unknown method id answers
+//!   `DispatchResult::Unknown`. The decoded arguments are bound to positional locals
+//!   (`__keel_a0`, ..), never to the user's parameter names, so no parameter name can collide
+//!   with a generated local;
+//! * `static __KEEL_META_Type: ObjectMeta` and its registration;
+//! * the identity checks of `check.rs` for every parameter and return type, and the hidden
+//!   `__KEEL_IS_OBJECT` marker that lets them say "an object cannot be a value" (E0064).
+//!
+//! A second `#[keel::api] impl` block for the same type defines the dispatcher twice: the
+//! expansion carries a constant named after the rule, so the duplicate-definition error says
+//! what is wrong.
 //!
 //! Constructors (a `pub fn` without receiver that returns `Self` or `Result<Self, E>`) are
 //! listed separately in the meta. Their dispatch arm builds the value, inserts it into the
@@ -24,12 +33,13 @@ use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
 use syn::{FnArg, ImplItem, ItemFn, ItemImpl, Pat, ReturnType, Signature, Type, Visibility};
 
-use super::attrs::{Site, docs, take};
+use super::attrs::{Site, docs, is_keel_macro_path, take};
+use super::check::Checks;
 use super::common::{check_generics, derived, item_root, param_meta, submit};
 use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, unraw};
 use super::paths::Root;
-use super::types::{Allow, KType, Pos, map_return, map_type, ty_string};
+use super::types::{Allow, KType, Pos, map_error_type, map_return, map_type, ty_string};
 
 /// A leading `ctx: Ctx` / `ctx: &Ctx` parameter.
 #[derive(Clone, Copy, Debug)]
@@ -40,7 +50,6 @@ pub(crate) struct CtxParam {
 /// A wire parameter.
 #[derive(Debug)]
 pub(crate) struct ParamModel {
-    pub(crate) ident: syn::Ident,
     pub(crate) name: String,
     pub(crate) ty: Type,
     pub(crate) kty: KType,
@@ -174,6 +183,27 @@ fn self_by_value(fn_name: &str, node: &impl quote::ToTokens) -> syn::Error {
     .on(node)
 }
 
+fn is_plain_path_ref(path: &syn::TypePath) -> bool {
+    path.qself.is_none()
+        && path.path.segments.len() == 1
+        && path.path.segments[0].arguments.is_none()
+}
+
+/// `Self` or a plain type name, without arguments.
+fn is_plain_path(ty: &Type) -> bool {
+    matches!(ty, Type::Path(path) if is_plain_path_ref(path))
+}
+
+fn typed_receiver(fn_name: &str, node: &impl quote::ToTokens, ty: &Type) -> syn::Error {
+    Diag::new(
+        code::E0007,
+        format!("the receiver `self: {}` of method `{fn_name}` is not supported", ty_string(ty)),
+        "the dispatcher resolves the object from its handle and calls the method with `&Type`; a receiver such as `Arc<Self>`, `Box<Self>` or `Pin<&Self>` needs a different call",
+        "write `&self`; clone an `Arc` of the object inside the method if you need one",
+    )
+    .on(node)
+}
+
 /// Checks the generics, receiver and parameters of `sig` and collects the parameters.
 pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
     let fn_name = sig.ident.to_string();
@@ -203,8 +233,13 @@ pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
                 Type::Reference(reference) if reference.mutability.is_some() => {
                     errors.push(mut_self(&fn_name, receiver));
                 }
-                Type::Reference(_) => {}
-                _ => errors.push(self_by_value(&fn_name, receiver)),
+                // `self: &Self` (or `&Type`).
+                Type::Reference(reference) if is_plain_path(&reference.elem) => {}
+                // `self: Self` consumes the object; any other typed receiver is not callable.
+                Type::Path(path) if is_plain_path_ref(path) => {
+                    errors.push(self_by_value(&fn_name, receiver));
+                }
+                other => errors.push(typed_receiver(&fn_name, receiver, other)),
             }
         } else {
             match &receiver.reference {
@@ -301,7 +336,6 @@ pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
         };
         params.push(ParamModel {
             name: unraw(&ident),
-            ident,
             ty: (*pat_type.ty).clone(),
             kty,
         });
@@ -430,6 +464,11 @@ struct Needs {
     send_assert: bool,
     map_stream: bool,
     opening_stream: bool,
+}
+
+/// The local that holds the decoded argument at `index`.
+pub(crate) fn arg_local(index: usize) -> syn::Ident {
+    format_ident!("__keel_a{}", index)
 }
 
 fn enc(wire: &TokenStream, value: &TokenStream) -> TokenStream {
@@ -662,12 +701,14 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
     };
 
     // Decode the arguments in declaration order; any failure is a bad request that says which.
-    let lets = m.params.iter().map(|p| {
-        let ident = &p.ident;
+    // The values are bound to positional locals, never to the user's parameter names, so a
+    // parameter called `__r` or `__ctx` cannot collide with what the dispatcher generates.
+    let lets = m.params.iter().enumerate().map(|(index, p)| {
+        let local = arg_local(index);
         let ty = &p.ty;
         let param = &p.name;
         quote_spanned! {p.ty.span()=>
-            let #ident: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
+            let #local: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(::std::format!(
@@ -719,9 +760,9 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
             quote!(__ctx)
         });
     }
-    call_args.extend(m.params.iter().map(|p| {
-        let ident = &p.ident;
-        quote!(#ident)
+    call_args.extend((0..m.params.len()).map(|index| {
+        let local = arg_local(index);
+        quote!(#local)
     }));
     let ident = &m.ident;
     let call = match target.self_ty {
@@ -994,10 +1035,16 @@ pub(crate) fn expand_impl(
 
     let mut constructors: Vec<FnModel> = Vec::new();
     let mut methods: Vec<FnModel> = Vec::new();
+    let mut checks = Checks::new();
     for impl_item in &mut item.items {
         let ImplItem::Fn(func) = impl_item else {
             continue;
         };
+        // A query or mutation inside the block is reported once; the function is not also
+        // "neither a method nor a constructor".
+        if reject_keel_macros(&func.attrs, &mut errors) {
+            continue;
+        }
         let is_public = matches!(func.vis, Visibility::Public(_));
         take(
             &mut func.attrs,
@@ -1015,6 +1062,9 @@ pub(crate) fn expand_impl(
         let analysis = analyze(&mut func.sig, &mut errors);
         let name = unraw(&func.sig.ident);
 
+        for p in &analysis.params {
+            checks.ty(&p.ty, &p.kty);
+        }
         if analysis.has_receiver {
             let ret = match map_return(&func.sig.output) {
                 Ok(ret) => ret,
@@ -1023,6 +1073,7 @@ pub(crate) fn expand_impl(
                     KType::Unit
                 }
             };
+            checks.ret(&func.sig.output, &ret);
             let stream_item = stream_item_type(&func.sig.output);
             ensure_static_streams_in(&mut func.sig.output);
             methods.push(FnModel {
@@ -1048,8 +1099,11 @@ pub(crate) fn expand_impl(
             let named = KType::Named(type_name.clone());
             let ret = match returns {
                 CtorReturn::Plain => named,
-                CtorReturn::Fallible(err_ty) => match map_type(&err_ty, Pos::Return, Allow::NONE) {
-                    Ok(err) => KType::Result(Box::new(named), Box::new(err)),
+                CtorReturn::Fallible(err_ty) => match map_error_type(&err_ty, Pos::Return) {
+                    Ok(err) => {
+                        checks.error_ty(&err_ty, &err);
+                        KType::Result(Box::new(named), Box::new(err))
+                    }
                     Err(err) => {
                         errors.push(err.into_error());
                         named
@@ -1117,6 +1171,7 @@ pub(crate) fn expand_impl(
     let meta = root.meta();
     let runtime = root.runtime();
     let signals = root.signals();
+    let wire = root.wire();
     let target = Target {
         self_ty: Some(&self_ty),
         store,
@@ -1173,6 +1228,69 @@ pub(crate) fn expand_impl(
 
     let derived = derived();
     let registration = submit(&root, "Object", &meta_static);
+    let checks = checks.emit(&root);
+    // What the runtime calls on a store, forwarding to the members `#[keel::store]` defines.
+    let store_object = if store {
+        quote! {
+            #derived
+            impl #runtime::StoreObject for #self_ty {
+                fn cell(&self) -> &::std::sync::Arc<#signals::StoreCell> {
+                    self.__keel_cell_ref()
+                }
+
+                fn restore(
+                    __ctx: #runtime::Ctx,
+                    __r: &mut #wire::Reader<'_>,
+                ) -> ::core::result::Result<Self, #wire::WireError> {
+                    Self::__keel_restore(__ctx, __r)
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
+    // A store's docs are its struct's docs, then its impl block's (a plain object's struct has
+    // no Keel attribute, so its docs are not visible here: document it on the impl block).
+    let object_docs = if store {
+        quote! {{
+            const __KEEL_A: &str = <#self_ty>::__KEEL_DOCS;
+            const __KEEL_B: &str = #type_docs;
+            const __KEEL_SEP: usize = if __KEEL_A.is_empty() || __KEEL_B.is_empty() { 0 } else { 2 };
+            const __KEEL_N: usize = __KEEL_A.len() + __KEEL_SEP + __KEEL_B.len();
+            const __KEEL_BYTES: [u8; __KEEL_N] = {
+                let (__a, __b) = (__KEEL_A.as_bytes(), __KEEL_B.as_bytes());
+                let mut __out = [0u8; __KEEL_N];
+                let mut __i = 0;
+                while __i < __a.len() {
+                    __out[__i] = __a[__i];
+                    __i += 1;
+                }
+                if __KEEL_SEP == 2 {
+                    __out[__a.len()] = b'\n';
+                    __out[__a.len() + 1] = b'\n';
+                }
+                let mut __j = 0;
+                while __j < __b.len() {
+                    __out[__a.len() + __KEEL_SEP + __j] = __b[__j];
+                    __j += 1;
+                }
+                __out
+            };
+            match ::core::str::from_utf8(&__KEEL_BYTES) {
+                ::core::result::Result::Ok(__s) => __s,
+                ::core::result::Result::Err(_) => "",
+            }
+        }}
+    } else {
+        quote!(#type_docs)
+    };
+    // One `#[keel::api] impl` block per type: the dispatcher, the registration and the object
+    // impl are named after the type. This constant repeats in a second block and its
+    // duplicate-definition error then reads as the rule.
+    let one_block = format_ident!(
+        "_keel_error_E0007_a_type_takes_one_keel_api_impl_block_{}",
+        type_name
+    );
 
     // The members `#[keel::store]` defines inherently on the struct, with harmless fallbacks
     // for every type that is not one. The fallbacks live in a trait of their own per type
@@ -1187,9 +1305,32 @@ pub(crate) fn expand_impl(
         #item
 
         #[doc(hidden)]
+        #[allow(non_upper_case_globals, dead_code)]
+        const #one_block: () = ();
+
+        impl #self_ty {
+            /// Marks the type as an object, so a signature that uses it as a value can say so.
+            #[doc(hidden)]
+            pub const __KEEL_IS_OBJECT: bool = true;
+        }
+
+        #[doc(hidden)]
         #[allow(non_camel_case_types, dead_code)]
         trait #probe_trait {
             const __KEEL_IS_STORE: bool = false;
+            const __KEEL_DOCS: &'static str = "";
+            fn __keel_cell_ref(&self) -> &::std::sync::Arc<#signals::StoreCell> {
+                ::core::unreachable!("not a `#[keel::store]`: E0011 stops the build first")
+            }
+            fn __keel_restore(
+                _ctx: #runtime::Ctx,
+                _r: &mut #wire::Reader<'_>,
+            ) -> ::core::result::Result<Self, #wire::WireError>
+            where
+                Self: ::core::marker::Sized,
+            {
+                ::core::unreachable!("not a `#[keel::store]`: E0011 stops the build first")
+            }
             const __KEEL_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
             fn __keel_attach_all(&self) -> ::core::result::Result<(), #signals::SignalsError> {
                 ::core::result::Result::Ok(())
@@ -1207,6 +1348,8 @@ pub(crate) fn expand_impl(
             const TYPE_ID: u32 = #meta::ids::type_id(#type_name);
             const NAME: &'static str = #type_name;
         }
+
+        #store_object
 
         #[doc(hidden)]
         #[allow(non_snake_case, non_upper_case_globals, unused_variables, unused_mut, deprecated, clippy::all)]
@@ -1232,11 +1375,61 @@ pub(crate) fn expand_impl(
             constructors: &[ #(#ctor_metas),* ],
             methods: &[ #(#method_metas),* ],
             store: #store_meta,
-            docs: #type_docs,
+            docs: #object_docs,
             dispatch: #dispatch_fn,
         };
         #registration
+
+        #checks
     })
+}
+
+/// E0007 for a Keel attribute macro on a method of an `#[keel::api] impl` block.
+///
+/// The impl block's macro expands first and sees the method's attributes unexpanded, so this
+/// is where "put `#[keel::api]` on the block, not on the method" and "a query is not a method"
+/// can be said in Keel's words instead of `rustc`'s.
+fn reject_keel_macros(attrs: &[syn::Attribute], errors: &mut Errors) -> bool {
+    let mut found = false;
+    for attr in attrs {
+        let Some(name) = keel_macro_name(attr) else {
+            continue;
+        };
+        let (what, why, help) = match name.as_str() {
+            "api" => (
+                "`#[keel::api]` on a method of an `#[keel::api] impl` block".to_owned(),
+                "the attribute on the impl block already exposes every `pub fn` of it; a method is not exposed one by one",
+                "remove the attribute from the method",
+            ),
+            "query" | "mutation" => (
+                format!("`#[keel::{name}]` inside an `impl` block"),
+                "a query or mutation is a free function: the macro generates a struct next to it, which an impl block cannot hold",
+                "move the function out of the impl block; it takes `ctx: &Ctx` first, so it does not need `self`",
+            ),
+            other => (
+                format!("`#[keel::{other}]` on a method"),
+                "this macro applies to a whole item (a type, a trait or a free function), not to a method of an impl block",
+                "remove the attribute, or move the item out of the impl block",
+            ),
+        };
+        errors.push(Diag::new(code::E0007, what, why, help).on(attr));
+        found = true;
+    }
+    found
+}
+
+/// The macro named by `#[keel::name]` / `#[keel_macros::name]`.
+fn keel_macro_name(attr: &syn::Attribute) -> Option<String> {
+    let path = attr.path();
+    if !is_keel_macro_path(path) {
+        return None;
+    }
+    let name = path.segments.last()?.ident.to_string();
+    matches!(
+        name.as_str(),
+        "api" | "query" | "mutation" | "port" | "store" | "error"
+    )
+    .then_some(name)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1248,6 +1441,17 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     let mut errors = Errors::new();
     let root = item_root(&mut item.attrs, args_root, &mut errors);
     let analysis = analyze(&mut item.sig, &mut errors);
+    if analysis.has_receiver {
+        errors.push(
+            Diag::new(
+                code::E0007,
+                format!("`#[keel::api]` on the method `{}`", item.sig.ident),
+                "`#[keel::api]` on a function exposes a free function; the methods of an object are exposed by putting the attribute on the `impl` block they are in",
+                "remove `#[keel::api]` from the method and write `#[keel::api]` above `impl Type { .. }`",
+            )
+            .on(&item.sig.ident),
+        );
+    }
     let ret = match map_return(&item.sig.output) {
         Ok(ret) => ret,
         Err(err) => {
@@ -1255,9 +1459,15 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             KType::Unit
         }
     };
+    let mut checks = Checks::new();
+    for p in &analysis.params {
+        checks.ty(&p.ty, &p.kty);
+    }
+    checks.ret(&item.sig.output, &ret);
     let stream_item = stream_item_type(&item.sig.output);
     ensure_static_streams_in(&mut item.sig.output);
     errors.finish()?;
+    let checks = checks.emit(&root);
 
     let name = unraw(&item.sig.ident);
     let model = FnModel {
@@ -1325,6 +1535,8 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
             dispatch: #dispatch_fn,
         };
         #registration
+
+        #checks
     })
 }
 
@@ -1379,9 +1591,22 @@ mod tests {
         assert!(impl_error("impl C { pub fn f(&mut self) {} }").contains("error[keel::E0020]"));
         assert!(impl_error("impl C { pub fn f(self) {} }").contains("error[keel::E0021]"));
         assert!(impl_error("impl C { pub fn f(mut self) {} }").contains("error[keel::E0021]"));
-        assert!(
-            impl_error("impl C { pub fn f(self: Arc<Self>) {} }").contains("error[keel::E0021]")
-        );
+        assert!(impl_error("impl C { pub fn f(self: Self) {} }").contains("error[keel::E0021]"));
+        // Receivers that are neither `&self` nor by value are not callable through a handle.
+        for receiver in [
+            "Arc<Self>",
+            "Box<Self>",
+            "Pin<&Self>",
+            "&Arc<Self>",
+            "Rc<Self>",
+        ] {
+            let message = impl_error(&format!("impl C {{ pub fn f(self: {receiver}) {{}} }}"));
+            assert!(
+                message.contains("error[keel::E0007]: the receiver `self: "),
+                "{receiver}: {message}"
+            );
+            assert!(message.contains("write `&self`"), "{receiver}: {message}");
+        }
         assert!(
             impl_error("impl C { pub fn f(self: &mut Self) {} }").contains("error[keel::E0020]")
         );
@@ -1485,12 +1710,22 @@ mod tests {
         );
         assert!(has(&out, "<S>::__KEEL_STORE_META"), "{out}");
         assert!(has(&out, "__value.__keel_attach_all()"), "{out}");
+        // `impl StoreObject` lives next to `impl KeelObject`: a store without an impl block
+        // then gets only the branded E0011.
+        assert!(
+            has(&out, "impl ::keel::runtime::StoreObject for S"),
+            "{out}"
+        );
     }
 
     #[test]
     fn non_store_impls_are_left_alone() {
         let out = impl_result("impl S { pub fn new() -> Self { Self { x: 1 } } }", false).unwrap();
-        assert!(!has(&out, "__keel_cell"), "{out}");
+        assert!(
+            !has(&out, "__keel_cell:"),
+            "no cell field is added to literals: {out}"
+        );
+        assert!(!has(&out, "impl ::keel::runtime::StoreObject"), "{out}");
         assert!(!has(&out, "__value.__keel_attach_all()"), "{out}");
         assert!(has(&out, "store: ::core::option::Option::None"), "{out}");
     }

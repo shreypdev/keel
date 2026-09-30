@@ -1,0 +1,17 @@
+error: error[keel::E0063]: nested option `Option<Option<i32>>` cannot cross the boundary
+         = note: Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null`
+         = help: wrap the inner option in a record or an enum that names the two cases
+         = docs: https://keel.dev/errors/E0063
+ --> tests/ui/m3_nested_option.rs:8:16
+  |
+8 |     pub value: Option<Option<i32>>,
+  |                ^^^^^^^^^^^^^^^^^^^
+
+error: error[keel::E0063]: nested option `Option<Box<Option<u8>>>` cannot cross the boundary
+         = note: Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null`
+         = help: wrap the inner option in a record or an enum that names the two cases
+         = docs: https://keel.dev/errors/E0063
+ --> tests/ui/m3_nested_option.rs:9:19
+  |
+9 |     pub many: Vec<Option<Box<Option<u8>>>>,
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^

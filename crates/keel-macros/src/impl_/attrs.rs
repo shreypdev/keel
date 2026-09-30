@@ -174,14 +174,14 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
                 if !site.root {
                     return Err(misplaced("crate"));
                 }
-                let lit: LitStr = meta.value()?.parse()?;
-                out.root = Some(Root::from_lit(&lit)?);
+                out.root = Some(root_arg(&meta)?);
                 Ok(())
             }
             "default" => {
                 if !site.default {
                     return Err(misplaced("default"));
                 }
+                flag(&meta, code::E0008, "default")?;
                 out.default = true;
                 Ok(())
             }
@@ -189,7 +189,13 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
                 if !site.key {
                     return Err(misplaced("key"));
                 }
-                let lit: LitStr = meta.value()?.parse()?;
+                let lit: LitStr = option_value(
+                    &meta,
+                    code::E0008,
+                    "key",
+                    "a string literal naming a field",
+                    "key = \"id\"",
+                )?;
                 out.key = Some(lit);
                 Ok(())
             }
@@ -197,6 +203,7 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
                 if !site.no_coalesce {
                     return Err(misplaced("no_coalesce"));
                 }
+                flag(&meta, code::E0008, "no_coalesce")?;
                 out.no_coalesce = true;
                 Ok(())
             }
@@ -261,9 +268,67 @@ pub(crate) fn parse_args(
     syn::parse::Parser::parse2(parser, attr)
 }
 
+/// Reads the value of `option = value`: a diagnostic with `code` (not `syn`'s "expected `=`" or
+/// "expected string literal") when the value is missing or has the wrong kind.
+///
+/// `expects` says what the value is ("a string literal"), `example` shows a correct use.
+pub(crate) fn option_value<T: syn::parse::Parse>(
+    meta: &ParseNestedMeta<'_>,
+    code: &'static str,
+    option: &str,
+    expects: &str,
+    example: &str,
+) -> syn::Result<T> {
+    if !meta.input.peek(syn::Token![=]) {
+        return Err(Diag::new(
+            code,
+            format!("`{option}` needs a value"),
+            format!("`{option}` takes {expects}"),
+            format!("write `{example}`"),
+        )
+        .on(&meta.path));
+    }
+    let value = meta.value()?;
+    value.parse::<T>().map_err(|error| {
+        Diag::new(
+            code,
+            format!("`{option}` must be {expects}"),
+            format!("`{option}` takes {expects}; anything else cannot be read at compile time"),
+            format!("write `{example}`"),
+        )
+        .at(error.span())
+    })
+}
+
+/// A flag option (`default`, `persist`): a diagnostic with `code` if a value follows.
+pub(crate) fn flag(
+    meta: &ParseNestedMeta<'_>,
+    code: &'static str,
+    option: &str,
+) -> syn::Result<()> {
+    if meta.input.peek(syn::Token![=]) {
+        return Err(Diag::new(
+            code,
+            format!("`{option}` takes no value"),
+            format!(
+                "`{option}` switches a behaviour on by being present; there is nothing to set it to"
+            ),
+            format!("write `{option}` alone"),
+        )
+        .on(&meta.path));
+    }
+    Ok(())
+}
+
 /// Reads a `crate = "path"` argument.
 pub(crate) fn root_arg(meta: &ParseNestedMeta<'_>) -> syn::Result<Root> {
-    let lit: LitStr = meta.value()?.parse()?;
+    let lit: LitStr = option_value(
+        meta,
+        code::E0008,
+        "crate",
+        "a string literal naming a path",
+        "crate = \"::keel\"",
+    )?;
     Root::from_lit(&lit)
 }
 
@@ -291,6 +356,19 @@ pub(crate) fn docs(attrs: &[Attribute]) -> String {
     lines.join("\n").trim().to_owned()
 }
 
+/// Whether `path` names one of the Keel attribute macros (`keel::query`, `keel_macros::api`).
+///
+/// An attribute macro on a nested item (a method of an `#[keel::api] impl`) is expanded after
+/// the outer macro; once the outer macro has reported it, the fallback drops it so it is not
+/// reported twice.
+pub(crate) fn is_keel_macro_path(path: &syn::Path) -> bool {
+    path.segments.len() >= 2
+        && path
+            .segments
+            .first()
+            .is_some_and(|seg| seg.ident == "keel" || seg.ident == "keel_macros")
+}
+
 /// Removes helper attributes (`#[keel(..)]` and any names in `also`) from a whole item.
 ///
 /// Used on the fallback path, so that after a diagnostic the original item is still emitted
@@ -308,7 +386,9 @@ impl<'a> StripHelpers<'a> {
     fn clean(&self, attrs: &mut Vec<Attribute>) {
         attrs.retain(|attr| {
             let path = attr.path();
-            !(path.is_ident("keel") || self.also.iter().any(|name| path.is_ident(name)))
+            !(path.is_ident("keel")
+                || is_keel_macro_path(path)
+                || self.also.iter().any(|name| path.is_ident(name)))
         });
     }
 }

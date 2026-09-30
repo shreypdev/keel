@@ -14,6 +14,13 @@ pub enum HttpError {
     Timeout,
 }
 
+/// A port that cannot answer is reported as the method's error.
+impl From<keel::runtime::PortError> for HttpError {
+    fn from(error: keel::runtime::PortError) -> Self {
+        HttpError::Network(error.to_string())
+    }
+}
+
 #[keel::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct HttpRequest {

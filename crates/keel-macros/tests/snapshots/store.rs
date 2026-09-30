@@ -40,6 +40,9 @@ impl Todos {
             },
         ],
     };
+    /// The struct's own documentation, which the impl block's object docs start with.
+    #[doc(hidden)]
+    pub const __KEEL_DOCS: &'static str = "";
     /// Builds the signal cell and attaches every signal, in declaration order.
     #[doc(hidden)]
     fn __keel_build_cell(
@@ -79,15 +82,9 @@ impl Todos {
     ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
         self.__keel_cell.get_or_try_init(|| self.__keel_build_cell()).map(|_| ())
     }
-    /// Records the handle the object table issued.
+    /// The store's cell.
     #[doc(hidden)]
-    pub fn __keel_set_handle(&self, __handle: u64) {
-        <Self as ::keel::runtime::StoreObject>::cell(self).set_handle(__handle);
-    }
-}
-#[automatically_derived]
-impl ::keel::runtime::StoreObject for Todos {
-    fn cell(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
+    pub fn __keel_cell_ref(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
         self.__keel_cell
             .get_or_init(|| {
                 match self.__keel_build_cell() {
@@ -100,8 +97,15 @@ impl ::keel::runtime::StoreObject for Todos {
                 }
             })
     }
+    /// Records the handle the object table issued.
+    #[doc(hidden)]
+    pub fn __keel_set_handle(&self, __handle: u64) {
+        self.__keel_cell_ref().set_handle(__handle);
+    }
+    /// Rebuilds the store from the body of its snapshot record.
+    #[doc(hidden)]
     #[allow(unused_mut, unused_variables)]
-    fn restore(
+    pub fn __keel_restore(
         __ctx: ::keel::runtime::Ctx,
         __r: &mut ::keel::wire::Reader<'_>,
     ) -> ::core::result::Result<Self, ::keel::wire::WireError> {
@@ -170,7 +174,7 @@ fn __keel_restore_erased_Todos(
     ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>,
     ::keel::wire::WireError,
 > {
-    let __value = <Todos as ::keel::runtime::StoreObject>::restore(__ctx, __r)?;
+    let __value = <Todos>::__keel_restore(__ctx, __r)?;
     __value.__keel_set_handle(__handle);
     ::core::result::Result::Ok(
         ::std::sync::Arc::new(__value)
@@ -184,9 +188,60 @@ fn __keel_restore_erased_Todos(
 fn __keel_cell_erased_Todos(
     __any: &(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync),
 ) -> ::core::option::Option<&::std::sync::Arc<::keel::signals::StoreCell>> {
-    __any.downcast_ref::<Todos>().map(<Todos as ::keel::runtime::StoreObject>::cell)
+    __any.downcast_ref::<Todos>().map(<Todos>::__keel_cell_ref)
 }
 ::keel::meta::inventory::submit! {
     ::keel::runtime::StoreRestorer { type_id : ::keel::meta::ids::type_id("Todos"),
     restore : __keel_restore_erased_Todos, cell : __keel_cell_erased_Todos, }
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0011]: store `Todos` has no `#[keel::api(store)]` impl block\n  = note: the constructors of the impl block create the store and wire its signals to the platforms; without the block the store can never be instantiated\n  = help: add an `impl Todos` block marked `#[keel::api(store)]` with a constructor such as `pub fn new(ctx: Ctx) -> Self`\n  = docs: https://keel.dev/errors/E0011",
+        label = "this store has no `#[keel::api(store)]` impl block"
+    )]
+    trait __KeelStoreNeedsImpl {}
+    impl<__KeelT: ::keel::runtime::KeelObject> __KeelStoreNeedsImpl for __KeelT {}
+    fn __keel_need_impl<__KeelT: __KeelStoreNeedsImpl>() {}
+    fn __keel_check_impl() {
+        __keel_need_impl::<Todos>();
+    }
+};
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<Vec<Row>, ::std::vec::Vec<Row>>();
+        __keel_same::<u32, ::core::primitive::u32>();
+    }
+    trait __KeelFallback {
+        const KEEL_TYPE_ID: u32 = 0;
+        const KEEL_IS_ERROR: bool = false;
+        const __KEEL_IS_OBJECT: bool = false;
+    }
+    impl<T: ?::core::marker::Sized> __KeelFallback for T {}
+    const _: () = {
+        if <Row>::__KEEL_IS_OBJECT {
+            ::core::panic!(
+                "error[keel::E0064]: `Row` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://keel.dev/errors/E0064"
+            );
+        }
+        if <Row>::KEEL_TYPE_ID != ::keel::meta::ids::type_id("Row") {
+            ::core::panic!(
+                "error[keel::E0061]: the schema records this type as `Row`, but the type written here is not that type\n  = note: Keel describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type Row = Other`), a renamed import (`use path::Other as Row`) or a type that is not declared with `#[keel::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[keel::api]` (`#[keel::error]` for errors)\n  = docs: https://keel.dev/errors/E0061"
+            );
+        }
+    };
+};

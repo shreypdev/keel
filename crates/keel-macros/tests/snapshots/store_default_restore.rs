@@ -20,6 +20,9 @@ impl Counter {
             },
         ],
     };
+    /// The struct's own documentation, which the impl block's object docs start with.
+    #[doc(hidden)]
+    pub const __KEEL_DOCS: &'static str = "";
     /// Builds the signal cell and attaches every signal, in declaration order.
     #[doc(hidden)]
     fn __keel_build_cell(
@@ -43,15 +46,9 @@ impl Counter {
     ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
         self.__keel_cell.get_or_try_init(|| self.__keel_build_cell()).map(|_| ())
     }
-    /// Records the handle the object table issued.
+    /// The store's cell.
     #[doc(hidden)]
-    pub fn __keel_set_handle(&self, __handle: u64) {
-        <Self as ::keel::runtime::StoreObject>::cell(self).set_handle(__handle);
-    }
-}
-#[automatically_derived]
-impl ::keel::runtime::StoreObject for Counter {
-    fn cell(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
+    pub fn __keel_cell_ref(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
         self.__keel_cell
             .get_or_init(|| {
                 match self.__keel_build_cell() {
@@ -64,8 +61,15 @@ impl ::keel::runtime::StoreObject for Counter {
                 }
             })
     }
+    /// Records the handle the object table issued.
+    #[doc(hidden)]
+    pub fn __keel_set_handle(&self, __handle: u64) {
+        self.__keel_cell_ref().set_handle(__handle);
+    }
+    /// Rebuilds the store from the body of its snapshot record.
+    #[doc(hidden)]
     #[allow(unused_mut, unused_variables)]
-    fn restore(
+    pub fn __keel_restore(
         __ctx: ::keel::runtime::Ctx,
         __r: &mut ::keel::wire::Reader<'_>,
     ) -> ::core::result::Result<Self, ::keel::wire::WireError> {
@@ -97,7 +101,7 @@ impl ::keel::runtime::StoreObject for Counter {
             let _ = &__ctx;
             Self {
                 ctx: ::core::clone::Clone::clone(&__ctx),
-                note: ::core::default::Default::default(),
+                note: <String as __KeelRestoreDefault_Counter>::__keel_default(),
                 count: ::keel::signals::Signal::<i64>::new(__value_count),
                 __keel_cell: ::core::default::Default::default(),
             }
@@ -122,7 +126,7 @@ fn __keel_restore_erased_Counter(
     ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>,
     ::keel::wire::WireError,
 > {
-    let __value = <Counter as ::keel::runtime::StoreObject>::restore(__ctx, __r)?;
+    let __value = <Counter>::__keel_restore(__ctx, __r)?;
     __value.__keel_set_handle(__handle);
     ::core::result::Result::Ok(
         ::std::sync::Arc::new(__value)
@@ -136,9 +140,55 @@ fn __keel_restore_erased_Counter(
 fn __keel_cell_erased_Counter(
     __any: &(dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync),
 ) -> ::core::option::Option<&::std::sync::Arc<::keel::signals::StoreCell>> {
-    __any.downcast_ref::<Counter>().map(<Counter as ::keel::runtime::StoreObject>::cell)
+    __any.downcast_ref::<Counter>().map(<Counter>::__keel_cell_ref)
 }
 ::keel::meta::inventory::submit! {
     ::keel::runtime::StoreRestorer { type_id : ::keel::meta::ids::type_id("Counter"),
     restore : __keel_restore_erased_Counter, cell : __keel_cell_erased_Counter, }
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code)]
+#[diagnostic::on_unimplemented(
+    message = "error[keel::E0013]: store `Counter` cannot be restored automatically: its field of type `{Self}` has no `Default`\n  = note: restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument)\n  = help: implement `Default` for the type, or add `#[keel::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store\n  = docs: https://keel.dev/errors/E0013",
+    label = "this field type has no `Default`"
+)]
+trait __KeelRestoreDefault_Counter: ::core::marker::Sized {
+    fn __keel_default() -> Self;
+}
+impl<__KeelT: ::core::default::Default> __KeelRestoreDefault_Counter for __KeelT {
+    fn __keel_default() -> Self {
+        <__KeelT as ::core::default::Default>::default()
+    }
+}
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0011]: store `Counter` has no `#[keel::api(store)]` impl block\n  = note: the constructors of the impl block create the store and wire its signals to the platforms; without the block the store can never be instantiated\n  = help: add an `impl Counter` block marked `#[keel::api(store)]` with a constructor such as `pub fn new(ctx: Ctx) -> Self`\n  = docs: https://keel.dev/errors/E0011",
+        label = "this store has no `#[keel::api(store)]` impl block"
+    )]
+    trait __KeelStoreNeedsImpl {}
+    impl<__KeelT: ::keel::runtime::KeelObject> __KeelStoreNeedsImpl for __KeelT {}
+    fn __keel_need_impl<__KeelT: __KeelStoreNeedsImpl>() {}
+    fn __keel_check_impl() {
+        __keel_need_impl::<Counter>();
+    }
+};
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<i64, ::core::primitive::i64>();
+    }
+};

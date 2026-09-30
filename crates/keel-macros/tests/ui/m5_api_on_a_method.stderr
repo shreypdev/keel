@@ -1,0 +1,17 @@
+error: error[keel::E0007]: `#[keel::api]` on the method `add`
+         = note: `#[keel::api]` on a function exposes a free function; the methods of an object are exposed by putting the attribute on the `impl` block they are in
+         = help: remove `#[keel::api]` from the method and write `#[keel::api]` above `impl Type { .. }`
+         = docs: https://keel.dev/errors/E0007
+  --> tests/ui/m5_api_on_a_method.rs:15:12
+   |
+15 |     pub fn add(&self, a: i32, b: i32) -> i32 {
+   |            ^^^
+
+error: error[keel::E0007]: `#[keel::api]` on the method `twice`
+         = note: `#[keel::api]` on a function exposes a free function; the methods of an object are exposed by putting the attribute on the `impl` block they are in
+         = help: remove `#[keel::api]` from the method and write `#[keel::api]` above `impl Type { .. }`
+         = docs: https://keel.dev/errors/E0007
+  --> tests/ui/m5_api_on_a_method.rs:24:12
+   |
+24 |     pub fn twice(&self, a: i32) -> i32 {
+   |            ^^^^^

@@ -4,7 +4,7 @@ error: error[keel::E0041]: `sync_query` must be `async`
          = docs: https://keel.dev/errors/E0041
  --> tests/ui/e0041_query_signature.rs:7:8
   |
-7 | pub fn sync_query(ctx: &Ctx) -> Result<u32, String> {
+7 | pub fn sync_query(ctx: &Ctx) -> Result<u32, TodoError> {
   |        ^^^^^^^^^^
 
 error: error[keel::E0041]: `no_ctx` must take `ctx: &Ctx` as its first parameter
@@ -13,7 +13,7 @@ error: error[keel::E0041]: `no_ctx` must take `ctx: &Ctx` as its first parameter
          = docs: https://keel.dev/errors/E0041
   --> tests/ui/e0041_query_signature.rs:12:14
    |
-12 | pub async fn no_ctx(page: u32) -> Result<u32, String> {
+12 | pub async fn no_ctx(page: u32) -> Result<u32, TodoError> {
    |              ^^^^^^
 
 error: error[keel::E0041]: `plain` must return `Result<T, E>`

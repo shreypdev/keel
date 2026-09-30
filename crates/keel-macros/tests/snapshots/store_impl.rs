@@ -9,9 +9,30 @@ impl Todos {
     pub fn add(&self, title: String) {}
 }
 #[doc(hidden)]
+#[allow(non_upper_case_globals, dead_code)]
+const _keel_error_E0007_a_type_takes_one_keel_api_impl_block_Todos: () = ();
+impl Todos {
+    /// Marks the type as an object, so a signature that uses it as a value can say so.
+    #[doc(hidden)]
+    pub const __KEEL_IS_OBJECT: bool = true;
+}
+#[doc(hidden)]
 #[allow(non_camel_case_types, dead_code)]
 trait __KeelStoreProbe_Todos {
     const __KEEL_IS_STORE: bool = false;
+    const __KEEL_DOCS: &'static str = "";
+    fn __keel_cell_ref(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
+        ::core::unreachable!("not a `#[keel::store]`: E0011 stops the build first")
+    }
+    fn __keel_restore(
+        _ctx: ::keel::runtime::Ctx,
+        _r: &mut ::keel::wire::Reader<'_>,
+    ) -> ::core::result::Result<Self, ::keel::wire::WireError>
+    where
+        Self: ::core::marker::Sized,
+    {
+        ::core::unreachable!("not a `#[keel::store]`: E0011 stops the build first")
+    }
     const __KEEL_STORE_META: ::keel::meta::StoreMeta = ::keel::meta::StoreMeta {
         signals: &[],
     };
@@ -33,6 +54,18 @@ const _: () = {
 impl ::keel::runtime::KeelObject for Todos {
     const TYPE_ID: u32 = ::keel::meta::ids::type_id("Todos");
     const NAME: &'static str = "Todos";
+}
+#[automatically_derived]
+impl ::keel::runtime::StoreObject for Todos {
+    fn cell(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
+        self.__keel_cell_ref()
+    }
+    fn restore(
+        __ctx: ::keel::runtime::Ctx,
+        __r: &mut ::keel::wire::Reader<'_>,
+    ) -> ::core::result::Result<Self, ::keel::wire::WireError> {
+        Self::__keel_restore(__ctx, __r)
+    }
 }
 #[doc(hidden)]
 #[allow(
@@ -105,7 +138,7 @@ fn __keel_dispatch_Todos(
         }
         __KEEL_ID_add => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let title: String = match <String as ::keel::wire::Decode>::decode(
+            let __keel_a0: String = match <String as ::keel::wire::Decode>::decode(
                 &mut __r,
             ) {
                 ::core::result::Result::Ok(__v) => __v,
@@ -134,7 +167,7 @@ fn __keel_dispatch_Todos(
                 }
             };
             __keel_out({
-                let __out = Todos::add(&*__obj, title);
+                let __out = Todos::add(&*__obj, __keel_a0);
                 ::keel::runtime::DispatchResult::Sync(
                     ::core::result::Result::Ok(
                         ::keel::wire::Encode::encode_to_vec(&__out),
@@ -177,9 +210,59 @@ static __KEEL_META_Todos: ::keel::meta::ObjectMeta = ::keel::meta::ObjectMeta {
         },
     ],
     store: ::core::option::Option::Some(<Todos>::__KEEL_STORE_META),
-    docs: "",
+    docs: {
+        const __KEEL_A: &str = <Todos>::__KEEL_DOCS;
+        const __KEEL_B: &str = "";
+        const __KEEL_SEP: usize = if __KEEL_A.is_empty() || __KEEL_B.is_empty() {
+            0
+        } else {
+            2
+        };
+        const __KEEL_N: usize = __KEEL_A.len() + __KEEL_SEP + __KEEL_B.len();
+        const __KEEL_BYTES: [u8; __KEEL_N] = {
+            let (__a, __b) = (__KEEL_A.as_bytes(), __KEEL_B.as_bytes());
+            let mut __out = [0u8; __KEEL_N];
+            let mut __i = 0;
+            while __i < __a.len() {
+                __out[__i] = __a[__i];
+                __i += 1;
+            }
+            if __KEEL_SEP == 2 {
+                __out[__a.len()] = b'\n';
+                __out[__a.len() + 1] = b'\n';
+            }
+            let mut __j = 0;
+            while __j < __b.len() {
+                __out[__a.len() + __KEEL_SEP + __j] = __b[__j];
+                __j += 1;
+            }
+            __out
+        };
+        match ::core::str::from_utf8(&__KEEL_BYTES) {
+            ::core::result::Result::Ok(__s) => __s,
+            ::core::result::Result::Err(_) => "",
+        }
+    },
     dispatch: __keel_dispatch_Todos,
 };
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Object(& __KEEL_META_Todos)
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<String, ::std::string::String>();
+    }
+};
