@@ -851,72 +851,32 @@ impl SwiftGen<'_> {
 
     fn objects_file(&self) -> String {
         let mut w = self.header(&["Foundation", "KeelRuntime"]);
-        let mut needs_stream = false;
         for object in &self.model.objects {
-            needs_stream |= self.object(&mut w, object);
+            self.object(&mut w, object);
             w.blank();
         }
         for function in &self.model.functions {
-            needs_stream |= self.function(&mut w, function, "KeelIds.Functions");
+            self.function(&mut w, function, "KeelIds.Functions");
             w.blank();
-        }
-        if needs_stream {
-            self.decode_stream_helper(&mut w);
         }
         w.finish()
     }
 
-    fn decode_stream_helper(&self, w: &mut CodeWriter) {
-        w.line("/// Decodes every item of a core stream; a failure passes through `mapError`.");
-        w.line("fileprivate func keelDecodeStream<T: Sendable>(");
-        w.indented(|w| {
-            w.line("_ source: AsyncThrowingStream<[UInt8], Error>,");
-            w.line("decode: @escaping @Sendable ([UInt8]) throws -> T,");
-            w.line("mapError: @escaping @Sendable (any Error) -> any Error");
-        });
-        w.line(") -> AsyncThrowingStream<T, Error> {");
-        w.indented(|w| {
-            w.line("return AsyncThrowingStream { continuation in");
-            w.indented(|w| {
-                w.line("let task = Task {");
-                w.indented(|w| {
-                    w.line("do {");
-                    w.indented(|w| {
-                        w.line("for try await item in source {");
-                        w.indented(|w| w.line("continuation.yield(try decode(item))"));
-                        w.line("}");
-                        w.line("continuation.finish()");
-                    });
-                    w.line("} catch {");
-                    w.indented(|w| w.line("continuation.finish(throwing: mapError(error))"));
-                    w.line("}");
-                });
-                w.line("}");
-                w.line("continuation.onTermination = { _ in");
-                w.indented(|w| w.line("task.cancel()"));
-                w.line("}");
-            });
-            w.line("}");
-        });
-        w.line("}");
-    }
-
-    /// Writes an object; returns whether it uses `keelDecodeStream`.
-    fn object(&self, w: &mut CodeWriter, o: &ObjectDef) -> bool {
+    /// Writes an object, or a store (a class over `KeelStore`).
+    fn object(&self, w: &mut CodeWriter, o: &ObjectDef) {
         let store = o.store.is_some();
         let signals: Vec<&SignalDef> = o.store.iter().flat_map(|s| s.signals.iter()).collect();
         let base = if store { "KeelStore" } else { "KeelObject" };
-        let mut uses_stream = false;
         doc(w, &o.docs, &[]);
         if store {
             w.line("@MainActor @Observable");
-            w.line(format!("public final class {}: {base} {{", o.name));
-        } else {
-            w.line(format!(
-                "public final class {}: {base}, @unchecked Sendable {{",
-                o.name
-            ));
         }
+        // `KeelObject` and `KeelStore` are `@unchecked Sendable`; Swift 6 wants a subclass to say
+        // so again.
+        w.line(format!(
+            "public final class {}: {base}, @unchecked Sendable {{",
+            o.name
+        ));
         w.indented(|w| {
             let t = self.types();
             for g in &signals {
@@ -949,7 +909,7 @@ impl SwiftGen<'_> {
             for m in &o.methods {
                 w.blank();
                 let ids = format!("KeelIds.Objects.{}", o.name);
-                uses_stream |= self.callable(
+                self.callable(
                     w,
                     &Callable::from_method(m),
                     &Site::Method {
@@ -963,7 +923,6 @@ impl SwiftGen<'_> {
             }
         });
         w.line("}");
-        uses_stream
     }
 
     fn constructor(&self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef) {
@@ -1053,21 +1012,19 @@ impl SwiftGen<'_> {
         });
     }
 
-    fn function(&self, w: &mut CodeWriter, f: &FunctionDef, ids: &str) -> bool {
+    fn function(&self, w: &mut CodeWriter, f: &FunctionDef, ids: &str) {
         let id = format!("{ids}.{}", id(&f.name));
-        self.callable(w, &Callable::from_function(f), &Site::Function { id })
+        self.callable(w, &Callable::from_function(f), &Site::Function { id });
     }
 
-    /// One method or free function; returns whether it uses
-    /// `keelDecodeStream`.
-    fn callable(&self, w: &mut CodeWriter, c: &Callable<'_>, site: &Site) -> bool {
+    /// One method or free function.
+    fn callable(&self, w: &mut CodeWriter, c: &Callable<'_>, site: &Site) {
         let t = self.types();
         let ret = Ret::classify(c.returns).unwrap_or(Ret::Plain(c.returns));
         let taken: Vec<String> = c.params.iter().map(|p| id(&p.name)).collect();
         let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
         let writer = naming::avoid("w", &taken_refs);
         let body = naming::avoid("body", &taken_refs);
-        let source = naming::avoid("source", &taken_refs);
         let (core, target, mid, is_function) = match site {
             Site::Method { id } => (
                 "self.core".to_owned(),
@@ -1100,33 +1057,20 @@ impl SwiftGen<'_> {
             let suffix = format!(" -> AsyncThrowingStream<{item_ty}, Error>");
             w.call_block(head, &params, suffix, false, |w| {
                 let args = self.encode_args(w, c.params, &writer);
-                w.call(
-                    format!("let {source} = {core}.stream"),
-                    &[
-                        target.clone(),
-                        format!("method: {mid}"),
-                        format!("args: {args}"),
-                    ],
-                    "",
-                    false,
-                );
-                let decode = format!("{{ try {} }}", t.decode_all(item, "$0"));
-                let map_error = match &err {
-                    Some(err) => format!("{{ {err}.keelFromReply($0) ?? $0 }}"),
-                    None => "{ $0 }".to_owned(),
-                };
-                w.call(
-                    "return keelDecodeStream",
-                    &[
-                        source.clone(),
-                        format!("decode: {decode}"),
-                        format!("mapError: {map_error}"),
-                    ],
-                    "",
-                    false,
-                );
+                // `KeelCore.stream` decodes an item when the consumer asks for it, which is what
+                // makes the core's credit follow the consumer (docs/SPEC.md section 3.7).
+                let mut call_args = vec![
+                    target.clone(),
+                    format!("method: {mid}"),
+                    format!("args: {args}"),
+                    format!("decode: {{ try {} }}", t.decode_all(item, "$0")),
+                ];
+                if let Some(err) = &err {
+                    call_args.push(format!("mapError: {{ {err}.keelFromReply($0) ?? $0 }}"));
+                }
+                w.call(format!("return {core}.stream"), &call_args, "", false);
             });
-            return true;
+            return;
         }
 
         let (ok, is_unit) = match &ret {
@@ -1194,20 +1138,15 @@ impl SwiftGen<'_> {
                 }
             }
         });
-        false
     }
 
     // ===== Stores.swift ======================================================
 
     fn stores_file(&self) -> String {
         let mut w = self.header(&["Foundation", "KeelRuntime", "Observation"]);
-        let mut needs_stream = false;
         for store in &self.model.stores {
-            needs_stream |= self.object(&mut w, store);
+            self.object(&mut w, store);
             w.blank();
-        }
-        if needs_stream {
-            self.decode_stream_helper(&mut w);
         }
         w.finish()
     }
@@ -1456,17 +1395,13 @@ impl SwiftGen<'_> {
 
     fn queries_file(&self) -> String {
         let mut w = self.header(&["Foundation", "KeelRuntime", "Observation"]);
-        let mut needs_stream = false;
         for handle in &self.model.query_handles {
-            needs_stream |= self.object(&mut w, handle);
+            self.object(&mut w, handle);
             w.blank();
         }
         for mutation in &self.model.mutations {
-            needs_stream |= self.function(&mut w, mutation, "KeelIds.Queries");
+            self.function(&mut w, mutation, "KeelIds.Queries");
             w.blank();
-        }
-        if needs_stream {
-            self.decode_stream_helper(&mut w);
         }
         w.finish()
     }

@@ -61,15 +61,11 @@ public final class Probe: KeelObject, @unchecked Sendable {
     public func ticks(count: UInt32) -> AsyncThrowingStream<UInt32, Error> {
         var w = KeelWriter()
         count.keelEncode(&w)
-        let source = self.core.stream(
+        return self.core.stream(
             .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Probe.ticks),
             method: KeelIds.Objects.Probe.ticks,
-            args: w.finish()
-        )
-        return keelDecodeStream(
-            source,
-            decode: { try UInt32.keelDecoded(from: $0) },
-            mapError: { $0 }
+            args: w.finish(),
+            decode: { try UInt32.keelDecoded(from: $0) }
         )
     }
 
@@ -377,28 +373,5 @@ public func version(ctx: KeelCore = .shared) -> String {
         return try String.keelDecoded(from: body)
     } catch {
         keelUnexpected(error)
-    }
-}
-
-/// Decodes every item of a core stream; a failure passes through `mapError`.
-fileprivate func keelDecodeStream<T: Sendable>(
-    _ source: AsyncThrowingStream<[UInt8], Error>,
-    decode: @escaping @Sendable ([UInt8]) throws -> T,
-    mapError: @escaping @Sendable (any Error) -> any Error
-) -> AsyncThrowingStream<T, Error> {
-    return AsyncThrowingStream { continuation in
-        let task = Task {
-            do {
-                for try await item in source {
-                    continuation.yield(try decode(item))
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: mapError(error))
-            }
-        }
-        continuation.onTermination = { _ in
-            task.cancel()
-        }
     }
 }

@@ -13,3 +13,4 @@ export { WasmMainTransport, type WasmMainOptions, type WasmSource } from "./tran
 export { WasmWorkerTransport, type WasmWorkerOptions, type WorkerLike } from "./transport/wasm-worker.js";
 export { RemoteTransport, type RemoteOptions, type WebSocketFactory, type WebSocketLike } from "./transport/remote.js";
 export * from "./adapters/index.js";
+export type { KeelClass } from "./lifetime.js";

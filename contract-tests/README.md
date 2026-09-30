@@ -22,9 +22,9 @@ contract-tests/run-all.sh ts kotlin  # a subset
   web|host`) and uses the bindings `keel bindgen` generated (`examples/playground/generated`), plus the runtime's
   own API for what bindings do not expose (raw signal updates, statistics, snapshots, schema checks).
 * `NOTES.md` in each runner says where the scenario text had to be read for that platform, and lists the
-  defects and gaps the run found in the merged crates and runtimes. The Swift and TypeScript runners keep
-  each defect as an expected-failure test (`Findings.swift`, `test/findings.test.ts`) that turns red when the
-  defect is fixed.
+  defects and gaps the run found in the merged crates and runtimes. A defect that is still open is kept as
+  an expected-failure test that turns red when it is fixed (`ts/test/findings.test.ts`); a fixed one is an
+  ordinary check in a scenario or in the runtime's own tests.
 * `wire-vectors.json` is the shared byte-level vector table the three runtimes' codec tests read.
 
 Environment: Node 22+, Rust with `wasm32-unknown-unknown`, `kotlinc` (set `KEEL_KOTLIN_STDLIB` and

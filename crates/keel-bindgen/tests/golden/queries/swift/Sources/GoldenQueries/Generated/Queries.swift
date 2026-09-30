@@ -7,7 +7,7 @@ import Observation
 /// Observes the `todo_by_id` query (cache key `todo:{id}`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
-public final class TodoByIdQueryHandle: KeelStore {
+public final class TodoByIdQueryHandle: KeelStore, @unchecked Sendable {
     /// The latest successful result, if any.
     public private(set) var data: Todo? = nil
     /// Where the query is in its fetch lifecycle.
@@ -131,7 +131,7 @@ public final class TodoByIdQueryHandle: KeelStore {
 /// Observes the `todo_count` query (cache key `todo-count`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
-public final class TodoCountQueryHandle: KeelStore {
+public final class TodoCountQueryHandle: KeelStore, @unchecked Sendable {
     /// The latest successful result, if any.
     public private(set) var data: UInt32? = nil
     /// Where the query is in its fetch lifecycle.
@@ -252,7 +252,7 @@ public final class TodoCountQueryHandle: KeelStore {
 /// Observes the `todos` query (cache key `todos:{page}`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
-public final class TodosQueryHandle: KeelStore {
+public final class TodosQueryHandle: KeelStore, @unchecked Sendable {
     /// The latest successful result, if any.
     public private(set) var data: Page? = nil
     /// Where the query is in its fetch lifecycle.

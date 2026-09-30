@@ -269,14 +269,57 @@ public final class KeelCore: @unchecked Sendable {
     /// the stream) cancels it in the core. A stream that fails throws `KeelReplyError` from
     /// `next()`; typed stream errors arrive as `status == .error` with the encoded `E` in `body`.
     public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], any Error> {
+        return stream(target, method: method, args: args, decode: { $0 })
+    }
+
+    /// Opens a stream and returns its items decoded, with the same flow control as
+    /// ``stream(_:method:args:)``.
+    ///
+    /// This is what generated stream methods call. The returned stream pulls an item from the core
+    /// only when its consumer asks for the next one, so the credit granted to the core follows what
+    /// the consumer has read; copying a stream into another `AsyncThrowingStream` with `yield`
+    /// would buffer without bound and lose that.
+    ///
+    /// - Parameters:
+    ///   - decode: turns the body of one item into the element. If it throws, the stream ends with
+    ///     that error (after `mapError`) and is cancelled in the core.
+    ///   - mapError: turns a failure of the stream (a `KeelReplyError` carrying a typed error, for
+    ///     instance) into the error the consumer sees. The default passes it through.
+    public func stream<Item: Sendable>(
+        _ target: CallTarget,
+        method: UInt32,
+        args: [UInt8],
+        decode: @escaping @Sendable ([UInt8]) throws -> Item,
+        mapError: @escaping @Sendable (any Error) -> any Error = { $0 }
+    ) -> AsyncThrowingStream<Item, any Error> {
+        let consumer = openStream(target, method: method, args: args)
+        return AsyncThrowingStream<Item, any Error>(unfolding: {
+            do {
+                guard let body = try await consumer.next() else {
+                    return nil
+                }
+                do {
+                    return try decode(body)
+                } catch {
+                    consumer.stop()
+                    throw error
+                }
+            } catch {
+                throw mapError(error)
+            }
+        })
+    }
+
+    /// Sends the call that opens a stream, grants its initial credit and returns the consumer end.
+    private func openStream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> StreamConsumer {
         KeelCore.checkMethod(target, method)
         let callId: UInt32
         do {
             callId = try reserveCallId()
         } catch {
-            return AsyncThrowingStream<[UInt8], any Error> { continuation in
-                continuation.finish(throwing: error)
-            }
+            let channel = StreamChannel(callId: 0, onCredit: { _, _ in }, onClose: { _ in })
+            channel.finish(.failed(error))
+            return StreamConsumer(channel)
         }
         let channel = StreamChannel(
             callId: callId,
@@ -299,10 +342,7 @@ public final class KeelCore: @unchecked Sendable {
             removePending(callId)
             channel.finish(.failed(KeelCore.rejection()))
         }
-        let consumer = StreamConsumer(channel)
-        return AsyncThrowingStream<[UInt8], any Error>(unfolding: {
-            try await consumer.next()
-        })
+        return StreamConsumer(channel)
     }
 
     /// Runs a synchronous constructor and returns the new object's handle. The caller owns the

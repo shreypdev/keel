@@ -41,13 +41,10 @@ public final class Syncer: KeelObject, @unchecked Sendable {
     public func follow(_ endpoint: Endpoint) -> AsyncThrowingStream<HttpResponse, Error> {
         var w = KeelWriter()
         endpoint.keelEncode(&w)
-        let source = self.core.stream(
+        return self.core.stream(
             .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Syncer.follow),
             method: KeelIds.Objects.Syncer.follow,
-            args: w.finish()
-        )
-        return keelDecodeStream(
-            source,
+            args: w.finish(),
             decode: { try HttpResponse.keelDecoded(from: $0) },
             mapError: { HttpError.keelFromReply($0) ?? $0 }
         )
@@ -81,29 +78,6 @@ public final class Syncer: KeelObject, @unchecked Sendable {
         } catch {
             guard let typed = SyncError.keelFromReply(error) else { keelUnexpected(error) }
             throw typed
-        }
-    }
-}
-
-/// Decodes every item of a core stream; a failure passes through `mapError`.
-fileprivate func keelDecodeStream<T: Sendable>(
-    _ source: AsyncThrowingStream<[UInt8], Error>,
-    decode: @escaping @Sendable ([UInt8]) throws -> T,
-    mapError: @escaping @Sendable (any Error) -> any Error
-) -> AsyncThrowingStream<T, Error> {
-    return AsyncThrowingStream { continuation in
-        let task = Task {
-            do {
-                for try await item in source {
-                    continuation.yield(try decode(item))
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: mapError(error))
-            }
-        }
-        continuation.onTermination = { _ in
-            task.cancel()
         }
     }
 }

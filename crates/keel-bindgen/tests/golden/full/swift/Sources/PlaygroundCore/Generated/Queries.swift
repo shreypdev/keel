@@ -7,7 +7,7 @@ import Observation
 /// Observes the `todos` query (cache key `todos:{page}`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
-public final class TodosQueryHandle: KeelStore {
+public final class TodosQueryHandle: KeelStore, @unchecked Sendable {
     /// The latest successful result, if any.
     public private(set) var data: Page? = nil
     /// Where the query is in its fetch lifecycle.

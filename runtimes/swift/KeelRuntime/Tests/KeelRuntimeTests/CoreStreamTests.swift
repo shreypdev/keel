@@ -298,4 +298,199 @@ final class CoreStreamTests: XCTestCase {
         XCTAssertEqual(taken, 2)
         XCTAssertEqual(transport.cancels, [transport.calls[0].callId])
     }
+
+    // MARK: Decoded streams (what generated stream methods call)
+
+    private struct Doubled: Error, Equatable {
+        var code: UInt8
+    }
+
+    private func decodedStream(_ core: KeelCore) -> AsyncThrowingStream<Int, any Error> {
+        return core.stream(
+            .freeFunction(methodId: 8),
+            method: 8,
+            args: [],
+            decode: { (body: [UInt8]) throws -> Int in
+                return Int(body[0]) * 2
+            }
+        )
+    }
+
+    func testADecodedStreamDeliversDecodedItemsInOrderThenEnds() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: numbered(40))
+        var received: [Int] = []
+        for try await item in decodedStream(core) {
+            received.append(item)
+        }
+        XCTAssertEqual(received, (0 ..< 40).map { $0 * 2 })
+        XCTAssertTrue(transport.cancels.isEmpty, "a stream that ended by itself is not cancelled")
+        XCTAssertEqual(core.stats().hostOpenStreams, 0)
+    }
+
+    func testADecodedStreamGrantsCreditAsItsConsumerReads() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: numbered(100), holdOpen: true)
+        let stream = decodedStream(core)
+        let callId = transport.calls[0].callId
+        var iterator = stream.makeAsyncIterator()
+
+        XCTAssertEqual(transport.deliveredCount(callId), 16, "the initial credit, before anything is read")
+        for expected in 0 ..< 3 {
+            let item = try await iterator.next()
+            XCTAssertEqual(item, expected * 2)
+        }
+        XCTAssertEqual(transport.credits(for: callId), [16], "three of sixteen read: no top-up yet")
+        for expected in 3 ..< 9 {
+            let item = try await iterator.next()
+            XCTAssertEqual(item, expected * 2)
+        }
+        XCTAssertEqual(transport.credits(for: callId), [16, 9], "a window of seven is topped back up to sixteen")
+        XCTAssertEqual(transport.deliveredCount(callId), 25)
+    }
+
+    func testADecodedStreamDoesNotRunAheadOfAConsumerThatStoppedReading() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: numbered(250), holdOpen: true)
+        let stream = decodedStream(core)
+        let callId = transport.calls[0].callId
+        var iterator = stream.makeAsyncIterator()
+        for _ in 0 ..< 5 {
+            _ = try await iterator.next()
+        }
+        // Give a copying wrapper every chance to pull the rest of the stream in the background.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertLessThanOrEqual(transport.deliveredCount(callId), 5 + 16, "the core ran ahead of a consumer that read 5")
+        XCTAssertEqual(transport.credits(for: callId), [16])
+    }
+
+    func testADecodedStreamNeverHasMoreThanTheWindowInFlight() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: numbered(200))
+        let stream = decodedStream(core)
+        let callId = transport.calls[0].callId
+        var consumed = 0
+        for try await item in stream {
+            XCTAssertEqual(item, (consumed & 0xFF) * 2)
+            consumed += 1
+            XCTAssertLessThanOrEqual(transport.deliveredCount(callId) - consumed, 16, "at item \(consumed)")
+        }
+        XCTAssertEqual(consumed, 200)
+    }
+
+    func testMapErrorTurnsAStreamFailureIntoTheConsumersError() async throws {
+        let transport = FakeTransport()
+        transport.onCall = { call, fake in
+            fake.openStream(call.callId, items: [[1], [2]], failureBody: [7])
+            return true
+        }
+        let core = try makeCore(transport)
+        let stream = core.stream(
+            .freeFunction(methodId: 8),
+            method: 8,
+            args: [],
+            decode: { (body: [UInt8]) throws -> UInt8 in
+                return body[0]
+            },
+            mapError: { (error: any Error) -> any Error in
+                if let reply = error as? KeelReplyError, reply.status == .error {
+                    return Doubled(code: reply.body[0])
+                }
+                return error
+            }
+        )
+        var received: [UInt8] = []
+        let error = await captureError {
+            for try await item in stream {
+                received.append(item)
+            }
+        }
+        XCTAssertEqual(received, [1, 2])
+        XCTAssertEqual(error as? Doubled, Doubled(code: 7))
+    }
+
+    func testAnItemThatCannotBeDecodedEndsTheStreamAndCancelsItInTheCore() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: numbered(50), holdOpen: true)
+        let stream = core.stream(
+            .freeFunction(methodId: 8),
+            method: 8,
+            args: [],
+            decode: { (body: [UInt8]) throws -> UInt8 in
+                if body[0] == 2 {
+                    throw Doubled(code: body[0])
+                }
+                return body[0]
+            }
+        )
+        let callId = transport.calls[0].callId
+        var iterator = stream.makeAsyncIterator()
+        var items: [UInt8] = []
+        var failure: (any Error)?
+        do {
+            while let item = try await iterator.next() {
+                items.append(item)
+            }
+        } catch {
+            failure = error
+        }
+        XCTAssertEqual(items, [0, 1])
+        XCTAssertEqual(failure as? Doubled, Doubled(code: 2))
+        XCTAssertEqual(transport.cancels, [callId], "the core stops producing for a consumer that cannot read it")
+        let after = try await iterator.next()
+        XCTAssertNil(after, "a stream that failed is over")
+        XCTAssertEqual(core.stats().hostOpenStreams, 0)
+    }
+
+    func testBreakingOutOfADecodedStreamCancelsItInTheCore() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: numbered(50), holdOpen: true)
+        var taken = 0
+        do {
+            for try await _ in decodedStream(core) {
+                taken += 1
+                if taken == 2 {
+                    break
+                }
+            }
+        }
+        XCTAssertEqual(taken, 2)
+        XCTAssertEqual(transport.cancels, [transport.calls[0].callId])
+        XCTAssertEqual(core.stats().hostOpenStreams, 0)
+    }
+
+    func testCancellingTheTaskOfADecodedStreamCancelsItInTheCore() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: [[1]], holdOpen: true)
+        let stream = decodedStream(core)
+        let callId = transport.calls[0].callId
+        let received = Guarded<Int>(0)
+        let task = Task { () -> Void in
+            for try await _ in stream {
+                received.withLock { (count: inout Int) -> Void in
+                    count += 1
+                }
+            }
+        }
+        let gotItem = await waitUntil {
+            return received.withLock { (count: inout Int) -> Bool in
+                return count == 1
+            }
+        }
+        XCTAssertTrue(gotItem)
+        task.cancel()
+        let result = await task.result
+        XCTAssertNoThrow(try result.get())
+        XCTAssertEqual(transport.cancels, [callId])
+    }
+
+    func testADecodedStreamOnAShutDownCoreFails() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: [[1]])
+        core.shutdown()
+        let error = await captureError {
+            for try await _ in decodedStream(core) {}
+        }
+        XCTAssertNotNil(error)
+    }
 }

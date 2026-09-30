@@ -7,7 +7,7 @@ import Observation
 /// Observes the `remote_todos` query (cache key `remote-todos:{list}`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
-public final class RemoteTodosQueryHandle: KeelStore {
+public final class RemoteTodosQueryHandle: KeelStore, @unchecked Sendable {
     /// The latest successful result, if any.
     public private(set) var data: [RemoteTodo]? = nil
     /// Where the query is in its fetch lifecycle.

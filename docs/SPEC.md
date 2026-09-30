@@ -653,7 +653,7 @@ export class Todos extends KeelStore {
 }
 export interface Http extends KeelPort { request(req: HttpRequest): Promise<HttpResponse> }
 ```
-All methods return `Promise` (uniform across main-thread, worker and remote modes). `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@keel/runtime/react` exports `useKeel(Class)` and `useSignal(signal)`; `vue`, `svelte`, `solid` adapters are thin files. `i64`/`u64` → `bigint`; `#[keel(js_number)]` → `number`.
+All methods return `Promise` (uniform across main-thread, worker and remote modes). `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@keel/runtime/react` exports `useKeel(Class)` (creates a store on mount, closes it on unmount; `undefined` until it exists) and `useSignal(signal)` (`useSyncExternalStore`, with a server snapshot); `vue` (`useSignal` as a `shallowRef`, `useKeel`), `svelte` (`signalStore`, a `Readable`) and `solid` (`useSignal` as an `Accessor`, `useKeel`) adapters are thin files. The frameworks are optional peer dependencies; the core package imports none of them. `i64`/`u64` → `bigint`; `#[keel(js_number)]` → `number`.
 
 ### 10.4 Codecs
 
@@ -1066,6 +1066,8 @@ public final class KeelCore: @unchecked Sendable {
   public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]
   public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8]   // cancellation-aware
   public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], Error>
+  public func stream<Item: Sendable>(_ target: CallTarget, method: UInt32, args: [UInt8], decode: @escaping @Sendable ([UInt8]) throws -> Item,
+                                     mapError: @escaping @Sendable (Error) -> Error = { $0 }) -> AsyncThrowingStream<Item, Error>   // what generated stream methods return; decodes on demand so credit follows the consumer (§3.7)
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> KeelHandle
   public func observe(_ handle: KeelHandle, signal: UInt32, on: Bool); public func release(_ handle: KeelHandle)
   public let mirror: Mirror        // register(handle) { @MainActor (signalId, op, reader) in … }

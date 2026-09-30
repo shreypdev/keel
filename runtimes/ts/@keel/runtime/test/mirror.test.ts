@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Mirror } from "../src/mirror.js";
-import { Signal } from "../src/signal.js";
+import { Signal, setSignalErrorHandler } from "../src/signal.js";
 import { ALL_SIGNALS, ChangeOp, encodeChangeSet } from "../src/wire/index.js";
 import { macrotask } from "./support/harness.js";
 
@@ -198,6 +198,121 @@ describe("Mirror change-sets", () => {
     mirror.enqueue(changeSet([1n, 0], [1n, 1]));
     mirror.flush();
     expect(order).toEqual([0, -1, 1, 10]);
+  });
+
+  describe("a change-set enqueued by a signal subscriber while the flush notifies", () => {
+    // `flush()` applies a batch, and the subscribers of the signals it touched are notified when
+    // the batch ends, still inside the flush. A subscriber that makes a core call whose change-set
+    // arrives at once (every synchronous call in wasm-main) enqueues it after the round's queue ran
+    // dry; it used to wait for an unrelated change-set.
+    const counter = (mirror: Mirror) => {
+      const count = new Signal(0);
+      mirror.register(1n, (_signalId, _op, value) => count._set(value[0] as number));
+      return count;
+    };
+
+    it("is applied by the same flush, on the default scheduler", async () => {
+      const mirror = new Mirror();
+      const count = counter(mirror);
+      const seen: number[] = [];
+      count.subscribe((n) => {
+        seen.push(n);
+        if (n === 1) mirror.enqueue(changeSet([1n, 0, bytes(2)]));
+      });
+      mirror.enqueue(changeSet([1n, 0, bytes(1)]));
+      await macrotask();
+      expect(seen).toEqual([1, 2]);
+      expect(mirror.pending).toBe(0);
+    });
+
+    it("is applied before the flush returns, and needs no second scheduled flush", () => {
+      const scheduled: Array<() => void> = [];
+      const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn) });
+      const count = counter(mirror);
+      const seen: number[] = [];
+      count.subscribe((n) => {
+        seen.push(n);
+        if (n < 3) mirror.enqueue(changeSet([1n, 0, bytes(n + 1)]));
+      });
+      mirror.enqueue(changeSet([1n, 0, bytes(1)]));
+      expect(scheduled).toHaveLength(1);
+      scheduled[0]?.();
+      expect(seen).toEqual([1, 2, 3]);
+      expect(scheduled).toHaveLength(1);
+      expect(mirror.pending).toBe(0);
+    });
+
+    it("settles a whenObserved waiter for an entry that arrived that way", async () => {
+      const mirror = new Mirror();
+      const count = counter(mirror);
+      count.subscribe((n) => {
+        if (n === 1) mirror.enqueue(changeSet([1n, 5, bytes(9)]));
+      });
+      const waiting = mirror.whenObserved(1n, 5);
+      mirror.enqueue(changeSet([1n, 0, bytes(1)]));
+      mirror.flush();
+      await waiting;
+    });
+
+    it("announces each round once, with the signals of that round", () => {
+      const mirror = new Mirror();
+      const count = counter(mirror);
+      const seen: number[] = [];
+      count.subscribe((n) => {
+        seen.push(n);
+        if (n === 1) mirror.enqueue(changeSet([1n, 0, bytes(2)], [1n, 0, bytes(3)]));
+      });
+      mirror.enqueue(changeSet([1n, 0, bytes(1)]));
+      mirror.flush();
+      expect(seen).toEqual([1, 3]);
+    });
+
+    it("stops a subscriber that feeds itself after 1000 rounds, reports it and finishes later", () => {
+      const scheduled: Array<() => void> = [];
+      const errors: unknown[] = [];
+      const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn), onError: (e) => errors.push(e) });
+      const count = counter(mirror);
+      let rounds = 0;
+      count.subscribe((n) => {
+        rounds++;
+        if (rounds < 2500) mirror.enqueue(changeSet([1n, 0, bytes((n + 1) % 256)]));
+      });
+      mirror.enqueue(changeSet([1n, 0, bytes(1)]));
+      scheduled.shift()?.();
+      expect(rounds).toBe(1000);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ kind: "state" });
+      expect(mirror.pending).toBe(1);
+      // The rest is not stranded: a later flush continues and finishes.
+      while (scheduled.length > 0) scheduled.shift()?.();
+      expect(rounds).toBe(2500);
+      expect(mirror.pending).toBe(0);
+    });
+
+    it("an error that unwinds the flush leaves the queue to a later flush", () => {
+      const scheduled: Array<() => void> = [];
+      const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn) });
+      const count = counter(mirror);
+      const restore = setSignalErrorHandler((error) => {
+        throw error;
+      });
+      try {
+        count.subscribe((n) => {
+          if (n === 1) {
+            mirror.enqueue(changeSet([1n, 0, bytes(2)]));
+            throw new Error("subscriber failed");
+          }
+        });
+        mirror.enqueue(changeSet([1n, 0, bytes(1)]));
+        expect(() => scheduled.shift()?.()).toThrow("subscriber failed");
+      } finally {
+        setSignalErrorHandler(restore);
+      }
+      expect(mirror.pending).toBe(1);
+      expect(scheduled).toHaveLength(1);
+      scheduled.shift()?.();
+      expect(count.peek()).toBe(2);
+    });
   });
 
   it("the default error handler rethrows from a microtask", async () => {

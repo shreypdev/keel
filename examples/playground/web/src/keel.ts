@@ -1,16 +1,17 @@
 import { KeelCore, emitConnectivity } from "@keel/runtime";
-import { BigList, Counter, KeelIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
+import { BigList, KeelIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `keel build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/keel_core.wasm?url";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
 
-/** Everything the views share: the one core's four stores, and the server behind its `Http` port. */
+/**
+ * What the views share: the one core's long-lived stores, and the server behind its `Http` port.
+ * (The counter is not here: its view creates it with `useKeel`.)
+ */
 export interface Playground {
   /** The to-do list. */
   readonly todos: Todos;
-  /** The counter. */
-  readonly counter: Counter;
   /** The 10,000-row list. */
   readonly bigList: BigList;
   /** The observed query of the `inbox` list on the (fake) server. */
@@ -20,7 +21,7 @@ export interface Playground {
 }
 
 /**
- * Attaches the page to its Rust core and creates the four stores.
+ * Attaches the page to its Rust core and creates the three long-lived stores.
  *
  * By default the core runs in the browser (wasm, on this thread). With `?keel=ws://127.0.0.1:7443`
  * in the page URL (or `VITE_KEEL_DEV_URL` in the environment) it is the core that `keel dev`
@@ -46,13 +47,12 @@ export async function startKeel(): Promise<Playground> {
   }
   // Tell the core where the server is before anything observes the query.
   await configureRemote({ baseUrl: REMOTE_BASE_URL });
-  const [todos, counter, bigList, inbox] = await Promise.all([
+  const [todos, bigList, inbox] = await Promise.all([
     Todos.create(),
-    Counter.create(),
     BigList.create(),
     RemoteTodosQueryHandle.create(INBOX),
   ]);
-  return { todos, counter, bigList, inbox, server };
+  return { todos, bigList, inbox, server };
 }
 
 /**

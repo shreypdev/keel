@@ -213,8 +213,9 @@ final class StreamChannel: @unchecked Sendable {
     }
 }
 
-/// Owned by the `AsyncThrowingStream` the consumer holds. When the stream (and every iterator
-/// over it) goes away, the deinitializer stops the stream in the core.
+/// Owned by the `AsyncThrowingStream` the consumer holds (its `unfolding` closure captures it).
+/// When the stream (and every iterator over it) goes away, the deinitializer stops the stream in
+/// the core.
 final class StreamConsumer: @unchecked Sendable {
     private let channel: StreamChannel
 
@@ -224,6 +225,11 @@ final class StreamConsumer: @unchecked Sendable {
 
     func next() async throws -> [UInt8]? {
         return try await channel.next()
+    }
+
+    /// Stops the stream now instead of when the consumer is deallocated.
+    func stop() {
+        channel.consumerGone()
     }
 
     deinit {

@@ -6,7 +6,7 @@ import Observation
 
 /// The todo list store.
 @MainActor @Observable
-public final class TodoStore: KeelStore {
+public final class TodoStore: KeelStore, @unchecked Sendable {
     public private(set) var todos: [Todo] = []
     public private(set) var filter: Filter = .all
     /// Computed by the core; read-only.

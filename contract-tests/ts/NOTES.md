@@ -48,6 +48,8 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
 
 ## Gaps and defects found (for the integrator)
 
+Fixed since (playground finding 5): the Mirror stranded a change-set enqueued from a signal subscriber during the flush; the flush now drains it in a further round (`runtimes/ts/@keel/runtime/test/mirror.test.ts`).
+
 1. **`KeelCore` has no `snapshot()` / `restore()`** (SPEC 17.1 lists none). The runtime implements
    `Kind.Restore` in `WasmMainTransport.send` and the core exports `keel_snapshot`, but an app holding only a
    `KeelCore` cannot use either. The scenarios reach the transport; an app would have to as well.
@@ -55,13 +57,10 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
    old core are alive again, but `Todos.create()` always constructs a new one and the constructor is private,
    so there is no supported way to put a store class on a restored handle. S17 casts around the private
    constructor (`adoptTodos`, the one place that does).
-3. **Mirror strands a change-set enqueued from a signal subscriber** (`runtimes/ts/@keel/runtime/src/mirror.ts`).
-   `flush()` keeps `#flushing` set until `batch()` returns, and `batch()` notifies subscribers as it returns, so
-   a subscriber that makes a synchronous core call enqueues its change-set while `#flushing` is true: no flush
-   is scheduled and nothing looks at the queue again until an unrelated change-set arrives. Minimal repro:
-   `test/findings.test.ts` (an expected-fail test, so it turns red when the runtime is fixed). Fix: re-check
-   the queue after `#flushing` is cleared. It does not affect a scenario (S04.4 only needs the observer's own
-   call to resolve).
+3. **Mirror stranded a change-set enqueued from a signal subscriber** (`runtimes/ts/@keel/runtime/src/mirror.ts`).
+   **Fixed.** `flush()` now drains further rounds until the queue is empty (up to the core's 1000-round cap),
+   so a subscriber's synchronous core call is applied in the same flush. The repro moved into the runtime's
+   own suite, `test/mirror.test.ts`.
 4. **A failed mutation's rollback removed the placeholder of a later mutation** (keel-query, SPEC 9: "the
    pre-mutation entries are restored"). **Fixed.** The restore was a snapshot taken before the mutation ran; a
    mutation that started after it had already put its own optimistic item into the entry, and the restore took it

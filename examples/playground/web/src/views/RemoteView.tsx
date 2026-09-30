@@ -1,8 +1,8 @@
+import { useSignal } from "@keel/runtime/react";
 import { RemoteError, type RemoteTodo, createRemoteTodo, setRemoteDone } from "@playground/core";
 import { useState } from "react";
 import { type Playground, setOffline } from "../keel";
 import { INBOX } from "../playground-server";
-import { useSignal } from "../useSignal";
 
 /** An item the server has not answered for yet has an identity counting down from `u32::MAX` (see `RemoteTodo.id`). */
 const isPending = (todo: RemoteTodo): boolean => todo.id >= 0x8000_0000;

@@ -167,15 +167,11 @@ public final class Calculator: KeelObject, @unchecked Sendable {
     public func ticks(n: UInt32) -> AsyncThrowingStream<UInt32, Error> {
         var w = KeelWriter()
         n.keelEncode(&w)
-        let source = self.core.stream(
+        return self.core.stream(
             .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Calculator.ticks),
             method: KeelIds.Objects.Calculator.ticks,
-            args: w.finish()
-        )
-        return keelDecodeStream(
-            source,
-            decode: { try UInt32.keelDecoded(from: $0) },
-            mapError: { $0 }
+            args: w.finish(),
+            decode: { try UInt32.keelDecoded(from: $0) }
         )
     }
 
@@ -184,13 +180,10 @@ public final class Calculator: KeelObject, @unchecked Sendable {
     public func watch(_ mode: Mode) -> AsyncThrowingStream<Todo, Error> {
         var w = KeelWriter()
         mode.keelEncode(&w)
-        let source = self.core.stream(
+        return self.core.stream(
             .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Calculator.watch),
             method: KeelIds.Objects.Calculator.watch,
-            args: w.finish()
-        )
-        return keelDecodeStream(
-            source,
+            args: w.finish(),
             decode: { try Todo.keelDecoded(from: $0) },
             mapError: { CalcError.keelFromReply($0) ?? $0 }
         )
@@ -251,12 +244,12 @@ public func greet(name: String, ctx: KeelCore = .shared) -> String {
 public func numbers(upto: UInt32, ctx: KeelCore = .shared) -> AsyncThrowingStream<UInt32, Error> {
     var w = KeelWriter()
     upto.keelEncode(&w)
-    let source = ctx.stream(
+    return ctx.stream(
         .freeFunction(methodId: KeelIds.Functions.numbers),
         method: KeelIds.Functions.numbers,
-        args: w.finish()
+        args: w.finish(),
+        decode: { try UInt32.keelDecoded(from: $0) }
     )
-    return keelDecodeStream(source, decode: { try UInt32.keelDecoded(from: $0) }, mapError: { $0 })
 }
 
 /// - Throws: ``CalcError``.
@@ -270,28 +263,5 @@ public func ping(ctx: KeelCore = .shared) async throws(CalcError) {
     } catch {
         guard let typed = CalcError.keelFromReply(error) else { keelUnexpected(error) }
         throw typed
-    }
-}
-
-/// Decodes every item of a core stream; a failure passes through `mapError`.
-fileprivate func keelDecodeStream<T: Sendable>(
-    _ source: AsyncThrowingStream<[UInt8], Error>,
-    decode: @escaping @Sendable ([UInt8]) throws -> T,
-    mapError: @escaping @Sendable (any Error) -> any Error
-) -> AsyncThrowingStream<T, Error> {
-    return AsyncThrowingStream { continuation in
-        let task = Task {
-            do {
-                for try await item in source {
-                    continuation.yield(try decode(item))
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: mapError(error))
-            }
-        }
-        continuation.onTermination = { _ in
-            task.cancel()
-        }
     }
 }

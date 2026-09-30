@@ -38,7 +38,7 @@ test("the playground runs: todos, counter, 10k list, remote", async ({ page }) =
   await page.goto("/");
   await expect(page.getByTestId("todo-input")).toBeVisible();
   const startedAt = await page.evaluate(() => performance.now());
-  console.log(`startup: the first view was interactive ${startedAt.toFixed(0)} ms after navigation started (fetch, compile and instantiate the 538 KB core, create four stores, render)`);
+  console.log(`startup: the first view was interactive ${startedAt.toFixed(0)} ms after navigation started (fetch, compile and instantiate the 538 KB core, create the stores, render)`);
   await expect(page.getByRole("heading", { name: "Keel playground" })).toBeVisible();
 
   // ---- Todos -------------------------------------------------------------------------------

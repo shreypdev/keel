@@ -1,14 +1,24 @@
-import type { Counter } from "@playground/core";
-import { useSignal } from "../useSignal";
+import { useKeel, useSignal } from "@keel/runtime/react";
+import { Counter } from "@playground/core";
 
 /**
  * The `Counter` store. Each command is one transaction in the core, so `count`, `changes` and the
  * computed `parity` reach this view in one change-set, and never disagree on screen.
+ *
+ * This view owns its counter: `useKeel(Counter)` creates the store when the tab opens and closes it
+ * (releasing its handle in the core) when the tab closes, so the count starts from zero each time.
+ * The other views share one store that lives as long as the page.
  */
-export function CounterView({ counter }: { readonly counter: Counter }) {
-  const count = useSignal(counter.count);
-  const changes = useSignal(counter.changes);
-  const parity = useSignal(counter.parity);
+export function CounterView() {
+  const counter = useKeel(Counter);
+  // Called before the store exists: `undefined` for a missing signal, the value once it does.
+  const count = useSignal(counter?.count);
+  const changes = useSignal(counter?.changes);
+  const parity = useSignal(counter?.parity);
+
+  if (counter === undefined) {
+    return <h2>Counter</h2>;
+  }
 
   return (
     <>

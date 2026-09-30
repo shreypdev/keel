@@ -28,9 +28,32 @@ final class InprocTransport: KeelTransport, @unchecked Sendable {
         var user: UnsafeMutableRawPointer? = nil
     }
 
-    private let state = Guarded<State>(State())
+    /// The functions of the linked core that `start` calls before there is a transport to talk
+    /// through. Tests replace them to script the order in which `start` uses them; the shipped
+    /// value calls the C ABI.
+    struct CoreEntry: Sendable {
+        /// `keel_abi_version()`.
+        var abiVersion: @Sendable () -> UInt32
+        /// `keel_schema_hash()`, which works before `keel_init`.
+        var schemaHash: @Sendable () -> UInt64
+        /// `keel_init` with the encoded `RuntimeConfig` and the `user` pointer of every callback;
+        /// returns its status code (0 when the core is running).
+        var initialize: @Sendable (_ config: [UInt8], _ user: UnsafeMutableRawPointer) -> UInt32
 
-    init() {}
+        /// The core behind `KeelFFI`.
+        static let linked = CoreEntry(
+            abiVersion: { keel_abi_version() },
+            schemaHash: { keel_schema_hash() },
+            initialize: { InprocTransport.initializeLinkedCore(config: $0, user: $1) }
+        )
+    }
+
+    private let state = Guarded<State>(State())
+    private let entry: CoreEntry
+
+    init(entry: CoreEntry = .linked) {
+        self.entry = entry
+    }
 
     /// The ABI version of whatever is linked behind `KeelFFI` (0 for the link-time stub).
     static var linkedABIVersion: UInt32 {
@@ -48,9 +71,19 @@ final class InprocTransport: KeelTransport, @unchecked Sendable {
     // MARK: Start and stop
 
     func start(inbound: any KeelInbound, options: TransportStartOptions) throws -> TransportInfo {
-        let abi = keel_abi_version()
+        let abi = entry.abiVersion()
         if abi != KeelCore.abiVersion {
             throw KeelLoadError.abiMismatch(expected: KeelCore.abiVersion, got: abi)
+        }
+        // The schema hash is compared before the core is initialised (docs/SPEC.md section 11:
+        // the check is at attach). `keel_schema_hash` needs no running core, so bindings generated
+        // for another schema are refused without `keel_init` having run, which matters when the
+        // core is already initialised by someone else (a second `keel_init` is refused, and the
+        // caller would see `coreInitFailed` instead of the mismatch) and saves starting a core
+        // only to shut it down.
+        let schemaHash = entry.schemaHash()
+        if schemaHash != options.expectedSchemaHash {
+            throw KeelSchemaMismatchError(expected: options.expectedSchemaHash, got: schemaHash)
         }
         let claimed = InprocTransport.active.withLock { (slot: inout InprocTransport?) -> Bool in
             if slot != nil {
@@ -79,7 +112,19 @@ final class InprocTransport: KeelTransport, @unchecked Sendable {
             blockingThreads: 0,
             logLevel: options.logLevel
         ).keelEncoded()
+        let code = entry.initialize(config, user)
+        if code != 0 {
+            InprocTransport.active.withLock { (slot: inout InprocTransport?) -> Void in
+                slot = nil
+            }
+            throw KeelLoadError.coreInitFailed(code: code)
+        }
+        return TransportInfo(schemaHash: schemaHash)
+    }
 
+    /// `keel_init` with the trampolines that route the core's callbacks to the transport that
+    /// `user` points to.
+    private static func initializeLinkedCore(config: [UInt8], user: UnsafeMutableRawPointer) -> UInt32 {
         let replyCallback: keel_reply_cb = { userData, callId, ptr, len in
             InprocTransport.deliverReply(userData, callId, ptr, len)
         }
@@ -89,7 +134,7 @@ final class InprocTransport: KeelTransport, @unchecked Sendable {
         let streamCallback: keel_stream_cb = { userData, callId, ptr, len in
             InprocTransport.deliverStreamItem(userData, callId, ptr, len)
         }
-        let code = config.withUnsafeBufferPointer { (buffer: UnsafeBufferPointer<UInt8>) -> UInt32 in
+        return config.withUnsafeBufferPointer { (buffer: UnsafeBufferPointer<UInt8>) -> UInt32 in
             return keel_init(
                 buffer.baseAddress,
                 UInt32(buffer.count),
@@ -99,13 +144,6 @@ final class InprocTransport: KeelTransport, @unchecked Sendable {
                 user
             )
         }
-        if code != 0 {
-            InprocTransport.active.withLock { (slot: inout InprocTransport?) -> Void in
-                slot = nil
-            }
-            throw KeelLoadError.coreInitFailed(code: code)
-        }
-        return TransportInfo(schemaHash: keel_schema_hash())
     }
 
     func shutdown() {

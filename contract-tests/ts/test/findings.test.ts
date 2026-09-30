@@ -1,50 +1,24 @@
 import { expect, test } from "vitest";
-import { ChangeOp, Mirror, Signal, encodeChangeSet } from "@keel/runtime";
 import { RemoteTodosQueryHandle, configureRemote, createRemoteTodo, setRemoteDone } from "@playground/core";
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
 import { waitFor } from "../src/wait.js";
 
-// Defects found in the merged runtime while writing the scenarios. Each is a minimal repro that
-// is written as the behaviour it should have and marked `fails`: it passes while the defect is
-// there, and starts failing (telling whoever fixes it to delete the mark) once it is fixed.
-// A repro whose defect has been fixed loses the mark and stays here as a regression test.
-// They are not scenarios: the reporter ignores them.
+// Defects found in merged code while writing the scenarios and still open. Each is a minimal repro
+// written as the behaviour it should have and marked `fails`: it passes while the defect is there,
+// and starts failing (telling whoever fixes it to delete the mark) once it is fixed. They are not
+// scenarios: the reporter ignores them. (The Mirror defect that used to be here, a change-set
+// enqueued by a signal subscriber during the flush, is fixed and tested in the runtime's own suite,
+// `test/mirror.test.ts`.)
 
-const fullValue = (n: number): Uint8Array =>
-  encodeChangeSet({ txnId: 1n, entries: [{ handle: 1n, signalId: 0, op: ChangeOp.FullValue, value: Uint8Array.of(n) }] });
-
-// FINDING ts-runtime/Mirror: `Mirror.flush` sets `#flushing` while it runs `batch(...)`, and the
-// signal subscribers are notified when the batch ends, which is still inside that window. A
-// subscriber that makes a core call whose change-set arrives synchronously (every synchronous
-// core method in wasm-main) enqueues it while `#flushing` is true, so no flush is scheduled, and
-// nothing looks at the queue again: the change-set waits for an unrelated one. The fix is to
-// re-check the queue after `#flushing` is cleared.
-test.fails("FINDING a change-set enqueued by a subscriber during the flush is applied", async () => {
-  const mirror = new Mirror();
-  const count = new Signal(0);
-  const seen: number[] = [];
-  mirror.register(1n, (_signalId, _op, value) => {
-    count._set(value[0] as number);
-  });
-  count.subscribe((n) => {
-    seen.push(n);
-    if (n === 1) mirror.enqueue(fullValue(2));
-  });
-  mirror.enqueue(fullValue(1));
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(seen).toEqual([1, 2]);
-});
-
-// FIXED keel-query/optimistic rollback: a failed mutation used to restore the snapshot of the cache
-// entry it took before it ran. A mutation that started after it, on the same list, had put its own
-// optimistic item into that entry by then, and the restore took the item away again while its request
-// was still in flight (offline, while it was queued, the item was gone until the replay succeeded).
-// The playground web app hit it by turning Offline on while a toggle's PATCH was still in flight and
-// then adding an item. The rollback is now the inverse of the failed mutation's own writes: an entry
-// that something else has written since (by write stamp) is left as it is, so the later mutation's
-// placeholder survives the earlier one's rollback (SPEC 9).
-test("the rollback of one mutation keeps the placeholder of a later one", async () => {
+// FINDING keel-query/optimistic rollback: a failed mutation restores the snapshot of the cache
+// entry it took before it ran (SPEC 9: "the pre-mutation entries are restored"). A mutation that
+// started after it, on the same list, has put its own optimistic item into that entry by then, and
+// the restore takes the item away again while its request is still in flight (offline, while it is
+// queued, the item is gone until the replay succeeds). The playground web app hits it by turning
+// Offline on while a toggle's PATCH is still in flight and then adding an item. Expected: the later
+// mutation's placeholder survives the earlier one's rollback.
+test.fails("FINDING the rollback of one mutation keeps the placeholder of a later one", async () => {
   const { core, server } = await boot();
   await configureRemote({ baseUrl: BASE_URL }, core);
   const url = `${BASE_URL}/lists/find/todos`;

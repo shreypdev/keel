@@ -6,7 +6,7 @@ import Observation
 
 /// A store with a single signal and a constructor argument.
 @MainActor @Observable
-public final class Clock: KeelStore {
+public final class Clock: KeelStore, @unchecked Sendable {
     public private(set) var now: Date = Date(timeIntervalSince1970: 0)
 
     private init(adopting handle: KeelHandle, core: KeelCore) {
@@ -53,7 +53,7 @@ public final class Clock: KeelStore {
 
 /// The todo list.
 @MainActor @Observable
-public final class Todos: KeelStore {
+public final class Todos: KeelStore, @unchecked Sendable {
     public private(set) var todos: [Todo] = []
     public private(set) var filter: Filter = .all
     /// Computed by the core; read-only.
@@ -157,15 +157,11 @@ public final class Todos: KeelStore {
     }
 
     public func changes() -> AsyncThrowingStream<Todo, Error> {
-        let source = self.core.stream(
+        return self.core.stream(
             .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Todos.changes),
             method: KeelIds.Objects.Todos.changes,
-            args: []
-        )
-        return keelDecodeStream(
-            source,
-            decode: { try Todo.keelDecoded(from: $0) },
-            mapError: { $0 }
+            args: [],
+            decode: { try Todo.keelDecoded(from: $0) }
         )
     }
 
@@ -335,29 +331,6 @@ public final class Todos: KeelStore {
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
             assertionFailure("Keel: undecodable change for signal \(signal) of Todos: \(error)")
-        }
-    }
-}
-
-/// Decodes every item of a core stream; a failure passes through `mapError`.
-fileprivate func keelDecodeStream<T: Sendable>(
-    _ source: AsyncThrowingStream<[UInt8], Error>,
-    decode: @escaping @Sendable ([UInt8]) throws -> T,
-    mapError: @escaping @Sendable (any Error) -> any Error
-) -> AsyncThrowingStream<T, Error> {
-    return AsyncThrowingStream { continuation in
-        let task = Task {
-            do {
-                for try await item in source {
-                    continuation.yield(try decode(item))
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: mapError(error))
-            }
-        }
-        continuation.onTermination = { _ in
-            task.cancel()
         }
     }
 }
