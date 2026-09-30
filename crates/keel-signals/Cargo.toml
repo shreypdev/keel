@@ -6,6 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel: signals crate (stub, to be implemented)"
+description = "Keel reactive state: signals, computed values, effects, transactions and change-set delivery."
+readme = "README.md"
+keywords = ["keel", "signals", "reactive", "state"]
+categories = ["data-structures"]
 
 [dependencies]
+keel-wire.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
