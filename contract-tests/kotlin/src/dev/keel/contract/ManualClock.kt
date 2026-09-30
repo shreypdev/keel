@@ -25,12 +25,10 @@ class ManualClock {
     /** This clock as a sync `Clock` port. The monotonic reading is the wall reading since [START_MS], in ns. */
     fun portImpl(): PortImpl = PortImpl(
         sync = true,
-        methods = mapOf(
-            StandardPorts.Clock.NOW_MS to { _: ByteArray -> Codecs.i64.encodeToByteArray(nowMs) },
-            StandardPorts.Clock.MONOTONIC_NS to { _: ByteArray ->
-                Codecs.u64.encodeToByteArray((nowMs - START_MS).toULong() * 1_000_000uL)
-            },
-        ),
+        methods = portMethods {
+            this[StandardPorts.Clock.NOW_MS] = { Codecs.i64.encodeToByteArray(nowMs) }
+            this[StandardPorts.Clock.MONOTONIC_NS] = { Codecs.u64.encodeToByteArray((nowMs - START_MS).toULong() * 1_000_000uL) }
+        },
     )
 
     /** The start time. */

@@ -64,8 +64,8 @@ class FakeServer {
     /** This server as an async `Http` port. */
     fun portImpl(): PortImpl = PortImpl(
         sync = false,
-        methods = mapOf(
-            StandardPorts.Http.REQUEST to { args: ByteArray ->
+        methods = portMethods {
+            this[StandardPorts.Http.REQUEST] = { args ->
                 val request = HttpRequest.decodeAll(args)
                 requests.add(Request(request.method, request.url, request.headers, request.body))
                 when (val reply = routes[key(request.method, request.url)]) {
@@ -79,8 +79,8 @@ class FakeServer {
                         throw KeelPortException(HttpError.encodeToByteArray(reply.error))
                     }
                 }
-            },
-        ),
+            }
+        },
     )
 
     private fun key(method: HttpMethod, url: String) = "${method.name} $url"

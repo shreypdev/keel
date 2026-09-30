@@ -16,42 +16,39 @@ class MemoryKv {
     /** One `set` (with its bytes) or `delete` (with `null`) the core asked for, in order. */
     class Write(val key: String, val value: ByteArray?)
 
-    private val entries = ConcurrentHashMap<String, ByteArray>()
+    private val stored = ConcurrentHashMap<String, ByteArray>()
 
     /** Every write so far, oldest first. */
     val writes = CopyOnWriteArrayList<Write>()
 
-    /** The value stored under [key] now, or `null`. */
-    fun get(key: String): ByteArray? = entries[key]
-
     /** This store as an async `Kv` port, the way the default file-backed adapter is. */
     fun portImpl(): PortImpl = PortImpl(
         sync = false,
-        methods = mapOf(
-            StandardPorts.Kv.GET to { args: ByteArray ->
+        methods = portMethods {
+            this[StandardPorts.Kv.GET] = { args ->
                 val key = string(args)
-                Codecs.option(Codecs.bytes).encodeToByteArray(entries[key])
-            },
-            StandardPorts.Kv.SET to { args: ByteArray ->
+                Codecs.option(Codecs.bytes).encodeToByteArray(stored[key])
+            }
+            this[StandardPorts.Kv.SET] = { args ->
                 val r = KeelReader(args)
                 val key = r.readStr()
                 val value = r.readBytes()
                 r.finish()
-                entries[key] = value
+                stored[key] = value
                 writes.add(Write(key, value))
                 ByteArray(0)
-            },
-            StandardPorts.Kv.DELETE to { args: ByteArray ->
+            }
+            this[StandardPorts.Kv.DELETE] = { args ->
                 val key = string(args)
-                entries.remove(key)
+                stored.remove(key)
                 writes.add(Write(key, null))
                 ByteArray(0)
-            },
-            StandardPorts.Kv.LIST to { args: ByteArray ->
+            }
+            this[StandardPorts.Kv.LIST] = { args ->
                 val prefix = string(args)
-                Codecs.vec(Codecs.string).encodeToByteArray(entries.keys.filter { it.startsWith(prefix) }.sorted())
-            },
-        ),
+                Codecs.vec(Codecs.string).encodeToByteArray(stored.keys.filter { it.startsWith(prefix) }.sorted())
+            }
+        },
     )
 
     private fun string(args: ByteArray): String {

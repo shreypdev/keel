@@ -16,13 +16,13 @@ class CapturingLog {
     /** This log as a sync `Log` port. */
     fun portImpl(): PortImpl = PortImpl(
         sync = true,
-        methods = mapOf(
-            StandardPorts.Log.LOG to { args: ByteArray ->
+        methods = portMethods {
+            this[StandardPorts.Log.LOG] = { args ->
                 val r = KeelReader(args)
                 records.add(Record(r.readU8().toInt(), r.readStr(), r.readStr()))
                 r.finish()
                 ByteArray(0)
-            },
-        ),
+            }
+        },
     )
 }
