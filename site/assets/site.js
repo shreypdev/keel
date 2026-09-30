@@ -14,7 +14,7 @@
   function setTheme(t, persist) {
     root.dataset.theme = t;
     var meta = doc.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", t === "light" ? "#fafafa" : "#0a0a0b");
+    if (meta) meta.setAttribute("content", t === "light" ? "#f7f6f2" : "#0a0a0a");
     if (persist) { try { localStorage.setItem("keel-theme", t); } catch (e) { /* private mode */ } }
     $$("[data-theme-toggle]").forEach(function (b) {
       b.setAttribute("aria-label", t === "light" ? "Switch to dark theme" : "Switch to light theme");

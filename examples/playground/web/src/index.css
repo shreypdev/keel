@@ -94,6 +94,40 @@ main {
   background: transparent;
 }
 
+/* The embedded page wears the site's own palette (one orange accent, warm neutrals), light and dark. */
+:root[data-embed] {
+  --text: #141413;
+  --muted: #56564f;
+  --border: #cbc8bf;
+  --accent: #c2410c;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(194, 65, 12, 0.08);
+  --flash: #f3e3a3;
+  accent-color: var(--accent);
+}
+
+:root[data-embed][data-theme="dark"] {
+  --text: #ededea;
+  --muted: #8a8a84;
+  --border: #353535;
+  --accent: #ff6a2a;
+  --accent-text: #0a0a0a;
+  --accent-soft: rgba(255, 106, 42, 0.11);
+  --flash: #4a4317;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-embed]:not([data-theme="light"]) {
+    --text: #ededea;
+    --muted: #8a8a84;
+    --border: #353535;
+    --accent: #ff6a2a;
+    --accent-text: #0a0a0a;
+    --accent-soft: rgba(255, 106, 42, 0.11);
+    --flash: #4a4317;
+  }
+}
+
 h1 {
   margin: 0;
   font-size: 1.5rem;
