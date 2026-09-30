@@ -14,3 +14,4 @@ dist
 .10x/**/.tmp
 *.bundle
 *.xcframework
+.claude/

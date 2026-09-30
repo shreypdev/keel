@@ -306,6 +306,16 @@
    },
    "hex": "04000000000000000005000000010100000003000000000100000004",
    "note": ""
+  },
+  {
+   "name": "map_key_order_by_encoded_bytes",
+   "type": "map<string,i32>",
+   "value": {
+    "aa": 1,
+    "b": 2
+   },
+   "hex": "0200000001000000620200000002000000616101000000",
+   "note": "sorted by encoded key bytes, so the u32 length prefix dominates: \"b\" (len 1) precedes \"aa\" (len 2)"
   }
  ]
 }
