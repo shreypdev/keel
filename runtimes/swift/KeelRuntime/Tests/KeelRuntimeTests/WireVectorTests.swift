@@ -295,7 +295,7 @@ final class WireVectorTests: XCTestCase {
         for arg in args {
             argWriter.writeI32(arg)
         }
-        let call = Call(
+        let call = Wire.Call(
             target: .objectMethod(handle: KeelHandle(rawValue: handle), methodId: methodId),
             callId: callId,
             args: argWriter.finishSlice()
@@ -316,7 +316,7 @@ final class WireVectorTests: XCTestCase {
         else { return bad(name, "reply fields") }
         var bodyWriter = KeelWriter()
         bodyWriter.writeI32(body)
-        assertCodec(Reply(callId: callId, status: status, body: bodyWriter.finishSlice()), hex: hex, name)
+        assertCodec(Wire.Reply(callId: callId, status: status, body: bodyWriter.finishSlice()), hex: hex, name)
         return true
     }
 
@@ -325,7 +325,7 @@ final class WireVectorTests: XCTestCase {
               let txnId = jsonUInt64(jsonField(fields, "txn_id")),
               let rawEntries = fields["entries"] as? [Any]
         else { return bad(name, "change-set fields") }
-        var entries: [ChangeEntry] = []
+        var entries: [Wire.ChangeEntry] = []
         for rawEntry in rawEntries {
             guard let entry = rawEntry as? [String: Any],
                   let handle = jsonUInt64(jsonField(entry, "handle")),
@@ -337,14 +337,14 @@ final class WireVectorTests: XCTestCase {
                   let items = jsonInt32Array(jsonField(entry, "value"))
             else { return bad(name, "change-set entry") }
             // The vector's value is the signal's `Vec<i32>`.
-            entries.append(ChangeEntry(
+            entries.append(Wire.ChangeEntry(
                 handle: KeelHandle(rawValue: handle),
                 signalId: signalId,
                 op: op,
                 value: ArraySlice(items.keelEncoded())
             ))
         }
-        assertCodec(ChangeSet(txnId: txnId, entries: entries), hex: hex, name)
+        assertCodec(Wire.ChangeSet(txnId: txnId, entries: entries), hex: hex, name)
         return true
     }
 

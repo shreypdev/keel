@@ -60,21 +60,21 @@ final class FuzzTests: XCTestCase {
         list.append(codecDecoder(Shape.self, "Shape"))
         list.append(codecDecoder(Filter.self, "Filter"))
         // Payloads.
-        list.append(codecDecoder(Call.self, "Call"))
-        list.append(codecDecoder(Reply.self, "Reply"))
-        list.append(codecDecoder(ChangeSet.self, "ChangeSet"))
-        list.append(codecDecoder(PortCall.self, "PortCall"))
-        list.append(codecDecoder(PortReply.self, "PortReply"))
-        list.append(codecDecoder(Cancel.self, "Cancel"))
-        list.append(codecDecoder(StreamCredit.self, "StreamCredit"))
-        list.append(codecDecoder(StreamItem.self, "StreamItem"))
-        list.append(codecDecoder(Observe.self, "Observe"))
-        list.append(codecDecoder(Release.self, "Release"))
-        list.append(codecDecoder(Event.self, "Event"))
-        list.append(codecDecoder(Hello.self, "Hello"))
-        list.append(codecDecoder(Log.self, "Log"))
-        list.append(codecDecoder(TimerFired.self, "TimerFired"))
-        list.append(codecDecoder(Snapshot.self, "Snapshot"))
+        list.append(codecDecoder(Wire.Call.self, "Call"))
+        list.append(codecDecoder(Wire.Reply.self, "Reply"))
+        list.append(codecDecoder(Wire.ChangeSet.self, "ChangeSet"))
+        list.append(codecDecoder(Wire.PortCall.self, "PortCall"))
+        list.append(codecDecoder(Wire.PortReply.self, "PortReply"))
+        list.append(codecDecoder(Wire.Cancel.self, "Cancel"))
+        list.append(codecDecoder(Wire.StreamCredit.self, "StreamCredit"))
+        list.append(codecDecoder(Wire.StreamItem.self, "StreamItem"))
+        list.append(codecDecoder(Wire.Observe.self, "Observe"))
+        list.append(codecDecoder(Wire.Release.self, "Release"))
+        list.append(codecDecoder(Wire.Event.self, "Event"))
+        list.append(codecDecoder(Wire.Hello.self, "Hello"))
+        list.append(codecDecoder(Wire.Log.self, "Log"))
+        list.append(codecDecoder(Wire.TimerFired.self, "TimerFired"))
+        list.append(codecDecoder(Wire.Snapshot.self, "Snapshot"))
         // Envelope, change-set walker and patch decoders.
         list.append(NamedDecoder(name: "decodeEnvelope", run: { bytes in
             _ = try decodeEnvelope(bytes)
@@ -83,7 +83,7 @@ final class FuzzTests: XCTestCase {
             _ = try decodeEnvelope(slice: bytes[0 ..< bytes.count])
         }))
         list.append(NamedDecoder(name: "ChangeSet.forEachEntry", run: { bytes in
-            _ = try ChangeSet.forEachEntry(slice: ArraySlice(bytes)) { _, _, _, value in
+            _ = try Wire.ChangeSet.forEachEntry(slice: ArraySlice(bytes)) { _, _, _, value in
                 let _: [Int32] = try [Int32].keelDecode(&value)
             }
         }))
@@ -221,25 +221,25 @@ final class FuzzTests: XCTestCase {
         var args = KeelWriter()
         args.writeI32(2)
         args.writeI32(3)
-        seeds.append(Call(target: .objectMethod(handle: handle, methodId: 9), callId: 9, args: args.finishSlice()).encode())
-        seeds.append(Call(target: .lazyListPage(handle: handle, offset: 1, limit: 2), callId: 3).encode())
-        seeds.append(Reply(callId: 9, status: .ok, body: args.finishSlice()).encode())
-        seeds.append(PortCall(portId: 1, methodId: 2, portCallId: 3, args: args.finishSlice()).encode())
-        seeds.append(PortReply(portCallId: 3, status: .ok, body: args.finishSlice()).encode())
-        seeds.append(StreamItem(callId: 9, flag: .item, body: args.finishSlice()).encode())
-        seeds.append(Observe(handle: handle, signalId: 3, on: true).encode())
-        seeds.append(Hello(keelVersion: "0.1.0", schemaHash: 1, platform: "ios", mode: "inproc").encode())
-        seeds.append(Log(level: 2, target: "net", message: "hi").encode())
+        seeds.append(Wire.Call(target: .objectMethod(handle: handle, methodId: 9), callId: 9, args: args.finishSlice()).encode())
+        seeds.append(Wire.Call(target: .lazyListPage(handle: handle, offset: 1, limit: 2), callId: 3).encode())
+        seeds.append(Wire.Reply(callId: 9, status: .ok, body: args.finishSlice()).encode())
+        seeds.append(Wire.PortCall(portId: 1, methodId: 2, portCallId: 3, args: args.finishSlice()).encode())
+        seeds.append(Wire.PortReply(portCallId: 3, status: .ok, body: args.finishSlice()).encode())
+        seeds.append(Wire.StreamItem(callId: 9, flag: .item, body: args.finishSlice()).encode())
+        seeds.append(Wire.Observe(handle: handle, signalId: 3, on: true).encode())
+        seeds.append(Wire.Hello(keelVersion: "0.1.0", schemaHash: 1, platform: "ios", mode: "inproc").encode())
+        seeds.append(Wire.Log(level: 2, target: "net", message: "hi").encode())
 
         let items: [Int32] = [1, 2]
         let value = items.keelEncoded()
-        let changeSet = ChangeSet(txnId: 42, entries: [
-            ChangeEntry(handle: handle, signalId: 0, op: .fullValue, value: ArraySlice(value)),
-            ChangeEntry(handle: handle, signalId: 1, op: .lazyListInvalidated),
+        let changeSet = Wire.ChangeSet(txnId: 42, entries: [
+            Wire.ChangeEntry(handle: handle, signalId: 0, op: .fullValue, value: ArraySlice(value)),
+            Wire.ChangeEntry(handle: handle, signalId: 1, op: .lazyListInvalidated),
         ])
         seeds.append(changeSet.encode())
-        let snapshot = Snapshot(stores: [
-            SnapshotStore(handle: handle, typeId: 5, signals: [SnapshotSignal(signalId: 0, value: ArraySlice(value))]),
+        let snapshot = Wire.Snapshot(stores: [
+            Wire.SnapshotStore(handle: handle, typeId: 5, signals: [Wire.SnapshotSignal(signalId: 0, value: ArraySlice(value))]),
         ])
         seeds.append(snapshot.encode())
         seeds.append(encodeEnvelope(kind: .changeSet, seq: 3, schemaHash: 0x0102_0304_0506_0708, payload: changeSet.encode()))
