@@ -36,6 +36,7 @@ export class KeelReader {
   readonly #view: DataView;
   #pos = 0;
 
+  /** @param bytes The message to read. The reader keeps a reference; it never copies or modifies the bytes. */
   constructor(bytes: Uint8Array) {
     this.#bytes = bytes;
     this.#view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

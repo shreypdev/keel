@@ -92,12 +92,14 @@ function describe(d: WireErrorDetail): string {
  * ```
  */
 export class WireError extends Error {
+  /** Always `"WireError"`. */
   override readonly name = "WireError";
   /** Discriminant, identical to `detail.code`. */
   readonly code: WireErrorCode;
   /** Structured fields of this failure. */
   readonly detail: WireErrorDetail;
 
+  /** @param detail What went wrong; the message is derived from it. */
   constructor(detail: WireErrorDetail) {
     super(`wire: ${describe(detail)}`);
     this.code = detail.code;
@@ -112,6 +114,7 @@ export class WireError extends Error {
  * than continue with a corrupted mirror.
  */
 export class PatchError extends Error {
+  /** Always `"PatchError"`. */
   override readonly name = "PatchError";
   /** Zero-based position of the failing operation within the patch. */
   readonly opIndex: number;
@@ -122,6 +125,7 @@ export class PatchError extends Error {
   /** Length of the list when the operation was attempted. */
   readonly length: number;
 
+  /** @param opIndex Position of the failing operation. @param op Its name. @param index The offending index. @param length The list length at that point. */
   constructor(opIndex: number, op: string, index: number, length: number) {
     super(
       `keyed patch operation #${opIndex} (${op}) index ${index} is out of bounds for a list of length ${length}`,
