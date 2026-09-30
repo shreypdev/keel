@@ -132,7 +132,7 @@ fn main() {
 | `keel::signals` | `keel-signals`: `Signal`, `Computed`, `Effect`, `txn`, `StoreCell`, `CellSlot` |
 | `keel::wire` | `keel-wire`: the binary codec and the message payloads |
 | `keel::meta` | `keel-meta`: the schema (`collect_schema`) every language is generated from |
-| `keel::query` | `QueryDef`, `MutationDef`, `BoxFuture`: the contract `#[keel::query]` and `#[keel::mutation]` implement |
+| `keel::query` | `keel-query`: `QueryDef` / `MutationDef` (the contract `#[keel::query]` and `#[keel::mutation]` implement), `ctx.query()` / `ctx.mutate(..)` (`CtxQuery`, in the prelude), `QueryHandle`, `MutationBuilder` |
 
 The macros generate code that names `::keel::{wire, meta, runtime, signals, query}`, so an
 application depends on this crate and nothing else. (`#[keel(crate = "path")]` points the

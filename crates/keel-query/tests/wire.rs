@@ -15,7 +15,7 @@ use keel::wire::payload::{CallTarget, ChangeEntry, ChangeOp, ChangeSet, ReplySta
 use keel_query::{
     CtxQuery, INVALIDATE_METHOD_ID, MutationDef, QueryDef, QueryStatus, REFETCH_METHOD_ID,
 };
-use keel_wire::{Decode, Encode, Handle, Reader, Timestamp};
+use keel_wire::{Decode, Encode, Handle, Reader, Timestamp, Uuid};
 
 /// The signal ids `keel-bindgen` numbers a query handle's signals with.
 const DATA: u32 = 0;
@@ -177,6 +177,41 @@ fn constructing_and_observing_emits_the_initial_change_set_with_signals_0_to_4()
     assert_eq!(
         entry(&cs, UPDATED_AT).value,
         None::<Timestamp>.encode_to_vec()
+    );
+}
+
+#[test]
+fn a_constructor_takes_the_parameters_in_declaration_order() {
+    let p = Platform::new();
+    let id = Uuid([0x42; 16]);
+    p.h.fakes.http.respond(
+        keel_ports::fakes::Matcher::url_prefix(format!("{API}/todos/{id}")),
+        ok(&todo(0x42, "milk")),
+    );
+    // `todo_by_id(id: Uuid, fresh: bool)`: the id, then the flag, no framing.
+    let mut args = Vec::new();
+    args.extend_from_slice(&id.0);
+    args.push(1);
+    let reply = p.t().call_sync(
+        CallTarget::Constructor {
+            type_id: TodoByIdQuery::QUERY_ID,
+            method_id: TodoByIdQuery::QUERY_ID,
+        },
+        1,
+        &args,
+    );
+    assert_eq!(reply.status, ReplyStatus::Ok);
+    let handle = Handle::decode_exact(&reply.body).unwrap();
+    p.observe(handle);
+    p.t().run_pending();
+    assert_eq!(
+        p.h.fakes.http.last_call().unwrap().url,
+        format!("{API}/todos/{id}?fresh=1")
+    );
+    let cs = one(p.change_sets());
+    assert_eq!(
+        entry(&cs, DATA).value,
+        Some(todo(0x42, "milk")).encode_to_vec()
     );
 }
 
