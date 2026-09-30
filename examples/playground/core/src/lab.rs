@@ -80,7 +80,7 @@ pub enum Figure {
     Empty,
 }
 
-/// A record that nests the other kinds: lists, options, maps, a record-like enum and a map with
+/// A record that nests the other kinds: lists, options, maps, enums with data and a map with
 /// integer keys.
 #[keel::api]
 #[derive(Clone, Debug, PartialEq)]
@@ -97,8 +97,8 @@ pub struct Composite {
     pub scores: BTreeMap<String, i32>,
     /// A map keyed by integer.
     pub names: BTreeMap<u32, String>,
-    /// An option inside an option.
-    pub maybe: Option<Option<u8>>,
+    /// Maybe a number.
+    pub limit: Option<u32>,
 }
 
 /// Why a lab call failed.
@@ -424,7 +424,7 @@ mod tests {
             ],
             scores: BTreeMap::from([("high".to_owned(), 99), ("low".to_owned(), -3)]),
             names: BTreeMap::from([(7, "seven".to_owned()), (1, "one".to_owned())]),
-            maybe: Some(None),
+            limit: Some(7),
         }
     }
 

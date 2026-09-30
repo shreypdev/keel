@@ -1,4 +1,4 @@
-//! The remote to-do list: a query, mutations and an optimistic command, all over the `Http` port.
+//! The remote to-do lists: a query, mutations and optimistic commands, all over the `Http` port.
 //!
 //! This is the data-layer demo. The app tells the core where the server is ([`configure_remote`]
 //! with a [`RemoteConfig`]); the core never opens a socket itself: every request goes through the
@@ -6,15 +6,18 @@
 //! (`keel::ports::fakes::FakeHttp`). An app that has no server can answer the port itself, which
 //! is what the playground apps do to work offline.
 //!
-//! * [`remote_todos`] is a query (`GET {base}/todos`): cached, fresh for 30 seconds, persisted and
-//!   shared by every observer. A platform watches it through the generated `RemoteTodosQueryHandle`.
+//! * [`remote_todos`] is a query (`GET {base}/lists/{list}/todos`): cached per list, fresh for 30
+//!   seconds, persisted and shared by every observer. A platform watches it through the generated
+//!   `RemoteTodosQueryHandle`.
 //! * [`post_remote_todo`] and [`patch_remote_todo`] are mutations. The first is `idempotent`, so
 //!   while the device is offline it is queued and replayed when the network returns.
 //! * [`create_remote_todo`] and [`set_remote_done`] are what the UI calls: they run the mutation
 //!   with an optimistic update of the cached list, which is rolled back if the server says no.
 //!
-//! The server speaks JSON: `[{"id":1,"title":"Buy milk","done":false}]` for the list, a single
-//! object for one item, `{"title":".."}` to create and `{"done":true}` to change.
+//! The server speaks JSON: `[{"id":1,"title":"Buy milk","done":false}]` for a list, a single
+//! object for one item, `{"title":".."}` to create and `{"done":true}` to change. Every function
+//! takes the name of the list (`inbox`, say), which is part of the cache key: two lists are two
+//! independent cache entries.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -121,19 +124,23 @@ fn parse<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, RemoteError> {
     serde_json::from_slice(body).map_err(|e| RemoteError::BadBody(e.to_string()))
 }
 
-/// The server's to-do list: `GET {base}/todos`.
-#[keel::query(key = "remote-todos", stale = "30s", persist, retry = 1)]
-pub async fn remote_todos(ctx: &Ctx) -> Result<Vec<RemoteTodo>, RemoteError> {
-    let url = endpoint(ctx, "/todos")?;
+/// The items of the server's list `list`: `GET {base}/lists/{list}/todos`.
+#[keel::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
+pub async fn remote_todos(ctx: &Ctx, list: String) -> Result<Vec<RemoteTodo>, RemoteError> {
+    let url = endpoint(ctx, &format!("/lists/{list}/todos"))?;
     parse(&send(ctx, HttpRequest::get(url)).await?)
 }
 
-/// Creates an item: `POST {base}/todos`. Idempotent: the request carries an `Idempotency-Key`
+/// Creates an item in `list`: `POST {base}/lists/{list}/todos`. Idempotent: the request carries an `Idempotency-Key`
 /// header that stays the same across retries and offline replays, so the server can tell a repeat
 /// from a second item.
-#[keel::mutation(key = "remote-todos", idempotent)]
-pub async fn post_remote_todo(ctx: &Ctx, title: String) -> Result<RemoteTodo, RemoteError> {
-    let url = endpoint(ctx, "/todos")?;
+#[keel::mutation(key = "remote-todos:{list}", idempotent)]
+pub async fn post_remote_todo(
+    ctx: &Ctx,
+    list: String,
+    title: String,
+) -> Result<RemoteTodo, RemoteError> {
+    let url = endpoint(ctx, &format!("/lists/{list}/todos"))?;
     let body = serde_json::json!({ "title": title }).to_string();
     let mut request =
         HttpRequest::post(url, body.into_bytes()).with_header("Content-Type", "application/json");
@@ -143,10 +150,15 @@ pub async fn post_remote_todo(ctx: &Ctx, title: String) -> Result<RemoteTodo, Re
     parse(&send(ctx, request).await?)
 }
 
-/// Marks an item finished or not: `PATCH {base}/todos/{id}`.
-#[keel::mutation(key = "remote-todos")]
-pub async fn patch_remote_todo(ctx: &Ctx, id: u32, done: bool) -> Result<RemoteTodo, RemoteError> {
-    let url = endpoint(ctx, &format!("/todos/{id}"))?;
+/// Marks an item of `list` finished or not: `PATCH {base}/lists/{list}/todos/{id}`.
+#[keel::mutation(key = "remote-todos:{list}")]
+pub async fn patch_remote_todo(
+    ctx: &Ctx,
+    list: String,
+    id: u32,
+    done: bool,
+) -> Result<RemoteTodo, RemoteError> {
+    let url = endpoint(ctx, &format!("/lists/{list}/todos/{id}"))?;
     let body = serde_json::json!({ "done": done }).to_string();
     let request = HttpRequest::new(HttpMethod::Patch, url)
         .with_body(body.into_bytes())
@@ -154,7 +166,7 @@ pub async fn patch_remote_todo(ctx: &Ctx, id: u32, done: bool) -> Result<RemoteT
     parse(&send(ctx, request).await?)
 }
 
-/// Adds an item the way a UI wants it: the list shows it at once (an optimistic placeholder), the
+/// Adds an item to `list` the way a UI wants it: the list shows it at once (an optimistic placeholder), the
 /// server is asked, and the placeholder is taken back if the server refuses. On success the cached
 /// list is refetched, so the placeholder gives way to the server's item.
 ///
@@ -162,28 +174,39 @@ pub async fn patch_remote_todo(ctx: &Ctx, id: u32, done: bool) -> Result<RemoteT
 /// keeps waiting; the placeholder stays visible until the network returns and the request is
 /// replayed.
 #[keel::api]
-pub async fn create_remote_todo(ctx: &Ctx, title: String) -> Result<RemoteTodo, RemoteError> {
+pub async fn create_remote_todo(
+    ctx: &Ctx,
+    list: String,
+    title: String,
+) -> Result<RemoteTodo, RemoteError> {
     let id = u32::MAX - state(ctx).placeholders.fetch_add(1, Ordering::Relaxed);
     let placeholder = RemoteTodo {
         id,
         title: title.clone(),
         done: false,
     };
-    ctx.mutate::<PostRemoteTodoMutation>((title,))
+    let cached = list.clone();
+    ctx.mutate::<PostRemoteTodoMutation>((list, title))
         .optimistic(move |cache| {
-            cache.update::<RemoteTodosQuery>((), |list| list.push(placeholder));
+            cache.update::<RemoteTodosQuery>((cached,), |items| items.push(placeholder));
         })
         .await
 }
 
-/// Marks an item finished or not, showing the change at once and taking it back if the server
+/// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
 /// refuses.
 #[keel::api]
-pub async fn set_remote_done(ctx: &Ctx, id: u32, done: bool) -> Result<RemoteTodo, RemoteError> {
-    ctx.mutate::<PatchRemoteTodoMutation>((id, done))
+pub async fn set_remote_done(
+    ctx: &Ctx,
+    list: String,
+    id: u32,
+    done: bool,
+) -> Result<RemoteTodo, RemoteError> {
+    let cached = list.clone();
+    ctx.mutate::<PatchRemoteTodoMutation>((list, id, done))
         .optimistic(move |cache| {
-            cache.update::<RemoteTodosQuery>((), |list| {
-                if let Some(todo) = list.iter_mut().find(|todo| todo.id == id) {
+            cache.update::<RemoteTodosQuery>((cached,), |items| {
+                if let Some(todo) = items.iter_mut().find(|todo| todo.id == id) {
                     todo.done = done;
                 }
             });
@@ -204,6 +227,7 @@ mod tests {
     use super::*;
 
     const BASE: &str = "https://playground.test";
+    const LIST: &str = "inbox";
 
     /// A runtime like a started app: every port faked, the server configured.
     struct App {
@@ -235,13 +259,18 @@ mod tests {
         }
 
         fn serve_list(&self, todos: &[RemoteTodo]) {
-            self.fakes
-                .http
-                .respond(Matcher::get(format!("{BASE}/todos")), json(200, todos));
+            self.fakes.http.respond(
+                Matcher::get(format!("{BASE}/lists/{LIST}/todos")),
+                json(200, todos),
+            );
         }
 
         fn observe(&self) -> QueryHandle<RemoteTodosQuery> {
-            let handle = self.t.ctx().query().observe::<RemoteTodosQuery>(());
+            let handle = self
+                .t
+                .ctx()
+                .query()
+                .observe::<RemoteTodosQuery>((LIST.to_owned(),));
             self.t.run_pending();
             handle
         }
@@ -276,7 +305,7 @@ mod tests {
         // The trailing slash of the configured URL was dropped.
         assert_eq!(
             app.fakes.http.last_call().unwrap().url,
-            format!("{BASE}/todos")
+            format!("{BASE}/lists/{LIST}/todos")
         );
     }
 
@@ -285,7 +314,10 @@ mod tests {
         let t = TestRuntime::new();
         let _fakes = fakes::install(&t);
         t.run_init_hooks();
-        let handle = t.ctx().query().observe::<RemoteTodosQuery>(());
+        let handle = t
+            .ctx()
+            .query()
+            .observe::<RemoteTodosQuery>((LIST.to_owned(),));
         // The fetch retries once after a backoff before it reports the error.
         t.run_pending();
         let fakes = _fakes;
@@ -298,7 +330,7 @@ mod tests {
     fn a_status_and_a_bad_body_are_typed_errors() {
         let app = App::new();
         app.fakes.http.respond(
-            Matcher::get(format!("{BASE}/todos")),
+            Matcher::get(format!("{BASE}/lists/{LIST}/todos")),
             HttpResponse::new(503, b"down".to_vec()),
         );
         let handle = app.observe();
@@ -310,7 +342,7 @@ mod tests {
 
         let app = App::new();
         app.fakes.http.respond(
-            Matcher::get(format!("{BASE}/todos")),
+            Matcher::get(format!("{BASE}/lists/{LIST}/todos")),
             HttpResponse::new(200, b"not json".to_vec()),
         );
         let handle = app.observe();
@@ -345,15 +377,15 @@ mod tests {
         // accepts the new item and will list it (the mutation refetches the list).
         app.fakes.http.reset();
         app.fakes.http.respond(
-            Matcher::post(format!("{BASE}/todos")),
+            Matcher::post(format!("{BASE}/lists/{LIST}/todos")),
             json(201, &todo(2, "Walk", false)),
         );
         app.serve_list(&[todo(1, "Buy milk", false), todo(2, "Walk", false)]);
 
         let ctx = app.t.ctx();
-        let created = app
-            .t
-            .run_until(async move { create_remote_todo(&ctx, "Walk".to_owned()).await });
+        let created = app.t.run_until(async move {
+            create_remote_todo(&ctx, LIST.to_owned(), "Walk".to_owned()).await
+        });
         assert_eq!(created, Ok(todo(2, "Walk", false)));
         app.t.run_pending();
 
@@ -392,14 +424,14 @@ mod tests {
         let handle = app.observe();
         let before = handle.data().get();
         app.fakes.http.respond(
-            Matcher::post(format!("{BASE}/todos")),
+            Matcher::post(format!("{BASE}/lists/{LIST}/todos")),
             HttpResponse::new(422, b"no".to_vec()),
         );
 
         let ctx = app.t.ctx();
-        let result = app
-            .t
-            .run_until(async move { create_remote_todo(&ctx, "Walk".to_owned()).await });
+        let result = app.t.run_until(async move {
+            create_remote_todo(&ctx, LIST.to_owned(), "Walk".to_owned()).await
+        });
         assert_eq!(result, Err(RemoteError::Status { code: 422 }));
         assert_eq!(handle.data().get(), before, "the placeholder is gone again");
         assert_eq!(handle.status().get(), QueryStatus::Success);
@@ -417,7 +449,7 @@ mod tests {
         let ctx = app.t.ctx();
         let result = app
             .t
-            .run_until(async move { set_remote_done(&ctx, 1, true).await });
+            .run_until(async move { set_remote_done(&ctx, LIST.to_owned(), 1, true).await });
         assert_eq!(result, Err(RemoteError::Status { code: 500 }));
         assert_eq!(handle.data().get(), Some(vec![todo(1, "Buy milk", false)]));
         let patch = app
@@ -427,7 +459,7 @@ mod tests {
             .into_iter()
             .find(|request| request.method == HttpMethod::Patch)
             .expect("the PATCH");
-        assert_eq!(patch.url, format!("{BASE}/todos/1"));
+        assert_eq!(patch.url, format!("{BASE}/lists/{LIST}/todos/1"));
     }
 
     #[test]
@@ -438,7 +470,7 @@ mod tests {
         app.fakes.connectivity.go_offline();
         app.t.run_pending();
         app.fakes.http.fail(
-            Matcher::post(format!("{BASE}/todos")),
+            Matcher::post(format!("{BASE}/lists/{LIST}/todos")),
             HttpError::Network("offline".into()),
         );
 
@@ -446,7 +478,8 @@ mod tests {
         let created = std::sync::Arc::new(Mutex::new(None));
         let slot = created.clone();
         ctx.spawn(async move {
-            let result = create_remote_todo(&Ctx::current(), "Walk".to_owned()).await;
+            let result =
+                create_remote_todo(&Ctx::current(), LIST.to_owned(), "Walk".to_owned()).await;
             *slot.lock().unwrap() = Some(result);
         });
         app.t.run_pending();
@@ -463,7 +496,7 @@ mod tests {
         // The network returns and the server accepts the replay.
         app.fakes.http.reset();
         app.fakes.http.respond(
-            Matcher::post(format!("{BASE}/todos")),
+            Matcher::post(format!("{BASE}/lists/{LIST}/todos")),
             json(201, &todo(7, "Walk", false)),
         );
         app.serve_list(&[todo(7, "Walk", false)]);
@@ -491,6 +524,26 @@ mod tests {
         // Past the window, observing fetches again.
         app.advance(31_000);
         let _third = app.observe();
+        assert_eq!(app.fakes.http.call_count(), 2);
+    }
+
+    #[test]
+    fn two_lists_are_two_cache_entries() {
+        let app = App::new();
+        app.serve_list(&[todo(1, "Buy milk", false)]);
+        app.fakes.http.respond(
+            Matcher::get(format!("{BASE}/lists/work/todos")),
+            json(200, &[todo(5, "Ship it", false)]),
+        );
+        let inbox = app.observe();
+        let work = app
+            .t
+            .ctx()
+            .query()
+            .observe::<RemoteTodosQuery>(("work".to_owned(),));
+        app.t.run_pending();
+        assert_eq!(inbox.data().get(), Some(vec![todo(1, "Buy milk", false)]));
+        assert_eq!(work.data().get(), Some(vec![todo(5, "Ship it", false)]));
         assert_eq!(app.fakes.http.call_count(), 2);
     }
 }
