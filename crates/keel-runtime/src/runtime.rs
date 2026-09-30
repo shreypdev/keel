@@ -1,0 +1,1653 @@
+//! [`Runtime`]: the core lock, the call/reply machinery and every host-facing entry point
+//! (SPEC 5, 6, 16.2). See `docs/runtime-internals.md` for the threading model as built.
+
+use core::any::Any;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Once, Weak};
+use std::time::Duration;
+
+use keel_meta::{DispatchCall, Schema};
+use keel_signals::ChangeSink;
+use keel_wire::payload::{
+    Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StreamFlag, StreamItem,
+};
+use keel_wire::{Handle, Reader, Writer};
+use parking_lot::{Mutex, MutexGuard};
+
+use crate::blocking::{Blocking, BlockingTask, default_pool_size};
+use crate::config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
+use crate::ctx::{Ctx, CtxScope, current_runtime};
+use crate::dispatch::{DispatchBytes, DispatchResult, DispatchTable, E_REENTRANT, needs_async};
+use crate::executor::{
+    BATCH, BoxFuture, CancelOutcome, EndPoll, Executor, Notify, Shared, TaskId, TaskKind,
+};
+use crate::ext::{Extensions, InitHook};
+use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
+use crate::host::{Host, PortCallOutcome};
+use crate::lazy::LazyList;
+use crate::log::{DEBUG, ERROR, FATAL, WARN};
+use crate::object::{AnyObject, KeelObject, StoreObject, StoreRestorer, plain, store};
+use crate::object_table::{BadHandle, ObjectTable};
+use crate::ports::{
+    Completion, Events, PortBinding, PortError, PortFuture, PortTable, decode_port_reply,
+};
+use crate::stats::{Stats, push_json_string};
+use crate::timer::{Sleep, Timers, delay_ms};
+
+static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
+static GLOBAL: Mutex<Option<Arc<Runtime>>> = Mutex::new(None);
+
+thread_local! {
+    /// Ids of the runtimes whose core lock this thread currently holds.
+    static HELD: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The runtime executing on this thread, else the global one.
+pub(crate) fn current_or_global() -> Option<Arc<Runtime>> {
+    current_runtime().or_else(|| GLOBAL.lock().clone())
+}
+
+/// Logs a fatal record through the current runtime (the wasm panic hook).
+pub(crate) fn log_fatal_current(target: &str, message: &str) {
+    if let Some(rt) = current_or_global() {
+        rt.host.log(FATAL, target, message);
+    }
+}
+
+/// Routes every change-set committed by `keel-signals` to the runtime executing on the
+/// committing thread (else the global one), whose host receives it.
+struct RuntimeSink;
+
+impl ChangeSink for RuntimeSink {
+    fn deliver(&self, change_set: &[u8]) {
+        if let Some(rt) = current_or_global() {
+            rt.deliver_change_set(change_set);
+        }
+    }
+}
+
+fn install_sink() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| keel_signals::set_sink(Arc::new(RuntimeSink)));
+}
+
+/// What the core lock protects. It is deliberately tiny: the lock's job is mutual exclusion
+/// of *user code* (dispatchers and task polls), not protection of runtime bookkeeping, which
+/// has its own fine-grained locks because it must stay reachable from wakers, the timer
+/// thread and host threads. See `docs/runtime-internals.md`.
+#[derive(Default)]
+pub(crate) struct CoreState {
+    /// Executor turns run so far.
+    turns: u64,
+}
+
+/// Marker error: the calling thread already holds this runtime's core lock.
+#[derive(Debug)]
+pub(crate) struct Reentrant;
+
+/// Holds the core lock and makes the runtime current on this thread. Whoever holds one *is*
+/// the core loop.
+pub(crate) struct CoreGuard<'a> {
+    guard: Option<MutexGuard<'a, CoreState>>,
+    id: u64,
+    scope: Option<CtxScope>,
+}
+
+impl CoreGuard<'_> {
+    fn state(&mut self) -> Option<&mut CoreState> {
+        self.guard.as_deref_mut()
+    }
+
+    fn exit(&mut self) {
+        if self.scope.take().is_some() {
+            let id = self.id;
+            let _ = HELD.try_with(|held| {
+                let mut held = held.borrow_mut();
+                if let Some(pos) = held.iter().rposition(|&x| x == id) {
+                    held.remove(pos);
+                }
+            });
+        }
+    }
+
+    /// Unlocks, handing the lock to a waiting thread if there is one (used between executor
+    /// turns so host calls are not starved).
+    fn unlock_fair(mut self) {
+        self.exit();
+        if let Some(guard) = self.guard.take() {
+            MutexGuard::unlock_fair(guard);
+        }
+    }
+}
+
+impl Drop for CoreGuard<'_> {
+    fn drop(&mut self) {
+        self.exit();
+    }
+}
+
+/// A call whose completion is still to come.
+struct CallEntry {
+    task: TaskId,
+    stream: Option<Arc<StreamState>>,
+}
+
+/// Credit accounting for one open stream (SPEC 3.7).
+#[derive(Default)]
+struct StreamState {
+    credit: AtomicU32,
+    notify: Notify,
+}
+
+impl StreamState {
+    fn add_credit(&self, n: u32) {
+        let _ = self
+            .credit
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| {
+                Some(c.saturating_add(n))
+            });
+        self.notify.notify_one();
+    }
+
+    fn try_take(&self) -> bool {
+        self.credit
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| c.checked_sub(1))
+            .is_ok()
+    }
+}
+
+/// How the runtime is assembled; `Runtime::init` and `Runtime::new` use the defaults.
+pub(crate) struct BuildOptions {
+    /// No core thread, a manual clock and inline blocking: the test runtime.
+    pub manual: bool,
+    /// Run the [`InitHook`]s.
+    pub run_hooks: bool,
+    /// Register as the process-global runtime.
+    pub register_global: bool,
+}
+
+/// What `dispatch` found out about a call.
+enum Dispatched {
+    Done(DispatchResult, Handle),
+    Panicked(PanicReport, Handle),
+    Bad(String),
+}
+
+/// The Keel runtime: one per process (or per embedded instance). See the
+/// [crate documentation](crate).
+pub struct Runtime {
+    id: u64,
+    weak: Weak<Runtime>,
+    config: RuntimeConfig,
+    dev: bool,
+    host: Arc<dyn Host>,
+    schema: Schema,
+    schema_hash: u64,
+    core: Mutex<CoreState>,
+    objects: ObjectTable,
+    exec: Executor,
+    pub(crate) ports: Arc<PortTable>,
+    events: Events,
+    timers: Arc<Timers>,
+    blocking: Blocking,
+    table: DispatchTable,
+    restorers: HashMap<u32, &'static StoreRestorer>,
+    calls: Mutex<HashMap<u32, CallEntry>>,
+    stats: Stats,
+    extensions: Extensions,
+    shut_down: AtomicBool,
+    core_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+fn reply_payload(call_id: u32, status: ReplyStatus, body: &[u8]) -> Vec<u8> {
+    let mut w = Writer::with_capacity(5 + body.len());
+    Reply {
+        call_id,
+        status,
+        body,
+    }
+    .encode(&mut w);
+    w.into_vec()
+}
+
+fn string_body(s: &str) -> Vec<u8> {
+    let mut w = Writer::with_capacity(4 + s.len());
+    w.write_str(s);
+    w.into_vec()
+}
+
+fn stream_payload(call_id: u32, flag: StreamFlag, body: &[u8]) -> Vec<u8> {
+    let mut w = Writer::with_capacity(5 + body.len());
+    StreamItem {
+        call_id,
+        flag,
+        body,
+    }
+    .encode(&mut w);
+    w.into_vec()
+}
+
+impl Runtime {
+    // ----- construction and lifecycle ----------------------------------------------------
+
+    /// Creates the process-global runtime: builds the executor, object table, port table and
+    /// dispatch table, installs the change sink, runs the [`InitHook`]s (query hydration) and
+    /// starts the `keel-core` thread (unless `config.core_threads == 0` or on wasm, where the
+    /// host drives [`poll`](Runtime::poll)).
+    ///
+    /// Fails with [`InitError::AlreadyInitialized`] while another global runtime is alive;
+    /// [`shutdown`](Runtime::shutdown) releases it.
+    pub fn init(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError> {
+        Runtime::build(
+            config,
+            host,
+            BuildOptions {
+                manual: false,
+                run_hooks: true,
+                register_global: true,
+            },
+        )
+    }
+
+    /// Like [`init`](Runtime::init) but does not register the runtime as the global one, so
+    /// any number can coexist (a transport server with one core per connection, tests).
+    /// [`Runtime::global`] does not see it; its own calls and tasks still find it through
+    /// [`Ctx::current`].
+    pub fn new(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError> {
+        Runtime::build(
+            config,
+            host,
+            BuildOptions {
+                manual: false,
+                run_hooks: true,
+                register_global: false,
+            },
+        )
+    }
+
+    pub(crate) fn build(
+        config: RuntimeConfig,
+        host: Arc<dyn Host>,
+        opts: BuildOptions,
+    ) -> Result<Arc<Runtime>, InitError> {
+        let dev = match config.mode.as_str() {
+            MODE_INPROC => false,
+            MODE_DEV => true,
+            other => return Err(InitError::InvalidMode(other.to_owned())),
+        };
+        if opts.register_global && GLOBAL.lock().is_some() {
+            return Err(InitError::AlreadyInitialized);
+        }
+        guard::install_hook();
+        install_sink();
+
+        let inline = opts.manual || cfg!(target_family = "wasm") || config.core_threads == 0;
+        let pool_size = match config.blocking_threads {
+            0 => default_pool_size(),
+            n => usize::from(n).min(64),
+        };
+        let schema = keel_meta::collect_schema("keel-core");
+        let schema_hash = schema.hash();
+        let table = DispatchTable::collect();
+        let mut restorers: HashMap<u32, &'static StoreRestorer> = HashMap::new();
+        for restorer in inventory::iter::<StoreRestorer> {
+            restorers.entry(restorer.type_id).or_insert(restorer);
+        }
+
+        let rt = Arc::new_cyclic(|weak| Runtime {
+            id: NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed),
+            weak: weak.clone(),
+            dev,
+            exec: Executor::new(host.clone(), inline),
+            timers: Timers::new(opts.manual),
+            blocking: if opts.manual {
+                Blocking::Inline
+            } else {
+                Blocking::threaded(pool_size)
+            },
+            host,
+            config,
+            schema,
+            schema_hash,
+            core: Mutex::new(CoreState::default()),
+            objects: ObjectTable::new(),
+            ports: Arc::new(PortTable::default()),
+            events: Events::default(),
+            table,
+            restorers,
+            calls: Mutex::new(HashMap::new()),
+            stats: Stats::default(),
+            extensions: Extensions::default(),
+            shut_down: AtomicBool::new(false),
+            core_thread: Mutex::new(None),
+        });
+
+        for (id, first, second) in &rt.table.collisions {
+            rt.log(
+                ERROR,
+                "keel::runtime",
+                &format!(
+                    "dispatcher id {id:#010x} is claimed by both `{first}` and `{second}`; `{first}` wins"
+                ),
+            );
+        }
+
+        if !inline {
+            rt.start_core_thread()?;
+        }
+        if opts.register_global {
+            let mut global = GLOBAL.lock();
+            if global.is_some() {
+                drop(global);
+                rt.shutdown();
+                return Err(InitError::AlreadyInitialized);
+            }
+            *global = Some(rt.clone());
+        }
+        if opts.run_hooks {
+            rt.run_init_hooks();
+        }
+        Ok(rt)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn start_core_thread(&self) -> Result<(), InitError> {
+        let weak = self.weak.clone();
+        let shared = self.exec.shared();
+        let handle = std::thread::Builder::new()
+            .name("keel-core".to_owned())
+            .spawn(move || core_loop(&weak, &shared))
+            .map_err(|e| InitError::Spawn(e.to_string()))?;
+        *self.core_thread.lock() = Some(handle);
+        Ok(())
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn start_core_thread(&self) -> Result<(), InitError> {
+        Ok(())
+    }
+
+    /// The process-global runtime created by [`Runtime::init`], if any.
+    pub fn global() -> Option<Arc<Runtime>> {
+        GLOBAL.lock().clone()
+    }
+
+    /// Runs the registered [`InitHook`]s (done automatically by `init` and `new`; the test
+    /// runtime leaves it to the test, after it has bound its fakes).
+    pub fn run_init_hooks(&self) {
+        let ctx = self.ctx();
+        let Ok(_guard) = self.enter_core() else {
+            return;
+        };
+        for hook in inventory::iter::<InitHook> {
+            if let Err(report) = guard::guarded(|| (hook.run)(&ctx)) {
+                self.log_panic(&format!("init hook `{}` panicked", hook.name), &report);
+            }
+        }
+    }
+
+    /// Stops the runtime: ends the `keel-core`, timer and blocking threads, fails pending port
+    /// calls, drops every task and object (under the core lock, so user `Drop` code runs
+    /// where it expects to) and releases the global slot. Idempotent. Calls made afterwards
+    /// are answered with status 5.
+    ///
+    /// Called from inside a host callback or a dispatched call it does not wait for the
+    /// `keel-core` thread (that would deadlock); the thread exits on its own.
+    pub fn shutdown(&self) {
+        if self.shut_down.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        self.exec.shutdown();
+        let core_thread = if self.holds_core() {
+            None
+        } else {
+            self.core_thread.lock().take()
+        };
+        if let Some(handle) = core_thread {
+            if handle.thread().id() != std::thread::current().id() {
+                let _ = handle.join();
+            }
+        }
+        self.timers.shutdown();
+        self.blocking.shutdown();
+        self.ports.cancel_all();
+        let _guard = self.enter_core().ok();
+        self.teardown();
+        drop(_guard);
+        let mut global = GLOBAL.lock();
+        if global.as_ref().is_some_and(|g| g.id == self.id) {
+            *global = None;
+        }
+    }
+
+    /// Drops every task, call and object.
+    fn teardown(&self) {
+        for future in self.exec.clear() {
+            self.drop_guarded_logged("a task at shutdown", future);
+        }
+        self.calls.lock().clear();
+        for cleared in self.objects.clear() {
+            if let Some(cell) = cleared.object.as_store() {
+                cell.set_handle(0);
+            }
+            self.drop_guarded_logged("an object at shutdown", cleared.object);
+        }
+    }
+
+    /// Whether [`shutdown`](Runtime::shutdown) has been called.
+    pub fn is_shut_down(&self) -> bool {
+        self.shut_down.load(Ordering::Acquire)
+    }
+
+    // ----- small accessors ---------------------------------------------------------------
+
+    fn me(&self) -> Arc<Runtime> {
+        match self.weak.upgrade() {
+            Some(rt) => rt,
+            // A `Runtime` only ever exists inside the `Arc` its constructors return, and no
+            // caller can reach `&self` after the last strong reference is gone.
+            None => unreachable!("keel-runtime: Runtime used while being dropped"),
+        }
+    }
+
+    /// A [`Ctx`] for this runtime.
+    pub fn ctx(&self) -> Ctx {
+        Ctx(self.me())
+    }
+
+    /// A process-unique id for this runtime instance.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The configuration passed at creation.
+    pub fn config(&self) -> &RuntimeConfig {
+        &self.config
+    }
+
+    /// The schema collected from every registration linked into the process.
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    /// The schema hash (`fnv1a64` of the canonical JSON), for the load-time check.
+    pub fn schema_hash(&self) -> u64 {
+        self.schema_hash
+    }
+
+    /// The object table.
+    pub fn objects(&self) -> &ObjectTable {
+        &self.objects
+    }
+
+    /// Host-to-core event subscriptions.
+    pub fn events(&self) -> &Events {
+        &self.events
+    }
+
+    /// The value of type `T` attached to this runtime, created with `T::default()` on first
+    /// use: how `keel-query` keeps its `QueryClient` here.
+    pub fn extension<T: Default + Send + Sync + 'static>(&self) -> &T {
+        self.extensions.get_or_init(T::default)
+    }
+
+    /// Like [`extension`](Runtime::extension) with an explicit initializer (which may run
+    /// more than once if threads race; only one result is kept).
+    pub fn extension_with<T: Send + Sync + 'static>(&self, init: impl FnOnce() -> T) -> &T {
+        self.extensions.get_or_init(init)
+    }
+
+    // ----- logging -----------------------------------------------------------------------
+
+    /// Sends a record to the host if `level` is at least the configured level.
+    pub fn log(&self, level: u8, target: &str, message: &str) {
+        if level >= self.config.log_level {
+            // A panicking `Host::log` must not take the runtime down, and there is nowhere
+            // left to report it.
+            let _ = guard::guarded(|| self.host.log(level, target, message));
+        }
+    }
+
+    /// Runs a host callback under the panic guard: a host that panics is logged and the
+    /// runtime carries on.
+    fn guard_host<R>(&self, what: &str, f: impl FnOnce() -> R) -> Option<R> {
+        match guard::guarded(f) {
+            Ok(value) => Some(value),
+            Err(report) => {
+                self.log_panic(&format!("{what} panicked"), &report);
+                None
+            }
+        }
+    }
+
+    fn host_port_call(
+        &self,
+        port_id: u32,
+        method_id: u32,
+        port_call_id: u32,
+        args: &[u8],
+    ) -> PortCallOutcome {
+        self.guard_host("Host::port_call", || {
+            self.host.port_call(port_id, method_id, port_call_id, args)
+        })
+        .unwrap_or(PortCallOutcome::Unavailable)
+    }
+
+    fn log_panic(&self, what: &str, report: &PanicReport) {
+        Stats::inc(&self.stats.panics);
+        self.log(
+            FATAL,
+            "keel::panic",
+            &format!("{what}: {}\n{}", report.message, report.backtrace),
+        );
+    }
+
+    fn drop_guarded_logged<T>(&self, what: &str, value: T) {
+        if let Err(report) = drop_guarded(value) {
+            self.log_panic(&format!("dropping {what} panicked"), &report);
+        }
+    }
+
+    // ----- the core lock -----------------------------------------------------------------
+
+    /// Whether this thread holds the core lock.
+    fn holds_core(&self) -> bool {
+        HELD.try_with(|held| held.borrow().contains(&self.id))
+            .unwrap_or(false)
+    }
+
+    /// Takes the core lock and makes this runtime current on the thread. Fails, instead of
+    /// deadlocking, when this thread already holds the lock: that is a host callback (or
+    /// user code) calling back into the runtime, which SPEC 5.1 forbids (`E_REENTRANT`).
+    pub(crate) fn enter_core(&self) -> Result<CoreGuard<'_>, Reentrant> {
+        if self.holds_core() {
+            return Err(Reentrant);
+        }
+        let guard = self.core.lock();
+        let _ = HELD.try_with(|held| held.borrow_mut().push(self.id));
+        Ok(CoreGuard {
+            guard: Some(guard),
+            id: self.id,
+            scope: Some(CtxScope::enter(self.me())),
+        })
+    }
+
+    fn reentrant(&self, entry_point: &str) {
+        Stats::inc(&self.stats.bad_requests);
+        self.log(
+            ERROR,
+            "keel::runtime",
+            &format!("{entry_point}: {E_REENTRANT}"),
+        );
+    }
+
+    // ----- host callbacks ----------------------------------------------------------------
+
+    fn send_reply(&self, call_id: u32, status: ReplyStatus, body: &[u8]) {
+        Stats::inc(&self.stats.replies);
+        let payload = reply_payload(call_id, status, body);
+        self.guard_host("Host::reply", || self.host.reply(call_id, &payload));
+    }
+
+    fn send_stream_item(&self, call_id: u32, flag: StreamFlag, body: &[u8]) {
+        Stats::inc(&self.stats.stream_items);
+        let payload = stream_payload(call_id, flag, body);
+        self.guard_host("Host::stream_item", || {
+            self.host.stream_item(call_id, &payload);
+        });
+    }
+
+    pub(crate) fn deliver_change_set(&self, payload: &[u8]) {
+        Stats::inc(&self.stats.change_sets);
+        Stats::add(&self.stats.change_set_bytes, payload.len() as u64);
+        if self.dev && payload.len() >= 12 {
+            let mut txn = [0u8; 8];
+            txn.copy_from_slice(&payload[..8]);
+            let mut count = [0u8; 4];
+            count.copy_from_slice(&payload[8..12]);
+            self.log(
+                DEBUG,
+                "keel::devtools",
+                &format!(
+                    "commit txn={} entries={} bytes={}",
+                    u64::from_le_bytes(txn),
+                    u32::from_le_bytes(count),
+                    payload.len()
+                ),
+            );
+        }
+        self.guard_host("Host::change_set", || self.host.change_set(payload));
+    }
+
+    /// Wraps `count` encoded entries into a change-set and delivers it.
+    fn deliver_entries(&self, entries: &Writer, count: u32) {
+        if count == 0 {
+            return;
+        }
+        let mut w = Writer::with_capacity(12 + entries.len());
+        w.write_u64(keel_signals::next_txn_id());
+        w.write_u32(count);
+        w.write_raw(entries.as_slice());
+        self.deliver_change_set(w.as_slice());
+    }
+
+    // ----- calls -------------------------------------------------------------------------
+
+    /// Serves a call (SPEC 3.3) and replies through [`Host::reply`]. Sync methods reply before
+    /// this returns; async methods and streams are spawned and reply later.
+    ///
+    /// Returns `0` when the call was accepted (a reply will follow, for anything from success
+    /// to status 2 or 5) and `5` when it was rejected without a reply: an undecodable payload
+    /// (no `call_id` to answer), `call_id == 0`, a `call_id` that is already in flight, a
+    /// shut-down runtime, or a re-entrant call.
+    pub fn call(&self, payload: &[u8]) -> u32 {
+        Stats::inc(&self.stats.calls);
+        let call = match Call::decode(&mut Reader::new(payload)) {
+            Ok(call) => call,
+            Err(e) => {
+                Stats::inc(&self.stats.bad_requests);
+                self.log(
+                    WARN,
+                    "keel::runtime",
+                    &format!("call: malformed payload: {e}"),
+                );
+                return 5;
+            }
+        };
+        let call_id = call.call_id;
+        if call_id == 0 {
+            Stats::inc(&self.stats.bad_requests);
+            self.log(WARN, "keel::runtime", "call: call_id 0 is reserved");
+            return 5;
+        }
+        if self.is_shut_down() {
+            Stats::inc(&self.stats.bad_requests);
+            return 5;
+        }
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("call");
+            return 5;
+        };
+        if self.calls.lock().contains_key(&call_id) {
+            Stats::inc(&self.stats.bad_requests);
+            self.log(
+                WARN,
+                "keel::runtime",
+                &format!("call: call_id {call_id} is already in flight"),
+            );
+            return 5;
+        }
+        match self.dispatch(&call, false) {
+            Dispatched::Bad(reason) => self.reply_bad(call_id, &reason),
+            Dispatched::Panicked(report, handle) => self.reply_panic(call_id, handle, &report),
+            Dispatched::Done(result, handle) => match result {
+                DispatchResult::Sync(Ok(body)) => self.send_reply(call_id, ReplyStatus::Ok, &body),
+                DispatchResult::Sync(Err(body)) => {
+                    self.send_reply(call_id, ReplyStatus::Error, &body);
+                }
+                DispatchResult::Async(future) => self.spawn_call(call_id, handle, future),
+                DispatchResult::Stream(stream) => self.open_stream(call_id, handle, stream),
+                DispatchResult::Unknown | DispatchResult::BadRequest(_) => {
+                    // `dispatch` maps both to `Dispatched::Bad`.
+                    self.reply_bad(call_id, "internal: unmapped dispatch result");
+                }
+            },
+        }
+        0
+    }
+
+    /// Serves a call synchronously and returns the `Reply` payload (SPEC 3.4). Only for sync
+    /// methods: an `async` method or a stream is answered with status 5 without being run.
+    /// The reply is *not* passed to [`Host::reply`].
+    pub fn call_sync(&self, payload: &[u8]) -> Vec<u8> {
+        Stats::inc(&self.stats.calls);
+        Stats::inc(&self.stats.replies);
+        let call = match Call::decode(&mut Reader::new(payload)) {
+            Ok(call) => call,
+            Err(e) => {
+                Stats::inc(&self.stats.bad_requests);
+                return reply_payload(
+                    0,
+                    ReplyStatus::BadRequest,
+                    &string_body(&format!("malformed call payload: {e}")),
+                );
+            }
+        };
+        let call_id = call.call_id;
+        let bad = |reason: &str| {
+            Stats::inc(&self.stats.bad_requests);
+            reply_payload(call_id, ReplyStatus::BadRequest, &string_body(reason))
+        };
+        if self.is_shut_down() {
+            return bad("the runtime is shut down");
+        }
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("call_sync");
+            return bad(E_REENTRANT);
+        };
+        match self.dispatch(&call, true) {
+            Dispatched::Bad(reason) => bad(&reason),
+            Dispatched::Panicked(report, handle) => {
+                self.note_panic("call_sync", handle, &report);
+                reply_payload(call_id, ReplyStatus::Panic, &encode_panic_body(&report))
+            }
+            Dispatched::Done(result, _) => match result {
+                DispatchResult::Sync(Ok(body)) => reply_payload(call_id, ReplyStatus::Ok, &body),
+                DispatchResult::Sync(Err(body)) => {
+                    reply_payload(call_id, ReplyStatus::Error, &body)
+                }
+                other => {
+                    // A dispatcher that disagrees with its metadata about being async.
+                    self.drop_guarded_logged("an unused dispatch result", other);
+                    bad("this method is asynchronous; call it with call(), not call_sync()")
+                }
+            },
+        }
+    }
+
+    /// Finds the dispatcher for `call` and runs it under the panic guard. The caller holds
+    /// the core lock. `sync_only` rejects async-shaped methods (by their metadata) before
+    /// running anything.
+    fn dispatch(&self, call: &Call<'_>, sync_only: bool) -> Dispatched {
+        let async_reason = |name: &str| {
+            Dispatched::Bad(format!(
+                "`{name}` is asynchronous; call it with call(), not call_sync()"
+            ))
+        };
+        let (dispatch_fn, method_id, handle) = match call.target {
+            CallTarget::Function { method_id } => {
+                let Some(meta) = self.table.functions.get(&method_id) else {
+                    return Dispatched::Bad(format!("unknown function {method_id:#010x}"));
+                };
+                if sync_only && needs_async(meta.is_async, &meta.returns) {
+                    return async_reason(meta.name);
+                }
+                (meta.dispatch, method_id, Handle::NULL)
+            }
+            CallTarget::Method { handle, method_id } => {
+                let object = match self.objects.get_dyn(handle) {
+                    Ok(object) => object,
+                    Err(e) => return Dispatched::Bad(e.to_string()),
+                };
+                let Some(meta) = self.table.objects.get(&object.keel_type_id()) else {
+                    return Dispatched::Bad(format!(
+                        "no dispatcher is registered for `{}` ({:#010x})",
+                        object.keel_type_name(),
+                        object.keel_type_id()
+                    ));
+                };
+                if sync_only {
+                    if let Some(m) = meta.methods.iter().find(|m| m.method_id == method_id) {
+                        if needs_async(m.is_async, &m.returns) {
+                            return async_reason(m.name);
+                        }
+                    }
+                }
+                (meta.dispatch, method_id, handle)
+            }
+            CallTarget::Constructor { type_id, method_id } => {
+                let Some(meta) = self.table.objects.get(&type_id) else {
+                    return Dispatched::Bad(format!("unknown object type {type_id:#010x}"));
+                };
+                if sync_only {
+                    if let Some(m) = meta.constructors.iter().find(|m| m.method_id == method_id) {
+                        if needs_async(m.is_async, &m.returns) {
+                            return async_reason(m.name);
+                        }
+                    }
+                }
+                (meta.dispatch, method_id, Handle::NULL)
+            }
+            CallTarget::LazyPage {
+                handle,
+                offset,
+                limit,
+            } => {
+                return match self.objects.get::<LazyList>(handle) {
+                    Ok(list) => {
+                        Dispatched::Done(DispatchResult::Sync(Ok(list.page(offset, limit))), handle)
+                    }
+                    Err(e) => Dispatched::Bad(e.to_string()),
+                };
+            }
+        };
+        let dispatch_call = DispatchCall {
+            method_id,
+            call_id: call.call_id,
+            handle: handle.0,
+            args: call.args,
+        };
+        match guard::guarded(|| dispatch_fn(self as &dyn Any, dispatch_call)) {
+            Ok(outcome) => match outcome.downcast::<DispatchResult>() {
+                Ok(DispatchResult::BadRequest(reason)) => Dispatched::Bad(reason),
+                Ok(DispatchResult::Unknown) => {
+                    Dispatched::Bad(format!("unknown method {method_id:#010x}"))
+                }
+                Ok(result) => Dispatched::Done(result, handle),
+                Err(_) => Dispatched::Bad(
+                    "the dispatcher returned something other than a keel_runtime::DispatchResult"
+                        .to_owned(),
+                ),
+            },
+            Err(report) => Dispatched::Panicked(report, handle),
+        }
+    }
+
+    fn reply_bad(&self, call_id: u32, reason: &str) {
+        Stats::inc(&self.stats.bad_requests);
+        self.send_reply(call_id, ReplyStatus::BadRequest, &string_body(reason));
+    }
+
+    /// Accounts for a caught panic: log level 5, counters, store poisoning.
+    fn note_panic(&self, what: &str, handle: Handle, report: &PanicReport) {
+        self.log_panic(&format!("{what} panicked"), report);
+        if !handle.is_null() {
+            self.objects.mark_poisoned(handle);
+        }
+    }
+
+    fn reply_panic(&self, call_id: u32, handle: Handle, report: &PanicReport) {
+        self.note_panic("call", handle, report);
+        self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
+    }
+
+    fn spawn_call(
+        &self,
+        call_id: u32,
+        handle: Handle,
+        future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
+    ) {
+        let rt = self.me();
+        let task = self.exec.spawn(
+            Box::pin(async move {
+                let result = future.await;
+                rt.finish_call(call_id, result);
+            }),
+            TaskKind::Call { call_id, handle },
+        );
+        self.calls
+            .lock()
+            .insert(call_id, CallEntry { task, stream: None });
+    }
+
+    /// A call's task finished with `result`: reply, unless the call was cancelled meanwhile.
+    fn finish_call(&self, call_id: u32, result: DispatchBytes) {
+        if self.calls.lock().remove(&call_id).is_none() {
+            return;
+        }
+        match result {
+            Ok(body) => self.send_reply(call_id, ReplyStatus::Ok, &body),
+            Err(body) => self.send_reply(call_id, ReplyStatus::Error, &body),
+        }
+    }
+
+    fn open_stream(
+        &self,
+        call_id: u32,
+        handle: Handle,
+        stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
+    ) {
+        let state = Arc::new(StreamState::default());
+        // Status 4 goes out before the driver can run, so it always precedes the first item.
+        self.send_reply(call_id, ReplyStatus::StreamOpened, &[]);
+        let rt = self.me();
+        let task = self.exec.spawn(
+            Box::pin(drive_stream(rt, call_id, stream, state.clone())),
+            TaskKind::Stream { call_id, handle },
+        );
+        self.calls.lock().insert(
+            call_id,
+            CallEntry {
+                task,
+                stream: Some(state),
+            },
+        );
+    }
+
+    /// Cancels an in-flight call: the task is dropped and, for an ordinary call, the reply is
+    /// status 3. Cancelling a stream closes it without a further message (the host already
+    /// knows). Unknown or finished ids are ignored.
+    pub fn cancel(&self, call_id: u32) {
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("cancel");
+            return;
+        };
+        let Some(entry) = self.calls.lock().remove(&call_id) else {
+            return;
+        };
+        Stats::inc(&self.stats.cancelled);
+        if let CancelOutcome::Dropped(future) = self.exec.cancel(entry.task) {
+            self.drop_guarded_logged("a cancelled task", future);
+        }
+        if entry.stream.is_none() {
+            self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
+        }
+    }
+
+    /// Grants a stream more credit. Never takes the core lock. Unknown ids are ignored.
+    pub fn stream_credit(&self, call_id: u32, credit: u32) {
+        let state = self
+            .calls
+            .lock()
+            .get(&call_id)
+            .and_then(|entry| entry.stream.clone());
+        if let Some(state) = state {
+            state.add_credit(credit);
+        }
+    }
+
+    // ----- observation and objects -------------------------------------------------------
+
+    /// Starts or stops observing a store's signal (`signal_id == u32::MAX` for all of them).
+    /// Starting delivers the current values as a change-set through [`Host::change_set`]
+    /// **before this returns**. Unknown handles and non-stores are logged and ignored.
+    pub fn observe(&self, handle: u64, signal_id: u32, on: bool) {
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("observe");
+            return;
+        };
+        let handle = Handle(handle);
+        let object = match self.objects.get_dyn(handle) {
+            Ok(object) => object,
+            Err(e) => {
+                self.log(WARN, "keel::runtime", &format!("observe: {e}"));
+                return;
+            }
+        };
+        let Some(cell) = object.as_store() else {
+            self.log(
+                WARN,
+                "keel::runtime",
+                &format!("observe: `{}` is not a store", object.keel_type_name()),
+            );
+            return;
+        };
+        let signal_count = cell.signal_count();
+        self.objects
+            .with_observed(handle, |o| o.record(signal_id, on, signal_count));
+        let mut entries = Writer::new();
+        match guard::guarded(|| cell.observe(signal_id, on, &mut entries)) {
+            Ok(count) => self.deliver_entries(&entries, count),
+            Err(report) => self.note_panic("observe", handle, &report),
+        }
+    }
+
+    /// Releases a handle. The object is dropped once no task holds it; a released store stops
+    /// delivering change-sets. Stale handles are ignored.
+    pub fn release(&self, handle: u64) {
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("release");
+            return;
+        };
+        match self.objects.release(Handle(handle)) {
+            Ok(object) => {
+                if let Some(cell) = object.as_store() {
+                    cell.set_handle(0);
+                }
+                self.drop_guarded_logged("a released object", object);
+            }
+            Err(e) => self.log(DEBUG, "keel::runtime", &format!("release: {e}")),
+        }
+    }
+
+    /// Stores `object` and returns its handle. Generated constructors call this (or
+    /// [`insert_object`](Runtime::insert_object) / [`insert_store`](Runtime::insert_store)).
+    pub fn insert(&self, object: Arc<dyn AnyObject>) -> Handle {
+        self.objects.insert(object)
+    }
+
+    /// Stores a plain object and returns its handle.
+    pub fn insert_object<T: KeelObject>(&self, object: Arc<T>) -> Handle {
+        self.objects.insert(plain(object))
+    }
+
+    /// Stores a store and returns its handle; its cell learns the handle.
+    pub fn insert_store<T: StoreObject>(&self, object: Arc<T>) -> Handle {
+        self.objects.insert(store(object))
+    }
+
+    /// Stores a [`LazyList`] (sharing its state) and returns its handle, which platforms page
+    /// through with `LazyPage` calls.
+    pub fn insert_lazy_list(&self, list: &LazyList) -> Handle {
+        self.insert_object(Arc::new(list.clone()))
+    }
+
+    /// Resolves a raw handle to a `T`: what a generated dispatcher does for its receiver.
+    pub fn object<T: Send + Sync + 'static>(&self, handle: u64) -> Result<Arc<T>, BadHandle> {
+        self.objects.get::<T>(Handle(handle))
+    }
+
+    // ----- executor ----------------------------------------------------------------------
+
+    /// Spawns a detached task.
+    pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) -> TaskId {
+        self.exec.spawn(Box::pin(future), TaskKind::Detached)
+    }
+
+    /// Cancels a task; see [`Ctx::cancel_task`].
+    pub fn cancel_task(&self, id: TaskId) {
+        if let CancelOutcome::Dropped(future) = self.exec.cancel(id) {
+            self.drop_guarded_logged("a cancelled task", future);
+        }
+    }
+
+    /// Runs `f` on the blocking pool; see [`Ctx::spawn_blocking`].
+    pub fn spawn_blocking<T: Send + 'static>(
+        &self,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> BlockingTask<T> {
+        self.blocking.spawn(self.ctx(), f)
+    }
+
+    /// Sleeps; see [`Ctx::sleep`].
+    pub fn sleep(&self, duration: Duration) -> Sleep {
+        if duration.is_zero() {
+            return Sleep::ready();
+        }
+        let (id, slot) = self.timers.register();
+        let host_owns = self
+            .guard_host("Host::timer_set", || {
+                self.host.timer_set(id, delay_ms(duration))
+            })
+            .unwrap_or(false);
+        if !host_owns && !self.timers.arm(id, duration) {
+            self.log(
+                WARN,
+                "keel::runtime",
+                "sleep: the host does not own timers and this platform has no internal timer; the sleep will never complete",
+            );
+        }
+        Sleep::armed(self.timers.clone(), id, slot)
+    }
+
+    /// The host says timer `timer_id` is due. Never takes the core lock. Unknown ids (a
+    /// sleep that was dropped) are ignored.
+    pub fn timer_fired(&self, timer_id: u32) {
+        self.timers.fire(timer_id);
+    }
+
+    /// Drives the executor for one turn: polls at most [`BATCH`] ready tasks, then, if more
+    /// are ready, asks the host to call `poll` again ([`Host::schedule`]). This is how wasm
+    /// and manually driven runtimes make progress.
+    pub fn poll(&self) {
+        if self.holds_core() {
+            self.reentrant("poll");
+            return;
+        }
+        let batch = self.exec.take_ready(BATCH);
+        if !batch.is_empty() {
+            self.run_batch(batch);
+        }
+        self.exec.reschedule_if_ready();
+    }
+
+    /// Polls until no task is ready, and returns how many polls that took. Tasks that are
+    /// waiting for a timer, a port reply or credit stay parked. A task that re-wakes itself
+    /// forever makes this run forever.
+    pub fn run_pending(&self) -> usize {
+        if self.holds_core() {
+            self.reentrant("run_pending");
+            return 0;
+        }
+        let mut polled = 0;
+        loop {
+            let batch = self.exec.take_ready(BATCH);
+            if batch.is_empty() {
+                return polled;
+            }
+            polled += batch.len();
+            self.run_batch(batch);
+        }
+    }
+
+    /// One turn of the core loop: lock, poll `ids`, unlock fairly.
+    pub(crate) fn run_batch(&self, ids: Vec<TaskId>) {
+        let Ok(mut guard) = self.enter_core() else {
+            self.exec.requeue(ids);
+            self.reentrant("executor turn");
+            return;
+        };
+        if self.is_shut_down() {
+            return;
+        }
+        if let Some(state) = guard.state() {
+            state.turns += 1;
+        }
+        Stats::inc(&self.stats.turns);
+        for id in ids {
+            self.poll_one(id);
+        }
+        guard.unlock_fair();
+    }
+
+    fn poll_one(&self, id: TaskId) {
+        let Some((mut future, waker, kind)) = self.exec.begin_poll(id) else {
+            return;
+        };
+        Stats::inc(&self.stats.polls);
+        let mut cx = Context::from_waker(&waker);
+        match guard::guarded(|| future.as_mut().poll(&mut cx)) {
+            Ok(Poll::Pending) => {
+                if let EndPoll::Gone(future) = self.exec.end_poll(id, Some(future)) {
+                    self.drop_task_future(future);
+                }
+            }
+            Ok(Poll::Ready(())) => {
+                self.exec.end_poll(id, None);
+                self.drop_task_future(Some(future));
+            }
+            Err(report) => {
+                self.exec.end_poll(id, None);
+                self.drop_task_future(Some(future));
+                self.task_panicked(kind, &report);
+            }
+        }
+    }
+
+    fn drop_task_future(&self, future: Option<BoxFuture>) {
+        if let Some(future) = future {
+            self.drop_guarded_logged("a task", future);
+        }
+    }
+
+    fn task_panicked(&self, kind: TaskKind, report: &PanicReport) {
+        match kind {
+            TaskKind::Detached => self.log_panic("a spawned task panicked", report),
+            TaskKind::Call { call_id, handle } => {
+                self.note_panic("async call", handle, report);
+                if self.calls.lock().remove(&call_id).is_some() {
+                    self.send_reply(call_id, ReplyStatus::Panic, &encode_panic_body(report));
+                }
+            }
+            TaskKind::Stream { call_id, handle } => {
+                self.note_panic("stream", handle, report);
+                if self.calls.lock().remove(&call_id).is_some() {
+                    self.send_stream_item(
+                        call_id,
+                        StreamFlag::Error,
+                        &string_body(&format!("the stream panicked: {}", report.message)),
+                    );
+                }
+            }
+        }
+    }
+
+    // ----- ports and events --------------------------------------------------------------
+
+    /// Binds a Rust implementation to a port id (fakes, built-ins). `imp` must be an `Arc<T>`
+    /// of the concrete implementation type; fetch it back with
+    /// [`Ctx::rust_port::<T>`](Ctx::rust_port). `P` names the port trait the value stands in
+    /// for and is documentation only. For a value that is used as a trait object, prefer
+    /// [`bind_dyn_port`](Runtime::bind_dyn_port).
+    ///
+    /// A Rust binding has no wire form: raw [`port_call`](Runtime::port_call)s to the port
+    /// complete with [`PortError::Unavailable`].
+    pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>) {
+        self.ports.bind(port_id, PortBinding::Rust(imp));
+    }
+
+    /// Binds an implementation as the trait object `P`
+    /// (`rt.bind_dyn_port::<dyn Clock>(port_id, Arc::new(FakeClock::new()))`), retrievable with
+    /// [`dyn_port::<P>`](Runtime::dyn_port).
+    pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>) {
+        self.ports
+            .bind(port_id, PortBinding::Rust(Arc::new(DynPort(imp))));
+    }
+
+    /// Routes a port id to the platform again (through [`Host::port_call`]), replacing any
+    /// Rust binding.
+    pub fn bind_foreign_port(&self, port_id: u32) {
+        self.ports.bind(port_id, PortBinding::Foreign);
+    }
+
+    /// Removes a Rust binding; the port is foreign again. Returns whether there was one.
+    pub fn unbind_port(&self, port_id: u32) -> bool {
+        self.ports.unbind(port_id)
+    }
+
+    /// The Rust binding of `port_id`, if bound with [`bind_port`](Runtime::bind_port) as a `T`.
+    pub fn rust_port<T: Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<T>> {
+        match self.ports.binding(port_id) {
+            PortBinding::Rust(imp) => imp.downcast::<T>().ok(),
+            PortBinding::Foreign => None,
+        }
+    }
+
+    /// The Rust binding of `port_id`, if bound with [`bind_dyn_port`](Runtime::bind_dyn_port)
+    /// as a `P`.
+    pub fn dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
+        match self.ports.binding(port_id) {
+            PortBinding::Rust(imp) => imp.downcast::<DynPort<P>>().ok().map(|d| d.0.clone()),
+            PortBinding::Foreign => None,
+        }
+    }
+
+    /// Calls a platform-implemented async port method (SPEC 5.7). The call is sent when this
+    /// function is called; the future resolves when the host replies through
+    /// [`port_reply`](Runtime::port_reply), or immediately if the host answered synchronously.
+    pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture {
+        Stats::inc(&self.stats.port_calls);
+        if matches!(self.ports.binding(port_id), PortBinding::Rust(_)) {
+            return PortFuture::ready(self.ports.clone(), Err(PortError::Unavailable));
+        }
+        let (id, slot) = self.ports.begin(self.timers.now_ns());
+        // Constructed before the host is called so that a panic in the host abandons the id.
+        let future = PortFuture::new(slot, self.ports.clone(), id);
+        if self.dev {
+            self.log(
+                DEBUG,
+                "keel::devtools",
+                &format!(
+                    "port call {port_id:#010x}.{method_id:#010x} id={id} args={} bytes",
+                    args.len()
+                ),
+            );
+        }
+        match self.host_port_call(port_id, method_id, id, &args) {
+            PortCallOutcome::Sync(reply) => {
+                let result = decode_port_reply(id, &reply);
+                self.finish_port_call(id, result);
+            }
+            PortCallOutcome::Unavailable => {
+                self.finish_port_call(id, Err(PortError::Unavailable));
+            }
+            PortCallOutcome::Async => {}
+        }
+        future
+    }
+
+    /// Calls a platform-implemented sync port method. The host must answer synchronously; an
+    /// `Async` or `Unavailable` answer is [`PortError::Unavailable`] and the call is
+    /// abandoned. (An `Async` answer whose reply already arrived through
+    /// [`port_reply`](Runtime::port_reply) during `Host::port_call` counts as synchronous.)
+    pub fn port_call_sync(
+        &self,
+        port_id: u32,
+        method_id: u32,
+        args: &[u8],
+    ) -> Result<Vec<u8>, PortError> {
+        Stats::inc(&self.stats.port_calls);
+        if matches!(self.ports.binding(port_id), PortBinding::Rust(_)) {
+            return Err(PortError::Unavailable);
+        }
+        let (id, slot) = self.ports.begin(self.timers.now_ns());
+        let mut future = PortFuture::new(slot, self.ports.clone(), id);
+        match self.host_port_call(port_id, method_id, id, args) {
+            PortCallOutcome::Sync(reply) => {
+                let result = decode_port_reply(id, &reply);
+                self.finish_port_call(id, result);
+            }
+            PortCallOutcome::Unavailable => {
+                self.finish_port_call(id, Err(PortError::Unavailable));
+            }
+            PortCallOutcome::Async => {}
+        }
+        // Dropping `future` abandons a call that has not been answered.
+        future.try_take().unwrap_or(Err(PortError::Unavailable))
+    }
+
+    fn finish_port_call(&self, id: u32, result: Result<Vec<u8>, PortError>) {
+        Stats::inc(&self.stats.port_replies);
+        if let Completion::Delivered { started_ns } = self.ports.complete(id, result) {
+            if self.dev {
+                let elapsed = self.timers.now_ns().saturating_sub(started_ns);
+                self.log(
+                    DEBUG,
+                    "keel::devtools",
+                    &format!("port call id={id} completed in {elapsed} ns"),
+                );
+            }
+        }
+    }
+
+    /// The host answers a port call (`PortReply` payload, SPEC 3.6). Never takes the core
+    /// lock, so it is safe to call from the host thread that runs the port, and even from
+    /// inside [`Host::port_call`]. A reply for an abandoned call is discarded; a reply for an
+    /// unknown id or a malformed payload is logged and ignored.
+    pub fn port_reply(&self, payload: &[u8]) {
+        let mut reader = Reader::new(payload);
+        let reply = match PortReply::decode(&mut reader) {
+            Ok(reply) => reply,
+            Err(e) => {
+                self.log(
+                    WARN,
+                    "keel::runtime",
+                    &format!("port_reply: malformed payload: {e}"),
+                );
+                return;
+            }
+        };
+        let result = match reply.status {
+            PortStatus::Ok => Ok(reply.body.to_vec()),
+            PortStatus::Error => Err(PortError::Failed(reply.body.to_vec())),
+            PortStatus::Unavailable => Err(PortError::Unavailable),
+        };
+        Stats::inc(&self.stats.port_replies);
+        let id = reply.port_call_id;
+        match self.ports.complete(id, result) {
+            Completion::Delivered { started_ns } => {
+                if self.dev {
+                    let elapsed = self.timers.now_ns().saturating_sub(started_ns);
+                    self.log(
+                        DEBUG,
+                        "keel::devtools",
+                        &format!("port call id={id} completed in {elapsed} ns"),
+                    );
+                }
+            }
+            Completion::Discarded => self.log(
+                DEBUG,
+                "keel::runtime",
+                &format!("port_reply: discarded the late reply to abandoned call {id}"),
+            ),
+            Completion::Unknown => self.log(
+                WARN,
+                "keel::runtime",
+                &format!("port_reply: no port call {id} is pending"),
+            ),
+        }
+    }
+
+    /// A host-to-core event (SPEC 5.7): fans out to the [`Events`] subscribers of
+    /// `(port_id, method_id)` on the core loop, with the core lock held.
+    pub fn event(&self, port_id: u32, method_id: u32, payload: &[u8]) {
+        let Ok(_guard) = self.enter_core() else {
+            self.reentrant("event");
+            return;
+        };
+        Stats::inc(&self.stats.events);
+        for callback in self.events.callbacks(port_id, method_id) {
+            if let Err(report) = guard::guarded(|| callback(payload)) {
+                self.log_panic("an event subscriber panicked", &report);
+            }
+        }
+    }
+
+    // ----- snapshot and restore ----------------------------------------------------------
+
+    /// Encodes every live store (SPEC 5.9): `count u32, stores x { handle u64, type_id u32,
+    /// <StoreCell::encode_snapshot body> }`, which is exactly a `keel_wire::payload::Snapshot`.
+    /// Objects that are not stores are not included.
+    pub fn snapshot(&self) -> Vec<u8> {
+        // Read-only, so it is fine even if this thread already holds the lock.
+        let _guard = self.enter_core().ok();
+        let mut chunks: Vec<Vec<u8>> = Vec::new();
+        for (handle, object) in self.objects.stores() {
+            let Some(cell) = object.as_store() else {
+                continue;
+            };
+            let mut w = Writer::new();
+            w.write_u64(handle.0);
+            w.write_u32(object.keel_type_id());
+            match guard::guarded(|| cell.encode_snapshot(&mut w)) {
+                Ok(()) => chunks.push(w.into_vec()),
+                Err(report) => self.note_panic("snapshot", handle, &report),
+            }
+        }
+        let mut out = Writer::new();
+        out.write_len(u32::try_from(chunks.len()).unwrap_or(u32::MAX));
+        for chunk in &chunks {
+            out.write_raw(chunk);
+        }
+        out.into_vec()
+    }
+
+    /// Rebuilds the object table from a snapshot (SPEC 5.9).
+    ///
+    /// Every store is rebuilt through its registered [`StoreRestorer`] and re-inserted at the
+    /// **same handle** (index and generation), so handles the host holds stay valid. All
+    /// other objects are dropped and their handles become stale (status 5). Signals that
+    /// were being observed before the restore (the runtime tracks this per handle) are
+    /// re-observed and their current values re-emitted as one change-set.
+    ///
+    /// Restoring into a fresh runtime (after a crash) has no memory of observations: the host
+    /// re-observes what it mirrors. In-flight tasks keep the objects they already hold; those
+    /// stores are detached and no longer deliver change-sets.
+    ///
+    /// All stores are built before anything is replaced: on error the runtime is unchanged.
+    pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError> {
+        if self.is_shut_down() {
+            return Err(RestoreError::ShutDown);
+        }
+        let snapshot = {
+            let mut r = Reader::new(payload);
+            let snapshot = Snapshot::decode(&mut r).map_err(RestoreError::Decode)?;
+            r.finish().map_err(RestoreError::Decode)?;
+            snapshot
+        };
+        let mut seen = HashSet::new();
+        for s in &snapshot.stores {
+            let h = s.handle;
+            if h.is_null()
+                || h.generation() == 0
+                || h.index() as usize > crate::object_table::MAX_RESTORE_INDEX
+                || !seen.insert(h.0)
+            {
+                return Err(RestoreError::BadHandle { handle: h.0 });
+            }
+        }
+        let _guard = self.enter_core().map_err(|_| RestoreError::Reentrant)?;
+        let ctx = self.ctx();
+
+        // Phase 1: build every store. Nothing is touched yet.
+        let mut built: Vec<(Handle, Arc<dyn AnyObject>)> =
+            Vec::with_capacity(snapshot.stores.len());
+        for s in &snapshot.stores {
+            let type_id = s.type_id;
+            let Some(restorer) = self.restorers.get(&type_id) else {
+                return Err(RestoreError::UnknownStoreType { type_id });
+            };
+            let mut body = Writer::new();
+            body.write_len(u32::try_from(s.signals.len()).unwrap_or(u32::MAX));
+            for (signal_id, value) in &s.signals {
+                body.write_u32(*signal_id);
+                body.write_bytes(value);
+            }
+            let bytes = body.into_vec();
+            let mut r = Reader::new(&bytes);
+            let object = match guard::guarded(|| (restorer.restore)(ctx.clone(), &mut r)) {
+                Ok(Ok(object)) => object,
+                Ok(Err(source)) => return Err(RestoreError::Store { type_id, source }),
+                Err(report) => {
+                    self.log_panic("a store's restore panicked", &report);
+                    return Err(RestoreError::Panicked {
+                        type_id,
+                        message: report.message,
+                    });
+                }
+            };
+            r.finish()
+                .map_err(|source| RestoreError::Store { type_id, source })?;
+            if object.keel_type_id() != type_id || object.as_store().is_none() {
+                return Err(RestoreError::Store {
+                    type_id,
+                    source: keel_wire::WireError::InvalidTag {
+                        tag: object.keel_type_id(),
+                        at: 0,
+                        ty: "StoreRestorer.type_id",
+                    },
+                });
+            }
+            built.push((s.handle, object));
+        }
+
+        // Phase 2: replace the table.
+        let max_generation = built.iter().map(|(h, _)| h.generation()).max().unwrap_or(0);
+        let mut observed = HashMap::new();
+        for cleared in self.objects.clear() {
+            if let Some(cell) = cleared.object.as_store() {
+                cell.set_handle(0);
+                observed.insert(cleared.handle.0, cleared.observed);
+            }
+            self.drop_guarded_logged("an object replaced by restore", cleared.object);
+        }
+        self.objects
+            .raise_min_generation(max_generation.saturating_add(1));
+        for (handle, object) in &built {
+            if let Err(e) = self.objects.insert_at(*handle, object.clone()) {
+                self.log(
+                    ERROR,
+                    "keel::runtime",
+                    &format!("restore: could not place {handle:?}: {e}"),
+                );
+            }
+        }
+
+        // Phase 3: re-emit what was observed.
+        let mut entries = Writer::new();
+        let mut count = 0;
+        for (handle, object) in &built {
+            let (Some(previous), Some(cell)) = (observed.get(&handle.0), object.as_store()) else {
+                continue;
+            };
+            for signal_id in previous.to_reobserve() {
+                match guard::guarded(|| cell.observe(signal_id, true, &mut entries)) {
+                    Ok(n) => count += n,
+                    Err(report) => self.note_panic("restore", *handle, &report),
+                }
+            }
+            self.objects
+                .with_observed(*handle, |o| *o = previous.clone());
+        }
+        self.deliver_entries(&entries, count);
+        Ok(())
+    }
+
+    // ----- statistics --------------------------------------------------------------------
+
+    /// A JSON document with the live handle count, tasks, calls, crossing counters, poisoned
+    /// stores and panics (SPEC 6 `keel_stats_json`). Never takes the core lock.
+    pub fn stats_json(&self) -> String {
+        let s = &self.stats;
+        let (started, max) = self.blocking.threads();
+        let (open_streams, active_calls) = {
+            let calls = self.calls.lock();
+            (
+                calls.values().filter(|c| c.stream.is_some()).count(),
+                calls.len(),
+            )
+        };
+        let mut out = String::with_capacity(512);
+        out.push_str("{\"platform\":");
+        push_json_string(&mut out, &self.config.platform);
+        out.push_str(",\"mode\":");
+        push_json_string(&mut out, &self.config.mode);
+        out.push_str(&format!(
+            ",\"schema_hash\":\"{:#018x}\",\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            self.schema_hash,
+            self.objects.live(),
+            self.objects.store_count(),
+            self.objects.poisoned_stores(),
+            self.exec.live(),
+            active_calls,
+            open_streams,
+            self.ports.pending_count(),
+            self.ports.abandoned_count(),
+            self.timers.pending(),
+            started,
+            max,
+            Stats::get(&s.change_sets),
+            Stats::get(&s.panics),
+            Stats::get(&s.turns),
+            Stats::get(&s.polls),
+            Stats::get(&s.calls),
+            Stats::get(&s.replies),
+            Stats::get(&s.change_sets),
+            Stats::get(&s.change_set_bytes),
+            Stats::get(&s.port_calls),
+            Stats::get(&s.port_replies),
+            Stats::get(&s.stream_items),
+            Stats::get(&s.events),
+            Stats::get(&s.bad_requests),
+            Stats::get(&s.cancelled),
+        ));
+        out
+    }
+
+    /// Advances the manual clock (test runtimes); see `TestRuntime::advance`.
+    pub(crate) fn advance_clock(&self, d: Duration, after_each: impl FnMut()) -> usize {
+        self.timers.advance_manual(d, after_each)
+    }
+
+    /// Number of live sleepers (tests).
+    pub(crate) fn pending_timers(&self) -> usize {
+        self.timers.pending()
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        // The last reference is gone, so nothing else can be running; no lock is needed.
+        self.shut_down.store(true, Ordering::Release);
+        self.exec.shutdown();
+        let handle = self.core_thread.lock().take();
+        if let Some(handle) = handle {
+            if handle.thread().id() != std::thread::current().id() {
+                let _ = handle.join();
+            }
+        }
+        self.timers.shutdown();
+        self.blocking.shutdown();
+        self.ports.cancel_all();
+        self.teardown();
+        let mut global = GLOBAL.lock();
+        if global.as_ref().is_some_and(|g| g.id == self.id) {
+            *global = None;
+        }
+    }
+}
+
+/// A trait object bound as a port implementation; the wrapper gives `Arc<P>` a `TypeId`.
+struct DynPort<P: ?Sized>(Arc<P>);
+
+/// The `keel-core` thread: wait for work, run a turn, repeat. Holds only a `Weak` to the
+/// runtime, so dropping the last `Arc<Runtime>` ends it.
+#[cfg(not(target_family = "wasm"))]
+fn core_loop(weak: &Weak<Runtime>, shared: &Shared) {
+    while let Some(batch) = shared.wait_batch(BATCH) {
+        match weak.upgrade() {
+            Some(rt) => rt.run_batch(batch),
+            None => break,
+        }
+    }
+}
+
+/// Drives an open stream (SPEC 3.7): polls the next item, waits for credit, emits it; the end
+/// and the error markers need no credit.
+///
+/// The stream is polled *before* credit is checked, so it runs at most one item ahead of the
+/// host, and an ended stream reports its end immediately even if the host has spent all its
+/// credit (as gRPC servers send trailers regardless of the flow-control window).
+async fn drive_stream(
+    rt: Arc<Runtime>,
+    call_id: u32,
+    mut stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
+    state: Arc<StreamState>,
+) {
+    loop {
+        let next = std::future::poll_fn(|cx| stream.as_mut().poll_next(cx)).await;
+        match next {
+            Some(Ok(item)) => {
+                while !state.try_take() {
+                    state.notify.notified().await;
+                }
+                rt.send_stream_item(call_id, StreamFlag::Item, &item);
+            }
+            Some(Err(error)) => {
+                rt.calls.lock().remove(&call_id);
+                rt.send_stream_item(call_id, StreamFlag::Error, &error);
+                return;
+            }
+            None => {
+                rt.calls.lock().remove(&call_id);
+                rt.send_stream_item(call_id, StreamFlag::End, &[]);
+                return;
+            }
+        }
+    }
+}

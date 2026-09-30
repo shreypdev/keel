@@ -153,6 +153,7 @@ dependencies = [
  "keel-wire",
  "parking_lot",
  "pin-project-lite",
+ "serde_json",
  "slab",
 ]
 
