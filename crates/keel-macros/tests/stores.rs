@@ -1,6 +1,6 @@
 //! Behaviour tests for `#[keel::store]` and `#[keel::api(store)]`: the generated signal table,
 //! cell attachment, keyed lists, snapshot restore and struct-literal patching, run against
-//! the test facade.
+//! the real runtime and signals.
 #![forbid(unsafe_code)]
 
 use std::any::Any;
@@ -8,10 +8,14 @@ use std::sync::Arc;
 
 use keel::meta::{TypeRef, collect_schema, ids};
 use keel::prelude::{Computed, Ctx, Signal};
-use keel::runtime::{Runtime, StoreObject, StoreRestorer};
-use keel::signals::{AttachKind, Lazy, StoreCell};
-use keel::wire::{Decode, Encode, Handle, Reader, WireError, Writer};
+use keel::runtime::{StoreObject, StoreRestorer};
+use keel::signals::{ALL_SIGNALS, SignalsError, StoreCell};
+use keel::wire::payload::ChangeOp;
+use keel::wire::{Decode, Encode, Handle, KeyedPatch, PatchOp, Reader, WireError, Writer};
 use keel_macros as k;
+
+mod support;
+use support::Runtime;
 
 #[k::api]
 #[derive(Clone, Debug, PartialEq)]
@@ -43,7 +47,6 @@ pub struct Todos {
     #[keel(no_coalesce)]
     ticks: Signal<u32>,
     visible: Computed<Vec<Row>>,
-    page: Lazy<Row>,
     label: String,
 }
 
@@ -65,7 +68,7 @@ impl Todos {
         ticks: Signal<u32>,
     ) -> Self {
         let visible = Computed::new((&rows, &filter), |(rows, filter)| {
-            rows.into_iter().filter(|r| filter.matches(r)).collect()
+            rows.iter().filter(|r| filter.matches(r)).cloned().collect()
         });
         // No `__keel_cell` in the literal: the macro adds it inside this impl block.
         Self {
@@ -74,13 +77,20 @@ impl Todos {
             filter,
             ticks,
             visible,
-            page: Lazy::new(),
             label: "todos".to_owned(),
         }
     }
 
     pub fn add(&self, id: u32, title: String) {
         self.rows.update(|rows| rows.push(Row { id, title }));
+    }
+
+    pub fn rename(&self, id: u32, title: String) {
+        self.rows.update(|rows| {
+            for row in rows.iter_mut().filter(|r| r.id == id) {
+                row.title.clone_from(&title);
+            }
+        });
     }
 
     pub fn set_filter(&self, filter: Filter) {
@@ -141,6 +151,27 @@ impl Counter {
     }
 }
 
+/// A store that can be built over another store's signal, which cannot be attached twice.
+#[k::store]
+pub struct Twin {
+    count: Signal<u32>,
+}
+
+#[k::api(store)]
+impl Twin {
+    pub fn new() -> Self {
+        Twin {
+            count: Signal::new(0),
+        }
+    }
+
+    fn sharing(other: &Twin) -> Self {
+        Twin {
+            count: other.count.clone(),
+        }
+    }
+}
+
 fn construct(rt: &Runtime, store: &str, args: &[u8]) -> u64 {
     let reply = rt.call_object(store, "new", 0, args).sync_ok();
     Handle::decode_exact(&reply).unwrap().0
@@ -160,6 +191,17 @@ fn restorer(type_name: &str) -> &'static StoreRestorer {
         .into_iter()
         .find(|r| r.type_id == type_id)
         .unwrap_or_else(|| panic!("no restorer for {type_name}"))
+}
+
+/// The store body of a snapshot, as `StoreObject::restore` reads it: what `encode_snapshot`
+/// writes minus the `handle u64, type_id u32` the runtime consumes first.
+fn snapshot_body(store: &dyn Fn(&mut Writer)) -> Vec<u8> {
+    let mut record = Writer::new();
+    store(&mut record);
+    let mut r = Reader::new(record.as_slice());
+    r.read_u64().unwrap();
+    r.read_u32().unwrap();
+    r.read_rest().to_vec()
 }
 
 fn restore<T: Send + Sync + 'static>(
@@ -190,14 +232,12 @@ fn store_meta_lists_signals_with_ids_types_and_flags() {
             ("filter", 1, false, None),
             ("ticks", 2, false, None),
             ("visible", 3, true, None),
-            ("page", 4, false, None),
         ]
     );
     assert_eq!(store.signals[0].ty, TypeRef::vec(TypeRef::named("Row")));
     assert_eq!(store.signals[1].ty, TypeRef::named("Filter"));
     assert_eq!(store.signals[2].ty, TypeRef::U32);
     assert_eq!(store.signals[3].ty, TypeRef::vec(TypeRef::named("Row")));
-    assert_eq!(store.signals[4].ty, TypeRef::lazy(TypeRef::named("Row")));
     assert_eq!(object.constructors.len(), 1);
     assert_eq!(object.constructors[0].name, "new");
 
@@ -231,43 +271,124 @@ fn constructors_attach_every_signal_in_order_and_record_the_handle() {
         handle,
         "the object table's handle reached the cell"
     );
+    assert_eq!(cell.signal_count(), 4, "rows, filter, ticks, visible");
 
-    let attached = cell.attached();
-    let shape: Vec<(u32, AttachKind, bool, bool)> = attached
+    // Observing everything yields one entry per attached signal, in declaration order.
+    rt.real().observe(handle, ALL_SIGNALS, true);
+    let initial = rt.change_sets();
+    assert_eq!(initial.len(), 1);
+    let entries: Vec<(u32, ChangeOp)> = initial[0]
+        .entries
         .iter()
-        .map(|a| (a.signal_id, a.kind, a.key.is_some(), a.no_coalesce))
+        .map(|e| (e.signal_id, e.op))
         .collect();
     assert_eq!(
-        shape,
+        entries,
         [
-            (0, AttachKind::Plain, true, false),
-            (1, AttachKind::Plain, false, false),
-            (2, AttachKind::Plain, false, true),
-            (3, AttachKind::Computed, false, false),
-            (4, AttachKind::Lazy, false, false),
+            (0, ChangeOp::Full),
+            (1, ChangeOp::Full),
+            (2, ChangeOp::Full),
+            (3, ChangeOp::Full)
         ]
     );
+    assert!(initial[0].entries.iter().all(|e| e.handle == Handle(handle)));
+}
+
+fn add_row(rt: &Runtime, handle: u64, id: u32, title: &str) {
+    let mut w = Writer::new();
+    id.encode(&mut w);
+    title.to_owned().encode(&mut w);
+    rt.call_object("Todos", "add", handle, w.as_slice()).sync_ok();
+}
+
+fn patch_of(cs: &keel::wire::payload::ChangeSet, signal_id: u32) -> KeyedPatch<Row> {
+    let entry = cs
+        .entries
+        .iter()
+        .find(|e| e.signal_id == signal_id)
+        .expect("the signal is in the change-set");
+    assert_eq!(entry.op, ChangeOp::KeyedPatch, "{cs:?}");
+    let mut r = Reader::new(&entry.value);
+    let patch = KeyedPatch::<Row>::decode(&mut r).unwrap();
+    r.finish().unwrap();
+    patch
 }
 
 #[test]
-fn keyed_lists_hash_the_encoded_key_field() {
+fn keyed_lists_identify_items_by_the_hash_of_their_encoded_key_field() {
     let rt = Runtime::new();
-    let (_, store) = todos(&rt);
-    let attached = store.cell().attached();
-    let key = attached[0].key.unwrap();
-    let row = Row {
-        id: 5,
-        title: "x".into(),
-    };
-    assert_eq!(key(&row), ids::fnv1a64(&5_u32.encode_to_vec()));
-    // The title is not part of the key.
-    let other = Row {
-        id: 5,
-        title: "y".into(),
-    };
-    assert_eq!(key(&other), key(&row));
-    // A value of another type never panics.
-    assert_eq!(key(&"not a row".to_owned()), 0);
+    let (handle, _) = todos(&rt);
+    rt.real().observe(handle, 0, true);
+    rt.change_sets();
+
+    // Empty to non-empty shares no key: the whole list is sent.
+    add_row(&rt, handle, 1, "a");
+    let cs = rt.change_sets();
+    assert_eq!(cs[0].entries[0].op, ChangeOp::Full);
+    // Then items are matched by key: an append is one insert...
+    add_row(&rt, handle, 2, "b");
+    let cs = rt.change_sets();
+    assert_eq!(
+        patch_of(&cs[0], 0).ops,
+        [PatchOp::Insert {
+            index: 1,
+            item: Row {
+                id: 2,
+                title: "b".into()
+            }
+        }]
+    );
+    // ...and changing a field that is not the key is an update of the same item.
+    rt.call_object(
+        "Todos",
+        "rename",
+        handle,
+        &[1_u32.encode_to_vec(), "z".to_owned().encode_to_vec()].concat(),
+    )
+    .sync_ok();
+    let cs = rt.change_sets();
+    assert_eq!(
+        patch_of(&cs[0], 0).ops,
+        [PatchOp::Update {
+            index: 0,
+            item: Row {
+                id: 1,
+                title: "z".into()
+            }
+        }]
+    );
+    // A repeated key makes matching ambiguous: the full list is sent instead of a patch.
+    add_row(&rt, handle, 2, "dup");
+    let cs = rt.change_sets();
+    assert_eq!(cs[0].entries[0].op, ChangeOp::Full);
+}
+
+#[test]
+fn no_coalesce_signals_are_delivered_even_when_unobserved() {
+    let rt = Runtime::new();
+    let (handle, _) = todos(&rt);
+    // Nothing is observed; `ticks` is `no_coalesce`, `rows` is not.
+    rt.call_object("Todos", "tick", handle, &[]).sync_ok();
+    add_row(&rt, handle, 1, "a");
+    let cs = rt.change_sets();
+    assert_eq!(cs.len(), 1, "only the tick reached the platform: {cs:?}");
+    let ids: Vec<u32> = cs[0].entries.iter().map(|e| e.signal_id).collect();
+    assert_eq!(ids, [2]);
+    assert_eq!(u32::decode_exact(&cs[0].entries[0].value).unwrap(), 1);
+}
+
+#[test]
+fn attach_errors_are_returned_to_the_caller() {
+    let first = Twin::new();
+    let second = Twin::sharing(&first);
+    assert_eq!(first.__keel_attach_all(), Ok(()));
+    assert_eq!(first.__keel_attach_all(), Ok(()), "attaching twice is a no-op");
+    // `second` reuses the first store's signal, which belongs to `first`'s cell.
+    assert_eq!(second.__keel_attach_all(), Err(SignalsError::AlreadyAttached));
+    // (The constructor's dispatch arm turns that error into a bad request; see `keel`'s
+    // end-to-end test.)
+    let rt = Runtime::new();
+    assert!(rt.call_object("Twin", "new", 0, &[]).sync_ok().len() == 8);
 }
 
 #[test]
@@ -277,7 +398,7 @@ fn cell_is_created_lazily_for_stores_built_without_the_runtime() {
     let first = Arc::as_ptr(store.cell());
     let second = Arc::as_ptr(store.cell());
     assert_eq!(first, second, "one cell per instance");
-    assert_eq!(store.cell().attached().len(), 5);
+    assert_eq!(store.cell().signal_count(), 4);
     assert_eq!(store.cell().handle(), 0);
 }
 
@@ -315,13 +436,15 @@ fn methods_work_through_dispatch_and_signals_update() {
 }
 
 #[test]
-fn snapshot_excludes_computed_and_lazy_signals() {
+fn snapshot_excludes_computed_signals() {
     let rt = Runtime::new();
     let (handle, store) = todos(&rt);
     rt.call_object("Todos", "tick", handle, &[]).sync_ok();
-    let mut body = Writer::new();
-    store.cell().encode_snapshot(&mut body);
-    let mut r = Reader::new(body.as_slice());
+    let mut record = Writer::new();
+    store.cell().encode_snapshot(&mut record);
+    let mut r = Reader::new(record.as_slice());
+    assert_eq!(r.read_u64().unwrap(), handle, "the record starts with the handle");
+    assert_eq!(r.read_u32().unwrap(), ids::type_id("Todos"));
     assert_eq!(r.read_u32().unwrap(), 3, "rows, filter, ticks");
     let mut ids_seen = Vec::new();
     for _ in 0..3 {
@@ -333,7 +456,7 @@ fn snapshot_excludes_computed_and_lazy_signals() {
 }
 
 #[test]
-fn restore_with_a_hook_rebuilds_computed_and_lazy_fields() {
+fn restore_with_a_hook_rebuilds_computed_fields() {
     let rt = Runtime::new();
     let (handle, store) = todos(&rt);
     for (id, title) in [(1_u32, "a"), (2, "b"), (4, "d")] {
@@ -343,9 +466,8 @@ fn restore_with_a_hook_rebuilds_computed_and_lazy_fields() {
     rt.call_object("Todos", "tick", handle, &[]).sync_ok();
     rt.call_object("Todos", "tick", handle, &[]).sync_ok();
 
-    let mut body = Writer::new();
-    store.cell().encode_snapshot(&mut body);
-    let restored = restore::<Todos>(&rt, "Todos", body.as_slice()).unwrap();
+    let body = snapshot_body(&|w| store.cell().encode_snapshot(w));
+    let restored = restore::<Todos>(&rt, "Todos", &body).unwrap();
 
     assert_eq!(restored.rows.get(), store.rows.get());
     assert_eq!(restored.filter.get(), Filter::Even);
@@ -354,8 +476,8 @@ fn restore_with_a_hook_rebuilds_computed_and_lazy_fields() {
     assert_eq!(restored.label(), "todos", "state comes from the hook");
     assert!(restored.has_ctx());
     assert_eq!(
-        restored.cell().attached().len(),
-        5,
+        restored.cell().signal_count(),
+        4,
         "signals are attached after restore"
     );
     assert_eq!(
@@ -380,9 +502,8 @@ fn restore_without_a_hook_uses_ctx_and_default() {
     counter.incr();
     counter.name.set("renamed".to_owned());
 
-    let mut body = Writer::new();
-    counter.cell().encode_snapshot(&mut body);
-    let restored = restore::<Counter>(&rt, "Counter", body.as_slice()).unwrap();
+    let body = snapshot_body(&|w| counter.cell().encode_snapshot(w));
+    let restored = restore::<Counter>(&rt, "Counter", &body).unwrap();
     assert_eq!(restored.count.get(), 2);
     assert_eq!(restored.name.get(), "renamed");
     assert_eq!(
@@ -392,7 +513,7 @@ fn restore_without_a_hook_uses_ctx_and_default() {
     );
     assert_eq!(restored.extra_len(), 0);
     let _ = restored.ctx.clone();
-    assert_eq!(restored.cell().attached().len(), 2);
+    assert_eq!(restored.cell().signal_count(), 2);
 }
 
 #[test]
@@ -435,11 +556,10 @@ fn restore_ignores_unknown_signals_and_rejects_missing_ones() {
     w.write_u32(0);
     w.write_bytes(&[1, 2]);
     assert!(restore::<Counter>(&rt, "Counter", w.as_slice()).is_err());
-    let mut body = Writer::new();
-    counter.cell().encode_snapshot(&mut body);
-    for cut in 0..body.as_slice().len() {
+    let body = snapshot_body(&|w| counter.cell().encode_snapshot(w));
+    for cut in 0..body.len() {
         assert!(
-            restore::<Counter>(&rt, "Counter", &body.as_slice()[..cut]).is_err(),
+            restore::<Counter>(&rt, "Counter", &body[..cut]).is_err(),
             "cut at {cut} must not restore"
         );
     }

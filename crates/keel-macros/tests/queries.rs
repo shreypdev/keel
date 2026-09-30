@@ -1,13 +1,16 @@
 //! Behaviour tests for `#[keel::query]` and `#[keel::mutation]`: the generated `QueryDef` and
-//! `MutationDef` implementations are run through the test facade's traits.
+//! `MutationDef` implementations are run through the traits of `keel::query`.
 #![forbid(unsafe_code)]
 
 use keel::meta::{QueryKind, TypeRef, collect_schema, ids};
 use keel::query::{MutationDef, QueryDef};
-use keel::runtime::{Ctx, Runtime};
-use keel::testing::block_on;
+use keel::runtime::Ctx;
 use keel::wire::Encode;
 use keel_macros as k;
+
+mod support;
+use support::Runtime;
+use support::testing::block_on;
 
 /// Reads a constant flag at run time (clippy rejects asserting on constants).
 fn flag(value: bool) -> bool {

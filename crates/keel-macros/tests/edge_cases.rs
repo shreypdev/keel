@@ -8,10 +8,13 @@ use std::sync::Arc;
 
 use keel::meta::{TypeRef, collect_schema, ids};
 use keel::prelude::Ctx;
-use keel::runtime::{Port, Runtime};
-use keel::testing::block_on;
+use keel::runtime::Port;
 use keel::wire::{Decode, Encode, Handle};
 use keel_macros as k;
+
+mod support;
+use support::Runtime;
+use support::testing::block_on;
 
 mod model {
     use keel_macros as k;

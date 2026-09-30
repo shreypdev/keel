@@ -6,10 +6,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use keel::meta::{Registration, TypeRef, collect_schema, ids};
-use keel::runtime::{Ctx, KeelObject, Runtime, Stream};
-use keel::testing::stream_of;
+use keel::runtime::{Ctx, KeelObject, Stream};
 use keel::wire::{Decode, Encode, Handle, Writer};
 use keel_macros as k;
+
+mod support;
+use support::Runtime;
+use support::testing::stream_of;
 
 fn args(encode: impl FnOnce(&mut Writer)) -> Vec<u8> {
     let mut w = Writer::new();
