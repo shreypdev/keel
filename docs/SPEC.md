@@ -534,6 +534,8 @@ Build: `--release`, `-C panic=abort`, `-C opt-level=z` or `s` (measured), `-C lt
 ```
 Records: `HttpRequest { method: HttpMethod, url: String, headers: Vec<Header>, body: Option<Bytes>, timeout_ms: Option<u32> }`, `HttpResponse { status: u16, headers: Vec<Header>, body: Bytes }`, `HttpError { Network(String), Timeout, Cancelled, InvalidUrl(String) }`, `Header { name: String, value: String }`, `FsError { NotFound, Denied, Io(String) }`, `NetKind { Wifi, Cellular, Wired, Unknown, None }`, `AppState { Active, Inactive, Background }`.
 
+The standard surface (these ten ports and these types, plus `HttpMethod { Get, Post, Put, Delete, Patch, Head, Options }`) ships in each platform runtime (`@keel/runtime`, `dev.keel.runtime.adapters`, `KeelRuntime`), not in generated code: every core links `keel-ports`, so its schema contains all of it and the schema hash covers it, but `keel-bindgen` leaves it out of an app's bindings and the generated code refers to the runtime's own types (section 10.5, ADR-024).
+
 Fakes (all in `keel-ports::fakes`, `Send + Sync`): `FakeHttp` (script responses by matcher; records calls), `MemKv`, `MemSecureStore`, `MemFs`, `FakeClock` (settable `now`, `advance(d)` fires due timers; implements `Clock` + `Timer`), `SeededRng` (xorshift64\*), `CaptureLog`, `ScriptedConnectivity`, `ScriptedLifecycle`. `TestRuntime::new()` installs all fakes and runs the executor on the test thread (`run_until(fut)` / `run_pending()`).
 
 ---
@@ -638,6 +640,15 @@ All methods return `Promise` (uniform across main-thread, worker and remote mode
 
 Each runtime ships `KeelWriter`/`KeelReader` mirroring §3.9 and the generated code implements per-type encode/decode. Generated codecs must be allocation-conscious: decode records into constructors directly, decode `Vec` with a preallocated capacity, and never go through JSON.
 
+### 10.5 The standard library
+
+The ten standard ports of section 8 and the eight types they exchange (`HttpMethod`, `Header`, `HttpRequest`, `HttpResponse`, `HttpError`, `FsError`, `NetKind`, `AppState`) are in every core's schema but not in an app's bindings: the runtimes already implement the ports and ship the types, and a second `FsError` in the app's namespace would fail native review. The schema keeps them (R1; the schema hash covers them); the generators filter them at generation time (ADR-024).
+
+* **What is standard.** An item is left out only when it is exactly the standard one: same name, same id and same shape (fields, variants and indices, method ids and signatures; documentation is ignored). Ids are derived from names (section 1.1), so a schema item that only shares a name with a standard one has the standard id but another shape and stays the app's own type; one with the name and another id is E0052 (section 12). A standard type is left out only while every standard type it refers to is (a schema with its own `Header` does not get the runtime's `HttpRequest`). The table is `keel_bindgen::stdlib`, with the ids pinned as hex and cross-checked against the registrations of `keel-ports`.
+* **What references become.** A port or type of the app that mentions a standard type refers to the runtime's own: TypeScript imports the type and its `<Name>Codec` from `@keel/runtime`; Kotlin imports `dev.keel.runtime.adapters.<Name>` (spelled in full where a variant of the enclosing sealed type shadows the name); Swift's runtime keeps seven of the eight internal (`PortHttpRequest`, ...), so the generator declares each one that something refers to (and what that one refers to) and spells `AppState` as the runtime's public `KeelAppState`. A typed failure whose error is `HttpError` or `FsError` is decoded by the runtime's codec at the call site instead of the `fromReply` helper of a generated error.
+* **Ports.** The standard ports are never generated. They do not claim names in the generated namespace either, so an app may have a record called `Timer` or `Log`.
+* **Escape hatch.** `Generator::emit_standard_library` declares everything as ordinary items; `keel-ports` uses it to prove its own schema generates.
+
 ---
 
 ## 11. Platform runtimes
@@ -688,6 +699,7 @@ Macro errors use stable codes and a fixed shape: `error[keel::E00NN]: <what>` + 
 | E0041 | query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`) |
 | E0050 | duplicate type name (bindgen) |
 | E0051 | a name that collides after case conversion (`a_b` and `aB`) or is not an identifier in a target language (bindgen) |
+| E0052 | a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids (bindgen) |
 
 ---
 
