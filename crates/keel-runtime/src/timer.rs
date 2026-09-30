@@ -26,7 +26,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use parking_lot::{Condvar, Mutex, MutexGuard};
+#[cfg(not(target_family = "wasm"))]
+use parking_lot::MutexGuard;
+use parking_lot::{Condvar, Mutex};
 
 /// Where "now" comes from.
 enum TimeSource {
@@ -227,7 +229,9 @@ impl Timers {
                     let slot = st.sleepers.remove(&id);
                     MutexGuard::unlocked(&mut st, || {
                         if let Some(slot) = slot {
-                            slot.fire();
+                            // Waking runs a waker, which is arbitrary code; the timer thread
+                            // must not die because one misbehaves.
+                            let _ = crate::guard::guarded(|| slot.fire());
                         }
                     });
                 }
@@ -270,9 +274,12 @@ impl Timers {
     /// order. The clock stops at each deadline before `after_each` runs, so timers armed by
     /// the woken tasks are measured from that moment and fire in the same call if they fall
     /// inside the window. Returns how many sleepers fired. Does nothing on a system clock.
+    #[cfg_attr(target_family = "wasm", allow(clippy::infallible_destructuring_match))]
     pub(crate) fn advance_manual(&self, d: Duration, mut after_each: impl FnMut()) -> usize {
-        let TimeSource::Manual(clock) = &self.source else {
-            return 0;
+        let clock = match &self.source {
+            TimeSource::Manual(clock) => clock,
+            #[cfg(not(target_family = "wasm"))]
+            TimeSource::System(_) => return 0,
         };
         let target = clock.load(Ordering::Acquire).saturating_add(nanos(d));
         let mut fired = 0;

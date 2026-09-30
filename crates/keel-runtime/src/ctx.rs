@@ -36,6 +36,11 @@ pub(crate) fn current_runtime() -> Option<Arc<Runtime>> {
 /// Restores the previously current runtime when dropped. Returned by [`Ctx::enter`].
 ///
 /// Not `Send`: it must be dropped on the thread that created it.
+///
+/// ```compile_fail
+/// fn assert_send<T: Send>() {}
+/// assert_send::<keel_runtime::CtxScope>();
+/// ```
 #[must_use = "the runtime is only current while the scope is alive"]
 pub struct CtxScope {
     previous: Option<Arc<Runtime>>,
@@ -205,13 +210,8 @@ mod tests {
     }
 
     #[test]
-    fn scope_is_not_send() {
-        fn assert_send<T: Send>() {}
-        fn assert_not_send_by_construction() {
-            // `CtxScope` holds `PhantomData<*const ()>`, which makes it `!Send`; this test
-            // documents the intent and keeps `Ctx` itself `Send + Sync`.
-            assert_send::<Ctx>();
-        }
-        assert_not_send_by_construction();
+    fn ctx_is_send_and_sync_so_tasks_and_stores_can_hold_it() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Ctx>();
     }
 }

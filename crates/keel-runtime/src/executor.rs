@@ -9,7 +9,7 @@
 //! deduplicated by a per-task `queued` flag, and nudges whoever runs the loop:
 //!
 //! * native: a `Condvar` wakes the `keel-core` thread;
-//! * wasm and manually driven runtimes: [`Host::schedule`](crate::Host::schedule), at most
+//! * wasm and manually driven runtimes: [`Host::schedule`], at most
 //!   once per turn.
 //!
 //! Waking never takes the core lock, so any thread (a blocking-pool worker, the timer thread,
@@ -152,6 +152,7 @@ impl Shared {
     }
 
     /// Blocks until work is ready; `None` once shut down. Native core thread only.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn wait_batch(&self, max: usize) -> Option<Vec<TaskId>> {
         let mut q = self.queue.lock();
         loop {
@@ -212,6 +213,7 @@ impl Executor {
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn shared(&self) -> Arc<Shared> {
         self.shared.clone()
     }

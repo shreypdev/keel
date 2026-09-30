@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::*;
+use keel_meta::ids::ALL_SIGNALS;
 use keel_runtime::testing::{RecordingHost, TestRuntime};
 use keel_runtime::{InitError, InitHook, Runtime, RuntimeConfig};
-use keel_meta::ids::ALL_SIGNALS;
 
 static HOOK_RUNS: AtomicU32 = AtomicU32::new(0);
 static HOOK_SAW_CTX: AtomicU32 = AtomicU32::new(0);

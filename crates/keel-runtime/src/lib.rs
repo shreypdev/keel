@@ -5,7 +5,8 @@
 //! thin shells over the [`Runtime`] here.
 //!
 //! The runtime is dependency-light: no tokio, no async runtime crate, no `unsafe`. The
-//! threading model as built is described in `docs/runtime-internals.md`; the short version:
+//! threading model as built is described in the crate's `docs/runtime-internals.md` (locks,
+//! their order, cancellation, re-entrancy, shutdown); the short version:
 //!
 //! * One **core lock** ([`parking_lot::Mutex`]) is held while user code runs, either a
 //!   dispatcher answering a host call on the caller's thread, or a batch of task polls on the
@@ -26,7 +27,7 @@
 //! downcasts it to [`Runtime`] and returns `DispatchOutcome::new(DispatchResult::..)`. It
 //! resolves receivers with [`Runtime::object`], stores new objects with
 //! [`Runtime::insert_object`] or [`Runtime::insert_store`] (and encodes the returned
-//! [`Handle`](object_table::Handle)`.0` as a `u64` in the `Ok` body of a constructor reply),
+//! [`Handle`]`.0` as a `u64` in the `Ok` body of a constructor reply),
 //! and reaches ports through [`Ctx::port_call`], [`port_call_sync`] and [`Ctx::rust_port`] /
 //! [`Ctx::dyn_port`]. `#[keel::store]` submits one [`StoreRestorer`] per store type.
 //!

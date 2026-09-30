@@ -23,8 +23,10 @@ use crate::blocking::{Blocking, BlockingTask, default_pool_size};
 use crate::config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
 use crate::ctx::{Ctx, CtxScope, current_runtime};
 use crate::dispatch::{DispatchBytes, DispatchResult, DispatchTable, E_REENTRANT, needs_async};
+#[cfg(not(target_family = "wasm"))]
+use crate::executor::Shared;
 use crate::executor::{
-    BATCH, BoxFuture, CancelOutcome, EndPoll, Executor, Notify, Shared, TaskId, TaskKind,
+    BATCH, BoxFuture, CancelOutcome, EndPoll, Executor, Notify, TaskId, TaskKind,
 };
 use crate::ext::{Extensions, InitHook};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
@@ -681,6 +683,11 @@ impl Runtime {
             self.reentrant("call");
             return 5;
         };
+        // `shutdown` tears down under this lock, so once we hold it the answer is final.
+        if self.is_shut_down() {
+            Stats::inc(&self.stats.bad_requests);
+            return 5;
+        }
         if self.calls.lock().contains_key(&call_id) {
             Stats::inc(&self.stats.bad_requests);
             self.log(
@@ -738,6 +745,9 @@ impl Runtime {
             self.reentrant("call_sync");
             return bad(E_REENTRANT);
         };
+        if self.is_shut_down() {
+            return bad("the runtime is shut down");
+        }
         match self.dispatch(&call, true) {
             Dispatched::Bad(reason) => bad(&reason),
             Dispatched::Panicked(report, handle) => {
@@ -1591,6 +1601,17 @@ impl Runtime {
     }
 }
 
+impl core::fmt::Debug for Runtime {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Runtime")
+            .field("id", &self.id)
+            .field("platform", &self.config.platform)
+            .field("mode", &self.config.mode)
+            .field("shut_down", &self.is_shut_down())
+            .finish_non_exhaustive()
+    }
+}
+
 impl Drop for Runtime {
     fn drop(&mut self) {
         // The last reference is gone, so nothing else can be running; no lock is needed.
@@ -1619,7 +1640,13 @@ struct DynPort<P: ?Sized>(Arc<P>);
 fn core_loop(weak: &Weak<Runtime>, shared: &Shared) {
     while let Some(batch) = shared.wait_batch(BATCH) {
         match weak.upgrade() {
-            Some(rt) => rt.run_batch(batch),
+            // The loop must survive anything, including a bug in the runtime itself: a dead
+            // `keel-core` thread would silently stall every async call.
+            Some(rt) => {
+                if let Err(report) = guard::guarded(|| rt.run_batch(batch)) {
+                    rt.log_panic("the executor loop panicked", &report);
+                }
+            }
             None => break,
         }
     }

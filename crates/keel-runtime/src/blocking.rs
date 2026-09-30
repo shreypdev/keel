@@ -16,10 +16,9 @@
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
-use std::collections::VecDeque;
 use std::sync::Arc;
 
-use parking_lot::{Condvar, Mutex};
+use parking_lot::Mutex;
 
 use crate::guard::{self, CarriedPanic, PanicReport};
 
@@ -98,6 +97,8 @@ fn make_job<T: Send + 'static>(
 #[cfg(not(target_family = "wasm"))]
 mod native {
     use super::*;
+    use parking_lot::Condvar;
+    use std::collections::VecDeque;
     use std::thread::JoinHandle;
 
     struct Queue {
@@ -310,6 +311,8 @@ pub(crate) fn default_pool_size() -> usize {
 mod tests {
     use super::*;
     use crate::testing::TestRuntime;
+    #[cfg(not(target_family = "wasm"))]
+    use parking_lot::Condvar;
 
     #[test]
     fn inline_runner_completes_before_returning() {

@@ -31,6 +31,13 @@
 //! ```
 //!
 //! See [`TestRuntime::advance`] for driving time.
+//!
+//! # Writing signals from test code
+//!
+//! Change-sets are routed to the runtime that is current on the writing thread (see
+//! `docs/runtime-internals.md`, section 12). Writes made inside a dispatched call, a task, or
+//! [`Ctx::txn`] find the test runtime by themselves; a direct `signal.set(..)` in the test body
+//! needs `let _scope = t.ctx().enter();` first, or its change-set has nowhere to go.
 
 use core::future::Future;
 use core::task::{Context, Poll, Waker};
@@ -546,9 +553,10 @@ impl TestRuntime {
         }
     }
 
-    /// Moves the manual clock forward by `duration`, firing every sleep that comes due in
-    /// deadline order (tasks that are already ready run first, at the current time) and running the woken tasks after each one, so a task that sleeps
-    /// again inside the window is served within the same call. Returns how many sleeps fired.
+    /// Moves the manual clock forward by `duration`. Tasks that are already ready run first,
+    /// at the current time; then every sleep that comes due fires in deadline order, and the
+    /// woken tasks run after each one, so a task that sleeps again inside the window is
+    /// served within the same call. Returns how many sleeps fired.
     ///
     /// ```
     /// use keel_runtime::testing::TestRuntime;

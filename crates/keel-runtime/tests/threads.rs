@@ -591,6 +591,314 @@ fn panics_on_the_core_thread_do_not_kill_it() {
     rt.shutdown();
 }
 
+#[test]
+fn calls_racing_shutdown_never_leave_state_behind() {
+    // A call that slips in around `shutdown` must either be refused or be torn down with the
+    // rest; nothing may stay registered in a runtime that is shut down. (A smoke test: the
+    // window is a few microseconds wide. The re-check of the shutdown flag under the core
+    // lock in `call` and `call_sync` is what closes it.)
+    for round in 0..25_u32 {
+        let (rt, _host) = threaded();
+        let h = new_counter_rt(&rt, 0, "");
+        let hammer = {
+            let rt = rt.clone();
+            std::thread::spawn(move || {
+                let mut accepted = 0_u32;
+                for i in 0..200_u32 {
+                    let id = round * 1000 + i + 1;
+                    if rt.call(&counter_call_payload(h, FOREVER, id, &[])) == 0 {
+                        accepted += 1;
+                    }
+                    if i % 7 == 0 {
+                        std::thread::yield_now();
+                    }
+                }
+                accepted
+            })
+        };
+        std::thread::sleep(Duration::from_micros(200 * u64::from(round % 5)));
+        with_timeout("shutdown racing calls", LONG, {
+            let rt = rt.clone();
+            move || rt.shutdown()
+        });
+        let _accepted = hammer.join().unwrap();
+        let stats: serde_json::Value = serde_json::from_str(&rt.stats_json()).unwrap();
+        assert_eq!(stats["active_calls"], 0, "round {round}: {stats}");
+        assert_eq!(stats["tasks"], 0, "round {round}: {stats}");
+        assert_eq!(stats["live_handles"], 0, "round {round}: {stats}");
+    }
+}
+
+// ----- races and randomised stress --------------------------------------------------------
+
+#[test]
+fn exactly_one_of_many_racing_calls_with_the_same_id_is_accepted() {
+    let (rt, host) = threaded();
+    let h = new_counter_rt(&rt, 0, "");
+    let accepted = with_timeout("racing duplicate call ids", LONG, {
+        let rt = rt.clone();
+        move || {
+            let barrier = Arc::new(std::sync::Barrier::new(8));
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let (rt, barrier) = (rt.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        rt.call(&counter_call_payload(h, FOREVER, 77, &[]))
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|t| t.join().unwrap())
+                .filter(|&code| code == 0)
+                .count()
+        }
+    });
+    assert_eq!(accepted, 1);
+    rt.cancel(77);
+    assert!(host.wait_for_replies(1, LONG));
+    assert_eq!(
+        host.take_replies().len(),
+        1,
+        "only the accepted call is answered"
+    );
+    rt.shutdown();
+}
+
+/// A tiny deterministic PRNG so failures reproduce.
+struct XorShift(u64);
+
+impl XorShift {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+#[derive(Default)]
+struct Issued {
+    plain: Vec<u32>,
+    streams: Vec<u32>,
+    cancelled: Vec<u32>,
+}
+
+/// One thread of the stress test: a seeded random walk over every host entry point.
+fn stress_thread(rt: &Runtime, shared: &[keel_runtime::Handle], thread: u32, ops: usize) -> Issued {
+    // `KEEL_STRESS_SEED` varies the walk for soak runs; the default keeps CI reproducible.
+    let seed = std::env::var("KEEL_STRESS_SEED")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0x9e37_79b9_7f4a_7c15);
+    let mut rng = XorShift(seed ^ u64::from(thread + 1).wrapping_mul(0x2545_f491_4f6c_dd1d));
+    let mut next_id = thread * 1_000_000 + 1;
+    let mut mine = Issued::default();
+    let mut private = new_counter_rt(rt, 0, "private");
+    let mut fresh_id = || {
+        next_id += 1;
+        next_id
+    };
+    for _ in 0..ops {
+        let target = shared[rng.below(shared.len())];
+        match rng.below(13) {
+            0 => {
+                let r = call_sync_rt(rt, counter_target(target, ADD), fresh_id(), &enc(&1_i32));
+                assert_eq!(r.status, ReplyStatus::Ok);
+            }
+            1 => {
+                let r = call_sync_rt(
+                    rt,
+                    counter_target(target, ADD_TWICE),
+                    fresh_id(),
+                    &enc(&1_i32),
+                );
+                assert_eq!(r.status, ReplyStatus::Ok);
+            }
+            2 => {
+                let id = fresh_id();
+                if rt.call(&counter_call_payload(target, SLOW_ADD, id, &enc(&1_i32))) == 0 {
+                    mine.plain.push(id);
+                }
+            }
+            3 => {
+                let id = fresh_id();
+                if rt.call(&counter_call_payload(target, FOREVER, id, &[])) == 0 {
+                    mine.plain.push(id);
+                }
+            }
+            4 | 5 => {
+                // Cancel one of this thread's calls, possibly racing its completion.
+                if !mine.plain.is_empty() {
+                    let id = mine.plain[rng.below(mine.plain.len())];
+                    rt.cancel(id);
+                    mine.cancelled.push(id);
+                }
+            }
+            6 => {
+                let id = fresh_id();
+                let n = rng.below(12) as u32;
+                if rt.call(&counter_call_payload(target, TICKS, id, &enc(&n))) == 0 {
+                    mine.streams.push(id);
+                }
+            }
+            7 => {
+                if !mine.streams.is_empty() {
+                    let id = mine.streams[rng.below(mine.streams.len())];
+                    rt.stream_credit(id, rng.below(5) as u32);
+                }
+            }
+            8 => {
+                if !mine.streams.is_empty() && rng.below(3) == 0 {
+                    let id = mine.streams[rng.below(mine.streams.len())];
+                    rt.cancel(id);
+                    mine.cancelled.push(id);
+                }
+            }
+            9 => {
+                let signal = match rng.below(3) {
+                    2 => u32::MAX,
+                    n => n as u32,
+                };
+                rt.observe(target.0, signal, true);
+            }
+            10 => {
+                // Churn a private, unobserved store: release and recreate, snapshot.
+                rt.release(private.0);
+                private = new_counter_rt(rt, 0, "private");
+                let _ = rt.snapshot();
+            }
+            11 => {
+                let id = fresh_id();
+                let call = if rng.below(2) == 0 {
+                    BLOCKING_SQUARE
+                } else {
+                    PANIC_ASYNC
+                };
+                if rt.call(&counter_call_payload(private, call, id, &enc(&3_i32))) == 0 {
+                    mine.plain.push(id);
+                }
+            }
+            _ => {
+                let id = fresh_id();
+                if rt.call(&counter_call_payload(private, ASK_PORT, id, &enc(&1_i32))) == 0 {
+                    mine.plain.push(id);
+                }
+            }
+        }
+    }
+    rt.release(private.0);
+    mine
+}
+
+#[test]
+fn randomised_mixed_operations_answer_every_call_exactly_once_and_keep_mirrors_exact() {
+    const THREADS: u32 = 6;
+    let ops: usize = std::env::var("KEEL_STRESS_OPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300);
+    let (rt, host) = threaded();
+    host.script_port_ok(TEST_PORT, ASK, enc(&5_i32));
+    let shared: Vec<_> = (0..4).map(|i| new_counter_rt(&rt, i, "shared")).collect();
+    for h in &shared {
+        rt.observe(h.0, u32::MAX, true);
+    }
+
+    let issued = with_timeout("randomised stress", LONG, {
+        let (rt, shared) = (rt.clone(), shared.clone());
+        move || {
+            let handles: Vec<_> = (0..THREADS)
+                .map(|thread| {
+                    let (rt, shared) = (rt.clone(), shared.clone());
+                    std::thread::spawn(move || stress_thread(&rt, &shared, thread, ops))
+                })
+                .collect();
+            let mut all = Issued::default();
+            for handle in handles {
+                let mine = handle.join().unwrap();
+                all.plain.extend(mine.plain);
+                all.streams.extend(mine.streams);
+                all.cancelled.extend(mine.cancelled);
+            }
+            all
+        }
+    });
+
+    // Wind everything down: cancel what never ends, give every stream unlimited credit.
+    for &id in &issued.plain {
+        rt.cancel(id);
+    }
+    for &id in &issued.streams {
+        rt.stream_credit(id, u32::MAX);
+    }
+    assert!(
+        wait_until(LONG, || {
+            let stats: serde_json::Value = serde_json::from_str(&rt.stats_json()).unwrap();
+            stats["active_calls"] == 0 && stats["tasks"] == 0 && stats["pending_port_calls"] == 0
+        }),
+        "everything winds down: {}",
+        rt.stats_json()
+    );
+
+    // Exactly one terminal reply per accepted plain call; one status 4 per stream.
+    let mut by_id: std::collections::BTreeMap<u32, Vec<ReplyStatus>> = Default::default();
+    for r in host.take_replies() {
+        by_id.entry(r.call_id).or_default().push(r.status);
+    }
+    for &id in &issued.plain {
+        let statuses = &by_id[&id];
+        assert_eq!(statuses.len(), 1, "call {id} was answered {statuses:?}");
+        assert_ne!(statuses[0], ReplyStatus::StreamOpened);
+    }
+    for &id in &issued.streams {
+        assert_eq!(by_id[&id], [ReplyStatus::StreamOpened], "stream {id}");
+    }
+    assert_eq!(
+        by_id.len(),
+        issued.plain.len() + issued.streams.len(),
+        "no reply for a call that was never accepted"
+    );
+    // Streams that were not cancelled ended exactly once; cancelled ones at most once.
+    let items = host.take_stream_items();
+    for &id in &issued.streams {
+        let terminals = items
+            .iter()
+            .filter(|i| i.call_id == id && i.flag != keel_wire::payload::StreamFlag::Item)
+            .count();
+        if issued.cancelled.contains(&id) {
+            assert!(terminals <= 1, "stream {id}");
+        } else {
+            assert_eq!(terminals, 1, "stream {id} ends exactly once");
+        }
+    }
+
+    // The mirror a host builds by applying change-sets in arrival order is exact.
+    let mut mirror: std::collections::HashMap<(u64, u32), Vec<u8>> = Default::default();
+    for cs in host.take_decoded_change_sets() {
+        for e in cs.entries {
+            mirror.insert((e.handle.0, e.signal_id), e.value);
+        }
+    }
+    for h in &shared {
+        let counter = rt.object::<Counter>(h.0).unwrap();
+        assert_eq!(
+            mirror[&(h.0, COUNT_SIGNAL)],
+            enc(&counter.count.get()),
+            "count of {h:?}"
+        );
+        if let Some(label) = mirror.get(&(h.0, LABEL_SIGNAL)) {
+            assert_eq!(label, &enc(&counter.label.get()), "label of {h:?}");
+        }
+    }
+    rt.shutdown();
+}
+
 // Silence unused-import lints for helpers only some tests use.
 #[allow(dead_code)]
 fn _uses(_: CallTarget, _: fn(&mut Reader<'_>) -> Result<u8, keel_wire::WireError>) {
