@@ -26,6 +26,10 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: Clippy (keel-ffi on wasm32)
+        run: cargo clippy -p keel-ffi --target wasm32-unknown-unknown -- -D warnings
+      - name: C ABI acceptance (keel.h with -Werror; the host contract under ASan)
+        run: KEEL_C_SANITIZE=1 bash crates/keel-ffi/tests/c/run.sh
       - name: Docs
         run: cargo doc --workspace --no-deps
         env:
@@ -92,6 +96,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install the TypeScript runtime's dependencies
+        working-directory: runtimes/ts/@keel/runtime
+        run: npm ci
+      # run.sh builds the TypeScript runtime from source into a scratch directory and fails (it does
+      # not skip) when it cannot, so this leg can neither be stale nor silently absent.
       - name: wasm acceptance (raw host + TS runtime)
         run: bash crates/keel-ffi/tests/wasm/run.sh
 
@@ -107,6 +116,8 @@ jobs:
         run: swift test
       - name: Swift-over-C-ABI acceptance
         run: bash crates/keel-ffi/tests/swift/run.sh
+      - name: C ABI acceptance (keel.h with -Werror; the host contract under ASan)
+        run: KEEL_C_SANITIZE=1 bash crates/keel-ffi/tests/c/run.sh
       - name: iOS cross-build (device + simulator)
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
@@ -132,6 +143,10 @@ jobs:
   ffi-sanitizers:
     name: keel-ffi under Miri and ASan
     runs-on: ubuntu-latest
+    env:
+      # Nightly grows new lints every week (deprecations in the workspace crates, for one); this job is
+      # about undefined behaviour, so they must not fail it. The ASan step sets its own flags anyway.
+      RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -140,7 +155,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Miri (unit tests; FFI-callback tests excluded)
         run: cargo +nightly miri test -p keel-ffi --lib
-      - name: AddressSanitizer
+      - name: Miri (host-allocated port replies, out_reply is always free()d)
+        run: |
+          MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test -p keel-ffi --test abi -- \
+            a_host_that_sets_cap sync_port_answers
+      - name: AddressSanitizer (includes tests/host_contract.rs, the port-callback lifetime regression)
         run: |
           RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p keel-ffi \
             --target x86_64-unknown-linux-gnu --tests
