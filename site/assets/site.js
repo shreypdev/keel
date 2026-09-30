@@ -30,7 +30,8 @@
     kotlin: "as break by class companion continue data do else enum false for fun if import in interface is null object override package private return sealed super suspend this throw true try typealias val var when while open abstract",
     ts: "as async await break case catch class const continue default delete do else enum export extends false finally for from function if implements import in instanceof interface let new null of private protected public readonly return static super switch this throw true try type typeof undefined var void while yield declare abstract",
     bash: "if then else fi for do done case esac in export",
-    toml: "true false"
+    toml: "true false",
+    c: "void const struct typedef return static enum extern uint8_t uint16_t uint32_t uint64_t int char"
   };
   KW.tsx = KW.ts; KW.typescript = KW.ts; KW.kt = KW.kotlin; KW.sh = KW.bash; KW.shell = KW.bash; KW.json = "true false null";
   var RX = {
@@ -40,7 +41,8 @@
     ts: [["com", "\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/"], ["str", "\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])*'|`(?:\\\\.|[^`\\\\])*`"], ["attr", "@\\w+"]],
     bash: [["com", "(?:^|\\s)#[^\\n]*"], ["str", "\"(?:\\\\.|[^\"\\\\])*\"|'[^'\\n]*'"], ["attr", "\\s--?[A-Za-z][\\w-]*"]],
     toml: [["com", "#[^\\n]*"], ["str", "\"(?:\\\\.|[^\"\\\\\\n])*\""], ["ty", "^\\[[^\\]\\n]+\\]"]],
-    json: [["str", "\"(?:\\\\.|[^\"\\\\\\n])*\""]]
+    json: [["str", "\"(?:\\\\.|[^\"\\\\\\n])*\""]],
+    c: [["com", "\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/"], ["str", "\"(?:\\\\.|[^\"\\\\\\n])*\""]]
   };
   RX.tsx = RX.ts; RX.typescript = RX.ts; RX.kt = RX.kotlin; RX.sh = RX.bash; RX.shell = RX.bash;
   var BASH_CMDS = "keel cargo npm git cd rustup brew source curl swift bash gradlew xcodebuild";
