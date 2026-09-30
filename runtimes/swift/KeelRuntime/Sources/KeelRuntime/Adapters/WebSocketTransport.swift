@@ -249,22 +249,22 @@ final class WebSocketTransport: KeelTransport, @unchecked Sendable {
             protocolFailure("malformed envelope: \(error)")
             return
         }
-        let snapshot = state.withLock { (current: inout State) -> (inbound: (any KeelInbound)?, done: Bool, hash: UInt64) in
+        let context = state.withLock { (current: inout State) -> (inbound: (any KeelInbound)?, done: Bool, hash: UInt64) in
             return (inbound: current.inbound, done: current.handshakeDone, hash: current.schemaHash)
         }
         if frame.kind == .hello {
             handleHello(frame.payload)
             return
         }
-        guard let inbound = snapshot.inbound else {
+        guard let inbound = context.inbound else {
             return
         }
-        if !snapshot.done {
+        if !context.done {
             protocolFailure("the core sent \(frame.kind) before its Hello")
             return
         }
-        if frame.schemaHash != snapshot.hash {
-            inbound.onDisconnect(KeelSchemaMismatchError(expected: snapshot.hash, got: frame.schemaHash))
+        if frame.schemaHash != context.hash {
+            inbound.onDisconnect(KeelSchemaMismatchError(expected: context.hash, got: frame.schemaHash))
             closeSocket()
             return
         }

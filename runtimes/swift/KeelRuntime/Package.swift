@@ -6,10 +6,10 @@
 //   KeelFFI           C target: `include/keel.h` (the C ABI of SPEC section 6) and its module map.
 //                     `keel_stub.c` provides link-time stand-ins for every `keel_*` symbol and is
 //                     compiled only when `KEEL_STUB_FFI` is defined (see below).
-//   KeelRuntime       Swift target: wire codecs, envelope, payloads (and, in later tasks, the
-//                     transport, mirror and adapters).
+//   KeelRuntime       Swift target: the wire layer, the runtime core (KeelCore, the in-process and
+//                     WebSocket transports, mirror, objects, stores, ports) and the default adapters.
 //   KeelRuntimeTests  XCTest target. Runs with `swift test` and needs neither the Rust core nor
-//                     the XCFramework.
+//                     the XCFramework (a scripted fake core stands in for it).
 //
 // The KEEL_STUB_FFI switch
 //   The real core (libkeel_ffi, shipped later as an XCFramework) is not linked yet. Until it is,
