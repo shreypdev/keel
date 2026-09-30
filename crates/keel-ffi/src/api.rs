@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use keel_runtime::keel_wire::payload::{Call, Reply, ReplyStatus};
-use keel_runtime::keel_wire::{Reader, Writer};
-use keel_runtime::{RestoreError, Runtime};
+use keel_runtime::keel_wire::{Decode, Reader, Writer};
+use keel_runtime::{InitError, RestoreError, Runtime, RuntimeConfig};
 
 use crate::guard::guarded;
 
@@ -48,6 +48,23 @@ pub mod restore_code {
     /// There is no running runtime, it is shut down, or `keel_restore` was called from inside a
     /// host callback.
     pub const UNAVAILABLE: u32 = 6;
+}
+
+/// Decodes a `RuntimeConfig`, strictly (trailing bytes are an error).
+pub(crate) fn parse_config(bytes: &[u8]) -> Option<RuntimeConfig> {
+    let mut reader = Reader::new(bytes);
+    let config = RuntimeConfig::decode(&mut reader).ok()?;
+    reader.finish().ok()?;
+    Some(config)
+}
+
+/// Maps the runtime's init failure to a `keel_init` code.
+pub(crate) fn init_error_code(error: &InitError) -> u32 {
+    match error {
+        InitError::AlreadyInitialized => init_code::ALREADY_INITIALIZED,
+        InitError::InvalidMode(_) => init_code::BAD_CONFIG,
+        InitError::Spawn(_) => init_code::START_FAILED,
+    }
 }
 
 /// The running runtime, if any.

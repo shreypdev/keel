@@ -269,7 +269,8 @@ pub extern "C" fn keel_schema_json() -> KeelBuf {
 ///
 /// Starts the process-global runtime. `cfg, len` is an encoded `RuntimeConfig`
 /// (`platform String, mode String, core_threads u8, blocking_threads u8, log_level u8`); the
-/// three callbacks and `user` are how the core reaches the host.
+/// three callbacks and `user` are how the core reaches the host. The native ABI has no
+/// `keel_poll`, so `core_threads == 0` is treated as `1`: the `keel-core` thread always runs.
 ///
 /// Returns `0` on success, otherwise an [`init_code`]. **Idempotent per process**: calling it
 /// again with the same callbacks and `user` while the runtime is up does nothing and returns `0`;

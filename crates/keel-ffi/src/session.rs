@@ -9,10 +9,10 @@ use std::cell::Cell;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use keel_runtime::keel_meta::ids;
-use keel_runtime::keel_wire::{Decode, Reader, Writer};
-use keel_runtime::{Host, InitError, PortCallOutcome, Runtime, RuntimeConfig};
+use keel_runtime::keel_wire::Writer;
+use keel_runtime::{Host, PortCallOutcome, Runtime};
 
-use crate::api::{self, init_code};
+use crate::api::{self, init_code, init_error_code, parse_config};
 use crate::guard::guarded;
 
 /// Where the runtime's outgoing traffic goes; one implementation per native shim.
@@ -48,6 +48,15 @@ thread_local! {
     static LOGGING: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Clears [`LOGGING`] when the log path ends, also by unwinding.
+struct LogScope;
+
+impl Drop for LogScope {
+    fn drop(&mut self) {
+        let _ = LOGGING.try_with(|flag| flag.set(false));
+    }
+}
+
 /// The [`Host`] the runtime sees: everything goes to the shim's [`Sink`].
 struct NativeHost {
     sink: Arc<dyn Sink>,
@@ -80,6 +89,7 @@ impl Host for NativeHost {
         if LOGGING.with(|flag| flag.replace(true)) {
             return;
         }
+        let _scope = LogScope;
         let mut args = Writer::with_capacity(9 + target.len() + message.len());
         args.write_u8(level);
         args.write_str(target);
@@ -100,23 +110,6 @@ fn installed() -> std::sync::MutexGuard<'static, Option<Arc<dyn Sink>>> {
     INSTALLED.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Decodes a `RuntimeConfig`, strictly (trailing bytes are an error).
-pub(crate) fn parse_config(bytes: &[u8]) -> Option<RuntimeConfig> {
-    let mut reader = Reader::new(bytes);
-    let config = RuntimeConfig::decode(&mut reader).ok()?;
-    reader.finish().ok()?;
-    Some(config)
-}
-
-/// Maps the runtime's init failure to a `keel_init` code.
-pub(crate) fn init_error_code(error: &InitError) -> u32 {
-    match error {
-        InitError::AlreadyInitialized => init_code::ALREADY_INITIALIZED,
-        InitError::InvalidMode(_) => init_code::BAD_CONFIG,
-        InitError::Spawn(_) => init_code::START_FAILED,
-    }
-}
-
 /// `keel_init`: starts the process runtime for `sink`.
 ///
 /// Idempotent: when this crate already started a runtime for the *same* embedder the call does
@@ -127,9 +120,12 @@ pub(crate) fn start(config: &[u8], sink: Arc<dyn Sink>, after_init: impl FnOnce(
         "keel_init",
         |_| init_code::PANICKED,
         || {
-            let Some(config) = parse_config(config) else {
+            let Some(mut config) = parse_config(config) else {
                 return init_code::BAD_CONFIG;
             };
+            // There is no native `keel_poll`: nobody but the `keel-core` thread can run async
+            // tasks, so "no core thread" (which means "the host polls") is not an option here.
+            config.core_threads = config.core_threads.max(1);
             let mut slot = installed();
             if let Some(existing) = slot.as_ref() {
                 if api::runtime().is_some() {
