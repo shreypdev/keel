@@ -17,6 +17,7 @@ import java.util.concurrent.CompletionException
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.http.HttpRequest as JdkRequest
 import java.net.http.HttpResponse as JdkResponse
 
@@ -25,9 +26,12 @@ import java.net.http.HttpResponse as JdkResponse
  *
  * Redirects are followed (not from `https` to `http`). Headers the JDK manages itself (`Host`,
  * `Content-Length`, `Connection`, `Expect`, `Upgrade`) are dropped from requests. The request's
- * `timeoutMs` bounds the whole exchange. Failures map to [HttpError]: an unusable URL or header is
+ * `timeoutMs` bounds the whole exchange, response body included. Failures map to [HttpError]: an unusable URL or header is
  * `InvalidUrl`, a timeout is `Timeout`, a cancelled call is `Cancelled`, anything else `Network`. A response
  * with an error status (404, 500, ...) is still a success: its status is in the response.
+ *
+ * Cancelling the calling coroutine returns immediately; on JDK 11 to 15 the JDK client then lets the
+ * transfer finish in the background instead of closing the connection (JDK-8245462).
  *
  * @param client the client to use; the default is created on first use.
  */
@@ -47,7 +51,11 @@ public class HttpAdapter(client: HttpClient? = null) {
     public suspend fun request(request: HttpRequest): HttpResponse {
         val jdkRequest = build(request)
         val response = try {
-            client.sendAsync(jdkRequest, JdkResponse.BodyHandlers.ofByteArray()).await()
+            val exchange = suspend { client.sendAsync(jdkRequest, JdkResponse.BodyHandlers.ofByteArray()).await() }
+            // The JDK's own timeout ends at the response headers; the coroutine timeout also covers the body.
+            // (withTimeoutOrNull answers null only for its own timeout; a caller's timeout stays a cancellation.)
+            val total = request.timeoutMs
+            (if (total == null) exchange() else withTimeoutOrNull(total.toLong()) { exchange() }) ?: throw HttpError.Timeout
         } catch (e: HttpTimeoutException) {
             throw HttpError.Timeout
         } catch (e: CancellationException) {

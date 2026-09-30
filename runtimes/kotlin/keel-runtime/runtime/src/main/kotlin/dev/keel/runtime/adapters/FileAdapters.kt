@@ -13,6 +13,7 @@ import java.nio.file.AccessDeniedException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.DirectoryNotEmptyException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -231,12 +232,18 @@ public class FsAdapter(root: Path) {
     private fun resolve(path: String): Path {
         val resolved = root.resolve(path.trimStart('/', '\\')).normalize()
         if (!resolved.startsWith(root)) throw FsError.Denied
-        // Symbolic links must not lead out either: check the nearest existing ancestor's real location.
-        var existing: Path? = resolved
-        while (existing != null && !Files.exists(existing)) existing = existing.parent
-        if (existing != null) {
+        // Symbolic links must not lead out either: the nearest existing path inside the root (a link
+        // counts even when dangling) must really live inside the root.
+        var existing: Path = resolved
+        while (existing != root && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) existing = existing.parent
+        if (Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
             val realRoot = if (Files.exists(root)) root.toRealPath() else root
-            if (!existing.toRealPath().startsWith(realRoot)) throw FsError.Denied
+            val real = try {
+                existing.toRealPath()
+            } catch (e: IOException) {
+                throw FsError.Denied // a dangling link
+            }
+            if (!real.startsWith(realRoot)) throw FsError.Denied
         }
         return resolved
     }

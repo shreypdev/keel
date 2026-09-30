@@ -41,6 +41,9 @@ fun main() {
         PortTests(),
         InprocTransportTests(),
         RemoteTransportTests(),
+        AdapterTests(),
+        FileAdapterTests(),
+        HttpAdapterTests(),
     )
     var failures = 0
     var cases = 0
