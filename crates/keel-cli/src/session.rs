@@ -48,10 +48,25 @@ impl<'a> Session<'a> {
         }
     }
 
-    /// Cargo's target directory for everything the CLI builds.
-    #[must_use]
-    pub fn target_dir(&self) -> PathBuf {
-        self.project.target_dir()
+    /// Cargo's target directory for everything the CLI builds, in this order:
+    ///
+    /// 1. `CARGO_TARGET_DIR`, when set;
+    /// 2. the target directory of the Cargo workspace the core is a member of (`cargo metadata`
+    ///    says where it is), so a core inside a bigger workspace shares one dependency build with
+    ///    `cargo build`, `cargo test` and the rest of the workspace;
+    /// 3. `<project>/target`.
+    ///
+    /// # Errors
+    ///
+    /// See [`Session::core`]: the workspace is read from Cargo's metadata of the core.
+    pub fn target_dir(&self) -> Result<PathBuf> {
+        if let Some(dir) = self.project.explicit_target_dir(self.sys) {
+            return Ok(dir);
+        }
+        Ok(match &self.core()?.workspace {
+            Some(workspace) => workspace.target_dir.clone(),
+            None => self.project.local_target_dir(),
+        })
     }
 
     /// What Cargo says about the core crate (read once per session).
@@ -116,7 +131,7 @@ impl<'a> Session<'a> {
     pub fn shim_manifest(&self) -> Result<PathBuf> {
         let core = self.core()?;
         shim::write_shim(
-            &self.target_dir(),
+            &self.target_dir()?,
             &self.project.root,
             core,
             &self.project.config.web.opt_level,
@@ -144,6 +159,76 @@ fn mismatch(configured: &str, actual: &str) -> CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cargo::Workspace;
+    use crate::config::{Platform, ProjectConfig};
+    use crate::sys::fake::FakeSys;
+
+    fn core_info(workspace: Option<Workspace>) -> CoreInfo {
+        CoreInfo {
+            package: "todo-core".into(),
+            version: "0.1.0".into(),
+            lib_name: "todo_core".into(),
+            dir: PathBuf::from("/repo/apps/todo/core"),
+            keel: KeelSource::Registry {
+                version: "0.1.0".into(),
+            },
+            links_ports: false,
+            local_dirs: Vec::new(),
+            workspace,
+        }
+    }
+
+    /// A session for the project at `/repo/apps/todo` whose core Cargo has already described.
+    fn session<'a>(sys: &'a FakeSys, workspace: Option<Workspace>) -> Session<'a> {
+        let project = Project {
+            root: PathBuf::from("/repo/apps/todo"),
+            config: ProjectConfig::new("todo", "com.example.todo", vec![Platform::Web]),
+        };
+        let session = Session::new(project, sys, Ui::plain());
+        session.core.set(core_info(workspace)).unwrap();
+        session
+    }
+
+    fn workspace() -> Workspace {
+        Workspace {
+            root: PathBuf::from("/repo"),
+            target_dir: PathBuf::from("/repo/target"),
+        }
+    }
+
+    #[test]
+    fn a_core_in_a_workspace_builds_into_the_workspace_target() {
+        let sys = FakeSys::macos();
+        assert_eq!(
+            session(&sys, Some(workspace())).target_dir().unwrap(),
+            PathBuf::from("/repo/target"),
+            "one dependency build for cargo and keel"
+        );
+    }
+
+    #[test]
+    fn a_core_that_is_a_workspace_of_its_own_builds_into_the_project() {
+        let sys = FakeSys::macos();
+        assert_eq!(
+            session(&sys, None).target_dir().unwrap(),
+            PathBuf::from("/repo/apps/todo/target")
+        );
+    }
+
+    #[test]
+    fn cargo_target_dir_wins_over_the_workspace() {
+        let absolute = FakeSys::macos().with_env("CARGO_TARGET_DIR", "/fast/target");
+        assert_eq!(
+            session(&absolute, Some(workspace())).target_dir().unwrap(),
+            PathBuf::from("/fast/target")
+        );
+        let relative = FakeSys::macos().with_env("CARGO_TARGET_DIR", "out");
+        assert_eq!(
+            session(&relative, None).target_dir().unwrap(),
+            PathBuf::from("/repo/apps/todo/out"),
+            "relative to the project, as it always was"
+        );
+    }
 
     #[test]
     fn mismatches_teach() {

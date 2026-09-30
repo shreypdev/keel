@@ -52,7 +52,7 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
     let manifest = session.shim_manifest()?;
     let files = session.cargo().build_library(&Build {
         manifest,
-        target_dir: session.target_dir(),
+        target_dir: session.target_dir()?,
         triple: None,
         profile: if release {
             Profile::Release

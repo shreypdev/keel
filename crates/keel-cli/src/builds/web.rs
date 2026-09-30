@@ -39,7 +39,7 @@ pub fn build(session: &Session<'_>) -> Result<Vec<Artifact>> {
     let manifest = session.shim_manifest()?;
     let files = session.cargo().build_library(&Build {
         manifest,
-        target_dir: session.target_dir(),
+        target_dir: session.target_dir()?,
         triple: Some(TRIPLE.to_owned()),
         profile: Profile::ReleaseWasm,
         crate_type: "cdylib",

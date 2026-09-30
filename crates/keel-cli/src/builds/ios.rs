@@ -92,7 +92,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     } else {
         Profile::Dev
     };
-    let target_dir = session.target_dir();
+    let target_dir = session.target_dir()?;
     let stage =
         crate::shim::ios_stage_dir(&target_dir, &session.project.root).join(profile.dir_name());
     let env = vec![(
