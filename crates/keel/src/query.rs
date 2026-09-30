@@ -1,65 +1,23 @@
-//! The traits `#[keel::query]` and `#[keel::mutation]` implement (SPEC 9).
+//! The query layer: the traits `#[keel::query]` and `#[keel::mutation]` implement, and the
+//! client behind `ctx.query()` and `ctx.mutate(..)` (SPEC 4.5, 5.3 and 9).
 //!
-//! The macros generate a `<Name>Query` / `<Name>Mutation` struct implementing [`QueryDef`] /
-//! [`MutationDef`] for each annotated function. `keel-query` will implement the client (cache,
-//! staleness, retries, optimistic updates) against exactly these traits; this module only
-//! defines the contract.
+//! This module is `keel-query` under its facade path. The traits used to be defined here; they
+//! moved down into `keel-query`, which implements the client against them (the facade depends
+//! on `keel-query`, not the other way round), and this re-export keeps every path stable:
+//! `keel::query::QueryDef`, `keel::query::MutationDef`, `keel::query::BoxFuture` and
+//! `keel::query::CacheValue` are the same items as before, and the macros' generated code keeps
+//! naming them through `::keel::query`.
+//!
+//! See the `keel-query` crate documentation for the model (keys, entries, staleness, retries,
+//! garbage collection, persistence) and for mutations and the offline queue.
 
-use core::future::Future;
-use core::pin::Pin;
-
-use keel_runtime::Ctx;
-use keel_wire::{Decode, Encode};
-
-/// A boxed, sendable future.
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
-
-/// The bounds every value crossing the query cache must satisfy.
-pub trait CacheValue: Encode + Decode + Clone + Send + Sync + 'static {}
-
-impl<T: Encode + Decode + Clone + Send + Sync + 'static> CacheValue for T {}
-
-/// A `#[keel::query]` function.
-pub trait QueryDef: 'static {
-    /// `fnv1a32("query.<fn name>")`.
-    const ID: u32;
-    /// The cache key template, `{param}` placeholders included.
-    const KEY: &'static str;
-    /// The staleness window in milliseconds.
-    const STALE_MS: Option<u64>;
-    /// Whether results are persisted.
-    const PERSIST: bool;
-    /// Retry attempts.
-    const RETRY: u32;
-    /// The parameters (excluding `Ctx`) as a tuple.
-    type Params: CacheValue;
-    /// The success value.
-    type Output: CacheValue;
-    /// The error value.
-    type Error: CacheValue;
-    /// Runs the function.
-    fn fetch(ctx: Ctx, params: Self::Params) -> BoxFuture<Result<Self::Output, Self::Error>>;
-}
-
-/// A `#[keel::mutation]` function.
-pub trait MutationDef: 'static {
-    /// `fnv1a32("mutation.<fn name>")`.
-    const ID: u32;
-    /// The invalidation key template.
-    const KEY: &'static str;
-    /// Retry attempts.
-    const RETRY: u32;
-    /// Whether the mutation is safe to replay.
-    const IDEMPOTENT: bool;
-    /// The parameters (excluding `Ctx`) as a tuple.
-    type Input: CacheValue;
-    /// The success value.
-    type Output: CacheValue;
-    /// The error value.
-    type Error: CacheValue;
-    /// Runs the function.
-    fn execute(ctx: Ctx, input: Self::Input) -> BoxFuture<Result<Self::Output, Self::Error>>;
-}
+pub use keel_query::{
+    BACKOFF_BASE_MS, BACKOFF_MAX_MS, BoxFuture, CACHE_KEY_PREFIX, CacheValue, CacheView, CtxQuery,
+    DEFAULT_GC_MS, INVALIDATE_METHOD_ID, Invalidate, JITTER_PERCENT, MutationBuilder, MutationDef,
+    MutationRegistration, MutationVTable, PERSIST_DEBOUNCE_MS, QUEUE_KEY, QueryClient, QueryDef,
+    QueryHandle, QueryRegistration, QueryStatus, QueryVTable, REFETCH_METHOD_ID, Settled,
+    backoff_ms, cache_key, idempotency_key,
+};
 
 #[cfg(test)]
 mod tests {
@@ -73,5 +31,28 @@ mod tests {
         assert_cache_value::<String>();
         assert_cache_value::<Vec<(String, u8)>>();
         assert_cache_value::<Option<keel_wire::Uuid>>();
+    }
+
+    #[test]
+    fn the_facade_paths_are_the_keel_query_items() {
+        // The same trait through both paths: an impl for one satisfies the other.
+        fn same<T: keel_query::QueryDef>() -> u32 {
+            <T as QueryDef>::ID
+        }
+        struct Q;
+        impl QueryDef for Q {
+            const ID: u32 = 9;
+            const KEY: &'static str = "q";
+            const STALE_MS: Option<u64> = None;
+            const PERSIST: bool = false;
+            const RETRY: u32 = 0;
+            type Params = ();
+            type Output = u8;
+            type Error = u8;
+            fn fetch(_: keel_runtime::Ctx, _: ()) -> BoxFuture<Result<u8, u8>> {
+                Box::pin(async { Ok(1) })
+            }
+        }
+        assert_eq!(same::<Q>(), 9);
     }
 }

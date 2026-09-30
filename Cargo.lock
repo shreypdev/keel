@@ -457,6 +457,7 @@ dependencies = [
  "keel-bindgen",
  "keel-macros",
  "keel-meta",
+ "keel-query",
  "keel-runtime",
  "keel-signals",
  "keel-wire",
@@ -465,6 +466,14 @@ dependencies = [
 [[package]]
 name = "keel-bench"
 version = "0.1.0"
+dependencies = [
+ "criterion",
+ "keel",
+ "keel-ports",
+ "keel-query",
+ "keel-runtime",
+ "keel-wire",
+]
 
 [[package]]
 name = "keel-bindgen"
@@ -528,6 +537,17 @@ dependencies = [
 [[package]]
 name = "keel-query"
 version = "0.1.0"
+dependencies = [
+ "keel",
+ "keel-meta",
+ "keel-ports",
+ "keel-runtime",
+ "keel-signals",
+ "keel-wire",
+ "parking_lot",
+ "proptest",
+ "serde_json",
+]
 
 [[package]]
 name = "keel-runtime"

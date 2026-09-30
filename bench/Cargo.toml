@@ -5,3 +5,15 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+keel = { workspace = true }
+keel-ports = { workspace = true }
+keel-query = { workspace = true }
+keel-runtime = { workspace = true }
+keel-wire = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "query"
+harness = false

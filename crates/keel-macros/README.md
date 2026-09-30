@@ -64,7 +64,7 @@ pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<Todo>, HttpError> { /* ..
 | `api` on a `fn` | `fn __keel_dispatch_fn_<name>`, `FunctionMeta` + registration |
 | `store` on a struct | hidden `CellSlot` field, `impl StoreObject` (`cell`, `restore`), a builder that attaches every signal (`attach`, `attach_keyed` with a typed key fn, `attach_computed`, `set_no_coalesce`), `StoreMeta`, `StoreRestorer` registration |
 | `port` on a trait | `impl Port for dyn T`, `<T>Proxy`, accessor `fn <t>(ctx)`, `__keel_port_dispatch_<T>`, `PortMeta` |
-| `query` / `mutation` | `<Name>Query` / `<Name>Mutation` with the ids and settings, `QueryDef` / `MutationDef`, `QueryMeta` |
+| `query` / `mutation` | `<Name>Query` / `<Name>Mutation` with the ids and settings, `QueryDef` / `MutationDef`, `QueryMeta`, and a `QueryRegistration` / `MutationRegistration` (how `keel-query` finds the definition by id) |
 
 Generated code names its dependencies as `::keel::{wire, meta, runtime, signals, query}`;
 `#[keel(crate = "path")]` on the item (or `crate = "path"` in the macro arguments) replaces

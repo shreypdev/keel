@@ -11,7 +11,9 @@
 //! The function is kept. Next to it the macro emits `pub struct TodosQuery` (`AddTodoMutation`
 //! for mutations): inherent constants (`QUERY_ID`/`MUTATION_ID`, `KEY`, `STALE_MS`, `PERSIST`,
 //! `RETRY`, `IDEMPOTENT`), an implementation of `::keel::query::QueryDef` (`MutationDef`) whose
-//! `Params`/`Input` is the tuple of the parameters after `ctx`, and a `QueryMeta` registration.
+//! `Params`/`Input` is the tuple of the parameters after `ctx`, a `QueryMeta` registration (the
+//! schema) and a `QueryRegistration` / `MutationRegistration` (how `keel-query` finds the
+//! definition by id, for platform calls and the offline queue).
 //!
 //! Defaults: `retry` is 3 for queries (SPEC 9) and 0 for mutations (a mutation that is not
 //! safe to replay must not retry silently); `stale` is absent (always stale); `persist` and
@@ -432,6 +434,18 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         .map(|p| param_meta(&meta, &p.name, &p.kty));
     let returns = ret.meta(&meta);
     let registration = submit(&root, "Query", &meta_static);
+    // The type-erased half, so the client finds the definition by id: a platform constructs a
+    // query handle (or calls a mutation) knowing only the id, and the offline queue replays
+    // a mutation by id after a restart.
+    let inventory = quote!(#meta::inventory);
+    let erased_registration = match flavor {
+        Flavor::Query => quote! {
+            #inventory::submit! { #query::QueryRegistration::of::<#struct_name>() }
+        },
+        Flavor::Mutation => quote! {
+            #inventory::submit! { #query::MutationRegistration::of::<#struct_name>() }
+        },
+    };
 
     Ok(quote! {
         #item
@@ -456,6 +470,7 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
             idempotent: #idempotent,
         };
         #registration
+        #erased_registration
     })
 }
 
@@ -541,6 +556,7 @@ mod tests {
             "todos(&__ctx, page, q)",
             "kind: ::keel::meta::QueryKind::Query",
             "::keel::meta::Registration::Query",
+            "::keel::query::QueryRegistration::of::<TodosQuery>()",
         ] {
             assert!(has(&out, needle), "missing `{needle}` in {out}");
         }
@@ -564,6 +580,7 @@ mod tests {
             "pub const KEY: &'static str = \"\"",
             "add_todo(__ctx, title)",
             "kind: ::keel::meta::QueryKind::Mutation",
+            "::keel::query::MutationRegistration::of::<AddTodoMutation>()",
         ] {
             assert!(has(&out, needle), "missing `{needle}` in {out}");
         }
