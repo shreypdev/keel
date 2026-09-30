@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,910 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,913 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 833 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -43,6 +43,11 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
   runtime Subscription leak fixed (heap flat over 1000 cycles). TS 833. Re-review pending.
   Local-run note: the C harness rebuilds keel-ffi without `jni`, clobbering the dylib —
   build `--features jni` immediately before Kotlin runs (CI jobs are isolated).
+  Re-review found N1 (a NEW UAF in the fix: the loser of a removal race did not wait) and
+  N2 (mutual-removal hang); the integrator fixed both (shared draining list; in-callback
+  removals assert/skip) and the reviewer confirmed closure under ASan. keel-ffi cycle
+  CLOSED. All four core-crate adversarial cycles (signals, runtime, macros, ffi) are
+  now complete with every High/Medium finding fixed and re-verified.
 
 - **keel-macros fix round merged** (ADR-025): compile-time schema-identity checks
   (E0060/E0061), typed port outcomes via From<PortError> (E0033; HttpError/FsError map

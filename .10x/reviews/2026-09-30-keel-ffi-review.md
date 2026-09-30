@@ -217,3 +217,21 @@ I rebuilt every scratch harness against the merged checkout. The matrix is green
 * **N2 fixed**: a removal from a thread inside ANY port callback is a debug assertion and,
   in release, returns without waiting plus a FATAL log (keel.h forbids the call; waiting
   could only deadlock). Tests: `n2_*` (debug and release variants).
+
+### N1/N2 verification (reviewer, against `8f85447`; debug and release fixture cores)
+
+- **N1: CLOSED.**
+  - `probe2 remove-vs-shutdown` and `remove-vs-remove` under ASan: the losing `keel_port_register(LOG, NULL)` now blocks about 195 ms, until the Log callback ends (running = 0). Then `free(user)`. No ASan report, in debug or release.
+  - Both removers, and the shutdown, return at the same moment.
+- **N2: CLOSED.**
+  - `probe2 mutual` returns in both profiles (under 140 ms, was a hang).
+  - Debug: the assertion is contained by the entry's panic guard.
+  - Release: the removal returns without waiting.
+  - `probe2 n2-diag` (Sum callback removes the Echo port): the FATAL record reaches the host's Log port in both profiles.
+  - *Info:* in the mutual case itself the FATAL is never seen. One thread has just removed the Log port, and the other is inside the Log path, where the recursion guard drops the record. keel.h already forbids the call, so no action is needed.
+- **No regression:**
+  - `stress.c uaf-shutdown` and `uaf-unregister` (ASan): clean.
+  - 3,000 fixture init/shutdown cycles: heap flat at 17,168 B from cycle 500 to 3,000, so the draining list empties.
+  - `port_cb` concurrency is still 4.
+  - `c/run.sh` (ASan): ok.
+  - `registry` tests: 10/10 in debug and release.
