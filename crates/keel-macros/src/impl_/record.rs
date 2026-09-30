@@ -68,10 +68,109 @@ pub(crate) enum Mode {
     Error,
 }
 
+/// What to do with `#[error]`, `#[from]` and `#[source]` (the helper attributes of
+/// `#[keel::error]`) on an item that is not an error enum.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Helpers {
+    /// They are not ours to judge: another derive (`thiserror::Error`) may own them.
+    Ignore,
+    /// They are reported (E0010) and dropped: nothing would accept them, and `rustc` would only
+    /// say "cannot find attribute".
+    Report,
+}
+
+impl Helpers {
+    /// A plain enum that derives no `Error` reports them; structs and other derives leave them.
+    fn of_enum(item: &ItemEnum, mode: Mode) -> Helpers {
+        if mode == Mode::Api && !derives(&item.attrs, "Error") {
+            Helpers::Report
+        } else {
+            Helpers::Ignore
+        }
+    }
+}
+
+/// What a record, enum or error that failed to expand still provides, so the error is the only
+/// one. Everything that uses the type (`fn f(t: Todo)`, `Vec<Todo>`, a `Result<_, TodoError>`)
+/// needs its `Encode`, `Decode`, `KEEL_TYPE_ID` and, for an error, `Display` and `Error`; without
+/// them every use adds "cannot cross the boundary" and identity-check errors on top of the real
+/// one. The stubs carry no behaviour: the build stops on the real error first.
+pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item) -> TokenStream {
+    let (name, generics, is_enum) = match item {
+        syn::Item::Struct(item) => (item.ident.clone(), item.generics.clone(), false),
+        syn::Item::Enum(item) => (item.ident.clone(), item.generics.clone(), true),
+        _ => return TokenStream::new(),
+    };
+    let attrs = match item {
+        syn::Item::Struct(item) => &mut item.attrs,
+        syn::Item::Enum(item) => &mut item.attrs,
+        _ => return TokenStream::new(),
+    };
+    let root = item_root(&mut attrs.clone(), args_root, &mut Errors::new());
+    let is_error = mode == Mode::Error && is_enum;
+    if is_error && !derives(attrs, "Debug") {
+        // `std::error::Error` needs `Debug`; the expansion adds the derive, so the fallback does.
+        attrs.push(syn::parse_quote!(#[derive(::core::fmt::Debug)]));
+    }
+    let wire = root.wire();
+    let meta = root.meta();
+    let name_str = unraw(&name);
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let is_error_const = if is_enum {
+        quote! {
+            #[doc(hidden)]
+            pub const KEEL_IS_ERROR: bool = #is_error;
+        }
+    } else {
+        TokenStream::new()
+    };
+    let error_impls = if is_error {
+        quote! {
+            impl #impl_generics ::core::fmt::Display for #name #type_generics #where_clause {
+                fn fmt(&self, __fmt: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    ::core::result::Result::Ok(())
+                }
+            }
+            impl #impl_generics ::std::error::Error for #name #type_generics #where_clause {}
+        }
+    } else {
+        TokenStream::new()
+    };
+    quote! {
+        #[allow(dead_code)]
+        impl #impl_generics #name #type_generics #where_clause {
+            #[doc(hidden)]
+            pub const KEEL_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
+            #is_error_const
+        }
+        impl #impl_generics #wire::Encode for #name #type_generics #where_clause {
+            fn encode(&self, __w: &mut #wire::Writer) {}
+        }
+        impl #impl_generics #wire::Decode for #name #type_generics #where_clause {
+            const MIN_ENCODED_LEN: usize = 0;
+            fn decode(__r: &mut #wire::Reader<'_>) -> ::core::result::Result<Self, #wire::WireError> {
+                ::core::result::Result::Err(#wire::WireError::InvalidTag {
+                    tag: 0,
+                    at: __r.position(),
+                    ty: #name_str,
+                })
+            }
+        }
+        #error_impls
+    }
+}
+
+/// Whether the fallback of a failed `#[keel::api]` on `item` drops `#[error]`, `#[from]` and
+/// `#[source]`: only on a plain enum that reports them (see [`Helpers`]).
+pub(crate) fn drops_error_helpers(item: &syn::Item) -> bool {
+    matches!(item, syn::Item::Enum(item) if Helpers::of_enum(item, Mode::Api) == Helpers::Report)
+}
+
 fn parse_fields<'a>(
     fields: impl Iterator<Item = &'a mut syn::Field>,
     self_name: &str,
     mode: Mode,
+    helpers: Helpers,
     errors: &mut Errors,
 ) -> Vec<FieldModel> {
     let mut out = Vec::new();
@@ -83,7 +182,7 @@ fn parse_fields<'a>(
         let attr = take(&mut field.attrs, Site::FIELD, errors);
         let (from, source) = if mode == Mode::Error {
             take_field_attrs(&mut field.attrs)
-        } else {
+        } else if helpers == Helpers::Report {
             let (from, source) = take_field_attrs(&mut field.attrs);
             if from || source {
                 errors.push(error_attribute_misplaced(
@@ -92,6 +191,8 @@ fn parse_fields<'a>(
                     &field.ty,
                 ));
             }
+            (false, false)
+        } else {
             (false, false)
         };
         let kty = match map_field(&field.ty, &name, self_name) {
@@ -161,6 +262,7 @@ pub(crate) fn expand_struct(
                 named.named.iter_mut(),
                 &unraw(&item.ident),
                 Mode::Api,
+                Helpers::Ignore,
                 &mut errors,
             )
         }
@@ -261,6 +363,7 @@ pub(crate) fn expand_struct(
 
 fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<VariantModel> {
     let enum_name = item.ident.to_string();
+    let helpers = Helpers::of_enum(item, mode);
     let mut out = Vec::new();
     if item.variants.is_empty() {
         errors.push(item_shape(
@@ -302,7 +405,13 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
                 }
                 (
                     Shape::Tuple,
-                    parse_fields(unnamed.unnamed.iter_mut(), &enum_name, mode, errors),
+                    parse_fields(
+                        unnamed.unnamed.iter_mut(),
+                        &enum_name,
+                        mode,
+                        helpers,
+                        errors,
+                    ),
                 )
             }
             Fields::Named(named) => {
@@ -316,13 +425,13 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
                 }
                 (
                     Shape::Named,
-                    parse_fields(named.named.iter_mut(), &enum_name, mode, errors),
+                    parse_fields(named.named.iter_mut(), &enum_name, mode, helpers, errors),
                 )
             }
         };
         let error = if mode == Mode::Error {
             take_message(&mut variant.attrs, &variant.ident, shape, &fields, errors)
-        } else {
+        } else if helpers == Helpers::Report {
             let (misplaced, kept): (Vec<syn::Attribute>, Vec<syn::Attribute>) =
                 std::mem::take(&mut variant.attrs)
                     .into_iter()
@@ -335,6 +444,8 @@ fn parse_variants(item: &mut ItemEnum, mode: Mode, errors: &mut Errors) -> Vec<V
                     attr,
                 ));
             }
+            None
+        } else {
             None
         };
         out.push(VariantModel {

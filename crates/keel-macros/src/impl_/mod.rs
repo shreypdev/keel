@@ -80,11 +80,33 @@ fn wrong_item(macro_name: &str, expected: &str, item: &syn::Item) -> syn::Error 
     .on(item)
 }
 
+/// The `crate = ".."` path of a macro's arguments, for a recovery step that only needs that:
+/// errors in the arguments are reported by the expansion itself.
+fn recovery_root(attr: TokenStream, macro_name: &str) -> Option<Root> {
+    let mut root: Option<Root> = None;
+    let _ = parse_args(attr, macro_name, "", |meta| {
+        if meta.path.is_ident("crate") {
+            root = root_arg(meta).ok();
+        }
+        Ok(true)
+    });
+    root
+}
+
 /// `#[keel::api]`.
 pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // `error`, `from` and `source` belong to `#[keel::error]`; on a plain enum they are reported
-    // (E0010) and then dropped, so `rustc` does not add "cannot find attribute" on top.
-    run(item, &["error", "from", "source"], |item| {
+    // `error`, `from` and `source` belong to `#[keel::error]`; on a plain enum that derives no
+    // `Error` they are reported (E0010) and then dropped, so `rustc` does not add "cannot find
+    // attribute" on top. Where another derive (`thiserror::Error`) may own them they are left.
+    let strip: &[&str] = match syn::parse2::<syn::Item>(item.clone()) {
+        Ok(parsed) if record::drops_error_helpers(&parsed) => &["error", "from", "source"],
+        _ => &[],
+    };
+    let recovery_attr = attr.clone();
+    let recover = move |item: &mut syn::Item| {
+        record::recover(recovery_root(recovery_attr, "api"), Mode::Api, item)
+    };
+    run_recovering(item, strip, recover, |item| {
         let mut root: Option<Root> = None;
         let mut store = false;
         parse_args(
@@ -129,7 +151,11 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// `#[keel::error]`.
 pub(crate) fn expand_error(attr: TokenStream, item: TokenStream) -> TokenStream {
-    run(item, &["error", "from", "source"], |item| {
+    let recovery_attr = attr.clone();
+    let recover = move |item: &mut syn::Item| {
+        record::recover(recovery_root(recovery_attr, "error"), Mode::Error, item)
+    };
+    run_recovering(item, &["error", "from", "source"], recover, |item| {
         let mut root: Option<Root> = None;
         parse_args(attr, "error", "`crate = \"path\"`", |meta| {
             if meta.path.is_ident("crate") {
@@ -195,18 +221,8 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `#[keel::store]`.
 pub(crate) fn expand_store(attr: TokenStream, item: TokenStream) -> TokenStream {
     let recovery_attr = attr.clone();
-    let recover = move |item: &mut syn::Item| {
-        let mut root: Option<Root> = None;
-        // Whatever the arguments said, the recovery only needs the crate path; errors in the
-        // arguments are reported by the expansion itself.
-        let _ = parse_args(recovery_attr, "store", "", |meta| {
-            if meta.path.is_ident("crate") {
-                root = root_arg(meta).ok();
-            }
-            Ok(true)
-        });
-        store::recover(root, item)
-    };
+    let recover =
+        move |item: &mut syn::Item| store::recover(recovery_root(recovery_attr, "store"), item);
     run_recovering(item, &[], recover, |item| {
         let mut root: Option<Root> = None;
         let mut hook: Option<syn::Path> = None;

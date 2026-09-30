@@ -1,0 +1,17 @@
+error: error[keel::E0001]: `usize` cannot cross the boundary
+         = note: its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too
+         = help: use a fixed-width integer such as `u32` or `u64`
+         = docs: https://keel.dev/errors/E0001
+  --> tests/ui/m1_record_error_no_cascade.rs:10:12
+   |
+10 |     pub n: usize,
+   |            ^^^^^
+
+error: error[keel::E0010]: variant `Unmessaged` has no `#[error(..)]` message
+         = note: every variant of a `#[keel::error]` enum needs a message, because the platforms show it to users and logs
+         = help: add `#[error("what went wrong")]`, or `#[error(transparent)]` to forward to the inner error
+         = docs: https://keel.dev/errors/E0010
+  --> tests/ui/m1_record_error_no_cascade.rs:17:5
+   |
+17 |     Unmessaged,
+   |     ^^^^^^^^^^

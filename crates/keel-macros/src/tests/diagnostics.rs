@@ -696,3 +696,34 @@ fn a_failed_store_still_provides_what_its_impl_block_uses() {
     }
     assert!(!rendered.contains("# [keel ("), "{rendered}");
 }
+
+#[test]
+fn error_helpers_are_left_to_another_derive_that_owns_them() {
+    // `#[derive(thiserror::Error)]` brings its own `#[error]`, `#[from]` and `#[source]`: the
+    // E0010 for a plain enum must not fire, and the fallback must keep them.
+    let tokens = api(quote!(
+        #[derive(Debug, thiserror::Error)]
+        pub enum E {
+            #[error("one {0}")]
+            A(u8),
+            #[error("two")]
+            B(#[source] String),
+        }
+    ));
+    let rendered = tokens.to_string();
+    assert!(messages(&tokens).is_empty(), "{rendered}");
+    assert!(rendered.contains("# [error (\"one {0}\")]"), "{rendered}");
+    assert!(rendered.contains("# [source]"), "{rendered}");
+    // A failing item that keeps the helpers keeps them in the fallback too.
+    let tokens = api(quote!(
+        #[derive(Debug, thiserror::Error)]
+        pub enum E {
+            #[error("one")]
+            A(&str),
+        }
+    ));
+    assert!(
+        tokens.to_string().contains("# [error (\"one\")]"),
+        "{tokens}"
+    );
+}
