@@ -163,9 +163,17 @@ class StreamTests : Suite() {
             t.onCall = { call -> producer = t.serveStream(call, List(1000) { item(it) }) }
             attach(t).use { core ->
                 runBlocking {
-                    val seen = java.util.concurrent.atomic.AtomicInteger()
-                    val job = launch(Dispatchers.Default) { core.stream(TARGET, METHOD, NO_BYTES).collect { seen.incrementAndGet() } }
-                    eventually("some items arrive") { seen.get() > 0 }
+                    // Park the collector after the first item so the stream cannot run to completion
+                    // before the cancellation lands (on a fast machine 1000 items drain in under a ms).
+                    val firstItem = CompletableDeferred<Unit>()
+                    val parked = CompletableDeferred<Unit>() // never completed; collect suspends here
+                    val job = launch(Dispatchers.Default) {
+                        core.stream(TARGET, METHOD, NO_BYTES).collect {
+                            firstItem.complete(Unit)
+                            parked.await()
+                        }
+                    }
+                    firstItem.await()
                     job.cancelAndJoin()
                     assertEq(listOf(t.calls.single().callId), t.cancels.toList())
                     assertEq(0, core.stats().hostPendingCalls)
