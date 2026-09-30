@@ -229,7 +229,7 @@ final class RemoteTransportTests: XCTestCase {
         let item = Wire.StreamItem(callId: 9, flag: .item, body: [4]).encode()
         transport.handleFrame(makeFrame(.streamItem, seq: 4, schema: coreHash, item))
         transport.handleFrame(makeFrame(.log, seq: 5, schema: coreHash, Wire.Log(level: 3, target: "t", message: "m").encode()))
-        transport.handleFrame(makeFrame(.snapshot, seq: 6, schema: coreHash, Wire.Snapshot(stores: []).encode()))
+        transport.handleFrame(makeFrame(.snapshot, seq: 6, schema: coreHash, Wire.Snapshot(generationFloor: 0, stores: []).encode()))
         XCTAssertEqual(inbound.recorded, [
             .reply(7, reply),
             .changeSet(changeSet),

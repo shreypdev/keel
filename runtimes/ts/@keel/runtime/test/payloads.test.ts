@@ -572,6 +572,7 @@ describe("Hello, Log and TimerFired", () => {
 
 describe("Snapshot", () => {
   const snapshot = {
+    generationFloor: 0x01020304,
     stores: [
       {
         handle: HANDLE,
@@ -587,7 +588,7 @@ describe("Snapshot", () => {
 
   it("lays out stores and signals per SPEC 5.9", () => {
     expect(toHex(encodeSnapshot(snapshot))).toBe(
-      "02000000" +
+      "02000000" + "04030201" +
         "0100000001000000" + "efbeadde" + "02000000" +
         "00000000" + "02000000" + "0102" +
         "02000000" + "00000000" +
@@ -599,8 +600,8 @@ describe("Snapshot", () => {
     const bytes = encodeSnapshot(snapshot);
     expect(decodeSnapshot(bytes)).toEqual(snapshot);
     expect(decodeSnapshot(embedded(bytes))).toEqual(snapshot);
-    expect(toHex(encodeSnapshot({ stores: [] }))).toBe("00000000");
-    expect(decodeSnapshot(encodeSnapshot({ stores: [] }))).toEqual({ stores: [] });
+    expect(toHex(encodeSnapshot({ generationFloor: 0, stores: [] }))).toBe("0000000000000000");
+    expect(decodeSnapshot(encodeSnapshot({ generationFloor: 9, stores: [] }))).toEqual({ generationFloor: 9, stores: [] });
   });
 
   it("returns signal values as borrowed views", () => {
@@ -610,8 +611,16 @@ describe("Snapshot", () => {
   });
 
   it("rejects counts that cannot fit in the input", () => {
-    expectWireError(() => decodeSnapshot(fromHex("ffffffff")), "length_too_large");
-    expectWireError(() => decodeSnapshot(fromHex("01000000 0000000000000000 00000000 ffffffff")), "length_too_large");
+    expectWireError(() => decodeSnapshot(fromHex("ffffffff 00000000")), "length_too_large");
+    expectWireError(
+      () => decodeSnapshot(fromHex("01000000 00000000 0000000000000000 00000000 ffffffff")),
+      "length_too_large",
+    );
+  });
+
+  it("refuses a snapshot in the layout before the generation floor existed", () => {
+    // `count u32` only: an empty snapshot of the old layout ends where the floor should be.
+    expectWireError(() => decodeSnapshot(fromHex("00000000")), "unexpected_eof");
   });
 
   it("rejects every strict prefix and trailing bytes", () => {
@@ -628,6 +637,7 @@ describe("Snapshot", () => {
     const value = ["a", "b\u{1f30a}"];
     const codec = codecs.vec(codecs.string);
     const bytes = encodeSnapshot({
+      generationFloor: 1,
       stores: [{ handle: 1n, typeId: 2, signals: [{ signalId: 0, value: encodeValue(codec, value) }] }],
     });
     const signal = decodeSnapshot(bytes).stores[0]?.signals[0];

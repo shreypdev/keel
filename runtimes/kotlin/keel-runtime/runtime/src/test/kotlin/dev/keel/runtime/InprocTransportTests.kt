@@ -166,7 +166,7 @@ class InprocTransportTests : Suite() {
             assertEq(listOf(9), native.timers.toList())
             assertEq(1, native.portReplies.size)
             assertEq("{\"live_handles\":0}", transport.statsJson())
-            assertEq(4, transport.snapshot().size)
+            assertEq(8, transport.snapshot().size)
             assertEq(0, transport.restore(byteArrayOf(1)))
         }
 

@@ -196,7 +196,7 @@ class FuzzTests : Suite() {
         add(Payloads.Observe(Handle.make(1u, 1u), 2u, true).toByteArray())
         add(Payloads.Hello("0.1.0", 42uL, "jvm", "dev").toByteArray())
         add(Payloads.Log(2u, "core", "hello").toByteArray())
-        add(Payloads.Snapshot(listOf(Payloads.Snapshot.Store(Handle.make(1u, 1u), 5u, listOf(Payloads.Snapshot.Signal(0u, bytesOf(1, 2)))))).toByteArray())
+        add(Payloads.Snapshot(1u, listOf(Payloads.Snapshot.Store(Handle.make(1u, 1u), 5u, listOf(Payloads.Snapshot.Signal(0u, bytesOf(1, 2)))))).toByteArray())
         for (k in Envelope.Kind.entries) add(Envelope.encode(k, k.code.toUInt(), 0x0102030405060708uL, bytesOf(k.code.toInt(), 1, 2)))
         add(KeyedPatch.encodePatch(listOf(PatchOp.Insert(1u, 2), PatchOp.Remove(0u), PatchOp.Update(0u, 1), PatchOp.Move(0u, 1u), PatchOp.Clear), ints))
     }

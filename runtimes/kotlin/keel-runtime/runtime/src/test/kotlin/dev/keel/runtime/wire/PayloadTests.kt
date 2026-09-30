@@ -322,8 +322,9 @@ class PayloadTests : Suite() {
 
         // ---- Snapshot ---------------------------------------------------------------------------------------
 
-        case("Snapshot is a count of stores, each with its persisted signals") {
+        case("Snapshot is a count of stores and a generation floor, then each store with its persisted signals") {
             val snapshot = Payloads.Snapshot(
+                0x01020304u,
                 listOf(
                     Payloads.Snapshot.Store(
                         Handle.make(1u, 1u),
@@ -333,16 +334,17 @@ class PayloadTests : Suite() {
                 ),
             )
             check(
-                "01000000" + "0100000001000000" + "34120000" + "02000000" + "00000000" + "03000000" + "010203" + "01000000" + "00000000",
+                "01000000" + "04030201" + "0100000001000000" + "34120000" + "02000000" + "00000000" + "03000000" + "010203" + "01000000" + "00000000",
                 snapshot, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) },
             )
         }
 
         case("Snapshot edge cases: no stores, a store with no signals, several stores") {
-            check("00000000", Payloads.Snapshot(emptyList()), { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
-            val bare = Payloads.Snapshot(listOf(Payloads.Snapshot.Store(Handle(5), 9u, emptyList())))
-            check("01000000" + "0500000000000000" + "09000000" + "00000000", bare, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
+            check("00000000" + "00000000", Payloads.Snapshot(0u, emptyList()), { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
+            val bare = Payloads.Snapshot(7u, listOf(Payloads.Snapshot.Store(Handle(5), 9u, emptyList())))
+            check("01000000" + "07000000" + "0500000000000000" + "09000000" + "00000000", bare, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
             val many = Payloads.Snapshot(
+                20u,
                 List(20) { i ->
                     Payloads.Snapshot.Store(
                         Handle.make(i.toUInt(), 1u),
@@ -355,11 +357,11 @@ class PayloadTests : Suite() {
         }
 
         case("Snapshot decoding rejects impossible counts before allocating") {
-            assertEq(UInt.MAX_VALUE, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("ffffffff")) }.len)
-            // One store needs at least 16 bytes.
-            assertEq(1u, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("01000000" + "00".repeat(15))) }.len)
+            assertEq(UInt.MAX_VALUE, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("ffffffff" + "00000000")) }.len)
+            // One store needs at least 16 bytes (the generation floor is not one of them).
+            assertEq(1u, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex("01000000" + "00000000" + "00".repeat(11))) }.len)
             // A store claiming 2^32-1 signals with nothing behind it.
-            val hostile = "01000000" + "0100000001000000" + "01000000" + "ffffffff"
+            val hostile = "01000000" + "00000000" + "0100000001000000" + "01000000" + "ffffffff"
             assertEq(UInt.MAX_VALUE, assertWire<WireException.LengthTooLarge> { Payloads.Snapshot.decode(unhex(hostile)) }.len)
         }
 
@@ -379,6 +381,8 @@ class PayloadTests : Suite() {
             assertWire<WireException.UnexpectedEof> { Payloads.Log.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.TimerFired.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.Snapshot.decode(ByteArray(0)) }
+            // The layout before the generation floor (`count u32` only) ends where the floor should be.
+            assertWire<WireException.UnexpectedEof> { Payloads.Snapshot.decode(unhex("00000000")) }
         }
 
         case("payloads travel inside an envelope of the matching kind") {

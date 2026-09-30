@@ -710,6 +710,13 @@ export interface SnapshotStore {
  * both use the layout of section 5.9.
  */
 export interface SnapshotPayload {
+  /**
+   * The highest handle generation the core had issued when the snapshot was taken. A restore
+   * resumes the core's generation counter above it, so no handle issued before the snapshot (or
+   * between it and the restore) is ever issued again to another object (ADR-022). Opaque to the
+   * host: pass it back unchanged.
+   */
+  readonly generationFloor: number;
   /** Every store in the snapshot. */
   readonly stores: readonly SnapshotStore[];
 }
@@ -723,6 +730,7 @@ const SNAPSHOT_SIGNAL_MIN = 8;
 export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
   const w = new KeelWriter();
   w.writeLen(snapshot.stores.length);
+  w.writeU32(snapshot.generationFloor);
   for (const store of snapshot.stores) {
     w.writeU64(store.handle);
     w.writeU32(store.typeId);
@@ -739,6 +747,7 @@ export function encodeSnapshot(snapshot: SnapshotPayload): Uint8Array {
 export function decodeSnapshot(bytes: Uint8Array): SnapshotPayload {
   return decodeAll(bytes, (r) => {
     const storeCount = r.readLen(SNAPSHOT_STORE_MIN);
+    const generationFloor = r.readU32();
     const stores = new Array<SnapshotStore>(storeCount);
     for (let i = 0; i < storeCount; i++) {
       const handle = r.readU64();
@@ -751,7 +760,7 @@ export function decodeSnapshot(bytes: Uint8Array): SnapshotPayload {
       }
       stores[i] = { handle, typeId, signals };
     }
-    return { stores };
+    return { generationFloor, stores };
   });
 }
 

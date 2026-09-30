@@ -297,8 +297,9 @@ const targets: Target[] = [
     name: "snapshot",
     decode: decodeSnapshot,
     valid: [
-      encodeSnapshot({ stores: [] }),
+      encodeSnapshot({ generationFloor: 0, stores: [] }),
       encodeSnapshot({
+        generationFloor: 3,
         stores: [
           {
             handle: HANDLE,

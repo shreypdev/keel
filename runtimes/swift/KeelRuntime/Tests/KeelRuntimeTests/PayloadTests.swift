@@ -326,15 +326,15 @@ final class PayloadTests: XCTestCase {
     // MARK: Snapshot
 
     func testSnapshot() {
-        let snapshot = Wire.Snapshot(stores: [
+        let snapshot = Wire.Snapshot(generationFloor: 0x0102_0304, stores: [
             Wire.SnapshotStore(handle: handle, typeId: 0x0A0B_0C0D, signals: [
                 Wire.SnapshotSignal(signalId: 0, value: slice("010203")),
                 Wire.SnapshotSignal(signalId: 1, value: []),
             ]),
         ])
-        assertCodec(snapshot, hex: "0100000001000000010000000d0c0b0a0200000000000000030000000102030100000000000000")
-        assertCodec(Wire.Snapshot(stores: []), hex: "00000000")
-        assertRoundTrip(Wire.Snapshot(stores: [
+        assertCodec(snapshot, hex: "01000000" + "04030201" + "01000000" + "01000000" + "0d0c0b0a" + "02000000" + "00000000" + "03000000" + "010203" + "01000000" + "00000000")
+        assertCodec(Wire.Snapshot(generationFloor: 0, stores: []), hex: "0000000000000000")
+        assertRoundTrip(Wire.Snapshot(generationFloor: 7, stores: [
             Wire.SnapshotStore(handle: handle, typeId: 1, signals: []),
             Wire.SnapshotStore(handle: KeelHandle(rawValue: 9), typeId: 2, signals: [Wire.SnapshotSignal(signalId: 5, value: slice("ff"))]),
         ]))
@@ -343,15 +343,19 @@ final class PayloadTests: XCTestCase {
     func testSnapshotMalformed() {
         // Store count larger than the remaining bytes.
         expectWireError(.lengthTooLarge(len: 5, at: 0)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("05000000"))
+            _ = try Wire.Snapshot.decode(hexToBytes("05000000" + "00000000"))
+        }
+        // A snapshot in the layout before the generation floor ends where the floor should be.
+        expectWireError(.unexpectedEOF(needed: 4, at: 4)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("00000000"))
         }
         // Signal count larger than the remaining bytes.
-        expectWireError(.lengthTooLarge(len: 99, at: 16)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("0100000001000000010000000d0c0b0a63000000"))
+        expectWireError(.lengthTooLarge(len: 99, at: 20)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("01000000" + "00000000" + "0100000001000000" + "0d0c0b0a" + "63000000"))
         }
         // Signal value length larger than the remaining bytes.
-        expectWireError(.lengthTooLarge(len: 9, at: 24)) {
-            _ = try Wire.Snapshot.decode(hexToBytes("0100000001000000010000000d0c0b0a010000000000000009000000"))
+        expectWireError(.lengthTooLarge(len: 9, at: 28)) {
+            _ = try Wire.Snapshot.decode(hexToBytes("01000000" + "00000000" + "0100000001000000" + "0d0c0b0a" + "01000000" + "00000000" + "09000000"))
         }
     }
 
