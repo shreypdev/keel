@@ -245,6 +245,9 @@ impl Drop for CoreGuard<'_> {
 /// A call whose completion is still to come.
 struct CallEntry {
     task: TaskId,
+    /// The handle of the receiver the call was made on (null for free functions and
+    /// constructors): what a restore must check before the call may go on running.
+    receiver: Handle,
     stream: Option<Arc<StreamState>>,
 }
 
@@ -314,6 +317,11 @@ pub struct Runtime {
     extensions: Extensions,
     shut_down: AtomicBool,
     core_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+/// Where an object lives: equal addresses are the same object.
+fn object_address(object: &Arc<dyn AnyObject>) -> usize {
+    Arc::as_ptr(object).cast::<()>() as usize
 }
 
 fn reply_payload(call_id: u32, status: ReplyStatus, body: &[u8]) -> Vec<u8> {
@@ -1079,9 +1087,14 @@ impl Runtime {
             }),
             TaskKind::Call { call_id, handle },
         );
-        self.calls
-            .lock()
-            .insert(call_id, CallEntry { task, stream: None });
+        self.calls.lock().insert(
+            call_id,
+            CallEntry {
+                task,
+                receiver: handle,
+                stream: None,
+            },
+        );
     }
 
     /// A call's task finished with `result`: reply, unless the call was cancelled meanwhile.
@@ -1115,6 +1128,7 @@ impl Runtime {
             call_id,
             CallEntry {
                 task,
+                receiver: handle,
                 stream: Some(state),
             },
         );
@@ -1137,6 +1151,66 @@ impl Runtime {
             self.drop_guarded_logged("a cancelled task", future);
         }
         if entry.stream.is_none() {
+            self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
+        }
+    }
+
+    /// Cancels the in-flight calls and streams whose receiver a restore replaced or invalidated:
+    /// a plain call is answered with status 3, a stream ends with an error item saying so, and
+    /// the task is dropped, each exactly once (the call table is the gate). Calls with no
+    /// receiver, and calls on an object that is still the one its handle names, go on.
+    ///
+    /// `before` maps every handle that was live before the restore to its object's address.
+    /// A call is affected when its handle was live before or is live now and does not name the
+    /// same object in both (after a restore that is every call on a store, since each one is
+    /// rebuilt); a call on an object that had already been released, whose handle the restore did
+    /// not touch, is not.
+    fn cancel_calls_replaced_by_restore(&self, before: &HashMap<u64, usize>) {
+        let affected: Vec<u32> = {
+            let calls = self.calls.lock();
+            calls
+                .iter()
+                .filter(|(_, entry)| !entry.receiver.is_null())
+                .filter(|(_, entry)| {
+                    let was = before.get(&entry.receiver.0).copied();
+                    let now = self
+                        .objects
+                        .get_dyn(entry.receiver)
+                        .ok()
+                        .map(|object| object_address(&object));
+                    (was.is_some() || now.is_some()) && was != now
+                })
+                .map(|(&call_id, _)| call_id)
+                .collect()
+        };
+        for call_id in affected {
+            self.abort_call(
+                call_id,
+                "the object it was running on was replaced by a restore",
+            );
+        }
+    }
+
+    /// Ends in-flight call `call_id` from the runtime's side: drops its task and tells the host,
+    /// exactly once (a call already answered, or cancelled by the host, is left alone). A plain
+    /// call gets status 3 (cancelled); a stream gets an error item with a `String` body, the
+    /// shape of a stream panic, because the host did not ask for the end and a clean end would
+    /// read as success. The caller holds the core lock.
+    fn abort_call(&self, call_id: u32, why: &str) {
+        let Some(entry) = self.calls.lock().remove(&call_id) else {
+            return;
+        };
+        Stats::inc(&self.stats.cancelled);
+        if let CancelOutcome::Dropped(future) = self.exec.cancel(entry.task) {
+            self.drop_guarded_logged("a call cancelled by the runtime", future);
+        }
+        if entry.stream.is_some() {
+            self.send_stream_item(
+                call_id,
+                StreamFlag::Error,
+                &string_body(&format!("cancelled: {why}")),
+            );
+        } else {
             self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
         }
     }
@@ -1699,8 +1773,13 @@ impl Runtime {
     /// that the host converges on the core's settled values (ADR-023).
     ///
     /// Restoring into a fresh runtime (after a crash) has no memory of observations: the host
-    /// re-observes what it mirrors. In-flight tasks keep the objects they already hold; those
-    /// stores are detached and no longer deliver change-sets.
+    /// re-observes what it mirrors. Detached tasks keep the objects they already hold; those
+    /// stores are detached and no longer deliver change-sets. **In-flight calls and streams
+    /// whose receiver the restore replaced or invalidated are cancelled** (ADR-023): a plain
+    /// call is answered with status 3, exactly once, a stream ends with an error item
+    /// (`"cancelled: ..."`), and their tasks are dropped, so none can report success for a write
+    /// the restored store never saw. Calls without a receiver (free functions, constructors)
+    /// carry on.
     ///
     /// All stores are built before anything is replaced: on error the runtime is unchanged.
     pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError> {
@@ -1789,7 +1868,10 @@ impl Runtime {
         self.objects
             .raise_generation_floor(snapshot.generation_floor.max(max_generation));
         let mut observed = HashMap::new();
+        // Which object each handle named before the restore (by address, for the check below).
+        let mut before: HashMap<u64, usize> = HashMap::new();
         for cleared in self.objects.clear() {
+            before.insert(cleared.handle.0, object_address(&cleared.object));
             if let Some(cell) = cleared.object.as_store() {
                 cell.set_handle(0);
                 observed.insert(cleared.handle.0, cleared.observed);
@@ -1805,6 +1887,11 @@ impl Runtime {
                 );
             }
         }
+
+        // Calls and streams that were running on an object this restore replaced or invalidated
+        // must not go on: they would finish on a store the handle no longer names and report
+        // success for a write the restored store never saw (ADR-023, M3).
+        self.cancel_calls_replaced_by_restore(&before);
 
         // Phase 3: re-emit what was observed, through the path `observe` uses (ADR-023, L9):
         // one change-set per re-observed store, each built and handed to the host under that
