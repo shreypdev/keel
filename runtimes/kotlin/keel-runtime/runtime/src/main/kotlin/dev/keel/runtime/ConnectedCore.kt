@@ -70,6 +70,8 @@ internal class ConnectedCore(
     private val pending = ConcurrentHashMap<Int, Pending>()
     private val closed = AtomicBoolean(false)
 
+    private val closeLock = Any()
+
     @Volatile
     private var closeCause: Throwable? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("keel-ports"))
@@ -295,8 +297,12 @@ internal class ConnectedCore(
     }
 
     private fun shutDown(cause: Throwable?) {
-        if (!closed.compareAndSet(false, true)) return
-        closeCause = cause
+        // The cause must be visible before `closed` is, or a caller that sees the closed flag reports no cause.
+        synchronized(closeLock) {
+            if (closed.get()) return
+            closeCause = cause
+            closed.set(true)
+        }
         KeelCore.forget(this)
         failAll(KeelException("this KeelCore was closed", cause))
         scope.cancel()

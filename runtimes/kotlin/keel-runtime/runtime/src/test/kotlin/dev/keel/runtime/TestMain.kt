@@ -40,6 +40,7 @@ fun main() {
         StoreTests(),
         PortTests(),
         InprocTransportTests(),
+        RemoteTransportTests(),
     )
     var failures = 0
     var cases = 0
