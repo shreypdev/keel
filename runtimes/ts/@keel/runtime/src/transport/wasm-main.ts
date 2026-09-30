@@ -96,6 +96,17 @@ const REQUIRED_FUNCTIONS = [
   "keel_stats_json",
 ] as const;
 
+/**
+ * `keel_alloc` (SPEC 7) traps when it cannot satisfy a request, so it never returns 0. A 0 is a
+ * module that broke that contract, and copying a payload to linear address 0 would overwrite the
+ * bottom of its shadow stack: fail (the caller's trap path closes the transport) instead.
+ */
+function allocate(e: CoreExports, len: number): number {
+  const ptr = e.keel_alloc(len);
+  if (ptr === 0) throw new Error(`keel_alloc(${len}) returned 0 instead of trapping`);
+  return ptr;
+}
+
 async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.Instance> {
   if (typeof WebAssembly !== "object") {
     throw new KeelTransportError("unsupported", "WebAssembly is not available on this platform");
@@ -368,7 +379,7 @@ export class WasmMainTransport implements Transport {
         ptr = this.#scratch(e, len);
       } else {
         owned = Math.max(len, 1);
-        ptr = e.keel_alloc(owned);
+        ptr = allocate(e, owned);
       }
       this.#bytes().set(bytes, ptr >>> 0);
       return call(e, ptr, len);
@@ -398,7 +409,7 @@ export class WasmMainTransport implements Transport {
       if (this.#scratchPtr !== 0) e.keel_free(this.#scratchPtr, this.#scratchCap);
       let cap = SCRATCH_MIN;
       while (cap < len) cap *= 2;
-      this.#scratchPtr = e.keel_alloc(cap);
+      this.#scratchPtr = allocate(e, cap);
       this.#scratchCap = cap;
     }
     return this.#scratchPtr;

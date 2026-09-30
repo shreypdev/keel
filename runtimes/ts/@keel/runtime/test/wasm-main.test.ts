@@ -513,6 +513,21 @@ describe("failure", () => {
     await expect(core.call(FREE, STUB.ECHO, new Uint8Array(0))).rejects.toBeInstanceOf(KeelTransportError);
   });
 
+  it("a keel_alloc that returns 0 fails the transport instead of writing at linear address 0 (review L3)", async () => {
+    const onClose = vi.fn();
+    const { core, transport } = await boot({ onClose });
+    const exports = (transport.instance as WebAssembly.Instance).exports;
+    (exports.alloc_zero as WebAssembly.Global).value = 1;
+    // Only a payload above the scratch buffer's limit is allocated per call.
+    const big = new Uint8Array(100_000).fill(0xaa);
+    expect(() => core.callSync(FREE, STUB.ECHO, big)).toThrow(/keel_alloc\(\d+\) returned 0 instead of trapping/);
+    await microtasks();
+    expect(core.closed).toBe(true);
+    expect(onClose).toHaveBeenCalledOnce();
+    // Nothing was copied to linear address 0 (the bottom of a real module's shadow stack).
+    expect(new Uint8Array((exports.memory as WebAssembly.Memory).buffer, 0, 64).every((b) => b === 0)).toBe(true);
+  });
+
   it("close makes every later use fail and ignores the timers and polls still in flight", async () => {
     const { core, transport } = await boot();
     const pending = core.call(FREE, STUB.ECHO_ASYNC, bytesOf(1));
