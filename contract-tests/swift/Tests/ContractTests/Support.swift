@@ -118,8 +118,9 @@ func outcome<Value, Failure: Error>(_ body: () throws(Failure) -> Value) -> Resu
     }
 }
 
-/// The asynchronous form of `outcome`.
-func outcome<Value, Failure: Error>(_ body: () async throws(Failure) -> Value) async -> Result<Value, Failure> {
+/// The asynchronous form of `outcome`; it runs on the main actor, like the scenarios.
+@MainActor
+func outcome<Value, Failure: Error>(_ body: @MainActor () async throws(Failure) -> Value) async -> Result<Value, Failure> {
     do {
         return .success(try await body())
     } catch {

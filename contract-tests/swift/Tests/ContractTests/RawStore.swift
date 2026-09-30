@@ -22,7 +22,7 @@ final class RawStore {
     private(set) var entries: [Entry] = []
     /// Called for every entry as it arrives, on the main actor, from inside the mirror's apply:
     /// the place to test what an observer may do (S04 calls back into the core from here).
-    var onEntry: ((Entry) -> Void)?
+    var onEntry: (@MainActor (Entry) -> Void)?
 
     /// Constructs `type` with `method` and `args`, and registers for its change-sets. It does not
     /// observe yet; call `observe()`.
