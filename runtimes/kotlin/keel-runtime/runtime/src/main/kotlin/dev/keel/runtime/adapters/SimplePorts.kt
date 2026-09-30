@@ -138,12 +138,24 @@ public object JulLog {
  * (SPEC 5.8): the core asks for `set(timer_id, delay_ms)`, and when the delay has passed [fire] is called
  * with the id (which must tell the core: `KeelCore.timerFired`).
  *
+ * The thread starts with the first timer and exits after the adapter has been idle for a few seconds
+ * (never while a timer is pending), so an adapter nobody closes does not keep a thread around.
+ *
  * @param fire called on the timer thread when a timer is due; exceptions are logged and dropped.
  */
-public class TimerAdapter(private val fire: (UInt) -> Unit) : AutoCloseable {
+public class TimerAdapter internal constructor(private val fire: (UInt) -> Unit, private val idleMillis: Long) : AutoCloseable {
+    /** A timer adapter that calls [fire] when a timer is due. */
+    public constructor(fire: (UInt) -> Unit) : this(fire, IDLE_MILLIS)
+
     private val executor: ScheduledThreadPoolExecutor by lazy {
-        ScheduledThreadPoolExecutor(1, NamedDaemonThreads("keel-timer")).also { it.removeOnCancelPolicy = true }
+        ScheduledThreadPoolExecutor(1, NamedDaemonThreads("keel-timer")).also {
+            it.removeOnCancelPolicy = true
+            it.setKeepAliveTime(idleMillis, TimeUnit.MILLISECONDS)
+            it.allowCoreThreadTimeOut(true) // ThreadPoolExecutor keeps the last worker while delayed tasks are queued
+        }
     }
+
+    internal val hasLiveThread: Boolean get() = executor.poolSize > 0
 
     /** Schedules timer [timerId] to fire after [delayMs] milliseconds. */
     public fun set(timerId: UInt, delayMs: ULong) {
@@ -164,6 +176,10 @@ public class TimerAdapter(private val fire: (UInt) -> Unit) : AutoCloseable {
     /** Cancels every pending timer and stops the timer thread. */
     override fun close() {
         executor.shutdownNow()
+    }
+
+    private companion object {
+        const val IDLE_MILLIS: Long = 5_000L
     }
 
     /** This adapter as a sync [PortImpl] for [StandardPorts.Timer]. */

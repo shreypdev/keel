@@ -60,10 +60,21 @@ class StreamTests : Suite() {
             var producer: FakeTransport.StreamProducer? = null
             t.onCall = { call -> producer = t.serveStream(call, List(40) { item(it) }) }
             attach(t).use { core ->
-                val items = runBlocking { core.stream(TARGET, METHOD, NO_BYTES).map { decode(it) }.toList() }
+                val creditsWhenItemArrived = ArrayList<Int>()
+                val items = runBlocking {
+                    val out = ArrayList<Int>()
+                    core.stream(TARGET, METHOD, NO_BYTES).collect {
+                        creditsWhenItemArrived.add(t.credits.size)
+                        out.add(decode(it))
+                    }
+                    out
+                }
                 assertEq((0 until 40).toList(), items)
                 // 16 up front; then after the 9th, 17th, 25th and 33rd item the outstanding credit dropped below 8.
                 assertEq(listOf(16u, 8u, 8u, 8u, 8u), t.credits.map { it.second })
+                // ...and each top-up went out at exactly that moment: items 1-9 saw one grant, 10-17 two, and so on.
+                val expected = (1..40).map { n -> if (n <= 9) 1 else if (n <= 17) 2 else if (n <= 25) 3 else if (n <= 33) 4 else 5 }
+                assertEq(expected, creditsWhenItemArrived)
                 assertTrue(t.credits.all { it.first == t.calls.single().callId })
                 assertEq(40, producer!!.sent)
             }

@@ -200,6 +200,19 @@ class AdapterTests : Suite() {
             assertEq(3, fired.size, "the far-future timer was cancelled by close")
         }
 
+        case("Timer: the thread exits when idle, but never while a timer is still pending") {
+            val fired = CopyOnWriteArrayList<UInt>()
+            val timers = TimerAdapter({ fired.add(it) }, 60L)
+            timers.set(1u, 400uL) // pending for much longer than the idle timeout
+            Thread.sleep(200)
+            assertTrue(timers.hasLiveThread, "the worker must stay while a timer is pending")
+            eventually("the pending timer still fires") { fired.contains(1u) }
+            eventually("the idle worker exits") { !timers.hasLiveThread }
+            timers.set(2u, 10uL) // and a new one starts on demand
+            eventually("a timer set after the thread exited fires") { fired.contains(2u) }
+            timers.close()
+        }
+
         case("Timer: a failing callback is logged and does not stop later timers") {
             val fired = CopyOnWriteArrayList<UInt>()
             val timers = TimerAdapter { id -> if (id == 1u) throw IllegalStateException("core closed") else fired.add(id) }

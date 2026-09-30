@@ -35,8 +35,24 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
+// The generated Kotlin of bindgen's `full` golden case and its execution test are compiled and run against this
+// runtime as part of the tests (GoldenFullTests). Skipped when the repository layout is not around.
+val bindgenTests = rootProject.projectDir.resolve("../../../crates/keel-bindgen/tests")
+val goldenFull = bindgenTests.resolve("golden/full/kotlin/src/main/kotlin")
+val goldenFullRun = bindgenTests.resolve("fixtures/kotlin-run/full")
+if (goldenFull.isDirectory && goldenFullRun.isDirectory) {
+    kotlin.sourceSets.named("test") {
+        kotlin.srcDir(goldenFull)
+        kotlin.srcDir(goldenFullRun)
+    }
+}
+
 tasks.test {
     useJUnitPlatform()
+    // For the JNI smoke test: -Pkeel.native.dir=target/debug [-Pkeel.native.name=keel_ffi]
+    (findProperty("keel.native.dir") as String?)?.let { systemProperty("java.library.path", it) }
+    (findProperty("keel.native.name") as String?)?.let { systemProperty("keel.native.name", it) }
+    (findProperty("keel.native.path") as String?)?.let { systemProperty("keel.native.path", it) }
     testLogging {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
