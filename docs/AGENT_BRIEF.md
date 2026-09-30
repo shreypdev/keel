@@ -1,26 +1,37 @@
-# Brief for implementation agents
+# Brief for implementation agents (local workflow)
 
 You are one engineer on the Keel team. You own exactly the piece named in your task and nothing else.
 
-## Before you start
-1. Read `CLAUDE.md` (constitution and standards) and the sections of `docs/SPEC.md` your task names. The spec is binding; if you believe it is wrong, implement it as written and list the concern in your report.
-2. Look at `contract-tests/wire-vectors.json` if your task touches the wire.
-3. Your working directory is a git worktree of the Keel repository on its own branch. Work only inside the paths your task names. Do not edit other crates or packages. Edit the root `Cargo.toml` only to add a missing `[workspace.dependencies]` entry, and say so in your report.
+## Where the code lives and how you touch it
 
-## While you work
-* Small, coherent commits with `type(scope): summary` messages (`feat`, `fix`, `test`, `docs`, `chore`).
-* Rust: edition 2024, `#![forbid(unsafe_code)]` (except `keel-ffi`), `cargo clippy -p <crate> --all-targets -- -D warnings` clean, `cargo fmt`, every `pub` item documented, unit tests next to code, integration tests in `tests/`. Use `-p <crate>` to keep builds fast. No new dependencies beyond the workspace list unless the task allows it.
-* TypeScript: strict, ESM, zero runtime dependencies in the runtime package, vitest for tests.
-* Kotlin: compile with `scripts/kotlinc.sh` (works with or without a real `kotlinc`); stdlib + kotlinx-coroutines only.
-* Swift: Swift 6 language mode, strict concurrency; there is no Swift compiler in this environment, so write conservatively, avoid clever generics, and desk-check every file twice.
-* Never leave `TODO`, `unimplemented!()` or `todo!()` in committed code. If something is out of scope, leave a documented, tested, explicit limitation instead.
-* Quality bar: this is a framework other engineers will trust blindly. Names are precise, errors are typed and descriptive, tests cover edge cases (empty, max, malformed, unicode), and performance-sensitive paths avoid needless allocation.
+The repository lives on Shrey's Mac and is reached ONLY through the `mcp__remote-devices__device_bash` tool. Your `Read`, `Write`, `Edit`, `Glob`, `Grep` and `Bash` tools operate on a different machine and are useless for this repo: do not use them for project files.
+
+* Main repo: `$HOME/mnt/src/keel` (main branch; do not commit there yourself).
+* Your worktree: the path your task names, `$HOME/mnt/src/.work/<slug>`, on branch `wt/<slug>`. Work only there.
+* Every `device_bash` call is a fresh shell with a hard limit of about 180 s, after which every process it started is killed (no background jobs survive). Therefore:
+  * start every call with `cd $HOME/mnt/src/.work/<slug> && source scripts/env.sh` (Rust nightly with wasm32 via `-Z build-std`, kotlinc, node, java are on PATH after that);
+  * run cargo through the slice runner: `scripts/lb.sh cargo test -p <crate>`; when it prints `SLICE-TIMEOUT`, run the exact same command again (compilation progress is cached) until it prints `DONE`; build one crate at a time (`-p`) to keep slices short;
+  * keep any single command under ~150 s; split long test suites with filters if needed.
+* Read files with `cat -n`, `sed -n 'a,bp'`, `grep -n`. Write files with heredocs (`cat > path <<'EOF' … EOF`). Edit files with small Python scripts (read → `str.replace` with an assert that the anchor occurs exactly once → write) or `sed -i` for one-liners. Never retype a whole file from memory to change three lines. Always `cat -n` the region after an edit to verify it.
+* Never run `rm -rf` outside your worktree's `target/` and `node_modules/`.
+* Commit on your branch with `git add -A && git commit -m "type(scope): summary"` (small, coherent commits). Do not merge, rebase onto, or push to `main`; the integrator merges.
+
+## Before you start
+1. Read `CLAUDE.md` and the sections of `docs/SPEC.md` your task names. The spec is binding; if you believe it is wrong, implement it as written and list the concern in your report.
+2. Read the existing code you depend on (its README and public API) before writing against it.
+
+## Quality bar
+* Rust: edition 2024, `#![forbid(unsafe_code)]` (except `keel-ffi`), `cargo clippy -p <crate> --all-targets -- -D warnings` clean, `cargo fmt`, every `pub` item documented, tests next to code plus `tests/` integration tests, proptest where inputs are open-ended. No new dependencies beyond the workspace list unless the task allows it. Must also compile for `wasm32-unknown-unknown` when the crate is part of the core (`scripts/lb.sh cargo build -p <crate> --target wasm32-unknown-unknown -Z build-std=std,panic_abort`).
+* TypeScript: strict, ESM, zero runtime dependencies in `@keel/runtime`, vitest.
+* Kotlin: stdlib + kotlinx-coroutines only; compile with `kotlinc` (on PATH via env.sh); tests run through the package's `scripts/test-local.sh`.
+* Swift: Swift 6 language mode, strict concurrency; no compiler here, so desk-check twice and list uncertain constructs in your report.
+* Never leave `TODO`, `unimplemented!()`, `todo!()` or stubs in committed code.
+* This is a framework other engineers will trust blindly: precise names, typed descriptive errors, edge cases (empty, max, malformed, unicode), no needless allocation on hot paths.
 
 ## When you finish
-Run the full check for your piece (build, clippy/typecheck, tests) and make sure the tree is committed. Then report, in this order:
-1. Branch name (`git rev-parse --abbrev-ref HEAD`) and worktree path.
+Run the full check for your piece and make sure the tree is committed. Report, in this order, in under 60 lines:
+1. Branch and worktree path.
 2. What you built (files, public API summary).
-3. Test summary (counts, what they cover).
+3. Test summary (counts, what they cover, which checks ran green).
 4. Deviations from the spec or the task, and why.
 5. Open questions or concerns for the reviewer.
-Keep the report under 60 lines.
