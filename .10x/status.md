@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,836 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,879 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 832 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -30,11 +30,20 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- keel-macros review fixes (H1 schema-identity checks, H2 typed port errors; ADR-023) — `wt/macros-fixes`.
 - playground: core + 3 apps + §14 contract scenarios ×3 — `wt/playground` (agent).
 - re-reviews in flight: keel-runtime fixes; adversarial review of keel-ffi.
 
 ## Landed since takeover
+
+- **keel-macros fix round merged** (ADR-025): compile-time schema-identity checks
+  (E0060/E0061), typed port outcomes via From<PortError> (E0033; HttpError/FsError map
+  Unavailable etc. — wire unchanged), store error-recovery without cascades, seven new
+  E-codes, diagnostics polish. BREAKING for users: a port `Result` method's error type now
+  needs `From<PortError>`. Re-review in flight.
+- **keel-runtime re-review**: all original findings CLOSED; new NF1 (hostile snapshot
+  floor exhausts process-wide generations permanently) fixed by the integrator with a
+  2^24-headroom ceiling + tests; NF2 (eviction WARN flood) rate-limited to 1/1024.
+  v1.x items: L3 release-build silent drop of off-runtime writes; L2 init-hook timing.
 
 - **bindgen stdlib filter merged** (ADR-024): per-app bindings no longer duplicate the
   standard ports/records — references point at each runtime's own types (exact-shape
