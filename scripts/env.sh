@@ -23,6 +23,15 @@ elif [ -d "$HOME/.cargo/bin" ]; then
   export KEEL_WASM_BUILD_STD=""
 fi
 
+# --- Swift / Xcode ---------------------------------------------------------------------------
+# XCTest and the simulators need full Xcode. If it is installed but xcode-select still points at
+# CommandLineTools, DEVELOPER_DIR routes swift/xcodebuild there without needing sudo.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+  case "$(xcode-select -p 2>/dev/null)" in
+    */CommandLineTools) export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" ;;
+  esac
+fi
+
 # --- JVM -------------------------------------------------------------------------------------
 if [ -d "/opt/homebrew/opt/openjdk@17/bin" ] && ! command -v java >/dev/null 2>&1; then
   export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
