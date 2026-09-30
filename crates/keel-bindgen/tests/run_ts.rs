@@ -104,3 +104,8 @@ fn objects_map_calls_and_errors() {
 fn stores_mirror_every_signal_type() {
     run("stores", "stores", &[], |_| {});
 }
+
+#[test]
+fn standard_types_come_from_the_runtime() {
+    run("stdlib", "stdlib", &[], |_| {});
+}

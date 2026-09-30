@@ -4,6 +4,7 @@
 
 pub mod emit;
 pub mod naming;
+pub mod stdlib;
 
 mod kotlin;
 mod model;
@@ -91,6 +92,11 @@ pub struct Generator {
     pub ts_js_number: bool,
     /// `version` of the generated `package.json`.
     pub package_version: String,
+    /// Declare the standard library (the ten standard ports and their eight types) like any
+    /// other item. Off by default: every runtime already ships them, so generating them again
+    /// would declare a second `FsError` in the app (see [`stdlib`] and ADR-024). Turn it on only
+    /// to generate the standard library itself, as the `keel-ports` tests do.
+    pub emit_standard_library: bool,
 }
 
 impl Generator {
@@ -106,6 +112,7 @@ impl Generator {
             ts_package: crate_name.replace('_', "-").to_ascii_lowercase(),
             ts_js_number: false,
             package_version: "0.1.0".to_owned(),
+            emit_standard_library: false,
         }
     }
 
@@ -119,13 +126,13 @@ impl Generator {
         }
     }
 
-    /// Validates `schema` (see [`validate`]).
+    /// Validates `schema` (see [`validate`]), for this configuration.
     ///
     /// # Errors
     ///
     /// Returns every problem found.
     pub fn validate(&self, schema: &Schema) -> Result<(), Vec<BindgenError>> {
-        validate(schema)
+        validate::validate_for(schema, self.emit_standard_library)
     }
 
     /// Generates the Swift package sources:
@@ -135,8 +142,11 @@ impl Generator {
     ///
     /// Returns the validation errors when the schema cannot be generated.
     pub fn swift(&self, schema: &Schema) -> Result<Vec<GeneratedFile>, Vec<BindgenError>> {
-        validate(schema)?;
-        Ok(swift::generate(&model::Model::new(schema), self))
+        self.validate(schema)?;
+        Ok(swift::generate(
+            &model::Model::new(schema, model::Lang::Swift, self.emit_standard_library),
+            self,
+        ))
     }
 
     /// Generates the Kotlin sources:
@@ -146,8 +156,11 @@ impl Generator {
     ///
     /// Returns the validation errors when the schema cannot be generated.
     pub fn kotlin(&self, schema: &Schema) -> Result<Vec<GeneratedFile>, Vec<BindgenError>> {
-        validate(schema)?;
-        Ok(kotlin::generate(&model::Model::new(schema), self))
+        self.validate(schema)?;
+        Ok(kotlin::generate(
+            &model::Model::new(schema, model::Lang::Kotlin, self.emit_standard_library),
+            self,
+        ))
     }
 
     /// Generates the TypeScript package: `src/{types,errors,objects,stores,ports,queries,ids,index}.ts`,
@@ -157,7 +170,10 @@ impl Generator {
     ///
     /// Returns the validation errors when the schema cannot be generated.
     pub fn typescript(&self, schema: &Schema) -> Result<Vec<GeneratedFile>, Vec<BindgenError>> {
-        validate(schema)?;
-        Ok(ts::generate(&model::Model::new(schema), self))
+        self.validate(schema)?;
+        Ok(ts::generate(
+            &model::Model::new(schema, model::Lang::TypeScript, self.emit_standard_library),
+            self,
+        ))
     }
 }

@@ -13,3 +13,9 @@ readme = "README.md"
 keel-meta = { workspace = true }
 serde_json = { workspace = true }
 heck = { workspace = true }
+
+[dev-dependencies]
+# The `stdlib` golden case starts from the registrations of the real standard ports, and
+# tests/stdlib.rs checks the standard-library table against them (keel-ports itself
+# dev-depends on this crate, which Cargo allows).
+keel-ports = { workspace = true }

@@ -143,7 +143,7 @@ macro_rules! golden_cases {
 }
 
 golden_cases!(
-    records, enums, errors, objects, stores, ports, queries, full
+    records, enums, errors, objects, stores, ports, queries, full, stdlib
 );
 
 #[test]
@@ -153,7 +153,7 @@ fn every_case_has_a_test() {
     assert_eq!(
         listed,
         [
-            "records", "enums", "errors", "objects", "stores", "ports", "queries", "full"
+            "records", "enums", "errors", "objects", "stores", "ports", "queries", "full", "stdlib"
         ]
     );
 }

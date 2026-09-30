@@ -61,11 +61,27 @@ A constructor called `new` becomes `init` (Swift), `create` plus a convenience c
 
 A `Result<T, E>` becomes `throws(E)` (Swift, unless `Generator::swift_typed_throws` is off), a thrown `E` (Kotlin) and a rejection with `E` (TypeScript). Typed throws cannot express anything but `E`: in typed mode a core panic, a malformed reply or a cancelled `Task` awaiting such a method stops the process through `keelUnexpected`. Turn the option off (`throws`, the original error rethrown) for code that relies on structured cancellation. Asynchronous Swift methods without a `Result` use plain `throws`, so cancellation propagates there in both modes.
 
+### The standard library
+
+Every core links `keel-ports`, so its schema contains the ten standard ports (`Clock`, `Rng`, `Log`, `Http`, `Kv`, `SecureStore`, `Fs`, `Timer`, `Connectivity`, `Lifecycle`) and the eight types they exchange (`HttpMethod`, `Header`, `HttpRequest`, `HttpResponse`, `HttpError`, `FsError`, `NetKind`, `AppState`), and the schema hash covers them. The platform runtimes already implement the ports and ship the types, so the generators **leave them out** of an app's bindings and let references resolve to the runtime's own (ADR-024, SPEC 10.5):
+
+| | The standard ports | A reference to a standard type |
+|---|---|---|
+| TypeScript | not generated | `import { type HttpRequest, HttpRequestCodec } from "@keel/runtime"` |
+| Kotlin | not generated | `import dev.keel.runtime.adapters.HttpRequest` (its companion is the codec) |
+| Swift | not generated | `AppState` is `KeelRuntime.KeelAppState`; the runtime keeps the other seven internal, so the ones something refers to are declared in the app's module |
+
+Only an **exact** match is left out: same name, same id and same shape (`keel_bindgen::stdlib` holds the table, ids pinned as hex and checked against `keel-ports`). Ids are derived from names, so an app type that only shares a name, `struct HttpRequest { url: String }` for example, has another shape and is generated as the app's own; one with a standard name and another id (a hand-written schema) is E0052. A standard type that refers to another (`HttpRequest` to `Header`) is left out only while that one is. `validate` accepts the standard entries, and an app may have a record named like a standard *port* (`Timer`, `Log`): the ports are not declared, so they claim no names.
+
+`Generator::emit_standard_library` declares everything as ordinary items; `keel-ports` uses it to prove its own schema generates in all three languages.
+
 ## The runtime API the output depends on
 
 SPEC section 17 lists the base classes; these are the names generated code actually calls, including the few the specification does not spell out (marked *addition*). The tests compile and run the output against the real wire layers plus hand-written stand-ins of exactly this surface (`tests/fixtures/`).
 
 **Wire layer (exists today).** TypeScript `codecs`, `Codec<T>`, `KeelWriter`, `KeelReader`, `encodeValue`, `decodeValue`, `decodePatch`, `applyPatch`, `PatchError`, `WireError`, `ChangeOp`, `CallTarget`, `ReplyStatus`, `ALL_SIGNALS`; Kotlin `Codecs`, `KeelCodec`, `KeelWriter`, `KeelReader`, `KeyedPatch`, `WireException`, `Payloads.{CallTarget,ChangeOp,ReplyStatus}`, `Handle`, `Timestamp`, `decodeAll`, `encodeToByteArray`; Swift `KeelCodec`, `KeelWriter`, `KeelReader`, `KeelBytes`, `KeelHandle`, `WireError`, `PatchOp`, `decodePatch`, `applyPatch`, `PatchError`, `CallTarget`, `ChangeOp`, `ReplyStatus`, `Observe.allSignals`.
+
+**Standard types (SPEC 8).** TypeScript `HttpMethod`, `Header`, `HttpRequest`, `HttpResponse`, `NetKind`, `AppState`, `HttpError`, `FsError` and their `<Name>Codec` (`adapters/types.ts`, `adapters/codecs.ts`, exported from `@keel/runtime`); Kotlin the same eight in `dev.keel.runtime.adapters`, each with a companion `KeelCodec`; Swift `KeelAppState`. Generated code decodes a standard error at the call site (`decodeValue(HttpErrorCodec, ..)`, `HttpError.decodeAll(..)`) because these types have no `fromReply`.
 
 **Base classes (SPEC 17).** `KeelCore` (`callSync`, `call`, `stream`, `construct`, `observe`, `mirror`, `registerPort`, `shared`), `KeelObject`, `KeelStore` (Swift `apply`, Kotlin `apply` and `signal(initial)`, TypeScript `_apply` and `_signals`), `Signal<T>`, `KeelError`, `KeelReplyError` / `KeelReplyException`, `KeelPort`, `KeelRecord`, `KeelEnum`, `KeelException`, `PortImpl`.
 

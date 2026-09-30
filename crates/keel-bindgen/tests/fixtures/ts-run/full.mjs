@@ -217,10 +217,10 @@ assert.equal(errors.TodoError.fromReply(plain), plain);
 // ----- ports ------------------------------------------------------------------------------
 
 {
-  const clock = ports.clockPortImpl({ nowMs: () => 5n, monotonicNs: () => 6n });
+  const clock = ports.wallClockPortImpl({ nowMs: () => 5n, monotonicNs: () => 6n });
   assert.equal(clock.sync, true);
-  assert.equal(hex(clock.methods[KeelIds.Ports.Clock.nowMs]()), "0500000000000000");
-  assert.equal(hex(clock.methods[KeelIds.Ports.Clock.monotonicNs]()), "0600000000000000");
+  assert.equal(hex(clock.methods[KeelIds.Ports.WallClock.nowMs]()), "0500000000000000");
+  assert.equal(hex(clock.methods[KeelIds.Ports.WallClock.monotonicNs]()), "0600000000000000");
 
   let seenRequest;
   const http = ports.httpPortImpl({

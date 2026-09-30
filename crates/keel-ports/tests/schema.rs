@@ -373,7 +373,10 @@ fn the_schema_hash_and_canonical_json_are_locked() {
 #[test]
 fn bindgen_generates_all_three_languages_from_the_standard_schema() {
     let schema = schema();
-    let generator = Generator::for_crate("keel-ports");
+    // Apps leave the standard library out of their bindings (ADR-024); this test is about the
+    // library itself, so it asks for it.
+    let mut generator = Generator::for_crate("keel-ports");
+    generator.emit_standard_library = true;
     let swift = generator.swift(&schema).expect("Swift generation");
     let kotlin = generator.kotlin(&schema).expect("Kotlin generation");
     let ts = generator

@@ -24,6 +24,27 @@ use crate::model::{Model, MsgPart, NamedKind, Ret, doc_lines, parse_message};
 use crate::naming;
 use crate::{GeneratedFile, Generator};
 
+/// What turns a failed call's `error` into a typed error.
+enum TypedError {
+    /// An expression of the generated error class.
+    FromReply(String),
+    /// A standard error the runtime provides: test the reply status, decode the body.
+    Decode {
+        /// The test that the failure carries the typed error.
+        condition: String,
+        /// The decoded typed error.
+        decoded: String,
+    },
+}
+
+/// Where a named type is declared.
+enum Home {
+    /// A module of the generated package.
+    Local(Module),
+    /// `@keel/runtime`: a standard type the runtime provides.
+    Runtime,
+}
+
 /// The generated modules that can hold a named type.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Module {
@@ -115,11 +136,21 @@ fn mentions(ty: &TypeRef, pred: &dyn Fn(&str) -> bool) -> bool {
     }
 }
 
+/// The kind of a type declared in the generated package. The standard types the runtime
+/// provides are imported from `@keel/runtime` and cannot take part in a module cycle.
+fn local_kind(model: &Model, name: &str) -> Option<NamedKind> {
+    if model.external(name).is_some() {
+        None
+    } else {
+        model.kind(name)
+    }
+}
+
 fn types_and_errors_reference_each_other(model: &Model) -> bool {
-    let is_error = |n: &str| model.kind(n) == Some(NamedKind::Error);
+    let is_error = |n: &str| local_kind(model, n) == Some(NamedKind::Error);
     let is_type = |n: &str| {
         matches!(
-            model.kind(n),
+            local_kind(model, n),
             Some(NamedKind::Record | NamedKind::UnitEnum | NamedKind::DataEnum)
         )
     };
@@ -325,11 +356,16 @@ impl<'a> Ctx<'a> {
             .insert("KeelIds".to_owned());
     }
 
-    /// The module that defines the type `name`.
-    fn home(&self, name: &str) -> Option<Module> {
+    /// Where the type `name` is declared.
+    fn home(&self, name: &str) -> Option<Home> {
+        if self.model().external(name).is_some() {
+            return Some(Home::Runtime);
+        }
         match self.model().kind(name)? {
-            NamedKind::Record | NamedKind::UnitEnum | NamedKind::DataEnum => Some(Module::Types),
-            NamedKind::Error => Some(Module::Errors),
+            NamedKind::Record | NamedKind::UnitEnum | NamedKind::DataEnum => {
+                Some(Home::Local(Module::Types))
+            }
+            NamedKind::Error => Some(Home::Local(Module::Errors)),
             NamedKind::Object => None,
         }
     }
@@ -358,16 +394,54 @@ impl<'a> Ctx<'a> {
 
     /// Imports the type `name` for use in a type position.
     fn use_type(&mut self, name: &str) {
-        if let Some(home) = self.home(name) {
-            self.local_type(home, name);
+        match self.home(name) {
+            Some(Home::Local(home)) => self.local_type(home, name),
+            Some(Home::Runtime) => self.rt_type(name),
+            None => {}
         }
     }
 
     /// Imports the class, enum or codec value `symbol` defined next to the
     /// type `name`.
     fn use_value(&mut self, name: &str, symbol: &str) {
-        if let Some(home) = self.home(name) {
-            self.local_value(home, symbol);
+        match self.home(name) {
+            Some(Home::Local(home)) => self.local_value(home, symbol),
+            Some(Home::Runtime) => self.rt_value(symbol),
+            None => {}
+        }
+    }
+
+    /// How a failed call's `error` becomes the typed error `err`: a generated error class knows
+    /// how (`fromReply`); a standard error the runtime provides does not, so its codec decodes
+    /// the reply at the call site.
+    fn typed_error(&mut self, err: &str) -> TypedError {
+        if self.model().external(err).is_none() {
+            self.use_value(err, err);
+            return TypedError::FromReply(format!("{err}.fromReply(error)"));
+        }
+        self.rt_value("KeelReplyError");
+        self.rt_value("ReplyStatus");
+        self.rt_value("decodeValue");
+        let codec = format!("{err}Codec");
+        self.use_value(err, &codec);
+        TypedError::Decode {
+            condition: "error instanceof KeelReplyError && error.status === ReplyStatus.Error"
+                .to_owned(),
+            decoded: format!("decodeValue({codec}, error.body)"),
+        }
+    }
+
+    /// `throw <typed error>;` for the `catch (error)` block of a call.
+    fn throw_typed(&mut self, w: &mut CodeWriter, err: &str) {
+        match self.typed_error(err) {
+            TypedError::FromReply(expr) => w.line(format!("throw {expr};")),
+            TypedError::Decode { condition, decoded } => {
+                w.line(format!("throw {condition}"));
+                w.indented(|w| {
+                    w.line(format!("? {decoded}"));
+                    w.line(": error;");
+                });
+            }
         }
     }
 
@@ -518,10 +592,10 @@ impl<'a> Ctx<'a> {
         }
         let model = self.model();
         match self.module {
-            Module::Types => !mentions(t, &|n| model.kind(n) == Some(NamedKind::Error)),
+            Module::Types => !mentions(t, &|n| local_kind(model, n) == Some(NamedKind::Error)),
             Module::Errors => !mentions(t, &|n| {
                 matches!(
-                    model.kind(n),
+                    local_kind(model, n),
                     Some(NamedKind::Record | NamedKind::UnitEnum | NamedKind::DataEnum)
                 )
             }),
@@ -1559,7 +1633,6 @@ impl<'a> Ctx<'a> {
             ];
             let construct = format!("await {core}.construct");
             if let Some(err) = &err {
-                self.use_value(err, err);
                 w.line(format!("let {handle}: bigint;"));
                 try_catch(
                     w,
@@ -1571,7 +1644,7 @@ impl<'a> Ctx<'a> {
                             true,
                         )
                     },
-                    |w| w.line(format!("throw {err}.fromReply(error);")),
+                    |w| self.throw_typed(w, err),
                 );
             } else {
                 w.call(
@@ -1666,8 +1739,12 @@ impl<'a> Ctx<'a> {
                 );
                 let mut call_args = vec![source.clone(), codec];
                 if let Some(err) = &err {
-                    self.use_value(err, err);
-                    call_args.push(format!("(error) => {err}.fromReply(error)"));
+                    call_args.push(match self.typed_error(err) {
+                        TypedError::FromReply(expr) => format!("(error) => {expr}"),
+                        TypedError::Decode { condition, decoded } => {
+                            format!("(error) =>\n  {condition}\n    ? {decoded}\n    : error")
+                        }
+                    });
                 }
                 w.call("return decodeStream", &call_args, ";", true);
             });
@@ -1688,7 +1765,6 @@ impl<'a> Ctx<'a> {
             }
             let call = format!("await {core}.call");
             if let Some(err) = &err {
-                self.use_value(err, err);
                 let assign = if is_unit {
                     call.clone()
                 } else {
@@ -1698,7 +1774,7 @@ impl<'a> Ctx<'a> {
                 try_catch(
                     w,
                     |w| w.call(assign, &call_args, ";", true),
-                    |w| w.line(format!("throw {err}.fromReply(error);")),
+                    |w| self.throw_typed(w, err),
                 );
                 if let Ret::Result { ok, .. } = &ret {
                     if !is_unit {

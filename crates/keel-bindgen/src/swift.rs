@@ -132,7 +132,7 @@ impl Types<'_> {
             TypeRef::Option(inner) => format!("{}?", self.ty(inner)),
             TypeRef::Vec(inner) => format!("[{}]", self.ty(inner)),
             TypeRef::Map(k, v) => format!("[{}: {}]", self.ty(k), self.ty(v)),
-            TypeRef::Named(name) => name.clone(),
+            TypeRef::Named(name) => self.model.spelled(name).to_owned(),
             // Rejected by validation before generation starts.
             TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => "Never".to_owned(),
         }
@@ -228,6 +228,7 @@ impl Types<'_> {
         if depth > 8 {
             return "fatalError(\"recursive default\")".to_owned();
         }
+        let shown = self.model.spelled(name);
         match self.model.kind(name) {
             Some(NamedKind::Record) => {
                 let Some(record) = self.model.record(name) else {
@@ -238,7 +239,7 @@ impl Types<'_> {
                     .iter()
                     .map(|f| format!("{}: {}", id(&f.name), self.zero(&f.ty, depth + 1)))
                     .collect();
-                format!("{name}({})", args.join(", "))
+                format!("{shown}({})", args.join(", "))
             }
             Some(NamedKind::UnitEnum) => self
                 .model
@@ -255,21 +256,21 @@ impl Types<'_> {
                     return String::new();
                 };
                 if variant.fields.is_empty() {
-                    format!("{name}.{}", id(&variant.name))
+                    format!("{shown}.{}", id(&variant.name))
                 } else if variant.tuple {
                     let args: Vec<String> = variant
                         .fields
                         .iter()
                         .map(|f| self.zero(&f.ty, depth + 1))
                         .collect();
-                    format!("{name}.{}({})", id(&variant.name), args.join(", "))
+                    format!("{shown}.{}({})", id(&variant.name), args.join(", "))
                 } else {
                     let args: Vec<String> = variant
                         .fields
                         .iter()
                         .map(|f| format!("{}: {}", id(&f.name), self.zero(&f.ty, depth + 1)))
                         .collect();
-                    format!("{name}.{}({})", id(&variant.name), args.join(", "))
+                    format!("{shown}.{}({})", id(&variant.name), args.join(", "))
                 }
             }
             Some(NamedKind::Object) | None => String::new(),
@@ -294,6 +295,9 @@ impl Types<'_> {
         match t {
             TypeRef::Option(i) | TypeRef::Vec(i) => self.codable(i, visiting),
             TypeRef::Map(k, v) => self.codable(k, visiting) && self.codable(v, visiting),
+            // A standard type the runtime provides is not `Codable` (`KeelAppState` is only a
+            // `KeelCodec`), so a struct that holds one cannot derive it.
+            TypeRef::Named(name) if self.model.external(name).is_some() => false,
             TypeRef::Named(name) => match self.model.kind(name) {
                 Some(NamedKind::UnitEnum) => true,
                 Some(NamedKind::Record) => {

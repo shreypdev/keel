@@ -736,13 +736,13 @@
   ],
   "ports": [
     {
-      "name": "Clock",
-      "port_id": 3449406606,
+      "name": "WallClock",
+      "port_id": 1420335306,
       "kind": "sync",
       "methods": [
         {
           "name": "now_ms",
-          "method_id": 3435744656,
+          "method_id": 627079776,
           "params": [],
           "returns": {
             "kind": "i64"
@@ -752,7 +752,7 @@
         },
         {
           "name": "monotonic_ns",
-          "method_id": 749909183,
+          "method_id": 1943345295,
           "params": [],
           "returns": {
             "kind": "u64"
