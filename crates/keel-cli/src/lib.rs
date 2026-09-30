@@ -45,6 +45,7 @@ mod builds;
 mod cargo;
 mod cli;
 mod commands;
+mod detect;
 pub mod config;
 pub mod error;
 mod fsutil;
