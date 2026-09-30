@@ -152,3 +152,43 @@ The diagnostics fall short of R8 wherever the error comes from rustc rather than
    - A store fallback that keeps `__keel_cell` and the store consts (M1).
    - `#[diagnostic::on_unimplemented]` branding for a missing store impl (M2) and for `Encode`/`Decode`/`Default` (M5).
    - UI tests that include the impl block.
+
+## Re-review (after merge 889905d, ADR-025)
+
+Method: I rebuilt `/private/tmp/kmr` against the merged checkout and re-ran all original inputs (`d01`-`d30`, `e01`-`e07`, `f01`-`f03`). New probes are `f04` and `h01`-`h04`; outputs are in `out/` and the pre-fix outputs in `out-old/`. The original rich fixture (`examples/g00`) now stops with exactly its six intended errors: E0007, E0001 (Handle), E0010, E0063, E0061 and E0033. With those items removed, the schema, dispatch and snapshot tests give the same bytes and replies as before. Suites run: keel-ports (encoding 20, wire_contract, ports_runtime 26), keel `e2e_todo` 20, and keel-bindgen (golden 12, stdlib 15, typecheck). All green, so the H2 `From` mapping changed no wire golden (**d**).
+
+| Finding | Status | Evidence |
+|---|---|---|
+| H1 | CLOSED | A user `Bytes` gives E0060, pointed at the field's type. A renamed import or alias gives E0061 at the written type, including across crates (`use keel::ports::HttpRequest as Req`, h02). The checks reach every position the schema records (h04, 13 hits): store signals, the keyed list, port parameters and returns, event ports, queries and mutations, stream items, enum variants and the constructor's error type. |
+| H2 | CLOSED for `Result` methods | A port error type without `From<PortError>` is E0033 at compile time (f02). With the impl, an unbound port replies `Error(Unavailable)`, and unbound `ctx.http()` gives a typed `HttpError::Network` (f04). Residual, documented in SPEC 5.7 and ADR-025: methods with no error channel still panic (E0062). Unbound `Kv.get` replies `Panic "... On the web this traps the core"`. The browser adapters register SecureStore only when `crypto.subtle` exists (`runtimes/ts/@keel/runtime/src/adapters/browser.ts:122`), so a web core using SecureStore on an insecure-context page still traps. This is a policy question for the runtime and ports owners, not a macro defect. |
+| M1 | CLOSED | e01 went from 4 errors to 1 (E0013 only). d10 gives one E0008. e02 gives E0001 plus one genuine error from the user's own `Signal::new(0)`. |
+| M2 | CLOSED | d24 gives one branded E0011 on the struct name. rustc's KeelObject/LazyList help lines still follow it. |
+| M3 | CLOSED | f01 gives E0001 (a `String` error type), E0042 twice and E0063. A bare `{}` gives E0010 and `Handle` gives E0001. For the cleaned fixture, bindgen and keel-meta both return OK. |
+| M4 | CLOSED | d01 gives E0007 for both `struct Marker;` and `struct Empty {}`. |
+| M5 | PARTIAL | d04 now gives one E0007, and d08 gives a branded E0013 on the field. d03: a sentinel `_keel_error_E0007_a_type_takes_one_keel_api_impl_block_Calc` now comes first, but 6 follow-on E0428/E0119/E0592 errors remain (5 before; the new `__KEEL_IS_OBJECT` adds one). **d05 is NOT CLOSED:** `#[keel::query]` on an associated fn still gives 9 rustc errors with no Keel code. |
+| L1-L4 | CLOSED | d02 and e04-e06 now compile. d09, d10, d11 and d16 give E0008/E0040. d17 compiles up to the fixture's own genuine `E: Clone` error. |
+| L5 | CLOSED except NF1 | d06 and d20 say the receiver is not supported, d13 names the alias, d14 gives E0004 "boxed stream", d15 gives E0010, d27 says "cannot be nested". |
+| L6 | CLOSED for stores | Store docs are the struct's docs, then the impl's. A plain object still takes docs only from its impl block (`Calc` docs are `""`; this is documented at `object.rs:1252`). |
+| L7 | CLOSED | SPEC 4.2 no longer mentions `keel::Error`. |
+
+Answers to the requested probes:
+- **(a) Spans and cross-crate use.** Every E0060/E0061 points at the written type token in the user's file. h01 compiles clean. It uses keel-ports types across crates (in a record, a signature, a store signal and a keyed list), `kmr::Todo`, and constructors spelled `-> Obj` and `Result<Obj, HttpError>` (no false E0064). It also covers a raw-identifier record `r#Match`, `Vec<Box<Self>>`, and records declared inside `fn main`.
+- **(b) Re-exports.** `pub use m::Item` used as `Item`, as `reexp::Item` and as `kmr::v2::Item` all PASS. The name is the same, so the id is the same.
+- **(c) Recovery stubs.** They hide nothing. h03 combines a failed record `A`, a record `B { a: A, x: NotKeel }`, an alias `C`, `fn(a: A) -> Result<u8, A>`, and a failed `#[keel::error] Bad`. Every genuine error is reported: A's E0001, Bad's E0001, `B.x`, C's E0061, and `A` rejected as an error type. A failed item emits no checks of its own, so A's second bad field (`f: NotKeel`) appears only after its first error is fixed: sequential, not hidden. Bad's stub keeps `KEEL_IS_ERROR = true`, so `Result<u8, Bad>` adds no false error.
+- **(d)** Covered in the method paragraph: no golden or e2e change.
+
+New confirmed findings (both Low):
+- **NF1:** `#[keel(key = "idd")]` (d12). The E0609 now points at the literal, which is better. But rustc's "a field with a similar name exists" suggestion rewrites it as `#[keel(key = id)]`, unquoted, and that is itself E0008. Fix: check that the field exists and brand the error, or give the field access a span that is not the literal's.
+- **NF2:** a non-Keel type in a field produces three errors for one mistake (h03, line 4). The branded E0001 appears twice (at the field name and at the type), plus an E0061 that reads "the schema records this type as `NotKeel`, but the type written here is not that type". That message is wrong: the type written is exactly `NotKeel`; it just is not declared with `#[keel::api]`. An object used as a value is doubled the same way (d07: E0001 plus E0064). Fix: when `KEEL_TYPE_ID` comes from the fallback (0), say "not declared with `#[keel::api]`", or skip the named assert for such types, which the `Encode` bound already rejects.
+
+**Verdict:** keel-macros is now sound for v1 on the schema/wire axis: H1 and H2 are closed and no new wire defect was found. The remaining items are diagnostic polish: d05, the d03 follow-on cascade, NF1 and NF2.
+
+## Integrator resolution (same day)
+
+Both Highs and all Mediums except one M5 sub-case are closed; keel-macros is sound for v1
+on the schema/wire side. Accepted as v1.x diagnostic polish: query-in-impl (rustc errors,
+no Keel code — macros cannot see their parent item), split-impl follow-on errors (6),
+re-review NF1 (rustc's unquoted `key = id` suggestion) and NF2 (duplicate/misworded
+errors for a non-Keel field type). Runtime/ports follow-up noted: the browser runtime
+registers SecureStore only under crypto.subtle, so SecureStore on a plain-http page traps
+a wasm core — document in the web adapter README when the playground lands.

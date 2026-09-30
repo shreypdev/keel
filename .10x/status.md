@@ -39,7 +39,8 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
   (E0060/E0061), typed port outcomes via From<PortError> (E0033; HttpError/FsError map
   Unavailable etc. — wire unchanged), store error-recovery without cascades, seven new
   E-codes, diagnostics polish. BREAKING for users: a port `Result` method's error type now
-  needs `From<PortError>`. Re-review in flight.
+  needs `From<PortError>`. Re-review CLOSED (sound for v1 on schema/wire); v1.x polish:
+  query-in-impl diagnostics, split-impl follow-ons, two Low wording nits.
 - **keel-runtime re-review**: all original findings CLOSED; new NF1 (hostile snapshot
   floor exhausts process-wide generations permanently) fixed by the integrator with a
   2^24-headroom ceiling + tests; NF2 (eviction WARN flood) rate-limited to 1/1024.
