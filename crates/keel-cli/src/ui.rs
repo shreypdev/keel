@@ -69,6 +69,15 @@ impl Ui {
         );
     }
 
+    /// A piece of advice, on stderr: not a result, and never a failure.
+    pub fn hint(&self, text: &str) {
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "{} {text}",
+            Ui::paint(self.color_err, "1;36", "hint:")
+        );
+    }
+
     /// Text styled as a heading on stdout.
     #[must_use]
     pub fn bold_out(&self, text: &str) -> String {

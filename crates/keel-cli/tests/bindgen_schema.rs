@@ -16,6 +16,7 @@ const GOLDEN_FILES: &[&str] = &[
     "swift/Package.swift",
     "swift/Sources/GoldenStores/Generated/Stores.swift",
     "kotlin/build.gradle.kts",
+    "kotlin/.gitignore",
     "kotlin/src/main/kotlin/dev/keel/generated/golden_stores/Stores.kt",
     "ts/package.json",
     "ts/src/stores.ts",

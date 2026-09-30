@@ -71,7 +71,7 @@ NEXT
     #[command(
         long_about = "Reads the core's schema and writes the bindings the app shells import:\n\
   <out>/swift/     a Swift package (Sources/<Module>/Generated/*.swift + Package.swift)\n\
-  <out>/kotlin/    a Gradle module (src/main/kotlin/<package>/*.kt + build.gradle.kts)\n\
+  <out>/kotlin/    a Gradle module (src/main/kotlin/<package>/*.kt, build.gradle.kts, and a .gitignore for Gradle's output)\n\
   <out>/ts/        an npm package (src/*.ts, package.json, tsconfig.json)\n\n\
 By default the schema comes from the core itself: the core is built as a host library with `keel-ffi` \
 linked in, loaded, and asked for `keel_schema_json` (docs/SPEC.md 13). With --schema it is read from a file \
@@ -95,12 +95,14 @@ DOC COMMENTS
     #[command(
         long_about = "Builds the core for each platform and puts the result where the app shells look for it (below \
 `build/`):\n\
-  ios       build/ios/KeelCore.xcframework            device + simulator slices, with the C header\n\
+  ios       build/ios/KeelCore.xcframework            device + simulator slices (no header: the Swift runtime declares the C ABI)\n\
   android   build/android/jniLibs/<abi>/libkeel_core.so   arm64-v8a and x86_64, 16 KB page aligned\n\
   web       build/web/keel_core.wasm                  release profile, then wasm-opt -Oz if installed\n\
   host      build/host/libkeel_core.{dylib,so}        for the JVM tests and keel bindgen\n\n\
 The library is the core plus the Keel C ABI, built from a small crate generated below `target/keel/` \
-(you never write it). Sizes are printed at the end next to the budgets of the design.",
+of Cargo's target directory (the workspace's, when the core is a member of one; you never write the crate). \
+Sizes are printed at the end next to the budgets of the design. A debug Android core is tens of megabytes per \
+ABI: package with `keel build --platform android --release`.",
         after_long_help = "\
 EXAMPLES
     keel build                                   every platform in keel.toml, debug

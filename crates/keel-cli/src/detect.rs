@@ -244,13 +244,22 @@ fn find_android_app(root: &Path, kotlin_dsl: bool) -> (Option<PathBuf>, Option<S
         let Ok(text) = fs::read_to_string(module.join(script)) else {
             continue;
         };
-        if text.contains("com.android.application") {
+        if applies_android_application(&text) {
             let id =
                 gradle_value(&text, "applicationId").or_else(|| gradle_value(&text, "namespace"));
             return (Some(module), id);
         }
     }
     (None, None)
+}
+
+/// Whether a Gradle script applies the Android application plugin (as opposed to declaring its
+/// version for the modules, which a root script does with `apply false`).
+fn applies_android_application(script: &str) -> bool {
+    script
+        .lines()
+        .filter(|line| line.contains("com.android.application"))
+        .any(|line| !line.replace(' ', "").contains("applyfalse"))
 }
 
 /// `applicationId = "x"` or `applicationId "x"` from a Gradle script; the key may sit inside a
@@ -354,6 +363,30 @@ mod tests {
         assert!(android.kotlin_dsl);
         assert_eq!(android.app_id.as_deref(), Some("com.acme.app"));
         assert_eq!(android.app_module, Some(root.join("android/app")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_root_script_that_only_declares_the_plugin_is_not_the_app_module() {
+        let root = unique_temp_dir("detect-android-root");
+        write(&root, "android/settings.gradle.kts", "include(\":app\")\n");
+        write(
+            &root,
+            "android/build.gradle.kts",
+            "plugins {\n    id(\"com.android.application\") version \"8.7.3\" apply false\n}\n",
+        );
+        write(
+            &root,
+            "android/app/build.gradle.kts",
+            "plugins { id(\"com.android.application\") }\nandroid { defaultConfig { applicationId = \"com.acme.app\" } }\n",
+        );
+        let android = detect(&root).android.expect("android");
+        assert_eq!(android.app_module, Some(root.join("android/app")));
+        assert_eq!(android.app_id.as_deref(), Some("com.acme.app"));
+        assert!(applies_android_application("id 'com.android.application'"));
+        assert!(!applies_android_application(
+            "id(\"com.android.application\") version \"8.7.3\" apply  false"
+        ));
         let _ = std::fs::remove_dir_all(root);
     }
 

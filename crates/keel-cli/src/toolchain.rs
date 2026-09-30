@@ -15,6 +15,25 @@ use crate::sys::{Os, Sys};
 /// Where Xcode is installed by default.
 pub const XCODE_DEVELOPER_DIR: &str = "/Applications/Xcode.app/Contents/Developer";
 
+/// The platform a toolchain note is about, so a build says only what concerns the platform being
+/// built: an iOS build has no use for where the Android NDK was found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Concern {
+    /// Xcode and Apple's tools (iOS).
+    Apple,
+    /// The Android SDK and NDK.
+    Android,
+}
+
+/// One non-obvious decision of [`Toolchain::detect`], in words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    /// What the decision is about.
+    pub concern: Concern,
+    /// The sentence.
+    pub text: String,
+}
+
 /// The environment child processes (cargo, xcodebuild, cargo-ndk) are started with, on top of
 /// the CLI's own.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -23,8 +42,9 @@ pub struct Toolchain {
     pub path_dirs: Vec<PathBuf>,
     /// Variables to set for child processes: only ones the user has not set themselves.
     pub env: Vec<(String, String)>,
-    /// One line per non-obvious decision, for `keel doctor` and `--verbose` output.
-    pub notes: Vec<String>,
+    /// One entry per non-obvious decision; a build prints the ones of its own platform
+    /// ([`Toolchain::notes_for`]).
+    pub notes: Vec<Note>,
     /// The Android SDK directory, if one was found.
     pub android_sdk: Option<PathBuf>,
     /// The Android NDK directory, if one was found.
@@ -69,7 +89,7 @@ impl Toolchain {
         if selected.is_empty() || selected.ends_with("CommandLineTools") {
             self.env
                 .push(("DEVELOPER_DIR".to_owned(), XCODE_DEVELOPER_DIR.to_owned()));
-            self.notes.push(format!(
+            self.note(Concern::Apple, format!(
                 "xcode-select points at {}, so DEVELOPER_DIR={XCODE_DEVELOPER_DIR} is used for Xcode tools (fix for good: `sudo xcode-select -s {XCODE_DEVELOPER_DIR}`)",
                 if selected.is_empty() { "nothing" } else { selected.as_str() }
             ));
@@ -84,10 +104,13 @@ impl Toolchain {
                     "ANDROID_HOME".to_owned(),
                     sdk.to_string_lossy().into_owned(),
                 ));
-                self.notes.push(format!(
-                    "ANDROID_HOME is not set; using the SDK found at {}",
-                    sdk.display()
-                ));
+                self.note(
+                    Concern::Android,
+                    format!(
+                        "ANDROID_HOME is not set; using the SDK found at {}",
+                        sdk.display()
+                    ),
+                );
             }
         }
         self.android_ndk = find_android_ndk(sys, self.android_sdk.as_deref());
@@ -100,12 +123,27 @@ impl Toolchain {
                     "ANDROID_NDK_HOME".to_owned(),
                     ndk.to_string_lossy().into_owned(),
                 ));
-                self.notes.push(format!(
-                    "ANDROID_NDK_HOME is not set; using the NDK found at {}",
-                    ndk.display()
-                ));
+                self.note(
+                    Concern::Android,
+                    format!(
+                        "ANDROID_NDK_HOME is not set; using the NDK found at {}",
+                        ndk.display()
+                    ),
+                );
             }
         }
+    }
+
+    fn note(&mut self, concern: Concern, text: String) {
+        self.notes.push(Note { concern, text });
+    }
+
+    /// The notes about `concern`, for the build of that platform to print.
+    pub fn notes_for(&self, concern: Concern) -> impl Iterator<Item = &str> {
+        self.notes
+            .iter()
+            .filter(move |n| n.concern == concern)
+            .map(|n| n.text.as_str())
     }
 
     /// Applies the environment to a command about to be run.
@@ -245,7 +283,8 @@ mod tests {
             "{tc:?}"
         );
         assert!(
-            tc.notes.iter().any(|n| n.contains("xcode-select -s")),
+            tc.notes_for(Concern::Apple)
+                .any(|n| n.contains("xcode-select -s")),
             "{tc:?}"
         );
     }
@@ -285,6 +324,36 @@ mod tests {
             tc.env
                 .iter()
                 .any(|(k, v)| k == "ANDROID_NDK_HOME" && v.ends_with("27.2.12479018"))
+        );
+    }
+
+    #[test]
+    fn notes_belong_to_one_platform_each() {
+        let sdk = "/opt/homebrew/share/android-commandlinetools";
+        let sys = FakeSys::macos()
+            .with_dir(XCODE_DEVELOPER_DIR)
+            .with_tool("xcode-select", "/usr/bin/xcode-select")
+            .with_output(
+                "xcode-select",
+                "-p",
+                "/Library/Developer/CommandLineTools\n",
+            )
+            .with_dir(&format!("{sdk}/ndk/27.2.12479018"));
+        let tc = Toolchain::detect(&sys);
+
+        let apple: Vec<&str> = tc.notes_for(Concern::Apple).collect();
+        assert_eq!(apple.len(), 1, "{apple:?}");
+        assert!(apple[0].contains("DEVELOPER_DIR"), "{apple:?}");
+        assert!(
+            apple.iter().all(|n| !n.contains("ANDROID")),
+            "an iOS build must not hear about the Android SDK: {apple:?}"
+        );
+
+        let android: Vec<&str> = tc.notes_for(Concern::Android).collect();
+        assert_eq!(android.len(), 2, "{android:?}");
+        assert!(
+            android.iter().all(|n| n.contains("ANDROID")),
+            "an Android build must not hear about Xcode: {android:?}"
         );
     }
 

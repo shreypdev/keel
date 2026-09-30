@@ -23,6 +23,7 @@ use crate::error::{CliError, Code, Result};
 use crate::fsutil::{create_dir_all, remove_dir_all, size_of};
 use crate::session::Session;
 use crate::sys::Os;
+use crate::toolchain::Concern;
 
 use super::{Artifact, unsupported};
 
@@ -81,7 +82,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             "install Xcode, then `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` (or set DEVELOPER_DIR)",
         ));
     }
-    for note in &session.toolchain.notes {
+    for note in session.toolchain.notes_for(Concern::Apple) {
         session.ui.detail(note);
     }
 
@@ -91,7 +92,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     } else {
         Profile::Dev
     };
-    let target_dir = session.target_dir();
+    let target_dir = session.target_dir()?;
     let stage =
         crate::shim::ios_stage_dir(&target_dir, &session.project.root).join(profile.dir_name());
     let env = vec![(
@@ -110,6 +111,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             features: Vec::new(),
             env: env.clone(),
             lib_name: "keel_core".to_owned(),
+            rustc_args: Vec::new(),
         })?;
         files
             .into_iter()

@@ -421,12 +421,18 @@ const README_ANDROID: &str = "
 ## Android
 
 ```sh
-keel build --platform android                 # build/android/jniLibs/<abi>/libkeel_core.so
+keel build --platform android --release       # build/android/jniLibs/<abi>/libkeel_core.so, about 1.5 MB per ABI
 cd android && ./gradlew :app:assembleDebug    # or open android/ in Android Studio
 ```
 
-The app module packages `build/android/jniLibs` and depends on the generated Kotlin module
-(`generated/kotlin`, included by `android/settings.gradle.kts`) and on the Keel runtime (`dev.keel:runtime`).
+`--release` is the packaging path. A plain `keel build --platform android` makes a debug core: fast to
+build, right for the dev loop, but tens of megabytes per ABI (42 MB for the playground), and the APK carries
+every byte of it. `keel build` says so when it makes one.
+
+The app module packages `build/android/jniLibs` (the path in `android/app/build.gradle.kts` is relative to
+the module, `android/app`; after a build `keel` checks that it still names the directory it wrote) and
+depends on the generated Kotlin module (`generated/kotlin`, included by `android/settings.gradle.kts`) and on
+the Keel runtime (`dev.keel:runtime`).
 The Kotlin runtime has no remote transport on Android yet, so `keel dev` serves the web and iOS shells and
 the JVM; an Android build always runs the core in process.
 ";
@@ -748,6 +754,29 @@ mod tests {
         assert!(app.contains("dev.keel:runtime:0.1.0\""), "{app}");
         let pkg = std::fs::read_to_string(root.join("web/package.json")).unwrap();
         assert!(pkg.contains("\"@keel/runtime\": \"^0.1.0\""), "{pkg}");
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn the_readme_documents_release_as_the_android_packaging_path() {
+        let parent = fsutil::unique_temp_dir("init-readme");
+        create_dir_all(&parent).unwrap();
+        run(&env(&parent), &args("demo", "android")).unwrap();
+        let root = parent.canonicalize().unwrap().join("demo");
+        let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
+        assert!(
+            readme.contains("keel build --platform android --release")
+                && readme.contains("packaging path")
+                && readme.contains("debug core"),
+            "{readme}"
+        );
+        // The Gradle line says what its path is relative to, and is the one `keel build` checks.
+        let app = std::fs::read_to_string(root.join("android/app/build.gradle.kts")).unwrap();
+        assert!(
+            app.contains("relative to this module")
+                && app.contains("jniLibs.srcDir(\"../../build/android/jniLibs\")"),
+            "{app}"
+        );
         let _ = std::fs::remove_dir_all(parent);
     }
 }

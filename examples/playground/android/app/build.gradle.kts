@@ -37,8 +37,10 @@ android {
     }
 
     sourceSets {
-        // `keel build --platform android` writes libkeel_core.so for every ABI here. The Kotlin
-        // runtime loads it with System.loadLibrary("keel_core").
+        // `keel build --platform android --release` writes libkeel_core.so for every ABI here. The
+        // Kotlin runtime loads it with System.loadLibrary("keel_core"). Like any path in this file
+        // it is relative to this module (android/app), not to android/; Gradle ignores a
+        // directory that does not exist, so `keel build` checks this line after building.
         getByName("main").jniLibs.srcDir("../../build/android/jniLibs")
     }
 }

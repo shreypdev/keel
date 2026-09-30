@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::config::ProjectConfig;
 use crate::error::{CliError, Result};
 use crate::names::Names;
+use crate::sys::Sys;
 
 /// The file that makes a directory a Keel project.
 pub const CONFIG_FILE: &str = "keel.toml";
@@ -79,21 +80,25 @@ impl Project {
         self.root.join(&self.config.build)
     }
 
-    /// Cargo's target directory for everything the CLI builds: `CARGO_TARGET_DIR` when set,
-    /// else `<root>/target`. The generated shim and dev runner live below it, in `keel/`.
+    /// The target directory the environment asks for: `CARGO_TARGET_DIR` when set (a relative one
+    /// is relative to the project root).
     #[must_use]
-    pub fn target_dir(&self) -> PathBuf {
-        match std::env::var_os("CARGO_TARGET_DIR").filter(|v| !v.is_empty()) {
-            Some(dir) => {
-                let dir = PathBuf::from(dir);
-                if dir.is_absolute() {
-                    dir
-                } else {
-                    self.root.join(dir)
-                }
-            }
-            None => self.root.join("target"),
-        }
+    pub fn explicit_target_dir(&self, sys: &dyn Sys) -> Option<PathBuf> {
+        let dir = PathBuf::from(sys.env("CARGO_TARGET_DIR")?);
+        Some(if dir.is_absolute() {
+            dir
+        } else {
+            self.root.join(dir)
+        })
+    }
+
+    /// The project's own target directory, `<root>/target`: where everything the CLI builds goes
+    /// unless the environment or the core's Cargo workspace says otherwise (see
+    /// [`crate::session::Session::target_dir`]). The generated shim and dev runner live below it,
+    /// in `keel/`.
+    #[must_use]
+    pub fn local_target_dir(&self) -> PathBuf {
+        self.root.join("target")
     }
 
     /// The names derived from the project name.

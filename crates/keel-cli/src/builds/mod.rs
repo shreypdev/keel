@@ -2,7 +2,7 @@
 //!
 //! | Target | Result below `build/` | How |
 //! |---|---|---|
-//! | `host` | `host/libkeel_core.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM) |
+//! | `host` | `host/libkeel_core.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM); on macOS its install name is `@rpath/libkeel_core.dylib`, not a path into `target/` |
 //! | `ios` | `ios/KeelCore.xcframework` | the shim as a staticlib for device and simulator, `xcodebuild -create-xcframework` |
 //! | `android` | `android/jniLibs/<abi>/libkeel_core.so` | `cargo ndk`, 16 KB page aligned |
 //! | `web` | `web/keel_core.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present |
@@ -10,6 +10,7 @@
 //! Every target prints the size of what it made, next to the budget of the blueprint.
 
 pub(crate) mod android;
+pub(crate) mod gradle;
 pub(crate) mod host;
 pub(crate) mod ios;
 pub(crate) mod web;
@@ -127,6 +128,17 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
         all.extend(produced);
     }
     Ok(all)
+}
+
+/// Advice after a build, one line each: a debug Android core is tens of megabytes per ABI, and
+/// `--release` is what gets packaged.
+#[must_use]
+pub fn hints(session: &Session<'_>, options: &Options, artifacts: &[Artifact]) -> Vec<String> {
+    let mut out = Vec::new();
+    if !options.release && options.targets.contains(&Target::Android) {
+        out.extend(android::hint(session, artifacts));
+    }
+    out
 }
 
 /// The summary table of a build: one row per artifact, with its budget where the blueprint has one.

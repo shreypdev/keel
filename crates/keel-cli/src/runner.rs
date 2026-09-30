@@ -78,10 +78,11 @@ pub fn parse_line(id: u64, line: &str) -> RunnerEvent {
 /// See [`Session::core`], [`shim::write_runner`] and [`crate::cargo::Cargo::build_executable`].
 pub fn build(session: &Session<'_>) -> Result<std::path::PathBuf> {
     let core = session.core()?;
-    let manifest = shim::write_runner(&session.target_dir(), &session.project.root, core)?;
+    let target_dir = session.target_dir()?;
+    let manifest = shim::write_runner(&target_dir, &session.project.root, core)?;
     session
         .cargo()
-        .build_executable(&manifest, &session.target_dir(), BIN)
+        .build_executable(&manifest, &target_dir, BIN)
 }
 
 /// A started runner.

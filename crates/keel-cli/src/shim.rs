@@ -105,14 +105,21 @@ fn render(template: &str, vars: &Vars) -> Result<String> {
     })
 }
 
-/// Seeds `dir/Cargo.lock` from the project's lock file so the shim resolves the same dependency
-/// versions the core was tested with. Cargo completes it with what the shim adds.
-fn seed_lockfile(dir: &Path, project_root: &Path) {
+/// Seeds `dir/Cargo.lock` from the project's lock file, or else from the lock file of the Cargo
+/// workspace the core belongs to, so the shim resolves the same dependency versions the core was
+/// tested with (and finds them already compiled in a shared target directory). Cargo completes it
+/// with what the shim adds.
+fn seed_lockfile(dir: &Path, project_root: &Path, core: &CoreInfo) {
     let target = dir.join("Cargo.lock");
     if target.exists() {
         return;
     }
-    for candidate in [project_root.join("Cargo.lock")] {
+    let candidates = std::iter::once(project_root.join("Cargo.lock")).chain(
+        core.workspace
+            .iter()
+            .map(|workspace| workspace.root.join("Cargo.lock")),
+    );
+    for candidate in candidates {
         if candidate.is_file() {
             let _ = std::fs::copy(&candidate, &target);
             return;
@@ -137,7 +144,7 @@ pub fn write_shim(
         .with("WASM_OPT_LEVEL", wasm_opt_level);
     write_if_changed(&dir.join("Cargo.toml"), &render(SHIM_MANIFEST, &vars)?)?;
     write_if_changed(&dir.join("src/lib.rs"), SHIM_LIB)?;
-    seed_lockfile(&dir, project_root);
+    seed_lockfile(&dir, project_root, core);
     Ok(dir.join("Cargo.toml"))
 }
 
@@ -163,7 +170,7 @@ pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> 
     write_if_changed(&dir.join("Cargo.toml"), &render(RUNNER_MANIFEST, &vars)?)?;
     let main = strip_block(RUNNER_MAIN, "ports", core.links_ports);
     write_if_changed(&dir.join("src/main.rs"), &render(&main, &vars)?)?;
-    seed_lockfile(&dir, project_root);
+    seed_lockfile(&dir, project_root, core);
     Ok(dir.join("Cargo.toml"))
 }
 
@@ -209,6 +216,7 @@ mod tests {
             },
             links_ports,
             local_dirs: vec![PathBuf::from("/proj/core")],
+            workspace: None,
         }
     }
 

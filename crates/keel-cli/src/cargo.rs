@@ -75,6 +75,17 @@ impl KeelSource {
     }
 }
 
+/// The Cargo workspace a core belongs to, when it is a member of one that is more than the core
+/// crate alone (the Keel repository's own `examples/`, a monorepo with the core as one member).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Workspace {
+    /// The directory of the workspace's `Cargo.toml`.
+    pub root: PathBuf,
+    /// Where Cargo builds the workspace (`target_directory` of `cargo metadata`, so `build.target-dir`
+    /// and `CARGO_TARGET_DIR` are already taken into account).
+    pub target_dir: PathBuf,
+}
+
 /// What the CLI needs to know about the core crate.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoreInfo {
@@ -94,6 +105,8 @@ pub struct CoreInfo {
     /// The directories of the path dependencies the core is built from (the core itself
     /// included, Keel's own crates excluded): what `keel dev` watches for changes.
     pub local_dirs: Vec<PathBuf>,
+    /// The workspace the core is a member of, unless the core is a workspace of its own.
+    pub workspace: Option<Workspace>,
 }
 
 /// Interprets the output of `cargo metadata --format-version 1` for the crate at `manifest`.
@@ -166,6 +179,7 @@ pub fn parse_metadata(meta: &Value, manifest: &Path) -> Result<CoreInfo> {
         .map(Path::to_path_buf)
         .unwrap_or_default();
     let local_dirs = local_dirs(meta, core_id, &by_id, &dir, &keel);
+    let workspace = workspace_of(meta, core_id, &dir);
 
     Ok(CoreInfo {
         package,
@@ -175,7 +189,21 @@ pub fn parse_metadata(meta: &Value, manifest: &Path) -> Result<CoreInfo> {
         keel,
         links_ports,
         local_dirs,
+        workspace,
     })
+}
+
+/// The workspace `core_id` (whose directory is `core_dir`) is a member of, when its root is not
+/// the core's own directory: a core that is a workspace of its own has nothing to share.
+fn workspace_of(meta: &Value, core_id: &str, core_dir: &Path) -> Option<Workspace> {
+    let member = meta["workspace_members"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|id| id.as_str() == Some(core_id));
+    let root = PathBuf::from(meta["workspace_root"].as_str()?);
+    let target_dir = PathBuf::from(meta["target_directory"].as_str()?);
+    (member && root != core_dir).then_some(Workspace { root, target_dir })
 }
 
 /// The directories of the path packages reachable from the core through normal dependencies,
@@ -368,6 +396,9 @@ pub struct Build {
     pub env: Vec<(String, String)>,
     /// The library name to look for among Cargo's artifacts.
     pub lib_name: String,
+    /// Arguments for rustc itself, after `--` (`-Clink-arg=...`): they apply to the shim only,
+    /// never to the dependencies, which stay shared with the workspace's own builds.
+    pub rustc_args: Vec<String>,
 }
 
 impl Cargo<'_> {
@@ -441,8 +472,11 @@ impl Cargo<'_> {
         if !build.features.is_empty() {
             cmd.arg("--features").arg(build.features.join(","));
         }
-        cmd.args(["--message-format", "json-render-diagnostics"])
-            .envs(build.env.iter().map(|(k, v)| (k, v)))
+        cmd.args(["--message-format", "json-render-diagnostics"]);
+        if !build.rustc_args.is_empty() {
+            cmd.arg("--").args(&build.rustc_args);
+        }
+        cmd.envs(build.env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
@@ -662,6 +696,50 @@ mod tests {
             "{ version = \"=0.1.0\", features = [\"jni\"] }"
         );
         assert!(!info.links_ports, "a dev-only edge does not count");
+    }
+
+    /// `meta()` with the workspace fields of `cargo metadata` added.
+    fn meta_in_workspace(root: &str, members: &[&str]) -> Value {
+        let mut m = meta(json!("registry+x"), "/r/Cargo.toml", false);
+        m["workspace_root"] = json!(root);
+        m["target_directory"] = json!(format!("{root}/target"));
+        m["workspace_members"] = json!(members);
+        m
+    }
+
+    #[test]
+    fn a_core_in_a_bigger_workspace_reports_its_target_directory() {
+        let m = meta_in_workspace("/proj", &["core 0.1.0", "keel 0.1.0"]);
+        let info = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap();
+        assert_eq!(
+            info.workspace,
+            Some(Workspace {
+                root: PathBuf::from("/proj"),
+                target_dir: PathBuf::from("/proj/target"),
+            })
+        );
+    }
+
+    #[test]
+    fn a_core_that_is_its_own_workspace_shares_nothing() {
+        let m = meta_in_workspace("/proj/core", &["core 0.1.0"]);
+        let info = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap();
+        assert_eq!(info.workspace, None);
+    }
+
+    #[test]
+    fn a_path_dependency_outside_the_members_is_not_a_workspace_member() {
+        // The workspace of some other crate that happens to depend on the core by path.
+        let m = meta_in_workspace("/elsewhere", &["other 0.1.0"]);
+        let info = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap();
+        assert_eq!(info.workspace, None);
+    }
+
+    #[test]
+    fn metadata_without_workspace_fields_means_no_workspace() {
+        let m = meta(json!("registry+x"), "/r/Cargo.toml", false);
+        let info = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap();
+        assert_eq!(info.workspace, None);
     }
 
     #[test]
