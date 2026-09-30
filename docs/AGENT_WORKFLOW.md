@@ -132,6 +132,38 @@ invite double-merges.
   commit; if you must stash, tag it (`git stash push -u -m "<slug>"`) and `apply` by
   SHA, never `pop`.
 
+## Bringing a branch across the rename
+
+The product was renamed to Undra (ADR-030) by `scripts/rename-keel-to-undra.sh`. A branch cut
+before the rename crosses it mechanically, in the same order the rename branch did:
+
+1. **Commit your work, and `git add` every new file.** The script only touches tracked files
+   (it lists untracked ones that need it as a warning).
+2. **`git merge main`.** For a conflict in a file you own, keep your side
+   (`git checkout --ours -- <file>`); in any other file, take main's (`--theirs`). A file you
+   added inside a directory the rename moved is placed at the new path by git
+   (`CONFLICT (file location)`): `git add` it there.
+3. **`scripts/rename-keel-to-undra.sh <your paths>`** — files or directories, relative to where
+   you stand, in either spelling (`site/blog`, `crates/undra-foo`). It `git mv`s every path
+   whose name carries the old name (deepest first) and rewrites the content of every tracked
+   text file under the paths; running it again changes nothing. Without paths it renames the
+   whole tree except `site/` and the launch-v2 planning records; naming a path lifts those two
+   exclusions, never the immutable history (`.10x/reviews/`, ADR-018 to ADR-030).
+4. **Regenerate, never hand-edit:** lockfiles (`cargo build`; `npm install --package-lock-only`
+   in each package), the goldens (`UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test golden`
+   and `-p undra-cli --test bindgen_schema`; `UPDATE_SNAPSHOTS=1 cargo test -p undra-macros
+   --lib`; `TRYBUILD=overwrite cargo test -p undra-macros --test compile_fail`;
+   `undra bindgen -C examples/playground --docs`), then `cargo fmt`. The regenerated output
+   differs from the script's only in import order (the new name sorts later than the old one did),
+   line wrapping and caret underlines; read the diff to confirm nothing else
+   moved.
+5. **What a text rename cannot see** fails a test, and the fix is to recompute the
+   expectation, not to loosen it: fixed-width text (a padded table), hashes of names
+   (`fnv1a64` known-answer vectors, file names derived from a key), and sort order. The four
+   envelope magic bytes `4B 45 45 4C` are wire format and deliberately did not change; a
+   test that needs a wrong magic spells it as bytes.
+6. **Re-run your suites.**
+
 ## For AI agents specifically
 
 * Your world is exactly the worktree path in your brief. Do not touch any other

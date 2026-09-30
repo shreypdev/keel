@@ -9,3 +9,4 @@ playground, bench. Per-piece notes land here as `<slug>.md` when each piece merg
 
 - `playground.md` — the playground core, apps, contract scenarios (17 x 3), findings for the integrator (2026-09-30).
 - `undra-cli.md` — the CLI: layout, shim/runner design, XCFramework and shell decisions, open items (2026-09-30).
+- `rename-undra.md` — the rename to Undra: the script, false positives, frozen wire magic, goldens, what was verified, what the integrator owns (2026-09-30).

@@ -263,8 +263,14 @@ while IFS= read -r -d '' rec; do
   fi
 done < <(git ls-files -z -s)
 
+CHANGED=0
 if [ "$DRY_RUN" = 0 ] && [ "$EDITED" -gt 0 ]; then
+  BEFORE="$(xargs -0 cksum <"$EDIT_LIST")"
   xargs -0 perl -0777 -pi -e "$PERL_RULES" <"$EDIT_LIST"
+  AFTER="$(xargs -0 cksum <"$EDIT_LIST")"
+  # Files that mention the old name only inside this script's own file name come out unchanged.
+  CHANGED="$(diff <(printf '%s\n' "$BEFORE") <(printf '%s\n' "$AFTER") | grep -c '^>' || true)"
+  EDITED="$CHANGED"
 fi
 
 # --- untracked files that would need the rename -------------------------------------------------
