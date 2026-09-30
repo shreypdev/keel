@@ -21,3 +21,4 @@ dist
 /contract-tests/ts/node_modules
 /contract-tests/**/build
 /contract-tests/swift/.build
+/contract-tests/.logs
