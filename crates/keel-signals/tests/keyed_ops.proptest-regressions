@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3cce35d568fb9a6aa3741badf13781a641765d3317ba325bf60a6a0ab7a584b2 # shrinks to steps = [Txn([RawToggle(0), Push(0), Push(0)])]
+cc d31332e684089fa41864653f8f68f358d6b0683a0bd5ae95f490b75933cd93b6 # shrinks to steps = [Edit(Set([0, 0, 0]))]
+cc 875247ca5f1508e8d669cbf74530414ffadf3d55c0ae20c980845984724cd6fa # shrinks to steps = [Edit(Set([0])), ObserveAllOff, ObserveAllOn, Edit(Remove(0))]

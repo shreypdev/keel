@@ -7,8 +7,11 @@ use std::sync::{Arc, OnceLock, Weak};
 use parking_lot::RwLock;
 
 use crate::graph::{Binding, Dependents, Reactive, add_dependent, notify_dependents, record};
+use crate::oplog::ListLog;
 use crate::txn::TxnGuard;
 use crate::value::SignalValue;
+
+mod list;
 
 /// A shared value that other parts of the system can react to.
 ///
@@ -20,6 +23,38 @@ use crate::value::SignalValue;
 ///
 /// A signal that is not attached to a store still works as a local reactive value; its writes
 /// simply have nothing to deliver.
+///
+/// # Lists
+///
+/// A `Signal<Vec<T>>` also has list operations: [`push`](Signal::push),
+/// [`insert`](Signal::insert), [`remove`](Signal::remove), [`update_at`](Signal::update_at),
+/// [`move_item`](Signal::move_item), [`clear`](Signal::clear) and
+/// [`replace`](Signal::replace). On a list attached with
+/// [`StoreCell::attach_keyed`](crate::StoreCell::attach_keyed) that the host observes, there are
+/// two ways the commit can find out what to send (a keyed patch, SPEC 3.8), and the write picks
+/// one:
+///
+/// * **Recorded operations** (`push`, `insert`, `remove`, `update_at`, `move_item`, `clear`) note
+///   the SPEC 3.8 op they perform as they perform it, and the commit sends the notes: the cost is
+///   proportional to the number of operations, however long the list is. The only part that
+///   still grows with the list is the `memmove` of the vector's tail that a `Vec::insert` or
+///   `Vec::remove` in the middle needs anyway (the host pays it too when it applies the op).
+/// * **Raw writes** (`set`, `update`, `replace`) hand over a list that is compared with what the
+///   host has: the commit hashes every key of both lists and compares the items that survived,
+///   O(list), and sends the full value when more than half of the items were removed or the keys
+///   do not overlap (SPEC 3.8).
+///
+/// Prefer the recorded operations for edits of a few items, which is what nearly every list
+/// mutation is. Use `set` or `replace` to load or refresh a whole list, and `update` for an edit
+/// none of the operations can express. A transaction that mixes the two is sent by the raw path
+/// (the raw write invalidates the notes of the whole transaction), so the mix is correct and
+/// costs what the raw write costs.
+///
+/// The recorded operations do not look at keys: the host replays them by position. Keys must
+/// still be unique within the list (`KeyFn`); a list that breaks that is not noticed by the
+/// recorded path, where the raw path would have sent the full value. On a signal that is not
+/// attached as a keyed list, or whose slot the host does not observe, the operations are plain
+/// mutations (and, like `Vec`'s methods, panic on an index out of range).
 ///
 /// # Threading and re-entrancy
 ///
@@ -60,6 +95,9 @@ pub(crate) struct SignalInner<T> {
     value: RwLock<Arc<T>>,
     pub(crate) binding: OnceLock<Binding>,
     pub(crate) dependents: Dependents,
+    /// The op log of a list signal attached with [`StoreCell::attach_keyed`](crate::StoreCell):
+    /// what the recorded list operations append to and every raw write invalidates.
+    pub(crate) log: OnceLock<Arc<dyn ListLog>>,
 }
 
 impl<T> Clone for Signal<T> {
@@ -78,6 +116,7 @@ impl<T: SignalValue> Signal<T> {
                 value: RwLock::new(Arc::new(value)),
                 binding: OnceLock::new(),
                 dependents: parking_lot::Mutex::new(Vec::new()),
+                log: OnceLock::new(),
             }),
         }
     }
@@ -112,7 +151,10 @@ impl<T: SignalValue> Signal<T> {
     /// first such panic is re-raised. See the crate docs.
     pub fn set(&self, value: T) {
         // The replaced value is handed back so it is dropped after the lock is released.
-        let _old = self.write_with(|slot| std::mem::replace(slot, Arc::new(value)));
+        let _old = self.write_with(|slot| {
+            self.invalidate_log();
+            std::mem::replace(slot, Arc::new(value))
+        });
     }
 
     /// Mutates the value in place. Transaction behaviour is the same as [`set`](Signal::set).
@@ -134,6 +176,9 @@ impl<T: SignalValue> Signal<T> {
     pub fn update(&self, f: impl FnOnce(&mut T)) {
         let me = self.id();
         self.write_with(|slot| {
+            // Before `f` runs, so that a panic inside it cannot leave a half-changed list that
+            // a keyed slot still believes its recorded ops describe.
+            self.invalidate_log();
             let _updating = Updating::enter(me);
             f(Arc::make_mut(slot));
         });
@@ -161,6 +206,24 @@ impl<T: SignalValue> Signal<T> {
         // would never end.
         self.assert_not_updating("read");
         Arc::clone(&self.inner.value.read_recursive())
+    }
+
+    /// Runs `f` with the value read-locked: no writer, recorded or raw, can change the value or
+    /// its op log while `f` runs. Readers that take it with `snapshot` do not see the log.
+    pub(crate) fn read_locked<R>(&self, f: impl FnOnce(&Arc<T>) -> R) -> R {
+        if let Some(value) = self.inner.value.try_read_recursive() {
+            return f(&value);
+        }
+        self.assert_not_updating("read");
+        f(&self.inner.value.read_recursive())
+    }
+
+    /// Tells the op log of a keyed list (if any) that the list is about to be changed in a way
+    /// the recorded ops cannot describe. Called with the value write-locked.
+    fn invalidate_log(&self) {
+        if let Some(log) = self.inner.log.get() {
+            log.invalidate();
+        }
     }
 
     /// The signal's identity for the "being updated on this thread" list.
@@ -456,6 +519,58 @@ mod tests {
             0,
             "in-place updates never clone"
         );
+    }
+
+    #[test]
+    fn read_locked_keeps_writers_out_until_it_returns() {
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+        // A keyed slot takes its op log and looks at the list inside `read_locked`; that is only
+        // sound if no write (which appends to the log under the write lock) can land in
+        // between.
+        let s = Signal::new(vec![1, 2]);
+        let written = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            s.read_locked(|seen| {
+                scope.spawn(|| {
+                    s.update(|v| v.push(3));
+                    written.store(true, Ordering::SeqCst);
+                });
+                std::thread::sleep(Duration::from_millis(50));
+                assert!(!written.load(Ordering::SeqCst), "the writer got in");
+                assert_eq!(**seen, vec![1, 2]);
+            });
+        });
+        assert!(written.load(Ordering::SeqCst));
+        assert_eq!(s.get(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn a_raw_write_invalidates_the_op_log_and_a_recorded_one_does_not() {
+        use crate::oplog::{KeyedLog, ListLog};
+        let s = Signal::new(vec![1_u32, 2]);
+        let log = Arc::new(KeyedLog::<u32>::new());
+        let erased: Arc<dyn ListLog> = log.clone();
+        assert!(s.inner.log.set(erased).is_ok());
+        log.arm(2);
+        s.push(3);
+        s.insert(0, 0);
+        s.remove(1);
+        s.update_at(0, |n| *n += 10);
+        s.move_item(0, 1);
+        s.clear();
+        assert!(
+            log.is_recording(),
+            "recorded operations keep the log usable"
+        );
+        s.update(|v| v.push(1));
+        assert!(!log.is_recording(), "update makes it stale");
+        log.arm(1);
+        s.set(vec![5]);
+        assert!(!log.is_recording(), "so does set");
+        log.arm(1);
+        s.replace(vec![6]);
+        assert!(!log.is_recording(), "and replace");
     }
 
     #[test]
