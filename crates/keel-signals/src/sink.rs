@@ -10,10 +10,21 @@ use parking_lot::RwLock;
 /// `change_set` is a complete `ChangeSet` payload (SPEC 3.5): `txn_id u64, count u32,
 /// entries`. It is borrowed for the duration of the call.
 ///
-/// `deliver` runs on the thread that committed the transaction, **after** all locks internal to
-/// this crate have been released, so it may read and write signals. Writes made from inside
-/// `deliver` do not commit re-entrantly: they are queued and committed, as a new transaction,
-/// once the current commit finishes (see [`txn`](crate::txn)).
+/// `deliver` runs on the thread that committed the transaction. It may read and write signals:
+/// writes made from inside `deliver` do not commit re-entrantly, they are queued and committed,
+/// as a new transaction, once the current commit finishes (see [`txn`](crate::txn)).
+///
+/// # Ordering, and what a sink must not do
+///
+/// The change-sets of one store reach the sink one at a time, in the order they were built, with
+/// strictly increasing transaction ids, whatever threads commit them. To guarantee that, the
+/// store's **delivery lock is held while `deliver` runs** (it is taken when a commit claims the
+/// store's dirty slots and released when `deliver` returns). Consequently a sink must not block
+/// waiting for another thread that writes a signal of the same store: that thread would wait for
+/// the delivery lock and neither would progress. Handing the payload to a queue, or writing
+/// signals on the calling thread, is fine. Different stores do not exclude each other.
+///
+/// The runtime's sink only hands the payload to the host, which is why it can run under the lock.
 pub trait ChangeSink: Send + Sync {
     /// Handles one change-set payload.
     fn deliver(&self, change_set: &[u8]);

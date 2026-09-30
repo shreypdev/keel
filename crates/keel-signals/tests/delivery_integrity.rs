@@ -15,6 +15,7 @@ use common::*;
 use keel_signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, txn, with_sink};
 use keel_wire::payload::{ChangeEntry, ChangeOp, ChangeSet};
 use keel_wire::{Encode, Writer};
+use parking_lot::Mutex;
 
 /// What a host knows about a store: a keyed list at signal 0 and `u32` values elsewhere.
 #[derive(Default)]
@@ -512,5 +513,157 @@ fn m1_encode_signal_holds_closure_writes_until_the_value_is_produced() {
     assert!(
         sink.seen_encoded.load(Ordering::SeqCst),
         "and only after the value it was made for had been encoded"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// M2: commits of one store from several threads reach the sink in claim order
+// ---------------------------------------------------------------------------------------------
+
+/// A sink that holds up its first delivery until told to go on, and records deliveries in the
+/// order they *complete*.
+struct Gated {
+    capture: Arc<keel_signals::testing::CaptureSink>,
+    first: AtomicBool,
+    entered: Mutex<std::sync::mpsc::Sender<()>>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl ChangeSink for Gated {
+    fn deliver(&self, change_set: &[u8]) {
+        if self.first.swap(false, Ordering::SeqCst) {
+            self.entered.lock().send(()).unwrap();
+            self.release
+                .lock()
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("released");
+        }
+        self.capture.deliver(change_set);
+    }
+}
+
+type Latch = (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>);
+
+fn gated() -> (Arc<Gated>, Latch) {
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let sink = Arc::new(Gated {
+        capture: keel_signals::testing::CaptureSink::new(),
+        first: AtomicBool::new(true),
+        entered: Mutex::new(entered_tx),
+        release: Mutex::new(release_rx),
+    });
+    (sink, (entered_rx, release_tx))
+}
+
+#[test]
+fn m2_concurrent_commits_of_one_store_reach_the_sink_in_claim_order() {
+    // The review's repro: thread A removes item 2 (the diff is Remove{1} and the baseline
+    // advances) and is held up before its delivery completes; thread B updates item 3 and
+    // commits. B's patch is computed against A's baseline, so it must not reach the host first.
+    let rig = Rig::new();
+    let rows = Signal::new(todos(3));
+    rig.cell.attach_keyed(&rows, 0, todo_key).unwrap();
+    let mut host = Host::default();
+    host.apply_entries(&rig.observe_all(), Some(0));
+
+    let (sink, (entered, release)) = gated();
+    let a = {
+        let (rows, sink) = (rows.clone(), sink.clone());
+        std::thread::spawn(move || {
+            with_sink(sink, || rows.update(|l| drop(l.remove(1))));
+        })
+    };
+    entered
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("A reached the sink");
+    let b = {
+        let (rows, sink) = (rows.clone(), sink.clone());
+        std::thread::spawn(move || {
+            with_sink(sink, || rows.update(|l| l[1].done = true));
+        })
+    };
+    // Give B every chance to overtake A; it has to wait for A's delivery to finish.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    assert_eq!(
+        sink.capture.len(),
+        0,
+        "B must not deliver while A's change-set is still being delivered"
+    );
+    release.send(()).unwrap();
+    a.join().unwrap();
+    b.join().unwrap();
+
+    let sets = sink.capture.take_decoded();
+    assert_eq!(sets.len(), 2);
+    assert!(
+        sets[0].txn_id < sets[1].txn_id,
+        "ascending transaction ids: {} then {}",
+        sets[0].txn_id,
+        sets[1].txn_id
+    );
+    host.apply_all(&sets, Some(0));
+    assert_eq!(
+        host.list,
+        rows.get(),
+        "the host converges on the core's list"
+    );
+}
+
+#[test]
+fn m2_transaction_ids_seen_by_one_store_only_ever_grow() {
+    // A transaction that commits stores S1 then S2 shares one id between them. If another
+    // thread commits S2 in between, S2 must not see the shared (now older) id after that
+    // thread's newer one.
+    const S2: u64 = 0x0000_0002_0000_0002;
+    let s1 = Rig::new();
+    let s2 = Rig::new();
+    s2.cell.set_handle(S2);
+    let a1 = Signal::new(0_u32);
+    let a2 = Signal::new(0_u32);
+    let b2 = Signal::new(0_u32);
+    s1.cell.attach(&a1, 0).unwrap();
+    s2.cell.attach(&a2, 0).unwrap();
+    s2.cell.attach(&b2, 1).unwrap();
+    s1.observe_all();
+    s2.observe_all();
+
+    let (sink, (entered, release)) = gated();
+    let a = {
+        let (a1, a2, sink) = (a1.clone(), a2.clone(), sink.clone());
+        std::thread::spawn(move || {
+            with_sink(sink, || {
+                txn(|| {
+                    a1.set(1);
+                    a2.set(1);
+                });
+            });
+        })
+    };
+    // A's first delivery (S1) is held up, with the shared transaction id already allocated.
+    entered
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("A reached the sink");
+    // Meanwhile another thread commits a different slot of S2: it delivers straight away, under
+    // a newer id.
+    {
+        let (b2, sink) = (b2.clone(), sink.clone());
+        std::thread::spawn(move || with_sink(sink, || b2.set(2)))
+            .join()
+            .unwrap();
+    }
+    release.send(()).unwrap();
+    a.join().unwrap();
+
+    let sets = sink.capture.take_decoded();
+    let s2_ids: Vec<u64> = sets
+        .iter()
+        .filter(|s| s.entries[0].handle.0 == S2)
+        .map(|s| s.txn_id)
+        .collect();
+    assert_eq!(s2_ids.len(), 2, "{sets:?}");
+    assert!(
+        s2_ids[0] < s2_ids[1],
+        "S2 saw transaction ids {s2_ids:?}: they must ascend in delivery order"
     );
 }

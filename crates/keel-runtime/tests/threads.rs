@@ -290,6 +290,57 @@ fn a_task_may_spawn_from_a_blocking_thread() {
     rt.shutdown();
 }
 
+/// The review's blocking-thread repro (M2): a store signal written from a pool worker, which
+/// has a runtime installed but does not hold the core lock.
+#[test]
+fn m2_a_signal_write_on_a_blocking_thread_is_refused_in_debug_builds() {
+    let (rt, _host) = threaded();
+    let h = new_counter_rt(&rt, 0, "");
+    let counter = rt.object::<Counter>(h.0).unwrap();
+    let outcome: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+    let (ctx, c, out) = (rt.ctx(), counter.clone(), outcome.clone());
+    rt.spawn(async move {
+        let refused = ctx
+            .spawn_blocking(move || {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.count.set(7)))
+                    .err()
+                    .map(|payload| {
+                        payload
+                            .downcast_ref::<String>()
+                            .cloned()
+                            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                            .unwrap_or_default()
+                    })
+            })
+            .await;
+        *out.lock() = Some(refused);
+    });
+    assert!(wait_until(LONG, || outcome.lock().is_some()));
+    let refused = outcome.lock().take().unwrap();
+    #[cfg(debug_assertions)]
+    {
+        let message = refused.expect("debug builds refuse the write");
+        assert!(message.contains("not allowed to mutate state"), "{message}");
+        assert_eq!(counter.count.get(), 0, "refused before anything changed");
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        assert!(refused.is_none(), "release builds do not check");
+        assert_eq!(counter.count.get(), 7);
+    }
+
+    // The core is unaffected: a task writes the same signal without complaint.
+    let (c, done) = (counter.clone(), Arc::new(AtomicBool::new(false)));
+    let flag = done.clone();
+    rt.spawn(async move {
+        c.count.set(1);
+        flag.store(true, Ordering::SeqCst);
+    });
+    assert!(wait_until(LONG, || done.load(Ordering::SeqCst)));
+    assert_eq!(counter.count.get(), 1);
+    rt.shutdown();
+}
+
 #[test]
 fn a_hundred_tasks_run_across_several_core_turns() {
     let (rt, _host) = threaded();

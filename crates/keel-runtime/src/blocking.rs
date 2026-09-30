@@ -222,7 +222,18 @@ mod native {
         }
     }
 
+    thread_local! {
+        /// Set for the whole life of a pool worker thread.
+        static WORKER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Whether the calling thread is a blocking-pool worker.
+    pub(super) fn on_worker_thread() -> bool {
+        WORKER.try_with(std::cell::Cell::get).unwrap_or(false)
+    }
+
     fn worker(shared: &Shared) {
+        let _ = WORKER.try_with(|w| w.set(true));
         loop {
             let job = {
                 let mut q = shared.queue.lock();
@@ -240,6 +251,19 @@ mod native {
             };
             job();
         }
+    }
+}
+
+/// Whether the calling thread is a blocking-pool worker: it runs user closures without the core
+/// lock, so it must not write signals (the runtime's write-context check refuses it).
+pub(crate) fn on_worker_thread() -> bool {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        native::on_worker_thread()
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        false
     }
 }
 

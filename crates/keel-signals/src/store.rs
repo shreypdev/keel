@@ -119,6 +119,12 @@ pub struct StoreCell {
     unsent: Mutex<Vec<u32>>,
     /// `unsent` is not empty. Lets the common commit skip the lock.
     has_unsent: AtomicBool,
+    /// Held by `commit_slots` from the claim until the sink has returned, so that the
+    /// change-sets of one store reach the sink in the order they were claimed, whatever threads
+    /// commit them.
+    delivery: Mutex<()>,
+    /// The `txn_id` of the change-set delivered last; guarded by `delivery`.
+    last_txn: AtomicU64,
 }
 
 impl StoreCell {
@@ -130,6 +136,8 @@ impl StoreCell {
             slots: RwLock::new(Vec::new()),
             unsent: Mutex::new(Vec::new()),
             has_unsent: AtomicBool::new(false),
+            delivery: Mutex::new(()),
+            last_txn: AtomicU64::new(0),
         })
     }
 
@@ -492,6 +500,10 @@ impl StoreCell {
     /// touches this store sends every one of them again as a full value. Without that, the host
     /// would silently keep values the core has moved on from.
     ///
+    /// The store's delivery lock is held from the claim until `sink` has returned, so that
+    /// commits of one store from different threads reach the sink one at a time, in claim
+    /// order, with strictly increasing `txn_id`s.
+    ///
     /// `txn_id` is the transaction id of the current round, allocated on first use so that
     /// every store committed by the same transaction shares one id.
     pub(crate) fn commit_slots(
@@ -500,6 +512,12 @@ impl StoreCell {
         sink: Option<&Arc<dyn ChangeSink>>,
         txn_id: &mut Option<u64>,
     ) {
+        // One commit of this store at a time, from the claim to the sink's return: a second
+        // thread that dirtied the store waits here, so its change-set cannot overtake this one
+        // (a patch computed against a baseline that a still-undelivered patch has already moved
+        // would otherwise reach the host first). See the crate docs, "Threading".
+        let _delivery = self.delivery.lock();
+
         // Slots an earlier commit of this store abandoned are sent again with this one.
         let unsent = self.take_unsent();
         if !unsent.is_empty() {
@@ -542,7 +560,15 @@ impl StoreCell {
             return;
         }
         let handle = Handle(handle);
-        let txn = *txn_id.get_or_insert_with(next_txn_id);
+        // A transaction id is shared by every store the transaction commits, but the ids one
+        // store sees must only ever grow, so a shared id that a concurrent commit of this store
+        // has already overtaken is replaced (for this store and the ones after it).
+        let mut txn = *txn_id.get_or_insert_with(next_txn_id);
+        if txn <= self.last_txn.load(Ordering::SeqCst) {
+            txn = next_txn_id();
+            *txn_id = Some(txn);
+        }
+        self.last_txn.store(txn, Ordering::SeqCst);
 
         // From here until the sink has returned, the change-set is in flight: unwinding
         // abandons it (see `Abandon`).

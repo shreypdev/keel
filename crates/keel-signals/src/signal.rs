@@ -138,6 +138,12 @@ impl<T: SignalValue> Signal<T> {
     }
 
     fn write_with<R>(&self, f: impl FnOnce(&mut Arc<T>) -> R) -> R {
+        // Before anything changes: a write that reaches the host or other nodes must come from
+        // a thread the embedder allows to mutate (debug builds; see `set_write_checker`).
+        #[cfg(debug_assertions)]
+        if self.inner.binding.get().is_some() || !self.inner.dependents.lock().is_empty() {
+            crate::context::assert_write_allowed();
+        }
         // Drop order matters: the lock guard goes first, then the change is announced, then
         // the transaction ends (and commits if it was the outermost). Announcing from a guard
         // means a panicking `f` still marks whatever it managed to change.

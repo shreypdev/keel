@@ -292,7 +292,11 @@ are preserved in a `CarriedPanic`), where the ordinary guard turns it into a sta
 wasm and test runtimes have no pool: `f` runs **inline, synchronously, inside the
 `spawn_blocking` call**, and the returned future is already complete.
 
-`f` must not write signals or call host entry points: it does not hold the core lock.
+`f` must not write signals or call host entry points: it does not hold the core lock. Debug
+builds enforce the first half: the runtime installs a `keel_signals::set_write_checker` that
+refuses signal writes (with consequences: to an attached signal, or one with dependents) on a
+pool worker thread, so such a write panics in the closure, and the panic reaches the awaiting
+task like any other. Release builds do not check.
 
 ## 12. Change-sets, the sink and ordering
 
@@ -313,9 +317,12 @@ Consequences:
   The sink deliberately never takes the core lock: `keel-signals` may call it while holding
   its own lock, and a thread holding that lock that waited for the core while the core
   waited for it would deadlock.
-* Writes from a **blocking-pool thread** are delivered from that thread without the core
-  lock: their order relative to core writes is whatever `keel-signals` guarantees. Keep signal
-  writes on the core (send the result back to a task).
+* Writes from a **blocking-pool thread** are refused in debug builds (section 11); in release
+  builds they are delivered from that thread without the core lock. `keel-signals` still
+  delivers the change-sets of one store one at a time, in claim order, but a write from another
+  thread is not part of the core's transaction (if the slot is already dirty in an open
+  transaction it ships with that transaction). Keep signal writes on the core (send the result
+  back to a task).
 * `observe` delivers the initial change-set synchronously (before `observe` returns) by asking
   the cell to append entries for the newly observed signals and wrapping them with a fresh
   `txn_id`.
