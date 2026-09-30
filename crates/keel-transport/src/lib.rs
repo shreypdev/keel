@@ -39,12 +39,27 @@
 //!   app loads a new core. So a *new* connection is a new session, and the server ends the
 //!   old one's calls and observations (and by default releases its objects) when it closes.
 //!
-//! # Where this differs from SPEC 5.1
+//! # Which thread runs a call
 //!
-//! SPEC 5.1 lets a host call the runtime from any thread. Here the reader thread of the
-//! attached connection calls it; a synchronous method therefore runs on that thread, holding
-//! the core lock, and blocks the connection's inbound messages while it runs (they queue in
-//! the socket). Outbound messages are never blocked by it.
+//! The reader thread of the attached connection calls into the runtime (SPEC 5.1: a sync call
+//! runs on the caller's thread holding the core lock). A synchronous method therefore blocks
+//! that connection's *inbound* messages while it runs (they wait in the socket); outbound
+//! messages are never blocked by it, because they only enqueue.
+//!
+//! # Deviations from the spec, and decisions it leaves open
+//!
+//! * **The entry point is [`Server::start`], not `serve(runtime, addr)`.** A `Runtime`'s host is
+//!   fixed when it is built, so the host that carries messages to a client has to exist first;
+//!   [`Server::start`] builds the [`Bridge`], hands it to a closure that builds the runtime, and
+//!   listens. [`Server::bind`] takes a runtime and bridge you paired yourself.
+//! * **SPEC 3.2 leaves the Hello order and the sequence origin open.** The clients settle both:
+//!   see above. SPEC 3.4 lists "schema mismatch" as a status 5 reason; in practice a mismatch is
+//!   found at the `Hello` (every client checks it there) and later mismatching headers end the
+//!   connection (1008).
+//! * **SPEC 16.2 imagines a server with one core per connection**; this one serves one core to
+//!   one client at a time, as `keel dev` needs (one device against the developer's core).
+//! * **Dependencies** (SPEC 13 lists `keel-runtime` and `tungstenite`): `keel-wire` (the
+//!   envelope, not re-implemented here) and `parking_lot` (as in `keel-runtime`) as well.
 //!
 //! # Features
 //!

@@ -11,6 +11,7 @@
 
 use std::io::{self, Write};
 use std::net::{Shutdown, TcpStream};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
@@ -42,7 +43,16 @@ pub(crate) fn spawn(
 ) -> io::Result<JoinHandle<()>> {
     thread::Builder::new()
         .name(format!("keel-transport-writer-{}", conn.id))
-        .spawn(move || run(&conn, &queue, tcp, config, timing))
+        .spawn(move || {
+            // Nothing escapes as a panic (R6): a writer that dies takes its connection with it
+            // rather than leaving the reader blocked on a socket nobody writes.
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                run(&conn, &queue, tcp, config, timing);
+            }));
+            if outcome.is_err() {
+                conn.abort();
+            }
+        })
 }
 
 fn run(conn: &Conn, queue: &Receiver<Item>, tcp: TcpStream, config: WebSocketConfig, timing: Timing) {
