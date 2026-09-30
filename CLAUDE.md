@@ -35,12 +35,21 @@ R12 The core is deterministic: no wall-clock, randomness or threads outside the 
 * Kotlin: stdlib + kotlinx-coroutines only in the runtime module; Android-specific code in `android-adapters`.
 * Swift: Swift 6 language mode, strict concurrency, no Objective-C.
 
-## Toolchain notes for this environment
+## Toolchain and local development
 
-* Rust 1.95 (edition 2024 default), Node 22, Java 21, Gradle 8.14 (its `lib/` contains `kotlin-compiler-embeddable-2.0.21.jar`, `kotlin-stdlib`, `kotlinx-coroutines-core-jvm-1.6.4.jar`; use `scripts/kotlinc.sh` to compile Kotlin for JVM tests).
-* The `wasm32-unknown-unknown` target and Swift toolchain are **not** available here (rustup and swift.org downloads are blocked). wasm and Swift are verified in CI (`.github/workflows`) and on a developer Mac. Write them to compile there; keep the TS runtime testable against the native core over the `remote` transport (see SPEC §11) and against a WAT stub of the wasm ABI.
-* `cargo-fuzz` (nightly) is unavailable; use proptest and the in-tree byte-fuzz harness.
+Native macOS is the reference environment. `source scripts/env.sh` puts everything on
+PATH (rustup, brew JDK 17 + Kotlin, the kotlinx-coroutines jar, a `DEVELOPER_DIR`
+fallback when xcode-select still points at CommandLineTools). Machine setup, every
+suite's run command, and the known gotchas are in `docs/ONBOARDING.md`; `keel doctor`
+diagnoses a machine. Rust stable (1.98+) with the wasm32/iOS/Android targets installed —
+no build-std, no nightly, except Miri/ASan jobs in CI. Full Xcode is required for Swift
+tests and simulators; Android work needs the SDK + NDK r27 + the `keel` AVD.
 
-## Team state protocol (10x-team)
+## How changes land
 
-State files under `.10x/` are the team's memory. After finishing a phase or a substantial task, update `.10x/status.md`, `.10x/handoff.md` and the relevant `decisions/<role>/keel-v1.md`, then commit with `state(<phase>): …`.
+One piece, one worktree, one adversarial review, one merge, then clean up —
+`docs/AGENT_WORKFLOW.md` is the binding process (scripts/wt.sh new/merge/rm/clean).
+State files under `.10x/` are the team's memory: after a piece merges, the integrator
+updates `.10x/status.md` and `.10x/handoff.md` and commits `state(<piece>): …`;
+worktree authors record their piece in `.10x/decisions/<role>/<slug>.md` and never touch
+the shared state files. Reviews live in `.10x/reviews/`, decisions in `.10x/adrs/`.
