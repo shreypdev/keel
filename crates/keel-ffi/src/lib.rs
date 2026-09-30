@@ -32,6 +32,8 @@ pub use api::{ABI_VERSION, init_code, restore_code};
 pub use buf::KeelBuf;
 
 #[cfg(not(target_family = "wasm"))]
+mod registry;
+#[cfg(not(target_family = "wasm"))]
 mod session;
 
 #[cfg(not(target_family = "wasm"))]

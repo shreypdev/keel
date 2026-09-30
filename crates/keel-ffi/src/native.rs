@@ -14,14 +14,14 @@
 //!   reply, an error code, or nothing for `void` entries.
 
 use core::ffi::c_void;
-use std::collections::BTreeMap;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
 
 use keel_runtime::{PortCallOutcome, Runtime};
 
 use crate::api::{self, init_code};
 use crate::buf::KeelBuf;
 use crate::guard::guarded;
+use crate::registry::{PORTS, UserPtr};
 use crate::session::{self, Sink};
 
 /// `void (*keel_reply_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len)`:
@@ -68,35 +68,6 @@ pub type KeelPortCb = unsafe extern "C" fn(
 unsafe extern "C" {
     /// The C allocator's `free`, for host-allocated port replies (`cap == 0`).
     fn free(ptr: *mut c_void);
-}
-
-/// An opaque host pointer handed back to its callbacks.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct UserPtr(*mut c_void);
-
-// SAFETY: the pointer is never dereferenced here, only passed back to the host's own callbacks.
-// SPEC 6 makes the host responsible for those callbacks being callable from any thread.
-unsafe impl Send for UserPtr {}
-// SAFETY: as above; sharing the value shares no data.
-unsafe impl Sync for UserPtr {}
-
-/// One registered port callback.
-#[derive(Clone, Copy)]
-struct PortReg {
-    cb: KeelPortCb,
-    user: UserPtr,
-}
-
-/// Port callbacks by port id. Survives between `keel_port_register` and `keel_shutdown`; a
-/// registration made before `keel_init` applies once the runtime is up.
-static PORTS: RwLock<BTreeMap<u32, PortReg>> = RwLock::new(BTreeMap::new());
-
-fn port_registration(port_id: u32) -> Option<PortReg> {
-    PORTS
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&port_id)
-        .copied()
 }
 
 /// The embedder of a C host: its three callbacks and its `user` pointer.
@@ -180,19 +151,22 @@ impl Sink for CSink {
         port_call_id: u32,
         args: &[u8],
     ) -> PortCallOutcome {
-        let Some(reg) = port_registration(port_id) else {
-            return PortCallOutcome::Unavailable;
-        };
         let Some(len) = c_len(args) else {
             return PortCallOutcome::Unavailable;
         };
+        // Held until this call is done with the host's memory: `keel_port_register` (replace or
+        // remove) and `keel_shutdown` wait for it, so the host may free `user` when they return.
+        let Some(invocation) = PORTS.enter(port_id) else {
+            return PortCallOutcome::Unavailable;
+        };
         let mut out = KeelBuf::EMPTY;
-        // SAFETY: `cb` and `user` come from `keel_port_register`, whose contract keeps them valid
-        // until `keel_shutdown`; `args` is valid for `len` bytes and `out` is a live `KeelBuf`
-        // the callback may fill.
+        // SAFETY: `callback` and `user` come from `keel_port_register`; the invocation keeps that
+        // registration alive, because removing it waits until the invocation is dropped (after
+        // the reply below was read and released). `args` is valid for `len` bytes and `out` is a
+        // live `KeelBuf` the callback may fill.
         let answer = unsafe {
-            (reg.cb)(
-                reg.user.0,
+            (invocation.callback())(
+                invocation.user(),
                 port_id,
                 method_id,
                 port_call_id,
@@ -303,13 +277,7 @@ pub unsafe extern "C" fn keel_init(
     });
     session::start(config, sink, |runtime: &Runtime| {
         // A host that registered a port takes it over from any default Rust binding.
-        let ids: Vec<u32> = PORTS
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .copied()
-            .collect();
-        for id in ids {
+        for id in PORTS.ids() {
             runtime.bind_foreign_port(id);
         }
     })
@@ -321,10 +289,6 @@ pub unsafe extern "C" fn keel_init(
 #[unsafe(no_mangle)]
 pub extern "C" fn keel_shutdown() {
     session::stop();
-    PORTS
-        .write()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clear();
 }
 
 /// `uint32_t keel_call(const uint8_t *ptr, uint32_t len)`: submits a `Call` payload (SPEC 3.3).
@@ -407,22 +371,9 @@ pub unsafe extern "C" fn keel_port_register(
         "keel_port_register",
         |_| (),
         || {
-            {
-                let mut ports = PORTS.write().unwrap_or_else(PoisonError::into_inner);
-                match cb {
-                    Some(cb) => {
-                        ports.insert(
-                            port_id,
-                            PortReg {
-                                cb,
-                                user: UserPtr(user),
-                            },
-                        );
-                    }
-                    None => {
-                        ports.remove(&port_id);
-                    }
-                }
+            match cb {
+                Some(cb) => PORTS.install(port_id, cb, user),
+                None => PORTS.remove(port_id),
             }
             if cb.is_some() {
                 if let Some(runtime) = api::runtime() {

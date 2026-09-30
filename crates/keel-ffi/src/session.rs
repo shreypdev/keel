@@ -14,6 +14,7 @@ use keel_runtime::{Host, PortCallOutcome, Runtime};
 
 use crate::api::{self, init_code, init_error_code, parse_config};
 use crate::guard::guarded;
+use crate::registry::PORTS;
 
 /// Where the runtime's outgoing traffic goes; one implementation per native shim.
 pub(crate) trait Sink: Send + Sync + 'static {
@@ -154,6 +155,12 @@ pub(crate) fn start(config: &[u8], sink: Arc<dyn Sink>, after_init: impl FnOnce(
 
 /// `keel_shutdown`: stops the runtime (idempotent) and forgets the embedder, so a later
 /// `keel_init` may install another one.
+///
+/// The port registrations go with it, inside the same critical section as the embedder: a
+/// `keel_init` (and the registrations its host makes once it returns) on another thread waits
+/// for this shutdown to finish, so it can never be wiped by it. Removing the registrations
+/// waits for the port callbacks still running on other threads, which is what lets the host free
+/// its `user` pointers when this returns (SPEC 6.3, ADR-025).
 pub(crate) fn stop() {
     guarded(
         "keel_shutdown",
@@ -164,6 +171,8 @@ pub(crate) fn stop() {
                 rt.shutdown();
             }
             *slot = None;
+            // After the runtime: its shutdown still logs through the Log port.
+            PORTS.retire_all();
         },
     );
 }
