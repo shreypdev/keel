@@ -132,7 +132,8 @@ fn deliver_lifecycle(rt: &Runtime, state: AppState) {
 /// It starts out online on Wi-Fi. Nothing is emitted until you say so (real platforms report
 /// their initial state right after start-up; call [`emit_current`](Self::emit_current) to do the
 /// same). Events are delivered synchronously on the calling thread, exactly as
-/// `Runtime::event` does for a real host.
+/// `Runtime::event` does for a real host, so drive it from test code, not from inside a task
+/// the runtime is polling (the runtime refuses re-entrant calls).
 ///
 /// ```
 /// use std::sync::{Arc, Mutex};

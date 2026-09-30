@@ -40,8 +40,8 @@ the exact bytes and the schema hash.
 ## Using a port from the core
 
 Every request/reply port trait gets a typed accessor (`keel_ports::http(ctx)`, `kv`, `clock`,
-...). It returns the Rust binding if one is installed (a fake, a built-in), and otherwise a proxy
-that crosses to the platform. The two event ports (`Connectivity`, `Lifecycle`) are subscribed to
+...; the `CtxPorts` trait adds them as methods, `ctx.http()`). It returns the Rust binding if one
+is installed (a fake, a built-in), and otherwise a proxy that crosses to the platform. The two event ports (`Connectivity`, `Lifecycle`) are subscribed to
 instead: `on_connectivity_changed(ctx, f)`, `on_lifecycle_changed(ctx, f)`. See the crate
 documentation for a compiled example.
 

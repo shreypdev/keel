@@ -18,6 +18,8 @@ const MULTIPLIER: u64 = 0x2545_F491_4F6C_DD1D;
 /// * [`Rng::fill`]`(n)` consumes `ceil(n / 8)` outputs of the generator, little-endian, and
 ///   drops the unused tail of the last one, so a sequence of fills is reproducible however
 ///   the lengths are split across calls *of the same lengths*.
+/// * A fill never returns more than [`MAX_FILL`](SeededRng::MAX_FILL) bytes, the limit the
+///   platform adapters enforce; a larger request gets exactly that many.
 ///
 /// ```
 /// use keel_ports::Rng;
@@ -34,6 +36,9 @@ pub struct SeededRng {
 }
 
 impl SeededRng {
+    /// The most bytes one [`Rng::fill`] returns: 16 MiB.
+    pub const MAX_FILL: u32 = 1 << 24;
+
     /// The seed of [`SeededRng::default`].
     pub const DEFAULT_SEED: u64 = 0x4B45_454C_5F52_4E47; // "KEEL_RNG"
 
@@ -80,7 +85,7 @@ impl Default for SeededRng {
 
 impl Rng for SeededRng {
     fn fill(&self, len: u32) -> Bytes {
-        let len = len as usize;
+        let len = len.min(SeededRng::MAX_FILL) as usize;
         let mut out = Vec::with_capacity(len);
         let mut state = self.state.lock();
         while out.len() < len {
@@ -163,6 +168,13 @@ mod tests {
         let rng = SeededRng::new(9);
         assert!(rng.fill(0).is_empty());
         assert_eq!(rng.next_u64(), reference(9, 1)[0]);
+    }
+
+    #[test]
+    fn fill_is_capped_at_the_platform_limit() {
+        let rng = SeededRng::new(3);
+        assert_eq!(rng.fill(u32::MAX).len(), SeededRng::MAX_FILL as usize);
+        assert_eq!(rng.fill(SeededRng::MAX_FILL + 1).len(), 1 << 24);
     }
 
     #[test]
