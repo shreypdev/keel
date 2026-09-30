@@ -82,7 +82,16 @@ impl BigList {
     /// Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
     /// returns its identity. One keyed `Insert`.
     pub fn insert_at(&self, index: u32, label: String) -> Result<u32, ListError> {
-        self.items.with(|list| check(index, list.len() + 1))?;
+        self.items.with(|list| {
+            // One past the last row is fine (it appends); the error reports the real length.
+            if index as usize > list.len() {
+                return Err(ListError::OutOfRange {
+                    index,
+                    len: list.len() as u32,
+                });
+            }
+            Ok(())
+        })?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.items.update(|list| {
             list.insert(
@@ -311,11 +320,24 @@ mod tests {
         );
         let (status, _) = app.call("move_item", &args2(0, 10_000));
         assert_eq!(status, ReplyStatus::Error);
-        // Appending is an insert at `len`; one past that is an error.
+        // Appending is an insert at `len`; one past that is an error that reports the real length.
         let mut args = 10_001u32.encode_to_vec();
         args.extend("x".to_owned().encode_to_vec());
-        assert_eq!(app.call("insert_at", &args).0, ReplyStatus::Error);
+        let (status, body) = app.call("insert_at", &args);
+        assert_eq!(status, ReplyStatus::Error);
+        assert_eq!(
+            ListError::decode_exact(&body).unwrap(),
+            ListError::OutOfRange {
+                index: 10_001,
+                len: 10_000
+            }
+        );
+        // None of the refused calls changed anything...
         assert!(app.t.host().take_decoded_change_sets().is_empty());
+        // ...and an insert at `len` appends.
+        let mut append = 10_000u32.encode_to_vec();
+        append.extend("x".to_owned().encode_to_vec());
+        assert_eq!(app.call("insert_at", &append).0, ReplyStatus::Ok);
     }
 
     #[test]
