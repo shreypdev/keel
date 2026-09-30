@@ -7,7 +7,10 @@
 //! * `call/ready_add`: `keel_call` of an `async` method that is ready at once: the executor
 //!   hop (spawn, core thread wake, poll, reply callback on the core thread);
 //! * `write_observed`: a store write with one observer: `keel_call_sync` plus the change-set
-//!   callback.
+//!   callback;
+//! * `port_call/sum_on_host`: `keel_call_sync` of a method that makes one synchronous port call
+//!   the host answers with a `malloc`ed reply: the port path (registration lookup and in-flight
+//!   accounting, the callback, copying and `free`ing the reply) on top of a `call_sync`.
 #![allow(unsafe_code)]
 
 use core::ffi::c_void;
@@ -20,7 +23,10 @@ use keel::prelude::Handle;
 use keel::runtime::RuntimeConfig;
 use keel::wire::payload::{Call, CallTarget};
 use keel::wire::{Decode, Encode, Writer};
-use keel_ffi::{keel_buf_free, keel_call, keel_call_sync, keel_init, keel_observe, keel_shutdown};
+use keel_ffi::{
+    KeelBuf, keel_buf_free, keel_call, keel_call_sync, keel_init, keel_observe, keel_port_register,
+    keel_shutdown,
+};
 
 #[path = "../tests/common/core.rs"]
 mod test_core;
@@ -37,6 +43,40 @@ extern "C" fn on_changes(_user: *mut c_void, _ptr: *const u8, _len: u32) {
 }
 
 extern "C" fn on_stream(_user: *mut c_void, _call_id: u32, _ptr: *const u8, _len: u32) {}
+
+unsafe extern "C" {
+    fn malloc(size: usize) -> *mut c_void;
+}
+
+/// The `Sum` port: `add(a: u32, b: u32) -> u32`, answered inline with a `malloc`ed `PortReply`.
+extern "C" fn on_port(
+    _user: *mut c_void,
+    _port_id: u32,
+    _method_id: u32,
+    port_call_id: u32,
+    ptr: *const u8,
+    len: u32,
+    out: *mut KeelBuf,
+) -> u8 {
+    // SAFETY: the core passes `len` readable bytes (two `u32`s) and a live `out_reply`.
+    unsafe {
+        let args = std::slice::from_raw_parts(ptr, len as usize);
+        let sum = u32::from_le_bytes(args[..4].try_into().unwrap())
+            .wrapping_add(u32::from_le_bytes(args[4..8].try_into().unwrap()));
+        let block = malloc(9).cast::<u8>();
+        block.copy_from_nonoverlapping(port_call_id.to_le_bytes().as_ptr(), 4);
+        block.add(4).write(0); // status: ok
+        block
+            .add(5)
+            .copy_from_nonoverlapping(sum.to_le_bytes().as_ptr(), 4);
+        *out = KeelBuf {
+            ptr: block,
+            len: 9,
+            cap: 0,
+        };
+    }
+    0
+}
 
 fn payload(target: CallTarget, call_id: u32, args: &[u8]) -> Vec<u8> {
     let mut w = Writer::new();
@@ -80,6 +120,8 @@ fn construct(type_name: &str, args: &[u8]) -> Handle {
 
 fn boundary(c: &mut Criterion) {
     let cfg = RuntimeConfig::default().encode_to_vec();
+    // SAFETY: `on_port` is an `extern "C"` function that touches nothing but its arguments.
+    unsafe { keel_port_register(ids::port_id("Sum"), Some(on_port), std::ptr::null_mut()) };
     // SAFETY: `cfg` is valid for its length and the callbacks are `extern "C"` functions.
     let code = unsafe {
         keel_init(
@@ -112,6 +154,15 @@ fn boundary(c: &mut Criterion) {
     group.bench_function("call_sync/add", |b| b.iter(|| call_sync(black_box(&add))));
     group.bench_function("call_sync/unknown", |b| {
         b.iter(|| call_sync(black_box(&unknown)));
+    });
+
+    let sum = payload(
+        target("sum_on_host"),
+        5,
+        &[20_u32.encode_to_vec(), 22_u32.encode_to_vec()].concat(),
+    );
+    group.bench_function("port_call/sum_on_host", |b| {
+        b.iter(|| call_sync(black_box(&sum)));
     });
 
     group.bench_function("call/add", |b| {
