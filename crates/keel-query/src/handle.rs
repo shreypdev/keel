@@ -104,7 +104,8 @@ impl<Q: QueryDef> Sink for HandleInner<Q> {
     }
 }
 
-/// A live view of one query with one set of parameters. See the [module docs](self).
+/// A live view of one query with one set of parameters (the signals, and why it is not a
+/// `#[keel::store]`, are described at the top of this module).
 ///
 /// ```
 /// use keel_query::{CtxQuery, QueryDef, QueryHandle, QueryStatus};
@@ -319,5 +320,102 @@ impl KeelObjectDyn for HandleObject {
 impl AnyObject for HandleObject {
     fn shared(&self) -> Arc<dyn Any + Send + Sync> {
         self.0.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defs::BoxFuture;
+    use keel_runtime::testing::TestRuntime;
+
+    struct Q;
+
+    impl QueryDef for Q {
+        const ID: u32 = 0x1234;
+        const KEY: &'static str = "q";
+        const STALE_MS: Option<u64> = None;
+        const PERSIST: bool = false;
+        const RETRY: u32 = 0;
+        type Params = ();
+        type Output = u32;
+        type Error = String;
+        fn fetch(_: Ctx, _: ()) -> BoxFuture<Result<u32, String>> {
+            Box::pin(async { Ok(1) })
+        }
+    }
+
+    fn view(seq: u64, data: Option<u32>, data_ver: u64) -> View {
+        View {
+            seq,
+            data: data.map(Erased::new),
+            data_ver,
+            error: None,
+            error_ver: 0,
+            status: QueryStatus::Success,
+            fetching: false,
+            updated_at: Some(5),
+        }
+    }
+
+    #[test]
+    fn a_handle_never_goes_back_to_an_older_view() {
+        let inner = HandleInner::<Q>::new();
+        inner.apply(&view(5, Some(1), 1));
+        assert_eq!(inner.data.get(), Some(1));
+        inner.apply(&view(4, Some(2), 2));
+        assert_eq!(
+            inner.data.get(),
+            Some(1),
+            "a view older than the one shown is ignored"
+        );
+        inner.apply(&view(5, Some(3), 3));
+        assert_eq!(
+            inner.data.get(),
+            Some(1),
+            "so is a repeat of the sequence number"
+        );
+        inner.apply(&view(6, Some(4), 4));
+        assert_eq!(inner.data.get(), Some(4));
+        assert_eq!(inner.updated_at.get(), Some(Timestamp(5)));
+    }
+
+    #[test]
+    fn the_first_view_is_always_shown_even_at_sequence_zero() {
+        let inner = HandleInner::<Q>::new();
+        inner.apply(&view(0, Some(9), 0));
+        assert_eq!(inner.data.get(), Some(9));
+        assert_eq!(inner.status.get(), QueryStatus::Success);
+    }
+
+    #[test]
+    fn a_handle_gets_one_cell_and_the_object_is_transient_and_typed_by_the_query() {
+        let t = TestRuntime::new();
+        let handle = crate::CtxQuery::query(&t.ctx()).observe::<Q>(());
+        let cell = handle.make_cell().unwrap();
+        assert_eq!(cell.signal_count(), 5);
+        assert_eq!(StoreCell::type_id(&cell), Q::ID);
+        assert_eq!(
+            handle.make_cell().unwrap_err(),
+            SignalsError::AlreadyAttached
+        );
+
+        let object = HandleObject::new(Q::ID, Box::new(handle), cell.clone());
+        assert_eq!(object.keel_type_id(), Q::ID);
+        assert_eq!(object.keel_type_name(), "QueryHandle");
+        assert!(object.transient());
+        assert!(Arc::ptr_eq(object.as_store().unwrap(), &cell));
+        assert!(object.shared().downcast::<HandleObjectInner>().is_ok());
+    }
+
+    #[test]
+    fn debug_shows_the_query_and_where_it_is() {
+        let t = TestRuntime::new();
+        let handle = crate::CtxQuery::query(&t.ctx()).observe::<Q>(());
+        let text = format!("{handle:?}");
+        assert!(
+            text.contains("QueryHandle") && text.contains("\"q\""),
+            "{text}"
+        );
     }
 }

@@ -113,3 +113,16 @@ fn mutate(rt: &Runtime, vt: &'static MutationVTable, call: DispatchCall<'_>) -> 
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_method_ids_are_the_ones_bindgen_hard_codes() {
+        // `keel-bindgen::QUERY_REFETCH_ID` / `QUERY_INVALIDATE_ID`, and the runtimes' copies.
+        assert_eq!(REFETCH_METHOD_ID, 0x21d1_b9e2);
+        assert_eq!(INVALIDATE_METHOD_ID, 0x44ce_c2fa);
+        assert_ne!(REFETCH_METHOD_ID, INVALIDATE_METHOD_ID);
+    }
+}

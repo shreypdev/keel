@@ -470,7 +470,8 @@ fn sync_dispatchers_reply_immediately() {
         }
     }
     let clock: Arc<dyn Timekeeper> = Arc::new(FixedTimekeeper);
-    let reply = __keel_port_dispatch_Timekeeper(&clock, id("Timekeeper", "now_ms"), &[]).into_sync();
+    let reply =
+        __keel_port_dispatch_Timekeeper(&clock, id("Timekeeper", "now_ms"), &[]).into_sync();
     assert_eq!(reply[0], 0);
     assert_eq!(i64::decode_exact(&reply[1..]).unwrap(), 7);
 }

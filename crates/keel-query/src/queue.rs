@@ -408,3 +408,105 @@ async fn run_replay(shared: Arc<Shared>, ctx: Ctx) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keel_runtime::executor::yield_now;
+    use keel_runtime::testing::TestRuntime;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::task::Waker;
+
+    fn poll<T>(fut: &mut BoxFuture<T>) -> Poll<T> {
+        fut.as_mut().poll(&mut Context::from_waker(Waker::noop()))
+    }
+
+    #[test]
+    fn the_key_is_set_only_while_the_body_is_polled() {
+        let key = Uuid([9; 16]);
+        let mut fut: BoxFuture<(Option<Uuid>, Option<Uuid>)> = scoped(
+            Some(key),
+            Box::pin(async {
+                let before = idempotency_key();
+                yield_now().await;
+                (before, idempotency_key())
+            }),
+        );
+        assert_eq!(poll(&mut fut), Poll::Pending);
+        assert_eq!(idempotency_key(), None, "not left set between polls");
+        assert_eq!(poll(&mut fut), Poll::Ready((Some(key), Some(key))));
+        assert_eq!(idempotency_key(), None);
+    }
+
+    #[test]
+    fn without_a_key_the_future_is_untouched() {
+        let mut fut: BoxFuture<Option<Uuid>> = scoped(None, Box::pin(async { idempotency_key() }));
+        assert_eq!(poll(&mut fut), Poll::Ready(None));
+    }
+
+    #[test]
+    fn scopes_nest_and_restore_the_outer_key() {
+        let (outer, inner) = (Uuid([1; 16]), Uuid([2; 16]));
+        let mut fut: BoxFuture<(Option<Uuid>, Option<Uuid>)> = scoped(
+            Some(outer),
+            Box::pin(async move {
+                let mut nested: BoxFuture<Option<Uuid>> =
+                    scoped(Some(inner), Box::pin(async { idempotency_key() }));
+                let inside = match nested
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                {
+                    Poll::Ready(key) => key,
+                    Poll::Pending => None,
+                };
+                (inside, idempotency_key())
+            }),
+        );
+        assert_eq!(poll(&mut fut), Poll::Ready((Some(inner), Some(outer))));
+    }
+
+    #[test]
+    fn a_panicking_body_does_not_leave_the_key_set() {
+        let mut fut: BoxFuture<()> = scoped(
+            Some(Uuid([3; 16])),
+            Box::pin(async {
+                panic!("boom");
+            }),
+        );
+        let caught = catch_unwind(AssertUnwindSafe(|| poll(&mut fut)));
+        assert!(caught.is_err());
+        assert_eq!(idempotency_key(), None);
+    }
+
+    #[test]
+    fn a_waiter_gets_the_outcome_whether_it_was_completed_before_or_after_it_waited() {
+        let t = TestRuntime::new();
+        let early = Waiter::new();
+        early.complete(Ok(Erased::new(1_u8)));
+        let value = t.run_until(async { early.wait().await });
+        assert_eq!(value.ok().and_then(|e| e.typed::<u8>()), Some(1));
+
+        let late = Waiter::new();
+        let completer = late.clone();
+        t.ctx()
+            .spawn(async move { completer.complete(Err(Failure::Broken("x".into()))) });
+        let outcome = t.run_until(async { late.wait().await });
+        assert!(matches!(outcome, Err(Failure::Broken(m)) if m == "x"));
+    }
+
+    #[test]
+    fn network_errors_are_recognised_by_type_when_the_error_is_http_error() {
+        let t = TestRuntime::new();
+        let ctx = t.ctx();
+        let net = Erased::new(HttpError::Network("dns".into()));
+        let timeout = Erased::new(HttpError::Timeout);
+        assert!(is_network_error(&ctx, 1, &net));
+        assert!(!is_network_error(&ctx, 1, &timeout));
+        // Some other error type of a mutation the schema does not know: not a network error.
+        assert!(!is_network_error(
+            &ctx,
+            1,
+            &Erased::new("offline".to_owned())
+        ));
+    }
+}

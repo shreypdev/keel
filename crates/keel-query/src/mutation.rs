@@ -310,3 +310,30 @@ async fn run<M: MutationDef>(builder: MutationBuilder<M>) -> Result<M::Output, M
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(n: u8) -> QueryKey {
+        QueryKey::new(1, Arc::from(vec![n]))
+    }
+
+    #[test]
+    fn the_undo_log_keeps_the_first_state_of_each_key_in_order() {
+        let mut log = UndoLog::default();
+        assert!(log.is_empty());
+        log.record(&key(1), None);
+        log.record(&key(2), None);
+        // A second touch of a key must not overwrite what it looked like before the first.
+        log.record(&key(1), Some(EntrySnapshot::EMPTY));
+        let entries = log.into_entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, key(1));
+        assert!(
+            entries[0].1.is_none(),
+            "the first record of key 1 (it did not exist) wins"
+        );
+        assert_eq!(entries[1].0, key(2));
+    }
+}

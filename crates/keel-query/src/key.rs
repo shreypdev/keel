@@ -101,3 +101,90 @@ impl From<&String> for Invalidate {
         Invalidate::Prefix(prefix.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defs::{BoxFuture, QueryDef};
+    use crate::erased::query_vtable;
+    use keel_runtime::Ctx;
+
+    struct Q;
+
+    impl QueryDef for Q {
+        const ID: u32 = 21;
+        const KEY: &'static str = "q:{n}";
+        const STALE_MS: Option<u64> = None;
+        const PERSIST: bool = false;
+        const RETRY: u32 = 0;
+        type Params = (u8,);
+        type Output = u8;
+        type Error = u8;
+        fn fetch(_: Ctx, _: (u8,)) -> BoxFuture<Result<u8, u8>> {
+            Box::pin(async { Ok(1) })
+        }
+    }
+
+    fn keyed(n: u8) -> (QueryKey, Entry) {
+        let key = QueryKey::new(Q::ID, Arc::from((n,).encode_to_vec()));
+        let entry = Entry::new(query_vtable::<Q>(), format!("q:{n}"));
+        (key, entry)
+    }
+
+    #[test]
+    fn prefixes_match_the_rendered_key_from_the_start() {
+        let (key, entry) = keyed(3);
+        assert!(Invalidate::prefix("q").matches(&key, &entry));
+        assert!(Invalidate::prefix("q:").matches(&key, &entry));
+        assert!(Invalidate::prefix("q:3").matches(&key, &entry));
+        assert!(Invalidate::prefix("").matches(&key, &entry));
+        assert!(!Invalidate::prefix("q:4").matches(&key, &entry));
+        assert!(
+            !Invalidate::prefix("3").matches(&key, &entry),
+            "a prefix, not a substring"
+        );
+        assert!(!Invalidate::prefix("q:33").matches(&key, &entry));
+    }
+
+    #[test]
+    fn typed_targets_match_by_id_and_by_exact_parameters() {
+        let (key, entry) = keyed(3);
+        assert!(Invalidate::query::<Q>().matches(&key, &entry));
+        assert!(Invalidate::exact::<Q>(&(3,)).matches(&key, &entry));
+        assert!(!Invalidate::exact::<Q>(&(4,)).matches(&key, &entry));
+        assert!(!Invalidate::Query(22).matches(&key, &entry));
+        assert!(
+            !Invalidate::Exact {
+                query_id: 22,
+                params: (3_u8,).encode_to_vec()
+            }
+            .matches(&key, &entry)
+        );
+    }
+
+    #[test]
+    fn strings_convert_to_prefixes() {
+        assert_eq!(
+            Invalidate::from("todos"),
+            Invalidate::Prefix("todos".into())
+        );
+        assert_eq!(
+            Invalidate::from("todos".to_owned()),
+            Invalidate::prefix("todos")
+        );
+        let owned = "todos".to_owned();
+        assert_eq!(Invalidate::from(&owned), Invalidate::prefix("todos"));
+    }
+
+    #[test]
+    fn keys_are_equal_when_id_and_params_are() {
+        let a = QueryKey::new(1, Arc::from(vec![1_u8, 2]));
+        let b = QueryKey::new(1, Arc::from(vec![1_u8, 2]));
+        assert_eq!(a, b);
+        assert_ne!(a, QueryKey::new(2, Arc::from(vec![1_u8, 2])));
+        assert_ne!(a, QueryKey::new(1, Arc::from(vec![1_u8])));
+        let mut set = std::collections::HashSet::new();
+        set.insert(a);
+        assert!(set.contains(&b));
+    }
+}

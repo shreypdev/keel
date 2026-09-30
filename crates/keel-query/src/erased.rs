@@ -73,6 +73,9 @@ impl Failure {
 /// What an erased fetch or execution resolves to.
 pub(crate) type Outcome = Result<Erased, Failure>;
 
+/// Observes a query with encoded parameters and answers the handle.
+pub(crate) type OpenFn = fn(&crate::QueryClient, &[u8]) -> Result<Box<dyn HandleOps>, WireError>;
+
 /// The encoded result of a mutation dispatched from the platform: `Ok` body or typed error.
 pub(crate) type EncodedResult = Result<Vec<u8>, Vec<u8>>;
 
@@ -89,7 +92,7 @@ pub struct QueryVTable {
     /// Decodes an encoded output (a persisted entry).
     pub(crate) decode_data: fn(&[u8]) -> Result<Erased, WireError>,
     /// Observes the query with encoded parameters: what a platform constructor call does.
-    pub(crate) open: fn(&crate::QueryClient, &[u8]) -> Result<Box<dyn HandleOps>, WireError>,
+    pub(crate) open: OpenFn,
 }
 
 /// The type-erased half of one `#[keel::mutation]`. Built with [`MutationRegistration::of`].

@@ -124,7 +124,60 @@ pub(crate) fn new_uuid(ctx: &Ctx) -> Uuid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
+    use keel_ports::{Rng, fakes};
+    use keel_runtime::testing::TestRuntime;
+    use proptest::prelude::{prop_assert, proptest};
+
+    #[test]
+    fn jitter_comes_from_the_rng_port_and_is_reproducible() {
+        let t = TestRuntime::new();
+        fakes::install(&t);
+        let ctx = t.ctx();
+        let shadow = fakes::SeededRng::default();
+        for _ in 0..3 {
+            let bytes: [u8; 8] = shadow.fill(8).0.try_into().unwrap();
+            assert_eq!(jitter(&ctx), u64::from_le_bytes(bytes));
+        }
+    }
+
+    #[test]
+    fn uuids_are_version_4_variant_1_and_come_from_the_rng_port() {
+        let t = TestRuntime::new();
+        fakes::install(&t);
+        let ctx = t.ctx();
+        let a = new_uuid(&ctx);
+        let b = new_uuid(&ctx);
+        assert_ne!(a, b);
+        for id in [a, b] {
+            assert_eq!(id.0[6] >> 4, 4, "version 4");
+            assert_eq!(id.0[8] >> 6, 0b10, "RFC 4122 variant");
+        }
+        // Same seed, same key: the sequence is reproducible.
+        let t2 = TestRuntime::new();
+        fakes::install(&t2);
+        assert_eq!(new_uuid(&t2.ctx()), a);
+    }
+
+    #[test]
+    fn missing_ports_fall_back_instead_of_panicking() {
+        // No fakes and no host: the proxies panic, the helpers answer a fallback and log it.
+        let t = TestRuntime::new();
+        let ctx = t.ctx();
+        assert_eq!(
+            jitter(&ctx),
+            200,
+            "a jitter that gives a factor of exactly 1.0"
+        );
+        assert_eq!(now_ms(&ctx, 77), 77);
+        let logs = t.host().take_logs();
+        assert!(
+            logs.iter()
+                .any(|l| l.message.contains("Rng") && l.level == WARN),
+            "{logs:?}"
+        );
+        assert!(logs.iter().any(|l| l.message.contains("Clock")));
+        assert_eq!(new_uuid(&ctx).0[6] >> 4, 4);
+    }
 
     #[test]
     fn delays_double_up_to_the_cap() {

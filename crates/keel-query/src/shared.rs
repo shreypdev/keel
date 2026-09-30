@@ -232,7 +232,7 @@ fn same_bytes(a: &Option<Erased>, b: &Option<Erased>) -> bool {
 
 impl EntrySnapshot {
     /// What an entry that did not exist looked like.
-    const EMPTY: EntrySnapshot = EntrySnapshot {
+    pub(crate) const EMPTY: EntrySnapshot = EntrySnapshot {
         data: None,
         error: None,
         updated_at: None,
@@ -985,4 +985,245 @@ pub(crate) fn shared_of(runtime: &Runtime) -> Arc<Shared> {
         .extension_with(|| Ext(Arc::new(Shared::new())))
         .0
         .clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defs::{BoxFuture, QueryDef};
+    use crate::erased::query_vtable;
+    use keel_runtime::testing::TestRuntime;
+    use std::sync::atomic::AtomicUsize;
+    use std::task::Wake;
+
+    struct Dummy;
+
+    impl QueryDef for Dummy {
+        const ID: u32 = 7;
+        const KEY: &'static str = "dummy:{x}";
+        const STALE_MS: Option<u64> = Some(1_000);
+        const PERSIST: bool = false;
+        const RETRY: u32 = 0;
+        type Params = (u8,);
+        type Output = u32;
+        type Error = String;
+        fn fetch(_: Ctx, _: (u8,)) -> BoxFuture<Result<u32, String>> {
+            Box::pin(async { Ok(1) })
+        }
+    }
+
+    struct Always;
+
+    impl QueryDef for Always {
+        const ID: u32 = 8;
+        const KEY: &'static str = "always";
+        const STALE_MS: Option<u64> = None;
+        const PERSIST: bool = false;
+        const RETRY: u32 = 0;
+        type Params = ();
+        type Output = u32;
+        type Error = String;
+        fn fetch(_: Ctx, _: ()) -> BoxFuture<Result<u32, String>> {
+            Box::pin(async { Ok(1) })
+        }
+    }
+
+    fn entry() -> Entry {
+        Entry::new(query_vtable::<Dummy>(), "dummy:1".to_owned())
+    }
+
+    fn with_data(mut entry: Entry, at: i64) -> Entry {
+        entry.data = Some(Erased::new(5_u32));
+        entry.updated_at = Some(at);
+        entry
+    }
+
+    /// A task id to put in an `Inflight` (ids cannot be made up).
+    fn a_task() -> TaskId {
+        let t = TestRuntime::new();
+        t.ctx().spawn(async {})
+    }
+
+    fn inflight() -> Option<Inflight> {
+        Some(Inflight {
+            serial: 1,
+            task: a_task(),
+        })
+    }
+
+    #[test]
+    fn status_is_derived_from_what_the_entry_holds() {
+        let mut e = entry();
+        assert_eq!(e.status(), QueryStatus::Idle);
+
+        e.inflight = inflight();
+        assert_eq!(
+            e.status(),
+            QueryStatus::Fetching,
+            "fetching with nothing to show"
+        );
+
+        e.data = Some(Erased::new(1_u32));
+        assert_eq!(
+            e.status(),
+            QueryStatus::Success,
+            "a refetch keeps showing the data"
+        );
+
+        e.error = Some(Erased::new("boom".to_owned()));
+        assert_eq!(
+            e.status(),
+            QueryStatus::Error,
+            "the last fetch failed; stale data stays"
+        );
+
+        e.inflight = None;
+        e.error = None;
+        e.failed = true;
+        assert_eq!(
+            e.status(),
+            QueryStatus::Error,
+            "a fetch that died shows as an error too"
+        );
+
+        e.failed = false;
+        e.data = None;
+        e.error = Some(Erased::new("boom".to_owned()));
+        e.inflight = inflight();
+        assert_eq!(
+            e.status(),
+            QueryStatus::Fetching,
+            "retrying by hand with no data is a spinner again"
+        );
+    }
+
+    #[test]
+    fn staleness_follows_the_window_and_the_flags() {
+        let fresh = with_data(entry(), 1_000);
+        assert!(!fresh.is_stale(1_000));
+        assert!(!fresh.is_stale(1_999));
+        assert!(
+            fresh.is_stale(2_000),
+            "the window is over at exactly its length"
+        );
+        assert!(fresh.is_stale(5_000));
+        // A clock that moved backwards does not make data stale (or panic).
+        assert!(!fresh.is_stale(0));
+
+        assert!(entry().is_stale(0), "no data is always stale");
+
+        let mut invalidated = with_data(entry(), 1_000);
+        invalidated.invalidated = true;
+        assert!(invalidated.is_stale(1_000));
+
+        let mut errored = with_data(entry(), 1_000);
+        errored.error = Some(Erased::new("x".to_owned()));
+        assert!(
+            errored.is_stale(1_000),
+            "a failed last fetch is worth trying again"
+        );
+
+        let mut failed = with_data(entry(), 1_000);
+        failed.failed = true;
+        assert!(failed.is_stale(1_000));
+
+        let mut always = Entry::new(query_vtable::<Always>(), "always".to_owned());
+        always.data = Some(Erased::new(1_u32));
+        always.updated_at = Some(1_000);
+        assert!(always.is_stale(1_000), "no window means always stale");
+    }
+
+    #[test]
+    fn a_fetch_is_only_needed_when_stale_and_idle() {
+        let mut e = entry();
+        assert!(e.needs_fetch(0));
+        e.inflight = inflight();
+        assert!(!e.needs_fetch(0), "one fetch at a time");
+        let fresh = with_data(entry(), 0);
+        assert!(!fresh.needs_fetch(10));
+    }
+
+    struct Recorder(AtomicUsize);
+
+    impl Sink for Recorder {
+        fn apply(&self, _: &View) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn publications_bump_the_sequence_and_skip_entries_nobody_shows() {
+        let mut e = entry();
+        assert!(e.publication().is_none(), "no sinks: nothing to publish to");
+        assert_eq!(
+            e.seq, 1,
+            "the sequence still advances, so a later view is newer"
+        );
+
+        let sink = Arc::new(Recorder(AtomicUsize::new(0)));
+        let weak: Weak<dyn Sink> = Arc::downgrade(&sink) as Weak<dyn Sink>;
+        e.sinks.push((1, weak));
+        let (sinks, view) = e.publication().unwrap();
+        assert_eq!((sinks.len(), view.seq), (1, 2));
+
+        // A sink that is gone is pruned, not kept alive.
+        drop(sinks);
+        drop(sink);
+        assert!(e.publication().is_none());
+        assert!(e.sinks.is_empty());
+    }
+
+    struct CountWake(AtomicUsize);
+
+    impl Wake for CountWake {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn waiters_are_released_only_when_the_fetch_is_over() {
+        let counter = Arc::new(CountWake(AtomicUsize::new(0)));
+        let mut e = entry();
+        e.settle.push(Waker::from(counter.clone()));
+        e.inflight = inflight();
+        let mut fx = Fx::default();
+        fx.publish(&mut e);
+        assert_eq!(fx.wake.len(), 0, "still fetching: keep waiting");
+
+        e.inflight = None;
+        fx.publish(&mut e);
+        assert_eq!(fx.wake.len(), 1);
+        assert!(e.settle.is_empty());
+        for waker in std::mem::take(&mut fx.wake) {
+            waker.wake();
+        }
+        assert_eq!(counter.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_snapshot_restores_every_field_of_an_entry() {
+        let mut e = with_data(entry(), 42);
+        e.invalidated = true;
+        let snapshot = EntrySnapshot::of(&e);
+        e.data = None;
+        e.updated_at = None;
+        e.invalidated = false;
+        e.failed = true;
+        assert!(snapshot.data.is_some());
+        assert_eq!(snapshot.updated_at, Some(42));
+        assert!(snapshot.invalidated && !snapshot.failed);
+        assert!(EntrySnapshot::EMPTY.data.is_none() && EntrySnapshot::EMPTY.updated_at.is_none());
+    }
+
+    #[test]
+    fn same_bytes_compares_encodings_not_identity() {
+        let a = Some(Erased::new(5_u32));
+        let b = Some(Erased::new(5_u32));
+        let c = Some(Erased::new(6_u32));
+        assert!(same_bytes(&a, &b));
+        assert!(!same_bytes(&a, &c));
+        assert!(!same_bytes(&a, &None));
+        assert!(same_bytes(&None, &None));
+    }
 }
