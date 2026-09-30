@@ -23,4 +23,23 @@ final class Findings: XCTestCase {
         XCTExpectFailure("playground-core: OutOfRange.len is len + 1 for insert_at")
         XCTAssertEqual(error, .outOfRange(index: 10_001, len: 10_000))
     }
+
+    /// The generated `Probe.ticks(count:)` copies the runtime's pull-based stream into an
+    /// unbounded `AsyncThrowingStream` from a task of its own (`keelDecodeStream` in
+    /// `Objects.swift`), so nothing the consumer does limits how far the core runs ahead: after
+    /// reading 5 of 1,000 items and waiting 200 ms, the core has produced all 1,000.
+    func testFinding_generatedTicksIgnoreBackpressure() async throws {
+        let core = try Fixture.shared.core()
+        let probe = try Probe(ctx: core)
+        defer { probe.close() }
+        probe.reset()
+        var iterator = probe.ticks(count: 1000).makeAsyncIterator()
+        for _ in 0 ..< 5 {
+            _ = try await iterator.next()
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        let produced = probe.counters().produced
+        XCTExpectFailure("keel-bindgen: generated stream methods buffer without bound")
+        XCTAssertLessThanOrEqual(produced, 5 + 64, "the core ran \(produced) items ahead of a consumer that read 5")
+    }
 }
