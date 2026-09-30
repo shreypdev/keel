@@ -74,7 +74,14 @@ internal class ExecutorMainThread : MainThread {
     override val dispatcher: CoroutineDispatcher = executor.asCoroutineDispatcher()
 
     override fun post(task: Runnable) {
-        executor.execute(task)
+        executor.execute {
+            try {
+                task.run()
+            } catch (e: Throwable) {
+                // A UI thread survives a bad task; so does this stand-in.
+                KeelLog.warn("a task on the keel-main thread failed", e)
+            }
+        }
     }
 
     override fun isCurrent(): Boolean = (Thread.currentThread() as? MainWorker)?.owner === this

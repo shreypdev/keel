@@ -21,6 +21,7 @@
 #   KEEL_SKIP_GOLDEN=1 scripts/test-local.sh   # leave the generated golden/full code out of the test build
 #   KEEL_BUILD_DIR=/tmp/keel-kotlin scripts/test-local.sh   # put the build output elsewhere (default: build/local)
 #   KEEL_NATIVE_LIB_DIR=target/debug scripts/test-local.sh run   # -Djava.library.path for the JNI smoke test
+#                                        (also KEEL_NATIVE_NAME -> -Dkeel.native.name, KEEL_NATIVE_PATH -> -Dkeel.native.path)
 #
 # Environment: KEEL_KOTLINX_COROUTINES (kotlinx-coroutines-core-jvm jar; scripts/env.sh sets it),
 # KEEL_KOTLIN_STDLIB (kotlin-stdlib jar; default: the one inside the kotlinc install).
@@ -152,6 +153,8 @@ phase_run() {
   echo "==> running suites"
   local jflags=(-Xmx512m)
   if [ -n "${KEEL_NATIVE_LIB_DIR:-}" ]; then jflags+=("-Djava.library.path=$KEEL_NATIVE_LIB_DIR"); fi
+  if [ -n "${KEEL_NATIVE_NAME:-}" ]; then jflags+=("-Dkeel.native.name=$KEEL_NATIVE_NAME"); fi
+  if [ -n "${KEEL_NATIVE_PATH:-}" ]; then jflags+=("-Dkeel.native.path=$KEEL_NATIVE_PATH"); fi
   java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$OUT/test" "$STDLIB" "$COROUTINES")" dev.keel.runtime.TestMainKt
 }
 

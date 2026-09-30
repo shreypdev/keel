@@ -44,6 +44,12 @@ fun main() {
         AdapterTests(),
         FileAdapterTests(),
         HttpAdapterTests(),
+        ErrorTests(),
+        StatsTests(),
+        CleanerTests(),
+        DispatcherTests(),
+        NativeShapeTests(),
+        NativeSmokeTests(),
     )
     var failures = 0
     var cases = 0
