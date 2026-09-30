@@ -14,6 +14,22 @@ final class RawStore {
         let op: ChangeOp
         /// The encoded value (a full value, or the encoded keyed patch).
         let value: [UInt8]
+
+        /// The value decoded as `Value`, which must use every byte.
+        func decode<Value: KeelCodec>(_ type: Value.Type = Value.self) throws -> Value {
+            var reader = KeelReader(value)
+            let decoded = try Value.keelDecode(&reader)
+            try reader.finish()
+            return decoded
+        }
+
+        /// The value decoded as a keyed patch of `Item`s.
+        func decodePatch<Item: KeelCodec>(_ type: Item.Type = Item.self) throws -> [PatchOp<Item>] {
+            var reader = KeelReader(value)
+            let ops: [PatchOp<Item>] = try KeelRuntime.decodePatch(&reader)
+            try reader.finish()
+            return ops
+        }
     }
 
     let core: KeelCore

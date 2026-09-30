@@ -11,7 +11,7 @@ import XCTest
 @MainActor
 class ScenarioCase: XCTestCase {
     /// Runs one scenario and prints its line.
-    func scenario(_ id: String, _ title: String, _ body: () async throws -> Void) async {
+    func scenario(_ id: String, _ title: String, _ body: @MainActor () async throws -> Void) async {
         do {
             try await body()
             ScenarioCase.report("SCENARIO \(id) PASS \(title)")
