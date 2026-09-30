@@ -206,3 +206,14 @@ I rebuilt every scratch harness against the merged checkout. The matrix is green
 - **Fix.** Assert (debug) and refuse with a FATAL log (release) whenever `RUNNING` is non-empty on the calling thread, not only for the same serial.
 
 **Verdict.** Every original finding is closed. N1 reopens H1's use-after-free under concurrent removal, so fix N1 before the C ABI goes to third-party hosts. N2 is cheap hardening.
+
+## Integrator resolution of the re-review (same day)
+
+* **N1 fixed** by the integrator: a shared per-id draining list. Every removal (remove,
+  replacing install, retire_all) publishes the registrations it takes, and waits for ALL
+  draining entries of the id — the loser of a removal race included. Regression tests:
+  `registry::tests::n1_the_loser_of_a_removal_race_still_waits_for_the_callback`,
+  `n1_two_removers_of_one_port_both_wait`.
+* **N2 fixed**: a removal from a thread inside ANY port callback is a debug assertion and,
+  in release, returns without waiting plus a FATAL log (keel.h forbids the call; waiting
+  could only deadlock). Tests: `n2_*` (debug and release variants).

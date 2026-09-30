@@ -122,11 +122,6 @@ impl PortReg {
                 .unwrap_or_else(PoisonError::into_inner);
         }
     }
-
-    fn retire(&self) {
-        self.mark_retired();
-        self.drain();
-    }
 }
 
 /// One running callback of a registration. While it lives, removing that registration waits, so
@@ -169,6 +164,11 @@ impl Drop for Invocation {
 /// Port callbacks by port id.
 pub(crate) struct Registry {
     ports: RwLock<BTreeMap<u32, Arc<PortReg>>>,
+    /// Registrations taken out of `ports` whose callbacks may still be running. Every removal
+    /// of a port id waits for ALL entries of that id here — not only the one it took out of
+    /// the map itself — so the loser of a removal race still returns only once no callback of
+    /// that port runs (re-review N1). Entries leave the list once drained.
+    draining: Mutex<Vec<(u32, Arc<PortReg>)>>,
 }
 
 /// The process-wide registry behind `keel_port_register`: it survives between registration and
@@ -179,6 +179,7 @@ impl Registry {
     pub(crate) const fn new() -> Registry {
         Registry {
             ports: RwLock::new(BTreeMap::new()),
+            draining: Mutex::new(Vec::new()),
         }
     }
 
@@ -190,36 +191,112 @@ impl Registry {
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(port_id, new);
-        if let Some(old) = old {
-            old.retire();
-        }
+        self.settle(Some(port_id), old.map(|old| (port_id, old)).into_iter());
     }
 
-    /// Removes the registration of `port_id`, returning once none of its callbacks is running.
+    /// Removes the registration of `port_id`, returning once none of its callbacks is running —
+    /// including callbacks of a registration that a concurrent removal or shutdown took out of
+    /// the map first (re-review N1).
     pub(crate) fn remove(&self, port_id: u32) {
         let old = self
             .ports
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&port_id);
-        if let Some(old) = old {
-            old.retire();
-        }
+        self.settle(Some(port_id), old.map(|old| (port_id, old)).into_iter());
     }
 
     /// Removes every registration (`keel_shutdown`), returning once no callback of any of them
-    /// is running.
+    /// is running, whoever took them out of the map.
     pub(crate) fn retire_all(&self) {
-        let all: Vec<Arc<PortReg>> =
+        let all: Vec<(u32, Arc<PortReg>)> =
             std::mem::take(&mut *self.ports.write().unwrap_or_else(PoisonError::into_inner))
-                .into_values()
+                .into_iter()
                 .collect();
-        for reg in &all {
-            reg.mark_retired();
+        self.settle(None, all.into_iter());
+    }
+
+    /// Publishes `taken` on the draining list, retires the entries, then waits until no
+    /// callback of `port_id` (every port for `None`) still runs — the entries taken here AND
+    /// the ones concurrent removals published. Skips all waiting, with a debug assertion and a
+    /// FATAL log, when called from inside a port callback (keel.h forbids it; waiting could
+    /// only deadlock — re-review N2).
+    fn settle(&self, port_id: Option<u32>, taken: impl Iterator<Item = (u32, Arc<PortReg>)>) {
+        {
+            let mut draining = self.draining.lock().unwrap_or_else(PoisonError::into_inner);
+            for (id, reg) in taken {
+                reg.mark_retired();
+                draining.push((id, reg));
+            }
         }
-        for reg in &all {
+        let on_callback_thread = RUNNING
+            .try_with(|running| !running.borrow().is_empty())
+            .unwrap_or(false);
+        if on_callback_thread {
+            // The own-registration case keeps its historical assertion message; drain() below
+            // would raise it. Anything else is the mutual-removal deadlock of re-review N2.
+            let own_only = RUNNING.try_with(|running| {
+                let running = running.borrow();
+                let draining = self.draining.lock().unwrap_or_else(PoisonError::into_inner);
+                running.iter().all(|serial| {
+                    draining
+                        .iter()
+                        .any(|(id, reg)| reg.serial == *serial && port_id.is_none_or(|p| *id == p))
+                })
+            });
+            debug_assert!(
+                own_only.unwrap_or(true),
+                "keel-ffi: keel_port_register / keel_shutdown must not be called from inside a \
+                 port callback (see keel.h); waiting here would deadlock"
+            );
+            #[cfg(debug_assertions)]
+            {
+                // Drain an entry whose callback is on THIS thread's stack: that is the one
+                // whose assertion ("removed from inside its own callback") should fire, and
+                // it cannot wait on anything.
+                let own = RUNNING
+                    .try_with(|running| running.borrow().clone())
+                    .unwrap_or_default();
+                let picked = {
+                    let draining = self.draining.lock().unwrap_or_else(PoisonError::into_inner);
+                    draining
+                        .iter()
+                        .find(|(_, reg)| own.contains(&reg.serial))
+                        .map(|(_, reg)| reg.clone())
+                };
+                if let Some(reg) = picked {
+                    reg.drain();
+                }
+            }
+            if let Some(rt) = keel_runtime::Runtime::global() {
+                rt.log(
+                    keel_runtime::log::FATAL,
+                    "keel::ffi",
+                    "keel_port_register / keel_shutdown called from inside a port callback; the \
+                     removal returns WITHOUT waiting and the `user` pointer may still be in use",
+                );
+            }
+            return;
+        }
+        // Outlast every draining entry of the id(s); entries whose drain completed leave the
+        // list, so a violating host's leftovers are cleaned up by the next legitimate removal.
+        while let Some(reg) = self.pick_draining(port_id) {
             reg.drain();
+            let mut draining = self.draining.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(at) = draining.iter().position(|(_, r)| Arc::ptr_eq(r, &reg)) {
+                draining.remove(at);
+            }
         }
+    }
+
+    /// One draining entry matching `port_id` (any entry for `None`), if there is one.
+    fn pick_draining(&self, port_id: Option<u32>) -> Option<Arc<PortReg>> {
+        self.draining
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|(id, _)| port_id.is_none_or(|p| *id == p))
+            .map(|(_, reg)| reg.clone())
     }
 
     /// The registered port ids.
@@ -369,9 +446,114 @@ mod tests {
         let registry = Registry::new();
         registry.install(1, nothing, core::ptr::null_mut());
         registry.install(2, nothing, core::ptr::null_mut());
-        let busy = registry.enter(1).expect("registered");
-        registry.remove(2); // returns at once: nothing of port 2 is running
-        drop(busy);
+        let (held_tx, held_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let holder = &registry;
+            scope.spawn(move || {
+                let busy = holder.enter(1).expect("registered");
+                held_tx.send(()).expect("listening");
+                done_rx.recv().expect("released");
+                drop(busy);
+            });
+            held_rx.recv().expect("an invocation of port 1 is running");
+            registry.remove(2); // returns at once: nothing of port 2 is running
+            done_tx.send(()).expect("the holder is waiting");
+        });
+    }
+
+    /// Re-review N1: the loser of a removal race must still wait. Whoever took the
+    /// registration out of the map, every `remove` / `retire_all` of that id returns only
+    /// once no callback of the id is running.
+    #[test]
+    fn n1_the_loser_of_a_removal_race_still_waits_for_the_callback() {
+        let registry = registry_with(7);
+        let invocation = registry.enter(7).expect("registered");
+        let first = AtomicBool::new(false);
+        let second = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                registry.retire_all(); // takes the registration out of the map
+                first.store(true, Ordering::Release);
+            });
+            // Make sure the shutdown grabbed it before the losing remover runs.
+            while !registry.ids().is_empty() {
+                std::thread::yield_now();
+            }
+            scope.spawn(|| {
+                registry.remove(7); // finds nothing in the map; must wait regardless
+                second.store(true, Ordering::Release);
+            });
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(!first.load(Ordering::Acquire), "shutdown returned early");
+            assert!(
+                !second.load(Ordering::Acquire),
+                "the losing remover returned early"
+            );
+            drop(invocation);
+        });
+        assert!(first.load(Ordering::Acquire));
+        assert!(second.load(Ordering::Acquire));
+    }
+
+    /// Re-review N1, both callers `remove`: same rule.
+    #[test]
+    fn n1_two_removers_of_one_port_both_wait() {
+        let registry = registry_with(7);
+        let invocation = registry.enter(7).expect("registered");
+        let done = [AtomicBool::new(false), AtomicBool::new(false)];
+        std::thread::scope(|scope| {
+            for flag in &done {
+                let registry = &registry;
+                scope.spawn(move || {
+                    registry.remove(7);
+                    flag.store(true, Ordering::Release);
+                });
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(done.iter().all(|f| !f.load(Ordering::Acquire)));
+            drop(invocation);
+        });
+        assert!(done.iter().all(|f| f.load(Ordering::Acquire)));
+    }
+
+    /// Re-review N2 (release): a removal from a thread that is inside SOME port callback does
+    /// not wait (waiting could deadlock against another callback removing this one); keel.h
+    /// forbids the call outright and debug builds assert.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn n2_a_removal_from_inside_another_ports_callback_does_not_wait() {
+        let registry = Registry::new();
+        registry.install(1, nothing, core::ptr::null_mut());
+        registry.install(2, nothing, core::ptr::null_mut());
+        let _inside = registry.enter(1).expect("registered"); // this thread is "in" port 1
+        let (held_tx, held_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let holder = &registry;
+            scope.spawn(move || {
+                let busy = holder.enter(2).expect("registered");
+                held_tx.send(()).expect("listening");
+                done_rx.recv().expect("released");
+                drop(busy);
+            });
+            held_rx.recv().expect("an invocation of port 2 is running");
+            registry.remove(2); // must return, not deadlock, even though port 2 is running
+            assert!(registry.enter(2).is_none(), "still retired");
+            done_tx.send(()).expect("the holder is waiting");
+        });
+    }
+
+    /// Re-review N2 (debug): the same situation is an assertion.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "must not be called from inside a port callback")]
+    fn n2_a_removal_from_inside_another_ports_callback_is_a_debug_assertion() {
+        let registry = Registry::new();
+        registry.install(1, nothing, core::ptr::null_mut());
+        registry.install(2, nothing, core::ptr::null_mut());
+        let _inside = registry.enter(1).expect("registered");
+        registry.remove(2);
     }
 
     #[test]
