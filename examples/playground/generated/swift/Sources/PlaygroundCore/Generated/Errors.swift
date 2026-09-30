@@ -98,7 +98,10 @@ public enum LabError: UndraError, Error, Sendable, Hashable {
         case 2:
             return try LabError.notANumber(String.undraDecode(&r))
         case 3:
-            return try LabError.rejected(code: Int32.undraDecode(&r), reason: String.undraDecode(&r))
+            return try LabError.rejected(
+                code: Int32.undraDecode(&r),
+                reason: String.undraDecode(&r)
+            )
         default:
             throw WireError.invalidTag(tag: UInt32(tag), at: at, type: "LabError")
         }

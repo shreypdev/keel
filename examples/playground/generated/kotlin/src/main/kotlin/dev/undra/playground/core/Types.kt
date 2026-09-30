@@ -5,10 +5,10 @@ package dev.undra.playground.core
 import dev.undra.runtime.UndraEnum
 import dev.undra.runtime.UndraRecord
 import dev.undra.runtime.wire.Codecs
+import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
-import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.WireException
 import java.util.UUID
 import kotlin.time.Duration

@@ -102,7 +102,11 @@ export class Probe extends UndraObject {
 }
 
 /** Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments. */
-export async function add(a: number, b: number, core: UndraCore = UndraCore.shared): Promise<number> {
+export async function add(
+  a: number,
+  b: number,
+  core: UndraCore = UndraCore.shared,
+): Promise<number> {
   const w = new UndraWriter();
   w.writeI32(a);
   w.writeI32(b);
@@ -147,7 +151,11 @@ export async function area(figure: Figure, core: UndraCore = UndraCore.shared): 
   FigureCodec.encode(w, figure);
   let body: Uint8Array;
   try {
-    body = await core.call({ target: CallTarget.FreeFunction }, UndraIds.Functions.area, w.finish());
+    body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.area,
+      w.finish(),
+    );
   } catch (error) {
     throw LabError.fromReply(error);
   }
@@ -221,7 +229,10 @@ export async function echoComposite(
 }
 
 /** Returns `value` unchanged. */
-export async function echoFigure(value: Figure, core: UndraCore = UndraCore.shared): Promise<Figure> {
+export async function echoFigure(
+  value: Figure,
+  core: UndraCore = UndraCore.shared,
+): Promise<Figure> {
   const w = new UndraWriter();
   FigureCodec.encode(w, value);
   const body = await core.call(
@@ -325,7 +336,10 @@ export async function greet(name: string, core: UndraCore = UndraCore.shared): P
  * Reads an unsigned number of at most nine digits.
  * @throws {LabError}
  */
-export async function parseCount(text: string, core: UndraCore = UndraCore.shared): Promise<number> {
+export async function parseCount(
+  text: string,
+  core: UndraCore = UndraCore.shared,
+): Promise<number> {
   const w = new UndraWriter();
   w.writeStr(text);
   let body: Uint8Array;
