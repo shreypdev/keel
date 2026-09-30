@@ -1,0 +1,193 @@
+{
+  "keel_version": "1.0.0",
+  "crate_name": "golden-queries",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "uuid"
+          },
+          "default": false
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "Page",
+      "type_id": 3896349078,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "total",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "TodoError",
+      "type_id": 787313993,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Offline",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "offline"
+        }
+      ]
+    }
+  ],
+  "objects": [],
+  "functions": [],
+  "ports": [],
+  "queries": [
+    {
+      "name": "todos",
+      "query_id": 1411423356,
+      "kind": "query",
+      "key": "todos:{page}",
+      "params": [
+        {
+          "name": "page",
+          "ty": {
+            "kind": "u32"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Page"
+          },
+          {
+            "kind": "named",
+            "of": "TodoError"
+          }
+        ]
+      },
+      "stale_ms": 30000,
+      "persist": true,
+      "idempotent": false
+    },
+    {
+      "name": "todo_count",
+      "query_id": 3408321191,
+      "kind": "query",
+      "key": "todo-count",
+      "params": [],
+      "returns": {
+        "kind": "u32"
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    },
+    {
+      "name": "todo_by_id",
+      "query_id": 733343731,
+      "kind": "query",
+      "key": "todo:{id}",
+      "params": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "uuid"
+          }
+        },
+        {
+          "name": "fresh",
+          "ty": {
+            "kind": "bool"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Todo"
+          },
+          {
+            "kind": "named",
+            "of": "TodoError"
+          }
+        ]
+      },
+      "stale_ms": 5000,
+      "persist": false,
+      "idempotent": false
+    },
+    {
+      "name": "add_todo",
+      "query_id": 1253773000,
+      "kind": "mutation",
+      "key": "todos",
+      "params": [
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "named",
+            "of": "Todo"
+          },
+          {
+            "kind": "named",
+            "of": "TodoError"
+          }
+        ]
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": true
+    },
+    {
+      "name": "clear_todos",
+      "query_id": 3504954659,
+      "kind": "mutation",
+      "key": "todos",
+      "params": [],
+      "returns": {
+        "kind": "unit"
+      },
+      "stale_ms": null,
+      "persist": false,
+      "idempotent": false
+    }
+  ]
+}

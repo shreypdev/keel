@@ -1,0 +1,387 @@
+{
+  "keel_version": "1.0.0",
+  "crate_name": "golden-ports",
+  "records": [
+    {
+      "name": "HttpRequest",
+      "type_id": 3149688402,
+      "fields": [
+        {
+          "name": "url",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "headers",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "string"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "bytes"
+            }
+          },
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "HttpResponse",
+      "type_id": 3427097086,
+      "fields": [
+        {
+          "name": "status",
+          "ty": {
+            "kind": "u16"
+          },
+          "default": false
+        },
+        {
+          "name": "body",
+          "ty": {
+            "kind": "bytes"
+          },
+          "default": false
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "HttpError",
+      "type_id": 3999515121,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Timeout",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "timed out"
+        },
+        {
+          "name": "Network",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "{0}"
+        }
+      ]
+    },
+    {
+      "name": "FsError",
+      "type_id": 3512648200,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "NotFound",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "not found"
+        },
+        {
+          "name": "Io",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "io: {0}"
+        }
+      ]
+    },
+    {
+      "name": "NetKind",
+      "type_id": 57766314,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Wifi",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Cellular",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "None",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    }
+  ],
+  "objects": [],
+  "functions": [],
+  "ports": [
+    {
+      "name": "Clock",
+      "port_id": 3449406606,
+      "kind": "sync",
+      "methods": [
+        {
+          "name": "now_ms",
+          "method_id": 3435744656,
+          "params": [],
+          "returns": {
+            "kind": "i64"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Milliseconds since the epoch."
+        },
+        {
+          "name": "monotonic_ns",
+          "method_id": 749909183,
+          "params": [],
+          "returns": {
+            "kind": "u64"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        },
+        {
+          "name": "log",
+          "method_id": 3579030293,
+          "params": [
+            {
+              "name": "level",
+              "ty": {
+                "kind": "u8"
+              }
+            },
+            {
+              "name": "target",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "message",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Logs a line."
+        }
+      ],
+      "docs": "Wall-clock and monotonic time."
+    },
+    {
+      "name": "Http",
+      "port_id": 515815688,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "request",
+          "method_id": 1796529958,
+          "params": [
+            {
+              "name": "req",
+              "ty": {
+                "kind": "named",
+                "of": "HttpRequest"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "HttpResponse"
+              },
+              {
+                "kind": "named",
+                "of": "HttpError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Sends a request."
+        }
+      ],
+      "docs": "Performs HTTP requests."
+    },
+    {
+      "name": "Kv",
+      "port_id": 1401491725,
+      "kind": "async",
+      "methods": [
+        {
+          "name": "get",
+          "method_id": 4031822618,
+          "params": [
+            {
+              "name": "key",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "option",
+            "of": {
+              "kind": "bytes"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "set",
+          "method_id": 1648523350,
+          "params": [
+            {
+              "name": "key",
+              "ty": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "value",
+              "ty": {
+                "kind": "bytes"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "list",
+          "method_id": 854708282,
+          "params": [
+            {
+              "name": "prefix",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "vec",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "is_async": true,
+          "takes_ctx": false
+        },
+        {
+          "name": "flush",
+          "method_id": 330516928,
+          "params": [],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "FsError"
+              }
+            ]
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "A synchronous method on an async port."
+        }
+      ],
+      "docs": "A key-value store."
+    },
+    {
+      "name": "Connectivity",
+      "port_id": 535820031,
+      "kind": "event",
+      "methods": [
+        {
+          "name": "changed",
+          "method_id": 3035799568,
+          "params": [
+            {
+              "name": "online",
+              "ty": {
+                "kind": "bool"
+              }
+            },
+            {
+              "name": "kind",
+              "ty": {
+                "kind": "named",
+                "of": "NetKind"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "The network changed."
+        },
+        {
+          "name": "reset",
+          "method_id": 1018664355,
+          "params": [],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "docs": "Connectivity changes, sent by the platform."
+    }
+  ],
+  "queries": []
+}

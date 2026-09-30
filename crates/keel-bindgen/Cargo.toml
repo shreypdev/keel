@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel: bindgen crate (stub, to be implemented)"
+description = "Keel bindgen: emits idiomatic Swift, Kotlin and TypeScript bindings from a keel-meta schema"
+readme = "README.md"
 
 [dependencies]
+keel-meta = { workspace = true }
+serde_json = { workspace = true }
+heck = { workspace = true }

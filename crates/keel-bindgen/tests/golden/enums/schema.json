@@ -1,0 +1,312 @@
+{
+  "keel_version": "1.0.0",
+  "crate_name": "golden-enums",
+  "records": [],
+  "enums": [
+    {
+      "name": "Filter",
+      "type_id": 4104765591,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "All",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "Everything."
+        },
+        {
+          "name": "Active",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "Not done yet."
+        },
+        {
+          "name": "Done",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null,
+          "docs": "Finished."
+        }
+      ],
+      "docs": "Which todos the list shows."
+    },
+    {
+      "name": "NetKind",
+      "type_id": 57766314,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Wifi",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Cellular",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "None",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Default",
+          "index": 3,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    },
+    {
+      "name": "Sparse",
+      "type_id": 3902314309,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "First",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Second",
+          "index": 7,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ],
+      "docs": "Variant indexes need not be dense."
+    },
+    {
+      "name": "Shape",
+      "type_id": 1132518854,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Circle",
+          "index": 0,
+          "fields": [
+            {
+              "name": "radius",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": null,
+          "docs": "A circle."
+        },
+        {
+          "name": "Rect",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            },
+            {
+              "name": "1",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Labelled",
+          "index": 2,
+          "fields": [
+            {
+              "name": "label",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            },
+            {
+              "name": "kind",
+              "ty": {
+                "kind": "i32"
+              },
+              "default": false
+            },
+            {
+              "name": "inner",
+              "ty": {
+                "kind": "option",
+                "of": {
+                  "kind": "named",
+                  "of": "Filter"
+                }
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Single",
+          "index": 3,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Empty",
+          "index": 4,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ],
+      "docs": "A shape with data."
+    },
+    {
+      "name": "Value",
+      "type_id": 3511155050,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "String",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Int",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "i64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Bool",
+          "index": 2,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "bool"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "List",
+          "index": 3,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "Value"
+                }
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Shape",
+          "index": 4,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "Shape"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Filter",
+          "index": 5,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "Filter"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Null",
+          "index": 6,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ],
+      "docs": "A JSON-like value: variant names shadow type names."
+    }
+  ],
+  "objects": [],
+  "functions": [],
+  "ports": [],
+  "queries": []
+}
