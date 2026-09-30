@@ -31,7 +31,8 @@ pub mod query;
 ///
 /// It brings the reactive primitives (`Signal`, `Computed`, `Effect`, `txn`), the runtime
 /// handle (`Ctx`), the wire scalars a public signature may use (`Bytes`, `Uuid`, `Timestamp`,
-/// `Duration`, and `Handle` for object references) and the six attribute macros
+/// `Duration`; `Handle` is the runtime's reference to an object instance and is not a schema
+/// type, so a public signature cannot use it) and the six attribute macros
 /// (`#[keel::api]` and friends are also reachable as `keel::api`, ...). It also brings
 /// [`CtxQuery`](crate::query::CtxQuery), so `ctx.query()` and `ctx.mutate(..)` work, and
 /// [`CtxPorts`](keel_ports::CtxPorts), so `ctx.http()`, `ctx.kv()` and the other standard

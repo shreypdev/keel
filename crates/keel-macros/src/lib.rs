@@ -22,7 +22,13 @@
 //! Every rejection is a diagnostic with a stable code (`error[keel::E0001]: ..`, SPEC 12):
 //! what is wrong, why the rule exists, how to fix it and a docs link. After a diagnostic the
 //! original item is still emitted (with its helper attributes removed), so the user sees the
-//! Keel errors and no cascade.
+//! Keel errors and no cascade; a failed `#[keel::store]` also keeps the hidden field and the
+//! members its impl block uses.
+//!
+//! What the macros cannot see from syntax, they check at compile time in the user's crate: that a
+//! spelled type is the type the schema names (`Bytes`, `use a::Item as Todo`; E0060, E0061), that
+//! the error side of a `Result` is a `#[keel::error]` enum, and that an object is not used as a
+//! value (E0064). See `impl_::check`.
 //!
 //! # Things the macros do that the SPEC leaves open
 //!
@@ -40,7 +46,15 @@
 //! * A returned `impl Stream<Item = T>` gets `+ 'static` added; a returned stream cannot borrow
 //!   from the object.
 //! * `#[cfg]` on fields, variants, parameters and public methods is rejected (E0008): the schema
-//!   is hashed and must not depend on the build.
+//!   is hashed and must not depend on the build. A `cfg_attr` that only switches documentation
+//!   or lint attributes (`#[cfg_attr(docsrs, doc(cfg(..)))]`) is fine.
+//! * Documentation comes from `///` lines. `#[doc = include_str!(..)]` and other non-literal
+//!   docs cannot be evaluated by a macro and are skipped (their sibling lines are kept). A
+//!   store's docs are its struct's docs followed by its impl block's; a plain object's struct
+//!   has no Keel attribute, so its docs are the impl block's.
+//! * A method of a port that returns `Result<T, E>` reports an unavailable port as
+//!   `E::from(PortError)`; one without an error channel panics with a message that names the
+//!   port and how to bind it (E0062).
 //!
 //! One `#[keel::api] impl` block per type: the registration and the dispatcher are named after
 //! the type, so a second block would define them twice.

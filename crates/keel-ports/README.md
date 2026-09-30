@@ -93,6 +93,24 @@ assert_eq!(fakes.http.call_count(), 1);
 
 All fakes are `Send + Sync`.
 
+## Unavailable ports
+
+A port nobody registered, a call that was cancelled and a reply that does not decode are ordinary
+outcomes, not bugs (SPEC 6.3). The proxy of a method returning `Result<T, E>` reports them as
+`E::from(PortError)`; `HttpError` and `FsError` implement `From<PortError>`:
+
+| `PortError` | `HttpError` | `FsError` |
+|---|---|---|
+| `Unavailable` | `Network("the Http port has no adapter registered")` | `Io("the Fs port has no adapter registered")` |
+| `Cancelled` | `Cancelled` | `Io("the Fs call was cancelled")` |
+| `Decode(e)` | `Network("malformed port reply: <e>")` | `Io("malformed port reply: <e>")` |
+| `Failed(bytes)` | the decoded `HttpError` | the decoded `FsError` |
+
+`Kv`, `SecureStore`, `Clock`, `Rng`, `Log` and `Timer` have no error channel: an unbound one panics
+with a message naming the port and method and how to register an adapter (E0062), which the native
+runtime contains at the dispatch boundary and which traps a wasm core. A web build registers the ones
+it uses (`Clock`, `Rng` and `Log` have built-in wasm bindings).
+
 ## Note on the schema
 
 `#[keel::port]`, `#[keel::api]` and `#[keel::error]` register everything in this crate with the
