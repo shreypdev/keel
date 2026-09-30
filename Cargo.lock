@@ -400,6 +400,7 @@ dependencies = [
  "jni",
  "keel",
  "keel-runtime",
+ "proptest",
  "serde_json",
 ]
 

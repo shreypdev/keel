@@ -23,6 +23,7 @@ jni = { workspace = true, optional = true }
 keel = { workspace = true }
 serde_json = { workspace = true }
 criterion = { workspace = true, features = ["cargo_bench_support"] }
+proptest = { workspace = true }
 
 [[bench]]
 name = "boundary"

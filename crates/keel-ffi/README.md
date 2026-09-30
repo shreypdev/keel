@@ -100,4 +100,6 @@ such a core.
 | wasm ABI under the TypeScript runtime | `tests/wasm/ts-runtime.test.mjs` |
 | JNI under the Kotlin runtime | `tests/jni/run.sh`, and the runtime's own `NativeSmokeTests` (`KEEL_NATIVE_LIB_DIR=target/debug KEEL_NATIVE_NAME=keel_ffi scripts/test-local.sh run`) |
 | C ABI under the Swift runtime | `tests/swift/run.sh` |
+| C ABI from a C host built against `keel.h` (`-Wall -Wextra -Werror`) | `tests/c/run.sh` |
+| Arbitrary bytes into every payload entry | `arbitrary_bytes_never_break_the_boundary` in `tests/abi.rs` (proptest) |
 | Crossing cost | `cargo bench -p keel-ffi --bench boundary` |

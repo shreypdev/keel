@@ -326,7 +326,7 @@ test("a panic logs at level 5 through the host, then traps", () => {
     (error) => error instanceof WebAssembly.RuntimeError,
   );
   const fatal = core.logs.filter((l) => l.level === 5);
-  assert.ok(fatal.length >= 1, JSON.stringify(core.logs));
+  assert.equal(fatal.length, 1, `exactly one fatal record: ${JSON.stringify(core.logs)}`);
   assert.equal(fatal[0].target, "keel::panic");
   assert.match(fatal[0].message, /kaboom/);
 });

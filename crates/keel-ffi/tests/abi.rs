@@ -1093,6 +1093,88 @@ fn events_reach_subscribers_on_the_core() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Scenarios: hostile input
+// ---------------------------------------------------------------------------------------------
+
+/// Random and mutated bytes into every entry point that takes a payload: nothing panics, aborts
+/// or answers status 2 (a decode failure is status 5), and the core still works afterwards.
+#[test]
+fn arbitrary_bytes_never_break_the_boundary() {
+    use proptest::prelude::*;
+    use proptest::test_runner::{Config, TestRunner};
+
+    let host = Embedder::start();
+    let calc = host.calculator(1);
+    let counter = host.construct("Counter", &[]);
+    let valid_add = call_payload(
+        method(calc, "Calculator", "add"),
+        1,
+        &[2_i64.encode_to_vec(), 3_i64.encode_to_vec()].concat(),
+    );
+    let valid_snapshot = take(keel_snapshot());
+
+    // Random bytes, plus a valid payload with a few bytes flipped and a random truncation.
+    let strategy = (
+        proptest::collection::vec(any::<u8>(), 0..96),
+        proptest::collection::vec((0..valid_add.len(), any::<u8>()), 0..4),
+        0..=valid_add.len(),
+        any::<u32>(),
+        any::<u64>(),
+    );
+    let mut runner = TestRunner::new(Config {
+        cases: 3000,
+        failure_persistence: None,
+        ..Config::default()
+    });
+    runner
+        .run(&strategy, |(noise, flips, cut, id, handle)| {
+            let mut mutated = valid_add.clone();
+            for (at, byte) in &flips {
+                mutated[*at] = *byte;
+            }
+            mutated.truncate(cut);
+            for payload in [&noise, &mutated] {
+                // keel_call: accepted (0) or refused (5); never a panic reply.
+                let code = submit(payload);
+                prop_assert!(code == 0 || code == 5, "keel_call answered {code}");
+                // keel_call_sync: always a decodable Reply that is not a panic.
+                let reply = take(call_sync_raw(payload));
+                let parsed = Reply::decode(&mut Reader::new(&reply));
+                prop_assert!(parsed.is_ok(), "keel_call_sync returned a malformed reply");
+                prop_assert_ne!(parsed.unwrap().status, ReplyStatus::Panic);
+                port_reply(payload);
+                event(id, id.rotate_left(7), payload);
+                prop_assert_ne!(restore(payload), 0, "random bytes are not a snapshot");
+            }
+            keel_cancel(id);
+            keel_stream_credit(id, id);
+            keel_timer_fired(id);
+            keel_observe(handle, id, 1);
+            keel_observe(handle, id, 0);
+            keel_release(handle);
+            Ok(())
+        })
+        .expect("the boundary survives arbitrary bytes");
+
+    // Nothing asynchronous is left running that we did not start, no panic was counted, and
+    // both objects still work.
+    let stats: serde_json::Value = serde_json::from_slice(&take(keel_stats_json())).unwrap();
+    assert_eq!(stats["panics"], 0);
+    let args: Vec<u8> = [2_i64.encode_to_vec(), 3_i64.encode_to_vec()].concat();
+    let (status, body) = host.sync(method(calc, "Calculator", "add"), &args);
+    assert_eq!(
+        (status, i64::decode_exact(&body).unwrap()),
+        (ReplyStatus::Ok, 6)
+    );
+    assert_eq!(
+        host.sync(method(counter, "Counter", "bump"), &[]).0,
+        ReplyStatus::Ok
+    );
+    // The valid snapshot from before still restores.
+    assert_eq!(restore(&valid_snapshot), 0);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Scenarios: threads
 // ---------------------------------------------------------------------------------------------
 
