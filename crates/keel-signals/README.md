@@ -50,6 +50,8 @@ assert_eq!(double.get(), 22);
 | `Deps` | The inputs of a computed or effect: one `&Signal` / `&Computed`, or a tuple of up to six. |
 | `txn` | Batches writes; nested calls join the outer transaction; exception safe. |
 | `StoreCell` | The signal table of one store: `attach`, `attach_keyed`, `attach_computed`, `observe`, `encode_signal`, `encode_snapshot`. |
+| `CellSlot` | Where a store keeps its `StoreCell`: empty until first use, then one shared cell for the store's life (the hidden field `#[keel::store]` adds). `get_or_init`, `get_or_try_init`. |
+| `SignalsError` | Why a signal could not be attached: already attached, out of order, unknown signal. |
 | `ChangeSink`, `set_sink`, `with_sink` | Where committed change-sets go. |
 | `next_txn_id`, `ALL_SIGNALS` | Transaction ids; the "every signal" id. |
 | `testing::CaptureSink` | Records change-sets in tests. |

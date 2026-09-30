@@ -318,7 +318,7 @@ On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{fie
 
 ### 4.3 `#[keel::store]`
 
-On a struct. Fields of type `Signal<T>`, `Computed<T>`, `Lazy<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). Generates `impl StoreObject for Type` (signal slot table, `apply_observe`, `encode_signal`, `restore`), registers `StoreDef` inside the object meta (the struct must also have a `#[keel::api] impl` block with at least one constructor). Attributes: `#[keel(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[keel(no_coalesce)]` forces every commit of this signal to be delivered.
+On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `keel-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[keel::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[keel(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[keel(no_coalesce)]` forces every commit of this signal to be delivered. `#[keel::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
 
 ### 4.4 `#[keel::port]`
 
@@ -385,7 +385,7 @@ The macro-generated dispatch function has the signature
 ```rust
 fn dispatch(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult
 pub struct DispatchCall<'a> { pub method_id: u32, pub call_id: u32, pub handle: Handle, pub args: &'a [u8] }
-pub enum DispatchResult { Sync(Result<Vec<u8>, Vec<u8>>) /* ok bytes / err bytes */, Async(Pin<Box<dyn Future<Output = Result<Vec<u8>, Vec<u8>>> + Send>>), Stream(Pin<Box<dyn Stream<Item = Result<Vec<u8>, Vec<u8>>> + Send>>), Unknown }
+pub enum DispatchResult { Sync(Result<Vec<u8>, Vec<u8>>) /* ok bytes / err bytes */, Async(Pin<Box<dyn Future<Output = Result<Vec<u8>, Vec<u8>>> + Send>>), Stream(Pin<Box<dyn Stream<Item = Result<Vec<u8>, Vec<u8>>> + Send>>), Unknown, BadRequest(String) /* status 5 with a reason */ }
 ```
 The runtime looks up the object by handle (`Arc<dyn AnyObject>`), downcasts inside the generated dispatcher, decodes args (status 5 on failure), runs the method, encodes the result. For `Sync` results of a `keel_call_sync`, the bytes are returned directly; for `keel_call` the reply callback is invoked. `Async` results are spawned as a task keyed by `call_id`. Panics are caught by `std::panic::catch_unwind` (`AssertUnwindSafe`) at this boundary on native.
 
@@ -662,22 +662,28 @@ Macro errors use stable codes and a fixed shape: `error[keel::E00NN]: <what>` + 
 
 | Code | Trigger |
 |---|---|
-| E0001 | unsupported type in a public position (lists the type and the allowed set) |
+| E0001 | unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>`: lazy lists are not available in v1 |
 | E0002 | generic parameter on a `#[keel::api]` item |
 | E0003 | lifetime in a public signature |
 | E0004 | trait object / `dyn` / `Box<dyn Fn>` |
 | E0005 | `Result` or `Stream` outside return position |
 | E0006 | map key type not allowed |
+| E0007 | unsupported item shape (a tuple or unit struct, an empty enum, an impl item that is neither a method nor a constructor, a store that is not a struct with named fields, the reserved field name `__keel_cell`, `#[keel::port]` on an inherent impl) |
+| E0008 | unknown or misplaced `#[keel(..)]` attribute or macro argument (an unknown key, `key` on a signal that is not a `Signal<Vec<T>>`, `#[cfg]` on a public item, an invalid `crate = ".."` path) |
 | E0010 | `#[keel::error]` variant without `#[error(..)]` |
-| E0011 | `#[keel::store]` without a `#[keel::api] impl` block (checked by bindgen) |
+| E0011 | `#[keel::store]` and its `#[keel::api(store)]` impl block disagree (macros); a store without a constructor (meta, bindgen) |
 | E0012 | trait object in a record field (the blueprint example) |
+| E0013 | store cannot be restored automatically: it has a `Computed` field and no `#[keel::store(restore = "..")]` hook |
 | E0020 | `&mut self` receiver |
 | E0021 | `self` by value |
 | E0022 | non-`Send` future in an async method |
 | E0030 | port method with a non-wire parameter |
 | E0031 | event port method with a return type |
+| E0032 | invalid port trait shape (an `async` method on a `sync` port, a parameter that is not a plain name, an associated type or const, no `&self` receiver) |
 | E0040 | query without `key` / mutation with `stale` |
+| E0041 | query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`) |
 | E0050 | duplicate type name (bindgen) |
+| E0051 | a name that collides after case conversion (`a_b` and `aB`) or is not an identifier in a target language (bindgen) |
 
 ---
 
@@ -734,105 +740,206 @@ Schema extraction: `keel-cli` builds the core for the host as a cdylib, `dlopen`
 
 ## 16. Internal Rust contracts (between keel-signals, keel-runtime, keel-macros)
 
-These are the exact names the macros emit and the runtime consumes. Change them only together.
+These are the exact names the macros emit and the runtime consumes, as merged. They are exercised end to end by `crates/keel/tests/e2e_todo.rs` and, per crate, by the macros' behaviour tests (`crates/keel-macros/tests`), which compile and run generated code against the real runtime and signals. Change them only together.
 
 ### 16.1 keel-signals
 
 ```rust
+// ---- the per-store table -------------------------------------------------------------------
 pub struct StoreCell { .. }                      // one per store instance; Send + Sync
 impl StoreCell {
     pub fn new(type_id: u32) -> Arc<StoreCell>;
-    pub fn attach<T: SignalValue>(self: &Arc<Self>, signal: &Signal<T>, signal_id: u32, key: Option<KeyFn<T>>);  // binds a field; called by generated code once per field in declaration order
-    pub fn attach_computed<T: SignalValue>(self: &Arc<Self>, computed: &Computed<T>, signal_id: u32);
-    pub fn set_handle(&self, handle: u64);       // called by the runtime when the store enters the object table
-    pub fn handle(&self) -> u64;
+    // Binding. Generated code calls exactly one of the next three per signal field, in
+    // declaration order (ids 0, 1, 2, ..), and every one can fail (see SignalsError).
+    pub fn attach<T: SignalValue>(self: &Arc<Self>, signal: &Signal<T>, signal_id: u32) -> Result<(), SignalsError>;
+    pub fn attach_keyed<T: SignalValue + ListLike>(self: &Arc<Self>, signal: &Signal<T>, signal_id: u32, key: KeyFn<T>) -> Result<(), SignalsError>;   // #[keel(key = "..")]
+    pub fn attach_computed<T: SignalValue>(self: &Arc<Self>, computed: &Computed<T>, signal_id: u32) -> Result<(), SignalsError>;
+    pub fn set_no_coalesce(&self, signal_id: u32) -> Result<(), SignalsError>;   // #[keel(no_coalesce)]; called after that signal's attach
+    pub fn set_handle(&self, handle: u64);       // the runtime, when the store enters the object table (and restore)
+    pub fn handle(&self) -> u64;                 // 0 until published
     pub fn type_id(&self) -> u32;
-    pub fn observe(&self, signal_id: u32 /* or ALL_SIGNALS */, on: bool, out: &mut keel_wire::Writer) -> u32; // appends ChangeSet entries (current values) for newly observed signals; returns entry count
-    pub fn encode_signal(&self, signal_id: u32, out: &mut keel_wire::Writer) -> bool; // full value
-    pub fn encode_snapshot(&self, out: &mut keel_wire::Writer);   // §5.9 store body (non-computed signals)
-    pub fn signal_count(&self) -> u32;
+    pub fn signal_count(&self) -> u32;           // attached signals, computeds included
+    pub fn is_observed(&self, signal_id: u32) -> bool;
+    pub fn observe(&self, signal_id: u32 /* or ALL_SIGNALS */, on: bool, out: &mut keel_wire::Writer) -> u32;
+        // on: appends one ChangeSet ENTRY per targeted signal (`handle u64, signal_id u32, op u8 = Full, len u32, value`)
+        // with its current value, also for already observed ones (re-observing resynchronises a host), and returns the count;
+        // the runtime wraps the entries into a payload (`txn_id u64, count u32, entries`). off: stops delivery, returns 0.
+    pub fn encode_signal(&self, signal_id: u32, out: &mut keel_wire::Writer) -> bool;   // full value, no header; false if unknown
+    pub fn encode_snapshot(&self, out: &mut keel_wire::Writer);   // one store record, §5.9: handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value }; computeds left out
 }
-pub type KeyFn<T> = fn(&<T as ListLike>::Item) -> u64;   // keyed lists: key hashed to u64 by generated code (fnv1a64 of the encoded key)
+pub const ALL_SIGNALS: u32 = u32::MAX;
+
+pub struct CellSlot { .. }                       // Default + Debug + Send + Sync, deliberately not Clone
+impl CellSlot {                                  // the hidden field `#[keel::store]` adds: empty until first use, then one cell for the store's life
+    pub const fn new() -> CellSlot;
+    pub fn get(&self) -> Option<&Arc<StoreCell>>;
+    pub fn get_or_init(&self, init: impl FnOnce() -> Arc<StoreCell>) -> &Arc<StoreCell>;
+    pub fn get_or_try_init<E>(&self, init: impl FnOnce() -> Result<Arc<StoreCell>, E>) -> Result<&Arc<StoreCell>, E>;   // racing threads agree on one cell; on Err the slot stays empty
+}
+
+#[non_exhaustive] pub enum SignalsError {        // Display + std::error::Error; typed values, never panics
+    AlreadyAttached,                             // the signal belongs to a store (this one or another) for its whole life
+    OutOfOrder { expected: u32, got: u32 },      // signals attach in declaration order
+    UnknownSignal { signal_id: u32 },            // set_no_coalesce on an id that was not attached
+}
+
+pub type KeyFn<T> = fn(&<T as ListLike>::Item) -> u64;   // keyed lists: the generated fn hashes the encoded key field with fnv1a64
+pub trait ListLike { type Item: SignalValue; fn items(&self) -> &[Self::Item]; }   // implemented for Vec<I>
 pub trait SignalValue: keel_wire::Encode + Clone + Send + Sync + 'static {}
 impl<T: keel_wire::Encode + Clone + Send + Sync + 'static> SignalValue for T {}
 
-pub struct Signal<T>;      // Clone = same signal
+// ---- reactive primitives -------------------------------------------------------------------
+pub struct Signal<T>;      // Clone = the same signal
 impl<T: SignalValue> Signal<T> {
     pub fn new(value: T) -> Signal<T>;
     pub fn get(&self) -> T;                       // clone
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
     pub fn set(&self, value: T);                  // implicit transaction if none is open
     pub fn update(&self, f: impl FnOnce(&mut T));
+    pub fn ptr_eq(&self, other: &Signal<T>) -> bool;
+    pub fn is_attached(&self) -> bool;
 }
 pub struct Computed<T>;
 impl<T: SignalValue> Computed<T> {
-    pub fn new<D: Deps>(deps: D, f: impl Fn(D::Values<'_>) -> T + Send + Sync + 'static) -> Computed<T>;  // Deps implemented for (&Signal<A>,), (&Signal<A>, &Signal<B>), … up to 6 and for &Computed<A>
+    pub fn new<D: Deps>(deps: D, f: impl for<'a> Fn(D::Values<'a>) -> T + Send + Sync + 'static) -> Computed<T>;
+        // Deps: `&Signal<A>` or `&Computed<A>`, or a tuple of up to 6 of them; the closure receives REFERENCES
+        // (one reference, or a tuple of references): `Computed::new((&todos, &filter), |(todos, filter)| ..)`.
     pub fn get(&self) -> T;                       // recomputes lazily when dirty
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
+    pub fn ptr_eq(&self, other: &Computed<T>) -> bool;
+    pub fn is_attached(&self) -> bool;
 }
-pub struct Effect;                                // Effect::new(deps, f) runs f after each commit that dirtied a dep; dropped = cancelled
-pub fn txn<R>(f: impl FnOnce() -> R) -> R;        // batch; nested calls join the outer transaction
+pub struct Effect;         // Effect::new(deps, f) runs f after each commit that dirtied a dep; dropped or `cancel(self)` = cancelled
+pub fn txn<R>(f: impl FnOnce() -> R) -> R;        // batch; nested calls join the outer transaction; exception safe
 pub trait ChangeSink: Send + Sync { fn deliver(&self, change_set: &[u8]); }
-pub fn set_sink(sink: Arc<dyn ChangeSink>);      // installed by the runtime; a global, one per process (wasm: one per instance)
+pub fn set_sink(sink: Arc<dyn ChangeSink>);      // installed by the runtime; a global, one per process
+pub fn clear_sink();  pub fn with_sink<R>(sink: Arc<dyn ChangeSink>, f: impl FnOnce() -> R) -> R;   // the latter is thread-scoped, for tests
 pub fn next_txn_id() -> u64;
+pub mod testing { pub struct CaptureSink; }      // records change-sets: take(), take_decoded()
 ```
-Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries for observed dirty signals (keyed lists as patches when `diff` returns `Some`, else full); one `ChangeSet` payload per store per transaction is acceptable in v1 (spec §3.5 "never split" applies per store); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery.
+
+Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries, ordered by `signal_id`, for signals that are observed or `no_coalesce` (keyed lists as a patch when one is possible and worthwhile, else the full value); one `ChangeSet` payload per store per transaction (never split; stores committed by one transaction share a `txn_id`); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery. No lock is held while user code (sink, effect, computed closure, encoder) runs.
+
+Keyed lists (SPEC 3.8): the cell keeps the list as the host last saw it (one clone per *observed* keyed signal) and sends a patch of `Insert`/`Remove`/`Update`/`Move` ops. It sends the full value instead when the lists share no key (including empty to non-empty and back), a key occurs twice, or more than half of the old items were removed. Items with equal keys are compared by their encoded bytes.
+
+Attach failures leave the failed signal unattached, but signals attached before it stay bound to the discarded cell, so a store whose attach failed is unusable and must not be published. Generated code therefore builds the cell with `?` and the constructor's dispatch arm answers `DispatchResult::BadRequest` with the `SignalsError` text (§16.3).
 
 ### 16.2 keel-runtime
 
 ```rust
-pub struct Runtime;                                 // one per process/instance; Runtime::global() after init
-pub struct RuntimeConfig { platform: String, mode: String, core_threads: u8, blocking_threads: u8, log_level: u8 }  // #[keel::api]-free hand-written Encode/Decode
-pub trait Host: Send + Sync + 'static {            // implemented by keel-ffi, the wasm shell and the transport server
+pub struct Runtime;                                 // Arc<Runtime>; Runtime::init registers the process global, Runtime::new does not (any number can coexist)
+pub struct RuntimeConfig { platform: String, mode: String /* "inproc" | "dev" */, core_threads: u8, blocking_threads: u8, log_level: u8 }  // hand-written Encode/Decode
+pub enum InitError { AlreadyInitialized, InvalidMode(String), Spawn(String) }
+pub trait Host: Send + Sync + 'static {            // implemented by keel-ffi, the wasm shell, the transport server and testing::RecordingHost
     fn reply(&self, call_id: u32, payload: &[u8]);
     fn change_set(&self, payload: &[u8]);
     fn stream_item(&self, call_id: u32, payload: &[u8]);
-    fn port_call(&self, port_id: u32, method_id: u32, port_call_id: u32, args: &[u8]) -> PortCallOutcome;  // Sync(Vec<u8> reply payload) | Async | Unavailable
+    fn port_call(&self, port_id: u32, method_id: u32, port_call_id: u32, args: &[u8]) -> PortCallOutcome;
     fn log(&self, level: u8, target: &str, message: &str);
-    fn schedule(&self) {}                           // wasm: ask the host to call poll() soon
+    fn schedule(&self) {}                           // wasm and manual runtimes: ask the host to call poll() soon
     fn timer_set(&self, timer_id: u32, delay_ms: u64) -> bool { false } // true if the host owns timers (wasm)
 }
+pub enum PortCallOutcome { Sync(Vec<u8> /* a complete PortReply payload */), Async, Unavailable }
 impl Runtime {
-    pub fn init(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError>;   // builds executor, object table, port table, installs the change sink, hydrates the query client
+    pub fn init(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError>;   // executor, object/port/dispatch tables, change sink, init hooks, `keel-core` thread (unless core_threads == 0)
+    pub fn new(config: RuntimeConfig, host: Arc<dyn Host>) -> Result<Arc<Runtime>, InitError>;    // same, not global
     pub fn global() -> Option<Arc<Runtime>>;
-    pub fn shutdown(&self);
-    pub fn call(&self, payload: &[u8]) -> u32;            // §3.3; 0 accepted / 5 bad request; replies through Host::reply
+    pub fn shutdown(&self);                          // breaks the runtime <-> Ctx reference cycles; joins threads
+    pub fn call(&self, payload: &[u8]) -> u32;       // §3.3; 0 accepted / 5 bad request; replies through Host::reply
     pub fn call_sync(&self, payload: &[u8]) -> Vec<u8>;   // §3.4 reply payload
-    pub fn cancel(&self, call_id: u32);
+    pub fn cancel(&self, call_id: u32);              // status 3 exactly once for a plain call
     pub fn stream_credit(&self, call_id: u32, credit: u32);
-    pub fn observe(&self, handle: u64, signal_id: u32, on: bool);   // delivers the initial change-set synchronously through Host::change_set
+    pub fn observe(&self, handle: u64, signal_id: u32, on: bool);   // the initial change-set is delivered synchronously through Host::change_set
     pub fn release(&self, handle: u64);
     pub fn port_reply(&self, payload: &[u8]);
     pub fn event(&self, port_id: u32, method_id: u32, payload: &[u8]);
     pub fn timer_fired(&self, timer_id: u32);
-    pub fn poll(&self);                                   // drive the executor (wasm and tests)
+    pub fn poll(&self);                              // drive the executor (wasm and manual runtimes); run_pending() runs until idle
     pub fn snapshot(&self) -> Vec<u8>;
-    pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;
+    pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;   // all or nothing
     pub fn stats_json(&self) -> String;
     pub fn schema(&self) -> &keel_meta::Schema; pub fn schema_hash(&self) -> u64;
-    pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn core::any::Any + Send + Sync>); // Rust-side port binding (fakes, built-ins)
     pub fn ctx(&self) -> Ctx;
+    // What generated code calls:
+    pub fn object<T: Send + Sync + 'static>(&self, handle: u64) -> Result<Arc<T>, object_table::BadHandle>;   // Display says null / unknown / stale / wrong type
+    pub fn insert_object<T: KeelObject>(&self, object: Arc<T>) -> Handle;   // stores (a StoreRestorer is registered for the type) get their cell's handle set
+    pub fn insert_store<T: StoreObject>(&self, object: Arc<T>) -> Handle;
+    pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>);   // imp is an Arc<Arc<P>> behind Any
+    pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>);      // does the wrapping
+    pub fn bind_foreign_port(&self, port_id: u32);  pub fn unbind_port(&self, port_id: u32) -> bool;
+    pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;
+    pub fn extension<T: Default + Send + Sync + 'static>(&self) -> &T;      // per-runtime state of layered crates (keel-query)
 }
-pub struct Ctx(..);   // §5.3; `Ctx::current()` reads a thread-local set by dispatch and by the executor while polling a task
-pub enum DispatchResult { Sync(Result<Vec<u8>, Vec<u8>>), Async(Pin<Box<dyn Future<Output = Result<Vec<u8>, Vec<u8>>> + Send>>), Stream(Pin<Box<dyn futures_core::Stream<Item = Result<Vec<u8>, Vec<u8>>> + Send>>), Unknown }
-// Generated dispatchers receive `&dyn Any` that downcasts to `&Runtime` and return `DispatchOutcome(Box::new(DispatchResult::..))`.
+#[derive(Clone)] pub struct Ctx(..);   // §5.3; an Arc<Runtime>. `Ctx::current()` / `try_current()` read a thread-local set by dispatch, by the executor while polling and by `Ctx::enter()`
+impl Ctx {
+    pub fn txn<R>(&self, f: impl FnOnce() -> R) -> R;                       // one transaction, delivered through this runtime
+    pub fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) -> TaskId;   pub fn cancel_task(&self, id: TaskId);
+    pub fn spawn_blocking<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> BlockingTask<T>;
+    pub fn sleep(&self, d: Duration) -> Sleep;                              // through the host's timer or the internal one
+    pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&[u8]) + Send + Sync>) -> Subscription
+    pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture;
+    pub fn port_call_sync(&self, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
+    pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;   pub fn bind_port / bind_dyn_port;
+    pub fn enter(&self) -> CtxScope;  pub fn runtime(&self) -> &Runtime;
+}
+// The typed accessors of §5.3 are not methods: `#[keel::port]` generates a free function `<trait_snake>(ctx: &Ctx) -> Arc<dyn Trait>` (the Rust binding, else a proxy to the
+// platform); `ctx.query()` / `ctx.mutate()` come from keel-query as extension traits over `Ctx`.
+
+pub enum DispatchResult {
+    Sync(Result<Vec<u8>, Vec<u8>>),                 // Ok bytes: status 0; Err bytes: status 1 (typed error)
+    Async(Pin<Box<dyn Future<Output = Result<Vec<u8>, Vec<u8>>> + Send>>),
+    Stream(Pin<Box<dyn futures_core::Stream<Item = Result<Vec<u8>, Vec<u8>>> + Send>>),
+    Unknown,                                        // status 5: the dispatcher does not implement this method id
+    BadRequest(String),                             // status 5 with the reason: arguments that do not decode, stale or wrongly typed receiver, a store whose signals cannot attach
+}
+// Generated dispatchers are `keel_meta::DispatchFn = fn(&dyn Any, DispatchCall<'_>) -> DispatchOutcome`: they downcast `&dyn Any` to `&Runtime` and return `DispatchOutcome::new(DispatchResult::..)`.
 pub trait KeelObject: Send + Sync + 'static { const TYPE_ID: u32; const NAME: &'static str; }
-pub trait StoreObject: KeelObject { fn cell(&self) -> &Arc<keel_signals::StoreCell>; fn restore(ctx: Ctx, r: &mut keel_wire::Reader<'_>) -> Result<Self, keel_wire::WireError> where Self: Sized; }
-pub trait Port: Send + Sync + 'static { const PORT_ID: u32; const NAME: &'static str; const KIND: keel_meta::PortKind; }
-pub struct PortFuture;    // Future<Output = Result<Vec<u8>, PortError>>; created by Runtime::port_call(port_id, method_id, args: Vec<u8>)
+pub trait StoreObject: KeelObject {
+    fn cell(&self) -> &Arc<keel_signals::StoreCell>;
+    fn restore(ctx: Ctx, r: &mut keel_wire::Reader<'_>) -> Result<Self, keel_wire::WireError> where Self: Sized;   // r is positioned at the store BODY (`signal_count u32, signals × { signal_id u32, len u32, value }`)
+}
+pub struct StoreRestorer {                           // submitted with `inventory::submit!` by #[keel::store], one per store type
+    pub type_id: u32,
+    pub restore: fn(Ctx, u64 /* the re-issued handle */, &mut Reader<'_>) -> Result<Arc<dyn Any + Send + Sync>, WireError>,   // builds the store and tells its cell the handle
+    pub cell: fn(&(dyn Any + Send + Sync)) -> Option<&Arc<StoreCell>>,   // how the runtime recognises a store inside `dyn Any`
+}
+pub trait Port: Send + Sync + 'static { const PORT_ID: u32; const NAME: &'static str; const KIND: keel_meta::PortKind; }   // implemented for `dyn Trait`
+pub struct PortDispatcher {                          // submitted by #[keel::port], one per port trait: how a Rust binding answers an encoded call
+    pub port_id: u32,
+    pub dispatch: fn(imp: &(dyn Any + Send + Sync), method_id: u32, args: &[u8]) -> PortDispatch,   // imp is the Arc<Arc<dyn Trait>> given to bind_port
+}
+pub enum PortDispatch { Sync(Vec<u8>), Async(Pin<Box<dyn Future<Output = Vec<u8>> + Send>>) }   // bytes: `status u8` (0 ok, 1 typed error, 2 unavailable) then the body
+pub struct PortFuture;    // Future<Output = Result<Vec<u8>, PortError>>; dropping it abandons the call
 pub fn port_call_sync(rt: &Runtime, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
-pub enum PortError { Unavailable, Cancelled, Decode(keel_wire::WireError), Failed(Vec<u8> /* encoded E */) }
-pub struct Events;        // ctx.events().subscribe(port_id, method_id, Box<dyn Fn(&[u8]) + Send + Sync>) -> Subscription
-pub mod object_table;     // Handle issue/lookup/release, generation-tagged slab
-pub mod log { pub fn log(level: u8, target: &str, msg: &str); }  macro_rules! keel_log! (info!/warn!/error!/debug! helpers)
-pub mod executor;         // spawn(fut) -> TaskId, spawn_blocking, sleep(Duration) (via Timer port), cancel(TaskId)
-pub mod testing { pub struct TestRuntime; }  // in-process runtime with fake host: captures replies/change-sets, `run_until(fut)`, `run_pending()`, `advance(Duration)`; used by keel-ports/keel-query/macro tests
+pub enum PortError { Unavailable, Cancelled, Decode(keel_wire::WireError), Failed(Vec<u8> /* encoded E */) }   // Clone + Debug + Display + Error
+pub enum RestoreError { Decode(WireError), UnknownStoreType { type_id: u32 }, Store { type_id: u32, source: WireError }, Panicked { type_id: u32, message: String }, BadHandle { handle: u64 }, ShutDown, Reentrant }
+pub struct InitHook { pub name: &'static str, pub run: fn(&Ctx) }   // submitted by layered crates, run for every new runtime
+pub mod object_table;     // ObjectTable, BadHandle, BadHandleReason: generation-tagged slots; Handle issue/lookup/release
+pub mod log;              // level constants TRACE..FATAL and `log::log(level, target, msg)`
+pub mod executor;         // spawn, spawn_blocking, sleep, cancel, yield_now, Notify, TaskId
+pub mod testing;          // TestRuntime: a real Runtime with no threads, a manual clock and a RecordingHost;
+                          // call / call_sync / run_pending / run_until(fut) / advance(Duration) / take_replies; host(): take_decoded_change_sets, take_stream_items,
+                          // take_port_calls, take_timeline, take_logs, script_port*(port_id, method_id, ..); helpers call_payload, decode_reply, port_reply, port_reply_ok, sync_ok
 ```
-`keel-runtime` re-exports `keel_signals`, `keel_wire`, `keel_meta` so generated code can use `::keel::runtime::…` paths. The `keel` facade re-exports `keel_runtime as runtime`, `keel_signals as signals`, `keel_wire as wire`, `keel_meta as meta`, `keel_ports as ports`, `keel_query as query`, the macros, and `prelude::*` = `{Signal, Computed, Effect, Ctx, Bytes, Uuid, Timestamp, Duration, txn}` plus the macros.
+`keel-runtime` re-exports `keel_signals`, `keel_wire`, `keel_meta` (and `keel_meta::inventory`) and `futures_core::Stream`. The `keel` facade re-exports `keel_runtime as runtime`, `keel_signals as signals`, `keel_wire as wire`, `keel_meta as meta`, the six macros at the crate root and in `prelude`, `pub mod query` (`QueryDef`, `MutationDef`, `BoxFuture`, `CacheValue`, the traits keel-query implements the client against), and `prelude::*` = `{Signal, Computed, Effect, Ctx, Bytes, Uuid, Timestamp, Duration, txn, Handle}` plus the macros. (`keel_ports as ports` and `keel_query as query` join the facade when those crates land; until then `keel::query` is the trait module.)
+
+Ids are `fnv1a` hashes computed in `keel_meta::ids`: `type_id(name)`, `method_id(type, method)` (constructors are methods called `new`, or whatever the fn is named), `function_id(name)`, `port_id(trait)`, `port_method_id(trait, method)`, `query_id`, `mutation_id`, `fnv1a64(bytes)` (keyed-list keys).
 
 ### 16.3 What the macros emit (paths)
 
-Generated code uses absolute paths through the facade: `::keel::wire::{Encode, Decode, Writer, Reader, WireError}`, `::keel::meta::{inventory, Registration, RecordMeta, …, ids}`, `::keel::runtime::{Runtime, DispatchResult, DispatchCall, KeelObject, StoreObject, Port, Ctx}`, `::keel::signals::{Signal, Computed, StoreCell}`. A `#[keel(crate = "path")]` attribute overrides the root (for keel-ports and tests inside the workspace, which use `::keel_runtime` directly).
+Generated code uses absolute paths through the facade: `::keel::wire::{Encode, Decode, Writer, Reader, WireError}`, `::keel::meta::{inventory, Registration, RecordMeta, ObjectMeta, StoreMeta, SignalMeta, .., DispatchCall, DispatchOutcome, ids}`, `::keel::runtime::{Runtime, Ctx, DispatchResult, KeelObject, StoreObject, StoreRestorer, Port, PortDispatcher, PortDispatch, PortError, Stream, Subscription}`, `::keel::signals::{Signal, StoreCell, CellSlot, SignalsError}`, `::keel::query::{QueryDef, MutationDef}`. A `#[keel(crate = "path")]` attribute (or `crate = "path"` in the macro arguments) overrides the root (for keel-ports and tests inside the workspace, which use `::keel_runtime` directly).
+
+`#[keel::store]` and its impl block:
+
+* The struct must be marked on its impl block: `#[keel::api(store)] impl Todos { .. }`. The marker is what wires the constructors to the signals; a struct without `#[keel::store]`, or an impl block without the marker, is E0011.
+* The macro appends a hidden field `pub __keel_cell: ::keel::signals::CellSlot`. Struct literals of the type inside its `#[keel::api(store)]` impl block get `__keel_cell: Default::default()` added; struct literals anywhere else must spell it out. The field name is reserved (E0007).
+* `#[keel::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument) or `Default`; a store with a `Computed` field needs the hook (E0013). Snapshots hold the plain signals only.
+* Field kinds: `Signal<T>` and `Computed<T>` are signals, numbered in declaration order; every other field is private state. `Lazy<T>` is rejected in v1 (E0001, "lazy lists are not available in v1"), like `keel-bindgen` rejects it.
+* The signal table is built by a hidden method that calls, per field and in order, `attach` (plain), `attach_keyed` with a generated `fn(&Item) -> u64` (`#[keel(key = "id")]`: `fnv1a64` over the encoded key field, encoded through a per-thread scratch buffer) or `attach_computed`, each followed by `set_no_coalesce(id)` for `#[keel(no_coalesce)]`, all with `?`. `StoreObject::cell()` creates the cell once through `CellSlot::get_or_init`; a store whose attach failed gets an empty cell there rather than a panic.
+* A constructor's dispatch arm first calls `__keel_attach_all()` (`CellSlot::get_or_try_init`); on `Err(SignalsError)` nothing is inserted and the arm answers `DispatchResult::BadRequest("store `Todos` could not attach its signals: <error>")`. Otherwise it inserts the object (`Runtime::insert_object`, which gives the cell its handle) and replies with the handle (`u64`). `restore` fails with `WireError::InvalidTag` if the rebuilt store cannot attach.
+* One `StoreRestorer` per store type is submitted through `inventory`.
+
+Dispatch arms answer `BadRequest` with a reason for arguments that do not decode (naming the argument and `Type.method`) and for a receiver handle that does not resolve to that type (the `BadHandle` text); `Unknown` is only for a method id the dispatcher does not implement.
 
 ---
 
