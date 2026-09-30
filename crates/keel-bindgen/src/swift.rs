@@ -99,6 +99,12 @@ fn id(name: &str) -> String {
     naming::swift_ident(&naming::camel(name))
 }
 
+/// A store signal's Swift property: `@Observable` rejects backticked stored
+/// properties, so reserved words are spelled with a trailing underscore.
+fn stored_id(name: &str) -> String {
+    naming::swift_stored_property(&naming::camel(name))
+}
+
 struct SwiftGen<'a> {
     model: &'a Model,
     cfg: &'a Generator,
@@ -885,7 +891,7 @@ impl SwiftGen<'_> {
                 }
                 w.line(format!(
                     "public private(set) var {}: {} = {}",
-                    id(&g.name),
+                    stored_id(&g.name),
                     t.ty(&g.ty),
                     t.zero(&g.ty, 0)
                 ));
@@ -1162,7 +1168,7 @@ impl SwiftGen<'_> {
                 w.indented(|w| {
                     switch_block(w, "signal", |w| {
                         for g in signals {
-                            let prop = format!("self.{}", id(&g.name));
+                            let prop = format!("self.{}", stored_id(&g.name));
                             w.line(format!("case {}:", g.signal_id));
                             w.indented(|w| {
                                 switch_block(w, "op", |w| {

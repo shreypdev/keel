@@ -235,6 +235,19 @@ pub fn swift_ident(name: &str) -> String {
     }
 }
 
+/// A Swift stored-property name on an `@Observable` class: the macro rejects
+/// backticked stored properties, so a reserved word gets a trailing underscore
+/// instead (`default` becomes `default_`). The schema name is unchanged; only
+/// the Swift spelling moves.
+#[must_use]
+pub fn swift_stored_property(name: &str) -> String {
+    if is_swift_reserved(name) {
+        format!("{name}_")
+    } else {
+        name.to_owned()
+    }
+}
+
 /// A Kotlin identifier: backticked when `name` is a hard keyword.
 #[must_use]
 pub fn kotlin_ident(name: &str) -> String {
