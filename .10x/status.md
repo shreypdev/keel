@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,079 passed / 0 failed |
+| Rust `cargo test --workspace` | 1,235 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 830 passed (20 files) |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed, 2 skipped (JNI smoke awaits keel-ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
@@ -30,12 +30,22 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- keel-ports (SPEC §8) — worktree `wt/keel-ports`.
+- keel-ffi (SPEC §6/§7) — worktree `wt/keel-ffi` (agent).
+- keel-query (SPEC §9) — worktree `wt/keel-query` (agent).
+- keel-transport (§3.2/§5.10) — worktree `wt/keel-transport` (agent).
+
+## Landed since takeover
+
+- **keel-ports** (SPEC §8) merged after adversarial review: ten ports, records with
+  byte-golden layout locks, id parity vs the Kotlin constants, deterministic fakes
+  (FakeClock with deadline-time reads), `fakes::install(&TestRuntime)`. Workspace: 1,235.
+  Debt noted: no bench yet (bench/ is a stub; lands with the bench piece); FakeHttp has
+  no hold/release gate for in-flight cancellation tests.
 
 ## Remaining (ordered, see docs/HANDOFF.md §2)
 
-keel-ports → keel-query → keel-ffi → keel-transport → keel-cli → playground (3 apps) →
-contract scenarios on 3 platforms → bench/RESULTS.md + CI → adversarial reviews closed.
+keel-cli → playground (3 apps) → contract scenarios on 3 platforms → bench/RESULTS.md +
+CI → adversarial reviews closed.
 
 ## Environment notes
 
