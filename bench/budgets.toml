@@ -1,0 +1,229 @@
+# Host budgets for the budgets test (`cargo test -p keel-bench --test budgets --release`).
+#
+# WHAT THESE ARE. Regression guards for a host machine, not the blueprint's device targets
+# (docs/blueprint.html section 14 is per device: A15 iPhone, mid-range 2022 Android, Chromium;
+# those are measured on devices in the playground phase, see bench/RESULTS.md). A budget here
+# fails CI when an operation became several times slower than it was.
+#
+# HOW THEY WERE SET. `measured_ns` is the p50 the budgets test itself reported on an Apple M5 Pro
+# (macOS 26.5, rustc 1.98.1, release profile: LTO fat, codegen-units 1): the best of three runs,
+# because the machine was shared with other builds and the best run is the closest to an
+# unloaded number. It agrees with the criterion median within a few percent. The budget is 5x
+# that, with an absolute floor of 250 ns (the noise floor of a shared runner for operations that
+# take tens of nanoseconds), rounded up to two significant figures.
+#
+# WHY 5x. A shared ubuntu-latest runner is commonly 1.5-3x slower than an M-series laptop and
+# noisier; the test also takes the best of three attempts. 5x passes on such a runner and still
+# fails a change that makes an operation 5x slower, which is the size of regression that
+# matters (an accidental O(n) on a hot path, a lock taken per call, a copy per item). A smaller
+# regression is what criterion's before/after comparison is for. If CI proves consistently
+# slower, set KEEL_BENCH_SCALE in the workflow instead of loosening this file.
+#
+# `blueprint_ns` / `blueprint` record the section 14 row an operation relates to, so the
+# report prints how far this host is from the device target. Where the host is already over the
+# target (see "Findings" in bench/RESULTS.md), the budget here still only guards the regression:
+# fixing the operation, not the budget, is what closes the gap.
+#
+# To set or re-base a budget: `cargo test -p keel-bench --test budgets --release -- --ignored
+# --nocapture baseline`, then apply the rule above.
+
+[meta]
+machine = "Apple M5 Pro, 18 cores, macOS 26.5"
+rustc = "1.98.1"
+profile = "release (lto = fat, codegen-units = 1)"
+factor = 5
+floor_ns = 250
+
+[bench."wire/bool/roundtrip"]
+budget_ns = 250
+measured_ns = 16.0
+
+[bench."wire/u8/roundtrip"]
+budget_ns = 250
+measured_ns = 18.8
+
+[bench."wire/u32/roundtrip"]
+budget_ns = 250
+measured_ns = 15.4
+
+[bench."wire/i64/roundtrip"]
+budget_ns = 250
+measured_ns = 17.1
+
+[bench."wire/f64/roundtrip"]
+budget_ns = 250
+measured_ns = 19.2
+
+[bench."wire/string_short/roundtrip"]
+budget_ns = 250
+measured_ns = 36.8
+
+[bench."wire/string_1kb/roundtrip"]
+budget_ns = 400
+measured_ns = 79.2
+
+[bench."wire/bytes_1kb/roundtrip"]
+budget_ns = 290
+measured_ns = 56.6
+
+[bench."wire/option_some/roundtrip"]
+budget_ns = 250
+measured_ns = 16.3
+
+[bench."wire/option_none/roundtrip"]
+budget_ns = 250
+measured_ns = 15.9
+
+[bench."wire/vec_u32_1k/roundtrip"]
+budget_ns = 5800
+measured_ns = 1141.1
+
+[bench."wire/map100_string_u32/roundtrip"]
+budget_ns = 33000
+measured_ns = 6569.6
+
+[bench."wire/map100_u32_u32/roundtrip"]
+budget_ns = 18000
+measured_ns = 3528.7
+
+[bench."wire/duration/roundtrip"]
+budget_ns = 250
+measured_ns = 15.0
+
+[bench."wire/timestamp/roundtrip"]
+budget_ns = 250
+measured_ns = 15.1
+
+[bench."wire/uuid/roundtrip"]
+budget_ns = 250
+measured_ns = 19.3
+
+[bench."wire/record5/roundtrip"]
+budget_ns = 540
+measured_ns = 107.3
+
+[bench."wire/record1k/roundtrip"]
+budget_ns = 1100
+measured_ns = 206.3
+blueprint_ns = 3000
+blueprint = "1 KB record, round trip: <= 3 us iOS (A15), <= 8 us Android, <= 4 us web (codec only here)"
+
+[bench."wire/enum_rect/roundtrip"]
+budget_ns = 350
+measured_ns = 68.9
+
+[bench."wire/enum_label/roundtrip"]
+budget_ns = 270
+measured_ns = 53.0
+
+[bench."wire/result_ok/roundtrip"]
+budget_ns = 250
+measured_ns = 17.8
+
+[bench."wire/result_err/roundtrip"]
+budget_ns = 340
+measured_ns = 67.6
+
+[bench."dispatch/call_sync/add"]
+budget_ns = 370
+measured_ns = 73.2
+blueprint_ns = 60
+blueprint = "Handle method call, primitive args and return: <= 60 ns iOS (A15), <= 250 ns Android, <= 80 ns web"
+
+[bench."dispatch/call_sync/function"]
+budget_ns = 340
+measured_ns = 66.5
+
+[bench."dispatch/call_sync/echo_record1k"]
+budget_ns = 1500
+measured_ns = 282.8
+blueprint_ns = 3000
+blueprint = "1 KB record, round trip: <= 3 us iOS (A15), <= 8 us Android, <= 4 us web (core half of the call here)"
+
+[bench."dispatch/call_async/ready_add"]
+budget_ns = 1200
+measured_ns = 220.8
+
+[bench."signals/changeset_100/cell"]
+budget_ns = 3800
+measured_ns = 746.7
+
+[bench."signals/changeset_100/runtime"]
+budget_ns = 12000
+measured_ns = 2262.1
+blueprint_ns = 100000
+blueprint = "Change-set with 100 dirty signals: <= 100 us iOS (A15), <= 150 us Android, <= 120 us web (core side here; the apply is measured on device)"
+
+[bench."signals/changeset_100/decode"]
+budget_ns = 1200
+measured_ns = 235.6
+
+[bench."signals/observe_100_initial"]
+budget_ns = 14000
+measured_ns = 2708.0
+
+# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
+# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+[bench."signals/keyed_10k/insert"]
+budget_ns = 2900000
+measured_ns = 569041.0
+blueprint_ns = 20000
+blueprint = "Keyed patch on 10,000 items, one insert: <= 20 us iOS (A15), <= 40 us Android, <= 30 us web"
+
+# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
+# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+[bench."signals/keyed_10k/update"]
+budget_ns = 2900000
+measured_ns = 567250.0
+
+# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
+# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+[bench."signals/keyed_10k/move"]
+budget_ns = 3500000
+measured_ns = 696833.0
+
+# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
+# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+[bench."signals/keyed_1k/insert"]
+budget_ns = 290000
+measured_ns = 56208.0
+
+# Patches are computed by diffing the whole list, so this is O(list), not O(change): see
+# "Findings" in bench/RESULTS.md. Re-base (tighten) this budget when that changes.
+[bench."signals/keyed_100/insert"]
+budget_ns = 32000
+measured_ns = 6334.0
+
+[bench."signals/computed/recompute_1"]
+budget_ns = 250
+measured_ns = 40.5
+
+[bench."signals/computed/recompute_chain_10"]
+budget_ns = 1300
+measured_ns = 256.5
+
+[bench."snapshot/encode_100kb"]
+budget_ns = 82000
+measured_ns = 16341.0
+
+[bench."snapshot/restore_100kb"]
+budget_ns = 150000
+measured_ns = 29779.8
+
+[bench."snapshot/restore_1mb"]
+budget_ns = 1400000
+measured_ns = 274875.0
+blueprint_ns = 100000000
+blueprint = "Web crash recovery from snapshot: <= 100 ms for a 1 MB state (restore only here)"
+
+[bench."snapshot/cold_start_restore_100kb"]
+budget_ns = 340000
+measured_ns = 67167.0
+blueprint_ns = 3000000
+blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (no dlopen, no wasm compile here)"
+
+[bench."snapshot/cold_start_restore_100kb_core_thread"]
+budget_ns = 380000
+measured_ns = 75583.0
+blueprint_ns = 3000000
+blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the keel-core thread)"
