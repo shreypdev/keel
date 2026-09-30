@@ -11,8 +11,8 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 1,763 passed / 0 failed |
-| TS `npm test` (runtimes/ts/@keel/runtime) | 831 passed (21 files) |
+| Rust `cargo test --workspace` | 1,813 passed / 0 failed |
+| TS `npm test` (runtimes/ts/@keel/runtime) | 832 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 313 passed / 0 failed |
 
@@ -30,11 +30,18 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- keel-runtime review fixes (H1 restore generations, M1-M3, lows; ADR-022) — `wt/runtime-fixes`.
 - keel-macros review fixes (H1 schema-identity checks, H2 typed port errors; ADR-023) — `wt/macros-fixes`.
 - bindgen standard-library filter (ADR-024) — `wt/stdlib-filter`.
 
 ## Landed since takeover
+
+- **keel-runtime fix round merged** (ADR-022, ADR-023): global generation counter +
+  `generation_floor` in the Snapshot payload (all three platform codecs updated); observe
+  and restore deliver under the store's delivery lock via `StoreCell::observe_and_deliver`;
+  E_REENTRANT now also fires for host-callback re-entry (was a deadlock); restore cancels
+  calls whose receiver was replaced; shutdown answers all in-flight work before joining;
+  write checker is an allowlist and TestRuntime uses a real blocking pool. Full matrix
+  re-verified. Detail: .10x/decisions/sde/keel-runtime-review-fixes.md. Re-review pending.
 
 - **keel-cli** merged after review: init/bindgen/build/dev/doctor/adopt; XCFramework,
   16KB-aligned Android .so, wasm-opt'd wasm; teaching C00NN errors. The generated shells
