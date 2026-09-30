@@ -5,8 +5,12 @@
 //! the `'static` mirrors in [`crate::meta`], which convert into these with
 //! `From`.
 //!
-//! Field declaration order is significant: it is the order fields appear in
-//! the canonical JSON and therefore in the schema hash.
+//! Field declaration order is significant: it is the key order of the JSON
+//! output, and therefore of the canonical JSON the schema hash is computed
+//! over. Which *lists* are order-sensitive is described in the crate's
+//! canonical-form rules (SPEC §2.3): record and variant fields, parameters and
+//! signals keep their declared order; the top-level lists, object methods and
+//! constructors, and port methods are sorted by name in the canonical form.
 //!
 //! Every `docs` field defaults to empty when absent in JSON and is omitted from
 //! serialized output when empty. The canonical form drops docs entirely.
@@ -22,9 +26,11 @@ pub const KEEL_VERSION: &str = "1.0.0";
 /// The complete public surface of one Keel core (SPEC §2.2).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schema {
-    /// Keel specification version, `"1.0.0"` for v1.
+    /// Keel specification version, `"1.0.0"` for v1. A label: excluded from
+    /// the canonical JSON and the schema hash.
     pub keel_version: String,
-    /// Cargo package name of the core.
+    /// Cargo package name of the core. A label: excluded from the canonical
+    /// JSON and the schema hash.
     pub crate_name: String,
     /// Records (`#[keel::api] struct`).
     pub records: Vec<RecordDef>,
@@ -126,9 +132,10 @@ pub struct ObjectDef {
     pub name: String,
     /// `fnv1a32(name)`.
     pub type_id: u32,
-    /// Functions returning `Self` / `Result<Self, E>`.
+    /// Functions returning `Self` / `Result<Self, E>` (sorted by name in the
+    /// canonical form).
     pub constructors: Vec<MethodDef>,
-    /// Methods, in declaration order.
+    /// Methods, in declaration order (sorted by name in the canonical form).
     pub methods: Vec<MethodDef>,
     /// Signal table when the object is a `#[keel::store]`.
     pub store: Option<StoreDef>,
@@ -230,7 +237,8 @@ pub struct PortDef {
     pub port_id: u32,
     /// Sync, async or event.
     pub kind: PortKind,
-    /// Port methods; `method_id` is `fnv1a32("<Trait>.<method>")`.
+    /// Port methods; `method_id` is `fnv1a32("<Trait>.<method>")`. Sorted by
+    /// name in the canonical form.
     pub methods: Vec<MethodDef>,
     /// Doc comment; excluded from the schema hash.
     #[serde(default, skip_serializing_if = "String::is_empty")]

@@ -84,6 +84,14 @@ pub enum SchemaError {
         /// Where it appears.
         at: String,
     },
+    /// A `Unit` where it is not allowed: as a record or variant field, a
+    /// parameter, a signal type, or the inner type of `Option`, `Vec`, `Map`
+    /// values or `Lazy` (E0001). `Unit` is legal only as a return type or as
+    /// a variant with no fields; zero-width items defeat length validation.
+    MisplacedUnit {
+        /// Where it appears.
+        at: String,
+    },
     /// A map whose key type is not `String`, an integer, `Bool` or `Uuid`
     /// (E0006).
     InvalidMapKey {
@@ -105,7 +113,9 @@ impl SchemaError {
     pub fn code(&self) -> &'static str {
         match self {
             SchemaError::DuplicateTypeName { .. } => "E0050",
-            SchemaError::UnresolvedType { .. } | SchemaError::MisplacedLazy { .. } => "E0001",
+            SchemaError::UnresolvedType { .. }
+            | SchemaError::MisplacedLazy { .. }
+            | SchemaError::MisplacedUnit { .. } => "E0001",
             SchemaError::MisplacedResult { .. } | SchemaError::MisplacedStream { .. } => "E0005",
             SchemaError::InvalidMapKey { .. } => "E0006",
             SchemaError::StoreWithoutConstructor { .. } => "E0011",
@@ -141,6 +151,10 @@ impl fmt::Display for SchemaError {
                 f,
                 "error[keel::{code}]: `{ty}` at {at}: Lazy is only allowed as the type of a store signal"
             ),
+            SchemaError::MisplacedUnit { at } => write!(
+                f,
+                "error[keel::{code}]: `unit` at {at}: Unit is only allowed as a return type or as a variant with no fields, not as a field, parameter or signal type, nor inside option, vec, map or lazy (zero-width items defeat length validation)"
+            ),
             SchemaError::InvalidMapKey { key, at } => write!(
                 f,
                 "error[keel::{code}]: `{key}` at {at} is not a valid map key; use String, an integer type, Bool or Uuid"
@@ -155,31 +169,45 @@ impl fmt::Display for SchemaError {
 
 impl std::error::Error for SchemaError {}
 
-/// Which return-only or signal-only wrappers are legal at a position.
+/// Which return-only or signal-only forms are legal at a position.
 #[derive(Clone, Copy)]
 struct Allow {
     result: bool,
     stream: bool,
     lazy: bool,
+    unit: bool,
 }
 
-/// Fields and parameters: no wrapper is legal.
+/// Fields and parameters: no wrapper and no `Unit`.
 const PLAIN: Allow = Allow {
     result: false,
     stream: false,
     lazy: false,
+    unit: false,
 };
-/// Return types: `T`, `Result<T,E>`, `Stream<T>`, `Result<Stream<T>,E>`.
+/// Return types: `T`, `Result<T,E>`, `Stream<T>`, `Result<Stream<T>,E>`, where
+/// `Unit` may stand for the whole return type.
 const RETURN: Allow = Allow {
     result: true,
     stream: true,
     lazy: false,
+    unit: true,
 };
 /// A store signal's type: `Lazy<T>` is legal at the top.
 const SIGNAL: Allow = Allow {
     result: false,
     stream: false,
     lazy: true,
+    unit: false,
+};
+/// The components of a `Result` or `Stream`: `Unit` is fine there (`Result<(),
+/// E>`, a stream of ticks). Also used for a map key so that a `Unit` key is
+/// reported once, as an invalid key, instead of twice.
+const COMPONENT: Allow = Allow {
+    result: false,
+    stream: false,
+    lazy: false,
+    unit: true,
 };
 
 struct Checker<'a> {
@@ -206,7 +234,7 @@ impl Checker<'_> {
                         at: at(),
                     });
                 }
-                self.check(key, PLAIN, at);
+                self.check(key, COMPONENT, at);
                 self.check(value, PLAIN, at);
             }
             TypeRef::Lazy(item) => {
@@ -226,16 +254,19 @@ impl Checker<'_> {
                     });
                 }
                 // `Stream` is only legal directly inside a legal `Result`.
+                // `Unit` is legal in both components; when the `Result`
+                // itself is misplaced that is already reported, so its
+                // components do not add a second error.
                 let ok_allow = if allow.result {
                     Allow {
                         stream: allow.stream,
-                        ..PLAIN
+                        ..COMPONENT
                     }
                 } else {
-                    PLAIN
+                    COMPONENT
                 };
                 self.check(ok, ok_allow, at);
-                self.check(err, PLAIN, at);
+                self.check(err, COMPONENT, at);
             }
             TypeRef::Stream(item) => {
                 if !allow.stream {
@@ -244,7 +275,12 @@ impl Checker<'_> {
                         at: at(),
                     });
                 }
-                self.check(item, PLAIN, at);
+                self.check(item, COMPONENT, at);
+            }
+            TypeRef::Unit => {
+                if !allow.unit {
+                    self.errors.push(SchemaError::MisplacedUnit { at: at() });
+                }
             }
             TypeRef::Bool
             | TypeRef::I8
@@ -259,7 +295,6 @@ impl Checker<'_> {
             | TypeRef::F64
             | TypeRef::String
             | TypeRef::Bytes
-            | TypeRef::Unit
             | TypeRef::Duration
             | TypeRef::Timestamp
             | TypeRef::Uuid => {}
@@ -296,6 +331,10 @@ impl Schema {
     ///   `T`, `Result<T,E>`, `Stream<T>`, `Result<Stream<T>,E>` (E0005);
     /// * map keys are `String`, integers, `Bool` or `Uuid` (E0006);
     /// * `Lazy` appears only as the type of a store signal (E0001);
+    /// * `Unit` appears only as a return type (alone, or as a component of a
+    ///   returned `Result` or `Stream`), never as a record, variant or
+    ///   parameter type, a signal type, or inside `Option`, `Vec`, map values
+    ///   or `Lazy` (E0001);
     /// * every store has at least one constructor (E0011).
     ///
     /// It does not check that ids match their names or that they are free of
@@ -903,6 +942,200 @@ mod tests {
         assert_eq!(ok.validate(), Ok(()));
     }
 
+    fn is_misplaced_unit(errs: &[SchemaError]) -> bool {
+        matches!(errs, [SchemaError::MisplacedUnit { .. }])
+    }
+
+    fn variant_field_errors(ty: TypeRef) -> Vec<SchemaError> {
+        errors(&base(|s| {
+            s.enums.push(EnumDef {
+                name: "E".into(),
+                type_id: 1,
+                is_error: false,
+                variants: vec![VariantDef {
+                    fields: vec![field("v", ty)],
+                    ..crate::fixtures::unit_variant("V", 0)
+                }],
+                docs: String::new(),
+            });
+        }))
+    }
+
+    fn method_param_errors(ty: TypeRef) -> Vec<SchemaError> {
+        errors(&base(|s| {
+            s.objects.push(object(
+                "Obj",
+                vec![],
+                vec![method(
+                    "Obj",
+                    "m",
+                    vec![param("p", ty)],
+                    TypeRef::Unit,
+                    false,
+                )],
+            ));
+        }))
+    }
+
+    #[test]
+    fn unit_is_legal_as_a_return_type_and_as_a_fieldless_variant() {
+        // Whole return type, Ok/Err components, stream items.
+        for ty in [
+            TypeRef::Unit,
+            TypeRef::result(TypeRef::Unit, known()),
+            TypeRef::result(TypeRef::Unit, TypeRef::Unit),
+            TypeRef::result(known(), TypeRef::Unit),
+            TypeRef::stream(TypeRef::Unit),
+            TypeRef::result(TypeRef::stream(TypeRef::Unit), known()),
+        ] {
+            assert_eq!(return_errors(ty.clone()), [], "return {ty}");
+        }
+        // Methods, constructors and port methods may return Unit too, and a
+        // variant with no fields is the way to spell a unit variant.
+        let s = base(|s| {
+            s.objects.push(object(
+                "Obj",
+                vec![],
+                vec![method("Obj", "m", vec![], TypeRef::Unit, false)],
+            ));
+            s.enums.push(EnumDef {
+                name: "E".into(),
+                type_id: 1,
+                is_error: false,
+                variants: vec![crate::fixtures::unit_variant("V", 0)],
+                docs: String::new(),
+            });
+        });
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    #[test]
+    fn unit_is_rejected_as_a_record_field() {
+        let errs = field_errors(TypeRef::Unit);
+        assert_eq!(
+            errs,
+            [SchemaError::MisplacedUnit {
+                at: "record Holder, field f".into()
+            }]
+        );
+        assert_eq!(errs[0].code(), "E0001");
+    }
+
+    #[test]
+    fn unit_is_rejected_as_a_variant_field() {
+        let errs = variant_field_errors(TypeRef::Unit);
+        assert_eq!(
+            errs,
+            [SchemaError::MisplacedUnit {
+                at: "enum E, variant V, field v".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn unit_is_rejected_as_a_parameter() {
+        assert_eq!(
+            param_errors(TypeRef::Unit),
+            [SchemaError::MisplacedUnit {
+                at: "function f, param p".into()
+            }]
+        );
+        assert_eq!(
+            method_param_errors(TypeRef::Unit),
+            [SchemaError::MisplacedUnit {
+                at: "object Obj, method m, param p".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn unit_is_rejected_as_a_signal_type() {
+        assert_eq!(
+            signal_errors(TypeRef::Unit),
+            [SchemaError::MisplacedUnit {
+                at: "store Store, signal sig".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn unit_is_rejected_inside_option_vec_map_and_lazy() {
+        let unit = || TypeRef::Unit;
+        for ty in [
+            TypeRef::option(unit()),
+            TypeRef::vec(unit()),
+            TypeRef::map(TypeRef::String, unit()),
+            TypeRef::option(TypeRef::vec(unit())),
+            TypeRef::vec(TypeRef::option(unit())),
+            TypeRef::map(TypeRef::String, TypeRef::vec(unit())),
+        ] {
+            assert!(is_misplaced_unit(&field_errors(ty.clone())), "field {ty}");
+            assert!(is_misplaced_unit(&param_errors(ty.clone())), "param {ty}");
+            assert!(is_misplaced_unit(&signal_errors(ty.clone())), "signal {ty}");
+            assert!(
+                is_misplaced_unit(&variant_field_errors(ty.clone())),
+                "variant {ty}"
+            );
+            // Being in return position does not legalise them either.
+            assert!(is_misplaced_unit(&return_errors(ty.clone())), "return {ty}");
+            assert!(
+                is_misplaced_unit(&return_errors(TypeRef::result(ty.clone(), known()))),
+                "result ok {ty}"
+            );
+        }
+        // Lazy<Unit> is only reachable as a signal; the item Unit is rejected.
+        assert!(is_misplaced_unit(&signal_errors(TypeRef::lazy(unit()))));
+    }
+
+    #[test]
+    fn unit_inside_a_wrapper_in_a_return_is_rejected_but_the_wrapper_itself_is_fine() {
+        // Stream<Vec<Unit>>, Result<Vec<Unit>, E>: legal shapes, illegal item.
+        assert!(is_misplaced_unit(&return_errors(TypeRef::stream(
+            TypeRef::vec(TypeRef::Unit)
+        ))));
+        assert!(is_misplaced_unit(&return_errors(TypeRef::result(
+            TypeRef::stream(TypeRef::option(TypeRef::Unit)),
+            known()
+        ))));
+    }
+
+    #[test]
+    fn a_unit_map_key_is_reported_once_as_an_invalid_key() {
+        let errs = field_errors(TypeRef::map(TypeRef::Unit, TypeRef::U8));
+        assert_eq!(
+            errs,
+            [SchemaError::InvalidMapKey {
+                key: TypeRef::Unit,
+                at: "record Holder, field f".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_misplaced_wrapper_around_unit_is_reported_once() {
+        // The wrapper is the problem; its Unit component is not a second one.
+        for errs in [
+            field_errors(TypeRef::result(TypeRef::Unit, TypeRef::Unit)),
+            field_errors(TypeRef::stream(TypeRef::Unit)),
+            param_errors(TypeRef::stream(TypeRef::Unit)),
+        ] {
+            assert_eq!(errs.len(), 1, "{errs:?}");
+            assert_eq!(errs[0].code(), "E0005");
+        }
+    }
+
+    #[test]
+    fn misplaced_unit_message_names_the_rule() {
+        let text = field_errors(TypeRef::vec(TypeRef::Unit))[0].to_string();
+        assert!(text.starts_with("error[keel::E0001]:"), "{text}");
+        assert!(text.contains("record Holder, field f"), "{text}");
+        assert!(
+            text.contains("only allowed as a return type or as a variant with no fields"),
+            "{text}"
+        );
+        assert!(text.contains("option, vec, map or lazy"), "{text}");
+    }
+
     #[test]
     fn all_errors_are_reported_in_schema_order() {
         let s = base(|s| {
@@ -911,12 +1144,12 @@ mod tests {
                 "Holder",
                 vec![
                     field("a", TypeRef::named("Ghost")),
-                    field("b", TypeRef::map(TypeRef::F32, TypeRef::Unit)),
+                    field("b", TypeRef::map(TypeRef::F32, TypeRef::U8)),
                     field("c", TypeRef::stream(TypeRef::Unit)),
                 ],
             ));
             s.functions
-                .push(function(vec![], TypeRef::lazy(TypeRef::Unit)));
+                .push(function(vec![], TypeRef::lazy(TypeRef::U8)));
         });
         let codes: Vec<&str> = errors(&s).iter().map(SchemaError::code).collect();
         assert_eq!(codes, ["E0050", "E0001", "E0006", "E0005", "E0001"]);
@@ -960,6 +1193,10 @@ mod tests {
                     at: "here".into(),
                 },
                 ["E0001", "lazy<u8>", "here", "Lazy"],
+            ),
+            (
+                SchemaError::MisplacedUnit { at: "here".into() },
+                ["E0001", "`unit`", "here", "return type"],
             ),
             (
                 SchemaError::InvalidMapKey {

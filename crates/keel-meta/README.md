@@ -91,7 +91,12 @@ assert_eq!(ids::fnv1a64(b"keel"), 6_367_360_722_358_687_308);
 
 ## The schema hash
 
-`Schema::hash()` is `fnv1a64` of `Schema::canonical_json()`: compact `serde_json`, docs excluded, the top-level lists (records, enums, objects, functions, ports, queries) sorted by name and enum variants by index. Everything that matters on the wire keeps its declared order: record and variant fields, parameters, signals, and the methods of an object or port. Two cores with the same public surface therefore hash identically whatever their doc comments or source order, and any rename, retype or reorder of a wire-relevant item changes the hash.
+`Schema::hash()` is `fnv1a64` of `Schema::canonical_json()`: compact `serde_json`, docs excluded, and only the six top-level lists (records, enums, objects, functions, ports, queries). The `crate_name` and `keel_version` labels do not change the wire, so they are not part of the canonical form or the hash.
+
+* Unordered things are sorted by name: the six top-level lists, the constructors and methods of an object, and the methods of a port. Enum variants are sorted by index.
+* Ordered things are part of the wire layout and keep their declared order: record fields, variant fields, parameters and signals (a signal id is its index).
+
+Two cores with the same public surface therefore hash identically whatever their doc comments, crate name or source order of unordered items, and any rename, retype or reorder of a wire-relevant item changes the hash.
 
 ## Dispatch without runtime types
 
@@ -99,4 +104,6 @@ assert_eq!(ids::fnv1a64(b"keel"), 6_367_360_722_358_687_308);
 
 ## Validation
 
-`Schema::validate()` returns every violation as a `SchemaError` with a stable code from SPEC section 12 (`E0050` duplicate type name, `E0005` misplaced `Result`/`Stream`, `E0006` bad map key, `E0011` store without constructor, `E0001` unresolved or misplaced type).
+`Schema::validate()` returns every violation as a `SchemaError` with a stable code from SPEC section 12 (`E0050` duplicate type name, `E0005` misplaced `Result`/`Stream`, `E0006` bad map key, `E0011` store without constructor, `E0001` unresolved type, misplaced `Lazy`, or misplaced `Unit`).
+
+`Unit` is legal only as a return type (alone, or as a component of a returned `Result` or `Stream`) or as a variant with no fields. It is rejected as a record, variant or parameter type, as a signal type, and inside `Option`, `Vec`, map values or `Lazy`, because zero-width items defeat length validation.
