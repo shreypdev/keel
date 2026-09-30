@@ -1,4 +1,4 @@
-import { ALL_SIGNALS, CallTarget, type ChangeOp, type Codec, type KeelCore, decodeValue, encodeValue } from "@keel/runtime";
+import { ALL_SIGNALS, CallTarget, type ChangeOp, type Codec, type KeelCore, KeelWriter, decodeValue, encodeValue } from "@keel/runtime";
 
 /** One entry of a change-set as the mirror hands it to a store. */
 export interface SignalUpdate {
@@ -82,6 +82,11 @@ export class RawStore {
     return this.call(methodId, encodeValue(codec, arg));
   }
 
+  /** How many entries the mirror has handed to this store since the last `take()`, without flushing: what has arrived, not what could. */
+  get received(): number {
+    return this.#entries.length;
+  }
+
   /**
    * The entries delivered since the last `take()` (or since `open`), oldest first, and forgets
    * them. Flushes the mirror first, so entries the core has already sent are included without
@@ -100,6 +105,19 @@ export class RawStore {
     this.#closed = true;
     this.core.release(this.handle);
   }
+}
+
+/**
+ * The encoded arguments of a call: what a generated method writes before it calls the core.
+ *
+ * ```ts
+ * store.call(BigList.insertAt, args((w) => { w.writeU32(5000); w.writeStr("fresh"); }));
+ * ```
+ */
+export function args(write: (w: KeelWriter) => void): Uint8Array {
+  const w = new KeelWriter();
+  write(w);
+  return w.finish();
 }
 
 /** The entry for `signalId` among `entries` (the last one if there are several), decoded with `codec`. Fails if there is none. */
