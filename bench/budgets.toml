@@ -236,8 +236,11 @@ measured_ns = 66459.0
 blueprint_ns = 3000000
 blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (no dlopen, no wasm compile here)"
 
+# Starts a real thread, so the time depends on the scheduler as well as on Keel (on a loaded
+# machine thread wake-up alone can take a millisecond). The budget is about 13x the quiet number,
+# the blueprint's 3 ms divided by three, instead of the usual 5x.
 [bench."snapshot/cold_start_restore_100kb_core_thread"]
-budget_ns = 390000
+budget_ns = 1000000
 measured_ns = 76625.0
 blueprint_ns = 3000000
 blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the keel-core thread)"
