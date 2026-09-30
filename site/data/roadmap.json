@@ -49,7 +49,7 @@
       "intro": "Planned for the releases after v1.0. The order may change with what the benchmarks show.",
       "items": [
         { "title": "crates.io publishing", "text": "Publish the crates under a registry-safe prefix; needs its own ADR for the renames." },
-        { "title": "Frame-coalesced delivery", "text": "Only if the stress suite shows the platform thread needs it. An ADR comes first." },
+        { "title": "Frame-coalesced delivery", "text": "Planned in ADR-031, not shipped. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed." },
         { "title": "Maven Central for the Kotlin runtime", "text": "Depend on it from Gradle without a local build." },
         { "title": "Windows CLI", "text": "Release binaries and docs for the keel command on Windows." },
         { "title": "keel upgrade", "text": "Move a project to a newer Keel version." },

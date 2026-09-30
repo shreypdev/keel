@@ -7,7 +7,8 @@ import { readdirSync, existsSync } from "node:fs";
 import { join, posix } from "node:path";
 import { SITE, ORIGIN, read, writeIfChanged, innerOf, titleOf, metaOf, textOf, decode, modifiedOf } from "./lib.mjs";
 
-const DOCS_ORDER = ["index", "getting-started", "concepts", "queries", "ports", "cli", "architecture", "api-swift", "api-kotlin", "api-typescript"];
+const navData = JSON.parse(read(join(SITE, "data", "docs.json")));
+const DOCS_ORDER = ["index", ...navData.groups.flatMap((g) => g.pages.map((p) => p.file.replace(/\.html$/, "")))];
 
 // ---- a small HTML -> Markdown converter for the subset the site uses
 const VOID = new Set(["br", "hr", "img", "meta", "link", "input", "path", "circle", "rect", "line", "stop", "use"]);

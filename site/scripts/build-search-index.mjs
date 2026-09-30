@@ -8,7 +8,8 @@ import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { SITE, read, writeIfChanged, innerOf, textOf, titleOf, decode, rel } from "./lib.mjs";
 
-const DOCS_ORDER = ["index", "getting-started", "concepts", "queries", "ports", "cli", "architecture", "api-swift", "api-kotlin", "api-typescript"];
+const navData = JSON.parse(read(join(SITE, "data", "docs.json")));
+const DOCS_ORDER = ["index", ...navData.groups.flatMap((g) => g.pages.map((p) => p.file.replace(/\.html$/, "")))];
 const CAP = 1200;
 const clip = (t) => (t.length <= CAP ? t : t.slice(0, CAP).replace(/\s+\S*$/, "") + " …");
 

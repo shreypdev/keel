@@ -395,7 +395,7 @@ What remains at 10,000 rows is the memory move of the vector's tail, which `Vec:
 
 Each platform runtime holds a **mirror**: store handle, then signal id, then the decoded value. Generated code exposes the mirror in the platform's own idiom (an `@Observable` property, a `StateFlow`, a `Signal` with `useSignal`), so reading is a local memory read that never calls into the core.
 
-Change-sets are applied on the main thread with per-frame coalescing: Swift on the `MainActor`, Kotlin on `Dispatchers.Main.immediate`, and TypeScript by batching into one flush per macrotask. A store is an object with a lifetime: release it explicitly with `close()` (Swift and Kotlin use `deinit` and a `Cleaner` as backstops, TypeScript a `FinalizationRegistry`), and `KeelCore.stats()` shows live handle counts.
+Every change-set is applied on the main thread, in one hop per transaction: Swift on the `MainActor`, Kotlin on `Dispatchers.Main.immediate`, and TypeScript in a queued flush on the page's main thread. A store is an object with a lifetime: release it explicitly with `close()` (Swift and Kotlin use `deinit` and a `Cleaner` as backstops, TypeScript a `FinalizationRegistry`), and `KeelCore.stats()` shows live handle counts.
 
 ## Snapshot and restore
 
@@ -1133,6 +1133,329 @@ By design, v1 has no sync engine, no hosted services and no shared UI of any kin
 
 ---
 
+Source: https://shreypdev.github.io/keel/docs/errors.html
+
+# Error codes
+
+Every compile error the macros raise has a stable code, a fixed shape and a fix. The link at the end of each message lands on its code below.
+
+## How to read one
+
+A diagnostic says what is wrong, why the rule exists and how to fix it. This one is verbatim from the macro test suite:
+
+text
+
+```
+error[keel::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
+  = note: trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript
+  = help: use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`)
+  = docs: https://shreypdev.github.io/keel/docs/errors.html#E0004
+```
+
+## All codes
+
+| Code | Meaning |
+| --- | --- |
+| [`E0001`](https://shreypdev.github.io/keel/docs/errors.html#E0001) | unsupported type in a public position |
+| [`E0002`](https://shreypdev.github.io/keel/docs/errors.html#E0002) | generic parameter |
+| [`E0003`](https://shreypdev.github.io/keel/docs/errors.html#E0003) | lifetime in a public signature |
+| [`E0004`](https://shreypdev.github.io/keel/docs/errors.html#E0004) | trait object, `dyn`, `impl Trait` |
+| [`E0005`](https://shreypdev.github.io/keel/docs/errors.html#E0005) | `Result` / `Stream` outside return position |
+| [`E0006`](https://shreypdev.github.io/keel/docs/errors.html#E0006) | map key type not allowed |
+| [`E0007`](https://shreypdev.github.io/keel/docs/errors.html#E0007) | unsupported item shape |
+| [`E0008`](https://shreypdev.github.io/keel/docs/errors.html#E0008) | unknown or misplaced `#[keel(..)]` attribute or macro argument |
+| [`E0010`](https://shreypdev.github.io/keel/docs/errors.html#E0010) | invalid `#[keel::error]` variant |
+| [`E0011`](https://shreypdev.github.io/keel/docs/errors.html#E0011) | store and `#[keel::api(store)]` impl block disagree |
+| [`E0012`](https://shreypdev.github.io/keel/docs/errors.html#E0012) | trait object in a record field |
+| [`E0013`](https://shreypdev.github.io/keel/docs/errors.html#E0013) | store cannot be restored automatically |
+| [`E0020`](https://shreypdev.github.io/keel/docs/errors.html#E0020) | `&mut self` receiver |
+| [`E0021`](https://shreypdev.github.io/keel/docs/errors.html#E0021) | `self` by value |
+| [`E0022`](https://shreypdev.github.io/keel/docs/errors.html#E0022) | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry a Keel code) |
+| [`E0030`](https://shreypdev.github.io/keel/docs/errors.html#E0030) | port method with a non-wire parameter |
+| [`E0031`](https://shreypdev.github.io/keel/docs/errors.html#E0031) | event port method that is not a plain `fn(..)` returning `()` |
+| [`E0032`](https://shreypdev.github.io/keel/docs/errors.html#E0032) | invalid port trait shape |
+| [`E0033`](https://shreypdev.github.io/keel/docs/errors.html#E0033) | the error type of a port method has no `From<PortError>` |
+| [`E0040`](https://shreypdev.github.io/keel/docs/errors.html#E0040) | query without `key`, mutation with `stale`, or another invalid query argument |
+| [`E0041`](https://shreypdev.github.io/keel/docs/errors.html#E0041) | query or mutation function with an invalid signature |
+| [`E0042`](https://shreypdev.github.io/keel/docs/errors.html#E0042) | query whose success value is `()` or an `Option` |
+| [`E0050`](https://shreypdev.github.io/keel/docs/errors.html#E0050) | duplicate type name |
+| [`E0051`](https://shreypdev.github.io/keel/docs/errors.html#E0051) | a name that collides after case conversion |
+| [`E0052`](https://shreypdev.github.io/keel/docs/errors.html#E0052) | a record, enum, error, object or port named like a standard library item |
+| [`E0060`](https://shreypdev.github.io/keel/docs/errors.html#E0060) | a spelling that looks like a built-in Keel type is another type |
+| [`E0061`](https://shreypdev.github.io/keel/docs/errors.html#E0061) | the schema names a different type than the one spelled, or a type that is not a Keel type |
+| [`E0062`](https://shreypdev.github.io/keel/docs/errors.html#E0062) | a port call had no adapter |
+| [`E0063`](https://shreypdev.github.io/keel/docs/errors.html#E0063) | nested `Option<Option<T>>` |
+| [`E0064`](https://shreypdev.github.io/keel/docs/errors.html#E0064) | an object (`#[keel::api] impl`) used where a value is expected |
+
+## Types and shapes
+
+### `E0001` unsupported type in a public position
+
+unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[keel::error]` enum, and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[keel(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
+| `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
+| `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
+| `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | store a `Ctx` in the object when it is constructed, or use `Ctx::current()` |
+| `Instant` cannot cross the boundary | monotonic instants are meaningless outside their process | use `Duration` for spans and `Timestamp` for points in time; if `Instant` is a type of your own, rename it: Keel recognises this name wherever it is written |
+| `Handle` cannot be used in a public signature | a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature | use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if `Handle` is a type of your own, rename it: Keel recognises this name wherever it is written |
+
+### `E0002` generic parameter
+
+generic parameter on a `#[keel::api]` item
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[keel::api]` type per instantiation |
+
+### `E0003` lifetime in a public signature
+
+lifetime in a public signature
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
+
+### `E0004` trait object, `dyn`, `impl Trait`
+
+trait object / `dyn` / `Box<dyn Fn>`
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| trait object `dyn Fn(u32)` cannot cross the boundary | trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript | use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`) |
+| `impl std::fmt::Display` cannot cross the boundary | `impl Trait` has no wire representation; the only one the schema understands is `impl Stream<Item = T>` in a return type | use a concrete type, or `impl Stream<Item = T>` for a sequence of values over time |
+| boxed stream `Pin<Box<dyn keel::runtime::Stream<Item = u32> + Send>>` cannot cross the boundary | a stream is described to the platforms as `impl Stream<Item = T>` in a return type; a boxed or `dyn` stream has no schema representation | return `impl Stream<Item = T> + Send + 'static` (box it inside the function if the branches differ) |
+
+### `E0005` `Result` / `Stream` outside return position
+
+`Result` or `Stream` outside return position
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `Result<u32, String>` cannot be used as a field | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
+
+### `E0006` map key type not allowed
+
+map key type not allowed
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `f64` cannot be a map key | map keys must be `String`, an integer, `bool` or `Uuid`: those compare and hash identically on every platform (floats and composite keys do not) | use one of those key types, or a `Vec` of records with an explicit key field |
+
+### `E0007` unsupported item shape
+
+unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__keel_cell`, `#[keel::port]` on an inherent impl, `#[keel::api]` on a method, `#[keel::query]` or `#[keel::mutation]` inside an `impl` block)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| tuple struct `Meters` cannot be a record | the schema names every field so the other languages can generate properties; tuple fields have no names | use named fields: `struct Meters { value: f64 }` |
+| enum `Nothing` has no variants | an enum without variants has no values, so it can never be sent | add at least one variant |
+| constructor `new` is `async` | a constructor inserts the new object into the object table before it replies, so it must finish synchronously | construct synchronously and start asynchronous work with `ctx.spawn(..)` |
+| `helper` is neither a method nor a constructor | a `pub fn` in a `#[keel::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed | add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[keel::api] fn` |
+| the receiver `self: &Arc<Self>` of method `by_arc` is not supported | the dispatcher resolves the object from its handle and calls the method with `&Type`; a receiver such as `Arc<Self>`, `Box<Self>` or `Pin<&Self>` needs a different call | write `&self`; clone an `Arc` of the object inside the method if you need one |
+| unit struct `Marker` cannot be a record | a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message | add a field, or use an enum with a unit variant if you need a marker |
+
+### `E0008` unknown or misplaced `#[keel(..)]` attribute or macro argument
+
+unknown or misplaced `#[keel(..)]` attribute or macro argument (an unknown key, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| unknown option `defualt` in `#[keel(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | remove or correct the option |
+| `#[keel(key)]` is not valid on a record or variant field | `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches | remove the option, or move it to where it applies |
+| unknown argument `colour` for `#[keel::api]` | `#[keel::api]` accepts: `crate = "path"`, and `store` on an impl block of a `#[keel::store]` struct | remove or correct the argument |
+| `default` takes no value | `default` switches a behaviour on by being present; there is nothing to set it to | write `default` alone |
+| `key` must be a string literal naming a field | `key` takes a string literal naming a field; anything else cannot be read at compile time | write `key = "id"` |
+| `no_coalesce` takes no value | `no_coalesce` switches a behaviour on by being present; there is nothing to set it to | write `no_coalesce` alone |
+
+## Errors and stores
+
+### `E0010` invalid `#[keel::error]` variant
+
+`#[keel::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[keel::api]` enum
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| variant `NotFound` has no `#[error(..)]` message | every variant of a `#[keel::error]` enum needs a message, because the platforms show it to users and logs | add `#[error("what went wrong")]`, or `#[error(transparent)]` to forward to the inner error |
+| invalid message for variant `Missing`: `{1}` refers to field 1, but the variant has 1 | the message is a template over the variant's fields | use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields |
+| `#[error(transparent)]` on variant `Both` needs exactly one field, found 2 | `transparent` forwards `Display` and `source()` to the variant's only field | give the variant a single field holding the inner error |
+| `#[error]` on the variant `A` belongs to `#[keel::error]`, not `#[keel::api]` | `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[keel::api]` enum has no messages, `Display` or `From` impls | change the enum's attribute to `#[keel::error]`, or remove the helper attribute |
+
+### `E0011` store and `#[keel::api(store)]` impl block disagree
+
+`#[keel::store]` and its `#[keel::api(store)]` impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen)
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+### `E0012` trait object in a record field
+
+trait object in a record field (the blueprint example)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `Vec<Box<dyn Any>>` cannot cross the boundary | trait objects have no wire representation | make `items` a concrete `#[keel::api]` type, or an enum listing the cases you need |
+
+### `E0013` store cannot be restored automatically
+
+store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[keel::store(restore = "..")]` hook
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| store `Todos` cannot be restored automatically: `count` is computed | restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them | add `#[keel::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
+
+## Methods
+
+### `E0020` `&mut self` receiver
+
+`&mut self` receiver
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `&mut self` receiver on method `increment` | objects are shared as `Arc<Type>` across calls and threads, so methods only ever get `&self` | take `&self` and mutate through signals (`Signal<T>`), a `Mutex` or another form of interior mutability |
+
+### `E0021` `self` by value
+
+`self` by value
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `self` by value on method `finish` | an object is shared across calls; a method cannot consume it | take `&self` and clone whatever you need to keep |
+
+### `E0022` non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry a Keel code)
+
+non-`Send` future in an async method
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+## Ports
+
+### `E0030` port method with a non-wire parameter
+
+port method with a non-wire parameter
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| parameter `url` of port method `request` is not a wire type | `&str` cannot cross the boundary (references have no wire representation; every value crosses by copy) | use an owned `String` |
+| parameter `on_progress` of port method `request` is not a wire type | trait object `dyn Fn(u8)` cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript) | use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`) |
+
+### `E0031` event port method that is not a plain `fn(..)` returning `()`
+
+event port method with a return type
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| event port method `changed` returns a value | events are fire-and-forget notifications from the host; there is no reply to carry a value | remove the return type, or drop `event` from `#[keel::port(event)]` to make it a request/reply port |
+| event port method `resumed` is `async` | events are fire-and-forget notifications from the host; nothing waits for them | make it a plain `fn` returning `()` |
+
+### `E0032` invalid port trait shape
+
+invalid port trait shape (an `async` method on a `sync` port, a parameter that is not a plain name, an associated type or const, no `&self` receiver)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `#[keel::port(sync)]` port has the `async` method `now_ms` | `sync` promises that every method answers immediately, so the core can call it without yielding | remove `async`, or remove `sync` from the attribute |
+| port trait `Kv` has an associated item that is not a method | a port is a list of methods the platform implements; associated types and constants have no wire representation | remove it, or move it to a separate trait |
+
+### `E0033` the error type of a port method has no `From<PortError>`
+
+the error type of a `Result` port method has no `From<PortError>` (an unavailable port cannot be reported)
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+## Queries and mutations
+
+### `E0040` query without `key`, mutation with `stale`, or another invalid query argument
+
+query without `key` / mutation with `stale` / a query argument of the wrong kind
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| query `todos` has no `key` | the cache is addressed by key: two calls share a cached result only if their keys are equal | add `key = "todos"`, with `{param}` placeholders for the parameters that distinguish results |
+| mutation `add_todo` has `stale` | `stale` is how long a cached *read* stays fresh; a mutation writes and caches nothing | remove `stale`; put it on the query the mutation invalidates |
+| `{pgae}` in `key` is not a parameter of the function | each placeholder is replaced by the encoded parameter of that name | the parameters are: page |
+| `key` must be a string literal | `key` takes a string literal; anything else cannot be read at compile time | write `key = "todos:{page}"` |
+| `retry` must be a whole number | `retry` takes a whole number; anything else cannot be read at compile time | write `retry = 3` |
+| `stale` must be a string literal with a unit | `stale` takes a string literal with a unit; anything else cannot be read at compile time | write `stale = "30s"` |
+
+### `E0041` query or mutation function with an invalid signature
+
+query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `sync_query` must be `async` | `#[keel::query]` functions fetch or write through ports, which are asynchronous | write `async fn` |
+| `no_ctx` must take `ctx: &Ctx` as its first parameter | the runtime hands every query and mutation a context to reach ports and other queries | add `ctx: &Ctx` (or `ctx: Ctx`) before the other parameters |
+| `plain` must return `Result<T, E>` | the cache stores the success value and the error separately, and the platforms show both | return `Result<T, E>` where `E` is a `#[keel::error]` enum |
+
+### `E0042` query whose success value is `()` or an `Option`
+
+query whose success value is `()` or an `Option` (a query caches a value; use a mutation for effects)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| query `ping` returns `()` | a query caches the value it returns; a query with nothing to return has nothing to cache | use `#[keel::mutation]` for a call that only has effects, or return the data the platform needs |
+| query `find` returns an `Option` | the handle's `data` signal is already optional (no result yet), so an optional result would be ambiguous: `None` could mean "not loaded" or "loaded, absent" | return a record or a list (an empty `Vec` says "nothing"), or an enum naming the cases |
+
+## Names in the generators
+
+### `E0050` duplicate type name
+
+duplicate type name (bindgen)
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+### `E0051` a name that collides after case conversion
+
+a name that collides after case conversion (`a_b` and `aB`) or is not an identifier in a target language (bindgen)
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+### `E0052` a record, enum, error, object or port named like a standard library item
+
+a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids (bindgen)
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+## Type identity and the schema
+
+### `E0060` a spelling that looks like a built-in Keel type is another type
+
+a spelling that looks like a built-in Keel type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+### `E0061` the schema names a different type than the one spelled, or a type that is not a Keel type
+
+the schema records a name that the type written there does not have: an alias (`type Todo = Item`), a renamed import (`use m::Item as Todo`) or a type that is not declared with `#[keel::api]`; reported by a const assertion comparing `KEEL_TYPE_ID`
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+### `E0062` a port call had no adapter
+
+a port call had no adapter (runtime message of a method without an error channel; a typed error for one with a `Result`)
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+### `E0063` nested `Option<Option<T>>`
+
+`Option<Option<T>>` in a public position
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| nested option `Option<Option<i32>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
+
+### `E0064` an object (`#[keel::api] impl`) used where a value is expected
+
+an object (`#[keel::api] impl`) used as a field, parameter or return value: objects cross by handle
+
+No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+
+Generated by `site/scripts/build-errors.mjs` from `docs/SPEC.md` section 12 and the compile-fail tests of the macros crate. To change a message, change the macro; to change the catalogue, change the specification.
+
+---
+
 Source: https://shreypdev.github.io/keel/docs/api-swift.html
 
 # API overview, Swift
@@ -1322,7 +1645,7 @@ See [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html) for the
 
 ## Threading and lifetime
 
-- Change-sets are applied on the `MainActor`, with per-frame coalescing, so observable properties only ever change on the main thread.
+- Change-sets are applied on the `MainActor`, in one hop per transaction, so observable properties only ever change on the main thread.
 - Stores and objects release their handle on `close()`, with `deinit` as the backstop. `KeelCore.stats()` exposes live handle counts for tests.
 - Swift 6 strict concurrency is on. Generated stores are `@MainActor`; objects are `@unchecked Sendable` because the core serializes access behind its lock.
 
@@ -1516,7 +1839,7 @@ See [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html) for the
 
 ## Threading and lifetime
 
-- Signals are updated on `Dispatchers.Main.immediate`, with per-frame coalescing. On a JVM without Android the runtime falls back to a single-thread executor, which is what the JVM test suite uses.
+- Signals are updated on `Dispatchers.Main.immediate`, in one hop per transaction. On a JVM without Android the runtime falls back to a single-thread executor, which is what the JVM test suite uses.
 - `KeelStore` and `KeelObject` implement `AutoCloseable`. Call `close()` to release the handle (a `use { }` block works); a `Cleaner` releases leaked handles as a backstop. `KeelCore.stats()` exposes live handle counts.
 - Over JNI, callbacks arrive from core threads and are decoded immediately; you never see a raw buffer.
 
@@ -1765,7 +2088,7 @@ planned
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
 - crates.io publishingPublish the crates under a registry-safe prefix; needs its own ADR for the renames.
-- Frame-coalesced deliveryOnly if the stress suite shows the platform thread needs it. An ADR comes first.
+- Frame-coalesced deliveryPlanned in ADR-031, not shipped. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed.
 - Maven Central for the Kotlin runtimeDepend on it from Gradle without a local build.
 - Windows CLIRelease binaries and docs for the keel command on Windows.
 - keel upgradeMove a project to a newer Keel version.
