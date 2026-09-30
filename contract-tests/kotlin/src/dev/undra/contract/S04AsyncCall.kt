@@ -27,7 +27,7 @@ fun s04AsyncCall(w: World) {
     // 2. Three at once resolve in the order of their delays, each with its own value.
     val order = CopyOnWriteArrayList<Int>()
     val values = runBlocking(Dispatchers.Default) {
-        listOf(1 to 60u, 2 to 20u, 3 to 40u)
+        listOf(1 to 400u, 2 to 50u, 3 to 200u)
             .map { (i, delayMs) -> async { addLater(i, 0, delayMs).also { order.add(i) } } }
             .awaitAll()
     }

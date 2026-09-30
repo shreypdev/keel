@@ -109,8 +109,9 @@ waiting for an event loop.
 ### S04 async call
 
 1. `add_later(20, 22, 50)` resolves to `42` after at least 45 ms and less than 2 s.
-2. Three concurrent calls `add_later(i, 0, d)` with `(i, d) = (1, 60), (2, 20), (3, 40)` resolve
-   in delay order `2, 3, 1` and with the right values.
+2. Three concurrent calls `add_later(i, 0, d)` with `(i, d) = (1, 400), (2, 50), (3, 200)` resolve
+   in delay order `2, 3, 1` and with the right values (the delays are 150 ms apart on purpose: a stalled
+   runner must not be able to reorder them).
 3. `Probe.wait(10)` resolves to `10`.
 4. A call made from inside a change observer or another call's completion (re-entrancy on the
    platform side: the continuation of `add_later` calls `add_later` again) works: the second call
