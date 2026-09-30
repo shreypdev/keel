@@ -151,12 +151,13 @@
   function countUp(el) {
     var target = parseFloat(el.getAttribute("data-count")), dec = parseInt(el.getAttribute("data-dec") || "0", 10);
     if (reduce || isNaN(target)) { el.textContent = el.getAttribute("data-final") || fmt(target, dec); return; }
-    var start = performance.now(), dur = 900;
-    (function tick(now) {
-      var k = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - k, 3);
+    var start = null, dur = 900;
+    requestAnimationFrame(function tick(now) {
+      if (start === null) start = now;
+      var k = Math.max(0, Math.min(1, (now - start) / dur)), e = 1 - Math.pow(1 - k, 3);
       el.textContent = k < 1 ? fmt(target * e, dec) : (el.getAttribute("data-final") || fmt(target, dec));
       if (k < 1) requestAnimationFrame(tick);
-    })(start);
+    });
   }
   var targets = $$(".reveal, [data-bar], [data-count]");
   if ("IntersectionObserver" in window && targets.length) {
