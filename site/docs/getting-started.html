@@ -4,16 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Getting started · Keel docs</title>
-<meta name="description" content="Install the toolchain and the keel CLI, scaffold a project, run the live dev loop and run the app on iOS, Android and the web.">
-<meta name="theme-color" content="#0a0a0a">
-<meta name="color-scheme" content="dark light">
+<meta name="description" content="Install the Keel CLI with brew, npm, curl or cargo, scaffold a project, run the live dev loop and run the app on iOS, Android and the web.">
 <link rel="canonical" href="https://shreypdev.github.io/keel/docs/getting-started.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Keel">
+<meta property="og:title" content="Getting started · Keel docs">
+<meta property="og:description" content="Install the Keel CLI with brew, npm, curl or cargo, scaffold a project, run the live dev loop and run the app on iOS, Android and the web.">
+<meta property="og:url" content="https://shreypdev.github.io/keel/docs/getting-started.html">
+<meta property="og:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Keel — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Getting started · Keel docs">
+<meta name="twitter:description" content="Install the Keel CLI with brew, npm, curl or cargo, scaffold a project, run the live dev loop and run the app on iOS, Android and the web.">
+<meta name="twitter:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/keel/docs/getting-started.html#article","headline":"Getting started · Keel docs","description":"Install the Keel CLI with brew, npm, curl or cargo, scaffold a project, run the live dev loop and run the app on iOS, Android and the web.","url":"https://shreypdev.github.io/keel/docs/getting-started.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Keel team"},"publisher":{"@id":"https://shreypdev.github.io/keel/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/keel/#website"},"about":{"@type":"SoftwareApplication","name":"Keel"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Keel","item":"https://shreypdev.github.io/keel/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/keel/docs/"},{"@type":"ListItem","position":3,"name":"Getting started","item":"https://shreypdev.github.io/keel/docs/getting-started.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0b">
+<meta name="color-scheme" content="dark light">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="alternate" type="application/rss+xml" title="Keel blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap"></noscript>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
 <link rel="stylesheet" href="../assets/base.css">
 <link rel="stylesheet" href="../assets/docs.css">
 </head>
@@ -21,21 +40,26 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
-    <nav class="nav" aria-label="Primary">
-      <a class="hide-sm" href=".././">Home</a>
+    <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
       <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
-      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
     </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
 </header>
 <div class="wrap docs">
   <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html" aria-current="page">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
   <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html" aria-current="page">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
-  <article id="main" class="prose">
+  <main id="main" class="prose">
     <p class="crumb">Start</p>
-    <h1 class="display">Getting started</h1>
+    <h1>Getting started</h1>
     <p class="lede">Install the toolchain, install the CLI, scaffold a project, and run it. A core you can test takes about ten minutes; the full five-language matrix takes about thirty including downloads.</p>
 <p>Everything here was exercised end to end on an Apple-Silicon Mac, which is the reference environment. Linux paths differ only where noted in the repository's onboarding guide; Windows is untested.</p>
 <h2 id="what-you-need">What you need<a class="anchor" href="#what-you-need" aria-label="Link to this section">#</a></h2>
@@ -61,11 +85,16 @@ sudo xcodebuild -license accept
 xcodebuild -downloadPlatform iOS        # simulator runtime, one time, large</code></pre></div>
 <p>The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the emulator and a system image). The <a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">onboarding guide</a> has the exact <code>sdkmanager</code> line and an <code>avdmanager</code> line that creates the <code>keel</code> emulator used throughout the project.</p>
 <h2 id="2-install-the-cli">2. Install the CLI<a class="anchor" href="#2-install-the-cli" aria-label="Link to this section">#</a></h2>
+<p>Pick one channel. Homebrew, the curl installer and npm put a prebuilt <code>keel</code> binary on your machine; cargo builds it from source with Rust 1.85 or newer.</p>
+<div class="table-wrap"><table><thead><tr><th>Channel</th><th>Command</th></tr></thead><tbody><tr><td>Homebrew</td><td><code class="cw">brew install shreypdev/keel/keel</code></td></tr><tr><td>npm</td><td><code class="cw">npm install -g @keel/cli</code></td></tr><tr><td>curl</td><td><code class="cw">curl -fsSL https://shreypdev.github.io/keel/install.sh | sh</code></td></tr><tr><td>cargo</td><td><code class="cw">cargo install --git https://github.com/shreypdev/keel keel-cli</code></td></tr></tbody></table></div>
+<p>The curl installer detects your OS and architecture, verifies the download against the release checksums, installs to <code>~/.keel/bin</code> and prints the line to add to your <code>PATH</code>. It never uses <code>sudo</code>.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel --version
+keel doctor      # prints what is missing, with the fix</code></pre></div>
+<p><code>keel doctor</code> exits with status 1 when something the project needs is missing, so it works in CI too. Inside a project it only checks the platforms named in <code>keel.toml</code>.</p>
+<h3 id="from-a-checkout">From a checkout (contributors)</h3>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">git clone https://github.com/shreypdev/keel.git &amp;&amp; cd keel
 cargo install --path crates/keel-cli    # the `keel` command
-source scripts/env.sh                   # PATH, JDK and Kotlin jars, Xcode fallback, per shell
-keel doctor                             # prints what is missing, with the fix</code></pre></div>
-<p><code>keel doctor</code> exits with status 1 when something the project needs is missing, so it works in CI too. Inside a project it only checks the platforms named in <code>keel.toml</code>.</p>
+source scripts/env.sh                   # PATH, JDK and Kotlin jars, Xcode fallback, per shell</code></pre></div>
 <h2 id="3-create-a-project">3. Create a project<a class="anchor" href="#3-create-a-project" aria-label="Link to this section">#</a></h2>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel init myapp                        # core + SwiftUI + Compose + React shells
 keel init myapp --platforms ios,web    # only some of them
@@ -97,27 +126,28 @@ keel build --platform ios,android,web --release</code></pre></div>
 <div class="table-wrap"><table><thead><tr><th>Platform</th><th>Artifact, below <code>build/</code></th></tr></thead><tbody><tr><td>iOS</td><td><code>ios/KeelCore.xcframework</code> (device and simulator slices)</td></tr><tr><td>Android</td><td><code class="cw">android/jniLibs/&lt;abi&gt;/libkeel_core.so</code>, arm64-v8a and x86_64, 16 KB page aligned</td></tr><tr><td>Web</td><td><code>web/keel_core.wasm</code>, release profile then <code>wasm-opt -Oz</code></td></tr><tr><td>Host</td><td><code>host/libkeel_core.{dylib,so}</code>, for JVM tests and <code>keel bindgen</code></td></tr></tbody></table></div>
 <p>Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 85 KB gzipped and an Android <code>.so</code> is 831 KB per ABI.</p>
 <h2 id="prefer-to-explore-first">Prefer to explore first?<a class="anchor" href="#prefer-to-explore-first" aria-label="Link to this section">#</a></h2>
-<p>The <a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">playground</a> is the same thing, fully built: a to-do list, a counter, a 10,000-row keyed list and remote queries with an offline switch, on Chrome, an iPhone simulator and an Android emulator. It uses only public APIs, and proof screenshots are committed in its <code>.proof/</code> folder.</p>
+<p>Try it in your browser first: the <a href="../playground/">live playground</a> is the real Rust core running as WebAssembly. The <a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">playground source</a> is the same thing, fully built: a to-do list, a counter, a 10,000-row keyed list and remote queries with an offline switch, on Chrome, an iPhone simulator and an Android emulator. It uses only public APIs, and proof screenshots are committed in its <code>.proof/</code> folder.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel build -C examples/playground --platform web
 cd examples/playground/web &amp;&amp; npm install &amp;&amp; npm run dev</code></pre></div>
 <h2 id="if-you-are-contributing">If you are contributing<a class="anchor" href="#if-you-are-contributing" aria-label="Link to this section">#</a></h2>
 <p>Every suite runs locally and nothing needs the network after install. The table is the same one the CI matrix follows.</p>
 <div class="table-wrap"><table><thead><tr><th>Suite</th><th>Command</th></tr></thead><tbody><tr><td>Rust workspace</td><td><code>cargo test --workspace</code></td></tr><tr><td>Lints</td><td><code class="cw">cargo fmt --check &amp;&amp; cargo clippy --workspace --all-targets -- -D warnings</code></td></tr><tr><td>TypeScript runtime</td><td><code class="cw">cd runtimes/ts/@keel/runtime &amp;&amp; npm ci &amp;&amp; npm test</code></td></tr><tr><td>Kotlin runtime</td><td><code class="cw">runtimes/kotlin/keel-runtime/scripts/test-local.sh</code></td></tr><tr><td>Swift runtime</td><td><code class="cw">cd runtimes/swift/KeelRuntime &amp;&amp; swift test</code></td></tr><tr><td>wasm ABI</td><td><code class="cw">bash crates/keel-ffi/tests/wasm/run.sh</code></td></tr><tr><td>Contract scenarios, three platforms</td><td><code>bash contract-tests/run-all.sh</code></td></tr><tr><td>Benchmark budget gate</td><td><code class="cw">cargo test -p keel-bench --test budgets --release</code></td></tr></tbody></table></div>
 <p>Read <code>CLAUDE.md</code> (the constitution) and <code>docs/SPEC.md</code> before you write code; the <a href="architecture.html#constitution">architecture page</a> digests the rules. Changes land one piece per worktree, with an adversarial review before merge; <code>docs/AGENT_WORKFLOW.md</code> describes the loop for humans and agents alike.</p>
-
+  
+<p class="edit"><a href="https://github.com/shreypdev/keel/edit/main/site/docs/getting-started.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
 <nav class="pager" aria-label="Previous and next">
-    <a class="prev" href="./"><span>Docs</span><b>Overview</b></a>
+    <a class="prev" href="./"><span>Previous</span><b>Overview</b></a>
     <a class="next" href="concepts.html"><span>Next</span><b>Core concepts</b></a>
   </nav>
-  </article>
+  </main>
   <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#what-you-need">What you need</a></li><li><a href="#1-install-the-toolchain">1. Install the toolchain</a></li><li><a href="#2-install-the-cli">2. Install the CLI</a></li><li><a href="#3-create-a-project">3. Create a project</a></li><li><a href="#4-start-the-live-loop">4. Start the live loop</a></li><li><a href="#5-run-each-platform">5. Run each platform</a></li><li><a href="#6-build-what-you-ship">6. Build what you ship</a></li><li><a href="#prefer-to-explore-first">Prefer to explore first?</a></li><li><a href="#if-you-are-contributing">If you are contributing</a></li></ul></aside>
 </div>
 <footer class="site-footer">
   <div class="wrap">
     <div class="footer-grid">
       <div>
-        <a class="brand" href=".././" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
-        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+        <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+        <p class="footer-note">The Rust core for native apps. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>
         <h3>Docs</h3>
@@ -131,6 +161,16 @@ cd examples/playground/web &amp;&amp; npm install &amp;&amp; npm run dev</code><
         </ul>
       </div>
       <div>
+        <h3>Keel</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
         <h3>Project</h3>
         <ul>
           <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
@@ -138,7 +178,6 @@ cd examples/playground/web &amp;&amp; npm install &amp;&amp; npm run dev</code><
           <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
           <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
           <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
         </ul>
       </div>
     </div>
