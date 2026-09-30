@@ -11,6 +11,7 @@ import {
   KeelSchemaMismatchError,
   KeelTransportError,
 } from "./errors.js";
+import { nextCallId } from "./callid.js";
 import { Mirror } from "./mirror.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
@@ -545,10 +546,7 @@ export class KeelCore {
   }
 
   #allocCallId(): number {
-    do {
-      this.#nextCallId = (this.#nextCallId + 1) >>> 0;
-      if (this.#nextCallId === 0) this.#nextCallId = 1;
-    } while (this.#pending.has(this.#nextCallId));
+    this.#nextCallId = nextCallId(this.#nextCallId, (id) => this.#pending.has(id));
     return this.#nextCallId;
   }
 

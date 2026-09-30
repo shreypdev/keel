@@ -97,7 +97,12 @@ export function trackReads<R>(fn: () => R): { readonly value: R; readonly signal
  */
 export class Signal<T> {
   #value: T;
-  #subscribers: Set<{ readonly fn: Subscriber<T> }> | null = null;
+  /**
+   * Typed `Subscriber<never>`, not `Subscriber<T>`: a `#private` field takes
+   * part in assignability, and a `Signal<number>` must stay assignable to
+   * `Signal<unknown>` (generated stores list their signals that way).
+   */
+  #subscribers: Set<{ readonly fn: Subscriber<never> }> | null = null;
   #queued = false;
 
   /** @param initial The placeholder value shown until the first change-set arrives. */
@@ -125,7 +130,7 @@ export class Signal<T> {
    * it twice is harmless. The same function may be subscribed more than once.
    */
   subscribe(fn: Subscriber<T>): () => void {
-    const entry = { fn };
+    const entry: { readonly fn: Subscriber<never> } = { fn };
     (this.#subscribers ??= new Set()).add(entry);
     return () => {
       this.#subscribers?.delete(entry);
@@ -167,7 +172,7 @@ export class Signal<T> {
     for (const entry of [...subscribers]) {
       if (!subscribers.has(entry)) continue;
       try {
-        entry.fn(value);
+        (entry.fn as Subscriber<T>)(value);
       } catch (error) {
         errorHandler(error);
       }
