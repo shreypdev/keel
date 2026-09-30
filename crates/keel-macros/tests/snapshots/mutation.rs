@@ -67,3 +67,6 @@ static __KEEL_META_AddTodoMutation: ::keel::meta::QueryMeta = ::keel::meta::Quer
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Query(& __KEEL_META_AddTodoMutation)
 }
+::keel::meta::inventory::submit! {
+    ::keel::query::MutationRegistration::of:: < AddTodoMutation > ()
+}

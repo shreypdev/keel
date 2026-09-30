@@ -19,7 +19,7 @@ fn flag(value: bool) -> bool {
 
 #[k::error]
 #[derive(Clone, PartialEq)]
-pub enum HttpError {
+pub enum NetError {
     #[error("timeout")]
     Timeout,
 }
@@ -33,23 +33,23 @@ pub struct Todo {
 
 /// Lists todos.
 #[k::query(key = "todos:{page}:{q}", stale = "30s", persist, retry = 5)]
-pub async fn todos(ctx: &Ctx, page: u32, q: String) -> Result<Vec<Todo>, HttpError> {
+pub async fn todos(ctx: &Ctx, page: u32, q: String) -> Result<Vec<Todo>, NetError> {
     let _ = ctx.clone();
     if page == 99 {
-        Err(HttpError::Timeout)
+        Err(NetError::Timeout)
     } else {
         Ok(vec![Todo { id: page, title: q }])
     }
 }
 
 #[k::query(key = "count", stale = "2h", idempotent)]
-async fn count(ctx: Ctx) -> Result<u32, HttpError> {
+async fn count(ctx: Ctx) -> Result<u32, NetError> {
     let _ = ctx;
     Ok(3)
 }
 
 #[k::mutation(idempotent, retry = 2, key = "todos")]
-pub async fn add_todo(ctx: &Ctx, title: String, done: bool) -> Result<Todo, HttpError> {
+pub async fn add_todo(ctx: &Ctx, title: String, done: bool) -> Result<Todo, NetError> {
     let _ = ctx;
     Ok(Todo {
         id: u32::from(done),
@@ -58,9 +58,9 @@ pub async fn add_todo(ctx: &Ctx, title: String, done: bool) -> Result<Todo, Http
 }
 
 #[k::mutation]
-pub async fn wipe(ctx: &Ctx) -> Result<(), HttpError> {
+pub async fn wipe(ctx: &Ctx) -> Result<(), NetError> {
     let _ = ctx;
-    Err(HttpError::Timeout)
+    Err(NetError::Timeout)
 }
 
 #[test]
@@ -108,16 +108,16 @@ fn fetch_runs_the_function_with_the_tuple_of_parameters() {
         }]
     );
     let err = block_on(TodosQuery::fetch(ctx.clone(), (99, String::new()))).unwrap_err();
-    assert_eq!(err, HttpError::Timeout);
+    assert_eq!(err, NetError::Timeout);
     // A single by-value `Ctx` parameter and no other parameters.
     assert_eq!(block_on(CountQuery::fetch(ctx, ())).unwrap(), 3);
 }
 
 #[test]
 fn associated_types_are_the_tuple_the_value_and_the_error() {
-    fn params<Q: QueryDef<Params = (u32, String), Output = Vec<Todo>, Error = HttpError>>() {}
+    fn params<Q: QueryDef<Params = (u32, String), Output = Vec<Todo>, Error = NetError>>() {}
     params::<TodosQuery>();
-    fn unit<Q: QueryDef<Params = (), Output = u32, Error = HttpError>>() {}
+    fn unit<Q: QueryDef<Params = (), Output = u32, Error = NetError>>() {}
     unit::<CountQuery>();
     // `Params` is `Encode`: the query cache keys entries by its encoded bytes.
     assert_eq!(
@@ -160,7 +160,7 @@ fn execute_runs_the_mutation() {
     );
     assert_eq!(
         block_on(WipeMutation::execute(ctx, ())).unwrap_err(),
-        HttpError::Timeout
+        NetError::Timeout
     );
     fn ids_of<M: MutationDef>() -> (u32, u32, bool) {
         (M::ID, M::RETRY, M::IDEMPOTENT)
@@ -195,7 +195,7 @@ fn query_meta_describes_params_returns_and_flags() {
         todos.returns,
         TypeRef::result(
             TypeRef::vec(TypeRef::named("Todo")),
-            TypeRef::named("HttpError")
+            TypeRef::named("NetError")
         )
     );
 
@@ -207,7 +207,7 @@ fn query_meta_describes_params_returns_and_flags() {
     assert_eq!(add.key, "todos");
     assert_eq!(
         query("wipe").returns,
-        TypeRef::result(TypeRef::Unit, TypeRef::named("HttpError"))
+        TypeRef::result(TypeRef::Unit, TypeRef::named("NetError"))
     );
     assert!(
         query("count").params.is_empty(),

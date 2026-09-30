@@ -70,3 +70,6 @@ static __KEEL_META_TodosQuery: ::keel::meta::QueryMeta = ::keel::meta::QueryMeta
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Query(& __KEEL_META_TodosQuery)
 }
+::keel::meta::inventory::submit! {
+    ::keel::query::QueryRegistration::of:: < TodosQuery > ()
+}

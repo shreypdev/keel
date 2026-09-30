@@ -513,7 +513,7 @@ fn unit_enums_are_two_bytes() {
 /// Transport failures.
 #[k::error]
 #[derive(Clone, PartialEq)]
-pub enum HttpError {
+pub enum NetError {
     #[error("network error: {0}")]
     Network(String),
     #[error("request timed out")]
@@ -534,9 +534,9 @@ pub enum TodoError {
     #[error("bad value {0:?} ({1:>4})")]
     Bad(String, u8),
     #[error(transparent)]
-    Http(#[from] HttpError),
+    Http(#[from] NetError),
     #[error("storage failed")]
-    Storage(#[source] HttpError),
+    Storage(#[source] NetError),
     #[error("{{literal}} {}")]
     Braces(u8),
     #[error("only the second: {1}")]
@@ -563,11 +563,11 @@ fn error_display_follows_the_messages() {
         "bad value \"x\" (   7)"
     );
     assert_eq!(
-        TodoError::Http(HttpError::Timeout).to_string(),
+        TodoError::Http(NetError::Timeout).to_string(),
         "request timed out"
     );
     assert_eq!(
-        TodoError::Storage(HttpError::Timeout).to_string(),
+        TodoError::Storage(NetError::Timeout).to_string(),
         "storage failed"
     );
     assert_eq!(TodoError::Braces(3).to_string(), "{literal} 3");
@@ -582,21 +582,21 @@ fn error_source_and_from() {
     use std::error::Error;
 
     assert!(TodoError::EmptyTitle.source().is_none());
-    let storage = TodoError::Storage(HttpError::Network("down".into()));
+    let storage = TodoError::Storage(NetError::Network("down".into()));
     assert_eq!(storage.source().unwrap().to_string(), "network error: down");
     // Transparent forwards `source()` to the inner error, which has none.
-    assert!(TodoError::Http(HttpError::Timeout).source().is_none());
+    assert!(TodoError::Http(NetError::Timeout).source().is_none());
 
-    let converted: TodoError = HttpError::Timeout.into();
-    assert_eq!(converted, TodoError::Http(HttpError::Timeout));
+    let converted: TodoError = NetError::Timeout.into();
+    assert_eq!(converted, TodoError::Http(NetError::Timeout));
 
     fn fails() -> Result<(), TodoError> {
-        Err(HttpError::Network("boom".into()))?;
+        Err(NetError::Network("boom".into()))?;
         Ok(())
     }
     assert_eq!(
         fails().unwrap_err(),
-        TodoError::Http(HttpError::Network("boom".into()))
+        TodoError::Http(NetError::Network("boom".into()))
     );
 
     let boxed: Box<dyn Error> = Box::new(TodoError::EmptyTitle);
@@ -614,8 +614,8 @@ fn errors_encode_like_enums() {
             code: 500,
             reason: "no".into(),
         },
-        TodoError::Http(HttpError::Network("x".into())),
-        TodoError::Storage(HttpError::Timeout),
+        TodoError::Http(NetError::Network("x".into())),
+        TodoError::Storage(NetError::Timeout),
     ] {
         assert_eq!(
             TodoError::decode_exact(&value.encode_to_vec()).unwrap(),
@@ -627,7 +627,7 @@ fn errors_encode_like_enums() {
     expected.extend(1_u32.to_le_bytes());
     expected.push(b'x');
     assert_eq!(
-        TodoError::Http(HttpError::Network("x".into())).encode_to_vec(),
+        TodoError::Http(NetError::Network("x".into())).encode_to_vec(),
         expected
     );
 }
@@ -653,7 +653,7 @@ fn error_meta_carries_is_error_and_messages() {
     assert!(!def.variants[2].tuple);
     // Transparent variants have no message of their own.
     assert_eq!(def.variants[4].message, None);
-    assert_eq!(def.variants[4].fields[0].ty, TypeRef::named("HttpError"));
+    assert_eq!(def.variants[4].fields[0].ty, TypeRef::named("NetError"));
 }
 
 #[test]
