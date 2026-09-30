@@ -57,3 +57,32 @@ tungstenite, keel-wire. No `toml` crate: `keel.toml` uses the small reader in `t
   visible in a real browser.
 * Swift is distributed from a monorepo subdirectory, which SwiftPM cannot consume by URL: registry
   mode writes `https://github.com/shreypdev/keel-swift` as a placeholder.
+
+## CLI polish after the playground (finding 8 of `playground.md`)
+
+1. **Host dylib identity.** `keel build --platform host` links the shim with
+   `-Clink-arg=-Wl,-install_name,@rpath/libkeel_core.dylib` (macOS only), passed after `--` so it applies to the
+   shim and not to the dependencies. rustc's default is the absolute path of the file it wrote, which leaked
+   the `target/` path into anything embedding the copy. `contract-tests/swift/run.sh` re-stamps the name
+   itself (`install_name_tool -id`); that step is now redundant.
+2. **Toolchain notes carry a platform** (`Concern::{Apple, Android}`); a build prints only its own.
+3. **jniLibs.** The template path stays module-relative (`../../build/android/jniLibs` from `android/app`, what
+   Gradle needs) and now says so in a comment. The real failure was silent: Gradle ignores a missing source
+   directory and the APK ships no core. After an Android build `builds/gradle.rs` reads the app module's script
+   (line-level, like `detect`): same directory, silent; another directory inside the project, the libraries are
+   copied there too and the warning names the line to fix; no `srcDir` or one outside the project, a warning
+   with the line to add; unresolvable (variables, `$rootDir`), left alone. `detect` no longer mistakes a root
+   script that only declares the plugin (`apply false`) for the app module.
+4. **Debug Android cores are 42 MB per ABI.** Debug stays the default (dev loop). A debug build ends with one
+   `hint:` line: the size, and the release size and ratio when an earlier release build is in the target
+   directory (else "20x or more smaller"). `--release` is the documented packaging path (init README, adopt
+   guide, `keel build --help`, the playground READMEs).
+5. **`generated/kotlin/.gitignore` is written by the CLI**, next to the `build.gradle.kts` it already writes
+   (the module wrapper is the CLI's, the `.kt` sources are the generator's); `keel-bindgen` is untouched and its
+   goldens do not change. Anchored patterns (`/build/`, `/.gradle/`, `/.kotlin/`) so a package directory named
+   `build` is not hidden. Existing projects see `keel bindgen --check` fail once, until `keel bindgen` is run.
+6. **Target directory** (`Session::target_dir`): `CARGO_TARGET_DIR`, else the target directory `cargo metadata`
+   reports for the workspace the core is a member of (when that workspace is not the core crate alone), else
+   `<project>/target`. The shim's `Cargo.lock` is seeded from the project's lock file or that workspace's, so the
+   shim resolves the versions the workspace was tested with (no index update). The playground no longer builds
+   a second 1.4 GB dependency tree in `examples/playground/target`.
