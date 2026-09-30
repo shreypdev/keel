@@ -52,7 +52,8 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
     let manifest = session.shim_manifest()?;
     let files = session.cargo().build_library(&Build {
         manifest,
-        target_dir: session.target_dir()?,
+        // A target directory of its own, not the project's: see `host_lib_target_dir` (ADR-029).
+        target_dir: crate::shim::host_lib_target_dir(&session.target_dir()?, &session.project.root),
         triple: None,
         profile: if release {
             Profile::Release
@@ -61,7 +62,8 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
         },
         crate_type: "cdylib",
         features: vec!["jni".to_owned()],
-        env: Vec::new(),
+        // Belt to the profile's `incremental = false`: overrides an inherited `CARGO_INCREMENTAL=1`.
+        env: vec![("CARGO_INCREMENTAL".to_owned(), "0".to_owned())],
         lib_name: crate::shim::shim_lib_name(&session.project.root),
         rustc_args: identity_args(session.sys.os(), library_file_name()),
     })?;
