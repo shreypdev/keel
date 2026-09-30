@@ -1,0 +1,311 @@
+{
+ "spec": "docs/SPEC.md \u00a73",
+ "vectors": [
+  {
+   "name": "bool_true",
+   "type": "bool",
+   "value": true,
+   "hex": "01",
+   "note": ""
+  },
+  {
+   "name": "bool_false",
+   "type": "bool",
+   "value": false,
+   "hex": "00",
+   "note": ""
+  },
+  {
+   "name": "u8_255",
+   "type": "u8",
+   "value": 255,
+   "hex": "ff",
+   "note": ""
+  },
+  {
+   "name": "i32_neg",
+   "type": "i32",
+   "value": -2,
+   "hex": "feffffff",
+   "note": ""
+  },
+  {
+   "name": "u32_max",
+   "type": "u32",
+   "value": 4294967295,
+   "hex": "ffffffff",
+   "note": ""
+  },
+  {
+   "name": "i64_big",
+   "type": "i64",
+   "value": "-9007199254740993",
+   "hex": "ffffffffffffdfff",
+   "note": "beyond JS safe integer; TS uses bigint"
+  },
+  {
+   "name": "u64_max",
+   "type": "u64",
+   "value": "18446744073709551615",
+   "hex": "ffffffffffffffff",
+   "note": ""
+  },
+  {
+   "name": "f32_pi",
+   "type": "f32",
+   "value": 3.140000104904175,
+   "hex": "c3f54840",
+   "note": "f32 bits of 3.14"
+  },
+  {
+   "name": "f64_e",
+   "type": "f64",
+   "value": 2.718281828459045,
+   "hex": "6957148b0abf0540",
+   "note": ""
+  },
+  {
+   "name": "string_empty",
+   "type": "string",
+   "value": "",
+   "hex": "00000000",
+   "note": ""
+  },
+  {
+   "name": "string_utf8",
+   "type": "string",
+   "value": "h\u00e9llo \ud83c\udf0a",
+   "hex": "0b00000068c3a96c6c6f20f09f8c8a",
+   "note": ""
+  },
+  {
+   "name": "bytes",
+   "type": "bytes",
+   "value": [
+    1,
+    2,
+    3,
+    255
+   ],
+   "hex": "04000000010203ff",
+   "note": ""
+  },
+  {
+   "name": "option_none",
+   "type": "option<string>",
+   "value": null,
+   "hex": "00",
+   "note": ""
+  },
+  {
+   "name": "option_some",
+   "type": "option<string>",
+   "value": "x",
+   "hex": "010100000078",
+   "note": ""
+  },
+  {
+   "name": "vec_i32",
+   "type": "vec<i32>",
+   "value": [
+    1,
+    -1,
+    7
+   ],
+   "hex": "0300000001000000ffffffff07000000",
+   "note": ""
+  },
+  {
+   "name": "vec_string_empty",
+   "type": "vec<string>",
+   "value": [],
+   "hex": "00000000",
+   "note": ""
+  },
+  {
+   "name": "map_string_i32",
+   "type": "map<string,i32>",
+   "value": {
+    "b": 2,
+    "a": 1
+   },
+   "hex": "02000000010000006101000000010000006202000000",
+   "note": "encoder sorts by encoded key bytes: 'a' before 'b'"
+  },
+  {
+   "name": "duration_1_5s",
+   "type": "duration",
+   "value": "1500000000",
+   "hex": "002f685900000000",
+   "note": "nanoseconds"
+  },
+  {
+   "name": "timestamp",
+   "type": "timestamp",
+   "value": "1727654400000",
+   "hex": "00103a4092010000",
+   "note": "unix ms"
+  },
+  {
+   "name": "uuid",
+   "type": "uuid",
+   "value": "123e4567-e89b-12d3-a456-426614174000",
+   "hex": "123e4567e89b12d3a456426614174000",
+   "note": "16 raw big-endian bytes"
+  },
+  {
+   "name": "record_todo",
+   "type": "record Todo{id:uuid,title:string,done:bool}",
+   "value": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "title": "Milk",
+    "done": false
+   },
+   "hex": "123e4567e89b12d3a456426614174000040000004d696c6b00",
+   "note": ""
+  },
+  {
+   "name": "enum_unit",
+   "type": "enum Filter{All,Active,Done}",
+   "value": "done",
+   "hex": "0200",
+   "note": ""
+  },
+  {
+   "name": "enum_data",
+   "type": "enum Shape{Circle{radius:f64},Rect{w:f64,h:f64}}",
+   "value": {
+    "kind": "rect",
+    "w": 2.0,
+    "h": 3.0
+   },
+   "hex": "010000000000000000400000000000000840",
+   "note": ""
+  },
+  {
+   "name": "result_ok",
+   "type": "result<i32,string>",
+   "value": {
+    "ok": 5
+   },
+   "hex": "0005000000",
+   "note": ""
+  },
+  {
+   "name": "result_err",
+   "type": "result<i32,string>",
+   "value": {
+    "err": "bad"
+   },
+   "hex": "0103000000626164",
+   "note": ""
+  },
+  {
+   "name": "handle",
+   "type": "handle",
+   "value": "4294967297",
+   "hex": "0100000001000000",
+   "note": "index 1, generation 1"
+  },
+  {
+   "name": "envelope_call",
+   "type": "envelope",
+   "value": {
+    "kind": 1,
+    "seq": 7,
+    "schema": "72623859790382856",
+    "payload_hex": "aabbcc"
+   },
+   "hex": "4b45454c01000807060504030201010700000003000000aabbcc",
+   "note": "header is 23 bytes"
+  },
+  {
+   "name": "fnv1a32_calculator_add",
+   "type": "fnv1a32(\"Calculator.add\")",
+   "value": "2353348832",
+   "hex": "e040458c",
+   "note": ""
+  },
+  {
+   "name": "fnv1a64_keel",
+   "type": "fnv1a64(\"keel\")",
+   "value": "6367360722358687308",
+   "hex": "4cd6f65cd7685d58",
+   "note": ""
+  },
+  {
+   "name": "call_method",
+   "type": "call payload",
+   "value": {
+    "target": 1,
+    "handle": "4294967297",
+    "method_id": "2353348832",
+    "call_id": 9,
+    "args": [
+     2,
+     3
+    ]
+   },
+   "hex": "010100000001000000e040458c090000000200000003000000",
+   "note": ""
+  },
+  {
+   "name": "reply_ok",
+   "type": "reply payload",
+   "value": {
+    "call_id": 9,
+    "status": 0,
+    "body": 5
+   },
+   "hex": "090000000005000000",
+   "note": ""
+  },
+  {
+   "name": "changeset_one",
+   "type": "changeset payload",
+   "value": {
+    "txn_id": "42",
+    "entries": [
+     {
+      "handle": "4294967297",
+      "signal_id": 0,
+      "op": 0,
+      "value": [
+       1,
+       2
+      ]
+     }
+    ]
+   },
+   "hex": "2a0000000000000001000000010000000100000000000000000c000000020000000100000002000000",
+   "note": ""
+  },
+  {
+   "name": "keyed_patch",
+   "type": "keyed patch (item i32)",
+   "value": {
+    "ops": [
+     {
+      "op": "insert",
+      "index": 0,
+      "item": 5
+     },
+     {
+      "op": "remove",
+      "index": 1
+     },
+     {
+      "op": "move",
+      "from": 0,
+      "to": 1
+     },
+     {
+      "op": "clear"
+     }
+    ]
+   },
+   "hex": "04000000000000000005000000010100000003000000000100000004",
+   "note": ""
+  }
+ ]
+}
