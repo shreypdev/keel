@@ -1,0 +1,13 @@
+[package]
+name = "@@CORE_PACKAGE@@"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+description = "The Keel core of @@NAME@@"
+
+# A plain library. `keel build` links it with the Keel C ABI into libkeel_core (an XCFramework, a
+# .so per ABI, a wasm module) and `keel dev` serves it over a WebSocket, so the core itself names
+# no crate type and depends on nothing but `keel`.
+[dependencies]
+keel = @@KEEL_DEP@@

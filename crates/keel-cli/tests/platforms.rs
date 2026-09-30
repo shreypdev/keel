@@ -1,0 +1,203 @@
+//! The heavy platform builds, switched on by environment variables because they need Xcode, the
+//! Android NDK and, for the app shells, network access and minutes:
+//!
+//! | Variable | What runs |
+//! |---|---|
+//! | `KEEL_TEST_IOS=1` | `keel build --platform ios --release`: the XCFramework and its slices |
+//! | `KEEL_TEST_IOS_APP=1` | …and the generated Xcode project built for the simulator against it |
+//! | `KEEL_TEST_ANDROID=1` | `keel build --platform android --release`: a 16 KB aligned `.so` per ABI |
+//! | `KEEL_TEST_ANDROID_APP=1` | …and `./gradlew :app:assembleDebug` on the generated Android project |
+//! | `KEEL_TEST_WEB_APP=1` | `npm install && npm run build` on the generated web app |
+//!
+//! Without a variable a test prints why it did nothing and passes.
+
+mod common;
+
+use std::path::Path;
+use std::process::Command;
+
+use common::{flag, has_rust_target, has_tool, init_project, run_ok};
+
+fn skipped(variable: &str) -> bool {
+    if flag(variable) {
+        return false;
+    }
+    eprintln!("skipped: set {variable}=1 to run this test");
+    true
+}
+
+fn size(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+#[test]
+fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
+    if skipped("KEEL_TEST_IOS") && skipped("KEEL_TEST_IOS_APP") {
+        return;
+    }
+    assert!(
+        has_rust_target("aarch64-apple-ios") && has_rust_target("aarch64-apple-ios-sim"),
+        "rustup target add aarch64-apple-ios aarch64-apple-ios-sim"
+    );
+    let project = init_project("ios-build", "ios");
+    let out = run_ok(
+        project
+            .keel()
+            .args(["build", "--platform", "ios", "--release"]),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let xcframework = project.root.join("build/ios/KeelCore.xcframework");
+    for slice in ["ios-arm64", "ios-arm64-simulator"] {
+        let lib = xcframework.join(slice).join("libkeel_core.a");
+        assert!(lib.is_file(), "{slice} has no library:\n{stdout}");
+        // A release static library of the template core: a few MB, LTO'd into one object.
+        let bytes = size(&lib);
+        assert!(
+            (1_000_000..40_000_000).contains(&bytes),
+            "{slice}: {bytes} bytes"
+        );
+        eprintln!("ios {slice}: {bytes} bytes");
+    }
+    // Headerless, on purpose: the Swift runtime's KeelFFI target already declares the module.
+    assert!(!xcframework.join("ios-arm64/Headers").exists());
+    assert!(
+        stdout.contains("ios xcframework") && stdout.contains("budget 900 KB"),
+        "{stdout}"
+    );
+
+    if flag("KEEL_TEST_IOS_APP") {
+        let derived = common::TempDir::new("ios-dd");
+        let build = Command::new("xcodebuild")
+            .args(["-quiet", "-project"])
+            .arg(project.root.join("ios/IosBuild.xcodeproj"))
+            .args([
+                "-scheme",
+                "IosBuild",
+                "-configuration",
+                "Release",
+                "-destination",
+                "generic/platform=iOS Simulator",
+                "-derivedDataPath",
+            ])
+            .arg(derived.path())
+            .arg("build")
+            // The runtime package ships link-time stand-ins for the core; this switches them off.
+            .env("KEEL_LINK_CORE", "1")
+            .output()
+            .expect("xcodebuild runs");
+        assert!(
+            build.status.success(),
+            "xcodebuild failed:\n{}\n{}",
+            String::from_utf8_lossy(&build.stdout),
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let app = derived
+            .path()
+            .join("Build/Products/Release-iphonesimulator/IosBuild.app/IosBuild");
+        assert!(app.is_file(), "no app binary at {}", app.display());
+        eprintln!(
+            "ios app executable (release, simulator): {} bytes",
+            size(&app)
+        );
+    }
+}
+
+#[test]
+fn android_builds_a_16kb_aligned_library_per_abi() {
+    if skipped("KEEL_TEST_ANDROID") && skipped("KEEL_TEST_ANDROID_APP") {
+        return;
+    }
+    assert!(
+        has_tool("cargo-ndk", "--version"),
+        "cargo install cargo-ndk"
+    );
+    assert!(
+        has_rust_target("aarch64-linux-android") && has_rust_target("x86_64-linux-android"),
+        "rustup target add aarch64-linux-android x86_64-linux-android"
+    );
+    let project = init_project("androidbuild", "android");
+    let out = run_ok(
+        project
+            .keel()
+            .args(["build", "--platform", "android", "--release"]),
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for abi in ["arm64-v8a", "x86_64"] {
+        let lib = project
+            .root
+            .join("build/android/jniLibs")
+            .join(abi)
+            .join("libkeel_core.so");
+        assert!(lib.is_file(), "{abi}: no library\n{stdout}");
+        let bytes = size(&lib);
+        assert!(
+            bytes < 1_200_000,
+            "{abi}: {bytes} bytes is over the 1.2 MB budget of the blueprint"
+        );
+        eprintln!("android {abi}: {bytes} bytes");
+    }
+    assert!(stdout.contains("16 KB aligned"), "{stdout}");
+    // Only libkeel_core.so is shipped (cargo-ndk also copies the keel-ffi library it built).
+    assert!(
+        !project
+            .root
+            .join("build/android/jniLibs/arm64-v8a/libkeel_ffi.so")
+            .exists()
+    );
+
+    if flag("KEEL_TEST_ANDROID_APP") {
+        let gradlew = project.root.join("android/gradlew");
+        assert!(
+            gradlew.is_file(),
+            "init copies the Gradle wrapper from the checkout"
+        );
+        let mut gradle = Command::new(&gradlew);
+        gradle
+            .args([":app:assembleDebug", "--console=plain"])
+            .current_dir(project.root.join("android"));
+        for var in ["JAVA_HOME", "ANDROID_HOME"] {
+            if let Ok(value) = std::env::var(var) {
+                gradle.env(var, value);
+            }
+        }
+        let build = gradle.output().expect("gradlew runs");
+        assert!(
+            build.status.success(),
+            "gradle failed:\n{}\n{}",
+            String::from_utf8_lossy(&build.stdout),
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let apk = project
+            .root
+            .join("android/app/build/outputs/apk/debug/app-debug.apk");
+        assert!(apk.is_file());
+        eprintln!("android debug apk: {} bytes", size(&apk));
+    }
+}
+
+#[test]
+fn the_web_app_shell_type_checks_and_bundles() {
+    if skipped("KEEL_TEST_WEB_APP") {
+        return;
+    }
+    assert!(
+        has_rust_target("wasm32-unknown-unknown"),
+        "rustup target add wasm32-unknown-unknown"
+    );
+    let project = init_project("webapp", "web");
+    run_ok(project.keel().args(["build", "--platform", "web"]));
+    let web = project.root.join("web");
+    run_ok(
+        Command::new("npm")
+            .args(["install", "--no-audit", "--no-fund"])
+            .current_dir(&web),
+    );
+    run_ok(Command::new("npm").args(["run", "build"]).current_dir(&web));
+    let assets = std::fs::read_dir(web.join("dist/assets")).unwrap();
+    assert!(
+        assets
+            .filter_map(Result::ok)
+            .any(|e| e.file_name().to_string_lossy().ends_with(".wasm")),
+        "the wasm core is bundled"
+    );
+}

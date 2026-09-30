@@ -91,6 +91,26 @@ describe("Mirror change-sets", () => {
     expect(apply).toHaveBeenCalledTimes(2);
   });
 
+  it("the default scheduler works where queueMicrotask insists on a global receiver (browsers)", async () => {
+    // Browsers throw "Illegal invocation" when a global function such as queueMicrotask is called
+    // with another object as `this`; Node does not, so model the browser.
+    const real = globalThis.queueMicrotask;
+    vi.stubGlobal("queueMicrotask", function (this: unknown, fn: () => void) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      real(fn);
+    });
+    try {
+      const mirror = new Mirror();
+      const apply = vi.fn();
+      mirror.register(1n, apply);
+      mirror.enqueue(changeSet([1n, 0]));
+      await Promise.resolve();
+      expect(apply).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("notifies a signal once per flush no matter how many change-sets touched it", async () => {
     const mirror = new Mirror();
     const count = new Signal(0);

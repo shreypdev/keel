@@ -1,0 +1,46 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  max-width: 32rem;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+form,
+nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+form input {
+  flex: 1;
+}
+
+nav button[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0;
+}
+
+.done {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.error {
+  color: #c0392b;
+}

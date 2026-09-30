@@ -56,7 +56,14 @@ export class Mirror {
           throw error;
         });
       });
-    this.#schedule = options.schedule ?? queueMicrotask;
+    // Not `queueMicrotask` itself: called as `this.#schedule(...)` it would run with this mirror as
+    // its receiver, and browsers throw "Illegal invocation" for a global function called on
+    // anything but the window (Node does not, which is how it went unnoticed).
+    this.#schedule =
+      options.schedule ??
+      ((fn) => {
+        queueMicrotask(fn);
+      });
   }
 
   /**
