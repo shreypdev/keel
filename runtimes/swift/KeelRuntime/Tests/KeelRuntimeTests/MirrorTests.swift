@@ -13,7 +13,7 @@ final class EventLog {
 
 /// A store that records what it is given.
 @MainActor
-final class RecordingStore: KeelStore {
+final class RecordingStore: KeelStore, @unchecked Sendable {
     var applied: [String] = []
 
     override func apply(signal: UInt32, op: ChangeOp, reader: inout KeelReader) {
