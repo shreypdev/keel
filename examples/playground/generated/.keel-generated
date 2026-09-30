@@ -1,3 +1,4 @@
+kotlin/.gitignore
 kotlin/build.gradle.kts
 kotlin/src/main/kotlin/dev/keel/playground/core/Errors.kt
 kotlin/src/main/kotlin/dev/keel/playground/core/Ids.kt

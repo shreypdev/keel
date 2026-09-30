@@ -71,7 +71,7 @@ NEXT
     #[command(
         long_about = "Reads the core's schema and writes the bindings the app shells import:\n\
   <out>/swift/     a Swift package (Sources/<Module>/Generated/*.swift + Package.swift)\n\
-  <out>/kotlin/    a Gradle module (src/main/kotlin/<package>/*.kt + build.gradle.kts)\n\
+  <out>/kotlin/    a Gradle module (src/main/kotlin/<package>/*.kt, build.gradle.kts, and a .gitignore for Gradle's output)\n\
   <out>/ts/        an npm package (src/*.ts, package.json, tsconfig.json)\n\n\
 By default the schema comes from the core itself: the core is built as a host library with `keel-ffi` \
 linked in, loaded, and asked for `keel_schema_json` (docs/SPEC.md 13). With --schema it is read from a file \
