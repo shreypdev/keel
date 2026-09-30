@@ -11,7 +11,7 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 | Suite | Result |
 |---|---|
-| Rust `cargo test --workspace` | 2,076 passed / 0 failed |
+| Rust `cargo test --workspace` | 2,109 passed / 0 failed |
 | TS `npm test` (runtimes/ts/@keel/runtime) | 869 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libkeel_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 328 passed / 0 failed |
@@ -30,9 +30,14 @@ and `docs/SPEC.md`; the plan of record is `docs/HANDOFF.md`.
 
 ## In progress
 
-- No-alloc sync dispatch (ADR-028) — `wt/fast-dispatch` (bench: 60% allocator, 1.3x miss).
 
 ## Landed since takeover
+
+- **fast-dispatch merged** (ADR-028): a per-thread reply slot (no unsafe, no ABI change)
+  makes call_sync allocation-free on the hot path — 73.8 -> 43.9 ns (31.5 ns via the new
+  call_sync_with), C ABI 79.3 -> 49.8 ns; replies byte-identical under a counting
+  allocator across every outcome incl. layers and panics. Both blueprint §14 host rows
+  that missed now measure within target; device verdicts land with the device phase.
 
 - **cli-polish merged**: @rpath install name, platform-scoped toolchain notes, jniLibs
   drift detection (the silent no-core APK now warns with the line to fix), debug-size
