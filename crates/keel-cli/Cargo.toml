@@ -6,12 +6,29 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Keel command-line tool (stub)"
+description = "The `keel` command: init, bindgen, build, dev, doctor and adopt for Keel apps"
+readme = "README.md"
+keywords = ["keel", "cli", "cross-platform", "ios", "android"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lib]
+name = "keel_cli"
+path = "src/lib.rs"
 
 [[bin]]
 name = "keel"
 path = "src/main.rs"
-# The facade crate `keel` owns the documentation name `keel`.
+# The facade crate `keel` owns the documentation name `keel`; the library docs are `keel_cli`.
 doc = false
 
 [dependencies]
+keel-meta = { workspace = true }
+keel-bindgen = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+notify = { workspace = true }
+libloading = { workspace = true }
+
+[dev-dependencies]
+# The `keel dev` smoke test speaks to the served core with a raw WebSocket client, as a platform does.
+tungstenite = { workspace = true }
