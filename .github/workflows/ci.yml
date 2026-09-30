@@ -176,10 +176,13 @@ jobs:
         with:
           components: rust-src
       - uses: Swatinem/rust-cache@v2
-      - name: AddressSanitizer (includes tests/host_contract.rs, the port-callback lifetime regression)
+      - name: AddressSanitizer (memory safety; host_contract is the port-callback lifetime regression)
+        # The memory-safety targets only. `sync_alloc` asserts EXACT Rust allocation counts, which
+        # ASan instrumentation perturbs (it is a performance-accounting test, not a safety one, and
+        # runs unmodified in the normal Rust job).
         run: |
           RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p keel-ffi \
-            --target x86_64-unknown-linux-gnu --tests
+            --target x86_64-unknown-linux-gnu --lib --test abi --test host_contract
 
   contracts:
     name: Contract scenarios (TS + Kotlin)
