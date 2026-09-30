@@ -368,6 +368,9 @@ pub struct Build {
     pub env: Vec<(String, String)>,
     /// The library name to look for among Cargo's artifacts.
     pub lib_name: String,
+    /// Arguments for rustc itself, after `--` (`-Clink-arg=...`): they apply to the shim only,
+    /// never to the dependencies, which stay shared with the workspace's own builds.
+    pub rustc_args: Vec<String>,
 }
 
 impl Cargo<'_> {
@@ -441,8 +444,11 @@ impl Cargo<'_> {
         if !build.features.is_empty() {
             cmd.arg("--features").arg(build.features.join(","));
         }
-        cmd.args(["--message-format", "json-render-diagnostics"])
-            .envs(build.env.iter().map(|(k, v)| (k, v)))
+        cmd.args(["--message-format", "json-render-diagnostics"]);
+        if !build.rustc_args.is_empty() {
+            cmd.arg("--").args(&build.rustc_args);
+        }
+        cmd.envs(build.env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());

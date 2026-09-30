@@ -46,6 +46,7 @@ pub fn build(session: &Session<'_>) -> Result<Vec<Artifact>> {
         features: Vec::new(),
         env: Vec::new(),
         lib_name: "keel_core".to_owned(),
+        rustc_args: Vec::new(),
     })?;
     let built = files
         .iter()

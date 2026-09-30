@@ -110,6 +110,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             features: Vec::new(),
             env: env.clone(),
             lib_name: "keel_core".to_owned(),
+            rustc_args: Vec::new(),
         })?;
         files
             .into_iter()

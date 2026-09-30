@@ -11,6 +11,7 @@ use crate::cargo::{Build, Profile};
 use crate::error::Result;
 use crate::fsutil::{copy_file, size_of};
 use crate::session::Session;
+use crate::sys::Os;
 
 use super::Artifact;
 
@@ -23,6 +24,22 @@ pub fn library_file_name() -> &'static str {
         "keel_core.dll"
     } else {
         "libkeel_core.so"
+    }
+}
+
+/// The rustc arguments that give the host library a location-independent identity.
+///
+/// A macOS dylib records its *install name*, and rustc defaults it to the absolute path of the
+/// file it just wrote (`/Users/ana/app/target/debug/deps/libkeel_core.dylib`). Anything linked
+/// against, or embedding, a copy of the library would then look for it on the machine that built
+/// it, and the path leaks into whatever embeds it. `@rpath/<name>` lets the consumer decide where
+/// the library lives. Other systems record no path (ELF has no install name unless asked), so
+/// nothing is passed there.
+#[must_use]
+pub fn identity_args(os: Os, file_name: &str) -> Vec<String> {
+    match os {
+        Os::Macos => vec![format!("-Clink-arg=-Wl,-install_name,@rpath/{file_name}")],
+        Os::Linux | Os::Windows => Vec::new(),
     }
 }
 
@@ -46,6 +63,7 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
         features: vec!["jni".to_owned()],
         env: Vec::new(),
         lib_name: "keel_core".to_owned(),
+        rustc_args: identity_args(session.sys.os(), library_file_name()),
     })?;
     let wanted = library_file_name();
     Ok(files
@@ -76,4 +94,23 @@ pub fn package(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         budget: None,
         note: None,
     }])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_macos_library_is_named_relative_to_rpath() {
+        assert_eq!(
+            identity_args(Os::Macos, "libkeel_core.dylib"),
+            vec!["-Clink-arg=-Wl,-install_name,@rpath/libkeel_core.dylib".to_owned()]
+        );
+    }
+
+    #[test]
+    fn other_systems_record_no_path_so_nothing_is_passed() {
+        assert!(identity_args(Os::Linux, "libkeel_core.so").is_empty());
+        assert!(identity_args(Os::Windows, "keel_core.dll").is_empty());
+    }
 }

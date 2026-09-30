@@ -2,7 +2,7 @@
 //!
 //! | Target | Result below `build/` | How |
 //! |---|---|---|
-//! | `host` | `host/libkeel_core.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM) |
+//! | `host` | `host/libkeel_core.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM); on macOS its install name is `@rpath/libkeel_core.dylib`, not a path into `target/` |
 //! | `ios` | `ios/KeelCore.xcframework` | the shim as a staticlib for device and simulator, `xcodebuild -create-xcframework` |
 //! | `android` | `android/jniLibs/<abi>/libkeel_core.so` | `cargo ndk`, 16 KB page aligned |
 //! | `web` | `web/keel_core.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present |
