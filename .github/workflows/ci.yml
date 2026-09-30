@@ -210,6 +210,9 @@ jobs:
       - name: Run the scenario runners
         env:
           KEEL_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+          # The Kotlin contract runner requires the stdlib path explicitly (it does not derive
+          # it from the kotlinc location the way test-local.sh does).
+          KEEL_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
         run: bash contract-tests/run-all.sh ts kotlin
 
   contracts-swift:
