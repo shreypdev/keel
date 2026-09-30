@@ -28,8 +28,9 @@
 //! resolves receivers with [`Runtime::object`], stores new objects with
 //! [`Runtime::insert_object`] or [`Runtime::insert_store`] (and encodes the returned
 //! [`Handle`]`.0` as a `u64` in the `Ok` body of a constructor reply),
-//! and reaches ports through [`Ctx::port_call`], [`port_call_sync`] and [`Ctx::rust_port`] /
-//! [`Ctx::dyn_port`]. `#[keel::store]` submits one [`StoreRestorer`] per store type.
+//! and reaches ports through [`Ctx::port_call`], [`port_call_sync`] and [`Ctx::rust_port`].
+//! `#[keel::store]` submits one [`StoreRestorer`] per store type and `#[keel::port]` one
+//! [`PortDispatcher`] per port trait.
 //!
 //! # Deviations from SPEC 16.2
 //!

@@ -235,9 +235,19 @@ loop {
 * **Foreign is the default.** Any port id without a Rust binding goes through `Host::port_call`.
   A host answers `Sync(PortReply payload)`, `Async` (reply later with `port_reply`) or
   `Unavailable` (also what an unregistered port answers, SPEC 6.3).
-* **Rust bindings** (`bind_port`, `bind_dyn_port`) are fetched with `rust_port::<T>()` /
-  `dyn_port::<dyn Trait>()` and called directly. They have no wire form: a raw `port_call`
-  to a Rust-bound port completes with `Unavailable` and never reaches the host.
+* **Rust bindings** (`bind_port`, `bind_dyn_port`) are stored as an `Arc<Arc<dyn Trait>>` behind
+  `dyn Any` (a trait object cannot be downcast from `Arc<dyn Any>` any other way) and fetched
+  with `Ctx::rust_port::<dyn Trait>(port_id)`, which is what `#[keel::port]`'s accessor
+  (`clock(&ctx)`) calls before falling back to the proxy. A binding never reaches the host.
+* **Raw calls to a Rust-bound port.** A generated *proxy* always speaks bytes
+  (`Runtime::port_call` / `port_call_sync`). If the port id has a Rust binding, the runtime finds
+  the `PortDispatcher` that `#[keel::port]` registered through `inventory` (looked up once, at
+  `Runtime::new`) and calls `dispatch(imp, method_id, args)`. The answer is `PortDispatch::Sync`
+  or `Async`, both `status u8` (0 ok, 1 typed error, 2 unavailable) followed by the body; the
+  runtime strips the status into `Ok(body)` / `Err(PortError::Failed(body))` /
+  `Err(PortError::Unavailable)`, so a proxy behaves identically over the platform and over a
+  fake. A Rust-bound port with no dispatcher is `Unavailable`. `port_call_sync` on a Rust
+  binding whose dispatcher answers `Async` is `Unavailable` (a synchronous caller cannot wait).
 * **`Runtime::port_call`** registers the call **before** invoking the host, then completes it
   from the outcome. So a reply that arrives on another thread (or from inside
   `Host::port_call`, as a wasm host with a synchronous JS function does) before the host
@@ -322,20 +332,30 @@ holds the `Arc`. Inserting a store calls `StoreCell::set_handle`; releasing (or 
 replacing it) calls `set_handle(0)`, so a store that a task still holds stops delivering
 change-sets under a handle it no longer owns.
 
-**Snapshot** (`Runtime::snapshot`): under the core lock, for each store in handle order,
-`handle u64, type_id u32` followed by `StoreCell::encode_snapshot`. The result is a valid
-`keel_wire::payload::Snapshot` (tested by decoding it). The cell's `encode_snapshot` is
-taken to write the **store body**: `signal_count u32` then `signal_count x { signal_id u32,
-len u32, value }`, without the handle and type id, which the runtime writes. Non-store objects
-are not included.
+**Which objects are stores.** `insert_object` asks the type's `StoreRestorer::cell` accessor
+whether the value holds a `StoreCell` (registered stores do; plain objects do not), so a
+generated constructor arm can hand every result to one entry point. Stores get the handle
+written into their cell; everything else is a plain object.
+
+**Snapshot** (`Runtime::snapshot`): under the core lock, for each store in handle order, the
+runtime asks the cell for `StoreCell::encode_snapshot`, which writes a whole store record
+(`handle u64, type_id u32, signal_count u32, signal_count x { signal_id u32, len u32, value }`,
+the cell knowing its own handle and type id). The runtime decodes that record and re-encodes it
+with the object table's handle and type id, so the snapshot is right even if a cell's handle is
+stale (a store restored from an older snapshot, a handle reissued after release). The result is
+a valid `keel_wire::payload::Snapshot` (tested by decoding it). A cell that panics or writes a
+malformed record is skipped and logged. Non-store objects are not included.
 
 **Restore** (`Runtime::restore`), all-or-nothing:
 
 1. Decode and validate the snapshot: no null handle, no generation 0, no duplicate handle, index
    at most 2^20 (a corrupt snapshot cannot make the table allocate gigabytes).
-2. Build every store through its `StoreRestorer` (one per store type, submitted through
-   `inventory` by `#[keel::store]`), giving each a `Reader` over its body in the format above
-   and checking that the reader is fully consumed. Nothing has been touched yet, so any failure
+2. Build every store through its `StoreRestorer` (`{ type_id, restore, cell }`, one per store
+   type, submitted through `inventory` by `#[keel::store]`): `restore(ctx, handle, reader)`
+   gets a `Reader` over the **body** only (`signal_count u32`, then `{ signal_id, len, value }`
+   per signal; the runtime has already consumed the handle and type id) and the re-issued raw
+   handle, tells the new store's cell that handle, and returns it. The runtime checks that the
+   reader is fully consumed. Nothing has been touched yet, so any failure
    (`UnknownStoreType`, `Store`, `Panicked`, `Decode`) leaves the runtime unchanged.
 3. Replace the table: clear it (every old handle becomes stale; old stores are detached;
    the observed sets are remembered per handle), raise the generation floor to
@@ -409,8 +429,9 @@ panics instead of hanging when nothing can make progress.
 |---|---|---|---|
 | 5.1 | `Mutex<Core>` guards the core state | `Mutex<CoreState>` where `CoreState` is a counter; bookkeeping has its own locks | wakers, `port_reply`, `timer_fired` and `stream_credit` must not wait for the core lock, and dispatchers need the object table without re-locking (section 2) |
 | 16.2 `DispatchResult` | four variants | five: `BadRequest(String)` added | a dispatcher has no other way to say "the arguments did not decode" (status 5 with a reason) |
-| 5.9 | `restore(ctx, values)` | `restore(ctx, &mut Reader)` over the store body (section 13) | that is the signature in 16.2; the body layout is pinned here |
-| 5.7 | `bind_port<P>(port_id, imp: Arc<dyn Any>)` | implemented as specified, plus `bind_dyn_port<P>` / `dyn_port<P>` | an `Arc<dyn Any>` cannot be downcast to `Arc<dyn Trait>`, so typed trait-object bindings need their own wrapper |
+| 5.9 / 16.2 | `restore(ctx, values)`; `StoreRestorer { type_id, restore(ctx, reader) }` | `StoreRestorer { type_id, restore(ctx, handle, reader), cell }` over the store body (section 13) | the `keel-macros` branch generates this shape (it needs the handle to attach the cell and a way to find the cell in a `dyn Any`), and the runtime builds on it |
+| 5.7 | `bind_port<P>(port_id, imp: Arc<dyn Any>)` | implemented, storing `Arc<Arc<dyn Trait>>`; `bind_dyn_port<P: ?Sized>` and `Ctx::rust_port::<dyn Trait>` are the typed entry points | an `Arc<dyn Any>` cannot be downcast to `Arc<dyn Trait>`, so a sized wrapper is stored |
+| new | (none) | `PortDispatcher` / `PortDispatch` (inventory) | a proxy calling a Rust-bound port sends bytes; `#[keel::port]` generates the byte-level entry point (section 9) |
 | 5.1 | re-entrancy detected "in debug builds" | detected in every build | a deadlock in release is worse than a status 5 |
 | 5.2 | task cancellation drops the future | also drops what it awaits (`PortFuture`, `Sleep`) and replies status 3 exactly once | see section 7 |
 | new | (none) | `InitHook`, `Runtime::extension`, `Runtime::new` | `keel-query` needs a hydrate hook and a place to keep the `QueryClient` (SPEC 9) |
@@ -431,8 +452,10 @@ Known limitations, each deliberate for v1:
 * Unit tests sit next to the code: object table, executor (waker dedup, cancel, stale ids,
   deferred cancel), `Notify`, timers (deadline order, compaction, thread), ports (id
   allocation, abandonment), config codec, panic guard, lazy lists, extensions.
-* `tests/` uses hand-written stores and dispatchers registered through `inventory` (the
-  macros do not exist yet): sync/async/stream calls, cancellation, panics, bad requests,
+* `tests/` uses hand-written stores, dispatchers, restorers and port dispatchers registered
+  through `inventory` in the shape `keel-macros` generates (the crates were also checked
+  together in a scratch workspace, outside the repo: generated dispatchers, streams, port
+  proxies, Rust-bound port fakes and `Ctx::sleep` all run on this runtime): sync/async/stream calls, cancellation, panics, bad requests,
   observe and change-sets, snapshot/restore including every error path, ports and events,
   timers (manual clock and host-owned), and a global-runtime test.
 * `tests/threads.rs` runs a real threaded runtime: 8 threads calling `call_sync` on one store
