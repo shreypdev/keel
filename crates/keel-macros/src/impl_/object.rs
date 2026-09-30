@@ -607,27 +607,37 @@ fn constructor_result(
 ) -> TokenStream {
     let wire = root.wire();
     let runtime = root.runtime();
-    let insert = if target.store {
+    let reply = enc(&wire, &quote!(__handle));
+    let ok = quote!(#runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply)));
+    // What to do with the constructed `__value`: publish it and answer its handle. A store
+    // first attaches its signals; if that fails the store is never published and the caller
+    // gets a bad request carrying the reason (nothing panics).
+    let finish = if target.store {
+        let type_name = target.self_ty.map(ty_string).unwrap_or_default();
         quote! {
-            __value.__keel_attach_all();
-            let __arc = ::std::sync::Arc::new(__value);
-            let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
-            (*__arc).__keel_set_handle(__handle.0);
+            match __value.__keel_attach_all() {
+                ::core::result::Result::Ok(()) => {
+                    let __arc = ::std::sync::Arc::new(__value);
+                    let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
+                    (*__arc).__keel_set_handle(__handle.0);
+                    #ok
+                }
+                ::core::result::Result::Err(__why) => #runtime::DispatchResult::BadRequest(
+                    ::std::format!("store `{}` could not attach its signals: {}", #type_name, __why),
+                ),
+            }
         }
     } else {
-        quote! {
+        quote! {{
             let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
-        }
+            #ok
+        }}
     };
-    let reply = enc(&wire, &quote!(__handle));
     let err = enc(&wire, &quote!(__e));
     if matches!(m.ret, KType::Result(..)) {
         quote! {
             match #call {
-                ::core::result::Result::Ok(__value) => {
-                    #insert
-                    #runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply))
-                }
+                ::core::result::Result::Ok(__value) => #finish,
                 ::core::result::Result::Err(__e) => {
                     #runtime::DispatchResult::Sync(::core::result::Result::Err(#err))
                 }
@@ -636,33 +646,44 @@ fn constructor_result(
     } else {
         quote! {{
             let __value = #call;
-            #insert
-            #runtime::DispatchResult::Sync(::core::result::Result::Ok(#reply))
+            #finish
         }}
     }
 }
 
 /// The body of the dispatch arm for `m`: decode, call, encode. It evaluates to a
-/// `DispatchOutcome` or returns early with "unknown".
+/// `DispatchOutcome` or returns early with a bad request (status 5 and a reason).
 fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) -> TokenStream {
     let wire = root.wire();
+    // How the function is named in the reasons a bad request carries.
+    let what = match target.self_ty {
+        Some(self_ty) if m.kind != Kind::Function => format!("{}.{}", ty_string(self_ty), m.name),
+        _ => m.name.clone(),
+    };
 
-    // Decode the arguments in declaration order; any failure is a bad request.
+    // Decode the arguments in declaration order; any failure is a bad request that says which.
     let lets = m.params.iter().map(|p| {
         let ident = &p.ident;
         let ty = &p.ty;
+        let param = &p.name;
         quote_spanned! {p.ty.span()=>
             let #ident: #ty = match <#ty as #wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(::std::format!(
+                        "cannot decode argument `{}` of `{}`: {}", #param, #what, __e
+                    ));
+                }
             };
         }
     });
     let decode = quote! {
         let mut __r = #wire::Reader::new(__call.args);
         #(#lets)*
-        if __r.finish().is_err() {
-            return __keel_unknown();
+        if let ::core::result::Result::Err(__e) = __r.finish() {
+            return __keel_bad_request(::std::format!(
+                "cannot decode the arguments of `{}`: {}", #what, __e
+            ));
         }
     };
 
@@ -671,7 +692,11 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
         (Kind::Method, Some(self_ty)) => quote! {
             let __obj = match __rt.object::<#self_ty>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(::std::format!(
+                        "cannot call `{}`: {}", #what, __e
+                    ));
+                }
             };
         },
         _ => TokenStream::new(),
@@ -844,6 +869,10 @@ fn helpers(root: &Root, needs: &Needs) -> TokenStream {
         }
         fn __keel_unknown() -> #meta::DispatchOutcome {
             __keel_out(#runtime::DispatchResult::Unknown)
+        }
+        #[allow(dead_code)]
+        fn __keel_bad_request(__reason: ::std::string::String) -> #meta::DispatchOutcome {
+            __keel_out(#runtime::DispatchResult::BadRequest(__reason))
         }
         #send_assert
         #map_stream
@@ -1087,6 +1116,7 @@ pub(crate) fn expand_impl(
 
     let meta = root.meta();
     let runtime = root.runtime();
+    let signals = root.signals();
     let target = Target {
         self_ty: Some(&self_ty),
         store,
@@ -1161,7 +1191,9 @@ pub(crate) fn expand_impl(
         trait #probe_trait {
             const __KEEL_IS_STORE: bool = false;
             const __KEEL_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
-            fn __keel_attach_all(&self) {}
+            fn __keel_attach_all(&self) -> ::core::result::Result<(), #signals::SignalsError> {
+                ::core::result::Result::Ok(())
+            }
             fn __keel_set_handle(&self, _handle: u64) {}
         }
         impl #probe_trait for #self_ty {}

@@ -1,5 +1,5 @@
 //! Behaviour tests for `#[keel::api]` on structs and enums and for `#[keel::error]`:
-//! the generated code is compiled against the test facade and *run*.
+//! the generated code is compiled against the real facade and *run*.
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, HashMap};
@@ -325,8 +325,13 @@ fn self_in_fields_means_the_type_itself() {
     assert_eq!(def.variants[2].fields[0].ty, TypeRef::named("Expr"));
 }
 
+/// A second path to the facade, to exercise `crate = ".."`.
+mod rooted {
+    pub use keel::{meta, wire};
+}
+
 /// Uses the second path to the facade.
-#[k::api(crate = "::keel::rooted")]
+#[k::api(crate = "crate::rooted")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rooted {
     pub x: i32,
@@ -334,7 +339,7 @@ pub struct Rooted {
 
 /// Uses the item-level override.
 #[k::api]
-#[keel(crate = "::keel::rooted")]
+#[keel(crate = "crate::rooted")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct RootedByAttribute {
     pub x: i32,

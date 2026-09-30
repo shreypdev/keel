@@ -6,10 +6,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use keel::meta::{Registration, TypeRef, collect_schema, ids};
-use keel::runtime::{Ctx, KeelObject, Runtime, Stream};
-use keel::testing::stream_of;
+use keel::runtime::{Ctx, KeelObject, Stream};
 use keel::wire::{Decode, Encode, Handle, Writer};
 use keel_macros as k;
+
+mod support;
+use support::Runtime;
+use support::testing::stream_of;
 
 fn args(encode: impl FnOnce(&mut Writer)) -> Vec<u8> {
     let mut w = Writer::new();
@@ -312,46 +315,59 @@ fn result_methods_split_into_ok_and_typed_error() {
 }
 
 #[test]
-fn malformed_requests_are_unknown_not_panics() {
+fn malformed_requests_are_bad_requests_with_a_reason_not_panics() {
     let (rt, handle) = runtime_with_calculator();
     let good = args(|w| {
         1_i64.encode(w);
         2_i64.encode(w);
     });
-    // Too short, too long, empty.
+    // Too short: the reason names the argument and the method.
+    let reason = rt
+        .call_object("Calculator", "add", handle, &good[..15])
+        .bad_request();
     assert!(
-        rt.call_object("Calculator", "add", handle, &good[..15])
-            .is_unknown()
+        reason.contains("cannot decode argument `b` of `Calculator.add`"),
+        "{reason}"
     );
+    // Too long.
     let mut long = good.clone();
     long.push(0);
+    let reason = rt
+        .call_object("Calculator", "add", handle, &long)
+        .bad_request();
     assert!(
-        rt.call_object("Calculator", "add", handle, &long)
-            .is_unknown()
+        reason.contains("cannot decode the arguments of `Calculator.add`"),
+        "{reason}"
     );
-    assert!(
-        rt.call_object("Calculator", "add", handle, &[])
-            .is_unknown()
-    );
-    // Unknown method id.
+    // Empty.
+    let reason = rt
+        .call_object("Calculator", "add", handle, &[])
+        .bad_request();
+    assert!(reason.contains("argument `a`"), "{reason}");
+    // A method id the dispatcher does not implement is the "unknown" answer.
     assert!(
         rt.call_object_raw("Calculator", 0xdead_beef, handle, &good)
             .is_unknown()
     );
-    // Null, stale and wrongly typed handles.
-    assert!(rt.call_object("Calculator", "add", 0, &good).is_unknown());
+    // Null, stale and wrongly typed handles say which.
+    let reason = rt.call_object("Calculator", "add", 0, &good).bad_request();
+    assert!(reason.contains("null handle"), "{reason}");
+    let reason = rt
+        .call_object("Calculator", "add", Handle::new(99, 1).0, &good)
+        .bad_request();
     assert!(
-        rt.call_object("Calculator", "add", Handle::new(99, 1).0, &good)
-            .is_unknown()
+        reason.contains("cannot call `Calculator.add`") && reason.contains("unknown handle"),
+        "{reason}"
     );
     let other = rt.call_object("Other", "new", 0, &[]).sync_ok();
     let other = Handle::decode_exact(&other).unwrap().0;
-    assert!(
-        rt.call_object("Calculator", "add", other, &good)
-            .is_unknown()
-    );
+    let reason = rt
+        .call_object("Calculator", "add", other, &good)
+        .bad_request();
+    assert!(reason.contains("not a"), "{reason}");
     // Constructors with bad arguments do not insert anything.
-    assert!(rt.call_object("Calculator", "new", 0, &[1]).is_unknown());
+    let reason = rt.call_object("Calculator", "new", 0, &[1]).bad_request();
+    assert!(reason.contains("Calculator.new"), "{reason}");
 }
 
 #[test]
@@ -612,7 +628,8 @@ fn free_functions_dispatch() {
         .sync_ok();
     assert_eq!(String::decode_exact(&out).unwrap(), "hello keel");
     assert!(rt.call_function("noop", &[]).sync_ok().is_empty());
-    assert!(rt.call_function("greet", &[]).is_unknown());
+    let reason = rt.call_function("greet", &[]).bad_request();
+    assert!(reason.contains("argument `name` of `greet`"), "{reason}");
 }
 
 #[test]

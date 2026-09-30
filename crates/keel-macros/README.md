@@ -36,7 +36,7 @@ impl Todos {
 
     fn assemble(ctx: Ctx, todos: Signal<Vec<Todo>>, filter: Signal<Filter>) -> Self {
         let visible = Computed::new((&todos, &filter), |(t, f)| {
-            t.into_iter().filter(|x| f.matches(x)).collect()
+            t.iter().filter(|x| f.matches(x)).cloned().collect()
         });
         Self { ctx, todos, filter, visible }
     }
@@ -62,7 +62,7 @@ pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<Todo>, HttpError> { /* ..
 | `api` / `error` on an enum | the same with a `u16` variant index; `error` adds `Display`, `Error`, `From` for `#[from]` |
 | `api` on `impl T` | `impl KeelObject`, `fn __keel_dispatch_<T>`, `ObjectMeta` + registration |
 | `api` on a `fn` | `fn __keel_dispatch_fn_<name>`, `FunctionMeta` + registration |
-| `store` on a struct | hidden cell field, `impl StoreObject` (`cell`, `restore`), `StoreMeta`, `StoreRestorer` registration |
+| `store` on a struct | hidden `CellSlot` field, `impl StoreObject` (`cell`, `restore`), a builder that attaches every signal (`attach`, `attach_keyed` with a typed key fn, `attach_computed`, `set_no_coalesce`), `StoreMeta`, `StoreRestorer` registration |
 | `port` on a trait | `impl Port for dyn T`, `<T>Proxy`, accessor `fn <t>(ctx)`, `__keel_port_dispatch_<T>`, `PortMeta` |
 | `query` / `mutation` | `<Name>Query` / `<Name>Mutation` with the ids and settings, `QueryDef` / `MutationDef`, `QueryMeta` |
 
@@ -80,10 +80,14 @@ compile-fail test in `tests/ui/`.
 
 * `cargo test -p keel-macros --lib`: type mapper, attribute parsing, expansion snapshots
   (`UPDATE_SNAPSHOTS=1` rewrites `tests/snapshots/*.rs`) and a table test of every diagnostic.
-* `cargo test -p keel-macros --test wire_types --test objects --test stores --test ports --test queries`:
-  the generated code is compiled against `tests/facade` (a naive stand-in for the runtime and
-  signals crates) and *run*: dispatchers, proxies, restore, event subscriptions.
+* `cargo test -p keel-macros --test wire_types --test objects --test stores --test ports --test queries --test edge_cases`:
+  the generated code is compiled against the real `keel` facade (`keel-runtime`, `keel-signals`)
+  and *run*: dispatchers found in the registry and called through a real runtime
+  (`tests/support`), proxies, restore functions, keyed patches, event subscriptions.
 * `--test compile_fail`: trybuild expectations for the diagnostics
   (`TRYBUILD=overwrite` regenerates them).
-* `--test ui_runtime -- --ignored`: compile-pass files written as a user writes a core; ignored
-  until the `keel` dev-dependency points at the real runtime.
+* `--test ui_runtime`: compile-pass files written as a user writes a core
+  (`tests/ui-runtime/`), checked against the real runtime and signals.
+
+`crates/keel/tests/e2e_todo.rs` drives generated code through `TestRuntime` and asserts on the
+decoded wire payloads.

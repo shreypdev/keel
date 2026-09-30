@@ -1,17 +1,22 @@
 //! The traits `#[keel::query]` and `#[keel::mutation]` implement (SPEC 9).
+//!
+//! The macros generate a `<Name>Query` / `<Name>Mutation` struct implementing [`QueryDef`] /
+//! [`MutationDef`] for each annotated function. `keel-query` will implement the client (cache,
+//! staleness, retries, optimistic updates) against exactly these traits; this module only
+//! defines the contract.
 
 use core::future::Future;
 use core::pin::Pin;
 
+use keel_runtime::Ctx;
 use keel_wire::{Decode, Encode};
-
-use crate::runtime::Ctx;
 
 /// A boxed, sendable future.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// The bounds every value crossing the query cache must satisfy.
 pub trait CacheValue: Encode + Decode + Clone + Send + Sync + 'static {}
+
 impl<T: Encode + Decode + Clone + Send + Sync + 'static> CacheValue for T {}
 
 /// A `#[keel::query]` function.
@@ -54,4 +59,19 @@ pub trait MutationDef: 'static {
     type Error: CacheValue;
     /// Runs the function.
     fn execute(ctx: Ctx, input: Self::Input) -> BoxFuture<Result<Self::Output, Self::Error>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_cache_value<T: CacheValue>() {}
+
+    #[test]
+    fn wire_values_are_cache_values() {
+        assert_cache_value::<u32>();
+        assert_cache_value::<String>();
+        assert_cache_value::<Vec<(String, u8)>>();
+        assert_cache_value::<Option<keel_wire::Uuid>>();
+    }
 }

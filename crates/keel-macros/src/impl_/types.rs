@@ -51,7 +51,6 @@ pub(crate) enum KType {
     Option(Box<KType>),
     Vec(Box<KType>),
     Map(Box<KType>, Box<KType>),
-    Lazy(Box<KType>),
     Named(std::string::String),
     Result(Box<KType>, Box<KType>),
     Stream(Box<KType>),
@@ -89,10 +88,6 @@ impl KType {
             KType::Vec(inner) => {
                 let inner = inner.meta(meta);
                 quote!(#meta::TypeRefMeta::Vec(&#inner))
-            }
-            KType::Lazy(inner) => {
-                let inner = inner.meta(meta);
-                quote!(#meta::TypeRefMeta::Lazy(&#inner))
             }
             KType::Stream(inner) => {
                 let inner = inner.meta(meta);
@@ -631,9 +626,12 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
         }
         ("Lazy", 1) => Err(unsupported(
             ty,
-            format!("`{}` is only valid as a store field", ty_string(ty)),
-            "`Lazy<T>` is a lazily paged list that lives in a `#[keel::store]`",
-            "declare it as a field of a `#[keel::store]` struct, or use `Vec<T>` here",
+            format!(
+                "`{}` is not available in v1: lazy lists cannot be mirrored yet",
+                ty_string(ty)
+            ),
+            "a `Lazy<T>` is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17)",
+            "use a `Vec<T>`, or a method that takes an offset and a limit and returns one page",
         )),
         ("Signal" | "Computed" | "Effect", _) => Err(unsupported(
             ty,

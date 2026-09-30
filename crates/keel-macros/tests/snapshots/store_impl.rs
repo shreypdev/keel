@@ -15,7 +15,11 @@ trait __KeelStoreProbe_Todos {
     const __KEEL_STORE_META: ::keel::meta::StoreMeta = ::keel::meta::StoreMeta {
         signals: &[],
     };
-    fn __keel_attach_all(&self) {}
+    fn __keel_attach_all(
+        &self,
+    ) -> ::core::result::Result<(), ::keel::signals::SignalsError> {
+        ::core::result::Result::Ok(())
+    }
     fn __keel_set_handle(&self, _handle: u64) {}
 }
 impl __KeelStoreProbe_Todos for Todos {}
@@ -51,6 +55,12 @@ fn __keel_dispatch_Todos(
     fn __keel_unknown() -> ::keel::meta::DispatchOutcome {
         __keel_out(::keel::runtime::DispatchResult::Unknown)
     }
+    #[allow(dead_code)]
+    fn __keel_bad_request(
+        __reason: ::std::string::String,
+    ) -> ::keel::meta::DispatchOutcome {
+        __keel_out(::keel::runtime::DispatchResult::BadRequest(__reason))
+    }
     let ::core::option::Option::Some(__rt) = __rt
         .downcast_ref::<::keel::runtime::Runtime>() else {
         return __keel_unknown();
@@ -60,21 +70,37 @@ fn __keel_dispatch_Todos(
     match __call.method_id {
         __KEEL_ID_new => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Todos.new", __e
+                    ),
+                );
             }
             let __ctx = __rt.ctx();
             __keel_out({
                 let __value = Todos::new(__ctx);
-                __value.__keel_attach_all();
-                let __arc = ::std::sync::Arc::new(__value);
-                let __handle = __rt.insert_object(::std::sync::Arc::clone(&__arc));
-                (*__arc).__keel_set_handle(__handle.0);
-                ::keel::runtime::DispatchResult::Sync(
-                    ::core::result::Result::Ok(
-                        ::keel::wire::Encode::encode_to_vec(&__handle),
-                    ),
-                )
+                match __value.__keel_attach_all() {
+                    ::core::result::Result::Ok(()) => {
+                        let __arc = ::std::sync::Arc::new(__value);
+                        let __handle = __rt
+                            .insert_object(::std::sync::Arc::clone(&__arc));
+                        (*__arc).__keel_set_handle(__handle.0);
+                        ::keel::runtime::DispatchResult::Sync(
+                            ::core::result::Result::Ok(
+                                ::keel::wire::Encode::encode_to_vec(&__handle),
+                            ),
+                        )
+                    }
+                    ::core::result::Result::Err(__why) => {
+                        ::keel::runtime::DispatchResult::BadRequest(
+                            ::std::format!(
+                                "store `{}` could not attach its signals: {}", "Todos",
+                                __why
+                            ),
+                        )
+                    }
+                }
             })
         }
         __KEEL_ID_add => {
@@ -83,14 +109,29 @@ fn __keel_dispatch_Todos(
                 &mut __r,
             ) {
                 ::core::result::Result::Ok(__v) => __v,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!(
+                            "cannot decode argument `{}` of `{}`: {}", "title",
+                            "Todos.add", __e
+                        ),
+                    );
+                }
             };
-            if __r.finish().is_err() {
-                return __keel_unknown();
+            if let ::core::result::Result::Err(__e) = __r.finish() {
+                return __keel_bad_request(
+                    ::std::format!(
+                        "cannot decode the arguments of `{}`: {}", "Todos.add", __e
+                    ),
+                );
             }
             let __obj = match __rt.object::<Todos>(__call.handle) {
                 ::core::result::Result::Ok(__o) => __o,
-                ::core::result::Result::Err(_) => return __keel_unknown(),
+                ::core::result::Result::Err(__e) => {
+                    return __keel_bad_request(
+                        ::std::format!("cannot call `{}`: {}", "Todos.add", __e),
+                    );
+                }
             };
             __keel_out({
                 let __out = Todos::add(&*__obj, title);

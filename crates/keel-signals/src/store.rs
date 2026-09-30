@@ -485,6 +485,127 @@ impl StoreCell {
     }
 }
 
+/// Where a store keeps its [`StoreCell`]: an empty slot that is filled the first time the cell
+/// is needed.
+///
+/// `#[keel::store]` adds one hidden field of this type to the struct. Rust cannot add state to
+/// a struct any other way, and the cell cannot be created by the constructor the user wrote
+/// (the macro does not own it), so the slot creates the cell lazily and exactly once, and then
+/// hands out the same `Arc<StoreCell>` for the store's whole life. `Default` gives the empty
+/// slot, which is what lets the macro fill the field in struct literals it rewrites.
+///
+/// The slot is `Send + Sync`. Concurrent first calls agree on a single cell: the initialiser
+/// runs once and the other callers wait for it.
+///
+/// Deliberately not `Clone`: a store's signals are attached to exactly one cell, so a second
+/// slot over the same signals could never be attached.
+///
+/// # Example
+///
+/// ```
+/// use keel_signals::{CellSlot, Signal, StoreCell};
+///
+/// let count = Signal::new(0_u32);
+/// let slot = CellSlot::default();
+/// assert!(slot.get().is_none());
+///
+/// // Generated code: create the cell and attach the signals on first use.
+/// let cell = slot.get_or_init(|| {
+///     let cell = StoreCell::new(0xC0DE);
+///     cell.attach(&count, 0).expect("fresh signal");
+///     cell
+/// });
+/// assert_eq!(cell.signal_count(), 1);
+///
+/// // Later calls return the same cell; the initialiser is not run again.
+/// let again = slot.get_or_init(|| unreachable!("already initialised"));
+/// assert!(std::sync::Arc::ptr_eq(cell, again));
+/// ```
+#[derive(Default)]
+pub struct CellSlot {
+    cell: OnceLock<Arc<StoreCell>>,
+    /// Serialises initialisation (`OnceLock::get_or_try_init` is not stable), so that two threads
+    /// never both attach the same signals, whichever of the `get_or_*init` calls they use.
+    init: Mutex<()>,
+}
+
+impl CellSlot {
+    /// An empty slot (same as `CellSlot::default()`).
+    pub const fn new() -> CellSlot {
+        CellSlot {
+            cell: OnceLock::new(),
+            init: Mutex::new(()),
+        }
+    }
+
+    /// The cell, if it has been created.
+    pub fn get(&self) -> Option<&Arc<StoreCell>> {
+        self.cell.get()
+    }
+
+    /// The cell, creating it with `init` the first time.
+    ///
+    /// If several threads race, exactly one runs `init` and the rest wait for its result. This
+    /// also holds against concurrent [`get_or_try_init`](CellSlot::get_or_try_init) calls, which
+    /// share the same lock. `init` must not call back into the same slot (it would deadlock).
+    pub fn get_or_init(&self, init: impl FnOnce() -> Arc<StoreCell>) -> &Arc<StoreCell> {
+        if let Some(cell) = self.cell.get() {
+            return cell;
+        }
+        let _guard = self.init.lock();
+        self.cell.get_or_init(init)
+    }
+
+    /// Like [`get_or_init`](CellSlot::get_or_init) for an initialiser that can fail (attaching
+    /// signals returns a [`SignalsError`]). On failure the slot stays empty and the error is
+    /// returned to this caller. Signals the initialiser attached before it failed stay bound to
+    /// the discarded cell, so a store whose attach failed is unusable: running the initialiser
+    /// again reports [`SignalsError::AlreadyAttached`].
+    ///
+    /// # Errors
+    ///
+    /// Whatever `init` returns.
+    ///
+    /// ```
+    /// use keel_signals::{CellSlot, Signal, SignalsError, StoreCell};
+    ///
+    /// let taken = Signal::new(1_u8);
+    /// StoreCell::new(1).attach(&taken, 0).unwrap(); // already belongs to another store
+    ///
+    /// let slot = CellSlot::new();
+    /// let result = slot.get_or_try_init(|| {
+    ///     let cell = StoreCell::new(2);
+    ///     cell.attach(&taken, 0)?;
+    ///     Ok::<_, SignalsError>(cell)
+    /// });
+    /// assert_eq!(result.unwrap_err(), SignalsError::AlreadyAttached);
+    /// assert!(slot.get().is_none());
+    /// ```
+    pub fn get_or_try_init<E>(
+        &self,
+        init: impl FnOnce() -> Result<Arc<StoreCell>, E>,
+    ) -> Result<&Arc<StoreCell>, E> {
+        if let Some(cell) = self.cell.get() {
+            return Ok(cell);
+        }
+        let _guard = self.init.lock();
+        if let Some(cell) = self.cell.get() {
+            return Ok(cell);
+        }
+        let cell = init()?;
+        Ok(self.cell.get_or_init(|| cell))
+    }
+}
+
+impl fmt::Debug for CellSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.cell.get() {
+            Some(cell) => f.debug_tuple("CellSlot").field(cell).finish(),
+            None => f.write_str("CellSlot(empty)"),
+        }
+    }
+}
+
 impl fmt::Debug for StoreCell {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StoreCell")
@@ -589,6 +710,124 @@ mod tests {
         assert_eq!(cell.handle(), 0);
         assert_eq!(cell.signal_count(), 0);
         assert!(!cell.is_observed(0));
+    }
+
+    #[test]
+    fn cell_slot_creates_the_cell_once_and_shares_it() {
+        let slot = CellSlot::default();
+        assert!(slot.get().is_none());
+        assert_eq!(format!("{slot:?}"), "CellSlot(empty)");
+        let count = Signal::new(1_u8);
+        let first = Arc::clone(slot.get_or_init(|| {
+            let cell = StoreCell::new(5);
+            cell.attach(&count, 0).unwrap();
+            cell
+        }));
+        let second = slot.get_or_init(|| panic!("the initialiser must not run twice"));
+        assert!(Arc::ptr_eq(&first, second));
+        assert!(Arc::ptr_eq(&first, slot.get().unwrap()));
+        assert_eq!(first.signal_count(), 1);
+        let text = format!("{slot:?}");
+        assert!(text.starts_with("CellSlot(StoreCell"), "{text}");
+    }
+
+    #[test]
+    fn cell_slot_new_is_const_and_empty() {
+        static SLOT: CellSlot = CellSlot::new();
+        assert!(SLOT.get().is_none());
+    }
+
+    #[test]
+    fn cell_slot_try_init_reports_errors_and_stays_empty() {
+        let shared = Signal::new(1_u8);
+        StoreCell::new(1).attach(&shared, 0).unwrap();
+        let slot = CellSlot::new();
+        let err = slot
+            .get_or_try_init(|| {
+                let cell = StoreCell::new(2);
+                cell.attach(&shared, 0)?;
+                Ok::<_, SignalsError>(cell)
+            })
+            .unwrap_err();
+        assert_eq!(err, SignalsError::AlreadyAttached);
+        assert!(slot.get().is_none());
+        // A successful initialiser fills the slot, and later calls do not run theirs.
+        let ok = slot
+            .get_or_try_init(|| Ok::<_, SignalsError>(StoreCell::new(3)))
+            .unwrap();
+        assert_eq!(ok.type_id(), 3);
+        let again = slot
+            .get_or_try_init(|| Err::<Arc<StoreCell>, _>(SignalsError::AlreadyAttached))
+            .unwrap();
+        assert!(Arc::ptr_eq(ok, again));
+    }
+
+    #[test]
+    fn cell_slot_racing_threads_agree_on_one_cell() {
+        use std::sync::atomic::AtomicUsize;
+        let slot = Arc::new(CellSlot::new());
+        let runs = Arc::new(AtomicUsize::new(0));
+        let cells: Vec<Arc<StoreCell>> = (0..8)
+            .map(|_| {
+                let (slot, runs) = (Arc::clone(&slot), Arc::clone(&runs));
+                std::thread::spawn(move || {
+                    Arc::clone(
+                        slot.get_or_try_init(|| {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            Ok::<_, SignalsError>(StoreCell::new(9))
+                        })
+                        .unwrap(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|t| t.join().unwrap())
+            .collect();
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(cells.iter().all(|c| Arc::ptr_eq(c, &cells[0])));
+    }
+
+    #[test]
+    fn cell_slot_infallible_and_fallible_initialisers_do_not_race_each_other() {
+        use std::sync::atomic::AtomicUsize;
+        // Both kinds of caller attach the same signal: without a shared lock one of them would
+        // fail with `AlreadyAttached` even though a valid cell gets installed.
+        for _ in 0..50 {
+            let slot = Arc::new(CellSlot::new());
+            let signal = Signal::new(0_u8);
+            let runs = Arc::new(AtomicUsize::new(0));
+            let threads: Vec<_> = (0..8)
+                .map(|i| {
+                    let (slot, signal, runs) =
+                        (Arc::clone(&slot), signal.clone(), Arc::clone(&runs));
+                    std::thread::spawn(move || {
+                        let build = || {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            let cell = StoreCell::new(4);
+                            cell.attach(&signal, 0).map(|()| cell)
+                        };
+                        if i % 2 == 0 {
+                            slot.get_or_try_init(build).map(Arc::clone)
+                        } else {
+                            Ok(Arc::clone(slot.get_or_init(|| {
+                                build().expect("the first initialiser attaches")
+                            })))
+                        }
+                    })
+                })
+                .collect();
+            for thread in threads {
+                assert!(thread.join().unwrap().is_ok());
+            }
+            assert_eq!(runs.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn cell_slot_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<CellSlot>();
     }
 
     #[test]

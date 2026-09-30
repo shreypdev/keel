@@ -3,6 +3,8 @@
 #   source scripts/env.sh
 _KEEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 _KEEL_TOOLS="$(cd "$_KEEL_ROOT/.." && pwd)/.tools"
+# A worktree under <repos>/.work/<slug> finds the toolchain two levels up.
+[ -d "$_KEEL_TOOLS" ] || _KEEL_TOOLS="$(cd "$_KEEL_ROOT/../.." && pwd)/.tools"
 [ -d "$_KEEL_TOOLS/rust/bin" ] && export PATH="$_KEEL_TOOLS/rust/bin:$PATH"
 [ -d "$_KEEL_TOOLS/kotlinc/bin" ] && export PATH="$_KEEL_TOOLS/kotlinc/bin:$PATH"
 [ -f "$_KEEL_TOOLS/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" ] && export KEEL_KOTLINX_COROUTINES="$_KEEL_TOOLS/lib/kotlinx-coroutines-core-jvm-1.6.4.jar"

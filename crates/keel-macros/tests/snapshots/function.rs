@@ -16,6 +16,12 @@ fn __keel_dispatch_fn_greet(
     fn __keel_unknown() -> ::keel::meta::DispatchOutcome {
         __keel_out(::keel::runtime::DispatchResult::Unknown)
     }
+    #[allow(dead_code)]
+    fn __keel_bad_request(
+        __reason: ::std::string::String,
+    ) -> ::keel::meta::DispatchOutcome {
+        __keel_out(::keel::runtime::DispatchResult::BadRequest(__reason))
+    }
     fn __keel_assert_send<T: ::core::marker::Send>(_: &T) {}
     let ::core::option::Option::Some(__rt) = __rt
         .downcast_ref::<::keel::runtime::Runtime>() else {
@@ -27,10 +33,18 @@ fn __keel_dispatch_fn_greet(
     let mut __r = ::keel::wire::Reader::new(__call.args);
     let name: String = match <String as ::keel::wire::Decode>::decode(&mut __r) {
         ::core::result::Result::Ok(__v) => __v,
-        ::core::result::Result::Err(_) => return __keel_unknown(),
+        ::core::result::Result::Err(__e) => {
+            return __keel_bad_request(
+                ::std::format!(
+                    "cannot decode argument `{}` of `{}`: {}", "name", "greet", __e
+                ),
+            );
+        }
     };
-    if __r.finish().is_err() {
-        return __keel_unknown();
+    if let ::core::result::Result::Err(__e) = __r.finish() {
+        return __keel_bad_request(
+            ::std::format!("cannot decode the arguments of `{}`: {}", "greet", __e),
+        );
     }
     let __ctx = __rt.ctx();
     __keel_out({

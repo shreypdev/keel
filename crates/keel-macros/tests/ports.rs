@@ -1,15 +1,18 @@
 //! Behaviour tests for `#[keel::port]`: proxies, accessors, Rust-side dispatchers, event
-//! subscriptions and the async-to-boxed-future rewrite, run against the test facade.
+//! subscriptions and the async-to-boxed-future rewrite, run against the real runtime.
 #![forbid(unsafe_code)]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
 use keel::meta::{PortKind, TypeRef, collect_schema, ids};
-use keel::runtime::{Ctx, Port, PortDispatch, PortDispatcher, PortError, Runtime};
-use keel::testing::block_on;
+use keel::runtime::{Ctx, Port, PortDispatch, PortDispatcher, PortError};
 use keel::wire::{Bytes, Decode, Encode, Reader, Writer};
 use keel_macros as k;
+
+mod support;
+use support::Runtime;
+use support::testing::block_on;
 
 #[k::error]
 #[derive(Clone, PartialEq)]

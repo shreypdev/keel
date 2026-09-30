@@ -20,8 +20,6 @@ proc-macro2.workspace = true
 [dev-dependencies]
 prettyplease.workspace = true
 trybuild.workspace = true
-# The tests run the macros against a small stand-in for the `keel` facade
-# (`tests/facade`), named `keel` so the default `::keel` root of generated code
-# resolves. When keel-runtime and keel-signals land, point `keel` at
-# `../keel` instead and un-ignore `tests/ui_runtime.rs`.
-keel = { package = "keel-test-facade", path = "tests/facade" }
+# Generated code names `::keel::{wire, meta, runtime, signals, query}`; the tests run it
+# against the real facade, so what the macros emit is checked against the real runtime.
+keel = { workspace = true }
