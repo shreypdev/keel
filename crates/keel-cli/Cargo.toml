@@ -11,5 +11,7 @@ description = "Keel command-line tool (stub)"
 [[bin]]
 name = "keel"
 path = "src/main.rs"
+# The facade crate `keel` owns the documentation name `keel`.
+doc = false
 
 [dependencies]
