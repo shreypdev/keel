@@ -10,7 +10,9 @@ use common::*;
 use keel_runtime::testing::{
     HostEvent, PortCallRecord, TestRuntime, port_reply, port_reply_ok, sync_ok,
 };
-use keel_runtime::{Host, PortCallOutcome, PortError, Runtime, RuntimeConfig};
+use keel_runtime::{
+    Host, PortCallOutcome, PortDispatch, PortDispatcher, PortError, Runtime, RuntimeConfig,
+};
 use keel_wire::payload::{PortStatus, ReplyStatus};
 
 fn ask(t: &TestRuntime, handle: keel_runtime::Handle, x: i32, call_id: u32) {
@@ -322,12 +324,13 @@ fn shutdown_fails_pending_port_calls_with_cancelled() {
 
 // ----- Rust bindings ----------------------------------------------------------------------
 
-struct FakeClock {
-    now: AtomicU32,
-}
-
+/// The port trait the fixtures implement in Rust, like a `#[keel::port]` trait.
 trait Clocky: Send + Sync {
     fn now(&self) -> u32;
+}
+
+struct FakeClock {
+    now: AtomicU32,
 }
 
 impl Clocky for FakeClock {
@@ -336,68 +339,194 @@ impl Clocky for FakeClock {
     }
 }
 
-#[test]
-fn rust_bindings_are_fetched_by_concrete_type() {
-    let t = TestRuntime::new();
-    let ctx = t.ctx();
-    assert!(ctx.rust_port::<FakeClock>(1).is_none());
-    let clock = Arc::new(FakeClock {
-        now: AtomicU32::new(5),
-    });
-    ctx.bind_port::<dyn Clocky>(1, clock.clone());
-    let fetched = ctx.rust_port::<FakeClock>(1).unwrap();
-    assert!(Arc::ptr_eq(&fetched, &clock));
-    assert!(ctx.rust_port::<String>(1).is_none(), "wrong type");
-    assert!(ctx.rust_port::<FakeClock>(2).is_none(), "other port");
-    assert!(t.runtime().unbind_port(1));
-    assert!(!t.runtime().unbind_port(1));
-    assert!(ctx.rust_port::<FakeClock>(1).is_none());
+fn fake_clock(now: u32) -> Arc<dyn Clocky> {
+    Arc::new(FakeClock {
+        now: AtomicU32::new(now),
+    })
+}
+
+const CLOCKY: u32 = keel_meta::ids::port_id("Clocky");
+const CLOCKY_NOW: u32 = keel_meta::ids::port_method_id("Clocky", "now");
+const CLOCKY_ADD: u32 = keel_meta::ids::port_method_id("Clocky", "add");
+const CLOCKY_LATER: u32 = keel_meta::ids::port_method_id("Clocky", "later");
+const CLOCKY_FAIL: u32 = keel_meta::ids::port_method_id("Clocky", "fail");
+
+/// What `#[keel::port]` generates: decode the call, run it on the implementation, encode the
+/// outcome as `status u8` + body.
+fn clocky_dispatch(imp: &(dyn Any + Send + Sync), method_id: u32, args: &[u8]) -> PortDispatch {
+    let Some(clock) = imp.downcast_ref::<Arc<dyn Clocky>>() else {
+        return PortDispatch::Sync(vec![2]);
+    };
+    let reply = |status: u8, body: Vec<u8>| {
+        let mut bytes = vec![status];
+        bytes.extend(body);
+        bytes
+    };
+    match method_id {
+        CLOCKY_NOW => PortDispatch::Sync(reply(0, enc(&clock.now()))),
+        CLOCKY_ADD => {
+            let n: i32 = decode_from(args);
+            PortDispatch::Sync(reply(0, enc(&(clock.now() as i32 + n))))
+        }
+        CLOCKY_LATER => {
+            let clock = Arc::clone(clock);
+            PortDispatch::Async(Box::pin(async move {
+                keel_runtime::executor::yield_now().await;
+                reply(0, enc(&(clock.now() + 1000)))
+            }))
+        }
+        CLOCKY_FAIL => PortDispatch::Sync(reply(1, enc(&7_u16))),
+        _ => PortDispatch::Sync(vec![2]),
+    }
+}
+
+keel_meta::inventory::submit! {
+    PortDispatcher { port_id: CLOCKY, dispatch: clocky_dispatch }
+}
+
+/// A Rust fake standing in for `TEST_PORT.ask` (the port the `Counter` fixture calls).
+trait Asker: Send + Sync {
+    fn triple(&self, x: i32) -> i32;
+}
+
+struct Tripler;
+
+impl Asker for Tripler {
+    fn triple(&self, x: i32) -> i32 {
+        x * 3
+    }
+}
+
+fn asker_dispatch(imp: &(dyn Any + Send + Sync), method_id: u32, args: &[u8]) -> PortDispatch {
+    match imp.downcast_ref::<Arc<dyn Asker>>() {
+        Some(asker) if method_id == ASK => {
+            let mut bytes = vec![0];
+            bytes.extend(enc(&asker.triple(decode_from::<i32>(args))));
+            PortDispatch::Sync(bytes)
+        }
+        _ => PortDispatch::Sync(vec![2]),
+    }
+}
+
+keel_meta::inventory::submit! {
+    PortDispatcher { port_id: TEST_PORT, dispatch: asker_dispatch }
 }
 
 #[test]
-fn trait_object_bindings_round_trip_through_dyn_port() {
+fn rust_bindings_follow_the_arc_arc_convention() {
     let t = TestRuntime::new();
     let ctx = t.ctx();
-    let clock: Arc<dyn Clocky> = Arc::new(FakeClock {
-        now: AtomicU32::new(9),
-    });
-    t.runtime().bind_dyn_port::<dyn Clocky>(2, clock.clone());
-    let fetched = ctx.dyn_port::<dyn Clocky>(2).unwrap();
-    assert_eq!(fetched.now(), 9);
+    assert!(ctx.rust_port::<dyn Clocky>(CLOCKY).is_none());
+    let clock = fake_clock(5);
+    // What generated accessors and fakes do: an `Arc<Arc<dyn Trait>>` behind `dyn Any`.
+    ctx.bind_port::<dyn Clocky>(CLOCKY, Arc::new(clock.clone()));
+    let fetched = ctx.rust_port::<dyn Clocky>(CLOCKY).unwrap();
     assert!(Arc::ptr_eq(&fetched, &clock));
-    assert!(ctx.dyn_port::<dyn Clocky>(3).is_none());
+    assert_eq!(fetched.now(), 5);
     assert!(
-        ctx.rust_port::<FakeClock>(2).is_none(),
-        "bound as a trait object, not a FakeClock"
+        ctx.rust_port::<dyn Asker>(CLOCKY).is_none(),
+        "another trait"
     );
-    // Rebinding replaces.
-    let other: Arc<dyn Clocky> = Arc::new(FakeClock {
-        now: AtomicU32::new(10),
-    });
-    t.runtime().bind_dyn_port::<dyn Clocky>(2, other);
-    assert_eq!(ctx.dyn_port::<dyn Clocky>(2).unwrap().now(), 10);
+    assert!(
+        ctx.rust_port::<dyn Clocky>(CLOCKY + 1).is_none(),
+        "another port"
+    );
+    assert!(t.runtime().unbind_port(CLOCKY));
+    assert!(!t.runtime().unbind_port(CLOCKY));
+    assert!(ctx.rust_port::<dyn Clocky>(CLOCKY).is_none());
 }
 
 #[test]
-fn raw_calls_to_a_rust_bound_port_are_unavailable_and_never_reach_the_host() {
+fn bind_dyn_port_does_the_wrapping() {
     let t = TestRuntime::new();
-    t.host().script_port_ok(TEST_PORT, ASK, vec![1]);
-    t.runtime().bind_port::<dyn Any>(
-        TEST_PORT,
-        Arc::new(FakeClock {
-            now: AtomicU32::new(0),
-        }),
-    );
+    let ctx = t.ctx();
+    let clock = fake_clock(9);
+    t.runtime()
+        .bind_dyn_port::<dyn Clocky>(CLOCKY, clock.clone());
+    let fetched = ctx.rust_port::<dyn Clocky>(CLOCKY).unwrap();
+    assert!(Arc::ptr_eq(&fetched, &clock));
+    // Rebinding replaces.
+    ctx.bind_dyn_port::<dyn Clocky>(CLOCKY, fake_clock(10));
+    assert_eq!(ctx.rust_port::<dyn Clocky>(CLOCKY).unwrap().now(), 10);
+    // Foreign again: no Rust binding is visible.
+    t.runtime().bind_foreign_port(CLOCKY);
+    assert!(ctx.rust_port::<dyn Clocky>(CLOCKY).is_none());
+}
+
+#[test]
+fn raw_calls_to_a_rust_bound_port_run_the_implementation_through_its_dispatcher() {
+    let t = TestRuntime::new();
+    let rt = t.runtime();
+    t.host().script_port_ok(CLOCKY, CLOCKY_NOW, vec![99]); // must never be used
+    rt.bind_dyn_port::<dyn Clocky>(CLOCKY, fake_clock(41));
+
+    // Sync method, sync call.
+    assert_eq!(rt.port_call_sync(CLOCKY, CLOCKY_NOW, &[]), Ok(enc(&41_u32)));
     assert_eq!(
-        t.runtime().port_call_sync(TEST_PORT, ASK, &[]),
+        rt.port_call_sync(CLOCKY, CLOCKY_ADD, &enc(&1_i32)),
+        Ok(enc(&42_i32))
+    );
+    // Async call of a sync method resolves at once; of an async one, when the task runs.
+    assert_eq!(
+        t.run_until(rt.port_call(CLOCKY, CLOCKY_NOW, vec![])),
+        Ok(enc(&41_u32))
+    );
+    let later = rt.port_call(CLOCKY, CLOCKY_LATER, vec![]);
+    assert_eq!(later.port_call_id(), 0, "no host round trip");
+    assert_eq!(t.run_until(later), Ok(enc(&1041_u32)));
+    // A sync call cannot wait for an async implementation.
+    assert_eq!(
+        rt.port_call_sync(CLOCKY, CLOCKY_LATER, &[]),
         Err(PortError::Unavailable)
     );
-    let future = t.runtime().port_call(TEST_PORT, ASK, vec![]);
+    // Typed errors and unknown methods.
+    assert_eq!(
+        rt.port_call_sync(CLOCKY, CLOCKY_FAIL, &[]),
+        Err(PortError::Failed(enc(&7_u16)))
+    );
+    assert_eq!(
+        rt.port_call_sync(CLOCKY, 12345, &[]),
+        Err(PortError::Unavailable)
+    );
+    // The host was never asked.
+    assert!(t.host().port_calls().is_empty());
+}
+
+#[test]
+fn a_rust_bound_port_without_a_dispatcher_is_unavailable_and_never_reaches_the_host() {
+    let t = TestRuntime::new();
+    let no_dispatcher = keel_meta::ids::port_id("NoDispatcherForThis");
+    t.host().script_port_ok(no_dispatcher, 1, vec![1]);
+    t.runtime()
+        .bind_port::<dyn Any>(no_dispatcher, Arc::new(fake_clock(0)));
+    assert_eq!(
+        t.runtime().port_call_sync(no_dispatcher, 1, &[]),
+        Err(PortError::Unavailable)
+    );
+    let future = t.runtime().port_call(no_dispatcher, 1, vec![]);
     assert_eq!(t.run_until(future), Err(PortError::Unavailable));
     assert!(t.host().port_calls().is_empty());
     // Handing the port back to the platform restores host routing.
-    t.runtime().bind_foreign_port(TEST_PORT);
-    assert_eq!(t.runtime().port_call_sync(TEST_PORT, ASK, &[]), Ok(vec![1]));
+    t.runtime().bind_foreign_port(no_dispatcher);
+    assert_eq!(
+        t.runtime().port_call_sync(no_dispatcher, 1, &[]),
+        Ok(vec![1])
+    );
+}
+
+#[test]
+fn a_dispatched_method_calls_a_rust_fake_instead_of_the_platform() {
+    // The `Counter::ask_port` fixture calls `TEST_PORT.ask` through `Ctx::port_call`. With a
+    // Rust fake bound, the platform is not involved at all.
+    let t = TestRuntime::new();
+    t.host().script_port_ok(TEST_PORT, ASK, enc(&-1_i32)); // the platform would answer -1
+    let fake: Arc<dyn Asker> = Arc::new(Tripler);
+    t.runtime().bind_dyn_port::<dyn Asker>(TEST_PORT, fake);
+    let h = new_counter(&t, 0, "");
+    ask(&t, h, 7, 3);
+    t.run_pending();
+    assert_eq!(decode_body::<i32>(&t.take_replies()[0]), 21);
+    assert!(t.host().port_calls().is_empty());
 }
 
 // ----- events -----------------------------------------------------------------------------

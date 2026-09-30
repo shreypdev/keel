@@ -16,7 +16,6 @@ parking_lot = { workspace = true }
 slab = { workspace = true }
 inventory = { workspace = true }
 futures-core = { workspace = true }
-pin-project-lite = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -4,15 +4,16 @@
 //! This file is the smallest surface of the SPEC section 16.1 contract that `keel-runtime`
 //! needs in order to compile and be tested while the real `keel-signals` crate is written in
 //! parallel: `Signal`, `StoreCell`, `txn`, the `ChangeSink` and `next_txn_id`. It has no
-//! `Computed`, `Effect` or keyed-list patches. Every signature matches SPEC 16.1; the merge
-//! replaces this whole crate with the real one.
+//! `Computed`, `Effect` or keyed-list patches. Signatures follow the real crate as it stands
+//! on its own branch (`attach(signal, id) -> Result`, `encode_snapshot` writing the whole
+//! store record); the merge replaces this whole crate with the real one.
 
 use std::cell::RefCell;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
-use keel_wire::payload::{ChangeOp, ChangeSetBuilder};
+use keel_wire::payload::{ChangeOp, ChangeSetBuilder, StoreSnapshot};
 use keel_wire::{Encode, Handle, Writer};
 use parking_lot::{Mutex, RwLock};
 
@@ -23,8 +24,19 @@ pub const ALL_SIGNALS: u32 = u32::MAX;
 pub trait SignalValue: Encode + Clone + Send + Sync + 'static {}
 impl<T: Encode + Clone + Send + Sync + 'static> SignalValue for T {}
 
-/// Extracts the key of a list item (provisional: the real alias is over `ListLike::Item`).
-pub type KeyFn<T> = fn(&T) -> u64;
+/// Why binding a signal to a store failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignalsError {
+    /// The signal already belongs to a store.
+    AlreadyAttached,
+    /// `signal_id` is not the number of signals attached so far.
+    OutOfOrder {
+        /// The id the next signal must have.
+        expected: u32,
+        /// The id that was given.
+        got: u32,
+    },
+}
 
 /// Receives every committed change-set (SPEC 3.5), encoded.
 pub trait ChangeSink: Send + Sync {
@@ -146,21 +158,29 @@ impl StoreCell {
         self: &Arc<Self>,
         signal: &Signal<T>,
         signal_id: u32,
-        key: Option<KeyFn<T>>,
-    ) {
-        let _ = key;
+    ) -> Result<(), SignalsError> {
         let value = signal.clone();
-        let index = {
-            let mut slots = self.slots.lock();
-            slots.push(Slot {
-                signal_id,
-                observed: false,
-                pending_dirty: false,
-                encode: Box::new(move |w| value.with(|v| v.encode(w))),
+        let mut slots = self.slots.lock();
+        if signal.inner.binding.get().is_some() {
+            return Err(SignalsError::AlreadyAttached);
+        }
+        let expected = u32::try_from(slots.len()).unwrap_or(ALL_SIGNALS);
+        if signal_id != expected {
+            return Err(SignalsError::OutOfOrder {
+                expected,
+                got: signal_id,
             });
-            slots.len() - 1
-        };
+        }
+        let index = slots.len();
+        slots.push(Slot {
+            signal_id,
+            observed: false,
+            pending_dirty: false,
+            encode: Box::new(move |w| value.with(|v| v.encode(w))),
+        });
+        drop(slots);
         let _ = signal.inner.binding.set((Arc::downgrade(self), index));
+        Ok(())
     }
 
     /// Called by the runtime when the store enters the object table (`0` detaches it).
@@ -217,16 +237,24 @@ impl StoreCell {
         }
     }
 
-    /// Appends the snapshot body: `signal_count u32, signals x { signal_id u32, len u32, value }`.
+    /// Appends this store's snapshot record (SPEC 5.9): `handle u64, type_id u32,
+    /// signal_count u32, signals x { signal_id u32, len u32, value }`.
     pub fn encode_snapshot(&self, out: &mut Writer) {
         let slots = self.slots.lock();
-        out.write_u32(u32::try_from(slots.len()).unwrap_or(u32::MAX));
-        for slot in slots.iter() {
-            let mut value = Writer::new();
-            (slot.encode)(&mut value);
-            out.write_u32(slot.signal_id);
-            out.write_bytes(value.as_slice());
+        let signals = slots
+            .iter()
+            .map(|slot| {
+                let mut value = Writer::new();
+                (slot.encode)(&mut value);
+                (slot.signal_id, value.into_vec())
+            })
+            .collect();
+        StoreSnapshot {
+            handle: Handle(self.handle()),
+            type_id: self.type_id,
+            signals,
         }
+        .encode(out);
     }
 
     fn change_set(&self, dirty_slots: &[usize]) -> Option<Vec<u8>> {
@@ -351,8 +379,8 @@ mod tests {
         let cell = StoreCell::new(7);
         let a = Signal::new(1_i32);
         let b = Signal::new(2_i32);
-        cell.attach(&a, 0, None);
-        cell.attach(&b, 1, None);
+        cell.attach(&a, 0).unwrap();
+        cell.attach(&b, 1).unwrap();
         cell.set_handle(Handle::new(0, 1).0);
 
         let mut w = Writer::new();
@@ -379,12 +407,30 @@ mod tests {
         let cell = StoreCell::new(8);
         let a = Signal::new(0_u8);
         a.set(1); // not attached
-        cell.attach(&a, 0, None);
+        cell.attach(&a, 0).unwrap();
+        assert_eq!(cell.attach(&a, 1), Err(SignalsError::AlreadyAttached));
         cell.set_handle(Handle::new(9, 1).0);
         a.set(2); // attached, unobserved
         assert_eq!(a.get(), 2);
-        let mut body = Writer::new();
-        cell.encode_snapshot(&mut body);
-        assert_eq!(body.as_slice(), &[1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2]);
+        let mut record = Writer::new();
+        cell.encode_snapshot(&mut record);
+        let decoded =
+            StoreSnapshot::decode(&mut keel_wire::Reader::new(record.as_slice())).unwrap();
+        assert_eq!(decoded.handle, Handle::new(9, 1));
+        assert_eq!(decoded.type_id, 8);
+        assert_eq!(decoded.signals, vec![(0, vec![2])]);
+    }
+
+    #[test]
+    fn attach_requires_declaration_order() {
+        let cell = StoreCell::new(1);
+        let a = Signal::new(0_u8);
+        assert_eq!(
+            cell.attach(&a, 3),
+            Err(SignalsError::OutOfOrder {
+                expected: 0,
+                got: 3
+            })
+        );
     }
 }

@@ -156,20 +156,22 @@ impl Ctx {
         self.0.port_call_sync(port_id, method_id, args)
     }
 
-    /// Binds a Rust implementation to a port id; see [`Runtime::bind_port`].
+    /// Binds a Rust implementation to a port id; see [`Runtime::bind_port`] for the
+    /// convention (`imp` is an `Arc<Arc<dyn Trait>>`).
     pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>) {
         self.0.bind_port::<P>(port_id, imp);
     }
 
-    /// The Rust binding of `port_id`, if one was bound and it is a `T`.
-    pub fn rust_port<T: Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<T>> {
-        self.0.rust_port::<T>(port_id)
+    /// Binds an implementation as the trait object `P`; see [`Runtime::bind_dyn_port`].
+    pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>) {
+        self.0.bind_dyn_port::<P>(port_id, imp);
     }
 
-    /// Like [`rust_port`](Ctx::rust_port) for a port bound as a trait object with
-    /// [`Runtime::bind_dyn_port`]: `ctx.dyn_port::<dyn Clock>(Clock::PORT_ID)`.
-    pub fn dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
-        self.0.dyn_port::<P>(port_id)
+    /// The Rust binding of `port_id` as a `P` (`ctx.rust_port::<dyn Http>(port_id)`), if there is
+    /// one: fakes and built-ins. What a generated port accessor tries before falling back to its
+    /// proxy.
+    pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
+        self.0.rust_port::<P>(port_id)
     }
 }
 

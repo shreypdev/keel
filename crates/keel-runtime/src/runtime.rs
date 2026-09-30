@@ -14,7 +14,8 @@ use std::time::Duration;
 use keel_meta::{DispatchCall, Schema};
 use keel_signals::ChangeSink;
 use keel_wire::payload::{
-    Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StreamFlag, StreamItem,
+    Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
+    StreamFlag, StreamItem,
 };
 use keel_wire::{Handle, Reader, Writer};
 use parking_lot::{Mutex, MutexGuard};
@@ -33,10 +34,11 @@ use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
 use crate::lazy::LazyList;
 use crate::log::{DEBUG, ERROR, FATAL, WARN};
-use crate::object::{AnyObject, KeelObject, StoreObject, StoreRestorer, plain, store};
+use crate::object::{AnyObject, KeelObject, StoreObject, StoreRestorer, erased, store};
 use crate::object_table::{BadHandle, ObjectTable};
 use crate::ports::{
-    Completion, Events, PortBinding, PortError, PortFuture, PortTable, decode_port_reply,
+    Completion, Events, PortBinding, PortDispatch, PortDispatcher, PortError, PortFuture,
+    PortTable, decode_dispatch_reply, decode_port_reply,
 };
 use crate::stats::{Stats, push_json_string};
 use crate::timer::{Sleep, Timers, delay_ms};
@@ -199,6 +201,7 @@ pub struct Runtime {
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
+    port_dispatchers: HashMap<u32, &'static PortDispatcher>,
     calls: Mutex<HashMap<u32, CallEntry>>,
     stats: Stats,
     extensions: Extensions,
@@ -301,6 +304,13 @@ impl Runtime {
             restorers.entry(restorer.type_id).or_insert(restorer);
         }
 
+        let mut port_dispatchers: HashMap<u32, &'static PortDispatcher> = HashMap::new();
+        for dispatcher in inventory::iter::<PortDispatcher> {
+            port_dispatchers
+                .entry(dispatcher.port_id)
+                .or_insert(dispatcher);
+        }
+
         let rt = Arc::new_cyclic(|weak| Runtime {
             id: NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed),
             weak: weak.clone(),
@@ -322,6 +332,7 @@ impl Runtime {
             events: Events::default(),
             table,
             restorers,
+            port_dispatchers,
             calls: Mutex::new(HashMap::new()),
             stats: Stats::default(),
             extensions: Extensions::default(),
@@ -843,9 +854,9 @@ impl Runtime {
         match guard::guarded(|| dispatch_fn(self as &dyn Any, dispatch_call)) {
             Ok(outcome) => match outcome.downcast::<DispatchResult>() {
                 Ok(DispatchResult::BadRequest(reason)) => Dispatched::Bad(reason),
-                Ok(DispatchResult::Unknown) => {
-                    Dispatched::Bad(format!("unknown method {method_id:#010x}"))
-                }
+                Ok(DispatchResult::Unknown) => Dispatched::Bad(format!(
+                    "unknown method {method_id:#010x}, or its arguments or receiver were not valid"
+                )),
                 Ok(result) => Dispatched::Done(result, handle),
                 Err(_) => Dispatched::Bad(
                     "the dispatcher returned something other than a keel_runtime::DispatchResult"
@@ -1022,12 +1033,21 @@ impl Runtime {
         self.objects.insert(object)
     }
 
-    /// Stores a plain object and returns its handle.
+    /// Stores an object and returns its handle: what a generated constructor calls.
+    ///
+    /// If `T` is a store (a [`StoreRestorer`] is registered for its type id) the runtime finds
+    /// its [`StoreCell`](keel_signals::StoreCell) through the restorer's `cell` accessor and
+    /// tells it its handle, so change-sets and snapshots work without the caller doing
+    /// anything more.
     pub fn insert_object<T: KeelObject>(&self, object: Arc<T>) -> Handle {
-        self.objects.insert(plain(object))
+        let cell = self.restorers.get(&T::TYPE_ID).map(|r| r.cell);
+        self.objects
+            .insert(erased(object, T::TYPE_ID, T::NAME, cell))
     }
 
-    /// Stores a store and returns its handle; its cell learns the handle.
+    /// Stores a store and returns its handle; its cell learns the handle. Unlike
+    /// [`insert_object`](Runtime::insert_object) this does not need a registered
+    /// [`StoreRestorer`].
     pub fn insert_store<T: StoreObject>(&self, object: Arc<T>) -> Handle {
         self.objects.insert(store(object))
     }
@@ -1200,24 +1220,24 @@ impl Runtime {
 
     // ----- ports and events --------------------------------------------------------------
 
-    /// Binds a Rust implementation to a port id (fakes, built-ins). `imp` must be an `Arc<T>`
-    /// of the concrete implementation type; fetch it back with
-    /// [`Ctx::rust_port::<T>`](Ctx::rust_port). `P` names the port trait the value stands in
-    /// for and is documentation only. For a value that is used as a trait object, prefer
-    /// [`bind_dyn_port`](Runtime::bind_dyn_port).
+    /// Binds a Rust implementation to a port id (fakes, built-ins).
     ///
-    /// A Rust binding has no wire form: raw [`port_call`](Runtime::port_call)s to the port
-    /// complete with [`PortError::Unavailable`].
+    /// **Convention** (what `#[keel::port]` generates code for): `P` is the port trait
+    /// (`dyn Http`) and `imp` is an `Arc<Arc<P>>` behind `dyn Any`, because an
+    /// `Arc<dyn Any>` cannot be downcast to `Arc<dyn Trait>` but can be downcast to
+    /// `Arc<Arc<dyn Trait>>`. [`bind_dyn_port`](Runtime::bind_dyn_port) does the wrapping for
+    /// you. Typed code fetches the binding back with [`rust_port::<P>`](Runtime::rust_port); a raw
+    /// [`port_call`](Runtime::port_call) reaches it through the [`PortDispatcher`] registered
+    /// for the port id.
     pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>) {
         self.ports.bind(port_id, PortBinding::Rust(imp));
     }
 
     /// Binds an implementation as the trait object `P`
-    /// (`rt.bind_dyn_port::<dyn Clock>(port_id, Arc::new(FakeClock::new()))`), retrievable with
-    /// [`dyn_port::<P>`](Runtime::dyn_port).
+    /// (`rt.bind_dyn_port::<dyn Clock>(port_id, Arc::new(FakeClock::new()))`), following the
+    /// [`bind_port`](Runtime::bind_port) convention.
     pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>) {
-        self.ports
-            .bind(port_id, PortBinding::Rust(Arc::new(DynPort(imp))));
+        self.ports.bind(port_id, PortBinding::Rust(Arc::new(imp)));
     }
 
     /// Routes a port id to the platform again (through [`Host::port_call`]), replacing any
@@ -1231,20 +1251,28 @@ impl Runtime {
         self.ports.unbind(port_id)
     }
 
-    /// The Rust binding of `port_id`, if bound with [`bind_port`](Runtime::bind_port) as a `T`.
-    pub fn rust_port<T: Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<T>> {
+    /// The Rust binding of `port_id` as a `P` (`rt.rust_port::<dyn Http>(port_id)`), if one was
+    /// bound following the [`bind_port`](Runtime::bind_port) convention (an `Arc<Arc<P>>`).
+    /// `None` for a foreign port or a binding of another type.
+    pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
         match self.ports.binding(port_id) {
-            PortBinding::Rust(imp) => imp.downcast::<T>().ok(),
+            PortBinding::Rust(imp) => imp.downcast::<Arc<P>>().ok().map(|arc| Arc::clone(&*arc)),
             PortBinding::Foreign => None,
         }
     }
 
-    /// The Rust binding of `port_id`, if bound with [`bind_dyn_port`](Runtime::bind_dyn_port)
-    /// as a `P`.
-    pub fn dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
-        match self.ports.binding(port_id) {
-            PortBinding::Rust(imp) => imp.downcast::<DynPort<P>>().ok().map(|d| d.0.clone()),
-            PortBinding::Foreign => None,
+    /// Runs an encoded call on a Rust-bound port through its registered [`PortDispatcher`].
+    /// `Unavailable` if the port has no dispatcher.
+    fn dispatch_to_rust(
+        &self,
+        imp: &Arc<dyn Any + Send + Sync>,
+        port_id: u32,
+        method_id: u32,
+        args: &[u8],
+    ) -> PortDispatch {
+        match self.port_dispatchers.get(&port_id) {
+            Some(dispatcher) => (dispatcher.dispatch)(&**imp, method_id, args),
+            None => PortDispatch::Sync(vec![2]),
         }
     }
 
@@ -1253,8 +1281,17 @@ impl Runtime {
     /// [`port_reply`](Runtime::port_reply), or immediately if the host answered synchronously.
     pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture {
         Stats::inc(&self.stats.port_calls);
-        if matches!(self.ports.binding(port_id), PortBinding::Rust(_)) {
-            return PortFuture::ready(self.ports.clone(), Err(PortError::Unavailable));
+        if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
+            return match self.dispatch_to_rust(&imp, port_id, method_id, &args) {
+                PortDispatch::Sync(bytes) => {
+                    PortFuture::ready(self.ports.clone(), decode_dispatch_reply(&bytes))
+                }
+                PortDispatch::Async(future) => {
+                    PortFuture::rust(Box::pin(
+                        async move { decode_dispatch_reply(&future.await) },
+                    ))
+                }
+            };
         }
         let (id, slot) = self.ports.begin(self.timers.now_ns());
         // Constructed before the host is called so that a panic in the host abandons the id.
@@ -1285,8 +1322,15 @@ impl Runtime {
         args: &[u8],
     ) -> Result<Vec<u8>, PortError> {
         Stats::inc(&self.stats.port_calls);
-        if matches!(self.ports.binding(port_id), PortBinding::Rust(_)) {
-            return Err(PortError::Unavailable);
+        if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
+            return match self.dispatch_to_rust(&imp, port_id, method_id, args) {
+                PortDispatch::Sync(bytes) => decode_dispatch_reply(&bytes),
+                // A sync call cannot wait for an implementation that answers later.
+                PortDispatch::Async(future) => {
+                    drop(future);
+                    Err(PortError::Unavailable)
+                }
+            };
         }
         let (id, slot) = self.ports.begin(self.timers.now_ns());
         let mut future = PortFuture::new(slot, self.ports.clone(), id);
@@ -1383,9 +1427,12 @@ impl Runtime {
 
     // ----- snapshot and restore ----------------------------------------------------------
 
-    /// Encodes every live store (SPEC 5.9): `count u32, stores x { handle u64, type_id u32,
-    /// <StoreCell::encode_snapshot body> }`, which is exactly a `keel_wire::payload::Snapshot`.
-    /// Objects that are not stores are not included.
+    /// Encodes every live store (SPEC 5.9): `count u32` followed by each store's
+    /// [`StoreCell::encode_snapshot`](keel_signals::StoreCell::encode_snapshot) record
+    /// (`handle u64, type_id u32, signal_count u32, signals`), which together are exactly a
+    /// `keel_wire::payload::Snapshot`. The runtime re-encodes each record with the table's own
+    /// handle and the object's own type id, so a snapshot is consistent whatever the cell
+    /// knows. Objects that are not stores are not included.
     pub fn snapshot(&self) -> Vec<u8> {
         // Read-only, so it is fine even if this thread already holds the lock.
         let _guard = self.enter_core().ok();
@@ -1395,11 +1442,33 @@ impl Runtime {
                 continue;
             };
             let mut w = Writer::new();
-            w.write_u64(handle.0);
-            w.write_u32(object.keel_type_id());
             match guard::guarded(|| cell.encode_snapshot(&mut w)) {
-                Ok(()) => chunks.push(w.into_vec()),
-                Err(report) => self.note_panic("snapshot", handle, &report),
+                Ok(()) => {}
+                Err(report) => {
+                    self.note_panic("snapshot", handle, &report);
+                    continue;
+                }
+            }
+            let mut r = Reader::new(w.as_slice());
+            match StoreSnapshot::decode(&mut r) {
+                Ok(record) => {
+                    let mut chunk = Writer::with_capacity(w.len());
+                    StoreSnapshot {
+                        handle,
+                        type_id: object.keel_type_id(),
+                        signals: record.signals,
+                    }
+                    .encode(&mut chunk);
+                    chunks.push(chunk.into_vec());
+                }
+                Err(e) => self.log(
+                    ERROR,
+                    "keel::runtime",
+                    &format!(
+                        "snapshot: `{}` wrote a malformed store record: {e}",
+                        object.keel_type_name()
+                    ),
+                ),
             }
         }
         let mut out = Writer::new();
@@ -1450,6 +1519,7 @@ impl Runtime {
         // Phase 1: build every store. Nothing is touched yet.
         let mut built: Vec<(Handle, Arc<dyn AnyObject>)> =
             Vec::with_capacity(snapshot.stores.len());
+
         for s in &snapshot.stores {
             let type_id = s.type_id;
             let Some(restorer) = self.restorers.get(&type_id) else {
@@ -1463,8 +1533,9 @@ impl Runtime {
             }
             let bytes = body.into_vec();
             let mut r = Reader::new(&bytes);
-            let object = match guard::guarded(|| (restorer.restore)(ctx.clone(), &mut r)) {
-                Ok(Ok(object)) => object,
+            let restored = guard::guarded(|| (restorer.restore)(ctx.clone(), s.handle.0, &mut r));
+            let any = match restored {
+                Ok(Ok(any)) => any,
                 Ok(Err(source)) => return Err(RestoreError::Store { type_id, source }),
                 Err(report) => {
                     self.log_panic("a store's restore panicked", &report);
@@ -1476,17 +1547,20 @@ impl Runtime {
             };
             r.finish()
                 .map_err(|source| RestoreError::Store { type_id, source })?;
-            if object.keel_type_id() != type_id || object.as_store().is_none() {
+            // The restorer must hand back the store it is registered for: prove it by finding
+            // the cell.
+            if (restorer.cell)(&*any).is_none() {
                 return Err(RestoreError::Store {
                     type_id,
                     source: keel_wire::WireError::InvalidTag {
-                        tag: object.keel_type_id(),
+                        tag: type_id,
                         at: 0,
-                        ty: "StoreRestorer.type_id",
+                        ty: "StoreRestorer.cell",
                     },
                 });
             }
-            built.push((s.handle, object));
+            let name = self.table.objects.get(&type_id).map_or("store", |m| m.name);
+            built.push((s.handle, erased(any, type_id, name, Some(restorer.cell))));
         }
 
         // Phase 2: replace the table.
@@ -1622,9 +1696,6 @@ impl Drop for Runtime {
         // The global slot holds a strong reference, so a registered runtime is never dropped.
     }
 }
-
-/// A trait object bound as a port implementation; the wrapper gives `Arc<P>` a `TypeId`.
-struct DynPort<P: ?Sized>(Arc<P>);
 
 /// The `keel-core` thread: wait for work, run a turn, repeat. Holds only a `Weak` to the
 /// runtime, so dropping the last `Arc<Runtime>` ends it.

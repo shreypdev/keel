@@ -17,7 +17,7 @@ use keel_meta::{
 use keel_runtime::testing::{ReplyRecord, TestRuntime, call_payload, decode_reply};
 use keel_runtime::{
     Ctx, DispatchBytes, DispatchResult, KeelObject, LazyList, PortError, Runtime, StoreObject,
-    StoreRestorer, store,
+    StoreRestorer,
 };
 use keel_signals::{Signal, StoreCell};
 use keel_wire::payload::{CallTarget, ReplyStatus};
@@ -45,8 +45,8 @@ impl Counter {
         let cell = StoreCell::new(<Counter as KeelObject>::TYPE_ID);
         let count = Signal::new(initial);
         let label = Signal::new(label.to_owned());
-        cell.attach(&count, COUNT_SIGNAL, None);
-        cell.attach(&label, LABEL_SIGNAL, None);
+        cell.attach(&count, COUNT_SIGNAL).unwrap();
+        cell.attach(&label, LABEL_SIGNAL).unwrap();
         Counter {
             cell,
             count,
@@ -456,7 +456,12 @@ keel_meta::inventory::submit! { Registration::Object(&COUNTER_META) }
 keel_meta::inventory::submit! {
     StoreRestorer {
         type_id: ids::type_id("Counter"),
-        restore: |ctx, r| Ok(store(Arc::new(<Counter as StoreObject>::restore(ctx, r)?))),
+        restore: |ctx, handle, r| {
+            let restored = <Counter as StoreObject>::restore(ctx, r)?;
+            restored.cell().set_handle(handle);
+            Ok(Arc::new(restored))
+        },
+        cell: |any| any.downcast_ref::<Counter>().map(<Counter as StoreObject>::cell),
     }
 }
 
@@ -682,7 +687,12 @@ macro_rules! misbehaving_store {
         keel_meta::inventory::submit! {
             StoreRestorer {
                 type_id: $type_id,
-                restore: |ctx, r| Ok(store(Arc::new(<$name as StoreObject>::restore(ctx, r)?))),
+                restore: |ctx, handle, r| {
+                    let restored = <$name as StoreObject>::restore(ctx, r)?;
+                    restored.cell().set_handle(handle);
+                    Ok(Arc::new(restored))
+                },
+                cell: |any| any.downcast_ref::<$name>().map(<$name as StoreObject>::cell),
             }
         }
     };

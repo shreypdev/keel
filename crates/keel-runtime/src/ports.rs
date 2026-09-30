@@ -6,10 +6,12 @@
 //!   (async, returns a [`PortFuture`]) or [`port_call_sync`] (sync methods).
 //! * A port id is either **foreign** (the default: calls go to
 //!   [`Host::port_call`](crate::Host::port_call)) or bound to a **Rust** implementation with
-//!   [`Runtime::bind_port`](crate::Runtime::bind_port) (fakes, built-ins). Rust bindings are
-//!   fetched with [`Ctx::rust_port`](crate::Ctx::rust_port) and called directly; they have no
-//!   wire form, so a raw port call to a Rust-bound port completes with
-//!   [`PortError::Unavailable`].
+//!   [`Runtime::bind_port`](crate::Runtime::bind_port) (fakes, built-ins), conventionally an
+//!   `Arc<Arc<dyn Trait>>`. Typed code fetches the binding with
+//!   [`Ctx::rust_port`](crate::Ctx::rust_port) and calls it directly; a raw port call
+//!   (what a generated proxy makes) is routed to the implementation through the
+//!   [`PortDispatcher`] that `#[keel::port]` registered, so the proxy works the same against a
+//!   fake. A Rust-bound port without a dispatcher is [`PortError::Unavailable`].
 //! * [`Events`] fans host-to-core events (`Connectivity`, `Lifecycle`) out to subscribers.
 //!
 //! # Abandoned calls
@@ -266,29 +268,100 @@ impl PortTable {
     }
 }
 
+// ----- Rust-side dispatch ----------------------------------------------------------------
+
+/// How a Rust implementation of a port answers an *encoded* call: a status byte followed by the
+/// body, exactly like a `PortReply` without its `port_call_id`. `#[keel::port]` generates the
+/// function that produces it.
+///
+/// `status` is `0` (the body is the encoded return value), `1` (the body is the encoded typed
+/// error) or `2` (unavailable: unknown method or undecodable arguments).
+pub enum PortDispatch {
+    /// The implementation answered synchronously.
+    Sync(Vec<u8>),
+    /// The implementation answers later.
+    Async(Pin<Box<dyn Future<Output = Vec<u8>> + Send>>),
+}
+
+impl fmt::Debug for PortDispatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PortDispatch::Sync(bytes) => f.debug_tuple("Sync").field(bytes).finish(),
+            PortDispatch::Async(_) => f.write_str("Async(..)"),
+        }
+    }
+}
+
+/// The erased entry point of a Rust-bound port: `#[keel::port]` submits one per port trait.
+///
+/// When a raw [`Runtime::port_call`](crate::Runtime::port_call) targets a port bound to a Rust
+/// implementation, the runtime finds the dispatcher by `port_id` and calls it with the bound
+/// `Arc<Arc<dyn Trait>>` (as `dyn Any`), the `method_id` and the encoded arguments, so a
+/// generated proxy behaves the same whether the implementation is the platform's or a fake.
+pub struct PortDispatcher {
+    /// The port id (`fnv1a32("port.<TraitName>")`).
+    pub port_id: u32,
+    /// Runs the call on the implementation (`imp` is the value passed to `bind_port`).
+    pub dispatch: fn(imp: &(dyn Any + Send + Sync), method_id: u32, args: &[u8]) -> PortDispatch,
+}
+
+inventory::collect!(PortDispatcher);
+
+/// Interprets a [`PortDispatch`] reply (`status u8` + body).
+pub(crate) fn decode_dispatch_reply(bytes: &[u8]) -> Result<Vec<u8>, PortError> {
+    match bytes.split_first() {
+        Some((0, body)) => Ok(body.to_vec()),
+        Some((1, body)) => Err(PortError::Failed(body.to_vec())),
+        Some((2, _)) => Err(PortError::Unavailable),
+        Some((&tag, _)) => Err(PortError::Decode(WireError::InvalidTag {
+            tag: u32::from(tag),
+            at: 0,
+            ty: "PortDispatch.status",
+        })),
+        None => Err(PortError::Decode(WireError::UnexpectedEof {
+            needed: 1,
+            at: 0,
+        })),
+    }
+}
+
 // ----- PortFuture ------------------------------------------------------------------------
+
+type BoxedPortFuture = Pin<Box<dyn Future<Output = Result<Vec<u8>, PortError>> + Send>>;
+
+enum Kind {
+    /// A call to the host: completed through the port table.
+    Foreign {
+        slot: Arc<PortSlot>,
+        table: Arc<PortTable>,
+        id: u32,
+        done: bool,
+    },
+    /// A call to a Rust implementation that answers asynchronously.
+    Rust(BoxedPortFuture),
+}
 
 /// The result of an asynchronous port call: resolves to the encoded return value
 /// (`Result<T, E>` collapses into `Ok(T bytes)` / [`PortError::Failed`]).
 ///
 /// Created by [`Runtime::port_call`](crate::Runtime::port_call); the call is sent to the
-/// host when the future is created, not when it is first polled. Dropping it before it
-/// completes abandons the call: a late reply is discarded.
+/// host (or run on the Rust implementation) when the future is created, not when it is first
+/// polled. Dropping it before it completes abandons the call: a late host reply is discarded, an
+/// asynchronous Rust implementation is dropped.
 #[must_use = "a PortFuture does nothing unless awaited; dropping it abandons the call"]
 pub struct PortFuture {
-    slot: Arc<PortSlot>,
-    table: Arc<PortTable>,
-    id: u32,
-    done: bool,
+    kind: Kind,
 }
 
 impl PortFuture {
     pub(crate) fn new(slot: Arc<PortSlot>, table: Arc<PortTable>, id: u32) -> PortFuture {
         PortFuture {
-            slot,
-            table,
-            id,
-            done: false,
+            kind: Kind::Foreign {
+                slot,
+                table,
+                id,
+                done: false,
+            },
         }
     }
 
@@ -297,25 +370,43 @@ impl PortFuture {
         let slot = PortSlot::new();
         slot.complete(result);
         PortFuture {
-            slot,
-            table,
-            id: 0,
-            done: false,
+            kind: Kind::Foreign {
+                slot,
+                table,
+                id: 0,
+                done: false,
+            },
         }
     }
 
-    /// The `port_call_id` this future waits on (`0` for an already-complete future).
+    /// A call answered by a Rust implementation.
+    pub(crate) fn rust(future: BoxedPortFuture) -> PortFuture {
+        PortFuture {
+            kind: Kind::Rust(future),
+        }
+    }
+
+    /// The `port_call_id` this future waits on (`0` for an already-complete future or a call
+    /// answered by a Rust implementation).
     pub fn port_call_id(&self) -> u32 {
-        self.id
+        match &self.kind {
+            Kind::Foreign { id, .. } => *id,
+            Kind::Rust(_) => 0,
+        }
     }
 
     /// Takes the result if it has arrived, without polling (used by `port_call_sync`).
     pub(crate) fn try_take(&mut self) -> Option<Result<Vec<u8>, PortError>> {
-        let result = self.slot.take();
-        if result.is_some() {
-            self.done = true;
+        match &mut self.kind {
+            Kind::Foreign { slot, done, .. } => {
+                let result = slot.take();
+                if result.is_some() {
+                    *done = true;
+                }
+                result
+            }
+            Kind::Rust(_) => None,
         }
-        result
     }
 }
 
@@ -323,24 +414,34 @@ impl Future for PortFuture {
     type Output = Result<Vec<u8>, PortError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut inner = self.slot.inner.lock();
-        if let Some(result) = inner.result.take() {
-            drop(inner);
-            self.done = true;
-            return Poll::Ready(result);
+        match &mut self.kind {
+            Kind::Rust(future) => future.as_mut().poll(cx),
+            Kind::Foreign { slot, done, .. } => {
+                let mut inner = slot.inner.lock();
+                if let Some(result) = inner.result.take() {
+                    drop(inner);
+                    *done = true;
+                    return Poll::Ready(result);
+                }
+                match &inner.waker {
+                    Some(w) if w.will_wake(cx.waker()) => {}
+                    _ => inner.waker = Some(cx.waker().clone()),
+                }
+                Poll::Pending
+            }
         }
-        match &inner.waker {
-            Some(w) if w.will_wake(cx.waker()) => {}
-            _ => inner.waker = Some(cx.waker().clone()),
-        }
-        Poll::Pending
     }
 }
 
 impl Drop for PortFuture {
     fn drop(&mut self) {
-        if !self.done && self.id != 0 {
-            self.table.abandon(self.id);
+        if let Kind::Foreign {
+            table, id, done, ..
+        } = &self.kind
+        {
+            if !*done && *id != 0 {
+                table.abandon(*id);
+            }
         }
     }
 }
@@ -348,7 +449,7 @@ impl Drop for PortFuture {
 impl fmt::Debug for PortFuture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PortFuture")
-            .field("port_call_id", &self.id)
+            .field("port_call_id", &self.port_call_id())
             .finish_non_exhaustive()
     }
 }

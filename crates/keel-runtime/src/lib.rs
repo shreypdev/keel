@@ -71,7 +71,14 @@ pub use keel_meta::{DispatchCall, DispatchOutcome};
 pub use keel_wire::Handle;
 pub use lazy::{LazyList, LazyListInner};
 pub use object::{
-    AnyObject, KeelObject, KeelObjectDyn, RestoreFn, StoreObject, StoreRestorer, plain, store,
+    AnyObject, CellFn, KeelObject, KeelObjectDyn, RestoreFn, StoreObject, StoreRestorer, plain,
+    store,
 };
-pub use ports::{EventHandler, Events, Port, PortError, PortFuture, Subscription, port_call_sync};
+pub use ports::{
+    EventHandler, Events, Port, PortDispatch, PortDispatcher, PortError, PortFuture, Subscription,
+    port_call_sync,
+};
 pub use runtime::Runtime;
+
+/// Re-export so generated code can name the stream trait as `::keel::runtime::Stream`.
+pub use futures_core::Stream;
