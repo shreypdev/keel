@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
-#![doc = include_str!("../README.md")]
+// The README (with its compiled example) documents the server, which exists only on native
+// targets with the `server` feature.
+#![cfg_attr(all(feature = "server", not(target_family = "wasm")), doc = include_str!("../README.md"))]
 //!
 //! # Threads, and why they are allowed here
 //!
@@ -9,7 +11,7 @@
 //! process of a `keel dev` core, next to the runtime, and does blocking socket I/O. It uses
 //! `std::net` and threads (one accept thread, and a reader and a writer thread per connection)
 //! rather than an async runtime, which CLAUDE.md bans from core crates. Nothing here is
-//! reachable from core code: the only way in is through the [`Bridge`] the runtime is
+//! reachable from core code: the only way in is through the `Bridge` the runtime is
 //! built with, and the bridge only enqueues.
 //!
 //! # The wire contract with the client runtimes
@@ -48,10 +50,10 @@
 //!
 //! # Deviations from the spec, and decisions it leaves open
 //!
-//! * **The entry point is [`Server::start`], not `serve(runtime, addr)`.** A `Runtime`'s host is
+//! * **The entry point is `Server::start`, not `serve(runtime, addr)`.** A `Runtime`'s host is
 //!   fixed when it is built, so the host that carries messages to a client has to exist first;
-//!   [`Server::start`] builds the [`Bridge`], hands it to a closure that builds the runtime, and
-//!   listens. [`Server::bind`] takes a runtime and bridge you paired yourself.
+//!   `Server::start` builds the `Bridge`, hands it to a closure that builds the runtime, and
+//!   listens. `Server::bind` takes a runtime and bridge you paired yourself.
 //! * **SPEC 3.2 leaves the Hello order and the sequence origin open.** The clients settle both:
 //!   see above. SPEC 3.4 lists "schema mismatch" as a status 5 reason; in practice a mismatch is
 //!   found at the `Hello` (every client checks it there) and later mismatching headers end the

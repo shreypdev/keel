@@ -11,6 +11,10 @@ readme = "README.md"
 keywords = ["keel", "websocket", "dev-server", "cross-platform"]
 categories = ["development-tools", "network-programming"]
 
+[[example]]
+name = "serve"
+required-features = ["server"]
+
 [features]
 default = ["server"]
 # The WebSocket server: tungstenite over std::net, threads, no async runtime. Without it (and
