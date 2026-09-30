@@ -62,7 +62,7 @@ open class KeelObject: @unchecked Sendable {
 /// After `super.init` the generated initializer calls `core.observe(handle, signal:on:)`, which
 /// applies the initial values before it returns.
 @MainActor
-open class KeelStore: KeelObject {
+open class KeelStore: KeelObject, @unchecked Sendable {
     /// Adopts `handle` and registers this store with `core.mirror`.
     public override init(core: KeelCore, handle: KeelHandle) {
         super.init(core: core, handle: handle)
