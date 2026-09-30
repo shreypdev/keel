@@ -138,19 +138,27 @@ measured_ns = 128.4
 budget_ns = 12000
 measured_ns = 2333.0
 
+# `call_sync/*` are `Runtime::call_sync`, which returns a `Vec` (one allocation: what `keel_call_sync`
+# hands the host as a `KeelBuf`); `call_sync_with/add` lends the reply buffer and allocates nothing
+# (ADR-028). The floor applies to the first two: 5x their measurements is under 250 ns. The
+# allocation count itself is guarded exactly by `crates/keel-ffi/tests/sync_alloc.rs`.
 [bench."dispatch/call_sync/add"]
-budget_ns = 380
-measured_ns = 74.2
+budget_ns = 250
+measured_ns = 42.9
 blueprint_ns = 60
 blueprint = "Handle method call, primitive args and return: <= 60 ns iOS (A15), <= 250 ns Android, <= 80 ns web"
 
+[bench."dispatch/call_sync_with/add"]
+budget_ns = 250
+measured_ns = 31.8
+
 [bench."dispatch/call_sync/function"]
-budget_ns = 340
-measured_ns = 66.9
+budget_ns = 250
+measured_ns = 36.0
 
 [bench."dispatch/call_sync/echo_record1k"]
-budget_ns = 1400
-measured_ns = 275.7
+budget_ns = 720
+measured_ns = 142.1
 blueprint_ns = 3000
 blueprint = "1 KB record, round trip: <= 3 us iOS (A15), <= 8 us Android, <= 4 us web (core half of the call here)"
 

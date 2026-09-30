@@ -262,6 +262,16 @@ pub fn dispatch() -> Vec<Workload> {
                 black_box(rt.call_sync(black_box(&payload)));
             })
         }),
+        Workload::new("dispatch/call_sync_with/add", || {
+            let (rt, _host) = runtime();
+            let calc = construct(&rt, "Calculator", &enc(&7_i64));
+            let args = [enc(&1_i64), enc(&2_i64)].concat();
+            let payload = method_call(calc, "Calculator", "add", 2, &args);
+            call_ok(&rt, &payload);
+            plain(move || {
+                black_box(rt.call_sync_with(black_box(&payload), |reply| black_box(reply.len())));
+            })
+        }),
         Workload::new("dispatch/call_sync/function", || {
             let (rt, _host) = runtime();
             let payload = call_payload(
