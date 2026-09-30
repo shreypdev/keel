@@ -543,9 +543,12 @@ fn empty_title_is_a_typed_error_and_changes_nothing() {
     let core = Core::new();
     let store = core.todos();
     core.observe(store);
-    let reply = core.run(method(store, "Todos", "add"), &enc(&"   ".to_owned()));
-    assert_eq!(reply.status, ReplyStatus::Error);
-    assert_eq!(decode::<TodoError>(&reply.body), TodoError::EmptyTitle);
+    // Empty, and blank (the title is trimmed): both are the same typed error, status 1.
+    for title in ["", "   "] {
+        let reply = core.run(method(store, "Todos", "add"), &enc(&title.to_owned()));
+        assert_eq!(reply.status, ReplyStatus::Error, "{title:?}");
+        assert_eq!(decode::<TodoError>(&reply.body), TodoError::EmptyTitle);
+    }
     assert!(core.change_sets().is_empty());
     assert!(core.fake.saved.lock().unwrap().is_empty());
 }

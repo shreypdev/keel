@@ -524,8 +524,8 @@ impl StoreCell {
 #[derive(Default)]
 pub struct CellSlot {
     cell: OnceLock<Arc<StoreCell>>,
-    /// Serialises fallible initialisation (`OnceLock::get_or_try_init` is not stable), so that
-    /// two threads never both attach the same signals.
+    /// Serialises initialisation (`OnceLock::get_or_try_init` is not stable), so that two threads
+    /// never both attach the same signals, whichever of the `get_or_*init` calls they use.
     init: Mutex<()>,
 }
 
@@ -545,8 +545,14 @@ impl CellSlot {
 
     /// The cell, creating it with `init` the first time.
     ///
-    /// If several threads race, exactly one runs `init` and the rest wait for its result.
+    /// If several threads race, exactly one runs `init` and the rest wait for its result. This
+    /// also holds against concurrent [`get_or_try_init`](CellSlot::get_or_try_init) calls, which
+    /// share the same lock. `init` must not call back into the same slot (it would deadlock).
     pub fn get_or_init(&self, init: impl FnOnce() -> Arc<StoreCell>) -> &Arc<StoreCell> {
+        if let Some(cell) = self.cell.get() {
+            return cell;
+        }
+        let _guard = self.init.lock();
         self.cell.get_or_init(init)
     }
 
@@ -780,6 +786,42 @@ mod tests {
             .collect();
         assert_eq!(runs.load(Ordering::SeqCst), 1);
         assert!(cells.iter().all(|c| Arc::ptr_eq(c, &cells[0])));
+    }
+
+    #[test]
+    fn cell_slot_infallible_and_fallible_initialisers_do_not_race_each_other() {
+        use std::sync::atomic::AtomicUsize;
+        // Both kinds of caller attach the same signal: without a shared lock one of them would
+        // fail with `AlreadyAttached` even though a valid cell gets installed.
+        for _ in 0..50 {
+            let slot = Arc::new(CellSlot::new());
+            let signal = Signal::new(0_u8);
+            let runs = Arc::new(AtomicUsize::new(0));
+            let threads: Vec<_> = (0..8)
+                .map(|i| {
+                    let (slot, signal, runs) =
+                        (Arc::clone(&slot), signal.clone(), Arc::clone(&runs));
+                    std::thread::spawn(move || {
+                        let build = || {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            let cell = StoreCell::new(4);
+                            cell.attach(&signal, 0).map(|()| cell)
+                        };
+                        if i % 2 == 0 {
+                            slot.get_or_try_init(build).map(Arc::clone)
+                        } else {
+                            Ok(Arc::clone(slot.get_or_init(|| {
+                                build().expect("the first initialiser attaches")
+                            })))
+                        }
+                    })
+                })
+                .collect();
+            for thread in threads {
+                assert!(thread.join().unwrap().is_ok());
+            }
+            assert_eq!(runs.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[test]
