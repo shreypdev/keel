@@ -12,7 +12,7 @@
 //! | [`signals`] | `keel-signals`: `Signal`, `Computed`, `Effect`, `txn`, `StoreCell` |
 //! | [`wire`] | `keel-wire`: the binary codec |
 //! | [`meta`] | `keel-meta`: the schema every language is generated from |
-//! | [`query`](mod@query) | the traits `#[keel::query]` and `#[keel::mutation]` implement |
+//! | [`query`](mod@query) | `keel-query`: the traits `#[keel::query]` and `#[keel::mutation]` implement, and `ctx.query()` / `ctx.mutate(..)` |
 //!
 //! The code the macros generate names everything through `::keel::{wire, meta, runtime,
 //! signals, query}` (SPEC 16.3), which is why an application depends on this crate alone.
@@ -30,11 +30,13 @@ pub mod query;
 /// It brings the reactive primitives (`Signal`, `Computed`, `Effect`, `txn`), the runtime
 /// handle (`Ctx`), the wire scalars a public signature may use (`Bytes`, `Uuid`, `Timestamp`,
 /// `Duration`, and `Handle` for object references) and the six attribute macros
-/// (`#[keel::api]` and friends are also reachable as `keel::api`, ...).
+/// (`#[keel::api]` and friends are also reachable as `keel::api`, ...). It also brings
+/// [`CtxQuery`](crate::query::CtxQuery), so `ctx.query()` and `ctx.mutate(..)` work.
 pub mod prelude {
     pub use core::time::Duration;
 
     pub use keel_macros::{api, error, mutation, port, query, store};
+    pub use keel_query::CtxQuery;
     pub use keel_runtime::Ctx;
     pub use keel_signals::{Computed, Effect, Signal, txn};
     pub use keel_wire::{Bytes, Handle, Timestamp, Uuid};
