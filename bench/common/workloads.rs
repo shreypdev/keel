@@ -21,7 +21,7 @@ use keel::runtime::testing::{call_payload, drive_from_this_thread};
 use keel::runtime::{Runtime, RuntimeConfig};
 use keel::signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, StoreCell, txn, with_sink};
 use keel::wire::payload::{CallTarget, ChangeSetRef};
-use keel::wire::{Bytes, Decode, Encode, Handle, Reader, Timestamp, Uuid, Writer};
+use keel::wire::{Bytes, Decode, Encode, Handle, KeyedPatch, Reader, Timestamp, Uuid, Writer};
 use keel_bench::workload::{Bench, Workload, plain, with_reset};
 
 use super::fixtures::{self, Item, Shape};
@@ -58,7 +58,9 @@ fn enc<T: Encode>(value: &T) -> Vec<u8> {
 
 /// Encode, decode and round trip of each wire type; the budgets test gates the round trips.
 pub fn wire() -> Vec<Workload> {
-    wire_types(false)
+    let mut all = wire_types(false);
+    all.extend(keyed_patch());
+    all
 }
 
 /// Each wire type's encode and decode on their own (criterion only).
@@ -119,6 +121,78 @@ fn wire_types(halves: bool) -> Vec<Workload> {
         Err::<u32, String>("the server said no".to_owned())
     });
     list
+}
+
+/// The keyed patch (`keel-wire`) on its own, for a 10,000-row list that gains one row in the
+/// middle: the diff with a cheap key and `PartialEq` (what is left of `signals/keyed_10k/insert`
+/// once the generated key function and the encoded comparison are taken out), the patch's own
+/// round trip, and the host-side replay.
+fn keyed_patch() -> Vec<Workload> {
+    const ROWS: u32 = 10_000;
+    fn rows() -> Vec<Item> {
+        (0..ROWS)
+            .map(|n| Item {
+                id: u64::from(n) * 2 + 1,
+                title: fixtures::title_of(n, 24),
+                done: false,
+            })
+            .collect()
+    }
+    fn gained() -> Item {
+        Item {
+            id: 10_000_000,
+            title: fixtures::title_of(ROWS, 24),
+            done: false,
+        }
+    }
+    fn patch_of(old: &[Item]) -> KeyedPatch<Item> {
+        let mut new = old.to_vec();
+        new.insert(old.len() / 2, gained());
+        KeyedPatch::diff(old, &new, |i| i.id, |a, b| a == b).expect("a patch, not the full list")
+    }
+    vec![
+        Workload::new("wire/keyed_patch_10k/diff", || {
+            let old = rows();
+            let mut new = old.clone();
+            new.insert(old.len() / 2, gained());
+            plain(move || {
+                black_box(KeyedPatch::diff(
+                    black_box(&old),
+                    black_box(&new),
+                    |i| i.id,
+                    |a, b| a == b,
+                ));
+            })
+        }),
+        Workload::new("wire/keyed_patch_10k/roundtrip", || {
+            let patch = patch_of(&rows());
+            assert_eq!(patch.ops.len(), 1, "one insert is one op");
+            plain(move || {
+                let mut w = Writer::new();
+                black_box(&patch).encode(&mut w);
+                let bytes = w.into_vec();
+                let mut r = Reader::new(black_box(&bytes));
+                black_box(KeyedPatch::<Item>::decode(&mut r)).ok();
+            })
+        }),
+        Workload::new("wire/keyed_patch_10k/apply", || {
+            let old = rows();
+            let patch = patch_of(&old);
+            let middle = old.len() / 2;
+            let list = std::rc::Rc::new(std::cell::RefCell::new(old));
+            let undo = list.clone();
+            with_reset(
+                move || {
+                    patch
+                        .apply(&mut list.borrow_mut())
+                        .expect("the patch applies");
+                },
+                move || {
+                    undo.borrow_mut().remove(middle);
+                },
+            )
+        }),
+    ]
 }
 
 /// Registers `wire/<name>/roundtrip`, and with `halves` also `/encode` and `/decode`.
