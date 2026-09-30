@@ -20,6 +20,12 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: TS runtime dev dependencies (the bindgen fixtures compile it with tsc)
+        working-directory: runtimes/ts/@keel/runtime
+        run: npm ci
       - name: Format
         run: cargo fmt --check
       - name: Clippy
@@ -137,15 +143,14 @@ jobs:
         run: cargo install cargo-ndk
       - name: Build the JNI library for both ABIs
         run: cargo ndk -t arm64-v8a -t x86_64 build -p keel-ffi --features jni
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
 
-  ffi-sanitizers:
-    name: keel-ffi under Miri and ASan
-    runs-on: ubuntu-latest
+  ffi-miri:
+    # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
+    # Linux futex call (upstream toolchain friction, not our code); the macOS backend has
+    # no futex path and checks the same keel-ffi code.
+    name: keel-ffi under Miri
+    runs-on: macos-15
     env:
-      # Nightly grows new lints every week (deprecations in the workspace crates, for one); this job is
-      # about undefined behaviour, so they must not fail it. The ASan step sets its own flags anyway.
       RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
@@ -159,6 +164,18 @@ jobs:
         run: |
           MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test -p keel-ffi --test abi -- \
             a_host_that_sets_cap sync_port_answers
+
+  ffi-asan:
+    name: keel-ffi under ASan
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
       - name: AddressSanitizer (includes tests/host_contract.rs, the port-callback lifetime regression)
         run: |
           RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p keel-ffi \
