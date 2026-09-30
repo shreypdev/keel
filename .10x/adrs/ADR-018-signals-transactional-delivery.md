@@ -1,7 +1,7 @@
 # ADR-018: keel-signals delivery is transactional
 
 Status: accepted (2026-09-30). Touches SPEC 16.1 (commit algorithm, `observe`).
-Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, finding H1 (M1 is added by the commit that fixes it).
+Origin: `.10x/reviews/2026-09-30-keel-signals-review.md`, findings H1 and M1.
 
 ## H1: an abandoned change-set must not leave the host diverged
 
@@ -27,3 +27,21 @@ recording, so with nobody holding the slot in a queue the next write to it would
 commit at all (the stranded state of finding M3). The unsent set is owned by the store, so any
 thread's next commit can drain it. Also rejected: retrying immediately inside the same commit
 loop (a deterministic panic would burn all 1000 rounds).
+
+## M1: writes made during `observe` must be part of what the host receives first
+
+Context. `observe` runs computed closures to encode them, and closures may write signals. With no
+transaction open such a write committed at once and reached the sink before the observe entries,
+which carried the older values.
+
+Decision. `observe(on)` runs inside a transaction. It marks the targets observed, then encodes
+every target, and repeats while a write made by a closure dirtied one of the targets (bounded, at
+most eight passes); each pass clears the targets' dirty bits before it encodes, so the writes are
+absorbed into the entries and their own commit, which happens when the transaction ends, finds
+nothing to send for them. The entries therefore hold the post-write values. Writes to slots that
+were not targeted commit normally after the entries are built. `encode_signal` runs in a
+transaction for the same reason.
+
+Alternative rejected: have the caller hold a transaction across `observe` and delivery. It moves
+the burden to every caller (the runtime, restore, tests) and leaves the bare `StoreCell::observe`
+contract unsafe.

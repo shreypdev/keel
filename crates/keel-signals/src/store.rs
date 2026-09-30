@@ -14,13 +14,18 @@ use crate::error::SignalsError;
 use crate::graph::{Binding, SlotFlags};
 use crate::signal::Signal;
 use crate::sink::ChangeSink;
-use crate::txn::{next_txn_id, recycle_buffer, take_buffer};
+use crate::txn::{TxnGuard, next_txn_id, recycle_buffer, take_buffer};
 use crate::value::{KeyFn, ListLike, SignalValue};
 
 /// The `signal_id` that means "every signal of the store" (SPEC 1.1).
 pub const ALL_SIGNALS: u32 = u32::MAX;
 
 type Encoder = Box<dyn Fn(&mut Writer) + Send + Sync>;
+
+/// How many times `observe` re-encodes its targets while computed closures keep writing to
+/// them (see [`StoreCell::observe`]). Every pass but the last one is only needed when a closure
+/// writes, so a store without such closures pays for exactly one.
+const OBSERVE_SETTLE_PASSES: usize = 8;
 
 /// What a keyed slot produced for one commit.
 enum PatchOrFull {
@@ -299,6 +304,16 @@ impl StoreCell {
     /// An unknown `signal_id` is ignored in every build (returns 0, writes nothing): it comes
     /// from the host, and host input must never be able to make the core assert.
     ///
+    /// `observe(on)` runs inside a [transaction](crate::txn), so a computed's closure that writes
+    /// signals while it is evaluated does not commit on the spot (which would put a change-set
+    /// ahead of the entries the caller is about to deliver). The entries are re-encoded until no
+    /// target was written while they were built (at most eight passes), so they hold the
+    /// **post-write** values, and the writes are absorbed into them: their own commit, when the
+    /// transaction ends, has nothing left to send for the targets. Writes to slots that were not
+    /// targeted are committed normally at that point, after the entries have been built. A
+    /// closure that writes one of its own inputs on every evaluation cannot be settled; its
+    /// writes are then committed as they are.
+    ///
     /// If building the entries panics (a computed's closure or an encoder), nothing is left half
     /// done: no target stays marked observed by this call, no keyed baseline is kept for a value
     /// the host never received, and `out` is untouched.
@@ -344,6 +359,10 @@ impl StoreCell {
             return 0;
         }
 
+        // Computed closures may write signals while their values are encoded. Inside this
+        // transaction such writes only queue up, and are committed after the entries are built
+        // (the guard is declared first, so it is dropped last).
+        let _txn = TxnGuard::enter();
         let handle = Handle(self.handle());
         // Nothing is left behind if building the entries panics (a computed's closure or an
         // encoder): the slots go back to what they were, so the host is not assumed to have
@@ -353,29 +372,43 @@ impl StoreCell {
             touched: Vec::with_capacity(targets.len()),
             armed: true,
         };
-        let mut entries = Writer::new();
         for (id, slot) in &targets {
             rollback.touched.push((
                 *id,
                 Arc::clone(slot),
-                slot.flags.observed.load(Ordering::SeqCst),
+                slot.flags.observed.swap(true, Ordering::SeqCst),
             ));
-            slot.flags.observed.store(true, Ordering::SeqCst);
-            // Clear the dirty bit *before* reading the value: a write that lands in between is
-            // recorded again and delivered by its own commit, instead of being lost.
-            slot.flags.dirty.store(false, Ordering::SeqCst);
-            let mut value = Writer::new();
-            match &slot.kind {
-                SlotKind::Keyed(state) => state.resync(&mut value),
-                SlotKind::Plain | SlotKind::Computed => (slot.encode)(&mut value),
+        }
+        let mut entries = Writer::new();
+        for pass in 1..=OBSERVE_SETTLE_PASSES {
+            entries.clear();
+            for (id, slot) in &targets {
+                // Clear the dirty bit *before* reading the value: a write that lands in between
+                // is recorded again and delivered by its own commit, instead of being lost.
+                slot.flags.dirty.store(false, Ordering::SeqCst);
+                let mut value = Writer::new();
+                match &slot.kind {
+                    SlotKind::Keyed(state) => state.resync(&mut value),
+                    SlotKind::Plain | SlotKind::Computed => (slot.encode)(&mut value),
+                }
+                ChangeEntry {
+                    handle,
+                    signal_id: *id,
+                    op: ChangeOp::Full,
+                    value: value.into_vec(),
+                }
+                .encode(&mut entries);
             }
-            ChangeEntry {
-                handle,
-                signal_id: *id,
-                op: ChangeOp::Full,
-                value: value.into_vec(),
+            // A target that is dirty again was written while the entries were being built (by
+            // a computed's closure), possibly after its own entry was encoded: encode once more,
+            // so that the host receives the post-write values in one coherent view. The commit
+            // at the end of the transaction then finds those slots clean.
+            let settled = targets
+                .iter()
+                .all(|(_, slot)| !slot.flags.dirty.load(Ordering::SeqCst));
+            if settled || pass == OBSERVE_SETTLE_PASSES {
+                break;
             }
-            .encode(&mut entries);
         }
         rollback.armed = false;
         // The host is about to receive the current value of every target, so an earlier
@@ -392,6 +425,9 @@ impl StoreCell {
     pub fn encode_signal(&self, signal_id: u32, out: &mut Writer) -> bool {
         match self.slot(signal_id) {
             Some(slot) => {
+                // A computed's closure may write signals: hold the writes back until the value
+                // has been produced instead of committing them ahead of it.
+                let _txn = TxnGuard::enter();
                 (slot.encode)(out);
                 true
             }

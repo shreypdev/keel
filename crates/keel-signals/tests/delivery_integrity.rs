@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use common::*;
 use keel_signals::{ALL_SIGNALS, ChangeSink, Computed, Signal, txn, with_sink};
-use keel_wire::Writer;
 use keel_wire::payload::{ChangeEntry, ChangeOp, ChangeSet};
+use keel_wire::{Encode, Writer};
 
 /// What a host knows about a store: a keyed list at signal 0 and `u32` values elsewhere.
 #[derive(Default)]
@@ -317,4 +317,200 @@ fn h1_a_computed_that_keeps_panicking_holds_back_its_store_until_it_recovers() {
     assert_eq!(ids(&set), vec![0, 1, 2]);
     assert_eq!(value_of::<u32>(entry(&set, 0)), 2);
     assert_eq!(value_of::<u32>(entry(&set, 2)), 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// M1: writes made by computed closures during `observe` must not overtake the entries
+// ---------------------------------------------------------------------------------------------
+
+/// The review's setup: `hits` (0), `items` (1) and a computed (2) whose closure bumps `hits`.
+struct Bumping {
+    rig: Rig,
+    hits: Signal<u32>,
+    items: Signal<Vec<Todo>>,
+    computed: Computed<u32>,
+}
+
+fn bumping() -> Bumping {
+    let rig = Rig::new();
+    let hits = Signal::new(0_u32);
+    let items = Signal::new(todos(2));
+    let bump = hits.clone();
+    let computed = Computed::new(&items, move |items: &Vec<Todo>| {
+        bump.update(|h| *h += 1);
+        u32::try_from(items.len()).unwrap()
+    });
+    rig.cell.attach(&hits, 0).unwrap();
+    rig.cell.attach_keyed(&items, 1, todo_key).unwrap();
+    rig.cell.attach_computed(&computed, 2).unwrap();
+    Bumping {
+        rig,
+        hits,
+        items,
+        computed,
+    }
+}
+
+#[test]
+fn m1_observe_entries_reflect_writes_made_by_computed_closures() {
+    let b = bumping();
+    let entries = b.rig.run(|| b.rig.observe_all());
+    assert!(
+        b.rig.sets().is_empty(),
+        "no change-set may reach the sink ahead of the observe entries"
+    );
+    assert_eq!(b.hits.get(), 1, "the closure ran exactly once");
+    let by_id = |id: u32| entries.iter().find(|e| e.signal_id == id).unwrap();
+    assert_eq!(
+        value_of::<u32>(by_id(0)),
+        1,
+        "the host receives the post-write value, not the value from before the closure ran"
+    );
+    assert_eq!(value_of::<u32>(by_id(2)), 2);
+    assert_eq!(value_of::<Vec<Todo>>(by_id(1)), todos(2));
+
+    // The write was absorbed: the host is in step, and the next commit is an ordinary one.
+    b.rig
+        .run(|| b.items.update(|l| l.push(todo(3, "t3", false))));
+    let mut host = Host::default();
+    host.apply_entries(&entries, Some(1));
+    host.apply_all(&b.rig.sets(), Some(1));
+    assert_eq!(host.list, b.items.get());
+    assert_eq!(host.values[&0], b.hits.get());
+    assert_eq!(host.values[&2], b.computed.get());
+}
+
+#[test]
+fn m1_observe_without_closure_writes_encodes_every_target_once() {
+    let encodes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let rig = Rig::new();
+    let probe = Signal::new(Probe::new(1, &encodes));
+    rig.cell.attach(&probe, 0).unwrap();
+    rig.observe_all();
+    assert_eq!(
+        count(&encodes),
+        1,
+        "the settle loop costs nothing when nothing writes"
+    );
+}
+
+#[test]
+fn m1_writes_to_slots_that_were_not_targeted_commit_after_the_entries_are_built() {
+    let b = bumping();
+    b.rig.observe_on(0);
+    b.rig.sets();
+    // Only the computed is (re)observed; its closure writes `hits`, an observed slot outside the
+    // target set. That write is an ordinary commit, delivered once the entries have been built.
+    let entries = b.rig.run(|| b.rig.observe_on(2));
+    assert_eq!(entries.len(), 1);
+    assert_eq!(value_of::<u32>(&entries[0]), 2);
+    let set = b.rig.one_set();
+    assert_eq!(ids(&set), vec![0]);
+    assert_eq!(value_of::<u32>(entry(&set, 0)), 1);
+}
+
+#[test]
+fn m1_a_keyed_list_written_during_observe_gets_a_matching_baseline() {
+    let rig = Rig::new();
+    let list = Signal::new(todos(2));
+    let once = Arc::new(AtomicBool::new(true));
+    let append = list.clone();
+    let computed = Computed::new(&list, move |l: &Vec<Todo>| {
+        if once.swap(false, Ordering::SeqCst) {
+            append.update(|l| l.push(todo(3, "t3", false)));
+        }
+        u32::try_from(l.len()).unwrap()
+    });
+    rig.cell.attach_keyed(&list, 0, todo_key).unwrap();
+    rig.cell.attach_computed(&computed, 1).unwrap();
+
+    let mut host = Host::default();
+    host.apply_entries(&rig.run(|| rig.observe_all()), Some(0));
+    assert!(rig.sets().is_empty());
+    assert_eq!(host.list, list.get());
+    assert_eq!(host.list.len(), 3, "the closure's write is in the entries");
+
+    rig.run(|| list.update(|l| l[0].done = true));
+    host.apply_all(&rig.sets(), Some(0));
+    assert_eq!(
+        host.list,
+        list.get(),
+        "a patch against that baseline applies"
+    );
+}
+
+#[test]
+fn m1_a_closure_that_keeps_writing_its_own_input_cannot_loop_observe() {
+    let rig = Rig::new();
+    let n = Signal::new(0_u32);
+    let bump = n.clone();
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = runs.clone();
+    let computed = Computed::new(&n, move |v: &u32| {
+        counted.fetch_add(1, Ordering::SeqCst);
+        bump.set(*v + 1);
+        *v
+    });
+    rig.cell.attach(&n, 0).unwrap();
+    rig.cell.attach_computed(&computed, 1).unwrap();
+    let entries = rig.run(|| rig.observe_all());
+    assert_eq!(entries.len(), 2, "observe returns");
+    // Eight settle passes, then the ordinary commit loop's own round cap.
+    assert!(count(&runs) <= 8 + 1000 + 1, "ran {} times", count(&runs));
+}
+
+#[test]
+fn m1_encode_signal_holds_closure_writes_until_the_value_is_produced() {
+    /// A value that notes when it is encoded.
+    #[derive(Clone)]
+    struct Noted(Arc<AtomicBool>);
+    impl Encode for Noted {
+        fn encode(&self, w: &mut Writer) {
+            self.0.store(true, Ordering::SeqCst);
+            1_u32.encode(w);
+        }
+    }
+    /// A sink that notes whether the value had been encoded when the change-set arrived.
+    struct Ordered {
+        encoded: Arc<AtomicBool>,
+        seen_encoded: AtomicBool,
+        delivered: AtomicBool,
+    }
+    impl ChangeSink for Ordered {
+        fn deliver(&self, _change_set: &[u8]) {
+            self.delivered.store(true, Ordering::SeqCst);
+            self.seen_encoded
+                .store(self.encoded.load(Ordering::SeqCst), Ordering::SeqCst);
+        }
+    }
+
+    let rig = Rig::new();
+    let hits = Signal::new(0_u32);
+    let src = Signal::new(0_u32);
+    let encoded = Arc::new(AtomicBool::new(false));
+    let (bump, flag) = (hits.clone(), encoded.clone());
+    let computed = Computed::new(&src, move |_: &u32| {
+        bump.update(|h| *h += 1);
+        Noted(flag.clone())
+    });
+    rig.cell.attach(&hits, 0).unwrap();
+    rig.cell.attach(&src, 1).unwrap();
+    rig.cell.attach_computed(&computed, 2).unwrap();
+    rig.observe_on(0);
+
+    let sink = Arc::new(Ordered {
+        encoded,
+        seen_encoded: AtomicBool::new(false),
+        delivered: AtomicBool::new(false),
+    });
+    let mut out = Writer::new();
+    with_sink(sink.clone(), || rig.cell.encode_signal(2, &mut out));
+    assert!(
+        sink.delivered.load(Ordering::SeqCst),
+        "the write was committed"
+    );
+    assert!(
+        sink.seen_encoded.load(Ordering::SeqCst),
+        "and only after the value it was made for had been encoded"
+    );
 }

@@ -768,6 +768,7 @@ impl StoreCell {
         // on: appends one ChangeSet ENTRY per targeted signal (`handle u64, signal_id u32, op u8 = Full, len u32, value`)
         // with its current value, also for already observed ones (re-observing resynchronises a host), and returns the count;
         // the runtime wraps the entries into a payload (`txn_id u64, count u32, entries`). off: stops delivery, returns 0.
+        // on runs inside a transaction (ADR-018): a computed's closure that writes signals while it is evaluated does not commit ahead of the entries; the entries are re-encoded (at most 8 passes) until no target was written meanwhile, so they carry the post-write values and the writes' own commit finds those targets clean. Writes to slots that were not targeted commit normally afterwards.
     pub fn encode_signal(&self, signal_id: u32, out: &mut keel_wire::Writer) -> bool;   // full value, no header; false if unknown
     pub fn encode_snapshot(&self, out: &mut keel_wire::Writer);   // one store record, §5.9: handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value }; computeds left out
 }
