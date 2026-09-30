@@ -120,7 +120,7 @@ impl Diag {
     /// The full multi-line message text.
     pub(crate) fn message(&self) -> String {
         format!(
-            "{MESSAGE_PREFIX}[undra::{code}]: {what}\n  = note: {why}\n  = help: {help}\n  = docs: {DOCS_BASE}/{code}",
+            "{MESSAGE_PREFIX}[undra::{code}]: {what}\n  = note: {why}\n  = help: {help}\n  = docs: {DOCS_BASE}#{code}",
             code = self.code,
             what = self.what,
             why = self.why,

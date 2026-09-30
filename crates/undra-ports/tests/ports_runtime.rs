@@ -668,5 +668,5 @@ fn h2_a_port_without_an_error_channel_still_panics_and_says_how_to_bind_it() {
         "{message}"
     );
     assert!(message.contains("registerPort"), "{message}");
-    assert!(message.contains("errors/E0062"), "{message}");
+    assert!(message.contains("errors.html#E0062"), "{message}");
 }

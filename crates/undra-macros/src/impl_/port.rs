@@ -621,7 +621,7 @@ fn call_helpers(
     } else {
         TokenStream::new()
     };
-    let failure_docs = format!("{DOCS_BASE}/{}", code::E0062);
+    let failure_docs = format!("{DOCS_BASE}#{}", code::E0062);
     let failure = quote! {
         #[doc(hidden)]
         #[cold]

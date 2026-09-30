@@ -91,7 +91,7 @@ fn a_platform_that_does_not_implement_the_port_answers_unavailable() {
         message.contains("the `Echo` port has no adapter registered (method `echo`)"),
         "{message}"
     );
-    assert!(message.contains("errors/E0062"), "{message}");
+    assert!(message.contains("errors.html#E0062"), "{message}");
     // The connection is fine.
     let (status, _) = client.method(handle, GET, &[]);
     assert_eq!(status, ReplyStatus::Ok);

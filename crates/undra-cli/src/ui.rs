@@ -161,7 +161,7 @@ mod tests {
         ];
         assert_eq!(
             table(&rows),
-            "artifact         size\nlibundra_core.so  742.4 KB\n"
+            "artifact          size\nlibundra_core.so  742.4 KB\n"
         );
     }
 

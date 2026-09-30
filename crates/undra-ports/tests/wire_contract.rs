@@ -13,6 +13,7 @@
 mod common;
 
 use common::hex;
+use std::sync::{Arc, Mutex};
 use undra_ports::{
     AppState, Clock, ClockProxy, Fs, FsError, FsProxy, Http, HttpError, HttpMethod, HttpProxy,
     HttpRequest, HttpResponse, Kv, KvProxy, Log, LogProxy, NetKind, Rng, RngProxy, SecureStore,
@@ -22,7 +23,6 @@ use undra_runtime::testing::{PortCallRecord, TestRuntime, port_reply};
 use undra_runtime::{Ctx, PortCallOutcome};
 use undra_wire::Bytes;
 use undra_wire::payload::PortStatus;
-use std::sync::{Arc, Mutex};
 
 /// A runtime with nothing bound: every port is the platform's.
 fn platform() -> TestRuntime {
@@ -380,5 +380,5 @@ fn an_unscripted_port_is_unavailable_and_the_proxy_says_which() {
         message.contains("undra: the `Clock` port has no adapter registered (method `now_ms`)"),
         "{message}"
     );
-    assert!(message.contains("errors/E0062"), "{message}");
+    assert!(message.contains("errors.html#E0062"), "{message}");
 }
