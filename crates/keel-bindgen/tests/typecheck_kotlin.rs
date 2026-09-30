@@ -1,6 +1,8 @@
-//! Compiles the generated Kotlin of every golden case against the real wire
-//! layer of the Kotlin runtime and the hand-written base API in
-//! `tests/fixtures/kotlin-base/KeelBase.kt`, using `scripts/kotlinc.sh`.
+//! Compiles the generated Kotlin of every golden case against the real Kotlin
+//! runtime (`runtimes/kotlin/keel-runtime/runtime/src/main/kotlin`: the wire
+//! layer, `KeelCore` and the rest of `dev.keel.runtime`), using `scripts/kotlinc.sh`.
+//! (`tests/fixtures/kotlin-base/KeelBase.kt` was the stand-in for the base API
+//! before the runtime implemented it; it is no longer compiled.)
 //! Skipped, with a message on stderr, when no JVM or Kotlin compiler is
 //! available; `KEEL_REQUIRE_TOOLCHAINS=1` turns the skip into a failure and
 //! `KEEL_SKIP_KOTLIN=1` skips this (slow) test on purpose.
@@ -61,7 +63,7 @@ fn kotlin_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Compiles the real wire layer and the hand-written base once.
+/// Compiles the real Kotlin runtime once.
 fn base_classes(tc: &Toolchain) -> &'static Path {
     static BASE: OnceLock<PathBuf> = OnceLock::new();
     BASE.get_or_init(|| {
@@ -74,12 +76,11 @@ fn base_classes(tc: &Toolchain) -> &'static Path {
             .arg(&out)
             .args(["-jvm-target", "11"])
             .arg(&wire)
-            .arg(manifest_dir().join("tests/fixtures/kotlin-base/KeelBase.kt"))
             .output()
             .expect("kotlinc.sh runs");
         assert!(
             output.status.success(),
-            "compiling the Kotlin wire layer and base fixture failed:\n{}",
+            "compiling the Kotlin runtime failed:\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
         out
@@ -108,7 +109,7 @@ const MAINS: &[(&str, &str)] = &[
 
 /// Generates every golden case, each in its own package, compiles all of them
 /// together with the execution tests of `tests/fixtures/kotlin-run` (warnings
-/// are errors) and runs those against the real wire layer and a fake core.
+/// are errors) and runs those against the real runtime and a fake core.
 #[test]
 fn every_case_compiles_and_the_generated_code_behaves() {
     let Some(tc) = toolchain() else {
