@@ -9,6 +9,8 @@
 
 use std::sync::Arc;
 
+#[cfg(any(target_family = "wasm", test))]
+use keel_runtime::keel_wire::payload::PortReply;
 use keel_runtime::keel_wire::payload::{Call, Reply, ReplyStatus};
 use keel_runtime::keel_wire::{Decode, Reader, Writer};
 use keel_runtime::{InitError, RestoreError, Runtime, RuntimeConfig};
@@ -206,6 +208,15 @@ fn answers_a_fire_and_forget_call(payload: &[u8]) -> bool {
     payload.len() >= 5 && payload[..4] == FIRE_AND_FORGET_PORT_CALL.to_le_bytes()
 }
 
+/// The port call a well-formed `PortReply` payload answers (`None` for a malformed one, which the
+/// runtime rejects too, so it answers nothing).
+#[cfg(any(target_family = "wasm", test))]
+pub(crate) fn port_reply_call_id(payload: &[u8]) -> Option<u32> {
+    PortReply::decode(&mut Reader::new(payload))
+        .ok()
+        .map(|reply| reply.port_call_id)
+}
+
 /// `keel_port_reply`. An answer to a fire-and-forget call is dropped silently: nothing waits for
 /// it, and logging "no port call 0 is pending" would be one more Log call, which a host that
 /// answers Log asynchronously would answer again, without end.
@@ -336,6 +347,14 @@ mod tests {
     fn decode(reply: &[u8]) -> (u32, ReplyStatus, Vec<u8>) {
         let r = Reply::decode(&mut Reader::new(reply)).expect("a reply payload");
         (r.call_id, r.status, r.body.to_vec())
+    }
+
+    #[test]
+    fn a_port_reply_names_its_call_only_when_well_formed() {
+        assert_eq!(port_reply_call_id(&[7, 0, 0, 0, 0]), Some(7));
+        assert_eq!(port_reply_call_id(&[7, 0, 0, 0, 0, 1, 2]), Some(7));
+        assert_eq!(port_reply_call_id(&[7, 0, 0, 0, 9]), None, "no such status");
+        assert_eq!(port_reply_call_id(&[7, 0, 0]), None);
     }
 
     #[test]

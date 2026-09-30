@@ -29,13 +29,14 @@
 use core::alloc::Layout;
 use std::alloc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use keel_runtime::{Host, InitError, PortCallOutcome, Runtime};
 
 use crate::api::{self, init_code, init_error_code, parse_config};
 use crate::buf::KeelBuf;
 use crate::builtin::{self, Monotonic, Platform};
+use crate::replies::ReplyWatch;
 
 #[link(wasm_import_module = "keel")]
 unsafe extern "C" {
@@ -102,9 +103,10 @@ impl Platform for Imports {
 
 static MONOTONIC: Monotonic = Monotonic::new();
 
-/// How many times the host called `keel_port_reply`: lets `port_call` tell whether a host that
-/// answered `0` (synchronously) really delivered its reply before returning.
-static PORT_REPLIES: AtomicU64 = AtomicU64::new(0);
+/// The replies the host delivers through `keel_port_reply` while a `port_call` import runs: lets
+/// `port_call` tell whether a host that answered `0` (synchronously) really delivered the reply
+/// *of that call* before returning (review L2).
+static PORT_REPLIES: ReplyWatch = ReplyWatch::new();
 
 /// Set once the runtime is up, so the crate's panic hook only logs when the runtime's own does
 /// not (before `keel_init`).
@@ -148,15 +150,16 @@ impl Host for WasmHost {
         let Ok(len) = u32::try_from(args.len()) else {
             return PortCallOutcome::Unavailable;
         };
-        let replies_before = PORT_REPLIES.load(Ordering::Acquire);
         // SAFETY: `args` is valid for `len` bytes for the duration of the import.
-        let answer =
-            unsafe { import_port_call(port_id, method_id, port_call_id, args.as_ptr(), len) };
+        let (answer, replied) = PORT_REPLIES.during(port_call_id, || unsafe {
+            import_port_call(port_id, method_id, port_call_id, args.as_ptr(), len)
+        });
         match answer {
-            // The host promised to have called `keel_port_reply` before returning. The runtime
-            // registered the call before invoking us, so that reply already completed it; if
-            // the host lied, fail the call instead of leaving it pending forever.
-            0 if PORT_REPLIES.load(Ordering::Acquire) != replies_before => PortCallOutcome::Async,
+            // The host promised to have called `keel_port_reply` for *this call* before
+            // returning. The runtime registered the call before invoking us, so that reply
+            // already completed it; if the host lied (or answered some other call), fail the
+            // call instead of leaving it pending forever.
+            0 if replied => PortCallOutcome::Async,
             0 => PortCallOutcome::Unavailable,
             1 => PortCallOutcome::Async,
             _ => builtin::answer(&Imports, &MONOTONIC, port_id, method_id, port_call_id, args)
@@ -255,11 +258,14 @@ pub extern "C" fn _initialize() {
 }
 
 /// `keel_alloc(len: i32) -> i32`: `len` bytes (8-aligned) of linear memory for the host to fill;
-/// release with `keel_free(ptr, len)`. Traps on out-of-memory.
+/// release with `keel_free(ptr, len)`. Never returns `0`: it traps (after a level-5 log record)
+/// when the memory is exhausted **and** when `len` is a size no allocation can have (`len >=
+/// 0x7fff_fff9`, beyond what `isize` addresses on `wasm32`). A null pointer would be written to
+/// by a host that does not check, at linear address 0, the bottom of the shadow stack (review L3).
 #[unsafe(no_mangle)]
 pub extern "C" fn keel_alloc(len: u32) -> *mut u8 {
     let Some(layout) = layout(len) else {
-        return core::ptr::null_mut();
+        panic!("keel_alloc({len}): a block of this size cannot exist");
     };
     // SAFETY: `layout` has a non-zero size.
     let ptr = unsafe { alloc::alloc(layout) };
@@ -392,9 +398,12 @@ pub extern "C" fn keel_release(handle_lo: u32, handle_hi: u32) {
 /// `ptr` must be valid for `len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn keel_port_reply(ptr: *const u8, len: u32) {
-    PORT_REPLIES.fetch_add(1, Ordering::AcqRel);
     // SAFETY: the caller guarantees `ptr` is valid for `len` bytes.
-    api::port_reply(unsafe { bytes(ptr, len) });
+    let payload = unsafe { bytes(ptr, len) };
+    if let Some(port_call_id) = api::port_reply_call_id(payload) {
+        PORT_REPLIES.note(port_call_id);
+    }
+    api::port_reply(payload);
 }
 
 /// `keel_event(port_id, method_id, ptr, len)`: a host-to-core event of an event port.

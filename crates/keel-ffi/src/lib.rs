@@ -46,6 +46,8 @@ mod jni_shim;
 
 #[cfg(any(target_family = "wasm", test))]
 mod builtin;
+#[cfg(any(target_family = "wasm", test))]
+mod replies;
 
 #[cfg(target_family = "wasm")]
 pub mod wasm;
