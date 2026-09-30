@@ -365,9 +365,11 @@ fn android(sys: &dyn Sys, toolchain: &Toolchain, abis: &[String]) -> Vec<Finding
         )),
     }
     match toolchain.which(sys, "cargo-ndk") {
-        Some(tool) => {
-            let version = version_line(sys, toolchain, &tool, &["ndk", "--version"])
-                .or_else(|| version_line(sys, toolchain, &tool, &["--version"]))
+        Some(_) => {
+            // `cargo ndk --version` (the binary alone does not answer outside of cargo).
+            let version = toolchain
+                .which(sys, "cargo")
+                .and_then(|cargo| version_line(sys, toolchain, &cargo, &["ndk", "--version"]))
                 .unwrap_or_else(|| "cargo-ndk".to_owned());
             out.push(Finding::ok(version));
         }
@@ -688,7 +690,7 @@ mod tests {
             .with_dir(&format!("{sdk}/platforms/android-35"))
             .with_file("/opt/homebrew/opt/openjdk@17/bin/java")
             .with_tool("cargo-ndk", "/home/dev/.cargo/bin/cargo-ndk")
-            .with_output("cargo-ndk", "ndk --version", "cargo-ndk 4.1.2\n");
+            .with_output("cargo", "ndk --version", "cargo-ndk 4.1.2\n");
         let tc = Toolchain::detect(&sys);
         let abis = vec!["arm64-v8a".to_owned(), "x86_64".to_owned()];
         let sections = check(&sys, &tc, &[Platform::Android], &abis);
