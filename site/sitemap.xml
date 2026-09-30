@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://shreypdev.github.io/keel/</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/getting-started.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/concepts.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/queries.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/ports.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/cli.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/architecture.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/api-swift.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/api-kotlin.html</loc></url>
-  <url><loc>https://shreypdev.github.io/keel/docs/api-typescript.html</loc></url>
+  <url><loc>https://shreypdev.github.io/keel/</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/api-kotlin.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/api-swift.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/api-typescript.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/architecture.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/cli.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/concepts.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/getting-started.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/ports.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/docs/queries.html</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/blog/</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/keel/roadmap/</loc><lastmod>2026-09-30</lastmod></url>
 </urlset>

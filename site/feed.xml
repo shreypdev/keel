@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Keel blog</title>
+    <link>https://shreypdev.github.io/keel/blog/</link>
+    <description>Comparisons, architecture and design notes from the Keel team.</description>
+    <language>en</language>
+    <atom:link href="https://shreypdev.github.io/keel/feed.xml" rel="self" type="application/rss+xml"/>
+  </channel>
+</rss>
