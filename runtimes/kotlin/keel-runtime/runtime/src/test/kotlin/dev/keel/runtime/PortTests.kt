@@ -1,6 +1,7 @@
 package dev.keel.runtime
 
 import dev.keel.runtime.adapters.StandardPorts
+import dev.keel.runtime.support.portMethods
 import dev.keel.runtime.support.FakeTransport
 import dev.keel.runtime.support.LogCapture
 import dev.keel.runtime.support.NO_BYTES
@@ -39,7 +40,7 @@ class PortTests : Suite() {
     init {
         case("a sync port is answered inline with a whole PortReply payload") {
             val t = FakeTransport()
-            val impl = PortImpl(true, mapOf(ECHO to { args: ByteArray -> args + byteArrayOf(9) }))
+            val impl = PortImpl(true, portMethods(ECHO to { args: ByteArray -> args + byteArrayOf(9) }))
             attach(t, adapters = mapOf(PORT to impl)).use {
                 val outcome = t.portCall(PORT, ECHO, 41u, byteArrayOf(1, 2))
                 assertTrue(outcome is PortOutcome.Sync, "got $outcome")
@@ -54,7 +55,7 @@ class PortTests : Suite() {
         case("a sync port runs on the thread that called, with no hop") {
             val t = FakeTransport()
             val thread = CopyOnWriteArrayList<String>()
-            val impl = PortImpl(true, mapOf(NAME to { _: ByteArray -> thread.add(Thread.currentThread().name); NO_BYTES }))
+            val impl = PortImpl(true, portMethods(NAME to { _: ByteArray -> thread.add(Thread.currentThread().name); NO_BYTES }))
             attach(t, adapters = mapOf(PORT to impl)).use {
                 t.onCore { t.portCall(PORT, NAME, 1u, NO_BYTES) }
                 t.awaitCore()
@@ -65,7 +66,7 @@ class PortTests : Suite() {
         case("a sync port method that suspends is reported as unavailable, not waited for") {
             val t = FakeTransport()
             val gate = CompletableDeferred<Unit>()
-            val impl = PortImpl(true, mapOf(SLOW to { _: ByteArray -> gate.await(); NO_BYTES }))
+            val impl = PortImpl(true, portMethods(SLOW to { _: ByteArray -> gate.await(); NO_BYTES }))
             LogCapture("dev.keel.runtime").use { log ->
                 attach(t, adapters = mapOf(PORT to impl)).use {
                     assertEq(PortOutcome.Unavailable, t.portCall(PORT, SLOW, 1u, NO_BYTES))
@@ -79,7 +80,7 @@ class PortTests : Suite() {
             val t = FakeTransport()
             val impl = PortImpl(
                 true,
-                mapOf(
+                portMethods(
                     FAIL_TYPED to { _: ByteArray -> throw KeelPortException(byteArrayOf(7, 7)) },
                     FAIL_OTHER to { _: ByteArray -> throw IllegalStateException("boom") },
                 ),
@@ -97,7 +98,7 @@ class PortTests : Suite() {
 
         case("an unregistered port or method is unavailable") {
             val t = FakeTransport()
-            attach(t, adapters = mapOf(PORT to PortImpl(true, mapOf(ECHO to { a: ByteArray -> a }))), defaultAdapters = false).use {
+            attach(t, adapters = mapOf(PORT to PortImpl(true, portMethods(ECHO to { a: ByteArray -> a }))), defaultAdapters = false).use {
                 assertEq(PortOutcome.Unavailable, t.portCall(0x1234u, ECHO, 1u, NO_BYTES))
                 assertEq(PortOutcome.Unavailable, t.portCall(PORT, 0x1234u, 1u, NO_BYTES))
             }
@@ -108,7 +109,7 @@ class PortTests : Suite() {
             val thread = CopyOnWriteArrayList<String>()
             val impl = PortImpl(
                 false,
-                mapOf(
+                portMethods(
                     SLOW to { args: ByteArray ->
                         thread.add(Thread.currentThread().name)
                         delay(50)
@@ -131,7 +132,7 @@ class PortTests : Suite() {
             val t = FakeTransport()
             val impl = PortImpl(
                 false,
-                mapOf(
+                portMethods(
                     FAIL_TYPED to { _: ByteArray -> throw KeelPortException(byteArrayOf(4)) },
                     FAIL_OTHER to { _: ByteArray -> throw IllegalStateException("boom") },
                     TIMEOUT to { _: ByteArray -> withTimeout(20) { delay(60_000) }; NO_BYTES },
@@ -155,7 +156,7 @@ class PortTests : Suite() {
 
         case("many async port calls run concurrently and each is answered once") {
             val t = FakeTransport()
-            val impl = PortImpl(false, mapOf(ECHO to { args: ByteArray -> delay(10); args }))
+            val impl = PortImpl(false, portMethods(ECHO to { args: ByteArray -> delay(10); args }))
             attach(t, adapters = mapOf(PORT to impl)).use {
                 for (i in 0 until 200) t.portCall(PORT, ECHO, i.toUInt(), byteArrayOf(i.toByte()))
                 eventually("all answered") { t.portReplies.size == 200 }
@@ -170,7 +171,7 @@ class PortTests : Suite() {
             val cancelled = CompletableFuture<Boolean>()
             val impl = PortImpl(
                 false,
-                mapOf(
+                portMethods(
                     SLOW to { _: ByteArray ->
                         started.complete(Unit)
                         try {
@@ -195,9 +196,9 @@ class PortTests : Suite() {
             val t = FakeTransport()
             attach(t).use { core ->
                 assertEq(PortOutcome.Unavailable, t.portCall(PORT, ECHO, 1u, NO_BYTES))
-                core.registerPort(PORT, PortImpl(true, mapOf(ECHO to { _: ByteArray -> byteArrayOf(1) })))
+                core.registerPort(PORT, PortImpl(true, portMethods(ECHO to { _: ByteArray -> byteArrayOf(1) })))
                 assertEq(listOf<Byte>(1), reply(t.portCall(PORT, ECHO, 2u, NO_BYTES)).body.toList())
-                core.registerPort(PORT, PortImpl(true, mapOf(ECHO to { _: ByteArray -> byteArrayOf(2) })))
+                core.registerPort(PORT, PortImpl(true, portMethods(ECHO to { _: ByteArray -> byteArrayOf(2) })))
                 assertEq(listOf<Byte>(2), reply(t.portCall(PORT, ECHO, 3u, NO_BYTES)).body.toList())
             }
         }
@@ -209,7 +210,7 @@ class PortTests : Suite() {
                 val now = Codecs.i64.decodeAll(reply(t.portCall(StandardPorts.Clock.PORT_ID, StandardPorts.Clock.NOW_MS, 1u, NO_BYTES)).body)
                 assertTrue(kotlin.math.abs(now - System.currentTimeMillis()) < 5_000, "clock is wall time: $now")
             }
-            val override = PortImpl(true, mapOf(StandardPorts.Clock.NOW_MS to { _: ByteArray -> Codecs.i64.encodeToByteArray(123L) }))
+            val override = PortImpl(true, portMethods(StandardPorts.Clock.NOW_MS to { _: ByteArray -> Codecs.i64.encodeToByteArray(123L) }))
             val t2 = FakeTransport()
             attach(t2, adapters = mapOf(StandardPorts.Clock.PORT_ID to override), defaultAdapters = true).use {
                 val body = reply(t2.portCall(StandardPorts.Clock.PORT_ID, StandardPorts.Clock.NOW_MS, 1u, NO_BYTES)).body
@@ -248,7 +249,7 @@ class PortTests : Suite() {
                     adapters = mapOf(
                         PORT to PortImpl(
                             true,
-                            mapOf(
+                            portMethods(
                                 ECHO to { _: ByteArray ->
                                     try {
                                         // A sync port must not call the core: the lock may be held.

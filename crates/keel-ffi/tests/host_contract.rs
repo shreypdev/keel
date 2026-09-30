@@ -204,6 +204,19 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// A `Host` kept alive — and, crucially, REACHABLE — for the rest of the process. These
+/// fixtures stand in for a C embedder whose `user` pointer must outlive its registration;
+/// parking them in a static keeps LeakSanitizer quiet without disabling it, so an
+/// allocation that becomes unreachable (a real leak) still fails the ASan job.
+fn static_host() -> &'static Host {
+    static KEPT: Mutex<Vec<&'static Host>> = Mutex::new(Vec::new());
+    let host: &'static Host = Box::leak(Box::new(Host::default()));
+    KEPT.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(host);
+    host
+}
+
 /// Runs `remove` (which must not return before the callback running on another thread has)
 /// while a Log callback is mid-flight, frees the host the instant it returns, and checks the
 /// callback had finished.
@@ -250,7 +263,7 @@ fn unregistering_a_port_waits_for_its_running_callback() {
 
 #[test]
 fn replacing_a_port_waits_for_the_old_callback() {
-    let replacement = Box::leak(Box::new(Host::default()));
+    let replacement = static_host();
     replacement.answer.store(2, Ordering::Release);
     let replacement: &Host = replacement;
     the_host_may_free_user_once_removal_returns(|| register_log(replacement));
@@ -270,9 +283,7 @@ fn no_callback_outlives_its_registration_under_load() {
     let _turn = Turn::take();
     assert_eq!(init(core::ptr::null_mut()), init_code::OK);
     let stop = AtomicBool::new(false);
-    let hosts: Vec<&'static Host> = (0..40)
-        .map(|_| &*Box::leak(Box::new(Host::default())))
-        .collect();
+    let hosts: Vec<&'static Host> = (0..40).map(|_| static_host()).collect();
     thread::scope(|scope| {
         for _ in 0..4 {
             scope.spawn(|| {
@@ -313,7 +324,7 @@ fn no_callback_outlives_its_registration_under_load() {
 #[test]
 fn unregistering_from_inside_its_own_callback_returns_instead_of_deadlocking() {
     let _turn = Turn::take();
-    let host = Box::leak(Box::new(Host::default()));
+    let host = static_host();
     host.answer.store(2, Ordering::Release);
     host.unregister_self.store(true, Ordering::Release);
     register_log(host);
@@ -338,7 +349,7 @@ fn unregistering_from_inside_its_own_callback_returns_instead_of_deadlocking() {
 #[test]
 fn port_callbacks_run_concurrently_on_the_threads_that_produced_the_event() {
     let _turn = Turn::take();
-    let host = Box::leak(Box::new(Host::default()));
+    let host = static_host();
     host.answer.store(2, Ordering::Release);
     host.hold_ms.store(150, Ordering::Release);
     register_log(host);
@@ -361,7 +372,7 @@ fn port_callbacks_run_concurrently_on_the_threads_that_produced_the_event() {
 #[test]
 fn init_waits_for_a_shutdown_that_is_draining_port_callbacks() {
     let _turn = Turn::take();
-    let old = Box::leak(Box::new(Host::default()));
+    let old = static_host();
     old.answer.store(2, Ordering::Release);
     old.gate.arm();
     register_log(old);
@@ -400,7 +411,7 @@ fn init_waits_for_a_shutdown_that_is_draining_port_callbacks() {
     assert!(shutdown_done.load(Ordering::Acquire) && init_done.load(Ordering::Acquire));
 
     // A port registered after that init is live: it is not wiped by the earlier shutdown.
-    let new = Box::leak(Box::new(Host::default()));
+    let new = static_host();
     new.answer.store(2, Ordering::Release);
     register_log(new);
     provoke_a_log_record();
@@ -417,9 +428,7 @@ fn init_waits_for_a_shutdown_that_is_draining_port_callbacks() {
 #[test]
 fn init_racing_shutdown_leaves_a_consistent_process() {
     let _turn = Turn::take();
-    let hosts: Vec<&'static Host> = (0..200)
-        .map(|_| &*Box::leak(Box::new(Host::default())))
-        .collect();
+    let hosts: Vec<&'static Host> = (0..200).map(|_| static_host()).collect();
     let stop = AtomicBool::new(false);
     thread::scope(|scope| {
         scope.spawn(|| {
@@ -441,7 +450,7 @@ fn init_racing_shutdown_leaves_a_consistent_process() {
         stop.store(true, Ordering::Release);
     });
     keel_shutdown();
-    let host = Box::leak(Box::new(Host::default()));
+    let host = static_host();
     host.answer.store(2, Ordering::Release);
     assert_eq!(init(core::ptr::null_mut()), init_code::OK);
     register_log(host);
@@ -455,7 +464,7 @@ fn init_racing_shutdown_leaves_a_consistent_process() {
 #[test]
 fn a_late_answer_to_a_log_record_is_dropped_not_logged() {
     let _turn = Turn::take();
-    let host = Box::leak(Box::new(Host::default()));
+    let host = static_host();
     host.answer.store(1, Ordering::Release); // "I will reply later"
     register_log(host);
     assert_eq!(init(core::ptr::null_mut()), init_code::OK);
@@ -488,7 +497,7 @@ fn a_late_answer_to_a_log_record_is_dropped_not_logged() {
 #[test]
 fn a_port_registered_before_init_is_served_after_it() {
     let _turn = Turn::take();
-    let host = Box::leak(Box::new(Host::default()));
+    let host = static_host();
     host.answer.store(2, Ordering::Release);
     register_log(host);
     assert_eq!(init(core::ptr::null_mut()), init_code::OK);

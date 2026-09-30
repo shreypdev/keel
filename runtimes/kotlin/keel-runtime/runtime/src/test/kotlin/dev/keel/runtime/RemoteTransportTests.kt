@@ -1,6 +1,7 @@
 package dev.keel.runtime
 
 import dev.keel.runtime.adapters.StandardPorts
+import dev.keel.runtime.support.portMethods
 import dev.keel.runtime.support.HASH
 import dev.keel.runtime.support.LogCapture
 import dev.keel.runtime.support.NO_BYTES
@@ -194,16 +195,9 @@ class RemoteTransportTests : Suite() {
         }
 
         case("port calls from the server are answered with PORT_REPLY envelopes: sync, async, and unavailable") {
-            // Typed explicitly: Kotlin 2.0's inference cannot pick the suspend function type
-            // for a plain lambda inside mapOf (2.4 can); the runtime's floor is 2.0.
-            val syncEcho: suspend (ByteArray) -> ByteArray = { a -> a + byteArrayOf(1) }
-            val asyncEcho: suspend (ByteArray) -> ByteArray = { a ->
-                kotlinx.coroutines.delay(20)
-                a + byteArrayOf(2)
-            }
             val ports = mapOf(
-                0xA1u to PortImpl(true, mapOf(1u to syncEcho)),
-                0xA2u to PortImpl(false, mapOf(1u to asyncEcho)),
+                0xA1u to PortImpl(true, portMethods(1u to { a -> a + byteArrayOf(1) })),
+                0xA2u to PortImpl(false, portMethods(1u to { a -> kotlinx.coroutines.delay(20); a + byteArrayOf(2) })),
             )
             withServer { server ->
                 load(server, adapters = ports).use {
