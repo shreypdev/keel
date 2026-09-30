@@ -576,7 +576,7 @@ impl Events {
             .or_default()
             .push((id, Arc::from(callback)));
         Subscription {
-            events: Arc::downgrade(&self.inner),
+            events: Some(Arc::downgrade(&self.inner)),
             key: (port_id, method_id),
             id,
         }
@@ -616,21 +616,27 @@ impl Events {
 /// Keeps an [`Events::subscribe`] callback alive; dropping it unsubscribes.
 #[must_use = "dropping a Subscription unsubscribes immediately"]
 pub struct Subscription {
-    events: std::sync::Weak<EventsInner>,
+    /// The table to unsubscribe from; `None` once [`detach`](Subscription::detach)ed.
+    events: Option<std::sync::Weak<EventsInner>>,
     key: EventKey,
     id: u64,
 }
 
 impl Subscription {
-    /// Keeps the subscription for the life of the runtime instead of until dropped.
-    pub fn detach(self) {
-        std::mem::forget(self);
+    /// Keeps the subscription for the life of the runtime instead of until dropped: the
+    /// subscriber stays in the table until [`Events::clear`] (shutdown) removes it.
+    ///
+    /// The handle's reference to the table is released, not leaked: forgetting the whole
+    /// `Subscription` kept the table's allocation alive after the runtime was gone (80 bytes per
+    /// `init` / `shutdown` cycle of a host that detaches one).
+    pub fn detach(mut self) {
+        self.events = None;
     }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        let Some(inner) = self.events.upgrade() else {
+        let Some(inner) = self.events.as_ref().and_then(std::sync::Weak::upgrade) else {
             return;
         };
         let mut subs = inner.subs.lock();
@@ -666,6 +672,48 @@ mod tests {
         }
         .encode(&mut w);
         w.into_vec()
+    }
+
+    /// The review's leak (I1): `detach` forgot the whole handle, so every detached subscription
+    /// kept one `Weak` on the table and the table's allocation outlived the runtime.
+    #[test]
+    fn subscribing_and_detaching_leaves_no_reference_to_the_table_behind() {
+        let events = Events::default();
+        let handler = || -> EventHandler { Box::new(|_: &[u8]| {}) };
+        for _ in 0..1000 {
+            events.subscribe(1, 2, handler()).detach();
+        }
+        assert_eq!(
+            Arc::weak_count(&events.inner),
+            0,
+            "a detached subscription must not hold on to the table"
+        );
+        // Detached means "until shutdown", so the subscribers are still there...
+        assert_eq!(events.subscriber_count(1, 2), 1000);
+        // ...and shutdown's `clear` removes every one of them.
+        assert_eq!(events.clear().len(), 1000);
+        assert_eq!(events.subscriber_count(1, 2), 0);
+        // A handle dropped after the table is gone finds nothing to remove and is harmless.
+        let late = events.subscribe(3, 4, handler());
+        let table = Arc::downgrade(&events.inner);
+        drop(events);
+        assert!(
+            table.upgrade().is_none(),
+            "the table is freed with its owner"
+        );
+        drop(late);
+    }
+
+    #[test]
+    fn dropped_subscriptions_leave_the_list_empty_across_many_cycles() {
+        let events = Events::default();
+        for _ in 0..1000 {
+            let subscription = events.subscribe(1, 2, Box::new(|_: &[u8]| {}));
+            assert_eq!(events.subscriber_count(1, 2), 1);
+            drop(subscription);
+            assert_eq!(events.subscriber_count(1, 2), 0);
+        }
+        assert_eq!(Arc::weak_count(&events.inner), 0);
     }
 
     #[test]
