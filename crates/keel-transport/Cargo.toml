@@ -31,5 +31,6 @@ tungstenite = { workspace = true, optional = true }
 keel = { workspace = true }
 keel-macros = { workspace = true }
 proptest = { workspace = true }
+serde_json = { workspace = true }
 # The tests speak to the server with tungstenite's client, as a raw stand-in for a platform.
 tungstenite = { workspace = true }

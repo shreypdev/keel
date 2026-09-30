@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use common::*;
 use keel::wire::payload::{Hello, ReplyStatus};
-use keel::wire::{Decode, Kind, Reader};
+use keel::wire::{Kind, Reader};
 use keel_transport::{ClientInfo, KEEL_VERSION, ServerConfig, close};
 
 #[test]
@@ -18,7 +18,11 @@ fn the_server_answers_the_clients_hello_with_its_own_as_sequence_zero() {
     let frame = client.expect_frame(Kind::Hello);
 
     assert_eq!(frame.seq, 0, "the server's first envelope is sequence 0");
-    assert_eq!(frame.schema, f.schema(), "the header carries the core's schema hash");
+    assert_eq!(
+        frame.schema,
+        f.schema(),
+        "the header carries the core's schema hash"
+    );
     let hello = Hello::decode(&mut Reader::new(&frame.payload)).unwrap();
     assert_eq!(hello.keel_version, KEEL_VERSION);
     assert_eq!(hello.schema_hash, f.schema());
@@ -52,8 +56,14 @@ fn a_schema_mismatch_is_reported_from_the_servers_hello_and_then_closed() {
     let (code, reason) = client.expect_close().expect("a Close frame");
     assert_eq!(code, close::POLICY_VIOLATION);
     assert!(reason.contains("schema mismatch"), "{reason}");
-    assert!(reason.contains(&format!("{:#018x}", f.schema())), "{reason}");
-    assert!(!f.bridge.is_connected(), "a refused client is never attached");
+    assert!(
+        reason.contains(&format!("{:#018x}", f.schema())),
+        "{reason}"
+    );
+    assert!(
+        !f.bridge.is_connected(),
+        "a refused client is never attached"
+    );
 
     // The server carries on: a client with the right hash is served.
     let mut good = f.client();
@@ -78,11 +88,18 @@ fn a_client_that_says_nothing_is_closed_when_the_handshake_times_out() {
 fn the_first_message_must_be_hello() {
     let f = start();
     let mut client = TestClient::connect_raw(&f.url(), f.schema());
-    client.send_call(keel::wire::payload::CallTarget::Function { method_id: SUM }, 1, &[]);
+    client.send_call(
+        keel::wire::payload::CallTarget::Function { method_id: SUM },
+        1,
+        &[],
+    );
     let (code, reason) = client.expect_close().expect("a Close frame");
     assert_eq!(code, close::PROTOCOL_ERROR);
     assert!(reason.contains("expected Hello"), "{reason}");
-    assert!(client.frames_of(Kind::Reply).is_empty(), "the call was never run");
+    assert!(
+        client.frames_of(Kind::Reply).is_empty(),
+        "the call was never run"
+    );
 }
 
 #[test]
@@ -122,7 +139,10 @@ fn a_repeated_hello_is_ignored() {
         &[enc(&1_i32), enc(&1_i32)].concat(),
     );
     assert_eq!(status, ReplyStatus::Ok);
-    assert!(client.frames_of(Kind::Hello).len() == 1, "the server did not answer twice");
+    assert!(
+        client.frames_of(Kind::Hello).len() == 1,
+        "the server did not answer twice"
+    );
 }
 
 #[test]

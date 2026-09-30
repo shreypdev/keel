@@ -29,6 +29,8 @@ use tungstenite::{Message, WebSocket};
 pub static DROPPED: AtomicUsize = AtomicUsize::new(0);
 /// Counts how often `hang` was started.
 pub static STARTED: AtomicUsize = AtomicUsize::new(0);
+/// What detached port calls (`ask_later`) came back with.
+pub static LATE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 struct DropGuard;
 
@@ -49,6 +51,18 @@ pub enum CounterError {
 #[keel::port]
 pub trait Echo {
     async fn echo(&self, x: i32) -> i32;
+}
+
+/// A synchronous port: a remote client cannot answer it in time.
+#[keel::port(sync)]
+pub trait Wall {
+    fn now(&self) -> i64;
+}
+
+/// A synchronous fire-and-forget port (like `Log`).
+#[keel::port(sync)]
+pub trait Beep {
+    fn beep(&self, n: u32);
 }
 
 #[keel::store]
@@ -115,12 +129,46 @@ impl Counter {
         echo(&self.ctx).echo(x).await
     }
 
+    /// Asks the platform from a detached task, no call waiting on it; the outcome is
+    /// recorded in [`LATE`].
+    pub fn ask_later(&self, x: i32) {
+        let ctx = self.ctx.clone();
+        self.ctx.spawn(async move {
+            let outcome = match ctx
+                .port_call(ECHO_PORT, ECHO_METHOD, x.encode_to_vec())
+                .await
+            {
+                Ok(body) => format!("ok {}", i32::decode_exact(&body).unwrap()),
+                Err(e) => format!("err {e}"),
+            };
+            LATE.lock().unwrap().push(outcome);
+        });
+    }
+
+    pub fn wall_now(&self) -> i64 {
+        wall(&self.ctx).now()
+    }
+
+    pub fn beep_twice(&self) -> u32 {
+        beep(&self.ctx).beep(1);
+        beep(&self.ctx).beep(2);
+        2
+    }
+
     pub fn ticks(&self, n: u32) -> impl Stream<Item = u32> + Send + 'static {
-        Ticks { next: 0, end: n, guard: None }
+        Ticks {
+            next: 0,
+            end: n,
+            guard: None,
+        }
     }
 
     pub fn endless(&self) -> impl Stream<Item = u32> + Send + 'static {
-        Ticks { next: 0, end: u32::MAX, guard: Some(DropGuard) }
+        Ticks {
+            next: 0,
+            end: u32::MAX,
+            guard: Some(DropGuard),
+        }
     }
 }
 
@@ -164,6 +212,11 @@ pub const SLOW_ADD: u32 = ids::method_id("Counter", "slow_add");
 pub const HANG: u32 = ids::method_id("Counter", "hang");
 pub const ASK: u32 = ids::method_id("Counter", "ask");
 pub const TICKS: u32 = ids::method_id("Counter", "ticks");
+pub const ASK_LATER: u32 = ids::method_id("Counter", "ask_later");
+pub const WALL_NOW: u32 = ids::method_id("Counter", "wall_now");
+pub const BEEP_TWICE: u32 = ids::method_id("Counter", "beep_twice");
+pub const WALL_PORT: u32 = ids::port_id("Wall");
+pub const BEEP_PORT: u32 = ids::port_id("Beep");
 pub const ENDLESS: u32 = ids::method_id("Counter", "endless");
 pub const SUM: u32 = ids::function_id("sum");
 pub const ECHO_BYTES: u32 = ids::function_id("echo_bytes");
@@ -171,6 +224,16 @@ pub const COUNTER: u32 = ids::type_id("Counter");
 pub const ECHO_PORT: u32 = ids::port_id("Echo");
 pub const ECHO_METHOD: u32 = ids::port_method_id("Echo", "echo");
 pub const COUNT_SIGNAL: u32 = 0;
+
+static SERIAL: Mutex<()> = Mutex::new(());
+
+/// Serialises the tests that read the `DROPPED` / `STARTED` counters, which every test in a
+/// binary shares.
+pub fn serial() -> std::sync::MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 pub fn enc<T: Encode + ?Sized>(value: &T) -> Vec<u8> {
     value.encode_to_vec()
@@ -225,7 +288,9 @@ pub fn start_with(config: ServerConfig, mode: &str) -> Fixture {
     let logs: Logs = Arc::new(Mutex::new(Vec::new()));
     let sink = logs.clone();
     server.bridge().set_log_sink(move |level, target, message| {
-        sink.lock().unwrap().push((level, target.to_owned(), message.to_owned()));
+        sink.lock()
+            .unwrap()
+            .push((level, target.to_owned(), message.to_owned()));
     });
     Fixture {
         rt: server.runtime().clone(),
@@ -275,6 +340,16 @@ impl Drop for Fixture {
     }
 }
 
+/// One number out of the runtime's `stats_json`.
+pub fn stat(rt: &Runtime, key: &str) -> u64 {
+    let stats: serde_json::Value = serde_json::from_str(&rt.stats_json()).unwrap();
+    stats
+        .get(key)
+        .or_else(|| stats["crossings"].get(key))
+        .and_then(|v| v.as_u64())
+        .unwrap_or_else(|| panic!("no stat {key}"))
+}
+
 pub fn eventually(what: &str, condition: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !condition() {
@@ -313,6 +388,8 @@ pub struct TestClient {
     pub seen: Vec<Frame>,
     pub hello: Option<Frame>,
     call_id: u32,
+    /// Replies that arrived while waiting for another call's.
+    replies: std::collections::HashMap<u32, (ReplyStatus, Vec<u8>)>,
 }
 
 impl TestClient {
@@ -322,7 +399,8 @@ impl TestClient {
         let tcp = TcpStream::connect(host).expect("the server accepts");
         tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         tcp.set_nodelay(true).unwrap();
-        let (ws, _response) = tungstenite::client(url, tcp).expect("the WebSocket upgrade succeeds");
+        let (ws, _response) =
+            tungstenite::client(url, tcp).expect("the WebSocket upgrade succeeds");
         TestClient {
             ws,
             schema,
@@ -330,6 +408,7 @@ impl TestClient {
             seen: Vec::new(),
             hello: None,
             call_id: 0,
+            replies: std::collections::HashMap::new(),
         }
     }
 
@@ -376,11 +455,15 @@ impl TestClient {
 
     /// Sends bytes as one binary message, whatever they are.
     pub fn send_binary(&mut self, bytes: Vec<u8>) {
-        self.ws.send(Message::Binary(bytes)).expect("the send succeeds");
+        self.ws
+            .send(Message::Binary(bytes))
+            .expect("the send succeeds");
     }
 
     pub fn send_text(&mut self, text: &str) {
-        self.ws.send(Message::Text(text.into())).expect("the send succeeds");
+        self.ws
+            .send(Message::Text(text.into()))
+            .expect("the send succeeds");
     }
 
     pub fn ws(&mut self) -> &mut WebSocket<TcpStream> {
@@ -405,14 +488,17 @@ impl TestClient {
         self.await_reply(id)
     }
 
+    /// The reply to `call_id`, whether it already arrived or is yet to.
     pub fn await_reply(&mut self, call_id: u32) -> (ReplyStatus, Vec<u8>) {
         loop {
+            if let Some(reply) = self.replies.remove(&call_id) {
+                return reply;
+            }
             let frame = self.expect_any();
             if frame.kind == Kind::Reply {
                 let reply = Reply::decode(&mut Reader::new(&frame.payload)).unwrap();
-                if reply.call_id == call_id {
-                    return (reply.status, reply.body.to_vec());
-                }
+                self.replies
+                    .insert(reply.call_id, (reply.status, reply.body.to_vec()));
             }
         }
     }
@@ -420,7 +506,10 @@ impl TestClient {
     /// Constructs a `Counter` and returns its handle.
     pub fn new_counter(&mut self, initial: i32) -> u64 {
         let (status, body) = self.call(
-            CallTarget::Constructor { type_id: COUNTER, method_id: NEW },
+            CallTarget::Constructor {
+                type_id: COUNTER,
+                method_id: NEW,
+            },
             &enc(&initial),
         );
         assert_eq!(status, ReplyStatus::Ok);
@@ -429,20 +518,31 @@ impl TestClient {
 
     pub fn method(&mut self, handle: u64, method_id: u32, args: &[u8]) -> (ReplyStatus, Vec<u8>) {
         self.call(
-            CallTarget::Method { handle: keel::wire::Handle(handle), method_id },
+            CallTarget::Method {
+                handle: keel::wire::Handle(handle),
+                method_id,
+            },
             args,
         )
     }
 
     pub fn observe(&mut self, handle: u64, signal_id: u32, on: bool) {
         let mut w = Writer::new();
-        Observe { handle: keel::wire::Handle(handle), signal_id, on }.encode(&mut w);
+        Observe {
+            handle: keel::wire::Handle(handle),
+            signal_id,
+            on,
+        }
+        .encode(&mut w);
         self.send(Kind::Observe, w.as_slice());
     }
 
     pub fn release(&mut self, handle: u64) {
         let mut w = Writer::new();
-        Release { handle: keel::wire::Handle(handle) }.encode(&mut w);
+        Release {
+            handle: keel::wire::Handle(handle),
+        }
+        .encode(&mut w);
         self.send(Kind::Release, w.as_slice());
     }
 
@@ -460,7 +560,12 @@ impl TestClient {
 
     pub fn port_reply(&mut self, port_call_id: u32, status: PortStatus, body: &[u8]) {
         let mut w = Writer::new();
-        PortReply { port_call_id, status, body }.encode(&mut w);
+        PortReply {
+            port_call_id,
+            status,
+            body,
+        }
+        .encode(&mut w);
         self.send(Kind::PortReply, w.as_slice());
     }
 
@@ -484,12 +589,17 @@ impl TestClient {
                 }
                 Ok(Message::Close(frame)) => {
                     let _ = self.ws.flush();
-                    return Received::Closed(frame.map(|f| (u16::from(f.code), f.reason.into_owned())));
+                    return Received::Closed(
+                        frame.map(|f| (u16::from(f.code), f.reason.into_owned())),
+                    );
                 }
                 Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
                 Ok(Message::Text(text)) => panic!("the server sent a text message: {text}"),
                 Err(tungstenite::Error::Io(e))
-                    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) =>
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
                 {
                     return Received::Silence;
                 }
@@ -547,6 +657,20 @@ impl TestClient {
     pub fn frames_of(&self, kind: Kind) -> Vec<&Frame> {
         self.seen.iter().filter(|f| f.kind == kind).collect()
     }
+}
+
+/// The change-set in `frame`, decoded.
+pub fn change_set(frame: &Frame) -> keel::wire::payload::ChangeSet {
+    keel::wire::payload::ChangeSet::decode(&mut Reader::new(&frame.payload)).unwrap()
+}
+
+/// Every change-set received so far, decoded, in arrival order.
+pub fn change_sets(client: &TestClient) -> Vec<keel::wire::payload::ChangeSet> {
+    client
+        .frames_of(Kind::ChangeSet)
+        .into_iter()
+        .map(change_set)
+        .collect()
 }
 
 pub fn stream_item(frame: &Frame) -> (u32, StreamFlag, Vec<u8>) {
