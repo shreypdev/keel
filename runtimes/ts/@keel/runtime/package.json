@@ -1,0 +1,44 @@
+{
+  "name": "@keel/runtime",
+  "version": "0.1.0",
+  "description": "Keel TypeScript runtime: wire format, transports and reactive mirror for Keel cores.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shreypdev/keel",
+    "directory": "runtimes/ts/@keel/runtime"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "//": "SPEC section 13 also lists the subpath exports ./react, ./vue, ./svelte, ./solid, ./worker and ./node. They are added by the later work that implements those modules; only . and ./wire exist so far, because no export may point at a stub.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./wire": {
+      "types": "./dist/wire/index.d.ts",
+      "default": "./dist/wire/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  }
+}
