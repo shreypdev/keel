@@ -50,7 +50,8 @@ public final class HttpAdapter: KeelAdapter, @unchecked Sendable {
         guard let url = URL(string: request.url),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              url.host != nil
+              let host = url.host,
+              !host.isEmpty
         else {
             throw HttpAdapter.portError(.invalidUrl(request.url))
         }

@@ -38,7 +38,8 @@ final class WebSocketTransport: KeelTransport, @unchecked Sendable {
         guard let url = URL(string: urlString),
               let scheme = url.scheme?.lowercased(),
               scheme == "ws" || scheme == "wss",
-              url.host != nil
+              let host = url.host,
+              !host.isEmpty
         else {
             throw KeelLoadError.invalidURL(urlString)
         }

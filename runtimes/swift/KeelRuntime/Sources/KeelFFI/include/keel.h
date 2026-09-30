@@ -41,6 +41,23 @@ typedef void (*keel_changeset_cb)(void *user, const uint8_t *ptr, uint32_t len);
  *   0 = replied synchronously into `out_reply` (a PortReply payload),
  *   1 = will reply asynchronously through `keel_port_reply`,
  *   2 = unavailable.
+ *
+ * HOST REPLY MEMORY RULE (the one place where the host, not the core, allocates a KeelBuf).
+ * When the host returns 0 it fills `*out_reply` with a complete PortReply payload
+ * (`port_call_id u32, status u8, body`, never empty) in a block obtained from the C allocator
+ * and sets `cap` to 0:
+ *
+ *     out_reply->ptr = (uint8_t *)malloc(n);   // host allocates with malloc
+ *     out_reply->len = n;
+ *     out_reply->cap = 0;                       // 0: a plain C block, not a Rust Vec
+ *
+ * Ownership passes to the core when the callback returns. The core copies the bytes
+ * immediately and releases the block with `free`. Because `cap == 0` the core must NOT rebuild a
+ * Rust `Vec` from `ptr`, and the host must NOT expect `keel_buf_free` to be called on it (that
+ * function is for buffers the core allocated). The host must not touch the block after
+ * returning. When the host returns 1 or 2 it leaves `*out_reply` untouched and the core ignores
+ * it. `ptr`/`len` of the arguments are borrowed for the duration of the callback only: copy them
+ * before returning if they are needed later (an asynchronous port does exactly that).
  */
 typedef uint8_t (*keel_port_cb)(void *user, uint32_t port_id, uint32_t method_id, uint32_t port_call_id, const uint8_t *ptr, uint32_t len, KeelBuf *out_reply);
 
