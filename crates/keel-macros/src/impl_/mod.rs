@@ -20,7 +20,10 @@ pub(crate) mod error;
 pub(crate) mod naming;
 pub(crate) mod object;
 pub(crate) mod paths;
+pub(crate) mod port;
+pub(crate) mod query;
 pub(crate) mod record;
+pub(crate) mod store;
 pub(crate) mod types;
 
 use attrs::{StripHelpers, parse_args, root_arg};
@@ -120,6 +123,85 @@ pub(crate) fn expand_error(attr: TokenStream, item: TokenStream) -> TokenStream 
         match item {
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Error),
             other => Err(wrong_item("error", "enums", &other)),
+        }
+    })
+}
+
+/// `#[keel::query]` and `#[keel::mutation]`.
+pub(crate) fn expand_query(
+    flavor: query::Flavor,
+    attr: TokenStream,
+    item: TokenStream,
+) -> TokenStream {
+    run(item, &[], |item| {
+        let args = query::parse_query_args(attr, flavor)?;
+        match item {
+            syn::Item::Fn(item) => query::expand(flavor, args, item),
+            other => Err(wrong_item(
+                match flavor {
+                    query::Flavor::Query => "query",
+                    query::Flavor::Mutation => "mutation",
+                },
+                "`async fn`s",
+                &other,
+            )),
+        }
+    })
+}
+
+/// `#[keel::port]`.
+pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
+    run(item, &[], |item| match item {
+        syn::Item::Trait(item) => {
+            let (root, requested) = port::parse_port_args(attr)?;
+            port::expand_trait(root, requested, item)
+        }
+        syn::Item::Impl(item) => {
+            parse_args(
+                attr,
+                "port",
+                "nothing on an `impl Trait for Type` block",
+                |_| Ok(false),
+            )?;
+            port::expand_impl(item)
+        }
+        other => Err(wrong_item(
+            "port",
+            "trait definitions and `impl Trait for Type` blocks",
+            &other,
+        )),
+    })
+}
+
+/// `#[keel::store]`.
+pub(crate) fn expand_store(attr: TokenStream, item: TokenStream) -> TokenStream {
+    run(item, &[], |item| {
+        let mut root: Option<Root> = None;
+        let mut hook: Option<syn::Path> = None;
+        parse_args(
+            attr,
+            "store",
+            "`crate = \"path\"` and `restore = \"Self::function\"`",
+            |meta| {
+                if meta.path.is_ident("crate") {
+                    root = Some(root_arg(meta)?);
+                    Ok(true)
+                } else if meta.path.is_ident("restore") {
+                    let value = meta.value()?;
+                    hook = Some(if value.peek(syn::LitStr) {
+                        value.parse::<syn::LitStr>()?.parse::<syn::Path>()?
+                    } else {
+                        value.parse::<syn::Path>()?
+                    });
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
+        )?;
+        match item {
+            syn::Item::Struct(item) => store::expand_store(root, hook, item),
+            other => Err(wrong_item("store", "structs", &other)),
         }
     })
 }

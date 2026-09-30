@@ -51,3 +51,57 @@ pub fn api(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn error(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_error(attr.into(), item.into()).into()
 }
+
+/// Marks an `async fn(ctx: &Ctx, ..params) -> Result<T, E>` as a cached, keyed read managed by
+/// `keel-query`.
+///
+/// Arguments: `key = "todos:{page}"` (required; `{param}` placeholders name parameters),
+/// `stale = "30s"`, `persist`, `retry = 3` and `idempotent`. Generates `pub struct <Name>Query`
+/// implementing `::keel::query::QueryDef`, plus `QueryMeta`.
+#[proc_macro_attribute]
+pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_query(impl_::query::Flavor::Query, attr.into(), item.into()).into()
+}
+
+/// Marks an `async fn(ctx: &Ctx, ..params) -> Result<T, E>` as a mutation managed by
+/// `keel-query`: optimistic patches, invalidation, retry and the offline queue.
+///
+/// Arguments: `retry = N`, `idempotent`, and an optional `key`; `stale` and `persist` are
+/// rejected. Generates `pub struct <Name>Mutation` implementing `::keel::query::MutationDef`,
+/// plus `QueryMeta`.
+#[proc_macro_attribute]
+pub fn mutation(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_query(impl_::query::Flavor::Mutation, attr.into(), item.into()).into()
+}
+
+/// Marks a trait as a port: an interface the platform (or a Rust fake) implements and the core
+/// calls.
+///
+/// `#[keel::port(sync)]` asserts every method is synchronous; `#[keel::port(event)]` makes it a
+/// host-to-core event port (methods return `()`). The trait gains `Send + Sync` supertraits and
+/// its `async fn`s become methods returning boxed futures (`async fn` in traits is not dyn
+/// compatible); apply `#[keel::port]` to `impl Trait for Type` blocks to keep writing `async fn`
+/// in implementations.
+///
+/// Generated: `impl Port for dyn Trait`, `<Trait>Proxy`, an accessor `fn <trait_snake>(ctx)`, a
+/// Rust-side dispatcher and `PortMeta` (event ports: `on_<trait>_<method>` subscriptions and
+/// `encode_<trait>_<method>_event` payload encoders instead).
+#[proc_macro_attribute]
+pub fn port(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_port(attr.into(), item.into()).into()
+}
+
+/// Marks a struct as a store: an object whose `Signal<T>`, `Computed<T>` and `Lazy<T>` fields
+/// the platforms mirror.
+///
+/// The macro appends a hidden `__keel_cell` field to the struct; struct literals of the type
+/// inside its `#[keel::api(store)]` impl block get it added automatically. See the
+/// `store` module of the implementation for the full contract, including
+/// `#[keel::store(restore = "Self::rebuild")]`.
+///
+/// `#[keel(key = "id")]` on a `Signal<Vec<T>>` enables keyed patches, `#[keel(no_coalesce)]`
+/// delivers every commit of a signal.
+#[proc_macro_attribute]
+pub fn store(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_store(attr.into(), item.into()).into()
+}
