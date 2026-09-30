@@ -62,3 +62,16 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
    `test/findings.test.ts` (an expected-fail test, so it turns red when the runtime is fixed). Fix: re-check
    the queue after `#flushing` is cleared. It does not affect a scenario (S04.4 only needs the observer's own
    call to resolve).
+4. **A failed mutation's rollback removes the placeholder of a later mutation** (keel-query, SPEC 9: "the
+   pre-mutation entries are restored"). The restore is a snapshot taken before the mutation ran; a mutation
+   that started after it has already put its own optimistic item into the entry, and the restore takes it
+   away while its request is in flight (offline and queued, it stays gone until the replay succeeds). The web
+   app hit it by accident: Offline turned on while a toggle's PATCH was in flight, then an add. Repro:
+   `test/findings.test.ts`, expected-fail. The flow is: toggle (PATCH, 300 ms) then, before it answers, add; the
+   PATCH fails; the add's item disappears. A rollback that undoes only its own change would not.
+5. **A keyed patch costs O(list) in the core, not O(change)** (keel-runtime / keel-signals, blueprint section 14:
+   "lists must be O(change)", web budget for a one-insert patch on 10,000 items: 30 us). S10 prints the numbers
+   (node 24, the release-wasm build): `update_at` on the 10,000-row list takes 5 us with nobody observing the store
+   and about 1.26 ms with an observing store; the TypeScript side of it (decode, apply to the 10,000-item copy,
+   announce) is about 15 us of that. The time is the core computing the patch by comparing the old and the new
+   list. The 10k tab of the web app shows the same: about 1.2 to 1.8 ms from click to re-rendered window.

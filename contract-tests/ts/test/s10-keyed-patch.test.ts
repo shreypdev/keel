@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ChangeOp, KeelReader, type PatchOp, applyPatch, codecs, decodePatch, decodeValue } from "@keel/runtime";
-import { type Item, ItemCodec, KeelIds } from "@playground/core";
+import { BigList as BigListStore, type Item, ItemCodec, KeelIds } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { RawStore, type SignalUpdate, args, valueOf } from "../src/raw-store.js";
 import { step } from "../src/wait.js";
@@ -49,7 +49,7 @@ class Model {
   }
 }
 
-test("S10 keyed patch", async () => {
+test("S10 keyed patch", async ({ task }) => {
   const { core } = await boot();
   const list = await RawStore.open(core, BigList);
   // The host's copy of the list, built from the initial change-set, and the model beside it.
@@ -171,6 +171,30 @@ test("S10 keyed patch", async () => {
     expect(applyPatch(afterRemove, ops)).toEqual(start);
     fresh.close();
   });
+
+  // Not part of the scenario, printed for the record: what one `update_at` costs on the 10,000-row list, end to
+  // end, with nobody observing it (the write alone) and through a generated store (the call, the core's
+  // diff, the change-set, the patch applied to the 10,000-item copy, the signal announced).
+  const rounds = 500;
+  const label = (i: number) => args((w) => {
+    w.writeU32(i % 100);
+    w.writeStr(`Round ${i}`);
+  });
+  const quiet = await RawStore.open(core, BigList, { observe: false });
+  let started = performance.now();
+  for (let i = 0; i < rounds; i++) await quiet.call(BigList.updateAt, label(i));
+  const unobservedUs = ((performance.now() - started) * 1000) / rounds;
+  quiet.close();
+
+  const store = await BigListStore.create(core);
+  started = performance.now();
+  for (let i = 0; i < rounds; i++) await store.updateAt(i % 100, `Round ${i}`);
+  const observedUs = ((performance.now() - started) * 1000) / rounds;
+  expect(store.items.peek()[0]).toMatchObject({ label: "Round 400" });
+  (task.meta.notes ??= []).push(
+    `update_at on a 10,000-row list, mean over ${rounds} calls: ${unobservedUs.toFixed(0)} us unobserved, ${observedUs.toFixed(0)} us through an observing generated store`,
+  );
+  store.close();
 
   list.close();
 });
