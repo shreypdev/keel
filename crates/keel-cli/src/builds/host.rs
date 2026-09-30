@@ -62,16 +62,26 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
         crate_type: "cdylib",
         features: vec!["jni".to_owned()],
         env: Vec::new(),
-        lib_name: "keel_core".to_owned(),
+        lib_name: crate::shim::shim_lib_name(&session.project.root),
         rustc_args: identity_args(session.sys.os(), library_file_name()),
     })?;
-    let wanted = library_file_name();
+    let wanted = shim_file_name(session, library_file_name());
     Ok(files
         .iter()
-        .find(|f| f.file_name().is_some_and(|n| n == wanted))
+        .find(|f| f.file_name().is_some_and(|n| n == wanted.as_str()))
         .or_else(|| files.first())
         .cloned()
         .expect("build_library returns at least one file"))
+}
+
+/// The artifact file the per-project shim produces (`libkeel_core_<hash>.dylib`), derived from
+/// the canonical file name the destination uses.
+fn shim_file_name(session: &Session<'_>, canonical: &str) -> String {
+    canonical.replacen(
+        "keel_core",
+        &crate::shim::shim_lib_name(&session.project.root),
+        1,
+    )
 }
 
 /// Builds the host library and copies it to `build/host/`.

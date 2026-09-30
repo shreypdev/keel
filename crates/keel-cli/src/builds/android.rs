@@ -119,12 +119,16 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     remove_dir_all(&jni_libs)?;
     let mut artifacts = Vec::new();
     for abi in &cfg.abis {
-        let built = staging.join(abi).join("libkeel_core.so");
+        let shim_so = format!(
+            "lib{}.so",
+            crate::shim::shim_lib_name(&session.project.root)
+        );
+        let built = staging.join(abi).join(&shim_so);
         if !built.is_file() {
             return Err(CliError::new(
                 Code::ToolFailed,
                 format!("cargo-ndk finished but {} does not exist", built.display()),
-                "the Android build expects `libkeel_core.so` for every ABI it was asked for",
+                "the Android build expects the shim library for every ABI it was asked for",
                 "update cargo-ndk (`cargo install cargo-ndk --force`) and try again",
             ));
         }

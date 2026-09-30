@@ -51,6 +51,16 @@ pub fn project_key(project_root: &Path) -> String {
     format!("{name}-{hash:08x}")
 }
 
+/// The shim crate's library name: `keel_core_` plus the project-path hash. Per-project so a
+/// shared target directory never sees two crates fight over one `libkeel_core.*` artifact
+/// (keel-ffi's test fixture builds a `keel_core` of its own; a global `CARGO_TARGET_DIR`
+/// would too). The build steps copy the artifact to its canonical `libkeel_core.*` name.
+#[must_use]
+pub fn shim_lib_name(project_root: &Path) -> String {
+    let hash = keel_meta::ids::fnv1a32(&project_root.to_string_lossy());
+    format!("keel_core_{hash:08x}")
+}
+
 /// The directory the shim is generated into.
 #[must_use]
 pub fn shim_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
@@ -141,6 +151,7 @@ pub fn write_shim(
     let dir = shim_dir(target_dir, project_root);
     let vars = common_vars(core)
         .with("KEEL_FFI", core.keel.dependency("keel-ffi", &[]))
+        .with("SHIM_LIB_NAME", shim_lib_name(project_root))
         .with("WASM_OPT_LEVEL", wasm_opt_level);
     write_if_changed(&dir.join("Cargo.toml"), &render(SHIM_MANIFEST, &vars)?)?;
     write_if_changed(&dir.join("src/lib.rs"), SHIM_LIB)?;
@@ -256,7 +267,12 @@ mod tests {
             text.contains("app-core = { path = \"/proj/core\", package = \"todo-core\" }"),
             "{text}"
         );
-        assert!(text.contains("name = \"keel_core\""), "{text}");
+        let expected = format!("name = \"{}\"", shim_lib_name(Path::new("/nonexistent")));
+        assert!(text.contains(&expected), "{text}");
+        assert!(
+            !text.contains("name = \"keel_core\""),
+            "the shim lib must be per-project, not the canonical name: {text}"
+        );
         assert!(text.contains("opt-level = \"s\""), "{text}");
         assert!(text.contains("panic = \"abort\""), "{text}");
         // Regenerating identical content leaves the file alone (Cargo keys rebuilds on mtime).

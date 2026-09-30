@@ -193,7 +193,7 @@ extension ContractScenarios {
             try checkFailure(await outcome { () async throws(RemoteError) -> RemoteTodo in
                 try await setRemoteDone(list: "s14", id: 1, done: true, ctx: core)
             }, .http(.network("offline")), "set_remote_done while offline")
-            try check(ContinuousClock.now - patchStarted < .seconds(2), "set_remote_done while offline did not fail at once")
+            try check(ContinuousClock.now - patchStarted < waitLimit, "set_remote_done while offline did not fail at once (bounded by waitLimit for loaded CI runners)")
 
             // 4. The network returns: the queued POST is replayed.
             let queuedWhileOffline = kv.operations

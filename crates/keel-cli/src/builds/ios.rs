@@ -110,7 +110,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             crate_type: "staticlib",
             features: Vec::new(),
             env: env.clone(),
-            lib_name: "keel_core".to_owned(),
+            lib_name: crate::shim::shim_lib_name(&session.project.root),
             rustc_args: Vec::new(),
         })?;
         files

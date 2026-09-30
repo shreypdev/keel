@@ -10,9 +10,10 @@ edition = "2024"
 publish = false
 
 [lib]
-# The Kotlin runtime loads "keel_core" by default (System.loadLibrary), so the library is named
-# after that rather than after the app.
-name = "keel_core"
+# Per-project so a shared target directory never collides on one artifact (keel-ffi's test
+# fixture builds a `keel_core` of its own); `keel build` copies the output to its canonical
+# `libkeel_core.*` name, which is what the Kotlin runtime loads.
+name = "@@SHIM_LIB_NAME@@"
 path = "src/lib.rs"
 crate-type = ["cdylib", "staticlib"]
 

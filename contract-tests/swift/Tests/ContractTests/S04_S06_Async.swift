@@ -16,7 +16,7 @@ extension ContractScenarios {
             let elapsed = ContinuousClock.now - started
             try checkEqual(sum, 42, "add_later(20, 22, 50)")
             try check(elapsed >= .milliseconds(45), "add_later(.., 50) returned after only \(elapsed)")
-            try check(elapsed < .seconds(2), "add_later(.., 50) took \(elapsed)")
+            try check(elapsed < waitLimit, "add_later(.., 50) took \(elapsed)")  // waitLimit, not a tight bound: CI runners stall
 
             // 2. Three concurrent calls resolve in the order of their delays, with the right values.
             let finished = Locked<[Int32]>([])

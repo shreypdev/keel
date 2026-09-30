@@ -1,6 +1,7 @@
 package dev.keel.runtime
 
 import dev.keel.runtime.adapters.StandardPorts
+import dev.keel.runtime.support.handledBy
 import dev.keel.runtime.support.portMethods
 import dev.keel.runtime.support.HASH
 import dev.keel.runtime.support.LogCapture
@@ -196,8 +197,8 @@ class RemoteTransportTests : Suite() {
 
         case("port calls from the server are answered with PORT_REPLY envelopes: sync, async, and unavailable") {
             val ports = mapOf(
-                0xA1u to PortImpl(true, portMethods(1u to { a -> a + byteArrayOf(1) })),
-                0xA2u to PortImpl(false, portMethods(1u to { a -> kotlinx.coroutines.delay(20); a + byteArrayOf(2) })),
+                0xA1u to PortImpl(true, portMethods(1u handledBy { a -> a + byteArrayOf(1) })),
+                0xA2u to PortImpl(false, portMethods(1u handledBy { a -> kotlinx.coroutines.delay(20); a + byteArrayOf(2) })),
             )
             withServer { server ->
                 load(server, adapters = ports).use {

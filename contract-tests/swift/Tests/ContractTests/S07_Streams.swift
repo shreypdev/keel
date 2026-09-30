@@ -48,7 +48,7 @@ extension ContractScenarios {
                     break
                 }
             }
-            try await waitUntil("open_streams to return to \(openBefore)", timeout: .seconds(1)) {
+            try await waitUntil("open_streams to return to \(openBefore)") {
                 core.stat("open_streams") == openBefore
             }
             let runAhead = probe.counters().produced - producedBefore

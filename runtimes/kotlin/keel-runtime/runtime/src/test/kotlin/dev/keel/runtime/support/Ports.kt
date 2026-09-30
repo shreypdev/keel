@@ -11,3 +11,12 @@ package dev.keel.runtime.support
 internal fun portMethods(
     vararg methods: Pair<UInt, suspend (ByteArray) -> ByteArray>,
 ): Map<UInt, suspend (ByteArray) -> ByteArray> = mapOf(*methods)
+
+/**
+ * Pairs a method id with its handler, typing the lambda DIRECTLY on the parameter: unlike
+ * `id to { .. }`, the expected suspend type reaches the lambda before any `Pair` inference
+ * runs, which Kotlin 2.0 needs (2.4 infers either way).
+ */
+internal infix fun UInt.handledBy(
+    method: suspend (ByteArray) -> ByteArray,
+): Pair<UInt, suspend (ByteArray) -> ByteArray> = this to method

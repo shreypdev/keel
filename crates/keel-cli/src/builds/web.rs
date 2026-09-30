@@ -45,7 +45,7 @@ pub fn build(session: &Session<'_>) -> Result<Vec<Artifact>> {
         crate_type: "cdylib",
         features: Vec::new(),
         env: Vec::new(),
-        lib_name: "keel_core".to_owned(),
+        lib_name: crate::shim::shim_lib_name(&session.project.root),
         rustc_args: Vec::new(),
     })?;
     let built = files
