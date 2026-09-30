@@ -773,16 +773,17 @@ impl Runtime {
         self.guard_host("Host::change_set", || self.host.change_set(payload));
     }
 
-    /// Wraps `count` encoded entries into a change-set and delivers it.
-    fn deliver_entries(&self, entries: &Writer, count: u32) {
-        if count == 0 {
-            return;
-        }
-        let mut w = Writer::with_capacity(12 + entries.len());
-        w.write_u64(keel_signals::next_txn_id());
-        w.write_u32(count);
-        w.write_raw(entries.as_slice());
-        self.deliver_change_set(w.as_slice());
+    /// Starts observing `signal_ids` of one store and hands the host their current values as one
+    /// change-set: the single path that `observe` and `restore` share (ADR-023, findings M1/L9).
+    ///
+    /// The cell builds the entries and calls [`deliver_change_set`](Runtime::deliver_change_set)
+    /// **under the store's delivery lock**, with the transaction id allocated there, so a commit
+    /// of the same store on another thread cannot slip its newer values in front of these
+    /// (older) ones. Callers run it inside `keel_signals::txn` (the writes of a computed that do
+    /// not settle within the cell's passes then commit after the delivery, and the host converges
+    /// on the core's values) and under the panic guard.
+    fn deliver_observed(&self, cell: &keel_signals::StoreCell, signal_ids: &[u32]) -> u32 {
+        cell.observe_and_deliver(signal_ids, |payload| self.deliver_change_set(payload))
     }
 
     // ----- calls -------------------------------------------------------------------------
@@ -1179,20 +1180,28 @@ impl Runtime {
             return;
         };
         let signal_count = cell.signal_count();
-        self.objects
-            .with_observed(handle, |o| o.record(signal_id, on, signal_count));
-        let mut entries = Writer::new();
+        if !on {
+            cell.observe(signal_id, false, &mut Writer::new());
+            self.objects
+                .with_observed(handle, |o| o.record(signal_id, false, signal_count));
+            return;
+        }
         // The transaction outlives the delivery: writes made by computed closures during
         // `observe` that do not settle within its pass cap commit after the entries went out,
         // so the host converges on the core's values instead of keeping the capped snapshot
-        // (signals re-review R2).
+        // (signals re-review R2). Entries and delivery are one step under the store's delivery
+        // lock (ADR-023, M1).
         match guard::guarded(|| {
             keel_signals::txn(|| {
-                let count = cell.observe(signal_id, on, &mut entries);
-                self.deliver_entries(&entries, count);
+                self.deliver_observed(cell, &[signal_id]);
             })
         }) {
-            Ok(()) => {}
+            // Recorded once the host has the values: a panic leaves nothing remembered that a
+            // later restore would re-observe (review N5).
+            Ok(()) => {
+                self.objects
+                    .with_observed(handle, |o| o.record(signal_id, true, signal_count));
+            }
             Err(report) => self.note_panic("observe", handle, &report),
         }
     }
@@ -1685,7 +1694,9 @@ impl Runtime {
     /// issued before the snapshot, or since, can name an object created after the restore
     /// (ADR-022). Signals that
     /// were being observed before the restore (the runtime tracks this per handle) are
-    /// re-observed and their current values re-emitted as one change-set.
+    /// re-observed and their current values re-emitted: **one change-set per store**, each built
+    /// and delivered under that store's delivery lock, in handle order, inside one transaction so
+    /// that the host converges on the core's settled values (ADR-023).
     ///
     /// Restoring into a fresh runtime (after a crash) has no memory of observations: the host
     /// re-observes what it mirrors. In-flight tasks keep the objects they already hold; those
@@ -1795,23 +1806,37 @@ impl Runtime {
             }
         }
 
-        // Phase 3: re-emit what was observed.
-        let mut entries = Writer::new();
-        let mut count = 0;
-        for (handle, object) in &built {
-            let (Some(previous), Some(cell)) = (observed.get(&handle.0), object.as_store()) else {
-                continue;
-            };
-            for signal_id in previous.to_reobserve() {
-                match guard::guarded(|| cell.observe(signal_id, true, &mut entries)) {
-                    Ok(n) => count += n,
-                    Err(report) => self.note_panic("restore", *handle, &report),
+        // Phase 3: re-emit what was observed, through the path `observe` uses (ADR-023, L9):
+        // one change-set per re-observed store, each built and handed to the host under that
+        // store's delivery lock, all inside one transaction so that writes a computed makes
+        // while it is evaluated (and that do not settle within the cell's passes) commit after
+        // every store's entries went out and the host converges on the core's values.
+        let phase3 = guard::guarded(|| {
+            keel_signals::txn(|| {
+                for (handle, object) in &built {
+                    let (Some(previous), Some(cell)) = (observed.get(&handle.0), object.as_store())
+                    else {
+                        continue;
+                    };
+                    let signal_ids = previous.to_reobserve();
+                    if !signal_ids.is_empty() {
+                        if let Err(report) =
+                            guard::guarded(|| self.deliver_observed(cell, &signal_ids))
+                        {
+                            self.note_panic("restore", *handle, &report);
+                        }
+                    }
+                    self.objects
+                        .with_observed(*handle, |o| *o = previous.clone());
                 }
-            }
-            self.objects
-                .with_observed(*handle, |o| *o = previous.clone());
+            });
+        });
+        if let Err(report) = phase3 {
+            self.log_panic(
+                "restore: committing the writes of the re-observed stores panicked",
+                &report,
+            );
         }
-        self.deliver_entries(&entries, count);
         Ok(())
     }
 

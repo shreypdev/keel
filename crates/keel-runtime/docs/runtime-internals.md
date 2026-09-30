@@ -406,7 +406,11 @@ or writes a malformed record is skipped and logged. Non-store objects are not in
    sets are remembered per handle), and `insert_at` every store at its original index and
    generation.
 4. Re-observe, for every restored store whose handle had observations before, exactly those
-   signals, and deliver **one** change-set with all their current values.
+   signals: inside one `keel_signals::txn`, one `StoreCell::observe_and_deliver` per store, so
+   each store gets **one change-set** with its signals' current values, built and handed to the
+   host under that store's delivery lock (the same path as `observe`, ADR-023). Writes a computed
+   makes that do not settle commit when the transaction ends, after every store's entries, and
+   the host converges on the core's values.
 
 Restoring into a fresh runtime (after a crash) has no memory of observations; the host
 re-observes what it mirrors.
