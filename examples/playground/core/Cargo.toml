@@ -2,9 +2,14 @@
 name = "playground-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 publish = false
+description = "The Keel playground core: one Rust core shared by the web, iOS and Android playground apps and by the contract tests."
 
-[lib]
-crate-type = ["cdylib", "staticlib", "rlib"]
-
+# A plain library, like every Keel core: `keel build` links it with the C ABI into the library each
+# platform loads, and `keel dev` serves it over a WebSocket (see ../keel.toml).
 [dependencies]
+keel = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
