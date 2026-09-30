@@ -9,7 +9,7 @@
 //! * **stdin**: the runner runs until its stdin closes, so it cannot outlive the CLI, even when
 //!   the CLI is killed.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -55,7 +55,10 @@ pub enum RunnerEvent {
 /// Parses a runner stdout line.
 #[must_use]
 pub fn parse_line(id: u64, line: &str) -> RunnerEvent {
-    match line.strip_prefix(READY).map(|rest| rest.split_whitespace().collect::<Vec<_>>()) {
+    match line
+        .strip_prefix(READY)
+        .map(|rest| rest.split_whitespace().collect::<Vec<_>>())
+    {
         Some(parts) if parts.len() == 2 => RunnerEvent::Ready {
             id,
             url: parts[0].to_owned(),
@@ -94,7 +97,13 @@ pub struct Running {
 /// # Errors
 ///
 /// `C0013` when it cannot be started.
-pub fn spawn(exe: &Path, addr: &str, log_level: u8, id: u64, events: Sender<RunnerEvent>) -> Result<Running> {
+pub fn spawn(
+    exe: &Path,
+    addr: &str,
+    log_level: u8,
+    id: u64,
+    events: Sender<RunnerEvent>,
+) -> Result<Running> {
     let mut child = Command::new(exe)
         .arg(addr)
         .arg("--log-level")
@@ -116,7 +125,10 @@ pub fn spawn(exe: &Path, addr: &str, log_level: u8, id: u64, events: Sender<Runn
     thread::Builder::new()
         .name("keel-dev-runner-stdout".to_owned())
         .spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(std::result::Result::ok) {
+            for line in BufReader::new(stdout)
+                .lines()
+                .map_while(std::result::Result::ok)
+            {
                 if events.send(parse_line(id, &line)).is_err() {
                     return;
                 }
@@ -148,19 +160,6 @@ impl Running {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-
-    /// The exit status, if it has exited.
-    pub fn exit_status(&mut self) -> Option<std::process::ExitStatus> {
-        self.child.try_wait().ok().flatten()
-    }
-
-    /// Writes a line to the runner's stdin (unused by the runner today; kept for commands).
-    #[allow(dead_code)]
-    pub fn send(&mut self, text: &str) {
-        if let Some(stdin) = &mut self.stdin {
-            let _ = writeln!(stdin, "{text}");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -181,7 +180,12 @@ mod tests {
 
     #[test]
     fn anything_else_is_a_plain_line() {
-        for text in ["hello", "KEEL-DEV ready", "KEEL-DEV ready only-one", "KEEL-DEV ready a b c"] {
+        for text in [
+            "hello",
+            "KEEL-DEV ready",
+            "KEEL-DEV ready only-one",
+            "KEEL-DEV ready a b c",
+        ] {
             assert_eq!(
                 parse_line(1, text),
                 RunnerEvent::Line {

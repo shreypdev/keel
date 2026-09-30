@@ -76,7 +76,11 @@ impl Vars {
                 return Ok(out);
             };
             let name = &after[..end];
-            if name.is_empty() || !name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            {
                 // Not a placeholder (for example `@@` in prose): keep the first `@@` literally.
                 out.push_str("@@");
                 rest = after;
@@ -99,7 +103,9 @@ mod tests {
 
     #[test]
     fn replaces_placeholders_everywhere() {
-        let vars = Vars::new().with("NAME", "todo").with("ID", "com.example.todo");
+        let vars = Vars::new()
+            .with("NAME", "todo")
+            .with("ID", "com.example.todo");
         assert_eq!(
             vars.render("a @@NAME@@ b @@ID@@ c @@NAME@@").unwrap(),
             "a todo b com.example.todo c todo"
@@ -108,15 +114,24 @@ mod tests {
 
     #[test]
     fn unknown_placeholders_are_reported() {
-        assert_eq!(Vars::new().render("x @@MISSING@@ y").unwrap_err(), "MISSING");
+        assert_eq!(
+            Vars::new().render("x @@MISSING@@ y").unwrap_err(),
+            "MISSING"
+        );
     }
 
     #[test]
     fn stray_at_signs_are_left_alone() {
         let vars = Vars::new().with("A", "1");
-        assert_eq!(vars.render("@@ not a name @@ @@A@@").unwrap(), "@@ not a name @@ 1");
+        assert_eq!(
+            vars.render("@@ not a name @@ @@A@@").unwrap(),
+            "@@ not a name @@ 1"
+        );
         assert_eq!(vars.render("email@@example").unwrap(), "email@@example");
         assert_eq!(vars.render("tail @@").unwrap(), "tail @@");
-        assert_eq!(vars.render("@MainActor @Observable").unwrap(), "@MainActor @Observable");
+        assert_eq!(
+            vars.render("@MainActor @Observable").unwrap(),
+            "@MainActor @Observable"
+        );
     }
 }

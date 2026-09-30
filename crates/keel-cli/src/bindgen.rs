@@ -32,8 +32,6 @@ pub struct Plan {
     /// The output directory, absolute with symlinks resolved (relative paths to the runtimes are
     /// computed from it).
     pub out: PathBuf,
-    /// The Keel version the registries are asked for.
-    pub keel_version: String,
 }
 
 impl Plan {
@@ -41,18 +39,6 @@ impl Plan {
     #[must_use]
     pub fn swift_dir(&self) -> PathBuf {
         self.out.join("swift")
-    }
-
-    /// The Gradle module directory (`<out>/kotlin`).
-    #[must_use]
-    pub fn kotlin_dir(&self) -> PathBuf {
-        self.out.join("kotlin")
-    }
-
-    /// The npm package directory (`<out>/ts`).
-    #[must_use]
-    pub fn ts_dir(&self) -> PathBuf {
-        self.out.join("ts")
     }
 }
 
@@ -98,28 +84,45 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
             .collect()
     };
     if plan.platforms.contains(&Platform::Ios) {
-        files.extend(prefixed("swift", plan.generator.swift(schema).map_err(bindgen_failure)?));
+        files.extend(prefixed(
+            "swift",
+            plan.generator.swift(schema).map_err(bindgen_failure)?,
+        ));
         files.push(GeneratedFile {
             path: "swift/Package.swift".into(),
-            contents: swift_package(&plan.generator.swift_module, &plan.runtimes.swift, &plan.swift_dir()),
+            contents: swift_package(
+                &plan.generator.swift_module,
+                &plan.runtimes.swift,
+                &plan.swift_dir(),
+            ),
         });
     }
     if plan.platforms.contains(&Platform::Android) {
-        files.extend(prefixed("kotlin", plan.generator.kotlin(schema).map_err(bindgen_failure)?));
+        files.extend(prefixed(
+            "kotlin",
+            plan.generator.kotlin(schema).map_err(bindgen_failure)?,
+        ));
         files.push(GeneratedFile {
             path: "kotlin/build.gradle.kts".into(),
             contents: kotlin_build(&plan.runtimes.kotlin),
         });
     }
     if plan.platforms.contains(&Platform::Web) {
-        files.extend(prefixed("ts", plan.generator.typescript(schema).map_err(bindgen_failure)?));
+        files.extend(prefixed(
+            "ts",
+            plan.generator.typescript(schema).map_err(bindgen_failure)?,
+        ));
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
 
 fn bindgen_failure(errors: Vec<BindgenError>) -> CliError {
-    let detail = errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+    let detail = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
     CliError::new(
         Code::Bindgen,
         format!(
@@ -142,11 +145,17 @@ pub fn swift_package(module: &str, runtime: &RuntimeRef, package_dir: &Path) -> 
             let rel = relative_path(package_dir, dir).unwrap_or_else(|| dir.clone());
             (
                 format!(".package(path: \"{}\")", portable(&rel)),
-                dir.file_name().map_or_else(|| "KeelRuntime".to_owned(), |n| n.to_string_lossy().into_owned()),
+                dir.file_name().map_or_else(
+                    || "KeelRuntime".to_owned(),
+                    |n| n.to_string_lossy().into_owned(),
+                ),
             )
         }
         RuntimeRef::Registry { version } => (
-            format!(".package(url: \"https://github.com/shreypdev/keel-swift\", from: \"{}.0\")", version_base(version)),
+            format!(
+                ".package(url: \"https://github.com/shreypdev/keel-swift\", from: \"{}.0\")",
+                version_base(version)
+            ),
             "keel-swift".to_owned(),
         ),
     };
@@ -286,14 +295,19 @@ pub fn check(out: &Path, files: &[GeneratedFile]) -> Vec<String> {
     for file in files {
         match std::fs::read_to_string(out.join(&file.path)) {
             Ok(existing) if existing == file.contents => {}
-            Ok(_) => problems.push(format!("{} differs from what the schema generates", file.path)),
+            Ok(_) => problems.push(format!(
+                "{} differs from what the schema generates",
+                file.path
+            )),
             Err(_) => problems.push(format!("{} is missing", file.path)),
         }
     }
     let current: BTreeSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
     for old in read_manifest(out) {
         if !current.contains(old.as_str()) && out.join(&old).is_file() {
-            problems.push(format!("{old} is stale (the schema no longer generates it)"));
+            problems.push(format!(
+                "{old} is stale (the schema no longer generates it)"
+            ));
         }
     }
     problems
@@ -329,32 +343,52 @@ mod tests {
             platforms,
             runtimes,
             out: PathBuf::from("/proj/generated"),
-            keel_version: "0.1".into(),
         }
     }
 
     #[test]
     fn each_platform_gets_its_tree_and_manifest() {
-        let files = plan_files(&schema(), &plan(Platform::ALL.to_vec(), Runtimes::from_registries("0.1"))).unwrap();
+        let files = plan_files(
+            &schema(),
+            &plan(Platform::ALL.to_vec(), Runtimes::from_registries("0.1")),
+        )
+        .unwrap();
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert!(paths.contains(&"swift/Package.swift"), "{paths:?}");
-        assert!(paths.contains(&"swift/Sources/DemoCore/Generated/Types.swift"), "{paths:?}");
+        assert!(
+            paths.contains(&"swift/Sources/DemoCore/Generated/Types.swift"),
+            "{paths:?}"
+        );
         assert!(paths.contains(&"kotlin/build.gradle.kts"), "{paths:?}");
-        assert!(paths.contains(&"kotlin/src/main/kotlin/com/example/demo/core/Types.kt"), "{paths:?}");
-        assert!(paths.contains(&"ts/src/types.ts") && paths.contains(&"ts/package.json"), "{paths:?}");
+        assert!(
+            paths.contains(&"kotlin/src/main/kotlin/com/example/demo/core/Types.kt"),
+            "{paths:?}"
+        );
+        assert!(
+            paths.contains(&"ts/src/types.ts") && paths.contains(&"ts/package.json"),
+            "{paths:?}"
+        );
         assert!(paths.windows(2).all(|w| w[0] <= w[1]), "sorted");
     }
 
     #[test]
     fn only_the_chosen_platforms_are_generated() {
-        let files = plan_files(&schema(), &plan(vec![Platform::Web], Runtimes::from_registries("0.1"))).unwrap();
+        let files = plan_files(
+            &schema(),
+            &plan(vec![Platform::Web], Runtimes::from_registries("0.1")),
+        )
+        .unwrap();
         assert!(files.iter().all(|f| f.path.starts_with("ts/")), "{files:?}");
     }
 
     #[test]
     fn the_swift_package_points_at_the_runtime_relative_to_itself() {
         let runtimes = Runtimes::in_repo(Path::new("/src/keel"));
-        let text = swift_package("DemoCore", &runtimes.swift, Path::new("/proj/generated/swift"));
+        let text = swift_package(
+            "DemoCore",
+            &runtimes.swift,
+            Path::new("/proj/generated/swift"),
+        );
         assert!(
             text.contains(".package(path: \"../../../src/keel/runtimes/swift/KeelRuntime\")"),
             "{text}"
@@ -365,9 +399,20 @@ mod tests {
 
     #[test]
     fn the_registry_flavours_name_the_published_packages() {
-        let swift = swift_package("DemoCore", &RuntimeRef::Registry { version: "0.1".into() }, Path::new("/x"));
+        let swift = swift_package(
+            "DemoCore",
+            &RuntimeRef::Registry {
+                version: "0.1".into(),
+            },
+            Path::new("/x"),
+        );
         assert!(swift.contains("from: \"0.1.0\""), "{swift}");
-        assert!(kotlin_build(&RuntimeRef::Registry { version: "0.1".into() }).contains("dev.keel:runtime:0.1.0\""));
+        assert!(
+            kotlin_build(&RuntimeRef::Registry {
+                version: "0.1".into()
+            })
+            .contains("dev.keel:runtime:0.1.0\"")
+        );
         assert!(kotlin_build(&RuntimeRef::Path(PathBuf::from("/k"))).contains("0.1.0-SNAPSHOT"));
     }
 
@@ -375,9 +420,16 @@ mod tests {
     fn invalid_schemas_are_reported_with_bindgens_diagnostics() {
         let mut bad = schema();
         bad.records.push(bad.records[0].clone()); // a duplicate type name: E0050
-        let e = plan_files(&bad, &plan(vec![Platform::Web], Runtimes::from_registries("0.1"))).unwrap_err();
+        let e = plan_files(
+            &bad,
+            &plan(vec![Platform::Web], Runtimes::from_registries("0.1")),
+        )
+        .unwrap_err();
         assert_eq!(e.code, Code::Bindgen);
-        assert!(e.detail.as_deref().unwrap_or_default().contains("E0050"), "{e}");
+        assert!(
+            e.detail.as_deref().unwrap_or_default().contains("E0050"),
+            "{e}"
+        );
     }
 
     #[test]
@@ -395,11 +447,17 @@ mod tests {
         let second = apply(&out, &[file("ts/a.ts", "a")]).unwrap();
         assert_eq!(second.unchanged, 1);
         assert_eq!(second.removed, ["ts/sub/b.ts"]);
-        assert!(!out.join("ts/sub").exists(), "the emptied directory is pruned");
+        assert!(
+            !out.join("ts/sub").exists(),
+            "the emptied directory is pruned"
+        );
         assert!(out.join("ts/mine.ts").exists());
         assert!(check(&out, &[file("ts/a.ts", "a")]).is_empty());
         assert_eq!(check(&out, &[file("ts/a.ts", "changed")]).len(), 1);
-        assert_eq!(check(&out, &[file("ts/a.ts", "a"), file("ts/new.ts", "n")]), ["ts/new.ts is missing"]);
+        assert_eq!(
+            check(&out, &[file("ts/a.ts", "a"), file("ts/new.ts", "n")]),
+            ["ts/new.ts is missing"]
+        );
         let _ = std::fs::remove_dir_all(out);
     }
 

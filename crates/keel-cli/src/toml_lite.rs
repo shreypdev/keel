@@ -85,7 +85,10 @@ pub fn parse(text: &str) -> Result<Document, ParseError> {
         }
         if let Some(rest) = line.strip_prefix('[') {
             if rest.starts_with('[') {
-                return Err(err(line_no, "arrays of tables (`[[name]]`) are not supported in keel.toml"));
+                return Err(err(
+                    line_no,
+                    "arrays of tables (`[[name]]`) are not supported in keel.toml",
+                ));
             }
             let Some(name) = rest.strip_suffix(']') else {
                 return Err(err(line_no, "a table header must end with `]`"));
@@ -121,11 +124,20 @@ pub fn parse(text: &str) -> Result<Document, ParseError> {
             value_text.push_str(strip_comment(next).trim());
         }
         let value = parse_value(&value_text, line_no)?;
-        let table = doc.tables.get_mut(&current).expect("the current table exists");
+        let table = doc
+            .tables
+            .get_mut(&current)
+            .expect("the current table exists");
         if table.contains_key(key) {
             return Err(err(line_no, format!("the key `{key}` is set twice")));
         }
-        table.insert(key.to_owned(), Entry { value, line: line_no });
+        table.insert(
+            key.to_owned(),
+            Entry {
+                value,
+                line: line_no,
+            },
+        );
     }
     Ok(doc)
 }
@@ -138,7 +150,10 @@ fn err(line: usize, message: impl Into<String>) -> ParseError {
 }
 
 fn is_bare_key(key: &str) -> bool {
-    !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Removes a `#` comment that is not inside a string.
@@ -214,7 +229,10 @@ fn parse_value(text: &str, line: usize) -> Result<Value, ParseError> {
     if let Some(rest) = text.strip_prefix('\'') {
         return match rest.strip_suffix('\'') {
             Some(body) if !body.contains('\'') => Ok(Value::Str(body.to_owned())),
-            _ => Err(err(line, "a '...' string must end with `'` and contain no other `'`")),
+            _ => Err(err(
+                line,
+                "a '...' string must end with `'` and contain no other `'`",
+            )),
         };
     }
     match text {
@@ -224,7 +242,10 @@ fn parse_value(text: &str, line: usize) -> Result<Value, ParseError> {
         _ => {}
     }
     if text.starts_with('{') {
-        return Err(err(line, "inline tables are not supported in keel.toml; use a [table] instead"));
+        return Err(err(
+            line,
+            "inline tables are not supported in keel.toml; use a [table] instead",
+        ));
     }
     let digits: String = text.chars().filter(|c| *c != '_').collect();
     if let Ok(n) = digits.parse::<i64>() {
@@ -344,14 +365,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(get(&doc, "", "name"), &Value::Str("todo".into()));
-        assert_eq!(get(&doc, "project", "id"), &Value::Str("com.example.todo".into()));
+        assert_eq!(
+            get(&doc, "project", "id"),
+            &Value::Str("com.example.todo".into())
+        );
         assert_eq!(get(&doc, "project", "flag"), &Value::Bool(true));
         assert_eq!(get(&doc, "project", "n"), &Value::Int(1000));
     }
 
     #[test]
     fn reads_arrays_over_several_lines() {
-        let doc = parse("platforms = [\n  \"ios\", # first\n  \"android\",\n  'web',\n]\nempty = []\n").unwrap();
+        let doc =
+            parse("platforms = [\n  \"ios\", # first\n  \"android\",\n  'web',\n]\nempty = []\n")
+                .unwrap();
         assert_eq!(
             get(&doc, "", "platforms"),
             &Value::Array(vec![
@@ -372,7 +398,12 @@ mod tests {
 
     #[test]
     fn escapes_round_trip_through_quote() {
-        for s in ["plain", "with \"quotes\"", "back\\slash", "line\nbreak\ttab"] {
+        for s in [
+            "plain",
+            "with \"quotes\"",
+            "back\\slash",
+            "line\nbreak\ttab",
+        ] {
             let doc = parse(&format!("k = {}\n", quote(s))).unwrap();
             assert_eq!(get(&doc, "", "k"), &Value::Str(s.into()), "{s:?}");
         }

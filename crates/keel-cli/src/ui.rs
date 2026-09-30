@@ -24,6 +24,7 @@ impl Ui {
     }
 
     /// Output without colour, for tests.
+    #[cfg(test)]
     #[must_use]
     pub fn plain() -> Ui {
         Ui {
@@ -114,7 +115,13 @@ impl Ui {
 pub fn table(rows: &[Vec<String>]) -> String {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     let widths: Vec<usize> = (0..columns)
-        .map(|c| rows.iter().filter_map(|r| r.get(c)).map(|s| s.chars().count()).max().unwrap_or(0))
+        .map(|c| {
+            rows.iter()
+                .filter_map(|r| r.get(c))
+                .map(|s| s.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
         .collect();
     let mut out = String::new();
     for row in rows {
@@ -143,7 +150,10 @@ mod tests {
             vec!["artifact".to_owned(), "size".to_owned()],
             vec!["libkeel_core.so".to_owned(), "742.4 KB".to_owned()],
         ];
-        assert_eq!(table(&rows), "artifact         size\nlibkeel_core.so  742.4 KB\n");
+        assert_eq!(
+            table(&rows),
+            "artifact         size\nlibkeel_core.so  742.4 KB\n"
+        );
     }
 
     #[test]

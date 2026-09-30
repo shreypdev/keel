@@ -67,7 +67,8 @@ impl Toolchain {
             .map(|out| out.stdout.trim().to_owned())
             .unwrap_or_default();
         if selected.is_empty() || selected.ends_with("CommandLineTools") {
-            self.env.push(("DEVELOPER_DIR".to_owned(), XCODE_DEVELOPER_DIR.to_owned()));
+            self.env
+                .push(("DEVELOPER_DIR".to_owned(), XCODE_DEVELOPER_DIR.to_owned()));
             self.notes.push(format!(
                 "xcode-select points at {}, so DEVELOPER_DIR={XCODE_DEVELOPER_DIR} is used for Xcode tools (fix for good: `sudo xcode-select -s {XCODE_DEVELOPER_DIR}`)",
                 if selected.is_empty() { "nothing" } else { selected.as_str() }
@@ -79,8 +80,14 @@ impl Toolchain {
         self.android_sdk = find_android_sdk(sys);
         if let Some(sdk) = &self.android_sdk {
             if sys.env("ANDROID_HOME").is_none() && sys.env("ANDROID_SDK_ROOT").is_none() {
-                self.env.push(("ANDROID_HOME".to_owned(), sdk.to_string_lossy().into_owned()));
-                self.notes.push(format!("ANDROID_HOME is not set; using the SDK found at {}", sdk.display()));
+                self.env.push((
+                    "ANDROID_HOME".to_owned(),
+                    sdk.to_string_lossy().into_owned(),
+                ));
+                self.notes.push(format!(
+                    "ANDROID_HOME is not set; using the SDK found at {}",
+                    sdk.display()
+                ));
             }
         }
         self.android_ndk = find_android_ndk(sys, self.android_sdk.as_deref());
@@ -89,8 +96,14 @@ impl Toolchain {
                 .iter()
                 .any(|k| sys.env(k).is_some());
             if !set {
-                self.env.push(("ANDROID_NDK_HOME".to_owned(), ndk.to_string_lossy().into_owned()));
-                self.notes.push(format!("ANDROID_NDK_HOME is not set; using the NDK found at {}", ndk.display()));
+                self.env.push((
+                    "ANDROID_NDK_HOME".to_owned(),
+                    ndk.to_string_lossy().into_owned(),
+                ));
+                self.notes.push(format!(
+                    "ANDROID_NDK_HOME is not set; using the NDK found at {}",
+                    ndk.display()
+                ));
             }
         }
     }
@@ -150,7 +163,9 @@ fn android_sdk_candidates(sys: &dyn Sys) -> Vec<PathBuf> {
         out.push(home.join("Library/Android/sdk"));
         out.push(home.join("Android/Sdk"));
     }
-    out.push(PathBuf::from("/opt/homebrew/share/android-commandlinetools"));
+    out.push(PathBuf::from(
+        "/opt/homebrew/share/android-commandlinetools",
+    ));
     out.push(PathBuf::from("/usr/local/share/android-commandlinetools"));
     out.push(PathBuf::from("/opt/android-sdk"));
     out.push(PathBuf::from("/usr/lib/android-sdk"));
@@ -161,7 +176,9 @@ fn android_sdk_candidates(sys: &dyn Sys) -> Vec<PathBuf> {
 /// else the first usual location that exists.
 #[must_use]
 pub fn find_android_sdk(sys: &dyn Sys) -> Option<PathBuf> {
-    android_sdk_candidates(sys).into_iter().find(|p| sys.is_dir(p))
+    android_sdk_candidates(sys)
+        .into_iter()
+        .find(|p| sys.is_dir(p))
 }
 
 /// The Android NDK: an explicit `ANDROID_NDK_HOME` (or `ANDROID_NDK_ROOT`, `NDK_HOME`), else the
@@ -216,10 +233,21 @@ mod tests {
         let sys = FakeSys::macos()
             .with_dir(XCODE_DEVELOPER_DIR)
             .with_tool("xcode-select", "/usr/bin/xcode-select")
-            .with_output("xcode-select", "-p", "/Library/Developer/CommandLineTools\n");
+            .with_output(
+                "xcode-select",
+                "-p",
+                "/Library/Developer/CommandLineTools\n",
+            );
         let tc = Toolchain::detect(&sys);
-        assert!(tc.env.contains(&("DEVELOPER_DIR".into(), XCODE_DEVELOPER_DIR.into())), "{tc:?}");
-        assert!(tc.notes.iter().any(|n| n.contains("xcode-select -s")), "{tc:?}");
+        assert!(
+            tc.env
+                .contains(&("DEVELOPER_DIR".into(), XCODE_DEVELOPER_DIR.into())),
+            "{tc:?}"
+        );
+        assert!(
+            tc.notes.iter().any(|n| n.contains("xcode-select -s")),
+            "{tc:?}"
+        );
     }
 
     #[test]
@@ -253,7 +281,11 @@ mod tests {
             Some(Path::new(&format!("{sdk}/ndk/27.2.12479018")))
         );
         assert!(tc.env.iter().any(|(k, _)| k == "ANDROID_HOME"));
-        assert!(tc.env.iter().any(|(k, v)| k == "ANDROID_NDK_HOME" && v.ends_with("27.2.12479018")));
+        assert!(
+            tc.env
+                .iter()
+                .any(|(k, v)| k == "ANDROID_NDK_HOME" && v.ends_with("27.2.12479018"))
+        );
     }
 
     #[test]
@@ -279,7 +311,10 @@ mod tests {
     #[test]
     fn cargo_home_is_added_to_path_when_it_exists() {
         let sys = FakeSys::macos().with_dir("/Users/dev/.cargo/bin");
-        assert_eq!(Toolchain::detect(&sys).path_dirs, vec![PathBuf::from("/Users/dev/.cargo/bin")]);
+        assert_eq!(
+            Toolchain::detect(&sys).path_dirs,
+            vec![PathBuf::from("/Users/dev/.cargo/bin")]
+        );
     }
 
     #[test]

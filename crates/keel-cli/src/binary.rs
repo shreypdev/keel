@@ -51,7 +51,10 @@ pub fn wasm_exports(bytes: &[u8]) -> Result<Vec<String>, String> {
         pos += 1;
         let (size, used) = leb_u32(&bytes[pos..]).ok_or("a section size is cut off")?;
         pos += used;
-        let end = pos.checked_add(size as usize).filter(|e| *e <= bytes.len()).ok_or("a section runs past the end")?;
+        let end = pos
+            .checked_add(size as usize)
+            .filter(|e| *e <= bytes.len())
+            .ok_or("a section runs past the end")?;
         if id == 7 {
             let section = &bytes[pos..end];
             let (count, mut at) = leb_u32(section).ok_or("the export count is cut off")?;
@@ -59,11 +62,15 @@ pub fn wasm_exports(bytes: &[u8]) -> Result<Vec<String>, String> {
             for _ in 0..count {
                 let (len, used) = leb_u32(&section[at..]).ok_or("an export name is cut off")?;
                 at += used;
-                let name_end = at.checked_add(len as usize).filter(|e| *e <= section.len()).ok_or("an export name runs past the section")?;
+                let name_end = at
+                    .checked_add(len as usize)
+                    .filter(|e| *e <= section.len())
+                    .ok_or("an export name runs past the section")?;
                 names.push(String::from_utf8_lossy(&section[at..name_end]).into_owned());
                 at = name_end;
                 at += 1; // export kind
-                let (_, used) = leb_u32(section.get(at..).unwrap_or_default()).ok_or("an export index is cut off")?;
+                let (_, used) = leb_u32(section.get(at..).unwrap_or_default())
+                    .ok_or("an export index is cut off")?;
                 at += used;
             }
             return Ok(names);
@@ -109,10 +116,20 @@ pub fn elf_min_load_alignment(bytes: &[u8]) -> Option<u64> {
         2 => true,
         _ => return None,
     };
-    let u16_at = |o: usize| bytes.get(o..o + 2).map(|b| u64::from(u16::from_le_bytes([b[0], b[1]])));
-    let u32_at = |o: usize| bytes.get(o..o + 4).map(|b| u64::from(u32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+    let u16_at = |o: usize| {
+        bytes
+            .get(o..o + 2)
+            .map(|b| u64::from(u16::from_le_bytes([b[0], b[1]])))
+    };
+    let u32_at = |o: usize| {
+        bytes
+            .get(o..o + 4)
+            .map(|b| u64::from(u32::from_le_bytes([b[0], b[1], b[2], b[3]])))
+    };
     let u64_at = |o: usize| {
-        bytes.get(o..o + 8).map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+        bytes
+            .get(o..o + 8)
+            .map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
     };
     let (phoff, phentsize, phnum) = if is64 {
         (u64_at(0x20)?, u16_at(0x36)?, u16_at(0x38)?)
@@ -125,7 +142,11 @@ pub fn elf_min_load_alignment(bytes: &[u8]) -> Option<u64> {
         if u32_at(base)? != 1 {
             continue; // not PT_LOAD
         }
-        let align = if is64 { u64_at(base + 0x30)? } else { u32_at(base + 0x1c)? };
+        let align = if is64 {
+            u64_at(base + 0x30)?
+        } else {
+            u32_at(base + 0x1c)?
+        };
         min = Some(min.map_or(align, |m| m.min(align)));
     }
     min
@@ -171,12 +192,19 @@ mod tests {
         truncated.truncate(truncated.len() - 3);
         assert!(wasm_exports(&truncated).is_err());
         // No export section at all is fine: no exports.
-        assert_eq!(wasm_exports(b"\0asm\x01\0\0\0").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            wasm_exports(b"\0asm\x01\0\0\0").unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
     fn problems_name_what_is_missing() {
-        let all: Vec<String> = REQUIRED_WASM_EXPORTS.iter().map(|s| (*s).to_owned()).chain(["_initialize".to_owned()]).collect();
+        let all: Vec<String> = REQUIRED_WASM_EXPORTS
+            .iter()
+            .map(|s| (*s).to_owned())
+            .chain(["_initialize".to_owned()])
+            .collect();
         assert!(wasm_problems(&all).is_empty());
         let mut without = all.clone();
         without.retain(|e| e != "keel_init" && e != "_initialize");
@@ -195,7 +223,10 @@ mod tests {
         b[0x20..0x28].copy_from_slice(&64_u64.to_le_bytes());
         b[0x36..0x38].copy_from_slice(&56_u16.to_le_bytes());
         b[0x38..0x3a].copy_from_slice(&3_u16.to_le_bytes());
-        for (i, (kind, align)) in [(1_u32, aligns[0]), (4, 8), (1, aligns[1])].into_iter().enumerate() {
+        for (i, (kind, align)) in [(1_u32, aligns[0]), (4, 8), (1, aligns[1])]
+            .into_iter()
+            .enumerate()
+        {
             let base = 64 + i * 56;
             b[base..base + 4].copy_from_slice(&kind.to_le_bytes());
             b[base + 0x30..base + 0x38].copy_from_slice(&align.to_le_bytes());
@@ -205,10 +236,20 @@ mod tests {
 
     #[test]
     fn finds_the_load_alignment() {
-        assert_eq!(elf_min_load_alignment(&elf64([0x4000, 0x10000])), Some(0x4000));
-        assert_eq!(elf_min_load_alignment(&elf64([0x1000, 0x4000])), Some(0x1000));
+        assert_eq!(
+            elf_min_load_alignment(&elf64([0x4000, 0x10000])),
+            Some(0x4000)
+        );
+        assert_eq!(
+            elf_min_load_alignment(&elf64([0x1000, 0x4000])),
+            Some(0x1000)
+        );
         assert!(elf_is_64(&elf64([0x4000, 0x4000])));
         assert_eq!(elf_min_load_alignment(b"not elf"), None);
-        assert_eq!(elf_min_load_alignment(&[0x7f, b'E', b'L', b'F', 2, 2]), None, "big endian is not read");
+        assert_eq!(
+            elf_min_load_alignment(&[0x7f, b'E', b'L', b'F', 2, 2]),
+            None,
+            "big endian is not read"
+        );
     }
 }

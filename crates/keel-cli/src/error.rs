@@ -93,7 +93,12 @@ pub type Result<T> = core::result::Result<T, CliError>;
 impl CliError {
     /// A diagnostic with all three parts.
     #[must_use]
-    pub fn new(code: Code, what: impl Into<String>, why: impl Into<String>, fix: impl Into<String>) -> CliError {
+    pub fn new(
+        code: Code,
+        what: impl Into<String>,
+        why: impl Into<String>,
+        fix: impl Into<String>,
+    ) -> CliError {
         CliError {
             code,
             what: what.into(),
@@ -115,7 +120,10 @@ impl CliError {
     pub fn no_project(start: &Path) -> CliError {
         CliError::new(
             Code::NoProject,
-            format!("no keel.toml found in {} or any parent directory", start.display()),
+            format!(
+                "no keel.toml found in {} or any parent directory",
+                start.display()
+            ),
             "this command works on a Keel project, and a project is the directory that holds keel.toml",
             "run it inside a project, point at one with `-C <dir>`, or create one with `keel init <name>`",
         )
@@ -150,7 +158,7 @@ impl CliError {
             Code::ToolFailed,
             format!("`{tool}` failed while {doing} ({status})"),
             "the tool's own output above says what it objected to; Keel cannot continue without its result",
-            format!("fix the problem the tool reported and run the command again; `keel doctor` checks the toolchain"),
+            "fix the problem the tool reported and run the command again; `keel doctor` checks the toolchain",
         )
     }
 
@@ -167,7 +175,11 @@ impl CliError {
 
     /// `C0009`: an argument is unusable.
     #[must_use]
-    pub fn bad_argument(what: impl Into<String>, why: impl Into<String>, fix: impl Into<String>) -> CliError {
+    pub fn bad_argument(
+        what: impl Into<String>,
+        why: impl Into<String>,
+        fix: impl Into<String>,
+    ) -> CliError {
         CliError::new(Code::BadArgument, what, why, fix)
     }
 
@@ -244,7 +256,11 @@ mod tests {
 
     #[test]
     fn missing_tool_teaches_the_install() {
-        let e = CliError::missing_tool("cargo-ndk", "building for Android", "install it with `cargo install cargo-ndk`");
+        let e = CliError::missing_tool(
+            "cargo-ndk",
+            "building for Android",
+            "install it with `cargo install cargo-ndk`",
+        );
         let text = e.to_string();
         assert!(text.contains("`cargo-ndk` was not found"), "{text}");
         assert!(text.contains("cargo install cargo-ndk"), "{text}");

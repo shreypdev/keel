@@ -26,7 +26,8 @@ pub fn run(env: &Env<'_>, args: &BuildArgs) -> Result<()> {
     let artifacts = builds::run(&session, &options)?;
     env.ui.line("");
     env.ui.line(&env.ui.bold_out("Built:"));
-    env.ui.line(builds::summary(&session.project.root, &artifacts).trim_end());
+    env.ui
+        .line(builds::summary(&session.project.root, &artifacts).trim_end());
     Ok(())
 }
 
@@ -69,7 +70,10 @@ mod tests {
 
     #[test]
     fn target_lists() {
-        assert_eq!(parse_targets("web, ios,web").unwrap(), vec![Target::Web, Target::Ios]);
+        assert_eq!(
+            parse_targets("web, ios,web").unwrap(),
+            vec![Target::Web, Target::Ios]
+        );
         assert!(parse_targets("").is_err());
         assert!(parse_targets("ios,tv").is_err());
     }

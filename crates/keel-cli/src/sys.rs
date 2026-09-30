@@ -86,7 +86,8 @@ impl Sys for RealSys {
     }
 
     fn home(&self) -> Option<PathBuf> {
-        self.env(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
+        self.env(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(PathBuf::from)
     }
 
     fn is_file(&self, path: &Path) -> bool {
@@ -142,7 +143,12 @@ impl Sys for RealSys {
 
 fn executable_names(program: &str) -> Vec<String> {
     if cfg!(windows) {
-        vec![format!("{program}.exe"), format!("{program}.cmd"), format!("{program}.bat"), program.to_owned()]
+        vec![
+            format!("{program}.exe"),
+            format!("{program}.cmd"),
+            format!("{program}.bat"),
+            program.to_owned(),
+        ]
     } else {
         vec![program.to_owned()]
     }
@@ -151,7 +157,8 @@ fn executable_names(program: &str) -> Vec<String> {
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    path.metadata().is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    path.metadata()
+        .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
@@ -239,18 +246,6 @@ pub(crate) mod fake {
             );
             self
         }
-
-        pub(crate) fn with_failing(mut self, tool: &str, args: &str, stderr: &str) -> FakeSys {
-            self.outputs.insert(
-                format!("{tool} {args}").trim().to_owned(),
-                CmdOutput {
-                    success: false,
-                    stdout: String::new(),
-                    stderr: stderr.to_owned(),
-                },
-            );
-            self
-        }
     }
 
     impl Sys for FakeSys {
@@ -290,10 +285,18 @@ pub(crate) mod fake {
             if let Some(found) = self.tools.get(program) {
                 return Some(found.clone());
             }
-            extra.iter().map(|d| d.join(program)).find(|p| self.files.contains(p))
+            extra
+                .iter()
+                .map(|d| d.join(program))
+                .find(|p| self.files.contains(p))
         }
 
-        fn run(&self, program: &Path, args: &[&str], _env: &[(String, String)]) -> Option<CmdOutput> {
+        fn run(
+            &self,
+            program: &Path,
+            args: &[&str],
+            _env: &[(String, String)],
+        ) -> Option<CmdOutput> {
             let name = program.file_name()?.to_string_lossy().into_owned();
             let key = format!("{name} {}", args.join(" ")).trim().to_owned();
             self.outputs.get(&key).cloned()

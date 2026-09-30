@@ -112,7 +112,11 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
         session.ui.step(&format!(
             "Building the core for {} ({})",
             target.name(),
-            if *target == Target::Web || options.release { "release" } else { "debug" }
+            if *target == Target::Web || options.release {
+                "release"
+            } else {
+                "debug"
+            }
         ));
         let produced = match target {
             Target::Host => host::package(session, options.release)?,
@@ -128,7 +132,11 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
 /// The summary table of a build: one row per artifact, with its budget where the blueprint has one.
 #[must_use]
 pub fn summary(project_root: &std::path::Path, artifacts: &[Artifact]) -> String {
-    let mut rows = vec![vec!["artifact".to_owned(), "size".to_owned(), "where".to_owned()]];
+    let mut rows = vec![vec![
+        "artifact".to_owned(),
+        "size".to_owned(),
+        "where".to_owned(),
+    ]];
     for a in artifacts {
         let mut size = human_size(a.size);
         if let Some(note) = &a.note {
@@ -161,7 +169,12 @@ mod tests {
     fn targets_parse_and_map_from_platforms() {
         assert_eq!(Target::parse("Host").unwrap(), Target::Host);
         assert_eq!(Target::parse("wasm").unwrap(), Target::Web);
-        assert!(Target::parse("tv").unwrap_err().fix.contains("host, ios, android, web"));
+        assert!(
+            Target::parse("tv")
+                .unwrap_err()
+                .fix
+                .contains("host, ios, android, web")
+        );
         assert_eq!(Target::of(Platform::Android), Target::Android);
     }
 
@@ -175,7 +188,10 @@ mod tests {
             note: Some("gzip 88.1 KB".into()),
         };
         let text = summary(std::path::Path::new("/p"), &[a]);
-        assert!(text.contains("241.0 KB (gzip 88.1 KB)  [budget 120 KB gzip]"), "{text}");
+        assert!(
+            text.contains("241.0 KB (gzip 88.1 KB)  [budget 120 KB gzip]"),
+            "{text}"
+        );
         assert!(text.contains("build/web/keel_core.wasm"), "{text}");
     }
 }

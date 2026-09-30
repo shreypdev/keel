@@ -39,7 +39,13 @@ pub fn project_key(project_root: &Path) -> String {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let hash = keel_meta::ids::fnv1a32(&project_root.to_string_lossy());
     format!("{name}-{hash:08x}")
@@ -48,25 +54,37 @@ pub fn project_key(project_root: &Path) -> String {
 /// The directory the shim is generated into.
 #[must_use]
 pub fn shim_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
-    target_dir.join("keel").join(project_key(project_root)).join("shim")
+    target_dir
+        .join("keel")
+        .join(project_key(project_root))
+        .join("shim")
 }
 
 /// The directory the dev runner is generated into.
 #[must_use]
 pub fn runner_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
-    target_dir.join("keel").join(project_key(project_root)).join("dev-runner")
+    target_dir
+        .join("keel")
+        .join(project_key(project_root))
+        .join("dev-runner")
 }
 
 /// The staging directory for Android builds of this project (`cargo ndk -o`).
 #[must_use]
 pub fn android_stage_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
-    target_dir.join("keel").join(project_key(project_root)).join("android-ndk")
+    target_dir
+        .join("keel")
+        .join(project_key(project_root))
+        .join("android-ndk")
 }
 
 /// The staging directory for iOS builds of this project.
 #[must_use]
 pub fn ios_stage_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
-    target_dir.join("keel").join(project_key(project_root)).join("ios")
+    target_dir
+        .join("keel")
+        .join(project_key(project_root))
+        .join("ios")
 }
 
 fn common_vars(core: &CoreInfo) -> Vars {
@@ -107,7 +125,12 @@ fn seed_lockfile(dir: &Path, project_root: &Path) {
 /// # Errors
 ///
 /// `C0010` when it cannot be written.
-pub fn write_shim(target_dir: &Path, project_root: &Path, core: &CoreInfo, wasm_opt_level: &str) -> Result<PathBuf> {
+pub fn write_shim(
+    target_dir: &Path,
+    project_root: &Path,
+    core: &CoreInfo,
+    wasm_opt_level: &str,
+) -> Result<PathBuf> {
     let dir = shim_dir(target_dir, project_root);
     let vars = common_vars(core)
         .with("KEEL_FFI", core.keel.dependency("keel-ffi", &[]))
@@ -132,7 +155,10 @@ pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> 
     };
     let vars = common_vars(core)
         .with("KEEL_RUNTIME", core.keel.dependency("keel-runtime", &[]))
-        .with("KEEL_TRANSPORT", core.keel.dependency("keel-transport", &[]))
+        .with(
+            "KEEL_TRANSPORT",
+            core.keel.dependency("keel-transport", &[]),
+        )
         .with("PORTS_DEP", ports_dep);
     write_if_changed(&dir.join("Cargo.toml"), &render(RUNNER_MANIFEST, &vars)?)?;
     let main = strip_block(RUNNER_MAIN, "ports", core.links_ports);
@@ -193,7 +219,10 @@ mod tests {
         let b = shim_dir(target, Path::new("/other/app"));
         assert_ne!(a, b, "same folder name, different projects");
         let text = a.to_string_lossy();
-        assert!(text.starts_with("/shared/target/keel/app-") && text.ends_with("/shim"), "{a:?}");
+        assert!(
+            text.starts_with("/shared/target/keel/app-") && text.ends_with("/shim"),
+            "{a:?}"
+        );
         assert_eq!(a, shim_dir(target, Path::new("/work/app")), "stable");
         assert_ne!(runner_dir(target, Path::new("/work/app")), a);
         assert!(project_key(Path::new("/w/My App!")).starts_with("My_App_-"));
@@ -211,8 +240,14 @@ mod tests {
         let dir = crate::fsutil::unique_temp_dir("shim-gen");
         let manifest = write_shim(&dir, Path::new("/nonexistent"), &core(false), "s").unwrap();
         let text = std::fs::read_to_string(&manifest).unwrap();
-        assert!(text.contains("keel-ffi = { path = \"/src/keel/crates/keel-ffi\" }"), "{text}");
-        assert!(text.contains("app-core = { path = \"/proj/core\", package = \"todo-core\" }"), "{text}");
+        assert!(
+            text.contains("keel-ffi = { path = \"/src/keel/crates/keel-ffi\" }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("app-core = { path = \"/proj/core\", package = \"todo-core\" }"),
+            "{text}"
+        );
         assert!(text.contains("name = \"keel_core\""), "{text}");
         assert!(text.contains("opt-level = \"s\""), "{text}");
         assert!(text.contains("panic = \"abort\""), "{text}");
@@ -220,7 +255,10 @@ mod tests {
         let before = std::fs::metadata(&manifest).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         write_shim(&dir, Path::new("/nonexistent"), &core(false), "s").unwrap();
-        assert_eq!(std::fs::metadata(&manifest).unwrap().modified().unwrap(), before);
+        assert_eq!(
+            std::fs::metadata(&manifest).unwrap().modified().unwrap(),
+            before
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -228,17 +266,39 @@ mod tests {
     fn the_runner_binds_native_ports_only_when_the_core_links_them() {
         let dir = crate::fsutil::unique_temp_dir("runner-gen");
         write_runner(&dir, Path::new("/nonexistent"), &core(false)).unwrap();
-        let without = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("src/main.rs")).unwrap();
-        let manifest = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml")).unwrap();
-        assert!(!without.contains("NativeClock") && !without.contains("bind_native_ports"), "{without}");
+        let without = std::fs::read_to_string(
+            runner_dir(&dir, Path::new("/nonexistent")).join("src/main.rs"),
+        )
+        .unwrap();
+        let manifest =
+            std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml"))
+                .unwrap();
+        assert!(
+            !without.contains("NativeClock") && !without.contains("bind_native_ports"),
+            "{without}"
+        );
         assert!(!manifest.contains("keel-ports"), "{manifest}");
-        assert!(manifest.contains("keel-transport = { path = \"/src/keel/crates/keel-transport\" }"), "{manifest}");
+        assert!(
+            manifest.contains("keel-transport = { path = \"/src/keel/crates/keel-transport\" }"),
+            "{manifest}"
+        );
 
         write_runner(&dir, Path::new("/nonexistent"), &core(true)).unwrap();
-        let with = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("src/main.rs")).unwrap();
-        let manifest = std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml")).unwrap();
-        assert!(with.contains("bind_native_ports(&runtime)") && with.contains("NativeClock"), "{with}");
-        assert!(manifest.contains("keel-ports = { path = \"/src/keel/crates/keel-ports\" }"), "{manifest}");
+        let with = std::fs::read_to_string(
+            runner_dir(&dir, Path::new("/nonexistent")).join("src/main.rs"),
+        )
+        .unwrap();
+        let manifest =
+            std::fs::read_to_string(runner_dir(&dir, Path::new("/nonexistent")).join("Cargo.toml"))
+                .unwrap();
+        assert!(
+            with.contains("bind_native_ports(&runtime)") && with.contains("NativeClock"),
+            "{with}"
+        );
+        assert!(
+            manifest.contains("keel-ports = { path = \"/src/keel/crates/keel-ports\" }"),
+            "{manifest}"
+        );
         assert!(with.contains("collect_schema(\"todo-core\")"), "{with}");
         let _ = std::fs::remove_dir_all(dir);
     }

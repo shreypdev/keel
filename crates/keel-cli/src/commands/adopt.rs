@@ -14,8 +14,9 @@ use crate::config::{Platform, ProjectConfig};
 use crate::detect::{AndroidApp, Detected, IosApp, WebApp, detect};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{is_empty_dir, write_if_changed};
-use crate::names::{Names, portable, relative_path, suggest, validate_app_id, validate_project_name};
-use crate::render::Vars;
+use crate::names::{
+    Names, portable, relative_path, suggest, validate_app_id, validate_project_name,
+};
 use crate::runtimes::{RuntimeRef, Runtimes, require_checkout};
 use crate::templates;
 
@@ -64,14 +65,21 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
     }
 
     let raw_name = args.name.clone().unwrap_or_else(|| {
-        suggest(&repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+        suggest(
+            &repo
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        )
     });
     validate_project_name(&raw_name)?;
     let names = Names::derive(&raw_name);
     let id = detect_id(&detected).unwrap_or_else(|| names.default_app_id());
     validate_app_id(&id).map_err(|e| {
         CliError::bad_argument(
-            format!("the application id of this app, `{id}`, cannot be used as a Kotlin package base"),
+            format!(
+                "the application id of this app, `{id}`, cannot be used as a Kotlin package base"
+            ),
             e.why,
             "pass `--name` so the default id is used, or rename the app's id",
         )
@@ -89,7 +97,9 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
                 )
             })?;
             require_checkout(&resolved)?;
-            config.keel_path = Some(portable(&relative_path(&keel_dir, &resolved).unwrap_or_else(|| resolved.clone())));
+            config.keel_path = Some(portable(
+                &relative_path(&keel_dir, &resolved).unwrap_or_else(|| resolved.clone()),
+            ));
             Some(resolved)
         }
         None => None,
@@ -117,17 +127,29 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
         runtimes: &runtimes,
     };
     let mut text = String::new();
-    if let Some(ios) = detected.ios.as_ref().filter(|_| platforms.contains(&Platform::Ios)) {
+    if let Some(ios) = detected
+        .ios
+        .as_ref()
+        .filter(|_| platforms.contains(&Platform::Ios))
+    {
         text.push_str(&steps.ios(ios));
     } else if platforms.contains(&Platform::Ios) {
         text.push_str(&steps.ios(&placeholder_ios(&repo)));
     }
-    if let Some(android) = detected.android.as_ref().filter(|_| platforms.contains(&Platform::Android)) {
+    if let Some(android) = detected
+        .android
+        .as_ref()
+        .filter(|_| platforms.contains(&Platform::Android))
+    {
         text.push_str(&steps.android(android));
     } else if platforms.contains(&Platform::Android) {
         text.push_str(&steps.android(&placeholder_android(&repo)));
     }
-    if let Some(web) = detected.web.as_ref().filter(|_| platforms.contains(&Platform::Web)) {
+    if let Some(web) = detected
+        .web
+        .as_ref()
+        .filter(|_| platforms.contains(&Platform::Web))
+    {
         text.push_str(&steps.web(web));
     } else if platforms.contains(&Platform::Web) {
         text.push_str(&steps.web(&placeholder_web(&repo)));
@@ -144,41 +166,62 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
                 None => "The core depends on the released Keel crates; the apps on the matching runtimes (Swift package, Maven artifact, npm package).".to_owned(),
             },
         );
-    let guide = guide_vars.render(templates::ADOPT_GUIDE.contents).map_err(|name| {
-        CliError::new(
-            Code::ToolFailed,
-            format!("a keel-cli template uses the placeholder @@{name}@@ and nothing sets it"),
-            "this is a bug in keel-cli, not in your arguments",
-            "report it at https://github.com/shreypdev/keel/issues",
-        )
-    })?;
+    let guide = guide_vars
+        .render(templates::ADOPT_GUIDE.contents)
+        .map_err(|name| {
+            CliError::new(
+                Code::ToolFailed,
+                format!("a keel-cli template uses the placeholder @@{name}@@ and nothing sets it"),
+                "this is a bug in keel-cli, not in your arguments",
+                "report it at https://github.com/shreypdev/keel/issues",
+            )
+        })?;
     write_if_changed(&setup.root.join(templates::ADOPT_GUIDE.path), &guide)?;
 
-    let rel_keel = portable(relative_path(&repo, &setup.root).as_deref().unwrap_or(&setup.root));
+    let rel_keel = portable(
+        relative_path(&repo, &setup.root)
+            .as_deref()
+            .unwrap_or(&setup.root),
+    );
     ui.line(&format!(
         "Detected: {}. Created {rel_keel}/ with a core crate and bindings for schema hash {:#018x}; nothing else was changed.",
         detected.describe(&repo),
         generated.hash
     ));
     ui.line("");
-    ui.line(&format!("Steps to wire it in are in {rel_keel}/KEEL_ADOPT.md. In short:"));
+    ui.line(&format!(
+        "Steps to wire it in are in {rel_keel}/KEEL_ADOPT.md. In short:"
+    ));
     for platform in &platforms {
         ui.line(&format!("  {}", summary_line(*platform, &rel_keel)));
     }
-    ui.line(&format!("  cd {rel_keel} && keel doctor && keel build --release"));
+    ui.line(&format!(
+        "  cd {rel_keel} && keel doctor && keel build --release"
+    ));
     Ok(())
 }
 
 fn summary_line(platform: Platform, keel: &str) -> String {
     match platform {
-        Platform::Ios => format!("iOS      add the package {keel}/generated/swift and link {keel}/build/ios/KeelCore.xcframework"),
-        Platform::Android => format!("Android  include {keel}/generated/kotlin as a Gradle module and package {keel}/build/android/jniLibs"),
-        Platform::Web => format!("web      make @keel/runtime and the bindings in {keel}/generated/ts resolvable, load {keel}/build/web/keel_core.wasm"),
+        Platform::Ios => format!(
+            "iOS      add the package {keel}/generated/swift and link {keel}/build/ios/KeelCore.xcframework"
+        ),
+        Platform::Android => format!(
+            "Android  include {keel}/generated/kotlin as a Gradle module and package {keel}/build/android/jniLibs"
+        ),
+        Platform::Web => format!(
+            "web      make @keel/runtime and the bindings in {keel}/generated/ts resolvable, load {keel}/build/web/keel_core.wasm"
+        ),
     }
 }
 
 /// The platforms to generate for: `--platform`, else everything detected.
-fn choose_platforms(detected: &Detected, requested: Option<&str>, repo: &Path, env: &Env<'_>) -> Result<Vec<Platform>> {
+fn choose_platforms(
+    detected: &Detected,
+    requested: Option<&str>,
+    repo: &Path,
+    env: &Env<'_>,
+) -> Result<Vec<Platform>> {
     if let Some(list) = requested {
         let platforms = Platform::parse_list(list)?;
         for p in &platforms {
@@ -287,17 +330,27 @@ impl Steps<'_> {
             app.project
                 .as_deref()
                 .or(app.package.as_deref())
-                .map_or_else(|| app.dir.display().to_string(), |p| p.display().to_string())
+                .map_or_else(
+                    || app.dir.display().to_string(),
+                    |p| p.display().to_string()
+                )
         ));
         text.push_str(&format!(
             "1. **Add the generated package.** In Xcode: *File > Add Package Dependencies... > Add Local...* and choose\n   `{}` (relative to the project: `{package}`). Add the product `{module}` to your app target.\n",
             self.generated().join("swift").display()
         ));
         let runtime = match &self.runtimes.swift {
-            RuntimeRef::Path(dir) => format!("the `KeelRuntime` package at `{}` (the generated package depends on it)", dir.display()),
-            RuntimeRef::Registry { version } => format!("`KeelRuntime` {version}.x from https://github.com/shreypdev/keel-swift"),
+            RuntimeRef::Path(dir) => format!(
+                "the `KeelRuntime` package at `{}` (the generated package depends on it)",
+                dir.display()
+            ),
+            RuntimeRef::Registry { version } => {
+                format!("`KeelRuntime` {version}.x from https://github.com/shreypdev/keel-swift")
+            }
         };
-        text.push_str(&format!("   It pulls in {runtime}; add the product `KeelRuntime` to the app target too.\n"));
+        text.push_str(&format!(
+            "   It pulls in {runtime}; add the product `KeelRuntime` to the app target too.\n"
+        ));
         text.push_str(&format!(
             "2. **Link the core.** `keel build --platform ios` writes `KeelCore.xcframework`. Add it to the target's\n   *Frameworks, Libraries, and Embedded Content* (Do Not Embed): `{xcframework}`.\n"
         ));
@@ -313,7 +366,10 @@ impl Steps<'_> {
     }
 
     fn android(&self, app: &AndroidApp) -> String {
-        let module = app.app_module.clone().unwrap_or_else(|| app.root.join("app"));
+        let module = app
+            .app_module
+            .clone()
+            .unwrap_or_else(|| app.root.join("app"));
         let bindings = self.rel(&app.root, &self.generated().join("kotlin"));
         let jni = self.rel(&module, &self.build().join("android/jniLibs"));
         let kts = app.kotlin_dsl;
@@ -321,39 +377,68 @@ impl Steps<'_> {
             RuntimeRef::Path(_) => "0.1.0-SNAPSHOT".to_owned(),
             RuntimeRef::Registry { version } => format!("{version}.0"),
         };
-        let package = self.config.bindings.kotlin_package.clone().unwrap_or_else(|| format!("{}.core", self.config.id));
+        let package = self
+            .config
+            .bindings
+            .kotlin_package
+            .clone()
+            .unwrap_or_else(|| format!("{}.core", self.config.id));
         let mut text = String::from("## Android\n\n");
-        text.push_str(&format!("Gradle project: `{}` (app module `{}`)\n\n", app.root.display(), module.display()));
+        text.push_str(&format!(
+            "Gradle project: `{}` (app module `{}`)\n\n",
+            app.root.display(),
+            module.display()
+        ));
         let (include, project_dir, include_build) = if kts {
             (
-                format!("include(\":core-bindings\")\nproject(\":core-bindings\").projectDir = file(\"{bindings}\")"),
+                format!(
+                    "include(\":core-bindings\")\nproject(\":core-bindings\").projectDir = file(\"{bindings}\")"
+                ),
                 String::new(),
                 match &self.runtimes.kotlin {
-                    RuntimeRef::Path(dir) => format!("\n   includeBuild(\"{}\")", self.rel(&app.root, dir)),
+                    RuntimeRef::Path(dir) => {
+                        format!("\n   includeBuild(\"{}\")", self.rel(&app.root, dir))
+                    }
                     RuntimeRef::Registry { .. } => String::new(),
                 },
             )
         } else {
             (
-                format!("include ':core-bindings'\nproject(':core-bindings').projectDir = file('{bindings}')"),
+                format!(
+                    "include ':core-bindings'\nproject(':core-bindings').projectDir = file('{bindings}')"
+                ),
                 String::new(),
                 match &self.runtimes.kotlin {
-                    RuntimeRef::Path(dir) => format!("\n   includeBuild('{}')", self.rel(&app.root, dir)),
+                    RuntimeRef::Path(dir) => {
+                        format!("\n   includeBuild('{}')", self.rel(&app.root, dir))
+                    }
                     RuntimeRef::Registry { .. } => String::new(),
                 },
             )
         };
         let _ = project_dir;
-        let settings = if kts { "settings.gradle.kts" } else { "settings.gradle" };
-        let build = if kts { "build.gradle.kts" } else { "build.gradle" };
+        let settings = if kts {
+            "settings.gradle.kts"
+        } else {
+            "settings.gradle"
+        };
+        let build = if kts {
+            "build.gradle.kts"
+        } else {
+            "build.gradle"
+        };
         text.push_str(&format!(
             "1. **Include the bindings module** in `{settings}`:\n\n   ```\n   {include}{include_build}\n   ```\n\n   The generated module (`{}`) is a plain JVM library with the Kotlin plugin; its `build.gradle.kts` uses\n   `id(\"org.jetbrains.kotlin.jvm\")` without a version, so declare that plugin (Kotlin 2.0.x) in your root build script\n   with `apply false`, as you do for the Android and Kotlin Android plugins.\n",
             self.generated().join("kotlin").display()
         ));
         let deps = if kts {
-            format!("implementation(project(\":core-bindings\"))\n   implementation(\"dev.keel:runtime:{version}\")")
+            format!(
+                "implementation(project(\":core-bindings\"))\n   implementation(\"dev.keel:runtime:{version}\")"
+            )
         } else {
-            format!("implementation project(':core-bindings')\n   implementation 'dev.keel:runtime:{version}'")
+            format!(
+                "implementation project(':core-bindings')\n   implementation 'dev.keel:runtime:{version}'"
+            )
         };
         let jni_line = if kts {
             format!("sourceSets {{ getByName(\"main\").jniLibs.srcDir(\"{jni}\") }}")
@@ -379,7 +464,9 @@ impl Steps<'_> {
         text.push_str(&format!(
             "Web app: `{}`{}\n\n",
             app.dir.display(),
-            app.tool.as_deref().map_or(String::new(), |t| format!(" ({t})"))
+            app.tool
+                .as_deref()
+                .map_or(String::new(), |t| format!(" ({t})"))
         ));
         match &self.runtimes.ts {
             RuntimeRef::Path(dir) => {
@@ -439,10 +526,22 @@ mod tests {
         let root = unique_temp_dir(tag);
         create_dir_all(&root).unwrap();
         let root = root.canonicalize().unwrap().join("MyApp");
-        write(&root, "ios/MyApp.xcodeproj/project.pbxproj", "PRODUCT_BUNDLE_IDENTIFIER = com.acme.myapp;\n");
+        write(
+            &root,
+            "ios/MyApp.xcodeproj/project.pbxproj",
+            "PRODUCT_BUNDLE_IDENTIFIER = com.acme.myapp;\n",
+        );
         write(&root, "android/settings.gradle.kts", "include(\":app\")\n");
-        write(&root, "android/app/build.gradle.kts", "plugins { id(\"com.android.application\") }\nandroid { defaultConfig { applicationId = \"com.acme.myapp\" } }\n");
-        write(&root, "web/package.json", "{\"devDependencies\": {\"vite\": \"^6\"}, \"dependencies\": {\"react\": \"^19\"}}");
+        write(
+            &root,
+            "android/app/build.gradle.kts",
+            "plugins { id(\"com.android.application\") }\nandroid { defaultConfig { applicationId = \"com.acme.myapp\" } }\n",
+        );
+        write(
+            &root,
+            "web/package.json",
+            "{\"devDependencies\": {\"vite\": \"^6\"}, \"dependencies\": {\"react\": \"^19\"}}",
+        );
         root
     }
 
@@ -456,9 +555,22 @@ mod tests {
             assert!(after.contains(file), "{file} vanished");
         }
         let added: Vec<&String> = after.iter().filter(|f| !before.contains(f)).collect();
-        assert!(added.iter().all(|f| f.starts_with("keel/")), "only keel/ is added: {added:?}");
-        for expected in ["keel/keel.toml", "keel/core/Cargo.toml", "keel/core/src/lib.rs", "keel/KEEL_ADOPT.md", "keel/generated/swift/Package.swift", "keel/generated/ts/src/index.ts"] {
-            assert!(after.iter().any(|f| f == expected), "missing {expected}: {after:#?}");
+        assert!(
+            added.iter().all(|f| f.starts_with("keel/")),
+            "only keel/ is added: {added:?}"
+        );
+        for expected in [
+            "keel/keel.toml",
+            "keel/core/Cargo.toml",
+            "keel/core/src/lib.rs",
+            "keel/KEEL_ADOPT.md",
+            "keel/generated/swift/Package.swift",
+            "keel/generated/ts/src/index.ts",
+        ] {
+            assert!(
+                after.iter().any(|f| f == expected),
+                "missing {expected}: {after:#?}"
+            );
         }
         // The app's own project file is byte for byte what it was.
         assert_eq!(
@@ -472,11 +584,25 @@ mod tests {
         assert_eq!(project.config.platforms, Platform::ALL.to_vec());
         let guide = std::fs::read_to_string(root.join("keel/KEEL_ADOPT.md")).unwrap();
         assert!(!guide.contains("@@"), "{guide}");
-        assert!(guide.contains("## iOS") && guide.contains("## Android") && guide.contains("## Web"), "{guide}");
+        assert!(
+            guide.contains("## iOS") && guide.contains("## Android") && guide.contains("## Web"),
+            "{guide}"
+        );
         assert!(guide.contains("MyApp.xcodeproj") && guide.contains("-force_load $(SRCROOT)/../keel/build/ios/KeelCore.xcframework/ios-arm64/libkeel_core.a"), "{guide}");
-        assert!(guide.contains("project(\":core-bindings\").projectDir = file(\"../keel/generated/kotlin\")"), "{guide}");
-        assert!(guide.contains("jniLibs.srcDir(\"../../keel/build/android/jniLibs\")"), "{guide}");
-        assert!(guide.contains("../keel/build/web/keel_core.wasm"), "{guide}");
+        assert!(
+            guide.contains(
+                "project(\":core-bindings\").projectDir = file(\"../keel/generated/kotlin\")"
+            ),
+            "{guide}"
+        );
+        assert!(
+            guide.contains("jniLibs.srcDir(\"../../keel/build/android/jniLibs\")"),
+            "{guide}"
+        );
+        assert!(
+            guide.contains("../keel/build/web/keel_core.wasm"),
+            "{guide}"
+        );
         let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
 
@@ -487,7 +613,10 @@ mod tests {
         a.platform = Some("web".into());
         run(&env(&root), &a).unwrap();
         let guide = std::fs::read_to_string(root.join("keel/KEEL_ADOPT.md")).unwrap();
-        assert!(guide.contains("## Web") && !guide.contains("## iOS"), "{guide}");
+        assert!(
+            guide.contains("## Web") && !guide.contains("## iOS"),
+            "{guide}"
+        );
         assert!(!root.join("keel/generated/swift").exists());
         let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
@@ -498,7 +627,10 @@ mod tests {
         write(&root, "README.md", "# nothing");
         let e = run(&env(&root), &args(&root)).unwrap_err();
         assert_eq!(e.code, Code::BadArgument);
-        assert!(e.fix.contains("--platform") && e.fix.contains("keel init"), "{e}");
+        assert!(
+            e.fix.contains("--platform") && e.fix.contains("keel init"),
+            "{e}"
+        );
         assert!(!root.join("keel").exists());
         let _ = std::fs::remove_dir_all(root);
     }
@@ -516,17 +648,31 @@ mod tests {
     fn a_groovy_gradle_build_gets_groovy_steps() {
         let root = unique_temp_dir("adopt-groovy");
         write(&root, "settings.gradle", "include ':app'\n");
-        write(&root, "app/build.gradle", "plugins { id 'com.android.application' }\nandroid { defaultConfig { applicationId 'com.acme.g' } }\n");
+        write(
+            &root,
+            "app/build.gradle",
+            "plugins { id 'com.android.application' }\nandroid { defaultConfig { applicationId 'com.acme.g' } }\n",
+        );
         run(&env(&root), &args(&root)).unwrap();
         let guide = std::fs::read_to_string(root.join("keel/KEEL_ADOPT.md")).unwrap();
-        assert!(guide.contains("include ':core-bindings'") && guide.contains("implementation project(':core-bindings')"), "{guide}");
+        assert!(
+            guide.contains("include ':core-bindings'")
+                && guide.contains("implementation project(':core-bindings')"),
+            "{guide}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn ids_are_taken_from_the_existing_app() {
         let detected = Detected {
-            ios: Some(IosApp { dir: PathBuf::new(), project: None, workspace: None, package: None, bundle_id: Some("Com.Acme.My-App".into()) }),
+            ios: Some(IosApp {
+                dir: PathBuf::new(),
+                project: None,
+                workspace: None,
+                package: None,
+                bundle_id: Some("Com.Acme.My-App".into()),
+            }),
             ..Detected::default()
         };
         assert_eq!(detect_id(&detected).as_deref(), Some("com.acme.my_app"));

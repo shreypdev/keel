@@ -34,15 +34,6 @@ type SchemaHashFn = unsafe extern "C" fn() -> u64;
 type SchemaJsonFn = unsafe extern "C" fn() -> KeelBuf;
 type BufFreeFn = unsafe extern "C" fn(KeelBuf);
 
-/// What was read from a core library.
-#[derive(Debug)]
-pub struct LoadedSchema {
-    /// The schema, labelled with the crate name the CLI was given.
-    pub schema: Schema,
-    /// `keel_schema_hash()` of the library (equal to `schema.hash()`, which is checked).
-    pub hash: u64,
-}
-
 /// Loads the core library at `library` and reads its schema. `crate_name` labels the result
 /// (the canonical JSON carries no labels).
 ///
@@ -50,7 +41,7 @@ pub struct LoadedSchema {
 ///
 /// `C0006` when the library cannot be loaded, is not a Keel core of this ABI version, reports
 /// JSON that does not parse, or reports a schema whose hash does not match its own.
-pub fn load_from_library(library: &Path, crate_name: &str) -> Result<LoadedSchema> {
+pub fn load_from_library(library: &Path, crate_name: &str) -> Result<Schema> {
     let fail = |what: String, why: &str, fix: &str| CliError::new(Code::Schema, what, why, fix);
 
     // SAFETY: loading a library runs its initialisers. The library is the one this process just
@@ -72,16 +63,20 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<LoadedSchem
         )
     };
 
-    // SAFETY (all four `get` calls): the symbol names and signatures are those of the C ABI in
-    // docs/SPEC.md 6 (`keel_abi_version`, `keel_schema_hash`, `keel_schema_json`, `keel_buf_free`),
-    // which `keel-ffi` implements and its tests pin; the function pointers do not outlive `lib`,
-    // which is intentionally leaked below.
+    // SAFETY (the four `get` calls below): the symbol names and signatures are those of the C ABI
+    // in docs/SPEC.md 6 (`keel_abi_version`, `keel_schema_hash`, `keel_schema_json`,
+    // `keel_buf_free`), which `keel-ffi` implements and its tests pin; the function pointers do
+    // not outlive `lib`, which is intentionally leaked below.
+    // SAFETY: see above; `keel_abi_version` is `extern "C" fn() -> u32`.
     let abi_version: libloading::Symbol<'_, AbiVersionFn> =
         unsafe { lib.get(b"keel_abi_version\0") }.map_err(|_| missing("keel_abi_version"))?;
+    // SAFETY: see above; `keel_schema_hash` is `extern "C" fn() -> u64`.
     let schema_hash: libloading::Symbol<'_, SchemaHashFn> =
         unsafe { lib.get(b"keel_schema_hash\0") }.map_err(|_| missing("keel_schema_hash"))?;
+    // SAFETY: see above; `keel_schema_json` is `extern "C" fn() -> KeelBuf`.
     let schema_json: libloading::Symbol<'_, SchemaJsonFn> =
         unsafe { lib.get(b"keel_schema_json\0") }.map_err(|_| missing("keel_schema_json"))?;
+    // SAFETY: see above; `keel_buf_free` is `extern "C" fn(KeelBuf)`.
     let buf_free: libloading::Symbol<'_, BufFreeFn> =
         unsafe { lib.get(b"keel_buf_free\0") }.map_err(|_| missing("keel_buf_free"))?;
 
@@ -89,7 +84,9 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<LoadedSchem
     let abi = unsafe { abi_version() };
     if abi != ABI_VERSION {
         return Err(fail(
-            format!("the core library speaks C ABI version {abi}; this keel-cli speaks {ABI_VERSION}"),
+            format!(
+                "the core library speaks C ABI version {abi}; this keel-cli speaks {ABI_VERSION}"
+            ),
             "the two were built from different Keel releases and cannot talk to each other",
             "use the keel-cli that matches the `keel` version of the core (`cargo install keel-cli --version <keel version>`)",
         ));
@@ -124,12 +121,14 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<LoadedSchem
     let computed = schema.hash();
     if computed != hash {
         return Err(fail(
-            format!("the schema hash does not match: the library says {hash:#018x}, its JSON hashes to {computed:#018x}"),
+            format!(
+                "the schema hash does not match: the library says {hash:#018x}, its JSON hashes to {computed:#018x}"
+            ),
             "keel-cli reads the schema with its own copy of `keel-meta`, and the core's differs in what it puts in the canonical form",
             "use the keel-cli that matches the `keel` version of the core",
         ));
     }
-    Ok(LoadedSchema { schema, hash })
+    Ok(schema)
 }
 
 /// Parses schema JSON: canonical (from `keel_schema_json`) or full (`Schema::to_json_pretty`).
@@ -147,8 +146,8 @@ pub fn parse_schema_json(text: &str, crate_name: &str) -> Result<Schema> {
             "regenerate it: `keel bindgen` extracts it from the built core, and `Schema::to_json_pretty` writes one",
         )
     };
-    let mut value: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| bad(format!("the schema is not valid JSON: {e}")))?;
+    let mut value: serde_json::Value = serde_json::from_str(text)
+        .map_err(|e| bad(format!("the schema is not valid JSON: {e}")))?;
     let Some(object) = value.as_object_mut() else {
         return Err(bad("the schema must be a JSON object".to_owned()));
     };
@@ -220,7 +219,6 @@ mod tests {
         assert_eq!(back, schema);
     }
 
-
     #[test]
     fn canonical_json_gets_its_labels_and_keeps_the_hash() {
         let schema = sample();
@@ -254,7 +252,13 @@ mod tests {
         });
         let from_full = parse_schema_json(&schema.to_json_pretty(), "x").unwrap();
         let from_canonical = parse_schema_json(&schema.canonical_json(), "demo-core").unwrap();
-        let names = |s: &Schema| s.objects[0].methods.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
+        let names = |s: &Schema| {
+            s.objects[0]
+                .methods
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(&from_full), ["alpha", "zeta"]);
         assert_eq!(names(&from_full), names(&from_canonical));
         assert_eq!(from_full.hash(), from_canonical.hash());
@@ -262,7 +266,11 @@ mod tests {
 
     #[test]
     fn unparseable_schemas_are_explained() {
-        for (text, needle) in [("", "not valid JSON"), ("[]", "must be a JSON object"), ("{\"records\": 3}", "expected shape")] {
+        for (text, needle) in [
+            ("", "not valid JSON"),
+            ("[]", "must be a JSON object"),
+            ("{\"records\": 3}", "expected shape"),
+        ] {
             let e = parse_schema_json(text, "x").unwrap_err();
             assert_eq!(e.code, Code::BadConfig, "{text}");
             assert!(e.what.contains(needle), "{text}: {e}");

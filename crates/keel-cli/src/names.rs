@@ -12,7 +12,18 @@ use crate::error::{CliError, Code, Result};
 /// Words that cannot be a project name because the derived crate name would be reserved or
 /// would shadow something the generated code names.
 const RESERVED: &[&str] = &[
-    "test", "keel", "std", "core", "alloc", "proc-macro", "proc_macro", "self", "super", "crate", "build", "target",
+    "test",
+    "keel",
+    "std",
+    "core",
+    "alloc",
+    "proc-macro",
+    "proc_macro",
+    "self",
+    "super",
+    "crate",
+    "build",
+    "target",
 ];
 
 /// The names derived from a project name.
@@ -84,12 +95,17 @@ pub fn pascal(name: &str) -> String {
 pub fn validate_project_name(name: &str) -> Result<()> {
     let problem = if name.is_empty() {
         Some("it is empty".to_owned())
-    } else if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    } else if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         Some("it contains characters other than ASCII letters, digits, `-` and `_`".to_owned())
     } else if !name.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
         Some("it does not start with a letter".to_owned())
     } else if RESERVED.contains(&name.to_ascii_lowercase().as_str()) {
-        Some(format!("`{name}` is reserved (it would clash with a Rust or Keel crate name)"))
+        Some(format!(
+            "`{name}` is reserved (it would clash with a Rust or Keel crate name)"
+        ))
     } else if name.len() > 48 {
         Some("it is longer than 48 characters".to_owned())
     } else {
@@ -101,7 +117,10 @@ pub fn validate_project_name(name: &str) -> Result<()> {
             Code::BadArgument,
             format!("`{name}` cannot be a project name: {problem}"),
             "the name becomes a Cargo package (`<name>-core`), a Swift module and a Kotlin package, which are stricter than file names",
-            format!("choose a name like `todo-app` or `acme_notes`\nyou can still call the folder anything: `keel init {} --dir <parent>`", suggest(name)),
+            format!(
+                "choose a name like `todo-app` or `acme_notes`\nyou can still call the folder anything: `keel init {} --dir <parent>`",
+                suggest(name)
+            ),
         )),
     }
 }
@@ -118,7 +137,9 @@ pub fn suggest(name: &str) -> String {
         }
     }
     let out = out.trim_matches('-').to_owned();
-    let out = out.trim_start_matches(|c: char| c.is_ascii_digit()).to_owned();
+    let out = out
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .to_owned();
     if out.is_empty() || RESERVED.contains(&out.as_str()) {
         "my-app".to_owned()
     } else {
@@ -201,7 +222,10 @@ mod tests {
     #[test]
     fn swift_module_matches_the_bindgen_default() {
         let n = Names::derive("todo-app");
-        assert_eq!(keel_bindgen::naming::pascal(&n.core_package), n.swift_module);
+        assert_eq!(
+            keel_bindgen::naming::pascal(&n.core_package),
+            n.swift_module
+        );
     }
 
     #[test]

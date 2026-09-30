@@ -37,9 +37,16 @@ pub fn triple_of(abi: &str) -> &'static str {
 /// build fails.
 pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     let cfg = &session.project.config.android;
-    let cargo = session.toolchain.which(session.sys, "cargo").ok_or_else(|| {
-        CliError::missing_tool("cargo", "building the core", "install Rust with rustup: https://rustup.rs")
-    })?;
+    let cargo = session
+        .toolchain
+        .which(session.sys, "cargo")
+        .ok_or_else(|| {
+            CliError::missing_tool(
+                "cargo",
+                "building the core",
+                "install Rust with rustup: https://rustup.rs",
+            )
+        })?;
     if session.toolchain.which(session.sys, "cargo-ndk").is_none() {
         return Err(CliError::missing_tool(
             "cargo-ndk",
@@ -83,7 +90,14 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         .arg(&staging)
         .arg("--manifest-path")
         .arg(&manifest)
-        .args(["rustc", "--lib", "--crate-type", "cdylib", "--features", "jni"]);
+        .args([
+            "rustc",
+            "--lib",
+            "--crate-type",
+            "cdylib",
+            "--features",
+            "jni",
+        ]);
     if release {
         cmd.arg("--release");
     }

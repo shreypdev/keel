@@ -46,7 +46,11 @@ pub(super) struct Setup {
 pub fn run(env: &Env<'_>, args: &InitArgs) -> Result<()> {
     let setup = prepare(env, args)?;
     let ui = env.ui;
-    ui.step(&format!("Creating {} in {}", setup.names.project, setup.root.display()));
+    ui.step(&format!(
+        "Creating {} in {}",
+        setup.names.project,
+        setup.root.display()
+    ));
     let files = scaffold(&setup)?;
     let bindings = generate_bindings(&setup)?;
     if setup.config.platforms.contains(&Platform::Android) {
@@ -82,7 +86,10 @@ fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
             Code::WouldOverwrite,
             format!("{} already exists and is not empty", root.display()),
             "`keel init` creates a new project and will not write into a directory that has files in it",
-            format!("choose another name, or another parent with `--dir`; to add Keel to an existing app use `keel adopt {}`", root.display()),
+            format!(
+                "choose another name, or another parent with `--dir`; to add Keel to an existing app use `keel adopt {}`",
+                root.display()
+            ),
         ));
     }
 
@@ -98,7 +105,7 @@ fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
                 )
             })?;
             require_checkout(&repo)?;
-            let shown = relative_path(&root, &repo).map_or_else(|| repo.clone(), |p| p);
+            let shown = relative_path(&root, &repo).unwrap_or_else(|| repo.clone());
             config.keel_path = Some(portable(&shown));
             Some(repo)
         }
@@ -120,7 +127,11 @@ fn rel(from: &Path, to: &Path) -> String {
 /// Every placeholder the templates use.
 pub(super) fn variables(setup: &Setup) -> Vars {
     let Setup {
-        root, names, config, repo, ..
+        root,
+        names,
+        config,
+        repo,
+        ..
     } = setup;
     let generated = root.join(&config.generated);
     let build = root.join(&config.build);
@@ -130,7 +141,10 @@ pub(super) fn variables(setup: &Setup) -> Vars {
 
     // Where Keel comes from, as the core's Cargo.toml and the shells say it.
     let keel_dep = match repo {
-        Some(repo) => format!("{{ path = {} }}", crate::toml_lite::quote(&rel(&root.join("core"), &repo.join("crates/keel")))),
+        Some(repo) => format!(
+            "{{ path = {} }}",
+            crate::toml_lite::quote(&rel(&root.join("core"), &repo.join("crates/keel")))
+        ),
         None => format!("\"{KEEL_VERSION}\""),
     };
     let runtimes = match repo {
@@ -156,7 +170,13 @@ pub(super) fn variables(setup: &Setup) -> Vars {
 
     // iOS
     let ios_dir = root.join("ios");
-    let slice_sim = if config.ios.simulator_archs.len() > 1 { "ios-arm64_x86_64-simulator" } else if config.ios.simulator_archs[0] == "x86_64" { "ios-x86_64-simulator" } else { "ios-arm64-simulator" };
+    let slice_sim = if config.ios.simulator_archs.len() > 1 {
+        "ios-arm64_x86_64-simulator"
+    } else if config.ios.simulator_archs[0] == "x86_64" {
+        "ios-x86_64-simulator"
+    } else {
+        "ios-arm64-simulator"
+    };
     let xcframework = build.join("ios/KeelCore.xcframework");
     let xcframework_rel = rel(&ios_dir, &xcframework);
     let link_flags = format!(
@@ -172,16 +192,35 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     vars.set("XCFRAMEWORK_PATH", xcframework_rel);
     vars.set("LINK_FLAGS", format!("{link_flags}{excluded}"));
     vars.set("DEPLOYMENT_TARGET", config.ios.deployment_target.clone());
-    vars.set("PACKAGE_REFERENCE_SECTIONS", package_references(&rel(&ios_dir, &generated.join("swift")), &runtimes.swift, &ios_dir));
+    vars.set(
+        "PACKAGE_REFERENCE_SECTIONS",
+        package_references(
+            &rel(&ios_dir, &generated.join("swift")),
+            &runtimes.swift,
+            &ios_dir,
+        ),
+    );
 
     // Android
     let android_dir = root.join("android");
-    vars.set("GENERATED_KOTLIN_PATH", rel(&android_dir, &generated.join("kotlin")));
-    vars.set("JNI_LIBS_PATH", rel(&android_dir.join("app"), &build.join("android/jniLibs")));
+    vars.set(
+        "GENERATED_KOTLIN_PATH",
+        rel(&android_dir, &generated.join("kotlin")),
+    );
+    vars.set(
+        "JNI_LIBS_PATH",
+        rel(&android_dir.join("app"), &build.join("android/jniLibs")),
+    );
     vars.set("MIN_SDK", config.android.min_sdk.to_string());
     vars.set(
         "ABI_FILTERS",
-        config.android.abis.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(", "),
+        config
+            .android
+            .abis
+            .iter()
+            .map(|a| format!("\"{a}\""))
+            .collect::<Vec<_>>()
+            .join(", "),
     );
     match &runtimes.kotlin {
         RuntimeRef::Path(dir) => {
@@ -204,7 +243,10 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     let web_dir = root.join("web");
     vars.set("GENERATED_TS_PATH", rel(&web_dir, &generated.join("ts")));
     vars.set("PROJECT_ROOT_PATH", rel(&web_dir, root));
-    vars.set("WASM_IMPORT", rel(&web_dir.join("src"), &build.join("web/keel_core.wasm")));
+    vars.set(
+        "WASM_IMPORT",
+        rel(&web_dir.join("src"), &build.join("web/keel_core.wasm")),
+    );
     match &runtimes.ts {
         RuntimeRef::Path(dir) => {
             let runtime_src = rel(&web_dir, &dir.join("src/index.ts"));
@@ -213,11 +255,20 @@ pub(super) fn variables(setup: &Setup) -> Vars {
                 "RUNTIME_ALIAS",
                 format!("      // The Keel runtime, from the Keel checkout's sources.\n      \"@keel/runtime\": here(\"{runtime_src}\"),\n"),
             );
-            vars.set("RUNTIME_PATHS", format!(",\n      \"@keel/runtime\": [\"{runtime_src}\"]"));
-            vars.set("EXTRA_FS_ALLOW", format!(", here(\"{}\")", rel(&web_dir, dir)));
+            vars.set(
+                "RUNTIME_PATHS",
+                format!(",\n      \"@keel/runtime\": [\"{runtime_src}\"]"),
+            );
+            vars.set(
+                "EXTRA_FS_ALLOW",
+                format!(", here(\"{}\")", rel(&web_dir, dir)),
+            );
         }
         RuntimeRef::Registry { version } => {
-            vars.set("RUNTIME_DEPENDENCY", format!("\"@keel/runtime\": \"^{version}.0\",\n    "));
+            vars.set(
+                "RUNTIME_DEPENDENCY",
+                format!("\"@keel/runtime\": \"^{version}.0\",\n    "),
+            );
             vars.set("RUNTIME_ALIAS", "");
             vars.set("RUNTIME_PATHS", "");
             vars.set("EXTRA_FS_ALLOW", "");
@@ -272,7 +323,11 @@ fn scaffold(setup: &Setup) -> Result<usize> {
             Platform::Web => write_set(&setup.root, templates::WEB, &vars)?,
         };
     }
-    count += write_set(&setup.root, std::slice::from_ref(&templates::README), &readme_vars(setup, vars))?;
+    count += write_set(
+        &setup.root,
+        std::slice::from_ref(&templates::README),
+        &readme_vars(setup, vars),
+    )?;
     Ok(count)
 }
 
@@ -303,10 +358,23 @@ fn template_bug(name: String) -> CliError {
 fn readme_vars(setup: &Setup, vars: Vars) -> Vars {
     let has = |p: Platform| setup.config.platforms.contains(&p);
     let mut vars = vars;
-    vars.set("PLATFORM_LIST", setup.config.platforms.iter().map(|p| p.name()).collect::<Vec<_>>().join(", "));
+    vars.set(
+        "PLATFORM_LIST",
+        setup
+            .config
+            .platforms
+            .iter()
+            .map(|p| p.name())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
     // The per-platform sections are templates themselves: render them with the shared values.
     let section = |vars: &Vars, platform: Platform, text: &str| {
-        if has(platform) { vars.render(text).unwrap_or_default() } else { String::new() }
+        if has(platform) {
+            vars.render(text).unwrap_or_default()
+        } else {
+            String::new()
+        }
     };
     let (ios, android, web) = (
         section(&vars, Platform::Ios, README_IOS),
@@ -398,7 +466,6 @@ pub(super) fn generate_bindings(setup: &Setup) -> Result<Generated> {
         platforms: setup.config.platforms.clone(),
         runtimes: Runtimes::for_project(&project),
         out: canonicalize_lenient(&project.generated_dir()),
-        keel_version: setup.config.keel_version.clone(),
     };
     let files = bindgen::plan_files(&schema, &plan)?;
     bindgen::apply(&plan.out, &files)?;
@@ -415,7 +482,12 @@ fn gradle_wrapper(env: &Env<'_>, setup: &Setup) {
     if let Some(repo) = &setup.repo {
         let source = repo.join(KOTLIN_IN_REPO);
         let mut copied = true;
-        for file in ["gradlew", "gradlew.bat", "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.properties"] {
+        for file in [
+            "gradlew",
+            "gradlew.bat",
+            "gradle/wrapper/gradle-wrapper.jar",
+            "gradle/wrapper/gradle-wrapper.properties",
+        ] {
             let from = source.join(file);
             if from.is_file() {
                 if fsutil::copy_file(&from, &android.join(file)).is_err() {
@@ -435,7 +507,12 @@ fn gradle_wrapper(env: &Env<'_>, setup: &Setup) {
         return;
     };
     let status = Command::new(gradle)
-        .args(["wrapper", "--gradle-version", GRADLE_VERSION, "--no-validate-url"])
+        .args([
+            "wrapper",
+            "--gradle-version",
+            GRADLE_VERSION,
+            "--no-validate-url",
+        ])
         .current_dir(&android)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -449,12 +526,17 @@ fn gradle_wrapper(env: &Env<'_>, setup: &Setup) {
 /// The text printed after a successful `init`.
 fn next_steps(setup: &Setup) -> String {
     let name = &setup.names.project;
-    let mut out = format!("Next:\n  cd {name}\n  keel doctor                 check this machine\n  keel dev                    serve the core to a running app, rebuilding on change\n  keel build --release        libraries for the apps to link\n");
+    let mut out = format!(
+        "Next:\n  cd {name}\n  keel doctor                 check this machine\n  keel dev                    serve the core to a running app, rebuilding on change\n  keel build --release        libraries for the apps to link\n"
+    );
     out.push_str("\nThen run an app:\n");
     for platform in &setup.config.platforms {
         match platform {
-            Platform::Ios => out.push_str("  iOS      open ios/ in Xcode (README.md: the KEEL_LINK_CORE=1 note)\n"),
-            Platform::Android => out.push_str("  Android  open android/ in Android Studio, or ./gradlew :app:installDebug\n"),
+            Platform::Ios => out
+                .push_str("  iOS      open ios/ in Xcode (README.md: the KEEL_LINK_CORE=1 note)\n"),
+            Platform::Android => out.push_str(
+                "  Android  open android/ in Android Studio, or ./gradlew :app:installDebug\n",
+            ),
             Platform::Web => out.push_str("  web      cd web && npm install && npm run dev\n"),
         }
     }
@@ -513,7 +595,10 @@ mod tests {
             "generated/ts/src/stores.ts",
             "generated/.keel-generated",
         ] {
-            assert!(files.iter().any(|f| f == expected), "missing {expected}; have {files:#?}");
+            assert!(
+                files.iter().any(|f| f == expected),
+                "missing {expected}; have {files:#?}"
+            );
         }
         // No placeholder survives rendering.
         for file in &files {
@@ -527,7 +612,10 @@ mod tests {
         assert_eq!(project.config.id, "com.example.todoapp");
         assert_eq!(project.config.platforms, Platform::ALL.to_vec());
         let core = std::fs::read_to_string(root.join("core/Cargo.toml")).unwrap();
-        assert!(core.contains("name = \"todo-app-core\"") && core.contains("keel = \"0.1\""), "{core}");
+        assert!(
+            core.contains("name = \"todo-app-core\"") && core.contains("keel = \"0.1\""),
+            "{core}"
+        );
         let _ = std::fs::remove_dir_all(parent);
     }
 
@@ -542,7 +630,10 @@ mod tests {
         assert!(root.join("generated/ts/src/index.ts").is_file());
         assert!(!root.join("generated/swift").exists());
         let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
-        assert!(readme.contains("## Web") && !readme.contains("## iOS"), "{readme}");
+        assert!(
+            readme.contains("## Web") && !readme.contains("## iOS"),
+            "{readme}"
+        );
         let _ = std::fs::remove_dir_all(parent);
     }
 
@@ -554,7 +645,10 @@ mod tests {
         let e = run(&env(&parent), &args("taken", "web")).unwrap_err();
         assert_eq!(e.code, Code::WouldOverwrite);
         assert!(e.fix.contains("keel adopt"), "{e}");
-        assert_eq!(std::fs::read_to_string(parent.join("taken/file")).unwrap(), "x");
+        assert_eq!(
+            std::fs::read_to_string(parent.join("taken/file")).unwrap(),
+            "x"
+        );
         let _ = std::fs::remove_dir_all(parent);
     }
 
@@ -562,14 +656,26 @@ mod tests {
     fn bad_arguments_are_explained_before_anything_is_written() {
         let parent = fsutil::unique_temp_dir("init-bad");
         create_dir_all(&parent).unwrap();
-        assert_eq!(run(&env(&parent), &args("1bad", "web")).unwrap_err().code, Code::BadArgument);
-        assert_eq!(run(&env(&parent), &args("ok", "tv")).unwrap_err().code, Code::BadArgument);
+        assert_eq!(
+            run(&env(&parent), &args("1bad", "web")).unwrap_err().code,
+            Code::BadArgument
+        );
+        assert_eq!(
+            run(&env(&parent), &args("ok", "tv")).unwrap_err().code,
+            Code::BadArgument
+        );
         let mut with_id = args("ok", "web");
         with_id.id = Some("Bad_Id".into());
-        assert_eq!(run(&env(&parent), &with_id).unwrap_err().code, Code::BadArgument);
+        assert_eq!(
+            run(&env(&parent), &with_id).unwrap_err().code,
+            Code::BadArgument
+        );
         let mut with_path = args("ok", "web");
         with_path.keel_path = Some(parent.join("not-a-checkout"));
-        assert_eq!(run(&env(&parent), &with_path).unwrap_err().code, Code::BadArgument);
+        assert_eq!(
+            run(&env(&parent), &with_path).unwrap_err().code,
+            Code::BadArgument
+        );
         assert!(fsutil::is_empty_dir(&parent), "nothing was written");
         let _ = std::fs::remove_dir_all(parent);
     }
@@ -583,7 +689,10 @@ mod tests {
 
     #[test]
     fn checkout_mode_writes_relative_paths_the_shells_can_follow() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
         let parent = fsutil::unique_temp_dir("init-path");
         create_dir_all(&parent).unwrap();
         let mut a = args("demo", "ios,android,web");
@@ -594,16 +703,33 @@ mod tests {
         // The path in core/Cargo.toml resolves to the checkout's `keel` crate.
         let dep = core.lines().find(|l| l.starts_with("keel = ")).unwrap();
         let path = dep.split('"').nth(1).unwrap();
-        assert!(root.join("core").join(path).join("Cargo.toml").is_file(), "{dep}");
+        assert!(
+            root.join("core").join(path).join("Cargo.toml").is_file(),
+            "{dep}"
+        );
         let project = Project::open(&root).unwrap();
         assert_eq!(project.keel_repo().unwrap(), repo);
         let pbx = std::fs::read_to_string(root.join("ios/Demo.xcodeproj/project.pbxproj")).unwrap();
-        assert!(pbx.contains("XCLocalSwiftPackageReference") && pbx.contains("runtimes/swift/KeelRuntime"), "pbxproj");
+        assert!(
+            pbx.contains("XCLocalSwiftPackageReference")
+                && pbx.contains("runtimes/swift/KeelRuntime"),
+            "pbxproj"
+        );
         let settings = std::fs::read_to_string(root.join("android/settings.gradle.kts")).unwrap();
-        assert!(settings.contains("includeBuild(") && settings.contains("runtimes/kotlin/keel-runtime"), "{settings}");
-        assert!(root.join("android/gradlew").is_file(), "the wrapper is copied from the checkout");
+        assert!(
+            settings.contains("includeBuild(") && settings.contains("runtimes/kotlin/keel-runtime"),
+            "{settings}"
+        );
+        assert!(
+            root.join("android/gradlew").is_file(),
+            "the wrapper is copied from the checkout"
+        );
         let vite = std::fs::read_to_string(root.join("web/vite.config.ts")).unwrap();
-        assert!(vite.contains("@keel/runtime") && vite.contains("runtimes/ts/@keel/runtime/src/index.ts"), "{vite}");
+        assert!(
+            vite.contains("@keel/runtime")
+                && vite.contains("runtimes/ts/@keel/runtime/src/index.ts"),
+            "{vite}"
+        );
         let _ = std::fs::remove_dir_all(parent);
     }
 
@@ -614,7 +740,10 @@ mod tests {
         run(&env(&parent), &args("demo", "ios,android,web")).unwrap();
         let root = parent.canonicalize().unwrap().join("demo");
         let pbx = std::fs::read_to_string(root.join("ios/Demo.xcodeproj/project.pbxproj")).unwrap();
-        assert!(pbx.contains("XCRemoteSwiftPackageReference") && pbx.contains("keel-swift"), "pbxproj");
+        assert!(
+            pbx.contains("XCRemoteSwiftPackageReference") && pbx.contains("keel-swift"),
+            "pbxproj"
+        );
         let app = std::fs::read_to_string(root.join("android/app/build.gradle.kts")).unwrap();
         assert!(app.contains("dev.keel:runtime:0.1.0\""), "{app}");
         let pkg = std::fs::read_to_string(root.join("web/package.json")).unwrap();

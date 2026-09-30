@@ -32,7 +32,11 @@ pub const DEVICE_TRIPLE: &str = "aarch64-apple-ios";
 /// The Rust target of a simulator architecture.
 #[must_use]
 pub fn simulator_triple(arch: &str) -> &'static str {
-    if arch == "x86_64" { "x86_64-apple-ios" } else { "aarch64-apple-ios-sim" }
+    if arch == "x86_64" {
+        "x86_64-apple-ios"
+    } else {
+        "aarch64-apple-ios-sim"
+    }
 }
 
 /// Builds `build/ios/KeelCore.xcframework`.
@@ -56,9 +60,16 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
             "install Xcode from the App Store, then `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`",
         )
     })?;
-    let lipo = session.toolchain.which(session.sys, "lipo").ok_or_else(|| {
-        CliError::missing_tool("lipo", "combining simulator slices", "install Xcode or the command line tools: `xcode-select --install`")
-    })?;
+    let lipo = session
+        .toolchain
+        .which(session.sys, "lipo")
+        .ok_or_else(|| {
+            CliError::missing_tool(
+                "lipo",
+                "combining simulator slices",
+                "install Xcode or the command line tools: `xcode-select --install`",
+            )
+        })?;
     let check = session
         .sys
         .run(&xcodebuild, &["-version"], &session.toolchain.env_pairs());
@@ -75,9 +86,14 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     }
 
     let manifest = session.shim_manifest()?;
-    let profile = if release { Profile::Release } else { Profile::Dev };
+    let profile = if release {
+        Profile::Release
+    } else {
+        Profile::Dev
+    };
     let target_dir = session.target_dir();
-    let stage = crate::shim::ios_stage_dir(&target_dir, &session.project.root).join(profile.dir_name());
+    let stage =
+        crate::shim::ios_stage_dir(&target_dir, &session.project.root).join(profile.dir_name());
     let env = vec![(
         "IPHONEOS_DEPLOYMENT_TARGET".to_owned(),
         session.project.config.ios.deployment_target.clone(),
@@ -121,11 +137,19 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         let fat = stage.join("simulator-fat/libkeel_core.a");
         create_dir_all(fat.parent().expect("has a parent"))?;
         let mut cmd = Command::new(&lipo);
-        cmd.arg("-create").args(&sim_libs).arg("-output").arg(&fat).stdin(Stdio::null());
+        cmd.arg("-create")
+            .args(&sim_libs)
+            .arg("-output")
+            .arg(&fat)
+            .stdin(Stdio::null());
         session.toolchain.apply(&mut cmd);
         let status = cmd.status().map_err(|e| CliError::io("run", &lipo, &e))?;
         if !status.success() {
-            return Err(CliError::tool_failed("lipo", "combining the simulator slices", &status.to_string()));
+            return Err(CliError::tool_failed(
+                "lipo",
+                "combining the simulator slices",
+                &status.to_string(),
+            ));
         }
         fat
     };
@@ -142,30 +166,37 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     }
     cmd.arg("-output").arg(&xcframework).stdin(Stdio::null());
     session.toolchain.apply(&mut cmd);
-    let output = cmd.output().map_err(|e| CliError::io("run", &xcodebuild, &e))?;
+    let output = cmd
+        .output()
+        .map_err(|e| CliError::io("run", &xcodebuild, &e))?;
     if !output.status.success() {
-        return Err(CliError::tool_failed("xcodebuild -create-xcframework", "packaging the libraries", &output.status.to_string())
-            .with_detail(format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            )));
+        return Err(CliError::tool_failed(
+            "xcodebuild -create-xcframework",
+            "packaging the libraries",
+            &output.status.to_string(),
+        )
+        .with_detail(format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )));
     }
 
     let slice_note = |p: &Path| format!("{} in the archive", crate::fsutil::human_size(size_of(p)));
-    Ok(vec![
-        Artifact {
-            label: "ios xcframework".to_owned(),
-            size: size_of(&xcframework),
-            path: xcframework.clone(),
-            budget: Some("900 KB arm64 added to an app (LTO, stripped); a static archive is an upper bound".to_owned()),
-            note: Some(format!(
-                "device {}, simulator {}",
-                slice_note(&device),
-                slice_note(&sim)
-            )),
-        },
-    ])
+    Ok(vec![Artifact {
+        label: "ios xcframework".to_owned(),
+        size: size_of(&xcframework),
+        path: xcframework.clone(),
+        budget: Some(
+            "900 KB arm64 added to an app (LTO, stripped); a static archive is an upper bound"
+                .to_owned(),
+        ),
+        note: Some(format!(
+            "device {}, simulator {}",
+            slice_note(&device),
+            slice_note(&sim)
+        )),
+    }])
 }
 
 #[cfg(test)]
@@ -184,11 +215,16 @@ mod tests {
         // runtime's `KeelFFI` target already defines the module `KeelFFI`, and a second
         // definition in the XCFramework fails the build ("redefinition of module 'KeelFFI'").
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let modulemap = repo.join("runtimes/swift/KeelRuntime/Sources/KeelFFI/include/module.modulemap");
+        let modulemap =
+            repo.join("runtimes/swift/KeelRuntime/Sources/KeelFFI/include/module.modulemap");
         if !modulemap.is_file() {
             return; // built outside the repository (a packaged crate)
         }
-        assert!(std::fs::read_to_string(modulemap).unwrap().contains("module KeelFFI"));
+        assert!(
+            std::fs::read_to_string(modulemap)
+                .unwrap()
+                .contains("module KeelFFI")
+        );
     }
 
     #[test]

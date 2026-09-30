@@ -8,11 +8,11 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use crate::binary::{wasm_exports, wasm_problems};
 use crate::cargo::{Build, Profile};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{copy_file, create_dir_all, size_of};
 use crate::session::Session;
-use crate::binary::{wasm_exports, wasm_problems};
 
 use super::Artifact;
 
@@ -70,12 +70,10 @@ pub fn build(session: &Session<'_>) -> Result<Vec<Artifact>> {
         Some(wasm_opt) => {
             session.ui.step("Optimizing with wasm-opt -Oz");
             if run_wasm_opt(&wasm_opt, &built, &out) {
-                let shrunk = size_of(&out);
                 note = Some(format!(
                     "{} before wasm-opt",
                     crate::fsutil::human_size(raw_size)
                 ));
-                let _ = shrunk;
             } else {
                 session.ui.warn(
                     "wasm-opt failed on this module; keeping the unoptimized build (run it by hand to see why)",
@@ -104,7 +102,11 @@ pub fn build(session: &Session<'_>) -> Result<Vec<Artifact>> {
     if !problems.is_empty() {
         return Err(CliError::new(
             Code::ToolFailed,
-            format!("{} is not a usable Keel core: {}", out.display(), problems.join("; ")),
+            format!(
+                "{} is not a usable Keel core: {}",
+                out.display(),
+                problems.join("; ")
+            ),
             "the web app loads this file with `KeelCore.load({ mode: \"wasm-main\", wasm })`",
             "check that the shim links keel-ffi (run `keel build --platform host` and `keel bindgen`), then rebuild",
         ));
@@ -150,5 +152,8 @@ fn gzip_size(file: &Path) -> Option<u64> {
         .stderr(Stdio::null())
         .output()
         .ok()?;
-    output.status.success().then_some(output.stdout.len() as u64)
+    output
+        .status
+        .success()
+        .then_some(output.stdout.len() as u64)
 }

@@ -49,7 +49,10 @@ impl KeelSource {
         let mut parts = match self {
             KeelSource::Path { repo } => {
                 let path = repo.join("crates").join(krate);
-                format!("path = {}", crate::toml_lite::quote(&path.to_string_lossy()))
+                format!(
+                    "path = {}",
+                    crate::toml_lite::quote(&path.to_string_lossy())
+                )
             }
             KeelSource::Registry { version } => format!("version = \"={version}\""),
             KeelSource::Git { url, rev } => {
@@ -61,7 +64,11 @@ impl KeelSource {
             }
         };
         if !features.is_empty() {
-            let list = features.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", ");
+            let list = features
+                .iter()
+                .map(|f| format!("\"{f}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
             parts.push_str(&format!(", features = [{list}]"));
         }
         format!("{{ {parts} }}")
@@ -97,7 +104,9 @@ pub struct CoreInfo {
 /// Keel.
 pub fn parse_metadata(meta: &Value, manifest: &Path) -> Result<CoreInfo> {
     let packages = meta["packages"].as_array().cloned().unwrap_or_default();
-    let manifest_canonical = manifest.canonicalize().unwrap_or_else(|_| manifest.to_path_buf());
+    let manifest_canonical = manifest
+        .canonicalize()
+        .unwrap_or_else(|_| manifest.to_path_buf());
     let is_core = |p: &Value| {
         p["manifest_path"].as_str().is_some_and(|m| {
             let m = Path::new(m);
@@ -136,7 +145,10 @@ pub fn parse_metadata(meta: &Value, manifest: &Path) -> Result<CoreInfo> {
             )
         })?;
 
-    let by_id: BTreeMap<&str, &Value> = packages.iter().filter_map(|p| Some((p["id"].as_str()?, p))).collect();
+    let by_id: BTreeMap<&str, &Value> = packages
+        .iter()
+        .filter_map(|p| Some((p["id"].as_str()?, p)))
+        .collect();
     let keel_runtime = packages.iter().find(|p| p["name"] == "keel-runtime").ok_or_else(|| {
         CliError::new(
             Code::BadCore,
@@ -168,7 +180,13 @@ pub fn parse_metadata(meta: &Value, manifest: &Path) -> Result<CoreInfo> {
 
 /// The directories of the path packages reachable from the core through normal dependencies,
 /// except the ones inside a Keel checkout.
-fn local_dirs(meta: &Value, root: &str, by_id: &BTreeMap<&str, &Value>, core_dir: &Path, keel: &KeelSource) -> Vec<PathBuf> {
+fn local_dirs(
+    meta: &Value,
+    root: &str,
+    by_id: &BTreeMap<&str, &Value>,
+    core_dir: &Path,
+    keel: &KeelSource,
+) -> Vec<PathBuf> {
     let nodes: BTreeMap<&str, &Value> = meta["resolve"]["nodes"]
         .as_array()
         .into_iter()
@@ -184,7 +202,9 @@ fn local_dirs(meta: &Value, root: &str, by_id: &BTreeMap<&str, &Value>, core_dir
         }
         if let Some(package) = by_id.get(id) {
             let is_path = package["source"].is_null();
-            let dir = Path::new(package["manifest_path"].as_str().unwrap_or_default()).parent().map(Path::to_path_buf);
+            let dir = Path::new(package["manifest_path"].as_str().unwrap_or_default())
+                .parent()
+                .map(Path::to_path_buf);
             if let (true, Some(dir)) = (is_path, dir) {
                 let in_keel = matches!(keel, KeelSource::Path { repo } if dir.starts_with(repo));
                 if !in_keel && !dirs.contains(&dir) {
@@ -210,26 +230,42 @@ fn source_of(runtime: &Value, package: &str) -> Result<KeelSource> {
     match runtime["source"].as_str() {
         None => {
             let manifest = Path::new(runtime["manifest_path"].as_str().unwrap_or_default());
-            let repo = manifest.parent().and_then(Path::parent).and_then(Path::parent);
+            let repo = manifest
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::parent);
             match repo {
-                Some(repo) if repo.join("crates/keel-ffi/Cargo.toml").is_file() => Ok(KeelSource::Path {
-                    repo: repo.to_path_buf(),
-                }),
+                Some(repo) if repo.join("crates/keel-ffi/Cargo.toml").is_file() => {
+                    Ok(KeelSource::Path {
+                        repo: repo.to_path_buf(),
+                    })
+                }
                 _ => Err(CliError::new(
                     Code::BadCore,
-                    format!("`{package}` uses keel-runtime from {}, which is not a Keel checkout", manifest.display()),
+                    format!(
+                        "`{package}` uses keel-runtime from {}, which is not a Keel checkout",
+                        manifest.display()
+                    ),
                     "the library Keel ships (`keel-ffi`) must come from the same place as `keel-runtime`, and it is expected next to it in `crates/`",
                     "point the core's `keel` dependency at a checkout of the Keel repository (`path = \"<repo>/crates/keel\"`) or at a released version",
                 )),
             }
         }
-        Some(source) if source.starts_with("registry+") || source.starts_with("sparse+") => Ok(KeelSource::Registry {
-            version: runtime["version"].as_str().unwrap_or("0.1.0").to_owned(),
-        }),
+        Some(source) if source.starts_with("registry+") || source.starts_with("sparse+") => {
+            Ok(KeelSource::Registry {
+                version: runtime["version"].as_str().unwrap_or("0.1.0").to_owned(),
+            })
+        }
         Some(source) if source.starts_with("git+") => {
             let rest = &source["git+".len()..];
-            let (url_and_query, sha) = rest.split_once('#').map_or((rest, None), |(a, b)| (a, Some(b)));
-            let url = url_and_query.split('?').next().unwrap_or(url_and_query).to_owned();
+            let (url_and_query, sha) = rest
+                .split_once('#')
+                .map_or((rest, None), |(a, b)| (a, Some(b)));
+            let url = url_and_query
+                .split('?')
+                .next()
+                .unwrap_or(url_and_query)
+                .to_owned();
             Ok(KeelSource::Git {
                 url,
                 rev: sha.map(ToOwned::to_owned),
@@ -360,8 +396,12 @@ impl Cargo<'_> {
         self.toolchain.apply(&mut cmd);
         let output = cmd.output().map_err(|e| CliError::io("run", &cargo, &e))?;
         if !output.status.success() {
-            return Err(CliError::tool_failed("cargo metadata", "reading the core crate", &status_text(&output.status))
-                .with_detail(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
+            return Err(CliError::tool_failed(
+                "cargo metadata",
+                "reading the core crate",
+                &status_text(&output.status),
+            )
+            .with_detail(String::from_utf8_lossy(&output.stderr).trim().to_owned()));
         }
         let json: Value = serde_json::from_slice(&output.stdout).map_err(|e| {
             CliError::new(
@@ -415,11 +455,18 @@ impl Cargo<'_> {
                 &status_text(&output.status),
             ));
         }
-        let files = artifacts(&String::from_utf8_lossy(&output.stdout), &build.lib_name, build.crate_type);
+        let files = artifacts(
+            &String::from_utf8_lossy(&output.stdout),
+            &build.lib_name,
+            build.crate_type,
+        );
         if files.is_empty() {
             return Err(CliError::new(
                 Code::ToolFailed,
-                format!("cargo finished but reported no `{}` {} artifact", build.lib_name, build.crate_type),
+                format!(
+                    "cargo finished but reported no `{}` {} artifact",
+                    build.lib_name, build.crate_type
+                ),
                 "the CLI finds the library through Cargo's JSON messages and there was none",
                 "run the command again with a clean target (`cargo clean`); if it persists this is a bug in keel-cli",
             ));
@@ -434,7 +481,12 @@ impl Cargo<'_> {
     ///
     /// `C0003` when cargo is missing, `C0004` when the build fails (the compiler's diagnostics were
     /// already shown).
-    pub fn build_executable(&self, manifest: &Path, target_dir: &Path, bin: &str) -> Result<PathBuf> {
+    pub fn build_executable(
+        &self,
+        manifest: &Path,
+        target_dir: &Path,
+        bin: &str,
+    ) -> Result<PathBuf> {
         let cargo = self.program("building the core")?;
         let mut cmd = Command::new(&cargo);
         cmd.args(["build", "--bin", bin, "--manifest-path"])
@@ -448,7 +500,11 @@ impl Cargo<'_> {
         self.toolchain.apply(&mut cmd);
         let output = cmd.output().map_err(|e| CliError::io("run", &cargo, &e))?;
         if !output.status.success() {
-            return Err(CliError::tool_failed("cargo", "building the core", &status_text(&output.status)));
+            return Err(CliError::tool_failed(
+                "cargo",
+                "building the core",
+                &status_text(&output.status),
+            ));
         }
         executable(&String::from_utf8_lossy(&output.stdout), bin).ok_or_else(|| {
             CliError::new(
@@ -474,7 +530,10 @@ impl Cargo<'_> {
             return Ok(());
         };
         let sysroot = PathBuf::from(out.stdout.trim());
-        if out.success && !sysroot.as_os_str().is_empty() && !self.sys.is_dir(&sysroot.join("lib/rustlib").join(triple)) {
+        if out.success
+            && !sysroot.as_os_str().is_empty()
+            && !self.sys.is_dir(&sysroot.join("lib/rustlib").join(triple))
+        {
             return Err(CliError::new(
                 Code::MissingTarget,
                 format!("the Rust target `{triple}` is not installed"),
@@ -553,7 +612,11 @@ mod tests {
     use super::*;
 
     fn meta(runtime_source: Value, runtime_manifest: &str, with_ports_dep: bool) -> Value {
-        let ports_kind = if with_ports_dep { Value::Null } else { json!("dev") };
+        let ports_kind = if with_ports_dep {
+            Value::Null
+        } else {
+            json!("dev")
+        };
         let mut nodes = vec![
             json!({"id": "core 0.1.0", "deps": [{"pkg": "keel 0.1.0", "dep_kinds": [{"kind": null}]}]}),
             json!({"id": "keel 0.1.0", "deps": [
@@ -578,26 +641,46 @@ mod tests {
 
     #[test]
     fn registry_keel_is_pinned_exactly() {
-        let m = meta(json!("registry+https://github.com/rust-lang/crates.io-index"), "/r/keel-runtime/Cargo.toml", false);
+        let m = meta(
+            json!("registry+https://github.com/rust-lang/crates.io-index"),
+            "/r/keel-runtime/Cargo.toml",
+            false,
+        );
         let info = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap();
         assert_eq!(info.package, "todo-core");
         assert_eq!(info.lib_name, "todo_core");
         assert_eq!(info.version, "0.3.0");
         assert_eq!(info.dir, PathBuf::from("/proj/core"));
-        assert_eq!(info.keel, KeelSource::Registry { version: "0.1.0".into() });
-        assert_eq!(info.keel.dependency("keel-ffi", &["jni"]), "{ version = \"=0.1.0\", features = [\"jni\"] }");
+        assert_eq!(
+            info.keel,
+            KeelSource::Registry {
+                version: "0.1.0".into()
+            }
+        );
+        assert_eq!(
+            info.keel.dependency("keel-ffi", &["jni"]),
+            "{ version = \"=0.1.0\", features = [\"jni\"] }"
+        );
         assert!(!info.links_ports, "a dev-only edge does not count");
     }
 
     #[test]
     fn ports_are_found_through_the_facade() {
         let m = meta(json!("registry+x"), "/r/Cargo.toml", true);
-        assert!(parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap().links_ports);
+        assert!(
+            parse_metadata(&m, Path::new("/proj/core/Cargo.toml"))
+                .unwrap()
+                .links_ports
+        );
     }
 
     #[test]
     fn git_sources_keep_the_revision() {
-        let m = meta(json!("git+https://github.com/shreypdev/keel?branch=main#abc123"), "/g/keel-runtime/Cargo.toml", false);
+        let m = meta(
+            json!("git+https://github.com/shreypdev/keel?branch=main#abc123"),
+            "/g/keel-runtime/Cargo.toml",
+            false,
+        );
         let info = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap();
         assert_eq!(
             info.keel,
@@ -623,7 +706,10 @@ mod tests {
     #[test]
     fn a_core_without_keel_is_explained() {
         let mut m = meta(json!("registry+x"), "/r/Cargo.toml", false);
-        m["packages"].as_array_mut().unwrap().retain(|p| p["name"] != "keel-runtime");
+        m["packages"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| p["name"] != "keel-runtime");
         let e = parse_metadata(&m, Path::new("/proj/core/Cargo.toml")).unwrap_err();
         assert!(e.what.contains("does not depend on Keel"), "{e}");
         assert!(e.fix.contains("keel = "), "{e}");
@@ -638,8 +724,13 @@ mod tests {
 
     #[test]
     fn path_dependencies_render_with_quoting() {
-        let s = KeelSource::Path { repo: PathBuf::from("/my \"repo\"") };
-        assert_eq!(s.dependency("keel-runtime", &[]), "{ path = \"/my \\\"repo\\\"/crates/keel-runtime\" }");
+        let s = KeelSource::Path {
+            repo: PathBuf::from("/my \"repo\""),
+        };
+        assert_eq!(
+            s.dependency("keel-runtime", &[]),
+            "{ path = \"/my \\\"repo\\\"/crates/keel-runtime\" }"
+        );
     }
 
     #[test]
@@ -652,8 +743,14 @@ mod tests {
             r#"{"reason":"build-finished","success":true}"#,
         ]
         .join("\n");
-        assert_eq!(artifacts(&lines, "keel_core", "cdylib"), vec![PathBuf::from("/t/libkeel_core.dylib")]);
-        assert_eq!(artifacts(&lines, "keel_core", "staticlib"), vec![PathBuf::from("/t/libkeel_core.a")]);
+        assert_eq!(
+            artifacts(&lines, "keel_core", "cdylib"),
+            vec![PathBuf::from("/t/libkeel_core.dylib")]
+        );
+        assert_eq!(
+            artifacts(&lines, "keel_core", "staticlib"),
+            vec![PathBuf::from("/t/libkeel_core.a")]
+        );
         assert!(artifacts(&lines, "other", "cdylib").is_empty());
     }
 
@@ -662,10 +759,17 @@ mod tests {
         use crate::sys::fake::FakeSys;
         let sys = FakeSys::macos()
             .with_tool("rustc", "/home/.cargo/bin/rustc")
-            .with_output("rustc", "--print sysroot", "/home/.rustup/toolchains/stable\n")
+            .with_output(
+                "rustc",
+                "--print sysroot",
+                "/home/.rustup/toolchains/stable\n",
+            )
             .with_dir("/home/.rustup/toolchains/stable/lib/rustlib/aarch64-apple-darwin");
         let tc = Toolchain::default();
-        let cargo = Cargo { toolchain: &tc, sys: &sys };
+        let cargo = Cargo {
+            toolchain: &tc,
+            sys: &sys,
+        };
         cargo.require_target("aarch64-apple-darwin").unwrap();
         let e = cargo.require_target("aarch64-apple-ios").unwrap_err();
         assert_eq!(e.code, Code::MissingTarget);

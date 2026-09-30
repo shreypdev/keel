@@ -15,7 +15,11 @@ fn the_generated_core_builds_its_tests_pass_and_its_bindings_are_current() {
             .arg(project.root.join("core/Cargo.toml"))
             .env("CARGO_TARGET_DIR", shared_target()),
     );
-    assert!(String::from_utf8_lossy(&test.stdout).contains("test result: ok. 2 passed"), "{}", String::from_utf8_lossy(&test.stdout));
+    assert!(
+        String::from_utf8_lossy(&test.stdout).contains("test result: ok. 2 passed"),
+        "{}",
+        String::from_utf8_lossy(&test.stdout)
+    );
 
     // `keel bindgen` (build the core, dlopen it, read the schema) agrees, byte for byte, with the
     // bindings `init` wrote from the embedded schema: the embedded schema has not drifted from
@@ -43,13 +47,41 @@ fn the_project_layout_is_what_the_readme_says() {
     }
     // Checkout mode: the shells point at the checkout's runtimes by relative path.
     let repo = repo_root();
-    let settings = std::fs::read_to_string(project.root.join("android/settings.gradle.kts")).unwrap();
-    let include = settings.lines().find(|l| l.contains("includeBuild(")).expect("a composite build of the runtime");
+    let settings =
+        std::fs::read_to_string(project.root.join("android/settings.gradle.kts")).unwrap();
+    let include = settings
+        .lines()
+        .find(|l| l.contains("includeBuild("))
+        .expect("a composite build of the runtime");
     let rel = include.split('"').nth(1).unwrap();
-    assert!(project.root.join("android").join(rel).join("settings.gradle.kts").is_file(), "{include} does not reach {}", repo.display());
-    let swift = std::fs::read_to_string(project.root.join("generated/swift/Package.swift")).unwrap();
-    let dep = swift.split(".package(path: \"").nth(1).unwrap().split('"').next().unwrap();
-    assert!(project.root.join("generated/swift").join(dep).join("Package.swift").is_file(), "{dep}");
+    assert!(
+        project
+            .root
+            .join("android")
+            .join(rel)
+            .join("settings.gradle.kts")
+            .is_file(),
+        "{include} does not reach {}",
+        repo.display()
+    );
+    let swift =
+        std::fs::read_to_string(project.root.join("generated/swift/Package.swift")).unwrap();
+    let dep = swift
+        .split(".package(path: \"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert!(
+        project
+            .root
+            .join("generated/swift")
+            .join(dep)
+            .join("Package.swift")
+            .is_file(),
+        "{dep}"
+    );
 }
 
 #[test]

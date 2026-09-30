@@ -90,10 +90,21 @@ pub struct Section {
 pub fn run(env: &Env<'_>, platform: Option<&str>) -> Result<bool> {
     let (scope, project) = scope(env, platform)?;
     let toolchain = Toolchain::detect(env.sys);
-    let android = project.as_ref().map(|p| p.config.android.abis.clone()).unwrap_or_else(|| vec!["arm64-v8a".into(), "x86_64".into()]);
+    let android = project
+        .as_ref()
+        .map(|p| p.config.android.abis.clone())
+        .unwrap_or_else(|| vec!["arm64-v8a".into(), "x86_64".into()]);
     let sections = check(env.sys, &toolchain, &scope, &android);
-    env.ui.line(&render(&sections, &env.ui, project.as_ref().map(|p| p.config.name.as_str()), &scope));
-    let failed = sections.iter().flat_map(|s| &s.findings).any(|f| f.status == Status::Fail);
+    env.ui.line(&render(
+        &sections,
+        &env.ui,
+        project.as_ref().map(|p| p.config.name.as_str()),
+        &scope,
+    ));
+    let failed = sections
+        .iter()
+        .flat_map(|s| &s.findings)
+        .any(|f| f.status == Status::Fail);
     Ok(!failed)
 }
 
@@ -114,7 +125,12 @@ fn scope(env: &Env<'_>, platform: Option<&str>) -> Result<(Vec<Platform>, Option
 
 /// Runs every check for the platforms in `scope`.
 #[must_use]
-pub fn check(sys: &dyn Sys, toolchain: &Toolchain, scope: &[Platform], android_abis: &[String]) -> Vec<Section> {
+pub fn check(
+    sys: &dyn Sys,
+    toolchain: &Toolchain,
+    scope: &[Platform],
+    android_abis: &[String],
+) -> Vec<Section> {
     let mut sections = vec![Section {
         title: "Rust",
         findings: rust(sys, toolchain),
@@ -141,7 +157,12 @@ pub fn check(sys: &dyn Sys, toolchain: &Toolchain, scope: &[Platform], android_a
 }
 
 /// The first line of a tool's version output.
-fn version_line(sys: &dyn Sys, toolchain: &Toolchain, program: &Path, args: &[&str]) -> Option<String> {
+fn version_line(
+    sys: &dyn Sys,
+    toolchain: &Toolchain,
+    program: &Path,
+    args: &[&str],
+) -> Option<String> {
     let out = sys.run(program, args, &toolchain.env_pairs())?;
     if !out.success {
         return None;
@@ -158,7 +179,12 @@ fn rust_version(line: &str) -> Option<(u32, u32)> {
 
 /// `v22.3.0` into `22`.
 fn node_major(line: &str) -> Option<u32> {
-    line.trim().trim_start_matches('v').split('.').next()?.parse().ok()
+    line.trim()
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
 fn rust_target(sys: &dyn Sys, toolchain: &Toolchain, triple: &str) -> Option<bool> {
@@ -178,7 +204,10 @@ fn target_finding(sys: &dyn Sys, toolchain: &Toolchain, triple: &str, needed_for
             format!("Rust target {triple} is not installed ({needed_for})"),
             format!("rustup target add {triple}"),
         ),
-        None => Finding::warn(format!("could not check the Rust target {triple}"), "check `rustc --print sysroot` works"),
+        None => Finding::warn(
+            format!("could not check the Rust target {triple}"),
+            "check `rustc --print sysroot` works",
+        ),
     }
 }
 
@@ -196,24 +225,38 @@ fn rust(sys: &dyn Sys, toolchain: &Toolchain) -> Vec<Finding> {
                     format!("{line}: Keel needs Rust 1.85 or newer (edition 2024)"),
                     "rustup update stable",
                 )),
-                None => out.push(Finding::warn(format!("rustc prints an unexpected version: {line}"), "")),
+                None => out.push(Finding::warn(
+                    format!("rustc prints an unexpected version: {line}"),
+                    "",
+                )),
             },
-            None => out.push(Finding::fail("rustc is installed but does not run", "reinstall it: rustup self uninstall, then https://rustup.rs")),
+            None => out.push(Finding::fail(
+                "rustc is installed but does not run",
+                "reinstall it: rustup self uninstall, then https://rustup.rs",
+            )),
         },
     }
     match toolchain.which(sys, "cargo") {
         Some(cargo) => match version_line(sys, toolchain, &cargo, &["--version"]) {
             Some(line) => out.push(Finding::ok(line)),
-            None => out.push(Finding::fail("cargo is installed but does not run", "rustup update stable")),
+            None => out.push(Finding::fail(
+                "cargo is installed but does not run",
+                "rustup update stable",
+            )),
         },
-        None => out.push(Finding::fail("cargo was not found", "install Rust with rustup: https://rustup.rs")),
+        None => out.push(Finding::fail(
+            "cargo was not found",
+            "install Rust with rustup: https://rustup.rs",
+        )),
     }
     out
 }
 
 fn ios(sys: &dyn Sys, toolchain: &Toolchain) -> Vec<Finding> {
     if sys.os() != Os::Macos {
-        return vec![Finding::skip("iOS builds need macOS (Xcode); build the other platforms here and iOS on a Mac or in CI")];
+        return vec![Finding::skip(
+            "iOS builds need macOS (Xcode); build the other platforms here and iOS on a Mac or in CI",
+        )];
     }
     let mut out = Vec::new();
     match toolchain.which(sys, "xcodebuild") {
@@ -255,10 +298,23 @@ fn ios(sys: &dyn Sys, toolchain: &Toolchain) -> Vec<Finding> {
         out.push(Finding::ok(format!("xcode-select: {selected}")));
     }
     if toolchain.which(sys, "lipo").is_none() {
-        out.push(Finding::fail("lipo was not found", "xcode-select --install"));
+        out.push(Finding::fail(
+            "lipo was not found",
+            "xcode-select --install",
+        ));
     }
-    out.push(target_finding(sys, toolchain, "aarch64-apple-ios", "iOS devices"));
-    out.push(target_finding(sys, toolchain, "aarch64-apple-ios-sim", "the simulator on Apple silicon"));
+    out.push(target_finding(
+        sys,
+        toolchain,
+        "aarch64-apple-ios",
+        "iOS devices",
+    ));
+    out.push(target_finding(
+        sys,
+        toolchain,
+        "aarch64-apple-ios-sim",
+        "the simulator on Apple silicon",
+    ));
     out
 }
 
@@ -291,9 +347,14 @@ fn android(sys: &dyn Sys, toolchain: &Toolchain, abis: &[String]) -> Vec<Finding
     }
     match &toolchain.android_ndk {
         Some(ndk) => match ndk_major(ndk) {
-            Some(major) if major >= 27 => out.push(Finding::ok(format!("Android NDK r{major} at {}", ndk.display()))),
+            Some(major) if major >= 27 => out.push(Finding::ok(format!(
+                "Android NDK r{major} at {}",
+                ndk.display()
+            ))),
             Some(major) => out.push(Finding::fail(
-                format!("Android NDK r{major} is too old: libraries need r27+ for 16 KB page alignment"),
+                format!(
+                    "Android NDK r{major} is too old: libraries need r27+ for 16 KB page alignment"
+                ),
                 "sdkmanager \"ndk;27.2.12479018\"",
             )),
             None => out.push(Finding::ok(format!("Android NDK at {}", ndk.display()))),
@@ -310,10 +371,18 @@ fn android(sys: &dyn Sys, toolchain: &Toolchain, abis: &[String]) -> Vec<Finding
                 .unwrap_or_else(|| "cargo-ndk".to_owned());
             out.push(Finding::ok(version));
         }
-        None => out.push(Finding::fail("cargo-ndk was not found", "cargo install cargo-ndk")),
+        None => out.push(Finding::fail(
+            "cargo-ndk was not found",
+            "cargo install cargo-ndk",
+        )),
     }
     for abi in abis {
-        out.push(target_finding(sys, toolchain, crate::builds::android::triple_of(abi), &format!("the {abi} ABI")));
+        out.push(target_finding(
+            sys,
+            toolchain,
+            crate::builds::android::triple_of(abi),
+            &format!("the {abi} ABI"),
+        ));
     }
     out.push(jdk(sys, toolchain));
     out
@@ -338,7 +407,12 @@ fn jdk(sys: &dyn Sys, toolchain: &Toolchain) -> Finding {
         }
     }
     // A JDK that is installed but not on PATH (Homebrew's openjdk is keg-only).
-    for candidate in ["/opt/homebrew/opt/openjdk@17", "/opt/homebrew/opt/openjdk", "/usr/local/opt/openjdk@17", "/usr/local/opt/openjdk"] {
+    for candidate in [
+        "/opt/homebrew/opt/openjdk@17",
+        "/opt/homebrew/opt/openjdk",
+        "/usr/local/opt/openjdk@17",
+        "/usr/local/opt/openjdk",
+    ] {
         if sys.is_file(&Path::new(candidate).join("bin/java")) {
             return Finding::warn(
                 format!("a JDK is installed at {candidate} but `java` is not on PATH"),
@@ -357,11 +431,20 @@ fn java_major(line: &str) -> Option<u32> {
     let quoted = line.split('"').nth(1)?;
     let mut parts = quoted.split('.');
     let first: u32 = parts.next()?.parse().ok()?;
-    if first == 1 { parts.next()?.parse().ok() } else { Some(first) }
+    if first == 1 {
+        parts.next()?.parse().ok()
+    } else {
+        Some(first)
+    }
 }
 
 fn web(sys: &dyn Sys, toolchain: &Toolchain) -> Vec<Finding> {
-    let mut out = vec![target_finding(sys, toolchain, "wasm32-unknown-unknown", "the web build")];
+    let mut out = vec![target_finding(
+        sys,
+        toolchain,
+        "wasm32-unknown-unknown",
+        "the web build",
+    )];
     match toolchain.which(sys, "node") {
         None => out.push(Finding::fail(
             "node was not found (the web app shell and the TypeScript runtime need Node 20+)",
@@ -377,7 +460,10 @@ fn web(sys: &dyn Sys, toolchain: &Toolchain) -> Vec<Finding> {
         },
     }
     if toolchain.which(sys, "npm").is_none() {
-        out.push(Finding::warn("npm was not found (the web app shell installs its dependencies with it)", "it ships with Node: https://nodejs.org"));
+        out.push(Finding::warn(
+            "npm was not found (the web app shell installs its dependencies with it)",
+            "it ships with Node: https://nodejs.org",
+        ));
     }
     match toolchain.which(sys, "wasm-opt") {
         Some(tool) => {
@@ -398,8 +484,16 @@ pub fn render(sections: &[Section], ui: &Ui, project: Option<&str>, scope: &[Pla
     let mut out = String::new();
     let names: Vec<&str> = scope.iter().map(|p| p.name()).collect();
     match project {
-        Some(name) => out.push_str(&format!("{} checking {name} ({})\n", ui.bold_out("keel doctor:"), names.join(", "))),
-        None => out.push_str(&format!("{} no project here, checking {}\n", ui.bold_out("keel doctor:"), names.join(", "))),
+        Some(name) => out.push_str(&format!(
+            "{} checking {name} ({})\n",
+            ui.bold_out("keel doctor:"),
+            names.join(", ")
+        )),
+        None => out.push_str(&format!(
+            "{} no project here, checking {}\n",
+            ui.bold_out("keel doctor:"),
+            names.join(", ")
+        )),
     }
     let mut counts = [0_usize; 4];
     for section in sections {
@@ -422,9 +516,17 @@ pub fn render(sections: &[Section], ui: &Ui, project: Option<&str>, scope: &[Pla
         "\n{} ok, {} warning{}, {} failure{}\n",
         counts[Status::Ok as usize],
         counts[Status::Warn as usize],
-        if counts[Status::Warn as usize] == 1 { "" } else { "s" },
+        if counts[Status::Warn as usize] == 1 {
+            ""
+        } else {
+            "s"
+        },
         counts[Status::Fail as usize],
-        if counts[Status::Fail as usize] == 1 { "" } else { "s" },
+        if counts[Status::Fail as usize] == 1 {
+            ""
+        } else {
+            "s"
+        },
     ));
     out
 }
@@ -450,11 +552,25 @@ mod tests {
         let mut sys = sys
             .with_tool("rustc", "/home/dev/.cargo/bin/rustc")
             .with_tool("cargo", "/home/dev/.cargo/bin/cargo")
-            .with_output("rustc", "--version", "rustc 1.98.1 (48a229cea 2026-09-01)\n")
-            .with_output("cargo", "--version", "cargo 1.98.1 (797e8a9bc 2026-08-05)\n")
-            .with_output("rustc", "--print sysroot", "/home/dev/.rustup/toolchains/stable\n");
+            .with_output(
+                "rustc",
+                "--version",
+                "rustc 1.98.1 (48a229cea 2026-09-01)\n",
+            )
+            .with_output(
+                "cargo",
+                "--version",
+                "cargo 1.98.1 (797e8a9bc 2026-08-05)\n",
+            )
+            .with_output(
+                "rustc",
+                "--print sysroot",
+                "/home/dev/.rustup/toolchains/stable\n",
+            );
         for t in targets {
-            sys = sys.with_dir(&format!("/home/dev/.rustup/toolchains/stable/lib/rustlib/{t}"));
+            sys = sys.with_dir(&format!(
+                "/home/dev/.rustup/toolchains/stable/lib/rustlib/{t}"
+            ));
         }
         sys
     }
@@ -497,7 +613,11 @@ mod tests {
         let tc = Toolchain::detect(&sys);
         let sections = check(&sys, &tc, &[Platform::Web], &[]);
         assert_eq!(find(&sections, "Rust", "1.80.0").status, Status::Fail);
-        assert!(find(&sections, "Rust", "1.80.0").fix.contains("rustup update"));
+        assert!(
+            find(&sections, "Rust", "1.80.0")
+                .fix
+                .contains("rustup update")
+        );
         assert_eq!(find(&sections, "Web", "v18").status, Status::Fail);
     }
 
@@ -512,20 +632,38 @@ mod tests {
     #[test]
     fn xcode_select_on_the_command_line_tools_is_a_warning_with_the_fix() {
         let dev = crate::toolchain::XCODE_DEVELOPER_DIR;
-        let sys = with_rust(FakeSys::macos(), &["aarch64-apple-ios", "aarch64-apple-ios-sim"])
-            .with_dir(dev)
-            .with_tool("xcodebuild", "/usr/bin/xcodebuild")
-            .with_tool("xcode-select", "/usr/bin/xcode-select")
-            .with_tool("lipo", "/usr/bin/lipo")
-            .with_output("xcodebuild", "-version", "Xcode 26.6\nBuild version 17F113\n")
-            .with_output("xcode-select", "-p", "/Library/Developer/CommandLineTools\n");
+        let sys = with_rust(
+            FakeSys::macos(),
+            &["aarch64-apple-ios", "aarch64-apple-ios-sim"],
+        )
+        .with_dir(dev)
+        .with_tool("xcodebuild", "/usr/bin/xcodebuild")
+        .with_tool("xcode-select", "/usr/bin/xcode-select")
+        .with_tool("lipo", "/usr/bin/lipo")
+        .with_output(
+            "xcodebuild",
+            "-version",
+            "Xcode 26.6\nBuild version 17F113\n",
+        )
+        .with_output(
+            "xcode-select",
+            "-p",
+            "/Library/Developer/CommandLineTools\n",
+        );
         let tc = Toolchain::detect(&sys);
         let sections = check(&sys, &tc, &[Platform::Ios], &[]);
         let f = find(&sections, "iOS", "command line tools");
         assert_eq!(f.status, Status::Warn);
-        assert!(f.fix.contains("sudo xcode-select -s /Applications/Xcode.app"), "{f:?}");
+        assert!(
+            f.fix
+                .contains("sudo xcode-select -s /Applications/Xcode.app"),
+            "{f:?}"
+        );
         assert_eq!(find(&sections, "iOS", "Xcode 26.6").status, Status::Ok);
-        assert_eq!(find(&sections, "iOS", "aarch64-apple-ios-sim").status, Status::Ok);
+        assert_eq!(
+            find(&sections, "iOS", "aarch64-apple-ios-sim").status,
+            Status::Ok
+        );
     }
 
     #[test]
@@ -536,7 +674,10 @@ mod tests {
         let f = find(&sections, "iOS", "aarch64-apple-ios ");
         assert_eq!(f.status, Status::Fail);
         assert_eq!(f.fix, "rustup target add aarch64-apple-ios");
-        assert_eq!(find(&sections, "iOS", "xcodebuild was not found").status, Status::Fail);
+        assert_eq!(
+            find(&sections, "iOS", "xcodebuild was not found").status,
+            Status::Fail
+        );
     }
 
     #[test]
@@ -551,16 +692,28 @@ mod tests {
         let tc = Toolchain::detect(&sys);
         let abis = vec!["arm64-v8a".to_owned(), "x86_64".to_owned()];
         let sections = check(&sys, &tc, &[Platform::Android], &abis);
-        assert_eq!(find(&sections, "Android", "ANDROID_HOME is not set").status, Status::Warn);
+        assert_eq!(
+            find(&sections, "Android", "ANDROID_HOME is not set").status,
+            Status::Warn
+        );
         assert_eq!(find(&sections, "Android", "NDK r27").status, Status::Ok);
-        assert_eq!(find(&sections, "Android", "cargo-ndk 4.1.2").status, Status::Ok);
-        assert_eq!(find(&sections, "Android", "aarch64-linux-android").status, Status::Ok);
+        assert_eq!(
+            find(&sections, "Android", "cargo-ndk 4.1.2").status,
+            Status::Ok
+        );
+        assert_eq!(
+            find(&sections, "Android", "aarch64-linux-android").status,
+            Status::Ok
+        );
         let missing = find(&sections, "Android", "x86_64-linux-android");
         assert_eq!(missing.status, Status::Fail);
         assert_eq!(missing.fix, "rustup target add x86_64-linux-android");
         let jdk = find(&sections, "Android", "JDK");
         assert_eq!(jdk.status, Status::Warn);
-        assert!(jdk.fix.contains("JAVA_HOME=/opt/homebrew/opt/openjdk@17"), "{jdk:?}");
+        assert!(
+            jdk.fix.contains("JAVA_HOME=/opt/homebrew/opt/openjdk@17"),
+            "{jdk:?}"
+        );
     }
 
     #[test]
@@ -568,9 +721,20 @@ mod tests {
         let sys = with_rust(FakeSys::linux(), &[]);
         let tc = Toolchain::detect(&sys);
         let sections = check(&sys, &tc, &[Platform::Android], &["arm64-v8a".to_owned()]);
-        assert!(find(&sections, "Android", "no Android SDK").fix.contains("ANDROID_HOME"));
-        assert!(find(&sections, "Android", "no Android NDK").fix.contains("sdkmanager"));
-        assert_eq!(find(&sections, "Android", "cargo-ndk").fix, "cargo install cargo-ndk");
+        assert!(
+            find(&sections, "Android", "no Android SDK")
+                .fix
+                .contains("ANDROID_HOME")
+        );
+        assert!(
+            find(&sections, "Android", "no Android NDK")
+                .fix
+                .contains("sdkmanager")
+        );
+        assert_eq!(
+            find(&sections, "Android", "cargo-ndk").fix,
+            "cargo install cargo-ndk"
+        );
     }
 
     #[test]
@@ -585,7 +749,10 @@ mod tests {
 
     #[test]
     fn java_versions_are_read() {
-        assert_eq!(java_major("openjdk version \"17.0.12\" 2024-07-16"), Some(17));
+        assert_eq!(
+            java_major("openjdk version \"17.0.12\" 2024-07-16"),
+            Some(17)
+        );
         assert_eq!(java_major("java version \"1.8.0_292\""), Some(8));
         assert_eq!(java_major("nonsense"), None);
     }
@@ -594,12 +761,18 @@ mod tests {
     fn the_report_counts_and_shows_fixes() {
         let sections = vec![Section {
             title: "Web",
-            findings: vec![Finding::ok("node v22"), Finding::fail("wasm-opt missing", "brew install binaryen")],
+            findings: vec![
+                Finding::ok("node v22"),
+                Finding::fail("wasm-opt missing", "brew install binaryen"),
+            ],
         }];
         let text = render(&sections, &Ui::plain(), Some("todo"), &[Platform::Web]);
         assert!(text.contains("checking todo (web)"), "{text}");
         assert!(text.contains("  ok    node v22"), "{text}");
-        assert!(text.contains("  FAIL  wasm-opt missing\n         fix: brew install binaryen"), "{text}");
+        assert!(
+            text.contains("  FAIL  wasm-opt missing\n         fix: brew install binaryen"),
+            "{text}"
+        );
         assert!(text.contains("1 ok, 0 warnings, 1 failure"), "{text}");
     }
 }

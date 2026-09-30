@@ -86,7 +86,11 @@ impl Project {
         match std::env::var_os("CARGO_TARGET_DIR").filter(|v| !v.is_empty()) {
             Some(dir) => {
                 let dir = PathBuf::from(dir);
-                if dir.is_absolute() { dir } else { self.root.join(dir) }
+                if dir.is_absolute() {
+                    dir
+                } else {
+                    self.root.join(dir)
+                }
             }
             None => self.root.join("target"),
         }
@@ -154,7 +158,10 @@ mod tests {
         let project = Project::discover(&nested).unwrap();
         assert_eq!(project.root, root.canonicalize().unwrap());
         assert_eq!(project.config.name, "demo");
-        assert_eq!(project.core_manifest(), project.root.join("core/Cargo.toml"));
+        assert_eq!(
+            project.core_manifest(),
+            project.root.join("core/Cargo.toml")
+        );
         assert_eq!(project.kotlin_package(), "com.example.demo.core");
         assert_eq!(project.swift_module(), "DemoCore");
         let _ = std::fs::remove_dir_all(root);

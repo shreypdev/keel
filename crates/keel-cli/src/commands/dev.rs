@@ -161,13 +161,18 @@ fn start(
                     "stop the other server, or choose another port: `keel dev --addr 127.0.0.1:0` picks a free one",
                 ));
             }
-            Ok(Event::Runner(RunnerEvent::Line { id: got, text })) if got == id => println!("{text}"),
+            Ok(Event::Runner(RunnerEvent::Line { id: got, text })) if got == id => {
+                println!("{text}")
+            }
             Ok(_) => {}
             Err(_) => {
                 running.stop();
                 return Err(CliError::new(
                     Code::Dev,
-                    format!("the dev server did not start listening within {} seconds", READY_TIMEOUT.as_secs()),
+                    format!(
+                        "the dev server did not start listening within {} seconds",
+                        READY_TIMEOUT.as_secs()
+                    ),
                     "the core's startup (a constructor, a hydration hook) is taking too long or is stuck",
                     "run the core's tests to find what blocks, then run `keel dev` again",
                 ));
@@ -203,7 +208,10 @@ fn socket_of(url: &str) -> Option<String> {
 fn watch(dirs: &[PathBuf], tx: Sender<Event>) -> Result<notify::RecommendedWatcher> {
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         let Ok(event) = result else { return };
-        if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)) {
+        if !matches!(
+            event.kind,
+            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+        ) {
             return;
         }
         if event.paths.iter().any(|p| is_source(p)) {
@@ -214,12 +222,16 @@ fn watch(dirs: &[PathBuf], tx: Sender<Event>) -> Result<notify::RecommendedWatch
     for dir in dirs {
         let src = dir.join("src");
         if src.is_dir() {
-            watcher.watch(&src, RecursiveMode::Recursive).map_err(|e| watch_error(&e))?;
+            watcher
+                .watch(&src, RecursiveMode::Recursive)
+                .map_err(|e| watch_error(&e))?;
         }
         for file in ["Cargo.toml", "build.rs"] {
             let path = dir.join(file);
             if path.is_file() {
-                watcher.watch(&path, RecursiveMode::NonRecursive).map_err(|e| watch_error(&e))?;
+                watcher
+                    .watch(&path, RecursiveMode::NonRecursive)
+                    .map_err(|e| watch_error(&e))?;
             }
         }
     }
@@ -241,19 +253,34 @@ fn is_source(path: &Path) -> bool {
     if path.components().any(|c| c.as_os_str() == "target") {
         return false;
     }
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if name.starts_with('.') || name.ends_with('~') || name.ends_with(".swp") {
         return false;
     }
-    matches!(path.extension().and_then(|e| e.to_str()), Some("rs" | "toml")) || name == "Cargo.lock"
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("rs" | "toml")
+    ) || name == "Cargo.lock"
 }
 
 /// Prints the banner: where to connect and how.
-fn announce(_session: &Session<'_>, url: &str, hash: &str, args: &DevArgs, watched: &[PathBuf], restarted: bool) {
+fn announce(
+    _session: &Session<'_>,
+    url: &str,
+    hash: &str,
+    args: &DevArgs,
+    watched: &[PathBuf],
+    restarted: bool,
+) {
     let say = |s: &str| println!("{s}");
     if restarted {
         say("");
-        say(&format!("Restarted: {url}  (schema hash {hash}); reload the app to reconnect"));
+        say(&format!(
+            "Restarted: {url}  (schema hash {hash}); reload the app to reconnect"
+        ));
         return;
     }
     say("");
@@ -262,18 +289,28 @@ fn announce(_session: &Session<'_>, url: &str, hash: &str, args: &DevArgs, watch
     say(url);
     say("");
     say(&format!("  schema hash   {hash}"));
-    say("  web           KeelCore.load({ mode: \"remote\", url, expectedSchemaHash: KeelIds.schemaHash })");
+    say(
+        "  web           KeelCore.load({ mode: \"remote\", url, expectedSchemaHash: KeelIds.schemaHash })",
+    );
     say("  iOS           launch the app with KEEL_DEV_URL set to the URL above");
     say("  JVM           LoadOptions(mode = REMOTE, remoteUrl = url)");
     if args.addr.starts_with("0.0.0.0") || args.addr.starts_with("[::]") {
-        say("  (listening on every interface: any device on your network can use this core, there is no authentication)");
+        say(
+            "  (listening on every interface: any device on your network can use this core, there is no authentication)",
+        );
     }
     say("");
     if args.no_watch {
         say("Serving. Press Ctrl-C to stop.");
     } else {
-        let shown: Vec<String> = watched.iter().map(|d| d.join("src").display().to_string()).collect();
-        say(&format!("Watching {} ; press Ctrl-C to stop.", shown.join(", ")));
+        let shown: Vec<String> = watched
+            .iter()
+            .map(|d| d.join("src").display().to_string())
+            .collect();
+        say(&format!(
+            "Watching {} ; press Ctrl-C to stop.",
+            shown.join(", ")
+        ));
     }
     say("");
 }
@@ -284,7 +321,12 @@ mod tests {
 
     #[test]
     fn only_sources_trigger_rebuilds() {
-        for yes in ["/p/core/src/lib.rs", "/p/core/Cargo.toml", "/p/core/src/a/b.rs", "/p/Cargo.lock"] {
+        for yes in [
+            "/p/core/src/lib.rs",
+            "/p/core/Cargo.toml",
+            "/p/core/src/a/b.rs",
+            "/p/Cargo.lock",
+        ] {
             assert!(is_source(Path::new(yes)), "{yes}");
         }
         for no in [
@@ -301,7 +343,10 @@ mod tests {
 
     #[test]
     fn the_socket_is_taken_from_the_url() {
-        assert_eq!(socket_of("ws://127.0.0.1:7443").as_deref(), Some("127.0.0.1:7443"));
+        assert_eq!(
+            socket_of("ws://127.0.0.1:7443").as_deref(),
+            Some("127.0.0.1:7443")
+        );
         assert_eq!(socket_of("http://x"), None);
     }
 }

@@ -42,7 +42,9 @@ impl Dev {
                 if n == 0 {
                     break;
                 }
-                sink.lock().unwrap().push_str(&String::from_utf8_lossy(&buf[..n]));
+                sink.lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&buf[..n]));
             }
         });
         let (tx, lines) = mpsc::channel();
@@ -67,7 +69,8 @@ impl Dev {
             if line.starts_with("ws://") {
                 dev.url = line.trim().to_owned();
             } else if let Some(hash) = line.trim().strip_prefix("schema hash") {
-                dev.hash = u64::from_str_radix(hash.trim().trim_start_matches("0x"), 16).expect("a hex hash");
+                dev.hash = u64::from_str_radix(hash.trim().trim_start_matches("0x"), 16)
+                    .expect("a hex hash");
             }
         }
         dev
@@ -76,7 +79,10 @@ impl Dev {
     fn next_line(&self, deadline: Instant) -> String {
         let left = deadline.saturating_duration_since(Instant::now());
         self.lines.recv_timeout(left).unwrap_or_else(|_| {
-            panic!("keel dev printed nothing in time; stderr:\n{}", self.log.lock().unwrap())
+            panic!(
+                "keel dev printed nothing in time; stderr:\n{}",
+                self.log.lock().unwrap()
+            )
         })
     }
 
@@ -139,9 +145,15 @@ fn connect(dev: &Dev) -> (WebSocket<TcpStream>, u64) {
     }
     .encode(&mut hello);
     send(&mut ws, dev.hash, Kind::Hello, 0, hello.as_slice());
-    let Message::Binary(reply) = ws.read().unwrap() else { panic!("binary envelopes only") };
+    let Message::Binary(reply) = ws.read().unwrap() else {
+        panic!("binary envelopes only")
+    };
     let envelope = Envelope::parse(&reply).unwrap();
-    assert_eq!(envelope.kind, Kind::Hello, "the server answers a Hello with its own");
+    assert_eq!(
+        envelope.kind,
+        Kind::Hello,
+        "the server answers a Hello with its own"
+    );
     (ws, envelope.schema)
 }
 
@@ -153,10 +165,17 @@ fn greeting(ws: &mut WebSocket<TcpStream>, schema: u64, name: &str) -> String {
         method_id: keel_meta::ids::function_id("greeting"),
     };
     let mut call = Writer::new();
-    Call { target, call_id: 1, args: args.as_slice() }.encode(&mut call);
+    Call {
+        target,
+        call_id: 1,
+        args: args.as_slice(),
+    }
+    .encode(&mut call);
     send(ws, schema, Kind::Call, 1, call.as_slice());
     loop {
-        let Message::Binary(bytes) = ws.read().expect("a reply") else { continue };
+        let Message::Binary(bytes) = ws.read().expect("a reply") else {
+            continue;
+        };
         let envelope = Envelope::parse(&bytes).unwrap();
         if envelope.kind == Kind::Reply {
             let reply = Reply::decode(&mut Reader::new(envelope.payload)).unwrap();
@@ -172,18 +191,30 @@ fn the_dev_server_serves_the_core_and_reports_its_schema() {
 
     // The hash `keel dev` printed is the hash of the bindings `keel init` generated.
     let ids = std::fs::read_to_string(project.root.join("generated/ts/src/ids.ts")).unwrap();
-    assert!(ids.contains(&format!("schemaHash: {:#018x}n", dev.hash)), "{ids}");
+    assert!(
+        ids.contains(&format!("schemaHash: {:#018x}n", dev.hash)),
+        "{ids}"
+    );
     assert!(dev.url.starts_with("ws://127.0.0.1:"), "{}", dev.url);
 
     let (mut ws, server_hash) = connect(&dev);
-    assert_eq!(server_hash, dev.hash, "the server's Hello carries the core's schema hash");
-    assert_eq!(greeting(&mut ws, dev.hash, "Ada"), "Hello, Ada, from the devsmoke core");
+    assert_eq!(
+        server_hash, dev.hash,
+        "the server's Hello carries the core's schema hash"
+    );
+    assert_eq!(
+        greeting(&mut ws, dev.hash, "Ada"),
+        "Hello, Ada, from the devsmoke core"
+    );
     drop(ws);
 
     // The core's dev records reach the terminal (docs/SPEC.md 5.10).
     std::thread::sleep(Duration::from_millis(300));
     let log = dev.log.lock().unwrap().clone();
-    assert!(log.contains("keel::transport: serving on ws://127.0.0.1:"), "{log}");
+    assert!(
+        log.contains("keel::transport: serving on ws://127.0.0.1:"),
+        "{log}"
+    );
     assert!(log.contains("client connected: platform=test"), "{log}");
 
     dev.kill_and_expect_the_port_to_close();
@@ -194,7 +225,10 @@ fn an_edit_rebuilds_and_restarts_the_core_on_the_same_address() {
     let project = init_project("devwatch", "web");
     let dev = Dev::start(&project, &[]);
     let (mut ws, hash) = connect(&dev);
-    assert_eq!(greeting(&mut ws, hash, "x"), "Hello, x, from the devwatch core");
+    assert_eq!(
+        greeting(&mut ws, hash, "x"),
+        "Hello, x, from the devwatch core"
+    );
     drop(ws);
 
     // A broken edit keeps the old core serving.
@@ -203,22 +237,42 @@ fn an_edit_rebuilds_and_restarts_the_core_on_the_same_address() {
     std::fs::write(&lib, format!("{original}\npub fn broken( {{\n")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
-        if dev.log.lock().unwrap().contains("the rebuild failed; still serving the previous build") {
+        if dev
+            .log
+            .lock()
+            .unwrap()
+            .contains("the rebuild failed; still serving the previous build")
+        {
             break;
         }
-        assert!(Instant::now() < deadline, "no rebuild failure was reported:\n{}", dev.log.lock().unwrap());
+        assert!(
+            Instant::now() < deadline,
+            "no rebuild failure was reported:\n{}",
+            dev.log.lock().unwrap()
+        );
         std::thread::sleep(Duration::from_millis(200));
     }
     let (mut ws, hash) = connect(&dev);
-    assert_eq!(greeting(&mut ws, hash, "x"), "Hello, x, from the devwatch core", "the previous core still answers");
+    assert_eq!(
+        greeting(&mut ws, hash, "x"),
+        "Hello, x, from the devwatch core",
+        "the previous core still answers"
+    );
     drop(ws);
 
     // A good edit is picked up: same address, new behaviour.
-    std::fs::write(&lib, original.replace("from the devwatch core", "again, from the rebuilt core")).unwrap();
+    std::fs::write(
+        &lib,
+        original.replace("from the devwatch core", "again, from the rebuilt core"),
+    )
+    .unwrap();
     dev.wait_for("Restarted: ws://", Duration::from_secs(180));
     // The banner line carries the same URL: clients reconnect where they were.
     let (mut ws, hash) = connect(&dev);
-    assert_eq!(greeting(&mut ws, hash, "x"), "Hello, x, again, from the rebuilt core");
+    assert_eq!(
+        greeting(&mut ws, hash, "x"),
+        "Hello, x, again, from the rebuilt core"
+    );
     drop(ws);
     dev.kill_and_expect_the_port_to_close();
 }
@@ -235,5 +289,10 @@ fn a_taken_address_is_explained() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("error[keel::C0013]") && stderr.contains("could not start") && stderr.contains("--addr 127.0.0.1:0"), "{stderr}");
+    assert!(
+        stderr.contains("error[keel::C0013]")
+            && stderr.contains("could not start")
+            && stderr.contains("--addr 127.0.0.1:0"),
+        "{stderr}"
+    );
 }

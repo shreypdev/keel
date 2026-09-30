@@ -1,7 +1,9 @@
 //! File-system helpers shared by the commands.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use crate::error::{CliError, Result};
 
@@ -67,6 +69,7 @@ pub fn copy_file(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 /// Copies a directory tree, following nothing: symlinks are recreated as files only when
 /// they point at files.
 ///
@@ -110,7 +113,12 @@ pub fn size_of(path: &Path) -> u64 {
     };
     if meta.is_dir() {
         fs::read_dir(path)
-            .map(|entries| entries.filter_map(|e| e.ok()).map(|e| size_of(&e.path())).sum())
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| size_of(&e.path()))
+                    .sum()
+            })
             .unwrap_or(0)
     } else {
         meta.len()
@@ -135,11 +143,14 @@ pub fn human_size(bytes: u64) -> String {
     }
 }
 
+#[cfg(test)]
 /// Every file below `dir` (recursively), as paths relative to `dir` with `/` separators, sorted.
 #[must_use]
 pub fn list_files(dir: &Path) -> Vec<String> {
     fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
-        let Ok(entries) = fs::read_dir(dir) else { return };
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             if path.is_dir() {
@@ -161,6 +172,7 @@ pub fn is_empty_dir(dir: &Path) -> bool {
     fs::read_dir(dir).map_or(true, |mut entries| entries.next().is_none())
 }
 
+#[cfg(test)]
 /// A fresh directory under the system temporary directory, for tests and scratch work; the
 /// caller removes it.
 #[must_use]

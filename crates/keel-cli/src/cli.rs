@@ -49,14 +49,14 @@ pub struct Cli {
 pub enum Command {
     /// Create a new Keel project: a core crate and an app shell per platform.
     #[command(
-    long_about = "Creates a project directory with:\n\
+        long_about = "Creates a project directory with:\n\
   keel.toml        the project file\n\
   core/            the Rust core: a working to-do store with #[keel::store] and #[keel::api]\n\
   generated/       Swift, Kotlin and TypeScript bindings for that core (already generated)\n\
   ios/ android/ web/   one minimal, real app per platform, using the generated bindings\n\n\
 Nothing is downloaded: the templates are part of this binary. Point --keel-path at a checkout of the Keel \
 repository to use its crates and runtimes directly; without it the project depends on released versions.",
-    after_long_help = "\
+        after_long_help = "\
 EXAMPLES
     keel init todo                                   all three platforms
     keel init todo --platforms ios,web               only those shells
@@ -65,11 +65,11 @@ EXAMPLES
 
 NEXT
     cd todo && keel dev        then run an app shell (each README says how)"
-)]
+    )]
     Init(InitArgs),
     /// Generate the Swift, Kotlin and TypeScript bindings from the core's schema.
     #[command(
-    long_about = "Reads the core's schema and writes the bindings the app shells import:\n\
+        long_about = "Reads the core's schema and writes the bindings the app shells import:\n\
   <out>/swift/     a Swift package (Sources/<Module>/Generated/*.swift + Package.swift)\n\
   <out>/kotlin/    a Gradle module (src/main/kotlin/<package>/*.kt + build.gradle.kts)\n\
   <out>/ts/        an npm package (src/*.ts, package.json, tsconfig.json)\n\n\
@@ -77,7 +77,7 @@ By default the schema comes from the core itself: the core is built as a host li
 linked in, loaded, and asked for `keel_schema_json` (docs/SPEC.md 13). With --schema it is read from a file \
 instead and nothing is built. Files an earlier run wrote and this one does not are removed; files you added \
 next to them are never touched.",
-    after_long_help = "\
+        after_long_help = "\
 EXAMPLES
     keel bindgen                          build the core, extract the schema, write <project>/generated
     keel bindgen --out ../shared/bindings
@@ -89,11 +89,11 @@ DOC COMMENTS
     The library's own schema export is the canonical form that the schema hash is computed from, which
     has no doc comments. --docs runs the core once more to read the full schema, so the generated code
     carries the same documentation the Rust source has."
-)]
+    )]
     Bindgen(BindgenArgs),
     /// Build the core for iOS, Android, the web or this machine.
     #[command(
-    long_about = "Builds the core for each platform and puts the result where the app shells look for it (below \
+        long_about = "Builds the core for each platform and puts the result where the app shells look for it (below \
 `build/`):\n\
   ios       build/ios/KeelCore.xcframework            device + simulator slices, with the C header\n\
   android   build/android/jniLibs/<abi>/libkeel_core.so   arm64-v8a and x86_64, 16 KB page aligned\n\
@@ -101,7 +101,7 @@ DOC COMMENTS
   host      build/host/libkeel_core.{dylib,so}        for the JVM tests and keel bindgen\n\n\
 The library is the core plus the Keel C ABI, built from a small crate generated below `target/keel/` \
 (you never write it). Sizes are printed at the end next to the budgets of the design.",
-    after_long_help = "\
+        after_long_help = "\
 EXAMPLES
     keel build                                   every platform in keel.toml, debug
     keel build --release                         optimized: what you ship
@@ -111,17 +111,17 @@ EXAMPLES
 iOS DEBUG BUILDS
     Link the library with -force_load (the generated Xcode project already does), or the core's
     registrations are dropped by the linker and the schema is empty. Release builds need no flag."
-)]
+    )]
     Build(BuildArgs),
     /// Serve the core over a WebSocket to running apps, rebuilding when the code changes.
     #[command(
-    long_about = "Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a \
+        long_about = "Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a \
 browser tab connects with the `remote` transport of its Keel runtime and uses this core instead of a built-in \
 one: edit Rust, save, and the core is rebuilt and restarted; reload the app to reconnect.\n\n\
 Logs, including the development records of docs/SPEC.md 5.10 (a line per transaction commit, port call \
 and panic), are printed here. Clocks, randomness and logging are answered by this machine because a remote \
 client cannot answer a synchronous port.",
-    after_long_help = "\
+        after_long_help = "\
 EXAMPLES
     keel dev                               listen on 127.0.0.1:7443
     keel dev --addr 0.0.0.0:7443           reachable from a phone on your network (no authentication!)
@@ -133,27 +133,27 @@ CONNECTING
     Android   the Kotlin runtime has no remote transport on Android yet; use the JVM or the web
 
 The server has no authentication. Keep the default loopback address unless a device has to reach it."
-)]
+    )]
     Dev(DevArgs),
     /// Check the toolchains and SDKs this machine has against what the project needs.
     #[command(
-    long_about = "Checks what the platforms need and prints one line per finding with the fix for each gap: \
+        long_about = "Checks what the platforms need and prints one line per finding with the fix for each gap: \
 Rust and its targets, Xcode (and whether xcode-select points at it), the Android SDK, NDK and cargo-ndk, \
 Node, wasm-opt and a JDK. Inside a project only the platforms of keel.toml are checked; elsewhere all of \
 them. Exits with status 1 when something the project needs is missing.",
-    after_long_help = "\
+        after_long_help = "\
 EXAMPLES
     keel doctor
     keel doctor --platform ios"
-)]
+    )]
     Doctor(DoctorArgs),
     /// Add a Keel core to an existing app, without touching the app's own project files.
     #[command(
-    long_about = "Looks at an existing iOS, Android or web app repository and adds a Keel core to it the \
+        long_about = "Looks at an existing iOS, Android or web app repository and adds a Keel core to it the \
 conservative way: one new `keel/` directory (a core crate, keel.toml and KEEL_ADOPT.md) and a list of the \
 exact steps to wire it into the app. The app's own project files are never modified: you make the few \
 edits yourself, and the steps are written down with the paths already filled in.",
-    after_long_help = "\
+        after_long_help = "\
 EXAMPLES
     keel adopt ../MyApp                          detect platforms, write ../MyApp/keel/
     keel adopt . --platform ios                  only the iOS steps
@@ -162,7 +162,7 @@ EXAMPLES
 WHAT IT DETECTS
     iOS      *.xcodeproj / Package.swift        Android  settings.gradle(.kts) + AndroidManifest.xml
     web      package.json (vite, webpack, next, ...)"
-)]
+    )]
     Adopt(AdoptArgs),
 }
 
@@ -173,7 +173,12 @@ pub struct InitArgs {
     pub name: String,
 
     /// Platforms to create app shells for: ios, android, web (comma separated).
-    #[arg(long, visible_alias = "targets", value_name = "LIST", default_value = "ios,android,web")]
+    #[arg(
+        long,
+        visible_alias = "targets",
+        value_name = "LIST",
+        default_value = "ios,android,web"
+    )]
     pub platforms: String,
 
     /// Application id and iOS bundle identifier; default com.example.<name>.
@@ -293,20 +298,36 @@ mod tests {
     #[test]
     fn init_defaults_and_aliases() {
         let cli = Cli::try_parse_from(["keel", "init", "todo"]).unwrap();
-        let Command::Init(args) = cli.command else { panic!("not init") };
+        let Command::Init(args) = cli.command else {
+            panic!("not init")
+        };
         assert_eq!(args.name, "todo");
         assert_eq!(args.platforms, "ios,android,web");
 
-        let cli = Cli::try_parse_from(["keel", "init", "todo", "--targets", "web", "--keel-path", "/k"]).unwrap();
-        let Command::Init(args) = cli.command else { panic!("not init") };
+        let cli = Cli::try_parse_from([
+            "keel",
+            "init",
+            "todo",
+            "--targets",
+            "web",
+            "--keel-path",
+            "/k",
+        ])
+        .unwrap();
+        let Command::Init(args) = cli.command else {
+            panic!("not init")
+        };
         assert_eq!(args.platforms, "web");
         assert_eq!(args.keel_path, Some(PathBuf::from("/k")));
     }
 
     #[test]
     fn build_accepts_the_spec_flags() {
-        let cli = Cli::try_parse_from(["keel", "build", "--platform", "ios,web", "--release"]).unwrap();
-        let Command::Build(args) = cli.command else { panic!("not build") };
+        let cli =
+            Cli::try_parse_from(["keel", "build", "--platform", "ios,web", "--release"]).unwrap();
+        let Command::Build(args) = cli.command else {
+            panic!("not build")
+        };
         assert_eq!(args.platform.as_deref(), Some("ios,web"));
         assert!(args.release);
     }
@@ -314,7 +335,9 @@ mod tests {
     #[test]
     fn dev_defaults_to_loopback() {
         let cli = Cli::try_parse_from(["keel", "dev"]).unwrap();
-        let Command::Dev(args) = cli.command else { panic!("not dev") };
+        let Command::Dev(args) = cli.command else {
+            panic!("not dev")
+        };
         assert_eq!(args.addr, "127.0.0.1:7443");
         assert!(!args.no_watch);
         assert_eq!(args.log_level, 1);
@@ -336,10 +359,18 @@ mod tests {
     fn every_command_has_teaching_help() {
         let command = Cli::command();
         for sub in command.get_subcommands() {
-            let long = sub.get_long_about().map(ToString::to_string).unwrap_or_default();
-            assert!(long.len() > 120, "`keel {}` needs a real --help text", sub.get_name());
+            let long = sub
+                .get_long_about()
+                .map(ToString::to_string)
+                .unwrap_or_default();
             assert!(
-                sub.get_after_long_help().is_some_and(|h| h.to_string().contains("keel ")),
+                long.len() > 120,
+                "`keel {}` needs a real --help text",
+                sub.get_name()
+            );
+            assert!(
+                sub.get_after_long_help()
+                    .is_some_and(|h| h.to_string().contains("keel ")),
                 "`keel {}` needs examples",
                 sub.get_name()
             );

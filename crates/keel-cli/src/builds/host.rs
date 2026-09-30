@@ -37,7 +37,11 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
         manifest,
         target_dir: session.target_dir(),
         triple: None,
-        profile: if release { Profile::Release } else { Profile::Dev },
+        profile: if release {
+            Profile::Release
+        } else {
+            Profile::Dev
+        },
         crate_type: "cdylib",
         features: vec!["jni".to_owned()],
         env: Vec::new(),
@@ -59,7 +63,11 @@ pub fn cdylib(session: &Session<'_>, release: bool) -> Result<PathBuf> {
 /// See [`cdylib`].
 pub fn package(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     let built = cdylib(session, release)?;
-    let dest = session.project.build_dir().join("host").join(library_file_name());
+    let dest = session
+        .project
+        .build_dir()
+        .join("host")
+        .join(library_file_name());
     copy_file(&built, &dest)?;
     Ok(vec![Artifact {
         label: "host".to_owned(),

@@ -18,7 +18,7 @@
 //!
 //! A project is a directory with a `keel.toml` ([`config`]). Its core is an ordinary library crate
 //! that depends on `keel`. Everything that ships to a platform is built from two crates the CLI
-//! generates under `target/keel/` ([`shim`]): the *shim*, which links the core and the C ABI
+//! generates under `target/keel/` (`shim`): the *shim*, which links the core and the C ABI
 //! (`keel-ffi`) into a library named `keel_core`, and the *dev runner*, which links the core and
 //! `keel-transport` into an executable. Keeping them out of the core means the core does not name
 //! crate types, profiles or platform features, and `keel` can change them without touching user
@@ -33,20 +33,20 @@
 //! # Deviations from SPEC 13 and the constitution
 //!
 //! * R2 says `unsafe` lives in `keel-ffi` only; SPEC 13 has this crate `dlopen` the core, which
-//!   cannot be done safely. The one module that does it ([`schema`]) is `#![allow(unsafe_code)]`
+//!   cannot be done safely. The one module that does it (`schema`) is `#![allow(unsafe_code)]`
 //!   with a `SAFETY` comment on every block; the rest of the crate denies `unsafe`.
 //! * The library's `keel_schema_json` is the canonical JSON, which has no doc comments and no
 //!   labels. `keel bindgen` adds the labels; `--docs` reads the full schema from the dev runner
 //!   instead when the generated code should carry the Rust docs.
 
-mod bindgen;
 mod binary;
+mod bindgen;
 mod builds;
 mod cargo;
 mod cli;
 mod commands;
-mod detect;
 pub mod config;
+mod detect;
 pub mod error;
 mod fsutil;
 mod names;

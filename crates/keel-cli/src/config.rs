@@ -299,7 +299,9 @@ impl ProjectConfig {
             kotlin_package: reader.opt_str("bindings", "kotlin_package")?,
             ts_scope: reader.opt_str("bindings", "ts_scope")?,
             ts_package: reader.opt_str("bindings", "ts_package")?,
-            ts_js_number: reader.opt_bool("bindings", "ts_js_number")?.unwrap_or(false),
+            ts_js_number: reader
+                .opt_bool("bindings", "ts_js_number")?
+                .unwrap_or(false),
             swift_typed_throws: reader.opt_bool("bindings", "swift_typed_throws")?,
         };
 
@@ -313,7 +315,10 @@ impl ProjectConfig {
                 if arch != "arm64" && arch != "x86_64" {
                     return Err(CliError::bad_config(
                         file,
-                        format!("line {}: `{arch}` is not an iOS simulator architecture", entry.line),
+                        format!(
+                            "line {}: `{arch}` is not an iOS simulator architecture",
+                            entry.line
+                        ),
                         "use \"arm64\" and/or \"x86_64\"",
                     ));
                 }
@@ -351,11 +356,16 @@ impl ProjectConfig {
         }
         if let Some(entry) = reader.get("android", "min_sdk") {
             match entry.value {
-                Value::Int(n) if (21..=99).contains(&n) => cfg.android.min_sdk = u32::try_from(n).expect("in range"),
+                Value::Int(n) if (21..=99).contains(&n) => {
+                    cfg.android.min_sdk = u32::try_from(n).expect("in range")
+                }
                 _ => {
                     return Err(CliError::bad_config(
                         file,
-                        format!("line {}: min_sdk must be an integer API level (21 or more)", entry.line),
+                        format!(
+                            "line {}: min_sdk must be an integer API level (21 or more)",
+                            entry.line
+                        ),
                         "Keel targets API 26 and up (SPEC 0); use 26 unless you know your users need less",
                     ));
                 }
@@ -473,7 +483,13 @@ impl ProjectConfig {
             .map(|a| quote(a))
             .collect::<Vec<_>>()
             .join(", ");
-        let abis = self.android.abis.iter().map(|a| quote(a)).collect::<Vec<_>>().join(", ");
+        let abis = self
+            .android
+            .abis
+            .iter()
+            .map(|a| quote(a))
+            .collect::<Vec<_>>()
+            .join(", ");
         let _ = writeln!(
             out,
             "\n[ios]\n\
@@ -498,7 +514,10 @@ impl ProjectConfig {
             ("ts", &self.runtimes.ts),
         ];
         if runtimes.iter().any(|(_, v)| v.is_some()) {
-            let _ = writeln!(out, "\n[runtimes]\n# Overrides for where each platform runtime lives (relative to this file).");
+            let _ = writeln!(
+                out,
+                "\n[runtimes]\n# Overrides for where each platform runtime lives (relative to this file)."
+            );
             for (key, value) in runtimes {
                 if let Some(v) = value {
                     let _ = writeln!(out, "{key} = {}", quote(v));
@@ -525,7 +544,14 @@ impl Reader<'_> {
                 return Err(CliError::bad_config(
                     self.file,
                     format!("unknown table [{name}]"),
-                    format!("keel.toml has these tables: {}", known.iter().map(|k| format!("[{k}]")).collect::<Vec<_>>().join(", ")),
+                    format!(
+                        "keel.toml has these tables: {}",
+                        known
+                            .iter()
+                            .map(|k| format!("[{k}]"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                 ));
             }
         }
@@ -550,7 +576,11 @@ impl Reader<'_> {
     fn wrong_type(&self, entry: &Entry, table: &str, key: &str, expected: &str) -> CliError {
         CliError::bad_config(
             self.file,
-            format!("line {}: `{key}` in [{table}] is {} but must be {expected}", entry.line, entry.value.describe()),
+            format!(
+                "line {}: `{key}` in [{table}] is {} but must be {expected}",
+                entry.line,
+                entry.value.describe()
+            ),
             format!("write it as {expected}, for example `{key} = ...`"),
         )
     }
@@ -559,7 +589,8 @@ impl Reader<'_> {
         match self.get(table, key) {
             None => Ok(None),
             Some(Entry {
-                value: Value::Str(s), ..
+                value: Value::Str(s),
+                ..
             }) => Ok(Some(s.clone())),
             Some(entry) => Err(self.wrong_type(entry, table, key, "a string")),
         }
@@ -579,7 +610,8 @@ impl Reader<'_> {
         match self.get(table, key) {
             None => Ok(None),
             Some(Entry {
-                value: Value::Bool(b), ..
+                value: Value::Bool(b),
+                ..
             }) => Ok(Some(*b)),
             Some(entry) => Err(self.wrong_type(entry, table, key, "true or false")),
         }
@@ -609,7 +641,11 @@ mod tests {
     }
 
     fn sample() -> ProjectConfig {
-        let mut cfg = ProjectConfig::new("todo-app", "com.example.todoapp", vec![Platform::Ios, Platform::Web]);
+        let mut cfg = ProjectConfig::new(
+            "todo-app",
+            "com.example.todoapp",
+            vec![Platform::Ios, Platform::Web],
+        );
         cfg.keel_path = Some("../../keel".into());
         cfg.bindings.kotlin_package = Some("com.example.todoapp.core".into());
         cfg.bindings.swift_typed_throws = Some(false);
@@ -627,7 +663,8 @@ mod tests {
 
     #[test]
     fn minimal_file_gets_defaults() {
-        let cfg = ProjectConfig::parse("[project]\nname = \"a\"\nid = \"com.example.a\"\n", file()).unwrap();
+        let cfg = ProjectConfig::parse("[project]\nname = \"a\"\nid = \"com.example.a\"\n", file())
+            .unwrap();
         assert_eq!(cfg.platforms, Platform::ALL.to_vec());
         assert_eq!(cfg.core_path, "core");
         assert_eq!(cfg.generated, "generated");
@@ -639,27 +676,57 @@ mod tests {
     fn mistakes_are_explained() {
         let cases = [
             ("[project]\nname = \"a\"\n", "no `id`"),
-            ("[project]\nname = \"a\"\nid = \"b\"\nplatfroms = []\n", "unknown key `platfroms`"),
-            ("[project]\nname = \"a\"\nid = \"b\"\n[tooling]\n", "unknown table [tooling]"),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\nplatfroms = []\n",
+                "unknown key `platfroms`",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[tooling]\n",
+                "unknown table [tooling]",
+            ),
             ("name = \"a\"\n", "outside any table"),
-            ("[project]\nname = 3\nid = \"b\"\n", "is an integer but must be a string"),
-            ("[project]\nname = \"a\"\nid = \"b\"\nplatforms = [\"ios\", \"tv\"]\n", "`tv` is not a platform"),
-            ("[project]\nname = \"a\"\nid = \"b\"\n[android]\nabis = [\"mips\"]\n", "not an Android ABI"),
-            ("[project]\nname = \"a\"\nid = \"b\"\n[android]\nmin_sdk = 3\n", "min_sdk"),
-            ("[project]\nname = \"a\"\nid = \"b\"\n[web]\nopt_level = \"3\"\n", "opt_level"),
-            ("[project]\nname = \"a\"\nid = \"b\"\n[ios]\nsimulator_archs = [\"ppc\"]\n", "not an iOS simulator"),
+            (
+                "[project]\nname = 3\nid = \"b\"\n",
+                "is an integer but must be a string",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\nplatforms = [\"ios\", \"tv\"]\n",
+                "`tv` is not a platform",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[android]\nabis = [\"mips\"]\n",
+                "not an Android ABI",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[android]\nmin_sdk = 3\n",
+                "min_sdk",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[web]\nopt_level = \"3\"\n",
+                "opt_level",
+            ),
+            (
+                "[project]\nname = \"a\"\nid = \"b\"\n[ios]\nsimulator_archs = [\"ppc\"]\n",
+                "not an iOS simulator",
+            ),
             ("[project\n", "must end with `]`"),
         ];
         for (text, needle) in cases {
             let e = ProjectConfig::parse(text, file()).unwrap_err();
             assert_eq!(e.code, Code::BadConfig, "{text:?}");
-            assert!(e.what.contains(needle) || e.fix.contains(needle), "{text:?}: {e}");
+            assert!(
+                e.what.contains(needle) || e.fix.contains(needle),
+                "{text:?}: {e}"
+            );
         }
     }
 
     #[test]
     fn platform_lists() {
-        assert_eq!(Platform::parse_list("web, ios,ios").unwrap(), vec![Platform::Ios, Platform::Web]);
+        assert_eq!(
+            Platform::parse_list("web, ios,ios").unwrap(),
+            vec![Platform::Ios, Platform::Web]
+        );
         assert_eq!(Platform::parse("WASM").unwrap(), Platform::Web);
         assert!(Platform::parse_list("").is_err());
         assert!(Platform::parse_list("ios,tv").is_err());

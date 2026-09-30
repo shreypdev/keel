@@ -106,7 +106,10 @@ pub fn require_checkout(repo: &Path) -> Result<()> {
         if !repo.join(needed).is_file() {
             return Err(CliError::new(
                 Code::BadArgument,
-                format!("{} does not look like a checkout of the Keel repository: {needed} is missing", repo.display()),
+                format!(
+                    "{} does not look like a checkout of the Keel repository: {needed} is missing",
+                    repo.display()
+                ),
                 "with `--keel-path` the crates and the platform runtimes are used straight from the checkout, so all of them have to be there",
                 "point `--keel-path` at the repository root (the directory that holds `crates/` and `runtimes/`)",
             ));
@@ -138,8 +141,14 @@ mod tests {
     #[test]
     fn checkout_paths_when_keel_path_is_set() {
         let r = Runtimes::for_project(&project("/nonexistent/p", Some("../keel")));
-        assert!(matches!(&r.swift, RuntimeRef::Path(p) if p.ends_with("keel/runtimes/swift/KeelRuntime")), "{r:?}");
-        assert!(matches!(&r.ts, RuntimeRef::Path(p) if p.ends_with("@keel/runtime")), "{r:?}");
+        assert!(
+            matches!(&r.swift, RuntimeRef::Path(p) if p.ends_with("keel/runtimes/swift/KeelRuntime")),
+            "{r:?}"
+        );
+        assert!(
+            matches!(&r.ts, RuntimeRef::Path(p) if p.ends_with("@keel/runtime")),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -147,7 +156,10 @@ mod tests {
         let mut p = project("/nonexistent/p", Some("../keel"));
         p.config.runtimes.kotlin = Some("vendor/kotlin".into());
         let r = Runtimes::for_project(&p);
-        assert_eq!(r.kotlin, RuntimeRef::Path(PathBuf::from("/nonexistent/p/vendor/kotlin")));
+        assert_eq!(
+            r.kotlin,
+            RuntimeRef::Path(PathBuf::from("/nonexistent/p/vendor/kotlin"))
+        );
     }
 
     #[test]

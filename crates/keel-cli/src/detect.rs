@@ -10,7 +10,19 @@ use std::path::{Path, PathBuf};
 
 /// Directories never searched: dependencies, build output, version control, and Keel's own.
 const SKIP: &[&str] = &[
-    "node_modules", ".git", "build", "Pods", "Carthage", "target", "DerivedData", ".gradle", ".build", "dist", "keel", ".idea", ".next",
+    "node_modules",
+    ".git",
+    "build",
+    "Pods",
+    "Carthage",
+    "target",
+    "DerivedData",
+    ".gradle",
+    ".build",
+    "dist",
+    "keel",
+    ".idea",
+    ".next",
 ];
 
 /// How deep below the repository root the search goes.
@@ -84,7 +96,11 @@ impl Detected {
             parts.push(format!(
                 "Android (Gradle at {}, {} DSL)",
                 shown(&android.root),
-                if android.kotlin_dsl { "Kotlin" } else { "Groovy" }
+                if android.kotlin_dsl {
+                    "Kotlin"
+                } else {
+                    "Groovy"
+                }
             ));
         }
         if let Some(web) = &self.web {
@@ -94,7 +110,11 @@ impl Detected {
                 shown(&web.dir)
             ));
         }
-        if parts.is_empty() { "nothing".to_owned() } else { parts.join(", ") }
+        if parts.is_empty() {
+            "nothing".to_owned()
+        } else {
+            parts.join(", ")
+        }
     }
 }
 
@@ -107,12 +127,18 @@ pub fn detect(root: &Path) -> Detected {
         // Breadth first: the shallowest project of each platform wins.
         let level = std::mem::take(&mut queue);
         for (dir, depth) in level {
-            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
             let mut names: Vec<(String, PathBuf, bool)> = entries
                 .filter_map(|e| e.ok())
                 .map(|e| {
                     let path = e.path();
-                    (e.file_name().to_string_lossy().into_owned(), path.clone(), path.is_dir())
+                    (
+                        e.file_name().to_string_lossy().into_owned(),
+                        path.clone(),
+                        path.is_dir(),
+                    )
                 })
                 .collect();
             names.sort();
@@ -120,7 +146,12 @@ pub fn detect(root: &Path) -> Detected {
             if depth < MAX_DEPTH {
                 for (name, path, is_dir) in &names {
                     // Bundles like `App.xcodeproj` are opaque; dot directories are tooling.
-                    if *is_dir && !SKIP.contains(&name.as_str()) && !name.starts_with('.') && !name.ends_with(".xcodeproj") && !name.ends_with(".xcworkspace") {
+                    if *is_dir
+                        && !SKIP.contains(&name.as_str())
+                        && !name.starts_with('.')
+                        && !name.ends_with(".xcodeproj")
+                        && !name.ends_with(".xcworkspace")
+                    {
                         queue.push((path.clone(), depth + 1));
                     }
                 }
@@ -132,13 +163,20 @@ pub fn detect(root: &Path) -> Detected {
 
 fn inspect(dir: &Path, entries: &[(String, PathBuf, bool)], found: &mut Detected) {
     let has = |name: &str| entries.iter().any(|(n, _, _)| n == name);
-    let find_suffix = |suffix: &str| entries.iter().find(|(n, _, is_dir)| *is_dir && n.ends_with(suffix)).map(|(_, p, _)| p.clone());
+    let find_suffix = |suffix: &str| {
+        entries
+            .iter()
+            .find(|(n, _, is_dir)| *is_dir && n.ends_with(suffix))
+            .map(|(_, p, _)| p.clone())
+    };
 
     if found.ios.is_none() {
         let project = find_suffix(".xcodeproj");
         let package = has("Package.swift").then(|| dir.join("Package.swift"));
         if project.is_some() || package.is_some() {
-            let bundle_id = project.as_deref().and_then(|p| read_bundle_id(&p.join("project.pbxproj")));
+            let bundle_id = project
+                .as_deref()
+                .and_then(|p| read_bundle_id(&p.join("project.pbxproj")));
             found.ios = Some(IosApp {
                 dir: dir.to_path_buf(),
                 workspace: find_suffix(".xcworkspace"),
@@ -176,21 +214,39 @@ fn read_bundle_id(pbxproj: &Path) -> Option<String> {
     let text = fs::read_to_string(pbxproj).ok()?;
     text.lines()
         .filter_map(|line| line.trim().strip_prefix("PRODUCT_BUNDLE_IDENTIFIER = "))
-        .map(|rest| rest.trim_end_matches(';').trim().trim_matches('"').to_owned())
+        .map(|rest| {
+            rest.trim_end_matches(';')
+                .trim()
+                .trim_matches('"')
+                .to_owned()
+        })
         .find(|id| !id.contains('$') && !id.to_ascii_lowercase().contains("test"))
 }
 
 /// The Gradle module that applies the Android application plugin and its application id.
 fn find_android_app(root: &Path, kotlin_dsl: bool) -> (Option<PathBuf>, Option<String>) {
-    let script = if kotlin_dsl { "build.gradle.kts" } else { "build.gradle" };
-    let Ok(entries) = fs::read_dir(root) else { return (None, None) };
-    let mut modules: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    let script = if kotlin_dsl {
+        "build.gradle.kts"
+    } else {
+        "build.gradle"
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return (None, None);
+    };
+    let mut modules: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
     modules.sort();
     modules.insert(0, root.to_path_buf());
     for module in modules {
-        let Ok(text) = fs::read_to_string(module.join(script)) else { continue };
+        let Ok(text) = fs::read_to_string(module.join(script)) else {
+            continue;
+        };
         if text.contains("com.android.application") {
-            let id = gradle_value(&text, "applicationId").or_else(|| gradle_value(&text, "namespace"));
+            let id =
+                gradle_value(&text, "applicationId").or_else(|| gradle_value(&text, "namespace"));
             return (Some(module), id);
         }
     }
@@ -202,12 +258,23 @@ fn find_android_app(root: &Path, kotlin_dsl: bool) -> (Option<PathBuf>, Option<S
 fn gradle_value(script: &str, key: &str) -> Option<String> {
     script.lines().find_map(|line| {
         let at = line.find(key)?;
-        if line[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+        if line[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        {
             return None;
         }
-        let value = line[at + key.len()..].trim_start().trim_start_matches('=').trim();
+        let value = line[at + key.len()..]
+            .trim_start()
+            .trim_start_matches('=')
+            .trim();
         let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
-        value[1..].split(quote).next().map(ToOwned::to_owned).filter(|v| !v.is_empty())
+        value[1..]
+            .split(quote)
+            .next()
+            .map(ToOwned::to_owned)
+            .filter(|v| !v.is_empty())
     })
 }
 
@@ -219,11 +286,26 @@ fn read_web_app(dir: &Path, text: &str) -> Option<WebApp> {
             .iter()
             .any(|section| json[*section].get(name).is_some())
     };
-    let tool = ["vite", "next", "webpack", "react-scripts", "@angular/cli", "nuxt", "parcel", "astro", "@sveltejs/kit", "esbuild", "rollup"]
-        .iter()
-        .find(|name| has_dep(name))
-        .map(|name| (*name).to_owned());
-    let is_app = tool.is_some() || ["react", "vue", "svelte", "solid-js", "preact"].iter().any(|name| has_dep(name));
+    let tool = [
+        "vite",
+        "next",
+        "webpack",
+        "react-scripts",
+        "@angular/cli",
+        "nuxt",
+        "parcel",
+        "astro",
+        "@sveltejs/kit",
+        "esbuild",
+        "rollup",
+    ]
+    .iter()
+    .find(|name| has_dep(name))
+    .map(|name| (*name).to_owned());
+    let is_app = tool.is_some()
+        || ["react", "vue", "svelte", "solid-js", "preact"]
+            .iter()
+            .any(|name| has_dep(name));
     is_app.then(|| WebApp {
         dir: dir.to_path_buf(),
         tool,
@@ -243,7 +325,11 @@ mod tests {
     #[test]
     fn finds_an_ios_project_and_its_bundle_id() {
         let root = unique_temp_dir("detect-ios");
-        write(&root, "ios/App.xcodeproj/project.pbxproj", "PRODUCT_BUNDLE_IDENTIFIER = \"$(X)\";\n PRODUCT_BUNDLE_IDENTIFIER = com.acme.appTests;\n PRODUCT_BUNDLE_IDENTIFIER = com.acme.app;\n");
+        write(
+            &root,
+            "ios/App.xcodeproj/project.pbxproj",
+            "PRODUCT_BUNDLE_IDENTIFIER = \"$(X)\";\n PRODUCT_BUNDLE_IDENTIFIER = com.acme.appTests;\n PRODUCT_BUNDLE_IDENTIFIER = com.acme.app;\n",
+        );
         write(&root, "ios/App.xcworkspace/contents.xcworkspacedata", "");
         let found = detect(&root);
         let ios = found.ios.expect("ios");
@@ -259,7 +345,11 @@ mod tests {
     fn finds_an_android_app_module_and_id() {
         let root = unique_temp_dir("detect-android");
         write(&root, "android/settings.gradle.kts", "include(\":app\")\n");
-        write(&root, "android/app/build.gradle.kts", "plugins { id(\"com.android.application\") }\nandroid { namespace = \"com.acme.ns\"\n defaultConfig { applicationId = \"com.acme.app\" } }\n");
+        write(
+            &root,
+            "android/app/build.gradle.kts",
+            "plugins { id(\"com.android.application\") }\nandroid { namespace = \"com.acme.ns\"\n defaultConfig { applicationId = \"com.acme.app\" } }\n",
+        );
         let android = detect(&root).android.expect("android");
         assert!(android.kotlin_dsl);
         assert_eq!(android.app_id.as_deref(), Some("com.acme.app"));
@@ -278,17 +368,38 @@ mod tests {
 
     #[test]
     fn groovy_application_ids_are_read() {
-        assert_eq!(gradle_value("  applicationId \"com.x.y\"\n", "applicationId").as_deref(), Some("com.x.y"));
-        assert_eq!(gradle_value("applicationId 'com.x.y'", "applicationId").as_deref(), Some("com.x.y"));
-        assert_eq!(gradle_value("applicationId = libs.versions.id", "applicationId"), None);
+        assert_eq!(
+            gradle_value("  applicationId \"com.x.y\"\n", "applicationId").as_deref(),
+            Some("com.x.y")
+        );
+        assert_eq!(
+            gradle_value("applicationId 'com.x.y'", "applicationId").as_deref(),
+            Some("com.x.y")
+        );
+        assert_eq!(
+            gradle_value("applicationId = libs.versions.id", "applicationId"),
+            None
+        );
     }
 
     #[test]
     fn finds_a_web_app_by_its_tooling() {
         let root = unique_temp_dir("detect-web");
-        write(&root, "web/package.json", "{\"devDependencies\": {\"vite\": \"^6\", \"typescript\": \"^5\"}, \"dependencies\": {\"react\": \"^19\"}}");
-        write(&root, "tools/package.json", "{\"name\": \"scripts\", \"dependencies\": {\"chalk\": \"5\"}}");
-        write(&root, "web/node_modules/pkg/package.json", "{\"dependencies\": {\"react\": \"1\"}}");
+        write(
+            &root,
+            "web/package.json",
+            "{\"devDependencies\": {\"vite\": \"^6\", \"typescript\": \"^5\"}, \"dependencies\": {\"react\": \"^19\"}}",
+        );
+        write(
+            &root,
+            "tools/package.json",
+            "{\"name\": \"scripts\", \"dependencies\": {\"chalk\": \"5\"}}",
+        );
+        write(
+            &root,
+            "web/node_modules/pkg/package.json",
+            "{\"dependencies\": {\"react\": \"1\"}}",
+        );
         let web = detect(&root).web.expect("web");
         assert_eq!(web.tool.as_deref(), Some("vite"));
         assert!(web.typescript);
@@ -308,7 +419,11 @@ mod tests {
     #[test]
     fn the_keel_directory_itself_is_not_searched() {
         let root = unique_temp_dir("detect-keel");
-        write(&root, "keel/web/package.json", "{\"devDependencies\": {\"vite\": \"^6\"}}");
+        write(
+            &root,
+            "keel/web/package.json",
+            "{\"devDependencies\": {\"vite\": \"^6\"}}",
+        );
         assert!(detect(&root).web.is_none());
         let _ = std::fs::remove_dir_all(root);
     }

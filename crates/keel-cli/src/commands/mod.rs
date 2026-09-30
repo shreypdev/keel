@@ -34,8 +34,9 @@ impl<'a> Env<'a> {
     pub fn start_dir(&self) -> Result<PathBuf> {
         match &self.project_dir {
             Some(dir) => Ok(dir.clone()),
-            None => std::env::current_dir()
-                .map_err(|e| CliError::io("find the current directory", std::path::Path::new("."), &e)),
+            None => std::env::current_dir().map_err(|e| {
+                CliError::io("find the current directory", std::path::Path::new("."), &e)
+            }),
         }
     }
 

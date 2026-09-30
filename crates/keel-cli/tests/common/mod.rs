@@ -43,6 +43,14 @@ impl Drop for TempDir {
     }
 }
 
+/// Serializes the tests of one test binary that assert on what Cargo compiles: other tests building
+/// into the shared target directory at the same time make "nothing was recompiled" unknowable.
+pub fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The `keel` binary under test, with a hermetic environment.
 pub fn keel() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_keel"));
@@ -77,7 +85,10 @@ pub fn run_err(cmd: &mut Command) -> (i32, String) {
         "{cmd:?} unexpectedly succeeded:\n{}",
         String::from_utf8_lossy(&out.stdout)
     );
-    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stderr).into_owned())
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 /// A project created with `keel init --keel-path <this repository>` in a fresh directory.

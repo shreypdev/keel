@@ -100,7 +100,10 @@ impl<'a> Session<'a> {
             }
             other => Err(mismatch(
                 &format!("keel.toml says Keel is at {}", configured.display()),
-                &format!("the core's `keel` dependency comes from {}", describe(other)),
+                &format!(
+                    "the core's `keel` dependency comes from {}",
+                    describe(other)
+                ),
             )),
         }
     }
@@ -144,7 +147,10 @@ mod tests {
 
     #[test]
     fn mismatches_teach() {
-        let e = mismatch("keel.toml says Keel is at /a", "the core's `keel` dependency is at /b");
+        let e = mismatch(
+            "keel.toml says Keel is at /a",
+            "the core's `keel` dependency is at /b",
+        );
         assert_eq!(e.code, Code::KeelMismatch);
         assert!(e.what.contains("/a") && e.what.contains("/b"), "{e}");
         assert!(e.fix.contains("[keel] path"), "{e}");
@@ -152,7 +158,18 @@ mod tests {
 
     #[test]
     fn sources_are_described() {
-        assert!(describe(&KeelSource::Registry { version: "0.1.0".into() }).contains("registry"));
-        assert!(describe(&KeelSource::Git { url: "u".into(), rev: None }).contains("git"));
+        assert!(
+            describe(&KeelSource::Registry {
+                version: "0.1.0".into()
+            })
+            .contains("registry")
+        );
+        assert!(
+            describe(&KeelSource::Git {
+                url: "u".into(),
+                rev: None
+            })
+            .contains("git")
+        );
     }
 }

@@ -2,12 +2,15 @@
 
 mod common;
 
-use common::{has_rust_target, has_tool, init_project, run_ok};
+use common::{has_rust_target, has_tool, init_project, run_ok, serial};
 
 #[test]
 fn the_web_build_produces_a_loadable_wasm_core() {
+    let _serial = serial();
     if !has_rust_target("wasm32-unknown-unknown") {
-        eprintln!("skipped: the wasm32-unknown-unknown Rust target is not installed (rustup target add wasm32-unknown-unknown)");
+        eprintln!(
+            "skipped: the wasm32-unknown-unknown Rust target is not installed (rustup target add wasm32-unknown-unknown)"
+        );
         return;
     }
     let project = init_project("webbuild", "web");
@@ -16,11 +19,19 @@ fn the_web_build_produces_a_loadable_wasm_core() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     let wasm = project.root.join("build/web/keel_core.wasm");
     assert!(wasm.is_file(), "{stdout}\n{stderr}");
-    assert!(stdout.contains("web wasm") && stdout.contains("gzip") && stdout.contains("budget 120 KB gzip"), "sizes are printed:\n{stdout}");
+    assert!(
+        stdout.contains("web wasm")
+            && stdout.contains("gzip")
+            && stdout.contains("budget 120 KB gzip"),
+        "sizes are printed:\n{stdout}"
+    );
     if has_tool("wasm-opt", "--version") {
         assert!(stderr.contains("Optimizing with wasm-opt"), "{stderr}");
     } else {
-        assert!(stderr.contains("wasm-opt (binaryen) is not installed"), "a missing wasm-opt is said, not fatal:\n{stderr}");
+        assert!(
+            stderr.contains("wasm-opt (binaryen) is not installed"),
+            "a missing wasm-opt is said, not fatal:\n{stderr}"
+        );
     }
 
     // The schema hash of the module is the hash of the bindings (`keel bindgen` wrote them at
@@ -46,13 +57,22 @@ fn the_web_build_produces_a_loadable_wasm_core() {
           console.log(e.keel_abi_version() + " 0x" + BigInt.asUintN(64, e.keel_schema_hash()).toString(16).padStart(16, "0"));
         });
     "#;
-    let loaded = run_ok(std::process::Command::new("node").args(["-e", script]).arg(&wasm));
+    let loaded = run_ok(
+        std::process::Command::new("node")
+            .args(["-e", script])
+            .arg(&wasm),
+    );
     let printed = String::from_utf8_lossy(&loaded.stdout).trim().to_owned();
-    assert_eq!(printed, format!("1 {expected}"), "abi version 1 and the hash of the bindings");
+    assert_eq!(
+        printed,
+        format!("1 {expected}"),
+        "abi version 1 and the hash of the bindings"
+    );
 }
 
 #[test]
 fn a_second_build_reuses_the_first() {
+    let _serial = serial();
     if !has_rust_target("wasm32-unknown-unknown") {
         return;
     }
@@ -60,11 +80,11 @@ fn a_second_build_reuses_the_first() {
     run_ok(project.keel().args(["build", "--platform", "web"]));
     let started = std::time::Instant::now();
     let again = run_ok(project.keel().args(["build", "--platform", "web"]));
-    // (Other tests build other projects into the same target directory at the same time, so
-    // "nothing at all is compiled" cannot be asserted; this project's own crates must not be.)
+    // (Serialized with the other tests of this file: they share the target directory.)
     let stderr = String::from_utf8_lossy(&again.stderr);
     assert!(
-        !stderr.contains("Compiling webrebuild-core") && !stderr.contains("Compiling keel-core-shim"),
+        !stderr.contains("Compiling webrebuild-core")
+            && !stderr.contains("Compiling keel-core-shim"),
         "an unchanged project recompiles nothing of its own:\n{stderr}"
     );
     assert!(started.elapsed().as_secs() < 30);
@@ -72,9 +92,19 @@ fn a_second_build_reuses_the_first() {
 
 #[test]
 fn the_host_build_is_named_keel_core() {
+    let _serial = serial();
     let project = init_project("hostbuild", "web");
     let out = run_ok(project.keel().args(["build", "--platform", "host"]));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let name = if cfg!(target_os = "macos") { "libkeel_core.dylib" } else if cfg!(windows) { "keel_core.dll" } else { "libkeel_core.so" };
-    assert!(project.root.join("build/host").join(name).is_file(), "{stdout}");
+    let name = if cfg!(target_os = "macos") {
+        "libkeel_core.dylib"
+    } else if cfg!(windows) {
+        "keel_core.dll"
+    } else {
+        "libkeel_core.so"
+    };
+    assert!(
+        project.root.join("build/host").join(name).is_file(),
+        "{stdout}"
+    );
 }
