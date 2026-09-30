@@ -19,10 +19,12 @@ if [ "${#platforms[@]}" = 0 ]; then
 fi
 
 status=0
+declare -A run_rc grade_rc
 for p in "${platforms[@]}"; do
   echo "==> contract-tests/$p"
-  "$HERE/$p/run.sh" >"$LOGS/$p.log" 2>&1 || status=1
-  "$HERE/check.sh" "$p" <"$LOGS/$p.log" >"$LOGS/$p.grade" 2>&1 || status=1
+  run_rc[$p]=0; "$HERE/$p/run.sh" >"$LOGS/$p.log" 2>&1 || run_rc[$p]=$?
+  grade_rc[$p]=0; "$HERE/check.sh" "$p" <"$LOGS/$p.log" >"$LOGS/$p.grade" 2>&1 || grade_rc[$p]=$?
+  [ "${run_rc[$p]}" = 0 ] && [ "${grade_rc[$p]}" = 0 ] || status=1
 done
 
 echo
@@ -36,4 +38,16 @@ for n in $(seq -w 1 17); do
   done
   echo
 done
+# On failure, say which runner or grade failed and show the reasons and the log tail, so a CI log
+# is enough to diagnose it (a runner can exit non-zero with every scenario passing: a failing
+# non-scenario test, a build step, a cleanup).
+if [ "$status" != 0 ]; then
+  for p in "${platforms[@]}"; do
+    if [ "${run_rc[$p]}" != 0 ] || [ "${grade_rc[$p]}" != 0 ]; then
+      echo; echo "==> $p: run.sh exited ${run_rc[$p]}, check.sh exited ${grade_rc[$p]}"
+      grep -E " (FAIL|SKIP|MISSING)" "$LOGS/$p.grade" || true
+      echo "==> $p: last 60 lines of $LOGS/$p.log"; tail -n 60 "$LOGS/$p.log"
+    fi
+  done
+fi
 exit $status

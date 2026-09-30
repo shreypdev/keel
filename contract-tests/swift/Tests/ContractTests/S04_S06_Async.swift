@@ -21,7 +21,7 @@ extension ContractScenarios {
             // 2. Three concurrent calls resolve in the order of their delays, with the right values.
             let finished = Locked<[Int32]>([])
             let values = try await withThrowingTaskGroup(of: Int32.self) { (group: inout ThrowingTaskGroup<Int32, any Error>) -> [Int32] in
-                for (i, delay) in [(Int32(1), UInt32(60)), (2, 20), (3, 40)] {
+                for (i, delay) in [(Int32(1), UInt32(400)), (2, 50), (3, 200)] {
                     group.addTask {
                         let value = try await addLater(a: i, b: 0, delayMs: delay, ctx: core)
                         finished.withLock { (current: inout [Int32]) -> Void in current.append(value) }
@@ -34,7 +34,7 @@ extension ContractScenarios {
                 }
                 return all
             }
-            try checkEqual(finished.snapshot, [2, 3, 1], "completion order of delays 60, 20, 40")
+            try checkEqual(finished.snapshot, [2, 3, 1], "completion order of delays 400, 50, 200")
             try checkEqual(values.sorted(), [1, 2, 3], "values of the three calls")
 
             // 3. A call on an object.
