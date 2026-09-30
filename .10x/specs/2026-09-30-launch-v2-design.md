@@ -338,3 +338,30 @@ before merge; findings High/Medium are fixed and re-verified, Low are recorded.
 crates.io publishing (v1.1), Windows CLI, Maven Central, a custom domain, per-post OG
 images, Google Search Console verification (founder action, documented), moving the
 repository under a GitHub organisation.
+
+## Amendment A — founder feedback on the first redesign (2026-09-30, evening)
+
+Overrides §2.2 (palette) and §2.4 (sections). The founder reviewed the v2 landing and
+said: the colour and theme of the v1 site (commit `e45e30f`) must stay — "the blue change
+is not looking good at all"; the new home page "has too much text and is very hard to
+digest, the old one was better"; keep the live playground; the "Describe once. Generate
+native. Write once per change." code should be minimised or shown on demand; the v1
+numbers section ("The boundary is cheap. Measured, not promised.") is preferred over the
+new table.
+
+* **Palette = v1 tokens, verbatim** (`git show e45e30f:site/assets/base.css`): dark canvas
+  `#0a0a0a` / surfaces `#111111`–`#1d1d1d` / text `#ededea`, accent **`#ff6a2a`**
+  (`--accent-hi #ff9a6b`, soft/line/glow at 0.11/0.42/0.17 alpha); light canvas `#f7f6f2`,
+  accent `#c2410c`. No cyan, no blue. Typography (Geist, no italics) and component
+  refinements stay.
+* **Landing = v1's arc plus three additions**: hero (v1 headline + diagram + the install
+  block) → one-line thesis → live playground with counters → numbers in v1's presentation,
+  driven by `site/data/bench.json` → "Describe once / Generate native / Write once per
+  change" as a compact strip with the generated code collapsed by default behind an
+  accessible disclosure → features as v1's compact grid → trust (v1) → compared (four
+  one-line cards) → roadmap teaser (three lines) → final CTA. Nothing else.
+* **Density rules**: one idea per section (eyebrow, headline, ≤ 2 sentences, one artifact);
+  no paragraphs on the landing page; visible prose outside code, numbers and footer
+  ≤ 350 words, enforced by a script in `site/scripts/`.
+* **Acceptance**: side-by-side screenshots against `e45e30f` (dark and light, 1440×900)
+  must read as "v1, cleaner, with a live demo".
