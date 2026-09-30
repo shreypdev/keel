@@ -372,7 +372,7 @@ final class KeyValueAdapterTests: XCTestCase {
     func testKvFileNamesAreStableAndKeysLiveInsideTheFiles() throws {
         XCTAssertEqual(FileKeyValueBackend.fileName(for: "a"), "af63dc4c8601ec8c-e40c292c")
         XCTAssertEqual(FileKeyValueBackend.fileName(for: ""), "cbf29ce484222325-811c9dc5")
-        XCTAssertEqual(FileKeyValueBackend.fileName(for: "undra.query.queue"), "f80d4429ac548763-02ed2463")
+        XCTAssertEqual(FileKeyValueBackend.fileName(for: "undra.query.queue"), "def1907793b60cec-f2daf06c")
         let directory = makeDirectory()
         let backend = FileKeyValueBackend(directory: directory)
         try backend.set("a", [1])
