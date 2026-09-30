@@ -131,6 +131,43 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<Schema> {
     Ok(schema)
 }
 
+/// Whether each of `symbols` is an exported, resolvable symbol of the core library at `library`.
+///
+/// Loads the library the way a platform runtime does (`dlopen`) and looks each name up
+/// (`dlsym`), returning one bool per input name in order. Used to check that a built cdylib kept
+/// keel-ffi's `#[no_mangle]` exports across the link — the JNI natives the Kotlin runtime binds
+/// through `System.loadLibrary` (`JNI_OnLoad`, `Java_dev_keel_runtime_KeelNative_*`, SPEC 6.1),
+/// which an incremental macOS build would otherwise dead-strip (ADR-029).
+///
+/// # Errors
+///
+/// `C0006` when the library cannot be loaded at all.
+pub fn symbols_present(library: &Path, symbols: &[&str]) -> Result<Vec<bool>> {
+    // SAFETY: loading the core library runs its initialisers, exactly as reading its schema does
+    // (see `load_from_library`); it is a library this process just built.
+    let lib = unsafe { libloading::Library::new(library) }.map_err(|e| {
+        CliError::new(
+            Code::Schema,
+            format!("cannot load {}: {e}", library.display()),
+            "the library has to be loadable to check its exported symbols",
+            "build it with `keel build --platform host`",
+        )
+    })?;
+    let found = symbols
+        .iter()
+        .map(|name| {
+            let mut c = name.as_bytes().to_vec();
+            c.push(0);
+            // SAFETY: `get` only resolves a symbol; the returned pointer is not called, and it does
+            // not outlive `lib`, which is leaked below.
+            unsafe { lib.get::<*const ()>(&c) }.is_ok()
+        })
+        .collect();
+    // A Rust cdylib does not always survive `dlclose`; keep it mapped (the process is short-lived).
+    std::mem::forget(lib);
+    Ok(found)
+}
+
 /// Parses schema JSON: canonical (from `keel_schema_json`) or full (`Schema::to_json_pretty`).
 /// `crate_name` is used when the JSON has no `crate_name` label.
 ///

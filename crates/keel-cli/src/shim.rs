@@ -70,6 +70,25 @@ pub fn shim_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
         .join("shim")
 }
 
+/// The target directory the **host** library is built in.
+///
+/// Isolated from the project's own target directory on purpose (ADR-029): the host `cdylib` is
+/// *loaded* with no link-time reference to it, and on macOS the linker drops the app core's
+/// `inventory` registrations and keel-ffi's JNI exports (both in dependency rlibs, linked with
+/// `--start-lib` lazy semantics) unless they are compiled just right. Sharing the project's target
+/// let a plain `cargo build`/`cargo test` leave an incremental core rlib that `keel build` then
+/// reused and stripped. A dedicated directory always builds the core fresh with the shim's
+/// (non-incremental) profile, so the result does not depend on what else touched the project's
+/// target. It still lives under the resolved target directory, so `CARGO_TARGET_DIR` is honoured.
+/// Android (ELF keeps the symbols) and iOS (its staticlib is `-force_load`ed) do not need this.
+#[must_use]
+pub fn host_lib_target_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
+    target_dir
+        .join("keel")
+        .join(project_key(project_root))
+        .join("host-lib")
+}
+
 /// The directory the dev runner is generated into.
 #[must_use]
 pub fn runner_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
@@ -245,6 +264,25 @@ mod tests {
         assert_eq!(a, shim_dir(target, Path::new("/work/app")), "stable");
         assert_ne!(runner_dir(target, Path::new("/work/app")), a);
         assert!(project_key(Path::new("/w/My App!")).starts_with("My_App_-"));
+    }
+
+    #[test]
+    fn the_host_library_builds_in_its_own_target_directory() {
+        // Under the resolved target (so CARGO_TARGET_DIR is honoured), but separate from the
+        // project's own deps so a stray incremental rlib cannot be reused (ADR-029).
+        let target = Path::new("/shared/target");
+        let host = host_lib_target_dir(target, Path::new("/work/app"));
+        let text = host.to_string_lossy();
+        assert!(
+            text.starts_with("/shared/target/keel/app-") && text.ends_with("/host-lib"),
+            "{host:?}"
+        );
+        assert_ne!(host, shim_dir(target, Path::new("/work/app")));
+        assert_ne!(
+            host,
+            host_lib_target_dir(target, Path::new("/other/app")),
+            "per project"
+        );
     }
 
     #[test]
