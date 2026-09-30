@@ -7,6 +7,7 @@
 //!   `-Z sanitizer=address`, because the host really frees `user` the moment the call returns;
 //! * callbacks may run concurrently, on the threads that produced the event;
 //! * `keel_init` does not overtake a shutdown in progress (L5);
+//! * an answer to the fire-and-forget Log call (port call id 0) is dropped, never logged (M4).
 //!
 //! The runtime is one per process, so the tests take turns (`Turn`). Nothing here needs a core:
 //! the Log port is reached through the runtime's own warnings (a malformed `keel_port_reply`),
@@ -446,6 +447,40 @@ fn init_racing_shutdown_leaves_a_consistent_process() {
     register_log(host);
     provoke_a_log_record();
     assert_eq!(host.entered.load(Ordering::Acquire), 1);
+}
+
+/// M4: the Log port is fire and forget (port call id 0). A host that answers it asynchronously
+/// and later replies with id 0 must not make the core log "no port call 0 is pending", which
+/// used to be another Log call, answered the same way, without end.
+#[test]
+fn a_late_answer_to_a_log_record_is_dropped_not_logged() {
+    let _turn = Turn::take();
+    let host = Box::leak(Box::new(Host::default()));
+    host.answer.store(1, Ordering::Release); // "I will reply later"
+    register_log(host);
+    assert_eq!(init(core::ptr::null_mut()), init_code::OK);
+
+    provoke_a_log_record();
+    assert_eq!(
+        host.entered.load(Ordering::Acquire),
+        1,
+        "the warning itself"
+    );
+    // The late reply to port call 0: status ok, empty body.
+    let late = [0_u8, 0, 0, 0, 0];
+    // SAFETY: `late` is valid for its length.
+    unsafe { keel_port_reply(late.as_ptr(), 5) };
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        host.entered.load(Ordering::Acquire),
+        1,
+        "the reply to id 0 produced another Log call"
+    );
+    // A reply to an id that really is unknown is still a warning (it was not silenced globally).
+    let unknown = [0xEF_u8, 0xBE, 0xAD, 0xDE, 0];
+    // SAFETY: `unknown` is valid for its length.
+    unsafe { keel_port_reply(unknown.as_ptr(), 5) };
+    assert_eq!(host.entered.load(Ordering::Acquire), 2);
 }
 
 /// The registration made by a host before `keel_init` applies once the runtime is up, and stats

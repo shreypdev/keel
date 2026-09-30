@@ -96,10 +96,14 @@ impl Host for NativeHost {
         args.write_str(target);
         args.write_str(message);
         // The answer is irrelevant: a log record is fire and forget. A synchronous reply is
-        // consumed (and freed) by the sink; an asynchronous one is ignored.
-        let _ = self
-            .sink
-            .port_call(LOG_PORT, LOG_METHOD, 0, args.as_slice());
+        // consumed (and freed) by the sink; an asynchronous one is ignored, and a late
+        // `keel_port_reply` carrying this call's id is dropped (`api::port_reply`).
+        let _ = self.sink.port_call(
+            LOG_PORT,
+            LOG_METHOD,
+            api::FIRE_AND_FORGET_PORT_CALL,
+            args.as_slice(),
+        );
         LOGGING.with(|flag| flag.set(false));
     }
 }

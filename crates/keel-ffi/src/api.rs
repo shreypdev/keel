@@ -197,12 +197,26 @@ pub(crate) fn release(handle: u64) {
     );
 }
 
-/// `keel_port_reply`.
+/// The port call id of fire-and-forget calls: the core sends the host's `Log` port its log
+/// records under it and never waits for an answer. Real port calls are numbered from 1.
+pub(crate) const FIRE_AND_FORGET_PORT_CALL: u32 = 0;
+
+/// Whether `payload` is a well-formed `PortReply` header answering a fire-and-forget call.
+fn answers_a_fire_and_forget_call(payload: &[u8]) -> bool {
+    payload.len() >= 5 && payload[..4] == FIRE_AND_FORGET_PORT_CALL.to_le_bytes()
+}
+
+/// `keel_port_reply`. An answer to a fire-and-forget call is dropped silently: nothing waits for
+/// it, and logging "no port call 0 is pending" would be one more Log call, which a host that
+/// answers Log asynchronously would answer again, without end.
 pub(crate) fn port_reply(payload: &[u8]) {
     guarded(
         "keel_port_reply",
         |_| (),
         || {
+            if answers_a_fire_and_forget_call(payload) {
+                return;
+            }
             if let Some(rt) = runtime() {
                 rt.port_reply(payload);
             }
@@ -314,6 +328,16 @@ mod tests {
     fn decode(reply: &[u8]) -> (u32, ReplyStatus, Vec<u8>) {
         let r = Reply::decode(&mut Reader::new(reply)).expect("a reply payload");
         (r.call_id, r.status, r.body.to_vec())
+    }
+
+    #[test]
+    fn only_a_whole_port_reply_header_with_id_zero_is_fire_and_forget() {
+        assert!(answers_a_fire_and_forget_call(&[0, 0, 0, 0, 0]));
+        assert!(answers_a_fire_and_forget_call(&[0, 0, 0, 0, 2, 9, 9]));
+        assert!(!answers_a_fire_and_forget_call(&[0, 0, 0, 0]), "truncated");
+        assert!(!answers_a_fire_and_forget_call(&[1, 0, 0, 0, 0]));
+        assert!(!answers_a_fire_and_forget_call(&[0, 0, 0, 1, 0]));
+        assert!(!answers_a_fire_and_forget_call(&[]));
     }
 
     #[test]
