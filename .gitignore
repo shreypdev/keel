@@ -22,3 +22,6 @@ dist
 /contract-tests/**/build
 /contract-tests/swift/.build
 /contract-tests/.logs
+
+# The staged site (site/ + the playground build): site/scripts/build-local.sh.
+/_site/
