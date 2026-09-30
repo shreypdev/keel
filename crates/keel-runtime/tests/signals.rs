@@ -9,7 +9,7 @@ use common::*;
 use keel_meta::ids;
 use keel_runtime::testing::{HostEvent, TestRuntime};
 use keel_runtime::{Handle, RestoreError, Runtime, RuntimeConfig};
-use keel_signals::ALL_SIGNALS;
+use keel_meta::ids::ALL_SIGNALS;
 use keel_wire::payload::{ChangeEntry, ChangeOp, ChangeSet, ReplyStatus, Snapshot, StoreSnapshot};
 use keel_wire::{Reader, WireError, Writer};
 

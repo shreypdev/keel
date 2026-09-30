@@ -313,7 +313,7 @@ fn call_sync_refuses_async_methods_without_running_them() {
         decode_body::<i32>(&call_counter(&t, handle, GET, 5, &[])),
         0
     );
-    assert_eq!(t.runtime().stats_json().contains("\"tasks\":0"), true);
+    assert!(t.runtime().stats_json().contains("\"tasks\":0"));
 }
 
 #[test]

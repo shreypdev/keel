@@ -125,7 +125,7 @@ pub(crate) struct Observed {
 impl Observed {
     /// Records an `observe(signal_id, on)` call. `signal_count` resolves "all but one".
     pub(crate) fn record(&mut self, signal_id: u32, on: bool, signal_count: u32) {
-        if signal_id == keel_signals::ALL_SIGNALS {
+        if signal_id == keel_meta::ids::ALL_SIGNALS {
             self.all = on;
             self.signals.clear();
         } else if on {
@@ -144,7 +144,7 @@ impl Observed {
     /// The `signal_id`s to re-observe: `ALL_SIGNALS` alone, or the explicit set.
     pub(crate) fn to_reobserve(&self) -> Vec<u32> {
         if self.all {
-            vec![keel_signals::ALL_SIGNALS]
+            vec![keel_meta::ids::ALL_SIGNALS]
         } else {
             self.signals.iter().copied().collect()
         }
@@ -647,11 +647,11 @@ mod tests {
         o.record(2, true, 4);
         o.record(0, true, 4);
         assert_eq!(o.to_reobserve(), [0, 2]);
-        o.record(keel_signals::ALL_SIGNALS, true, 4);
-        assert_eq!(o.to_reobserve(), [keel_signals::ALL_SIGNALS]);
+        o.record(keel_meta::ids::ALL_SIGNALS, true, 4);
+        assert_eq!(o.to_reobserve(), [keel_meta::ids::ALL_SIGNALS]);
         o.record(1, false, 4); // all but signal 1
         assert_eq!(o.to_reobserve(), [0, 2, 3]);
-        o.record(keel_signals::ALL_SIGNALS, false, 4);
+        o.record(keel_meta::ids::ALL_SIGNALS, false, 4);
         assert!(o.is_empty());
     }
 

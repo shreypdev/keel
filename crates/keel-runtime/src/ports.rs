@@ -371,9 +371,17 @@ pub fn port_call_sync(
 
 type Callback = dyn Fn(&[u8]) + Send + Sync;
 
+/// A boxed event subscriber, as passed to [`Events::subscribe`].
+pub type EventHandler = Box<dyn Fn(&[u8]) + Send + Sync>;
+
+/// `(port_id, method_id)`.
+type EventKey = (u32, u32);
+/// `(subscription id, callback)`.
+type Subscriber = (u64, Arc<Callback>);
+
 #[derive(Default)]
 struct EventsInner {
-    subs: Mutex<HashMap<(u32, u32), Vec<(u64, Arc<Callback>)>>>,
+    subs: Mutex<HashMap<EventKey, Vec<Subscriber>>>,
     next: AtomicU64,
 }
 
@@ -391,12 +399,7 @@ pub struct Events {
 impl Events {
     /// Subscribes to `(port_id, method_id)`. The callback receives the event's encoded
     /// parameters. Dropping the returned [`Subscription`] unsubscribes.
-    pub fn subscribe(
-        &self,
-        port_id: u32,
-        method_id: u32,
-        callback: Box<dyn Fn(&[u8]) + Send + Sync>,
-    ) -> Subscription {
+    pub fn subscribe(&self, port_id: u32, method_id: u32, callback: EventHandler) -> Subscription {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
         self.inner
             .subs
@@ -435,7 +438,7 @@ impl Events {
 #[must_use = "dropping a Subscription unsubscribes immediately"]
 pub struct Subscription {
     events: std::sync::Weak<EventsInner>,
-    key: (u32, u32),
+    key: EventKey,
     id: u64,
 }
 

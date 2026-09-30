@@ -138,8 +138,11 @@ pub struct StoreRestorer {
     /// The store's type id.
     pub type_id: u32,
     /// Builds the store from its snapshot body (see [`StoreObject::restore`]).
-    pub restore: fn(Ctx, &mut Reader<'_>) -> Result<Arc<dyn AnyObject>, WireError>,
+    pub restore: RestoreFn,
 }
+
+/// The signature of [`StoreRestorer::restore`].
+pub type RestoreFn = fn(Ctx, &mut Reader<'_>) -> Result<Arc<dyn AnyObject>, WireError>;
 
 inventory::collect!(StoreRestorer);
 

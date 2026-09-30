@@ -248,8 +248,17 @@ impl Timers {
     }
 
     /// Deregisters sleeper `id` (its [`Sleep`] was dropped).
+    ///
+    /// Its heap entry is left to expire (removal from the middle of a heap is linear), but
+    /// once dead entries outnumber live sleepers two to one the heap is compacted, so a
+    /// program that keeps cancelling long sleeps does not grow it without bound.
     pub(crate) fn cancel(&self, id: u32) {
-        self.state.lock().sleepers.remove(&id);
+        let mut st = self.state.lock();
+        st.sleepers.remove(&id);
+        if st.heap.len() > 64 && st.heap.len() > st.sleepers.len() * 2 {
+            let State { sleepers, heap, .. } = &mut *st;
+            heap.retain(|Reverse((_, _, id))| sleepers.contains_key(id));
+        }
     }
 
     /// Number of registered sleepers.
@@ -415,6 +424,29 @@ mod tests {
         timers.cancel(id);
         assert_eq!(timers.advance_manual(Duration::from_secs(2), || {}), 0);
         assert_eq!(timers.now_ns(), 2_000_000_000);
+    }
+
+    #[test]
+    fn cancelling_many_long_sleeps_compacts_the_heap() {
+        let timers = Timers::new(true);
+        let mut live = Vec::new();
+        for i in 0..1000_u64 {
+            let (id, slot) = timers.register();
+            timers.arm(id, Duration::from_secs(3600 + i));
+            live.push((id, slot));
+        }
+        // Cancel all but ten.
+        for (id, _) in live.iter().skip(10) {
+            timers.cancel(*id);
+        }
+        assert_eq!(timers.pending(), 10);
+        let heap_len = timers.state.lock().heap.len();
+        assert!(heap_len <= 65, "heap compacted, still {heap_len}");
+        // The survivors still fire, in order.
+        assert_eq!(
+            timers.advance_manual(Duration::from_secs(3600 + 9), || {}),
+            10
+        );
     }
 
     #[test]

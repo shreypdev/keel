@@ -69,6 +69,8 @@ pub use host::{Host, PortCallOutcome};
 pub use keel_meta::{DispatchCall, DispatchOutcome};
 pub use keel_wire::Handle;
 pub use lazy::{LazyList, LazyListInner};
-pub use object::{AnyObject, KeelObject, KeelObjectDyn, StoreObject, StoreRestorer, plain, store};
-pub use ports::{Events, Port, PortError, PortFuture, Subscription, port_call_sync};
+pub use object::{
+    AnyObject, KeelObject, KeelObjectDyn, RestoreFn, StoreObject, StoreRestorer, plain, store,
+};
+pub use ports::{EventHandler, Events, Port, PortError, PortFuture, Subscription, port_call_sync};
 pub use runtime::Runtime;

@@ -419,10 +419,18 @@ impl Runtime {
         let _guard = self.enter_core().ok();
         self.teardown();
         drop(_guard);
-        let mut global = GLOBAL.lock();
-        if global.as_ref().is_some_and(|g| g.id == self.id) {
-            *global = None;
-        }
+        // Take the global reference out under the lock but drop it outside: dropping the
+        // last reference runs `Drop`, which runs user destructors, which may log through
+        // `current_or_global()` and would deadlock on this lock.
+        let released = {
+            let mut global = GLOBAL.lock();
+            if global.as_ref().is_some_and(|g| g.id == self.id) {
+                global.take()
+            } else {
+                None
+            }
+        };
+        drop(released);
     }
 
     /// Drops every task, call and object.
@@ -893,13 +901,15 @@ impl Runtime {
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
-        // Status 4 goes out before the driver can run, so it always precedes the first item.
-        self.send_reply(call_id, ReplyStatus::StreamOpened, &[]);
         let rt = self.me();
         let task = self.exec.spawn(
             Box::pin(drive_stream(rt, call_id, stream, state.clone())),
             TaskKind::Stream { call_id, handle },
         );
+        // The call must be registered *before* the host hears status 4: `stream_credit` does
+        // not take the core lock, so a host that grants credit the moment it sees the reply
+        // must find the stream. The driver cannot run yet (we hold the core lock), so the
+        // reply still precedes the first item.
         self.calls.lock().insert(
             call_id,
             CallEntry {
@@ -907,6 +917,7 @@ impl Runtime {
                 stream: Some(state),
             },
         );
+        self.send_reply(call_id, ReplyStatus::StreamOpened, &[]);
     }
 
     /// Cancels an in-flight call: the task is dropped and, for an ordinary call, the reply is
@@ -1595,10 +1606,7 @@ impl Drop for Runtime {
         self.blocking.shutdown();
         self.ports.cancel_all();
         self.teardown();
-        let mut global = GLOBAL.lock();
-        if global.as_ref().is_some_and(|g| g.id == self.id) {
-            *global = None;
-        }
+        // The global slot holds a strong reference, so a registered runtime is never dropped.
     }
 }
 

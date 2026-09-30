@@ -161,6 +161,7 @@ method_ids! {
     CURRENT_RUNTIME_ID = "current_runtime_id";
     EVEN_MORE = "not_in_metadata";
     SPAWN_LATER = "spawn_later";
+    THREADS = "threads";
 }
 
 fn counter_dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome {
@@ -283,6 +284,21 @@ fn counter_call(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
                     .spawn_blocking(|| -> i32 { panic!("blocking kaboom") })
                     .await;
                 Ok(enc(&n))
+            }))
+        }
+        THREADS => {
+            // Reports the thread that runs the async body, the blocking closure and the
+            // continuation after it, as "<body thread>|<blocking thread>|<after thread>".
+            let ctx = rt.ctx();
+            let name = || std::thread::current().name().unwrap_or("?").to_owned();
+            DispatchResult::Async(Box::pin(async move {
+                let _keep = counter;
+                let body = name();
+                let blocking = ctx.spawn_blocking(move || {
+                    std::thread::current().name().unwrap_or("?").to_owned()
+                });
+                let blocking = blocking.await;
+                Ok(enc(&format!("{body}|{blocking}|{}", name())))
             }))
         }
         SPAWN_LATER => {
@@ -411,6 +427,7 @@ static COUNTER_META: ObjectMeta = ObjectMeta {
             false,
         ),
         method("spawn_later", SPAWN_LATER, &[], TypeRefMeta::Unit, false),
+        method("threads", THREADS, &[], TypeRefMeta::String, true),
     ],
     store: Some(StoreMeta {
         signals: &[
@@ -681,3 +698,56 @@ misbehaving_store!(Rejecting, REJECTING, "Rejecting", |_ctx, _r| Err(
         ty: "Rejecting"
     }
 ));
+
+// ----- helpers for tests that use a real (threaded) `Runtime` -------------------------------
+
+/// `Runtime::call_sync` with a payload built from its parts, decoded.
+pub fn call_sync_rt(rt: &Runtime, target: CallTarget, call_id: u32, a: &[u8]) -> ReplyRecord {
+    decode_reply(&rt.call_sync(&call_payload(target, call_id, a)))
+}
+
+/// Constructs a `Counter` on a real runtime.
+pub fn new_counter_rt(rt: &Runtime, initial: i32, label: &str) -> Handle {
+    let reply = call_sync_rt(
+        rt,
+        CallTarget::Constructor {
+            type_id: ids::type_id("Counter"),
+            method_id: NEW,
+        },
+        1,
+        &args(|w| {
+            initial.encode(w);
+            label.encode(w);
+        }),
+    );
+    Handle(decode_body::<u64>(&reply))
+}
+
+/// Runs `f` on a helper thread and fails the test if it takes longer than `limit`: a deadlock
+/// must fail loudly instead of hanging the test run.
+pub fn with_timeout<T: Send + 'static>(
+    what: &str,
+    limit: std::time::Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(limit) {
+        Ok(value) => value,
+        Err(_) => panic!("{what}: no result within {limit:?} (deadlock?)"),
+    }
+}
+
+/// Polls `cond` until it holds or `limit` passes.
+pub fn wait_until(limit: std::time::Duration, mut cond: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while std::time::Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    cond()
+}
