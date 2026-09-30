@@ -36,7 +36,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: wasm32 build (core crates)
         run: |
-          for p in keel-meta keel-wire keel-signals keel-runtime keel-ports keel-query keel-ffi keel; do
+          for p in keel-meta keel-wire keel-signals keel-runtime keel-ports keel-query keel-ffi keel playground-core; do
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
@@ -163,3 +163,44 @@ jobs:
         run: |
           RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p keel-ffi \
             --target x86_64-unknown-linux-gnu --tests
+
+  contracts:
+    name: Contract scenarios (TS + Kotlin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install kotlinc
+        run: |
+          curl -sSfL -o kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q kotlinc.zip -d "$HOME/kotlin"
+          echo "$HOME/kotlin/kotlinc/bin" >> "$GITHUB_PATH"
+      - name: Fetch kotlinx-coroutines
+        run: |
+          mkdir -p "$HOME/lib"
+          curl -sSfLo "$HOME/lib/kotlinx-coroutines-core-jvm-1.6.4.jar" \
+            https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
+      - name: Run the scenario runners
+        env:
+          KEEL_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+        run: bash contract-tests/run-all.sh ts kotlin
+
+  contracts-swift:
+    name: Contract scenarios (Swift)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the Swift scenario runner
+        run: bash contract-tests/run-all.sh swift
