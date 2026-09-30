@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
 use std::time::Duration;
 
-use keel_meta::{DispatchCall, Schema};
+use keel_meta::{DispatchCall, DispatchFn, Schema};
 use keel_signals::ChangeSink;
 use keel_wire::payload::{
     Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
@@ -788,49 +788,72 @@ impl Runtime {
                 "`{name}` is asynchronous; call it with call(), not call_sync()"
             ))
         };
-        let (dispatch_fn, method_id, handle) = match call.target {
-            CallTarget::Function { method_id } => {
-                let Some(meta) = self.table.functions.get(&method_id) else {
-                    return Dispatched::Bad(format!("unknown function {method_id:#010x}"));
-                };
-                if sync_only && needs_async(meta.is_async, &meta.returns) {
-                    return async_reason(meta.name);
+        // The route is the generated dispatcher the static table names, or, when the table has
+        // no entry, the reason to report if no layer serves the call either.
+        let (route, method_id, handle): (Result<DispatchFn, String>, u32, Handle) = match call
+            .target
+        {
+            CallTarget::Function { method_id } => match self.table.functions.get(&method_id) {
+                Some(meta) => {
+                    if sync_only && needs_async(meta.is_async, &meta.returns) {
+                        return async_reason(meta.name);
+                    }
+                    (Ok(meta.dispatch), method_id, Handle::NULL)
                 }
-                (meta.dispatch, method_id, Handle::NULL)
-            }
+                None => (
+                    Err(format!("unknown function {method_id:#010x}")),
+                    method_id,
+                    Handle::NULL,
+                ),
+            },
             CallTarget::Method { handle, method_id } => {
                 let object = match self.objects.get_dyn(handle) {
                     Ok(object) => object,
                     Err(e) => return Dispatched::Bad(e.to_string()),
                 };
-                let Some(meta) = self.table.objects.get(&object.keel_type_id()) else {
-                    return Dispatched::Bad(format!(
-                        "no dispatcher is registered for `{}` ({:#010x})",
-                        object.keel_type_name(),
-                        object.keel_type_id()
-                    ));
-                };
-                if sync_only {
-                    if let Some(m) = meta.methods.iter().find(|m| m.method_id == method_id) {
-                        if needs_async(m.is_async, &m.returns) {
-                            return async_reason(m.name);
+                match self.table.objects.get(&object.keel_type_id()) {
+                    Some(meta) => {
+                        if sync_only {
+                            if let Some(m) = meta.methods.iter().find(|m| m.method_id == method_id)
+                            {
+                                if needs_async(m.is_async, &m.returns) {
+                                    return async_reason(m.name);
+                                }
+                            }
                         }
+                        (Ok(meta.dispatch), method_id, handle)
                     }
+                    None => (
+                        Err(format!(
+                            "no dispatcher is registered for `{}` ({:#010x})",
+                            object.keel_type_name(),
+                            object.keel_type_id()
+                        )),
+                        method_id,
+                        handle,
+                    ),
                 }
-                (meta.dispatch, method_id, handle)
             }
             CallTarget::Constructor { type_id, method_id } => {
-                let Some(meta) = self.table.objects.get(&type_id) else {
-                    return Dispatched::Bad(format!("unknown object type {type_id:#010x}"));
-                };
-                if sync_only {
-                    if let Some(m) = meta.constructors.iter().find(|m| m.method_id == method_id) {
-                        if needs_async(m.is_async, &m.returns) {
-                            return async_reason(m.name);
+                match self.table.objects.get(&type_id) {
+                    Some(meta) => {
+                        if sync_only {
+                            if let Some(m) =
+                                meta.constructors.iter().find(|m| m.method_id == method_id)
+                            {
+                                if needs_async(m.is_async, &m.returns) {
+                                    return async_reason(m.name);
+                                }
+                            }
                         }
+                        (Ok(meta.dispatch), method_id, Handle::NULL)
                     }
+                    None => (
+                        Err(format!("unknown object type {type_id:#010x}")),
+                        method_id,
+                        Handle::NULL,
+                    ),
                 }
-                (meta.dispatch, method_id, Handle::NULL)
             }
             CallTarget::LazyPage {
                 handle,
@@ -851,19 +874,47 @@ impl Runtime {
             handle: handle.0,
             args: call.args,
         };
-        match guard::guarded(|| dispatch_fn(self as &dyn Any, dispatch_call)) {
+        match route {
+            Ok(dispatch_fn) => self
+                .run_dispatcher("generated", dispatch_fn, dispatch_call, handle, false)
+                .unwrap_or_else(|| Dispatched::Bad("internal: unrouted call".to_owned())),
+            Err(miss) => {
+                for layer in &self.table.layers {
+                    if let Some(done) =
+                        self.run_dispatcher(layer.name, layer.dispatch, dispatch_call, handle, true)
+                    {
+                        return done;
+                    }
+                }
+                Dispatched::Bad(miss)
+            }
+        }
+    }
+
+    /// Runs one dispatcher under the panic guard and classifies what it answered. A layer
+    /// (`layered`) that answers `Unknown` does not serve the id: `None` lets the next one try.
+    fn run_dispatcher(
+        &self,
+        name: &str,
+        dispatch_fn: DispatchFn,
+        call: DispatchCall<'_>,
+        handle: Handle,
+        layered: bool,
+    ) -> Option<Dispatched> {
+        match guard::guarded(|| dispatch_fn(self as &dyn Any, call)) {
             Ok(outcome) => match outcome.downcast::<DispatchResult>() {
-                Ok(DispatchResult::BadRequest(reason)) => Dispatched::Bad(reason),
-                Ok(DispatchResult::Unknown) => Dispatched::Bad(format!(
-                    "unknown method {method_id:#010x}, or its arguments or receiver were not valid"
-                )),
-                Ok(result) => Dispatched::Done(result, handle),
-                Err(_) => Dispatched::Bad(
-                    "the dispatcher returned something other than a keel_runtime::DispatchResult"
-                        .to_owned(),
-                ),
+                Ok(DispatchResult::BadRequest(reason)) => Some(Dispatched::Bad(reason)),
+                Ok(DispatchResult::Unknown) if layered => None,
+                Ok(DispatchResult::Unknown) => Some(Dispatched::Bad(format!(
+                    "unknown method {:#010x}, or its arguments or receiver were not valid",
+                    call.method_id
+                ))),
+                Ok(result) => Some(Dispatched::Done(result, handle)),
+                Err(_) => Some(Dispatched::Bad(format!(
+                    "the {name} dispatcher returned something other than a keel_runtime::DispatchResult"
+                ))),
             },
-            Err(report) => Dispatched::Panicked(report, handle),
+            Err(report) => Some(Dispatched::Panicked(report, handle)),
         }
     }
 
@@ -1432,7 +1483,8 @@ impl Runtime {
     /// (`handle u64, type_id u32, signal_count u32, signals`), which together are exactly a
     /// `keel_wire::payload::Snapshot`. The runtime re-encodes each record with the table's own
     /// handle and the object's own type id, so a snapshot is consistent whatever the cell
-    /// knows. Objects that are not stores are not included.
+    /// knows. Objects that are not stores, and stores that are [`transient`](crate::KeelObjectDyn::transient)
+    /// (query handles), are not included.
     pub fn snapshot(&self) -> Vec<u8> {
         // Read-only, so it is fine even if this thread already holds the lock.
         let _guard = self.enter_core().ok();
@@ -1441,6 +1493,9 @@ impl Runtime {
             let Some(cell) = object.as_store() else {
                 continue;
             };
+            if object.transient() {
+                continue;
+            }
             let mut w = Writer::new();
             match guard::guarded(|| cell.encode_snapshot(&mut w)) {
                 Ok(()) => {}

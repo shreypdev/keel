@@ -57,6 +57,15 @@ pub trait KeelObjectDyn: Send + Sync + 'static {
     fn as_store(&self) -> Option<&Arc<StoreCell>> {
         None
     }
+
+    /// Whether the object is derived state that a snapshot leaves out. `false` for everything
+    /// `#[keel::store]` generates. `keel-query`'s query handles answer `true`: they are views
+    /// of the query cache, which a restore does not rebuild, so the platform re-creates them
+    /// (their handles are stale after a restore, exactly like a plain object's, SPEC 5.9)
+    /// instead of the whole restore failing for lack of a `StoreRestorer`.
+    fn transient(&self) -> bool {
+        false
+    }
 }
 
 /// What the object table stores: a shared `dyn Any` with the object-safe [`KeelObjectDyn`]

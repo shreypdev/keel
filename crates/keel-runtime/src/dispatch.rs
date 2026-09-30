@@ -28,7 +28,7 @@ use core::future::Future;
 use core::pin::Pin;
 use std::collections::HashMap;
 
-use keel_meta::{FunctionMeta, ObjectMeta, Registration, TypeRefMeta};
+use keel_meta::{DispatchFn, FunctionMeta, ObjectMeta, Registration, TypeRefMeta};
 
 /// Encoded bytes of a successful (`Ok`) or typed-error (`Err`) result.
 pub type DispatchBytes = Result<Vec<u8>, Vec<u8>>;
@@ -64,11 +64,41 @@ impl fmt::Debug for DispatchResult {
     }
 }
 
+/// A dispatcher for calls that no [`Registration`] claims: how a crate layered on the runtime
+/// (`keel-query`) serves ids that exist only as generic instantiations. *Addition to SPEC
+/// 16.2, see the crate docs.*
+///
+/// The static table built from `keel_meta::registrations()` is consulted first. A call that
+/// misses it (an unknown function id, an unknown constructor type, or a method on an object
+/// whose type has no registered dispatcher) is offered to every layer in turn, with the same
+/// arguments a generated dispatcher gets: the runtime as `&dyn Any`, and a
+/// [`DispatchCall`](keel_meta::DispatchCall) whose `handle` is `0` for a function or a
+/// constructor. A layer answers [`DispatchResult::Unknown`] for ids it does not serve; the
+/// first other answer wins. Layers are consulted in link order, so two layers must not claim
+/// the same id.
+///
+/// ```ignore
+/// inventory::submit! {
+///     keel_runtime::DispatchLayer { name: "keel-query", dispatch: keel_query::dispatch }
+/// }
+/// ```
+pub struct DispatchLayer {
+    /// Shown in logs.
+    pub name: &'static str,
+    /// The dispatcher: downcast the `&dyn Any` to [`Runtime`](crate::Runtime), decode
+    /// `call.args`, answer with `DispatchOutcome::new(DispatchResult::..)`.
+    pub dispatch: DispatchFn,
+}
+
+inventory::collect!(DispatchLayer);
+
 /// The dispatchers registered with `keel-meta`, indexed for lookup by id.
 #[derive(Default)]
 pub(crate) struct DispatchTable {
     pub(crate) functions: HashMap<u32, &'static FunctionMeta>,
     pub(crate) objects: HashMap<u32, &'static ObjectMeta>,
+    /// The layers that serve what the two maps above miss, in registration order.
+    pub(crate) layers: Vec<&'static DispatchLayer>,
     /// Ids that more than one registration claimed (first wins); reported at init.
     pub(crate) collisions: Vec<(u32, &'static str, &'static str)>,
 }
@@ -98,6 +128,7 @@ impl DispatchTable {
                 _ => {}
             }
         }
+        table.layers.extend(inventory::iter::<DispatchLayer>);
         table
     }
 }

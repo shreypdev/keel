@@ -39,6 +39,11 @@
 //!   express "the arguments did not decode".
 //! * `StoreRestorer`, `InitHook`, [`Runtime::extension`], [`Runtime::new`] and the typed
 //!   `insert_*`/`object` helpers are additions the spec implies but does not name.
+//! * [`DispatchLayer`] lets a layered crate serve ids that have no static registration
+//!   (`keel-query`: one query handle type and one mutation function per user query, whose
+//!   ids exist only as generic instantiations). The static table is consulted first; a call it
+//!   cannot route is offered to the layers.
+//! * [`KeelObjectDyn::transient`] marks stores that a snapshot leaves out (query handles).
 
 pub use keel_meta;
 pub use keel_meta::inventory;
@@ -65,7 +70,7 @@ mod timer;
 
 pub use config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
 pub use ctx::{Ctx, CtxScope};
-pub use dispatch::{DispatchBytes, DispatchResult};
+pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::InitHook;
 pub use host::{Host, PortCallOutcome};
 pub use keel_meta::{DispatchCall, DispatchOutcome};

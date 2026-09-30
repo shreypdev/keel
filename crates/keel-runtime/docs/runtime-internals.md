@@ -163,6 +163,10 @@ don't block) is documented on `Host`.
    to an object, takes its `type_id` and looks the `ObjectMeta` up; `Constructor` looks the
    `ObjectMeta` up by `type_id`; `LazyPage` is answered by the runtime itself from a
    `LazyList` (no dispatcher). The tables are built once from `keel_meta::registrations()`.
+   A lookup that misses (unknown function id, unknown constructor type, or a method on an
+   object whose type has no `ObjectMeta`) falls through to the `DispatchLayer`s, in
+   registration order, until one answers something other than `Unknown`; none answering
+   reports the original miss.
 4. For `call_sync`, an async-shaped method (by its metadata: `is_async`, `Stream`, `Result<Stream, _>`)
    is refused with status 5 **before** the dispatcher runs, so nothing half-executes.
 5. Run the dispatcher under the panic guard with `&Runtime` erased as `&dyn Any`, then unwrap
@@ -436,6 +440,8 @@ panics instead of hanging when nothing can make progress.
 | 5.2 | task cancellation drops the future | also drops what it awaits (`PortFuture`, `Sleep`) and replies status 3 exactly once | see section 7 |
 | new | (none) | `InitHook`, `Runtime::extension`, `Runtime::new` | `keel-query` needs a hydrate hook and a place to keep the `QueryClient` (SPEC 9) |
 | new | (none) | `Notify`, `LazyList`, `StoreRestorer`, `Ctx::enter` | required by the task; see the crate docs |
+| 5.6 | dispatch by the static `Registration` tables only | plus `DispatchLayer` (inventory): a call the static table cannot route (unknown function, unknown constructor type, a method on an object whose type has no registered dispatcher) is offered to each layer; a layer answers `Unknown` for ids it does not serve | `keel-query` serves one handle type and one mutation function per user query, ids that exist only as generic instantiations and that must not enter the schema (bindgen synthesizes them from `QueryMeta`); layers see no `sync_only` metadata, so an async answer to `call_sync` is refused after the fact |
+| 5.9 | every store is snapshotted | `KeelObjectDyn::transient()`: a store that answers `true` is left out of `snapshot()` | query handles are views of the query cache; without this a snapshot with an open handle could not be restored (`UnknownStoreType`) |
 
 Known limitations, each deliberate for v1:
 
