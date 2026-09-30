@@ -136,6 +136,53 @@ fn swift_records_derive_codable_only_from_codable_fields() {
 }
 
 #[test]
+fn swift_streams_are_decoded_by_the_runtime_so_credit_follows_the_consumer() {
+    // A stream method must hand the core's pull-based stream to `KeelCore.stream(..decode:)`
+    // (SPEC 3.7). Copying it into an `AsyncThrowingStream` with `yield` buffers without bound and
+    // the core runs ahead of the consumer (playground finding 3).
+    for case in ["objects", "stores", "full", "queries", "stdlib"] {
+        let out = all_files(case, |_| {});
+        for f in &out[0].1 {
+            assert!(
+                !f.contents.contains("continuation.yield")
+                    && !f.contents.contains("keelDecodeStream"),
+                "{case}/{}: a generated stream must not copy items into its own buffer",
+                f.path
+            );
+        }
+    }
+    let out = all_files("objects", |_| {});
+    let swift = file(&out[0].1, "Objects.swift");
+    assert!(swift.contains("return self.core.stream("));
+    assert!(swift.contains("decode: { try UInt32.keelDecoded(from: $0) }"));
+    // A typed error maps the failure; an untyped stream leaves the runtime's default.
+    assert!(swift.contains("mapError: { CalcError.keelFromReply($0) ?? $0 }"));
+    assert!(!swift.contains("mapError: { $0 }"));
+}
+
+#[test]
+fn swift_stores_and_objects_restate_unchecked_sendable() {
+    // `KeelObject` and `KeelStore` are `@unchecked Sendable`; Swift 6 warns when a subclass does
+    // not say so again (playground finding 6).
+    for case in ["objects", "stores", "full", "queries", "stdlib"] {
+        let out = all_files(case, |_| {});
+        for f in &out[0].1 {
+            for line in f
+                .contents
+                .lines()
+                .filter(|l| l.starts_with("public final class "))
+            {
+                assert!(
+                    line.contains("@unchecked Sendable"),
+                    "{case}/{}: {line}",
+                    f.path
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn asynchronous_methods_without_a_result_can_throw_in_both_modes() {
     for typed in [true, false] {
         let out = all_files("objects", |g| g.swift_typed_throws = typed);

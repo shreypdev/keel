@@ -6,7 +6,7 @@ import Observation
 
 /// Mirrors what the platform reports about the connection.
 @MainActor @Observable
-public final class Link: KeelStore {
+public final class Link: KeelStore, @unchecked Sendable {
     public private(set) var state: KeelAppState = .active
     public private(set) var kind: NetKind = .wifi
     public private(set) var last: HttpResponse? = nil

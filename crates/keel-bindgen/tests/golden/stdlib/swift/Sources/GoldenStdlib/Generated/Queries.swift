@@ -7,7 +7,7 @@ import Observation
 /// Observes the `latest_response` query (cache key `latest`).
 /// Constructing it registers an observer and fetches when the data is stale or missing.
 @MainActor @Observable
-public final class LatestResponseQueryHandle: KeelStore {
+public final class LatestResponseQueryHandle: KeelStore, @unchecked Sendable {
     /// The latest successful result, if any.
     public private(set) var data: HttpResponse? = nil
     /// Where the query is in its fetch lifecycle.
