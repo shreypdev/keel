@@ -459,9 +459,14 @@ fn changeset_and_snapshot_reject_malformed_input() {
     );
     // Snapshot with one store and nothing else.
     assert_eq!(
-        Snapshot::decode(&mut Reader::new(&[1, 0, 0, 0])),
+        Snapshot::decode(&mut Reader::new(&[1, 0, 0, 0, 0, 0, 0, 0])),
         Err(WireError::LengthTooLarge { len: 1, at: 0 })
     );
+    // A snapshot that ends where its generation floor should be (the pre-ADR-022 layout).
+    assert!(matches!(
+        Snapshot::decode(&mut Reader::new(&[0, 0, 0, 0])),
+        Err(WireError::UnexpectedEof { .. })
+    ));
 }
 
 #[test]

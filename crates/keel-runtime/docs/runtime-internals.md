@@ -335,10 +335,13 @@ Consequences:
 
 ## 13. Objects, snapshot and restore
 
-**Object table**: a `Vec` of slots with `generation: u32` (starting at 1), a free list (LIFO) and
-a `BTreeSet` index of stores (so snapshots are in handle order). Releasing bumps the slot's
-generation (skipping 0 on wrap), so a stale handle is rejected (`Stale`) instead of aliasing the
-next object. A slot holds an `Arc<dyn AnyObject>`; the object outlives its handle while a task
+**Object table**: a `Vec` of slots, a free list (LIFO) and a `BTreeSet` index of stores (so
+snapshots are in handle order). Every inserted object takes a fresh generation from one counter
+(`Generations`: a `u32` holding the highest generation issued, `fetch_update`, never wrapping; one
+process-wide instance shared by real runtimes, a private one per `TestRuntime` so its handles are
+deterministic). A released or cleared slot is just vacant, so its old handles stay stale for good
+(`Stale`) instead of aliasing the next object. When all `u32::MAX` generations are spent, `insert`
+logs FATAL once and panics with a clear message (ADR-022). A slot holds an `Arc<dyn AnyObject>`; the object outlives its handle while a task
 holds the `Arc`. Inserting a store calls `StoreCell::set_handle`; releasing (or a restore
 replacing it) calls `set_handle(0)`, so a store that a task still holds stops delivering
 change-sets under a handle it no longer owns.
@@ -354,13 +357,17 @@ runtime asks the cell for `StoreCell::encode_snapshot`, which writes a whole sto
 the cell knowing its own handle and type id). The runtime decodes that record and re-encodes it
 with the object table's handle and type id, so the snapshot is right even if a cell's handle is
 stale (a store restored from an older snapshot, a handle reissued after release). The result is
-a valid `keel_wire::payload::Snapshot` (tested by decoding it). A cell that panics or writes a
-malformed record is skipped and logged. Non-store objects are not included.
+a valid `keel_wire::payload::Snapshot` (tested by decoding it): `count u32`, then
+`generation_floor u32` (the generation counter's high-water mark, read after the stores were
+listed, so it is at least every generation in the snapshot), then the records. A cell that panics
+or writes a malformed record is skipped and logged. Non-store objects are not included.
 
 **Restore** (`Runtime::restore`), all-or-nothing:
 
-1. Decode and validate the snapshot: no null handle, no generation 0, no duplicate handle, index
-   at most 2^20 (a corrupt snapshot cannot make the table allocate gigabytes).
+1. Decode and validate the snapshot: no null handle, no generation 0 or `u32::MAX`, no duplicate
+   handle, index at most 2^20 (a corrupt snapshot cannot make the table allocate gigabytes), and a
+   `generation_floor` below `u32::MAX` (a floor of `u32::MAX` would leave the counter nothing to
+   issue: `RestoreError::GenerationFloor`).
 2. Build every store through its `StoreRestorer` (`{ type_id, restore, cell }`, one per store
    type, submitted through `inventory` by `#[keel::store]`): `restore(ctx, handle, reader)`
    gets a `Reader` over the **body** only (`signal_count u32`, then `{ signal_id, len, value }`
@@ -368,10 +375,12 @@ malformed record is skipped and logged. Non-store objects are not included.
    handle, tells the new store's cell that handle, and returns it. The runtime checks that the
    reader is fully consumed. Nothing has been touched yet, so any failure
    (`UnknownStoreType`, `Store`, `Panicked`, `Decode`) leaves the runtime unchanged.
-3. Replace the table: clear it (every old handle becomes stale; old stores are detached;
-   the observed sets are remembered per handle), raise the generation floor to
-   `max snapshot generation + 1` (so a handle the host held from *before a crash* cannot alias a
-   new object), and `insert_at` every store at its original index and generation.
+3. Replace the table: raise the generation counter to
+   `max(current, snapshot.generation_floor, every generation in it)` (never lowering it, so nothing
+   issued before the snapshot, between it and the restore, or before a crash can be issued again,
+   ADR-022), clear the table (every old handle becomes stale; old stores are detached; the observed
+   sets are remembered per handle), and `insert_at` every store at its original index and
+   generation.
 4. Re-observe, for every restored store whose handle had observations before, exactly those
    signals, and deliver **one** change-set with all their current values.
 

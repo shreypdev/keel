@@ -89,7 +89,7 @@ test("without keel_init the entry points fail softly", () => {
   core.x.keel_cancel(1);
   core.observe(0x1_0000_0001n, 0, true);
   const snapshot = core.takeBuf(core.x.keel_snapshot());
-  assert.deepEqual([...snapshot], [0, 0, 0, 0]);
+  assert.deepEqual([...snapshot], [0, 0, 0, 0, 0, 0, 0, 0]);
   assert.equal(core.withBytes(snapshot, (p, n) => core.x.keel_restore(p, n)), 6);
   core.x.keel_buf_free(0);
 });

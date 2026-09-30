@@ -221,12 +221,14 @@ proptest! {
 
     #[test]
     fn snapshot(
+        generation_floor in any::<u32>(),
         stores in vec(
             (handle(), any::<u32>(), vec((any::<u32>(), body()), 0..5)),
             0..6,
         )
     ) {
         let snap = Snapshot {
+            generation_floor,
             stores: stores
                 .into_iter()
                 .map(|(handle, type_id, signals)| StoreSnapshot { handle, type_id, signals })

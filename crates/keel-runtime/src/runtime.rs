@@ -359,7 +359,13 @@ impl Runtime {
             schema,
             schema_hash,
             core: Mutex::new(CoreState::default()),
-            objects: ObjectTable::new(),
+            // Test runtimes own their generation counter so the handles a test sees are the
+            // same on every run; a real runtime shares the process-wide one (ADR-022).
+            objects: if opts.manual {
+                ObjectTable::isolated()
+            } else {
+                ObjectTable::new()
+            },
             ports: Arc::new(PortTable::default()),
             events: Events::default(),
             table,
@@ -1519,10 +1525,12 @@ impl Runtime {
 
     // ----- snapshot and restore ----------------------------------------------------------
 
-    /// Encodes every live store (SPEC 5.9): `count u32` followed by each store's
-    /// [`StoreCell::encode_snapshot`](keel_signals::StoreCell::encode_snapshot) record
+    /// Encodes every live store (SPEC 5.9): `count u32, generation_floor u32` followed by each
+    /// store's [`StoreCell::encode_snapshot`](keel_signals::StoreCell::encode_snapshot) record
     /// (`handle u64, type_id u32, signal_count u32, signals`), which together are exactly a
-    /// `keel_wire::payload::Snapshot`. The runtime re-encodes each record with the table's own
+    /// `keel_wire::payload::Snapshot`. The floor is the highest handle generation issued so far
+    /// (ADR-022): restoring it resumes the generation counter above everything the host may
+    /// still hold. The runtime re-encodes each record with the table's own
     /// handle and the object's own type id, so a snapshot is consistent whatever the cell
     /// knows. Objects that are not stores, and stores that are [`transient`](crate::KeelObjectDyn::transient)
     /// (query handles), are not included.
@@ -1569,6 +1577,9 @@ impl Runtime {
         }
         let mut out = Writer::new();
         out.write_len(u32::try_from(chunks.len()).unwrap_or(u32::MAX));
+        // Read after the stores were listed: the counter only grows, so the floor is at least
+        // every generation in the snapshot (and every one issued before it was taken).
+        out.write_u32(self.objects.generation_floor());
         for chunk in &chunks {
             out.write_raw(chunk);
         }
@@ -1579,7 +1590,10 @@ impl Runtime {
     ///
     /// Every store is rebuilt through its registered [`StoreRestorer`] and re-inserted at the
     /// **same handle** (index and generation), so handles the host holds stay valid. All
-    /// other objects are dropped and their handles become stale (status 5). Signals that
+    /// other objects are dropped and their handles become stale (status 5). The generation
+    /// counter is raised to at least the snapshot's floor (it is never lowered), so no handle
+    /// issued before the snapshot, or since, can name an object created after the restore
+    /// (ADR-022). Signals that
     /// were being observed before the restore (the runtime tracks this per handle) are
     /// re-observed and their current values re-emitted as one change-set.
     ///
@@ -1603,11 +1617,19 @@ impl Runtime {
             let h = s.handle;
             if h.is_null()
                 || h.generation() == 0
+                || h.generation() == u32::MAX
                 || h.index() as usize > crate::object_table::MAX_RESTORE_INDEX
                 || !seen.insert(h.0)
             {
                 return Err(RestoreError::BadHandle { handle: h.0 });
             }
+        }
+        // The counter must be left room to issue from (a floor at u32::MAX would make every
+        // later insert fail); a hostile or corrupt snapshot is refused rather than obeyed.
+        if snapshot.generation_floor == u32::MAX {
+            return Err(RestoreError::GenerationFloor {
+                floor: snapshot.generation_floor,
+            });
         }
         let _guard = self.enter_core().map_err(|_| RestoreError::Reentrant)?;
         let ctx = self.ctx();
@@ -1660,7 +1682,11 @@ impl Runtime {
         }
 
         // Phase 2: replace the table.
+        // Nothing issued before the snapshot (or since) may be issued again: the counter resumes
+        // above the snapshot's floor and above every generation it places (ADR-022).
         let max_generation = built.iter().map(|(h, _)| h.generation()).max().unwrap_or(0);
+        self.objects
+            .raise_generation_floor(snapshot.generation_floor.max(max_generation));
         let mut observed = HashMap::new();
         for cleared in self.objects.clear() {
             if let Some(cell) = cleared.object.as_store() {
@@ -1669,8 +1695,6 @@ impl Runtime {
             }
             self.drop_guarded_logged("an object replaced by restore", cleared.object);
         }
-        self.objects
-            .raise_min_generation(max_generation.saturating_add(1));
         for (handle, object) in &built {
             if let Err(e) = self.objects.insert_at(*handle, object.clone()) {
                 self.log(

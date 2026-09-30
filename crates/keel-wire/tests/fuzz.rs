@@ -331,6 +331,7 @@ fn seeds() -> Vec<Vec<u8>> {
     seeds.push(w.into_vec());
 
     let snapshot = Snapshot {
+        generation_floor: 4,
         stores: vec![
             StoreSnapshot {
                 handle: Handle::new(1, 1),
