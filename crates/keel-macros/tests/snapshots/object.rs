@@ -26,9 +26,30 @@ impl Calculator {
     fn helper(&self) {}
 }
 #[doc(hidden)]
+#[allow(non_upper_case_globals, dead_code)]
+const _keel_error_E0007_a_type_takes_one_keel_api_impl_block_Calculator: () = ();
+impl Calculator {
+    /// Marks the type as an object, so a signature that uses it as a value can say so.
+    #[doc(hidden)]
+    pub const __KEEL_IS_OBJECT: bool = true;
+}
+#[doc(hidden)]
 #[allow(non_camel_case_types, dead_code)]
 trait __KeelStoreProbe_Calculator {
     const __KEEL_IS_STORE: bool = false;
+    const __KEEL_DOCS: &'static str = "";
+    fn __keel_cell_ref(&self) -> &::std::sync::Arc<::keel::signals::StoreCell> {
+        ::core::unreachable!("not a `#[keel::store]`: E0011 stops the build first")
+    }
+    fn __keel_restore(
+        _ctx: ::keel::runtime::Ctx,
+        _r: &mut ::keel::wire::Reader<'_>,
+    ) -> ::core::result::Result<Self, ::keel::wire::WireError>
+    where
+        Self: ::core::marker::Sized,
+    {
+        ::core::unreachable!("not a `#[keel::store]`: E0011 stops the build first")
+    }
     const __KEEL_STORE_META: ::keel::meta::StoreMeta = ::keel::meta::StoreMeta {
         signals: &[],
     };
@@ -128,7 +149,7 @@ fn __keel_dispatch_Calculator(
     match __call.method_id {
         __KEEL_ID_new => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let base: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -148,7 +169,7 @@ fn __keel_dispatch_Calculator(
             }
             let __ctx = __rt.ctx();
             __keel_out({
-                let __value = Calculator::new(&__ctx, base);
+                let __value = Calculator::new(&__ctx, __keel_a0);
                 {
                     let __handle = __rt.insert_object(::std::sync::Arc::new(__value));
                     ::keel::runtime::DispatchResult::Sync(
@@ -161,7 +182,9 @@ fn __keel_dispatch_Calculator(
         }
         __KEEL_ID_open => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let path: String = match <String as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: String = match <String as ::keel::wire::Decode>::decode(
+                &mut __r,
+            ) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -180,7 +203,7 @@ fn __keel_dispatch_Calculator(
                 );
             }
             __keel_out(
-                match Calculator::open(path) {
+                match Calculator::open(__keel_a0) {
                     ::core::result::Result::Ok(__value) => {
                         let __handle = __rt
                             .insert_object(::std::sync::Arc::new(__value));
@@ -202,7 +225,7 @@ fn __keel_dispatch_Calculator(
         }
         __KEEL_ID_add => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -213,7 +236,7 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            let b: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a1: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -240,7 +263,7 @@ fn __keel_dispatch_Calculator(
                 }
             };
             __keel_out({
-                let __out = Calculator::add(&*__obj, a, b);
+                let __out = Calculator::add(&*__obj, __keel_a0, __keel_a1);
                 ::keel::runtime::DispatchResult::Sync(
                     ::core::result::Result::Ok(
                         ::keel::wire::Encode::encode_to_vec(&__out),
@@ -250,7 +273,7 @@ fn __keel_dispatch_Calculator(
         }
         __KEEL_ID_divide => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -261,7 +284,7 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            let b: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a1: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -289,7 +312,7 @@ fn __keel_dispatch_Calculator(
                 }
             };
             __keel_out(
-                match Calculator::divide(&*__obj, a, b) {
+                match Calculator::divide(&*__obj, __keel_a0, __keel_a1) {
                     ::core::result::Result::Ok(__v) => {
                         ::keel::runtime::DispatchResult::Sync(
                             ::core::result::Result::Ok(
@@ -309,7 +332,7 @@ fn __keel_dispatch_Calculator(
         }
         __KEEL_ID_slow_add => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -340,7 +363,7 @@ fn __keel_dispatch_Calculator(
             };
             __keel_out({
                 let __fut = async move {
-                    let __out = Calculator::slow_add(&*__obj, a).await;
+                    let __out = Calculator::slow_add(&*__obj, __keel_a0).await;
                     ::core::result::Result::<
                         _,
                         ::std::vec::Vec<u8>,
@@ -352,7 +375,7 @@ fn __keel_dispatch_Calculator(
         }
         __KEEL_ID_slow_divide => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let a: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -363,7 +386,7 @@ fn __keel_dispatch_Calculator(
                     );
                 }
             };
-            let b: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a1: i64 = match <i64 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -394,7 +417,7 @@ fn __keel_dispatch_Calculator(
             };
             __keel_out({
                 let __fut = async move {
-                    match Calculator::slow_divide(&*__obj, a, b).await {
+                    match Calculator::slow_divide(&*__obj, __keel_a0, __keel_a1).await {
                         ::core::result::Result::Ok(__v) => {
                             ::core::result::Result::<
                                 _,
@@ -415,7 +438,7 @@ fn __keel_dispatch_Calculator(
         }
         __KEEL_ID_counts => {
             let mut __r = ::keel::wire::Reader::new(__call.args);
-            let up_to: u32 = match <u32 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: u32 = match <u32 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(__e) => {
                     return __keel_bad_request(
@@ -444,7 +467,7 @@ fn __keel_dispatch_Calculator(
             };
             __keel_out({
                 let __stream = __KeelMap(
-                    ::std::boxed::Box::pin(Calculator::counts(&*__obj, up_to)),
+                    ::std::boxed::Box::pin(Calculator::counts(&*__obj, __keel_a0)),
                 );
                 __keel_assert_send(&__stream);
                 ::keel::runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream))
@@ -587,3 +610,47 @@ static __KEEL_META_Calculator: ::keel::meta::ObjectMeta = ::keel::meta::ObjectMe
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Object(& __KEEL_META_Calculator)
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<i64, ::core::primitive::i64>();
+        __keel_same::<String, ::std::string::String>();
+        __keel_same::<Result<i64, CalcError>, ::core::result::Result<i64, CalcError>>();
+        __keel_same::<u32, ::core::primitive::u32>();
+    }
+    trait __KeelFallback {
+        const KEEL_TYPE_ID: u32 = 0;
+        const KEEL_IS_ERROR: bool = false;
+        const __KEEL_IS_OBJECT: bool = false;
+    }
+    impl<T: ?::core::marker::Sized> __KeelFallback for T {}
+    const _: () = {
+        if <CalcError>::__KEEL_IS_OBJECT {
+            ::core::panic!(
+                "error[keel::E0064]: `CalcError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://keel.dev/errors/E0064"
+            );
+        }
+        if <CalcError>::KEEL_TYPE_ID != ::keel::meta::ids::type_id("CalcError") {
+            ::core::panic!(
+                "error[keel::E0061]: the schema records this type as `CalcError`, but the type written here is not that type\n  = note: Keel describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type CalcError = Other`), a renamed import (`use path::Other as CalcError`) or a type that is not declared with `#[keel::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[keel::api]` (`#[keel::error]` for errors)\n  = docs: https://keel.dev/errors/E0061"
+            );
+        }
+        if !<CalcError>::KEEL_IS_ERROR {
+            ::core::panic!(
+                "error[keel::E0001]: `CalcError` is used as the error type of a `Result`, but it is not a `#[keel::error]` enum\n  = note: the platforms throw the error type by name, and only `#[keel::error]` enums carry the messages they show\n  = help: declare it with `#[keel::error]`, for example `#[keel::error] enum CalcError {{ #[error(\"failed\")] Failed }}`\n  = docs: https://keel.dev/errors/E0001"
+            );
+        }
+    };
+};

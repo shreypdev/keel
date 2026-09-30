@@ -50,8 +50,15 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0030 | port method with a non-wire parameter |
 /// | E0031 | event port method that is not a plain `fn(..)` returning `()` |
 /// | E0032 | invalid port trait shape (addition) |
+/// | E0033 | the error type of a port method has no `From<PortError>` (addition) |
 /// | E0040 | query without `key`, mutation with `stale`, or another invalid query argument |
 /// | E0041 | query or mutation function with an invalid signature (addition) |
+/// | E0042 | query whose success value is `()` or an `Option` (addition) |
+/// | E0060 | a spelling that looks like a built-in Keel type is another type (addition) |
+/// | E0061 | the schema names a different type than the one spelled, or a type that is not a Keel type (addition) |
+/// | E0062 | a port call had no adapter (a runtime message, not a compile error; addition) |
+/// | E0063 | nested `Option<Option<T>>` (addition) |
+/// | E0064 | an object (`#[keel::api] impl`) used where a value is expected (addition) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";
@@ -70,8 +77,15 @@ pub(crate) mod code {
     pub(crate) const E0030: &str = "E0030";
     pub(crate) const E0031: &str = "E0031";
     pub(crate) const E0032: &str = "E0032";
+    pub(crate) const E0033: &str = "E0033";
     pub(crate) const E0040: &str = "E0040";
     pub(crate) const E0041: &str = "E0041";
+    pub(crate) const E0042: &str = "E0042";
+    pub(crate) const E0060: &str = "E0060";
+    pub(crate) const E0061: &str = "E0061";
+    pub(crate) const E0062: &str = "E0062";
+    pub(crate) const E0063: &str = "E0063";
+    pub(crate) const E0064: &str = "E0064";
 }
 
 /// A diagnostic under construction: everything except the span it is reported on.

@@ -5,7 +5,9 @@
 //! declared with `#[keel::api]` and becomes [`KType::Named`] with the last path segment.
 //! Whether that name really resolves is checked by `keel-bindgen` (`Schema::validate`);
 //! whether the type really implements `Encode`/`Decode` is checked by `rustc` on the
-//! generated code, whose errors point at the offending field.
+//! generated code, whose errors point at the offending field. That a spelling really *is*
+//! the type the schema names (a user type called `Bytes`, `use a::Item as Todo`) cannot be
+//! seen from syntax: `check.rs` emits compile-time assertions for it (E0060, E0061).
 //!
 //! | Rust | `KType` |
 //! |---|---|
@@ -17,6 +19,8 @@
 //! | `HashMap<K, V>`, `BTreeMap<K, V>` | `Map(K, V)` |
 //! | `Duration`, `Timestamp`, `Uuid` | the same-named variants |
 //! | `Box<T>` | `T` (transparent, so recursive types can be written) |
+//! | `Option<Option<T>>` | rejected (E0063): Kotlin and TypeScript cannot tell `Some(None)` from `None` |
+//! | `Handle` | rejected (E0001): handles are how objects cross, not a value type |
 //! | `()` | `Unit` (return types only) |
 //! | `Result<T, E>` | `Result(T, E)` (return types only) |
 //! | `impl Stream<Item = T>` | `Stream(T)` (return types only) |
@@ -247,6 +251,7 @@ pub(crate) fn ty_string(ty: &impl ToTokens) -> String {
         (" (", "("),
         ("[ ", "["),
         (" ]", "]"),
+        (">+", "> +"),
     ] {
         s = s.replace(from, to);
     }
@@ -323,6 +328,7 @@ pub(crate) fn map_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>, allow: Allow) -> Re
         )),
         Type::Reference(reference) => Err(reference_error(ty, reference)),
         Type::Path(path) => map_path(path, ty, cx, allow),
+        Type::TraitObject(object) if has_stream_bound(&object.bounds) => Err(dyn_stream_error(ty)),
         Type::TraitObject(_) => Err(TyErr::new(
             ty,
             Diag::new(
@@ -509,6 +515,20 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
         ));
     }
     reject_path_lifetimes(path, ty)?;
+    if path.path.segments.len() > 1
+        && path
+            .path
+            .segments
+            .first()
+            .is_some_and(|seg| seg.ident == "Self")
+    {
+        return Err(unsupported(
+            ty,
+            format!("`{}` cannot cross the boundary", ty_string(ty)),
+            "an associated type has no name the schema could record, and the platforms would have to guess which type it is",
+            "name the concrete type",
+        ));
+    }
     let Some(last) = path.path.segments.last() else {
         return Err(unsupported(
             ty,
@@ -574,7 +594,24 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
         )),
         ("Box", 1) => map_type(args[0], cx, Allow::NONE),
         ("Vec", 1) => Ok(KType::Vec(Box::new(map_type(args[0], cx, Allow::NONE)?))),
-        ("Option", 1) => Ok(KType::Option(Box::new(map_type(args[0], cx, Allow::NONE)?))),
+        ("Option", 1) => {
+            let inner = map_type(args[0], cx, Allow::NONE)?;
+            if matches!(inner, KType::Option(_)) {
+                return Err(TyErr::new(
+                    ty,
+                    Diag::new(
+                        code::E0063,
+                        format!(
+                            "nested option `{}` cannot cross the boundary",
+                            ty_string(ty)
+                        ),
+                        "Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null`",
+                        "wrap the inner option in a record or an enum that names the two cases",
+                    ),
+                ));
+            }
+            Ok(KType::Option(Box::new(inner)))
+        }
         ("HashMap" | "BTreeMap", 2) => {
             let key = map_type(args[0], cx, Allow::NONE)?;
             if !key.is_valid_map_key() {
@@ -610,7 +647,7 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
                     unit: true,
                 },
             )?;
-            let err = map_type(args[1], cx, Allow::NONE)?;
+            let err = map_error_type(args[1], cx)?;
             Ok(KType::Result(Box::new(ok), Box::new(err)))
         }
         ("Result", _) => {
@@ -643,8 +680,21 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             ty,
             "`Ctx` cannot be passed across the boundary".to_owned(),
             "the runtime injects `Ctx`; it is only accepted as the first parameter of a constructor, a free function, a query or a mutation",
-            "remove the parameter; store a `Ctx` in the object at construction, or call `Ctx::current()`",
+            &format!(
+                "remove the parameter; store a `Ctx` in the object at construction, or call `Ctx::current()`{}",
+                reserved_hint("Ctx")
+            ),
         )),
+        ("Handle", 0) => Err(unsupported(
+            ty,
+            "`Handle` cannot be used in a public signature".to_owned(),
+            "a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature",
+            &format!(
+                "use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs{}",
+                reserved_hint("Handle")
+            ),
+        )),
+        ("Pin", 1) if is_boxed_dyn_stream(args[0]) => Err(dyn_stream_error(ty)),
         ("Self", 0) => match cx.self_name {
             Some(name) => Ok(KType::Named(name.to_owned())),
             None => Err(unsupported(
@@ -682,19 +732,25 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             ty,
             format!("`{name}` cannot cross the boundary"),
             "paths are not portable text",
-            "use `String`",
+            &format!("use `String`{}", reserved_hint(&name)),
         )),
         ("Instant", 0) => Err(unsupported(
             ty,
             "`Instant` cannot cross the boundary".to_owned(),
             "monotonic instants are meaningless outside their process",
-            "use `Duration` for spans and `Timestamp` for points in time",
+            &format!(
+                "use `Duration` for spans and `Timestamp` for points in time{}",
+                reserved_hint("Instant")
+            ),
         )),
         ("SystemTime", 0) => Err(unsupported(
             ty,
             "`SystemTime` cannot cross the boundary".to_owned(),
             "it has no portable representation, and the core reads time through the `Clock` port",
-            "use `Timestamp` (milliseconds since the Unix epoch)",
+            &format!(
+                "use `Timestamp` (milliseconds since the Unix epoch){}",
+                reserved_hint("SystemTime")
+            ),
         )),
         (_, 0) if bare => Ok(KType::Named(strip_raw(&name))),
         _ => Err(unsupported(
@@ -711,13 +767,82 @@ fn strip_raw(name: &str) -> String {
 }
 
 fn result_misplaced(ty: &Type, pos: Pos) -> TyErr {
+    let what = match pos {
+        // In a return type, `allow.result` is only false below the outermost type.
+        Pos::Return => format!("`{}` cannot be nested inside another type", ty_string(ty)),
+        _ => format!("`{}` cannot be used as {}", ty_string(ty), pos.describe()),
+    };
     TyErr::new(
         ty,
         Diag::new(
             code::E0005,
-            format!("`{}` cannot be used as {}", ty_string(ty), pos.describe()),
+            what,
             "`Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return",
             "return the `Result` from the method and keep only plain values in fields, parameters and nested types",
+        ),
+    )
+}
+
+/// The error side of a `Result`: it is thrown by name on the platforms, so it must be a named
+/// type (`check.rs` then requires it to be a `#[keel::error]` enum).
+pub(crate) fn map_error_type<'a>(ty: &Type, cx: impl Into<Cx<'a>>) -> Result<KType, TyErr> {
+    let kty = map_type(ty, cx, Allow::NONE)?;
+    if matches!(kty, KType::Named(_)) {
+        return Ok(kty);
+    }
+    Err(TyErr::new(
+        ty,
+        Diag::new(
+            code::E0001,
+            format!("`{}` cannot be the error type of a `Result`", ty_string(ty)),
+            "the platforms throw the error by name, and only a `#[keel::error]` enum carries the messages they show",
+            "declare an error enum: `#[keel::error] enum MyError { #[error(\"what went wrong\")] Failed }`, and return `Result<T, MyError>`",
+        ),
+    ))
+}
+
+/// A hint appended to rejections that go by name: a type of the user's own with that name is
+/// refused too.
+fn reserved_hint(name: &str) -> String {
+    format!(
+        "; if `{name}` is a type of your own, rename it: Keel recognises this name wherever it is written"
+    )
+}
+
+fn has_stream_bound(bounds: &syn::punctuated::Punctuated<TypeParamBound, syn::Token![+]>) -> bool {
+    bounds.iter().any(|bound| {
+        matches!(bound, TypeParamBound::Trait(t)
+            if t.path.segments.last().is_some_and(|seg| seg.ident == "Stream"))
+    })
+}
+
+/// `Box<dyn Stream<..>>` (inside a `Pin`).
+fn is_boxed_dyn_stream(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    let Some(seg) = path.path.segments.last() else {
+        return false;
+    };
+    if seg.ident != "Box" {
+        return false;
+    }
+    let PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return false;
+    };
+    args.args.iter().any(|arg| {
+        matches!(arg, GenericArgument::Type(Type::TraitObject(object)) if has_stream_bound(&object.bounds))
+    })
+}
+
+fn dyn_stream_error(ty: &Type) -> TyErr {
+    TyErr::new(
+        ty,
+        Diag::new(
+            code::E0004,
+            format!("boxed stream `{}` cannot cross the boundary", ty_string(ty)),
+            "a stream is described to the platforms as `impl Stream<Item = T>` in a return type; a boxed or `dyn` stream has no schema representation",
+            "return `impl Stream<Item = T> + Send + 'static` (box it inside the function if the branches differ)",
         ),
     )
 }
@@ -773,11 +898,15 @@ fn map_impl_trait(
         return Err(impl_trait_error(ty));
     }
     if !allow.stream {
+        let what = match pos {
+            Pos::Return => format!("`{}` cannot be nested inside another type", ty_string(ty)),
+            _ => format!("`{}` cannot be used as {}", ty_string(ty), pos.describe()),
+        };
         return Err(TyErr::new(
             ty,
             Diag::new(
                 code::E0005,
-                format!("`{}` cannot be used as {}", ty_string(ty), pos.describe()),
+                what,
                 "a stream is how a method returns many values over time; it is only legal as the return type, or as the `Ok` side of a returned `Result`",
                 "return the stream from the method",
             ),
@@ -878,8 +1007,8 @@ mod tests {
             KType::Option(boxed(KType::Vec(boxed(named("Todo")))))
         );
         assert_eq!(
-            field("Option<Option<i32>>").unwrap(),
-            KType::Option(boxed(KType::Option(boxed(KType::I32))))
+            field("Option<Vec<Option<i32>>>").unwrap(),
+            KType::Option(boxed(KType::Vec(boxed(KType::Option(boxed(KType::I32))))))
         );
         assert_eq!(
             field("std::collections::HashMap<String, Vec<i64>>").unwrap(),
@@ -1111,6 +1240,91 @@ mod tests {
     #[test]
     fn parens_and_groups_are_transparent() {
         assert_eq!(field("(String)").unwrap(), KType::String);
+    }
+
+    #[test]
+    fn nested_options_are_e0063_at_any_depth() {
+        assert_eq!(code_of(field("Option<Option<i32>>")), code::E0063);
+        assert_eq!(code_of(field("Vec<Option<Option<i32>>>")), code::E0063);
+        assert_eq!(code_of(field("Option<Box<Option<u8>>>")), code::E0063);
+        assert_eq!(code_of(ret("Option<Option<u8>>")), code::E0063);
+        assert!(field("Option<Vec<Option<u8>>>").is_ok());
+        assert!(field("Vec<Option<u8>>").is_ok());
+    }
+
+    #[test]
+    fn handle_has_no_schema_type() {
+        let err = field("Handle").unwrap_err();
+        assert_eq!(err.diag.code, code::E0001);
+        assert!(err.diag.what.contains("`Handle`"), "{:?}", err.diag);
+        assert!(err.diag.help.contains("rename it"), "{:?}", err.diag);
+        assert_eq!(code_of(field("Vec<Handle>")), code::E0001);
+    }
+
+    #[test]
+    fn the_error_side_of_a_result_must_be_a_name() {
+        for src in [
+            "Result<u8, String>",
+            "Result<u8, u32>",
+            "Result<u8, Vec<String>>",
+        ] {
+            let err = ret(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0001, "{src}");
+            assert!(
+                err.diag.what.contains("error type"),
+                "{src}: {:?}",
+                err.diag
+            );
+        }
+        assert!(ret("Result<u8, crate::errors::TodoError>").is_ok());
+        assert!(ret("Result<u8, Box<TodoError>>").is_ok());
+    }
+
+    #[test]
+    fn associated_types_and_boxed_streams_have_their_own_messages() {
+        let err = field("Self::Output").unwrap_err();
+        assert!(err.diag.what.contains("Self::Output"), "{:?}", err.diag);
+        for src in [
+            "Pin<Box<dyn Stream<Item = u8> + Send>>",
+            "Box<dyn Stream<Item = u8>>",
+            "Pin<Box<dyn futures_core::Stream<Item = u8>>>",
+        ] {
+            let err = ret(src).unwrap_err();
+            assert_eq!(err.diag.code, code::E0004, "{src}");
+            assert!(
+                err.diag.help.contains("return `impl Stream<Item = T>"),
+                "{src}: {:?}",
+                err.diag
+            );
+        }
+    }
+
+    #[test]
+    fn a_result_nested_in_a_return_says_nested_not_return_type() {
+        let err = ret("Vec<Result<u8, E>>").unwrap_err();
+        assert_eq!(err.diag.code, code::E0005);
+        assert!(
+            err.diag.what.contains("nested inside another type"),
+            "{:?}",
+            err.diag
+        );
+        let err = ret("Vec<impl Stream<Item = u8>>").unwrap_err();
+        assert!(
+            err.diag.what.contains("nested inside another type"),
+            "{:?}",
+            err.diag
+        );
+        // In a field the old wording stands.
+        let err = field("Result<u8, E>").unwrap_err();
+        assert!(err.diag.what.contains("a field"), "{:?}", err.diag);
+    }
+
+    #[test]
+    fn names_the_mapper_recognises_come_with_a_rename_hint() {
+        for src in ["Instant", "Path", "SystemTime", "Ctx", "PathBuf"] {
+            let err = field(src).unwrap_err();
+            assert!(err.diag.help.contains("rename it"), "{src}: {:?}", err.diag);
+        }
     }
 
     #[test]

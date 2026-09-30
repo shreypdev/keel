@@ -55,6 +55,10 @@ pub trait Log {
 }
 
 /// Performs HTTP requests.
+///
+/// A platform that did not register the port answers "unavailable"; `request` reports that (and a
+/// cancelled call, and a reply that does not decode) as an `HttpError`, through
+/// `impl From<PortError> for HttpError`, instead of panicking.
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait Http {
@@ -64,6 +68,10 @@ pub trait Http {
 }
 
 /// A persistent key-value store of byte strings.
+///
+/// The methods have no error channel: calling one while no adapter is registered panics with a
+/// message that names the port and says how to register one (E0062), which traps a wasm core.
+/// Register `Kv` (or bind a fake) before the core uses it.
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait Kv {
@@ -77,7 +85,8 @@ pub trait Kv {
     async fn list(&self, prefix: String) -> Vec<String>;
 }
 
-/// A key-value store for secrets. Same methods as `Kv`, under its own port id.
+/// A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same
+/// behaviour when no adapter is registered (a panic naming the port, E0062).
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait SecureStore {
@@ -92,6 +101,9 @@ pub trait SecureStore {
 }
 
 /// A sandboxed file system. Paths are `/`-separated and relative to the platform's root.
+///
+/// A platform without a file system answers "unavailable"; every method reports that as an
+/// `FsError::Io` through `impl From<PortError> for FsError` instead of panicking.
 #[keel_macros::port]
 #[keel(crate = "crate::root")]
 pub trait Fs {

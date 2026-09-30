@@ -1,0 +1,8 @@
+error: error[keel::E0010]: invalid message for variant `Pair`: `{}` does not say which field it shows; write its position (`{0}`) or its name (`{name}`)
+         = note: the message is a template over the variant's fields
+         = help: use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields
+         = docs: https://keel.dev/errors/E0010
+ --> tests/ui/m3_error_message_implicit_position.rs:9:13
+  |
+9 |     #[error("pair {} and {}")]
+  |             ^^^^^^^^^^^^^^^^

@@ -1,9 +1,10 @@
 //! `#[keel::error]`: what an error enum gets on top of `#[keel::api]`.
 //!
 //! Every variant carries `#[error("..")]` (thiserror style). The message may interpolate
-//! fields: `{0}` and `{}` for tuple fields (`{}` takes the next field in order), `{name}` for
-//! named fields, with the usual format specs (`{0:?}`, `{name:>8}`). `#[error(transparent)]`
-//! forwards `Display` and `source()` to the variant's single field.
+//! fields: `{0}` for tuple fields, `{name}` for named fields, with the usual format specs
+//! (`{0:?}`, `{name:>8}`). An implicit `{}` is rejected: the schema keeps the message text, and the
+//! platforms resolve a placeholder from it by position or name, never by counting `{}`s.
+//! `#[error(transparent)]` forwards `Display` and `source()` to the variant's single field.
 //!
 //! Generated: `Display`, `std::error::Error` (with `source()` for `#[source]`/`#[from]`
 //! fields and transparent variants) and `From<Inner>` for every `#[from]` field. A
@@ -123,7 +124,7 @@ pub(crate) fn take_message(
                 &lit,
                 format!("invalid message for variant `{variant}`: {reason}"),
                 "the message is a template over the variant's fields",
-                "use `{0}` / `{}` for tuple fields and `{name}` for named fields",
+                "use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields",
             ));
             None
         }
@@ -189,7 +190,6 @@ fn rewrite_template(
 ) -> Result<(String, BTreeSet<usize>), String> {
     let mut out = String::with_capacity(text.len() + 8);
     let mut used = BTreeSet::new();
-    let mut implicit = 0usize;
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
@@ -216,7 +216,12 @@ fn rewrite_template(
                         "`{{{inner}}}`: width and precision arguments are not supported"
                     ));
                 }
-                let position = if arg.is_empty() || arg.chars().all(|ch| ch.is_ascii_digit()) {
+                if arg.is_empty() {
+                    return Err(format!(
+                        "`{{{inner}}}` does not say which field it shows; write its position (`{{0}}`) or its name (`{{name}}`)"
+                    ));
+                }
+                let position = if arg.chars().all(|ch| ch.is_ascii_digit()) {
                     if shape != Shape::Tuple {
                         return Err(format!(
                             "`{{{inner}}}` refers to a position, but the variant has {}",
@@ -227,14 +232,9 @@ fn rewrite_template(
                             }
                         ));
                     }
-                    let position = if arg.is_empty() {
-                        let next = implicit;
-                        implicit += 1;
-                        next
-                    } else {
-                        arg.parse::<usize>()
-                            .map_err(|_| format!("`{{{inner}}}` is not a valid position"))?
-                    };
+                    let position = arg
+                        .parse::<usize>()
+                        .map_err(|_| format!("`{{{inner}}}` is not a valid position"))?;
                     if position >= fields.len() {
                         return Err(format!(
                             "`{{{inner}}}` refers to field {position}, but the variant has {}",
@@ -475,15 +475,11 @@ mod tests {
     }
 
     #[test]
-    fn positional_and_implicit_placeholders() {
+    fn positional_placeholders() {
         let fields = tuple_fields(2);
         assert_eq!(
             rewrite("bad {0} and {1:?}", Shape::Tuple, &fields).unwrap(),
             ("bad {__f0} and {__f1:?}".to_owned(), vec![0, 1])
-        );
-        assert_eq!(
-            rewrite("{} then {}", Shape::Tuple, &fields).unwrap(),
-            ("{__f0} then {__f1}".to_owned(), vec![0, 1])
         );
         assert_eq!(
             rewrite("only {1}", Shape::Tuple, &fields).unwrap(),
@@ -518,11 +514,16 @@ mod tests {
                 .unwrap_err()
                 .contains("field 2")
         );
-        assert!(
-            rewrite("{}{}", Shape::Tuple, &tuple)
-                .unwrap_err()
-                .contains("field 1")
-        );
+        // An implicit position is rejected: the schema keeps the text, and the platforms resolve
+        // placeholders by index or name.
+        for text in ["{}", "{} then {}", "{:?}", "{:>4}"] {
+            let reason = rewrite(text, Shape::Tuple, &tuple_fields(2)).unwrap_err();
+            assert!(
+                reason.contains("does not say which field"),
+                "{text}: {reason}"
+            );
+            assert!(reason.contains("{0}"), "{text}: {reason}");
+        }
         assert!(
             rewrite("{a}", Shape::Tuple, &tuple)
                 .unwrap_err()

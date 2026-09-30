@@ -24,11 +24,12 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{ItemFn, LitInt, LitStr};
 
-use super::attrs::{parse_args, root_arg};
+use super::attrs::{flag, option_value, parse_args, root_arg};
+use super::check::Checks;
 use super::common::{item_root, param_meta, submit};
 use super::diag::{Diag, Errors, code};
 use super::naming::{pascal_case, unraw};
-use super::object::analyze;
+use super::object::{analyze, arg_local};
 use super::paths::Root;
 use super::types::{KType, map_return};
 
@@ -108,11 +109,23 @@ pub(crate) fn parse_query_args(attr: TokenStream, flavor: Flavor) -> syn::Result
                     Ok(true)
                 }
                 "key" => {
-                    args.key = Some(meta.value()?.parse()?);
+                    args.key = Some(option_value(
+                        meta,
+                        code::E0040,
+                        "key",
+                        "a string literal",
+                        "key = \"todos:{page}\"",
+                    )?);
                     Ok(true)
                 }
                 "stale" => {
-                    let lit: LitStr = meta.value()?.parse()?;
+                    let lit: LitStr = option_value(
+                        meta,
+                        code::E0040,
+                        "stale",
+                        "a string literal with a unit",
+                        "stale = \"30s\"",
+                    )?;
                     match parse_duration_ms(&lit.value()) {
                         Ok(ms) => args.stale = Some((ms, lit)),
                         Err(reason) => {
@@ -127,11 +140,13 @@ pub(crate) fn parse_query_args(attr: TokenStream, flavor: Flavor) -> syn::Result
                     Ok(true)
                 }
                 "persist" => {
+                    flag(meta, code::E0040, "persist")?;
                     args.persist = Some(meta.path.span());
                     Ok(true)
                 }
                 "retry" => {
-                    let lit: LitInt = meta.value()?.parse()?;
+                    let lit: LitInt =
+                        option_value(meta, code::E0040, "retry", "a whole number", "retry = 3")?;
                     args.retry = Some(lit.base10_parse::<u32>().map_err(|_| {
                         args_error(
                             "`retry` must be a whole number of attempts",
@@ -143,6 +158,7 @@ pub(crate) fn parse_query_args(attr: TokenStream, flavor: Flavor) -> syn::Result
                     Ok(true)
                 }
                 "idempotent" => {
+                    flag(meta, code::E0040, "idempotent")?;
                     args.idempotent = true;
                     Ok(true)
                 }
@@ -285,6 +301,9 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         (KType::Result(ok, _), syn::ReturnType::Type(_, ty))
             if !matches!(**ok, KType::Stream(_)) =>
         {
+            if flavor == Flavor::Query {
+                check_cacheable(ok, &item.sig.output, &fn_name, &mut errors);
+            }
             result_arguments(ty)
         }
         _ => {
@@ -305,13 +324,23 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
             errors.push(error);
         }
     }
+    let mut checks = Checks::new();
+    for p in &analysis.params {
+        checks.ty(&p.ty, &p.kty);
+    }
+    checks.ret(&item.sig.output, &ret);
     errors.finish()?;
     let (Some(ok_ty), Some(err_ty)) = (ok_ty, err_ty) else {
-        return Err(syn::Error::new(
-            Span::call_site(),
-            "keel: internal error: a validated query has no Result type",
+        // `result_arguments` reads what `map_return` accepted; if the two ever disagree, say
+        // so at the signature rather than panicking or hiding it.
+        return Err(signature_error(
+            format!("`{fn_name}` must return `Result<T, E>`"),
+            &item.sig.output,
+            "the cache stores the success value and the error separately, and the platforms show both",
+            "spell the return type as `Result<T, E>` with `E` a `#[keel::error]` enum",
         ));
     };
+    let checks = checks.emit(&root);
 
     // Generation.
     let meta = root.meta();
@@ -341,7 +370,8 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
     );
 
     let param_tys: Vec<&syn::Type> = analysis.params.iter().map(|p| &p.ty).collect();
-    let param_names: Vec<&syn::Ident> = analysis.params.iter().map(|p| &p.ident).collect();
+    // Positional locals, so no parameter name can collide with `__params`, `__ctx` or `__fut`.
+    let param_names: Vec<syn::Ident> = (0..analysis.params.len()).map(arg_local).collect();
     let ctx_arg = if analysis.ctx.is_some_and(|c| c.by_ref) {
         quote!(&__ctx)
     } else {
@@ -471,11 +501,40 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
         };
         #registration
         #erased_registration
+
+        #checks
     })
+}
+
+/// A query caches a value, so its success type cannot be `()` (use a mutation for effects) or
+/// an `Option` (the handle's `data` is already optional before the first result arrives).
+fn check_cacheable(ok: &KType, output: &syn::ReturnType, fn_name: &str, errors: &mut Errors) {
+    let (what, why, help) = match ok {
+        KType::Unit => (
+            format!("query `{fn_name}` returns `()`"),
+            "a query caches the value it returns; a query with nothing to return has nothing to cache",
+            "use `#[keel::mutation]` for a call that only has effects, or return the data the platform needs",
+        ),
+        KType::Option(_) => (
+            format!("query `{fn_name}` returns an `Option`"),
+            "the handle's `data` signal is already optional (no result yet), so an optional result would be ambiguous: `None` could mean \"not loaded\" or \"loaded, absent\"",
+            "return a record or a list (an empty `Vec` says \"nothing\"), or an enum naming the cases",
+        ),
+        _ => return,
+    };
+    errors.push(Diag::new(code::E0042, what, why, help).on(output));
 }
 
 /// `Result<T, E>` -> `(T, E)`.
 fn result_arguments(ty: &syn::Type) -> (Option<syn::Type>, Option<syn::Type>) {
+    let mut ty = ty;
+    loop {
+        match ty {
+            syn::Type::Paren(inner) => ty = &inner.elem,
+            syn::Type::Group(inner) => ty = &inner.elem,
+            _ => break,
+        }
+    }
     if let syn::Type::Path(path) = ty {
         if let Some(seg) = path.path.segments.last() {
             if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
@@ -553,7 +612,7 @@ mod tests {
             "type Params = (u32, String,)",
             "type Output = Vec<Todo>",
             "type Error = HttpError",
-            "todos(&__ctx, page, q)",
+            "todos(&__ctx, __keel_a0, __keel_a1)",
             "kind: ::keel::meta::QueryKind::Query",
             "::keel::meta::Registration::Query",
             "::keel::query::QueryRegistration::of::<TodosQuery>()",
@@ -578,7 +637,7 @@ mod tests {
             "pub const RETRY: u32 = 0u32",
             "pub const IDEMPOTENT: bool = true",
             "pub const KEY: &'static str = \"\"",
-            "add_todo(__ctx, title)",
+            "add_todo(__ctx, __keel_a0)",
             "kind: ::keel::meta::QueryKind::Mutation",
             "::keel::query::MutationRegistration::of::<AddTodoMutation>()",
         ] {
@@ -693,6 +752,49 @@ mod tests {
         assert!(
             e("async fn q<T>(ctx: &Ctx, s: T) -> Result<u8, E> { Ok(1) }")
                 .contains("error[keel::E0002]")
+        );
+    }
+
+    #[test]
+    fn parenthesised_result_types_are_read_through() {
+        // L4: this used to fail with "keel: internal error: a validated query has no Result type".
+        let out = run(
+            Flavor::Query,
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx) -> (Result<u8, E>) { Ok(1) }",
+        )
+        .unwrap();
+        assert!(has(&out, "type Output = u8"), "{out}");
+        assert!(has(&out, "type Error = E"), "{out}");
+    }
+
+    #[test]
+    fn a_query_cannot_cache_unit_or_an_option() {
+        let message = run(
+            Flavor::Query,
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx) -> Result<(), E> { Ok(()) }",
+        )
+        .unwrap_err();
+        assert!(
+            message.starts_with("error[keel::E0042]: query `q` returns `()`"),
+            "{message}"
+        );
+        let message = run(
+            Flavor::Query,
+            "key = \"k\"",
+            "async fn q(ctx: &Ctx) -> Result<Option<u8>, E> { Ok(None) }",
+        )
+        .unwrap_err();
+        assert!(message.contains("returns an `Option`"), "{message}");
+        assert!(
+            run(
+                Flavor::Mutation,
+                "",
+                "async fn m(ctx: &Ctx) -> Result<Option<u8>, E> { Ok(None) }"
+            )
+            .is_ok(),
+            "mutations may return either"
         );
     }
 

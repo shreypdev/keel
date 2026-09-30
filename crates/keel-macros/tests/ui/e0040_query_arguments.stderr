@@ -4,7 +4,7 @@ error: error[keel::E0040]: query `todos` has no `key`
          = docs: https://keel.dev/errors/E0040
  --> tests/ui/e0040_query_arguments.rs:7:14
   |
-7 | pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<u32>, String> {
+7 | pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<u32>, TodoError> {
   |              ^^^^^
 
 error: error[keel::E0040]: mutation `add_todo` has `stale`

@@ -130,6 +130,9 @@ pub(crate) fn take(attrs: &mut Vec<Attribute>, site: Site, errors: &mut Errors) 
 fn reject_cfg(attrs: &[Attribute], site: Site, errors: &mut Errors) {
     for attr in attrs {
         let path = attr.path();
+        if path.is_ident("cfg_attr") && is_schema_neutral_cfg_attr(attr) {
+            continue;
+        }
         if path.is_ident("cfg") || path.is_ident("cfg_attr") {
             errors.push(
                 Diag::new(
@@ -142,6 +145,34 @@ fn reject_cfg(attrs: &[Attribute], site: Site, errors: &mut Errors) {
             );
         }
     }
+}
+
+/// `#[cfg_attr(docsrs, doc(cfg(feature = "x")))]` and friends: a conditional attribute whose
+/// every expansion leaves the schema alone (documentation flags, lint levels, inlining hints).
+///
+/// `doc = "text"` is not neutral: the text is part of the schema, so it may not depend on the
+/// build. The list form (`doc(hidden)`, `doc(cfg(..))`, `doc(alias = "..")`) is.
+fn is_schema_neutral_cfg_attr(attr: &Attribute) -> bool {
+    let Ok(args) =
+        attr.parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+    else {
+        return false;
+    };
+    // The first element is the condition; the rest are the attributes it switches on.
+    let mut attributes = args.iter().skip(1).peekable();
+    if attributes.peek().is_none() {
+        return false;
+    }
+    attributes.all(|meta| match meta {
+        Meta::List(list) if list.path.is_ident("doc") => true,
+        Meta::List(list) => ["allow", "warn", "deny", "forbid", "expect"]
+            .iter()
+            .any(|name| list.path.is_ident(name)),
+        Meta::Path(path) => ["must_use", "inline", "cold", "track_caller"]
+            .iter()
+            .any(|name| path.is_ident(name)),
+        Meta::NameValue(_) => false,
+    })
 }
 
 fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()> {
@@ -174,14 +205,14 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
                 if !site.root {
                     return Err(misplaced("crate"));
                 }
-                let lit: LitStr = meta.value()?.parse()?;
-                out.root = Some(Root::from_lit(&lit)?);
+                out.root = Some(root_arg(&meta)?);
                 Ok(())
             }
             "default" => {
                 if !site.default {
                     return Err(misplaced("default"));
                 }
+                flag(&meta, code::E0008, "default")?;
                 out.default = true;
                 Ok(())
             }
@@ -189,7 +220,13 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
                 if !site.key {
                     return Err(misplaced("key"));
                 }
-                let lit: LitStr = meta.value()?.parse()?;
+                let lit: LitStr = option_value(
+                    &meta,
+                    code::E0008,
+                    "key",
+                    "a string literal naming a field",
+                    "key = \"id\"",
+                )?;
                 out.key = Some(lit);
                 Ok(())
             }
@@ -197,6 +234,7 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut KeelAttr) -> syn::Result<()
                 if !site.no_coalesce {
                     return Err(misplaced("no_coalesce"));
                 }
+                flag(&meta, code::E0008, "no_coalesce")?;
                 out.no_coalesce = true;
                 Ok(())
             }
@@ -261,9 +299,67 @@ pub(crate) fn parse_args(
     syn::parse::Parser::parse2(parser, attr)
 }
 
+/// Reads the value of `option = value`: a diagnostic with `code` (not `syn`'s "expected `=`" or
+/// "expected string literal") when the value is missing or has the wrong kind.
+///
+/// `expects` says what the value is ("a string literal"), `example` shows a correct use.
+pub(crate) fn option_value<T: syn::parse::Parse>(
+    meta: &ParseNestedMeta<'_>,
+    code: &'static str,
+    option: &str,
+    expects: &str,
+    example: &str,
+) -> syn::Result<T> {
+    if !meta.input.peek(syn::Token![=]) {
+        return Err(Diag::new(
+            code,
+            format!("`{option}` needs a value"),
+            format!("`{option}` takes {expects}"),
+            format!("write `{example}`"),
+        )
+        .on(&meta.path));
+    }
+    let value = meta.value()?;
+    value.parse::<T>().map_err(|error| {
+        Diag::new(
+            code,
+            format!("`{option}` must be {expects}"),
+            format!("`{option}` takes {expects}; anything else cannot be read at compile time"),
+            format!("write `{example}`"),
+        )
+        .at(error.span())
+    })
+}
+
+/// A flag option (`default`, `persist`): a diagnostic with `code` if a value follows.
+pub(crate) fn flag(
+    meta: &ParseNestedMeta<'_>,
+    code: &'static str,
+    option: &str,
+) -> syn::Result<()> {
+    if meta.input.peek(syn::Token![=]) {
+        return Err(Diag::new(
+            code,
+            format!("`{option}` takes no value"),
+            format!(
+                "`{option}` switches a behaviour on by being present; there is nothing to set it to"
+            ),
+            format!("write `{option}` alone"),
+        )
+        .on(&meta.path));
+    }
+    Ok(())
+}
+
 /// Reads a `crate = "path"` argument.
 pub(crate) fn root_arg(meta: &ParseNestedMeta<'_>) -> syn::Result<Root> {
-    let lit: LitStr = meta.value()?.parse()?;
+    let lit: LitStr = option_value(
+        meta,
+        code::E0008,
+        "crate",
+        "a string literal naming a path",
+        "crate = \"::keel\"",
+    )?;
     Root::from_lit(&lit)
 }
 
@@ -291,6 +387,19 @@ pub(crate) fn docs(attrs: &[Attribute]) -> String {
     lines.join("\n").trim().to_owned()
 }
 
+/// Whether `path` names one of the Keel attribute macros (`keel::query`, `keel_macros::api`).
+///
+/// An attribute macro on a nested item (a method of an `#[keel::api] impl`) is expanded after
+/// the outer macro; once the outer macro has reported it, the fallback drops it so it is not
+/// reported twice.
+pub(crate) fn is_keel_macro_path(path: &syn::Path) -> bool {
+    path.segments.len() >= 2
+        && path
+            .segments
+            .first()
+            .is_some_and(|seg| seg.ident == "keel" || seg.ident == "keel_macros")
+}
+
 /// Removes helper attributes (`#[keel(..)]` and any names in `also`) from a whole item.
 ///
 /// Used on the fallback path, so that after a diagnostic the original item is still emitted
@@ -308,7 +417,9 @@ impl<'a> StripHelpers<'a> {
     fn clean(&self, attrs: &mut Vec<Attribute>) {
         attrs.retain(|attr| {
             let path = attr.path();
-            !(path.is_ident("keel") || self.also.iter().any(|name| path.is_ident(name)))
+            !(path.is_ident("keel")
+                || is_keel_macro_path(path)
+                || self.also.iter().any(|name| path.is_ident(name)))
         });
     }
 }
@@ -458,7 +569,7 @@ mod tests {
             "{message}"
         );
         let message = first_error(
-            vec![parse_quote!(#[cfg_attr(test, allow(dead_code))])],
+            vec![parse_quote!(#[cfg_attr(test, derive(Clone))])],
             Site::NOTHING,
         );
         assert!(message.contains("`#[cfg_attr]`"), "{message}");
@@ -469,6 +580,29 @@ mod tests {
         take(&mut attrs, Site::ITEM, &mut errors);
         assert!(errors.is_empty());
         assert_eq!(attrs.len(), 1, "cfg is kept where it is allowed");
+    }
+
+    #[test]
+    fn documentation_and_lint_cfg_attrs_are_schema_neutral() {
+        let mut attrs: Vec<Attribute> = vec![
+            parse_quote!(#[cfg_attr(docsrs, doc(cfg(feature = "x")))]),
+            parse_quote!(#[cfg_attr(test, allow(dead_code), doc(hidden))]),
+            parse_quote!(#[cfg_attr(feature = "hot", inline)]),
+        ];
+        let mut errors = Errors::new();
+        take(&mut attrs, Site::FIELD, &mut errors);
+        assert!(errors.is_empty(), "neutral cfg_attrs are accepted");
+        assert_eq!(attrs.len(), 3, "and kept for rustc");
+        // A `doc = \"..\"` text, a derive or an unknown attribute may change the schema.
+        for attr in [
+            parse_quote!(#[cfg_attr(test, doc = "only in tests")]),
+            parse_quote!(#[cfg_attr(test, derive(Debug))]),
+            parse_quote!(#[cfg_attr(test, serde(skip))]),
+            parse_quote!(#[cfg_attr(test)]),
+        ] {
+            let message = first_error(vec![attr], Site::FIELD);
+            assert!(message.contains("`#[cfg_attr]`"), "{message}");
+        }
     }
 
     #[test]

@@ -57,7 +57,8 @@ use syn::spanned::Spanned;
 use syn::{Fields, ItemStruct};
 
 use super::attrs::{Site, take};
-use super::common::{check_generics, derived, item_root};
+use super::check::{Checks, on_unimplemented};
+use super::common::{check_generics, item_root};
 use super::diag::{Diag, Errors, code};
 use super::naming::unraw;
 use super::paths::Root;
@@ -86,6 +87,7 @@ struct SignalField {
 
 struct StateField {
     ident: syn::Ident,
+    ty: syn::Type,
     is_ctx: bool,
 }
 
@@ -162,6 +164,7 @@ pub(crate) fn expand_store(
     check_generics(&item.generics, &item.ident.to_string(), &mut errors);
     let name = item.ident.clone();
     let name_str = unraw(&name);
+    let struct_docs = super::attrs::docs(&item.attrs);
 
     let mut signals: Vec<SignalField> = Vec::new();
     let mut state: Vec<StateField> = Vec::new();
@@ -225,7 +228,11 @@ pub(crate) fn expand_store(
                                 return None;
                             };
                             match syn::parse_str::<syn::Ident>(&key_name) {
-                                Ok(key_ident) => Some((key_name, key_ident, item_ty)),
+                                Ok(mut key_ident) => {
+                                    // A key naming no field is then reported on the literal.
+                                    key_ident.set_span(lit.span());
+                                    Some((key_name, key_ident, item_ty))
+                                }
                                 Err(_) => {
                                     errors.push(
                                         Diag::new(
@@ -255,6 +262,7 @@ pub(crate) fn expand_store(
                         take(&mut field.attrs, Site::STATE_FIELD, &mut errors);
                         state.push(StateField {
                             is_ctx: is_ctx_type(&field.ty),
+                            ty: field.ty.clone(),
                             ident,
                         });
                     }
@@ -293,6 +301,12 @@ pub(crate) fn expand_store(
     }
     errors.finish()?;
 
+    let mut checks = Checks::new();
+    for signal in &signals {
+        checks.ty(&signal.value_ty, &signal.kty);
+    }
+    let checks = checks.emit(&root);
+
     // Hidden cell field.
     let signals_path = root.signals();
     if let Fields::Named(named) = &mut item.fields {
@@ -305,7 +319,6 @@ pub(crate) fn expand_store(
     let wire = root.wire();
     let meta = root.meta();
     let runtime = root.runtime();
-    let derived = derived();
 
     // --- the signal table -------------------------------------------------------------------
     let signal_metas = signals.iter().map(|s| {
@@ -389,6 +402,52 @@ pub(crate) fn expand_store(
         })
         .collect();
 
+    let default_trait = format_ident!("__KeelRestoreDefault_{}", name_str);
+    let needs_default = restore_hook.is_none() && state.iter().any(|f| !f.is_ctx);
+    let default_attr = on_unimplemented(
+        &Diag::new(
+            code::E0013,
+            format!(
+                "store `{name_str}` cannot be restored automatically: its field of type `{{Self}}` has no `Default`"
+            ),
+            "restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument)",
+            "implement `Default` for the type, or add `#[keel::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store",
+        ),
+        "this field type has no `Default`",
+    );
+    let default_items = if needs_default {
+        quote! {
+            #[doc(hidden)]
+            #[allow(non_camel_case_types, dead_code)]
+            #default_attr
+            trait #default_trait: ::core::marker::Sized {
+                fn __keel_default() -> Self;
+            }
+            impl<__KeelT: ::core::default::Default> #default_trait for __KeelT {
+                fn __keel_default() -> Self {
+                    <__KeelT as ::core::default::Default>::default()
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
+
+    // A store is constructed by the constructors of its `#[keel::api(store)] impl` block, which
+    // also implements `KeelObject`. Without the block `rustc` only says `KeelObject` is missing
+    // (and, from `StoreObject`'s supertrait, says so once more); this bound says what to write.
+    let impl_attr = on_unimplemented(
+        &Diag::new(
+            code::E0011,
+            format!("store `{name_str}` has no `#[keel::api(store)]` impl block"),
+            "the constructors of the impl block create the store and wire its signals to the platforms; without the block the store can never be instantiated",
+            format!(
+                "add an `impl {name_str}` block marked `#[keel::api(store)]` with a constructor such as `pub fn new(ctx: Ctx) -> Self`"
+            ),
+        ),
+        "this store has no `#[keel::api(store)]` impl block",
+    );
+
     let build = match &restore_hook {
         Some(hook) => {
             let wrapped = plain.iter().zip(&values).map(|(s, value)| {
@@ -398,12 +457,16 @@ pub(crate) fn expand_store(
             quote!(#hook(__ctx, #(#wrapped),*))
         }
         None => {
+            // A field that is not a `Ctx` is filled with `Default::default()`: through a trait of
+            // the expansion, so a field type without `Default` gets the branded E0013 at the
+            // field instead of `rustc`'s bound error at the attribute.
             let state_inits = state.iter().map(|f| {
                 let ident = &f.ident;
+                let ty = &f.ty;
                 if f.is_ctx {
                     quote!(#ident: ::core::clone::Clone::clone(&__ctx))
                 } else {
-                    quote!(#ident: ::core::default::Default::default())
+                    quote_spanned!(ty.span()=> #ident: <#ty as #default_trait>::__keel_default())
                 }
             });
             let signal_inits = plain.iter().zip(&values).map(|(s, value)| {
@@ -429,6 +492,10 @@ pub(crate) fn expand_store(
     let cell_fn = format_ident!("__keel_cell_erased_{}", name_str);
     let restorer = registration(&root, &name_str, &restorer_fn, &cell_fn);
 
+    // The work lives in inherent `#[doc(hidden)]` members. `impl StoreObject` (which needs
+    // `KeelObject`) is written by the `#[keel::api(store)] impl` block next to `impl KeelObject`
+    // and only forwards to them, so a store whose impl block is missing gets the branded E0011
+    // and not also an unsatisfied `KeelObject` bound.
     Ok(quote! {
         #item
 
@@ -440,6 +507,10 @@ pub(crate) fn expand_store(
             pub const __KEEL_STORE_META: #meta::StoreMeta = #meta::StoreMeta {
                 signals: &[ #(#signal_metas),* ],
             };
+
+            /// The struct's own documentation, which the impl block's object docs start with.
+            #[doc(hidden)]
+            pub const __KEEL_DOCS: &'static str = #struct_docs;
 
             /// Builds the signal cell and attaches every signal, in declaration order.
             #[doc(hidden)]
@@ -463,16 +534,9 @@ pub(crate) fn expand_store(
                     .map(|_| ())
             }
 
-            /// Records the handle the object table issued.
+            /// The store's cell.
             #[doc(hidden)]
-            pub fn __keel_set_handle(&self, __handle: u64) {
-                <Self as #runtime::StoreObject>::cell(self).set_handle(__handle);
-            }
-        }
-
-        #derived
-        impl #runtime::StoreObject for #name {
-            fn cell(&self) -> &::std::sync::Arc<#signals_path::StoreCell> {
+            pub fn __keel_cell_ref(&self) -> &::std::sync::Arc<#signals_path::StoreCell> {
                 // Every path that publishes a store calls `__keel_attach_all` first and reports
                 // its error, so this only fails for a store that was never published. It then
                 // gets an empty cell (it delivers nothing) rather than a panic.
@@ -486,8 +550,16 @@ pub(crate) fn expand_store(
                 })
             }
 
+            /// Records the handle the object table issued.
+            #[doc(hidden)]
+            pub fn __keel_set_handle(&self, __handle: u64) {
+                self.__keel_cell_ref().set_handle(__handle);
+            }
+
+            /// Rebuilds the store from the body of its snapshot record.
+            #[doc(hidden)]
             #[allow(unused_mut, unused_variables)]
-            fn restore(
+            pub fn __keel_restore(
                 __ctx: #runtime::Ctx,
                 __r: &mut #wire::Reader<'_>,
             ) -> ::core::result::Result<Self, #wire::WireError> {
@@ -541,7 +613,7 @@ pub(crate) fn expand_store(
             ::std::sync::Arc<dyn ::core::any::Any + ::core::marker::Send + ::core::marker::Sync>,
             #wire::WireError,
         > {
-            let __value = <#name as #runtime::StoreObject>::restore(__ctx, __r)?;
+            let __value = <#name>::__keel_restore(__ctx, __r)?;
             // The snapshot re-issues the store's old handle; the cell must know it.
             __value.__keel_set_handle(__handle);
             ::core::result::Result::Ok(::std::sync::Arc::new(__value)
@@ -555,10 +627,89 @@ pub(crate) fn expand_store(
         ) -> ::core::option::Option<&::std::sync::Arc<#signals_path::StoreCell>> {
             __any
                 .downcast_ref::<#name>()
-                .map(<#name as #runtime::StoreObject>::cell)
+                .map(<#name>::__keel_cell_ref)
         }
         #restorer
+
+        #default_items
+
+        #[doc(hidden)]
+        #[allow(non_camel_case_types, dead_code, unused)]
+        const _: () = {
+            #impl_attr
+            trait __KeelStoreNeedsImpl {}
+            impl<__KeelT: #runtime::KeelObject> __KeelStoreNeedsImpl for __KeelT {}
+            fn __keel_need_impl<__KeelT: __KeelStoreNeedsImpl>() {}
+            fn __keel_check_impl() {
+                __keel_need_impl::<#name>();
+            }
+        };
+
+        #checks
     })
+}
+
+/// What a store struct that failed to expand still needs, so the error is the only one.
+///
+/// The impl block `#[keel::api(store)] impl Type` is expanded on its own and talks to the struct
+/// through members `#[keel::store]` defines: the hidden cell field (its struct literals get it
+/// added), `__KEEL_IS_STORE`, `__KEEL_STORE_META`, `__keel_attach_all` and `__keel_set_handle`.
+/// Without them a bad store produces a false E0011 and "no field named `__keel_cell`" next to the
+/// real error. This adds the field and empty versions of the members to the original struct.
+pub(crate) fn recover(args_root: Option<Root>, item: &mut syn::Item) -> TokenStream {
+    let syn::Item::Struct(item) = item else {
+        return TokenStream::new();
+    };
+    let mut attrs = item.attrs.clone();
+    let root = item_root(&mut attrs, args_root, &mut Errors::new());
+    let signals = root.signals();
+    let meta = root.meta();
+    let runtime = root.runtime();
+    let wire = root.wire();
+    if let Fields::Named(named) = &mut item.fields {
+        let has_cell = named.named.iter().any(|field| {
+            field
+                .ident
+                .as_ref()
+                .is_some_and(|ident| ident == "__keel_cell")
+        });
+        if !has_cell {
+            named.named.push(syn::parse_quote! {
+                #[doc(hidden)]
+                pub __keel_cell: #signals::CellSlot
+            });
+        }
+    }
+    let name = &item.ident;
+    let (impl_generics, type_generics, where_clause) = item.generics.split_for_impl();
+    quote! {
+        #[allow(dead_code)]
+        impl #impl_generics #name #type_generics #where_clause {
+            #[doc(hidden)]
+            pub const __KEEL_IS_STORE: bool = true;
+            #[doc(hidden)]
+            pub const __KEEL_STORE_META: #meta::StoreMeta = #meta::StoreMeta { signals: &[] };
+            #[doc(hidden)]
+            pub const __KEEL_DOCS: &'static str = "";
+            #[doc(hidden)]
+            pub fn __keel_attach_all(&self) -> ::core::result::Result<(), #signals::SignalsError> {
+                ::core::result::Result::Ok(())
+            }
+            #[doc(hidden)]
+            pub fn __keel_set_handle(&self, __handle: u64) {}
+            #[doc(hidden)]
+            pub fn __keel_cell_ref(&self) -> &::std::sync::Arc<#signals::StoreCell> {
+                ::core::unreachable!("the store failed to expand; the build stops first")
+            }
+            #[doc(hidden)]
+            pub fn __keel_restore(
+                _ctx: #runtime::Ctx,
+                _r: &mut #wire::Reader<'_>,
+            ) -> ::core::result::Result<Self, #wire::WireError> {
+                ::core::unreachable!("the store failed to expand; the build stops first")
+            }
+        }
+    }
 }
 
 /// The `inventory::submit!` of the store's erased restore function and cell accessor.
@@ -618,8 +769,8 @@ mod tests {
             "{out}"
         );
         assert!(
-            has(&out, "impl ::keel::runtime::StoreObject for S"),
-            "{out}"
+            !has(&out, "impl ::keel::runtime::StoreObject for S"),
+            "the impl block writes StoreObject: {out}"
         );
         assert!(has(&out, "::keel::runtime::StoreRestorer"), "{out}");
     }
@@ -792,7 +943,10 @@ mod tests {
             "{out}"
         );
         assert!(
-            has(&out, "extra: ::core::default::Default::default()"),
+            has(
+                &out,
+                "extra: <Vec<u8> as __KeelRestoreDefault_S>::__keel_default()"
+            ),
             "{out}"
         );
         assert!(

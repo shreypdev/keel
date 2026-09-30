@@ -31,6 +31,10 @@ use crate::{Reader, WireError, Writer};
 ///
 /// assert_eq!(Point { x: 1, y: -1 }.encode_to_vec(), [1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]);
 /// ```
+#[diagnostic::on_unimplemented(
+    message = "error[keel::E0001]: `{Self}` cannot cross the boundary by value\n  = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[keel::api]` (records, enums) or `#[keel::error]`; an object (`#[keel::api] impl`) crosses by handle, never as a value\n  = help: declare `{Self}` with `#[keel::api]`, or return a record with the data the platform needs\n  = docs: https://keel.dev/errors/E0001",
+    label = "not a type that can cross the boundary"
+)]
 pub trait Encode {
     /// Appends the wire encoding of `self` to `w`.
     fn encode(&self, w: &mut Writer);
@@ -67,6 +71,10 @@ pub trait Encode {
 /// assert_eq!(Point::decode_exact(&[1, 0, 0, 0, 2, 0, 0, 0]), Ok(Point { x: 1, y: 2 }));
 /// assert!(Point::decode_exact(&[1, 0, 0, 0]).is_err());
 /// ```
+#[diagnostic::on_unimplemented(
+    message = "error[keel::E0001]: `{Self}` cannot cross the boundary by value\n  = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[keel::api]` (records, enums) or `#[keel::error]`; an object (`#[keel::api] impl`) crosses by handle, never as a value\n  = help: declare `{Self}` with `#[keel::api]`, or return a record with the data the platform needs\n  = docs: https://keel.dev/errors/E0001",
+    label = "not a type that can cross the boundary"
+)]
 pub trait Decode: Sized {
     /// A lower bound on the number of bytes any encoding of this type occupies.
     ///

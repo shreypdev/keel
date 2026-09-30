@@ -1,0 +1,17 @@
+error: error[keel::E0001]: `Handle` cannot be used in a public signature
+         = note: a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature
+         = help: use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if `Handle` is a type of your own, rename it: Keel recognises this name wherever it is written
+         = docs: https://keel.dev/errors/E0001
+ --> tests/ui/m3_handle_in_a_signature.rs:9:22
+  |
+9 | pub fn close(handle: Handle) {}
+  |                      ^^^^^^
+
+error: error[keel::E0001]: `Handle` cannot be used in a public signature
+         = note: a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature
+         = help: use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if `Handle` is a type of your own, rename it: Keel recognises this name wherever it is written
+         = docs: https://keel.dev/errors/E0001
+  --> tests/ui/m3_handle_in_a_signature.rs:13:16
+   |
+13 |     pub inner: Handle,
+   |                ^^^^^^

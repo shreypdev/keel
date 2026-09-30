@@ -17,7 +17,8 @@
 
 use core::fmt;
 
-use keel_wire::Bytes;
+use keel_runtime::PortError;
+use keel_wire::{Bytes, Decode};
 
 /// The method of an `HttpRequest`.
 // SPEC 8 names this type without listing its variants; the three platform runtimes number
@@ -257,6 +258,68 @@ pub enum FsError {
     Io(String),
 }
 
+/// A port that cannot answer is an ordinary outcome (SPEC 6.3), not a bug: a platform that does
+/// not register `Http` answers "unavailable". `HttpProxy::request` therefore returns the outcome
+/// as an error instead of panicking (which would trap a wasm core):
+///
+/// | `PortError` | `HttpError` |
+/// |---|---|
+/// | `Unavailable` | `Network("the Http port has no adapter registered")` |
+/// | `Cancelled` | `Cancelled` |
+/// | `Decode(e)` | `Network("malformed port reply: <e>")` |
+/// | `Failed(bytes)` | the decoded `HttpError`, else `Network("the Http port reported an error that does not decode")` |
+impl From<PortError> for HttpError {
+    fn from(error: PortError) -> Self {
+        if let PortError::Failed(bytes) = &error {
+            return match HttpError::decode_exact(bytes) {
+                Ok(typed) => typed,
+                Err(_) => HttpError::Network(
+                    "the Http port reported an error that does not decode".to_owned(),
+                ),
+            };
+        }
+        match error {
+            PortError::Unavailable => {
+                HttpError::Network("the Http port has no adapter registered".to_owned())
+            }
+            PortError::Cancelled => HttpError::Cancelled,
+            PortError::Decode(why) => HttpError::Network(format!("malformed port reply: {why}")),
+            other => HttpError::Network(format!("the Http port call failed: {other}")),
+        }
+    }
+}
+
+/// A port that cannot answer is an ordinary outcome (SPEC 6.3), not a bug: a platform without a
+/// file system (or a web page without the File System Access API) answers "unavailable".
+/// `FsProxy`'s methods return the outcome as an error instead of panicking:
+///
+/// | `PortError` | `FsError` |
+/// |---|---|
+/// | `Unavailable` | `Io("the Fs port has no adapter registered")` |
+/// | `Cancelled` | `Io("the Fs call was cancelled")` |
+/// | `Decode(e)` | `Io("malformed port reply: <e>")` |
+/// | `Failed(bytes)` | the decoded `FsError`, else `Io("the Fs port reported an error that does not decode")` |
+impl From<PortError> for FsError {
+    fn from(error: PortError) -> Self {
+        if let PortError::Failed(bytes) = &error {
+            return match FsError::decode_exact(bytes) {
+                Ok(typed) => typed,
+                Err(_) => {
+                    FsError::Io("the Fs port reported an error that does not decode".to_owned())
+                }
+            };
+        }
+        match error {
+            PortError::Unavailable => {
+                FsError::Io("the Fs port has no adapter registered".to_owned())
+            }
+            PortError::Cancelled => FsError::Io("the Fs call was cancelled".to_owned()),
+            PortError::Decode(why) => FsError::Io(format!("malformed port reply: {why}")),
+            other => FsError::Io(format!("the Fs port call failed: {other}")),
+        }
+    }
+}
+
 /// What kind of network the device is on.
 #[keel_macros::api]
 #[keel(crate = "crate::root")]
@@ -361,6 +424,56 @@ mod tests {
         assert_eq!(FsError::Io("disk".into()).to_string(), "I/O error: disk");
         let boxed: Box<dyn std::error::Error> = Box::new(HttpError::Timeout);
         assert_eq!(boxed.to_string(), "the request timed out");
+    }
+
+    #[test]
+    fn port_errors_map_onto_the_typed_errors() {
+        use keel_wire::WireError;
+
+        let bad = WireError::InvalidTag {
+            tag: 9,
+            at: 3,
+            ty: "HttpResponse",
+        };
+        assert_eq!(
+            HttpError::from(PortError::Unavailable),
+            HttpError::Network("the Http port has no adapter registered".into())
+        );
+        assert_eq!(HttpError::from(PortError::Cancelled), HttpError::Cancelled);
+        assert_eq!(
+            HttpError::from(PortError::Decode(bad)),
+            HttpError::Network(format!("malformed port reply: {bad}"))
+        );
+        // `Failed` carries the encoded error: a typed one comes back as itself, garbage as text.
+        assert_eq!(
+            HttpError::from(PortError::Failed(HttpError::Timeout.encode_to_vec())),
+            HttpError::Timeout
+        );
+        assert_eq!(
+            HttpError::from(PortError::Failed(vec![0xff, 0xff])),
+            HttpError::Network("the Http port reported an error that does not decode".into())
+        );
+
+        assert_eq!(
+            FsError::from(PortError::Unavailable),
+            FsError::Io("the Fs port has no adapter registered".into())
+        );
+        assert_eq!(
+            FsError::from(PortError::Cancelled),
+            FsError::Io("the Fs call was cancelled".into())
+        );
+        assert_eq!(
+            FsError::from(PortError::Decode(bad)),
+            FsError::Io(format!("malformed port reply: {bad}"))
+        );
+        assert_eq!(
+            FsError::from(PortError::Failed(FsError::Denied.encode_to_vec())),
+            FsError::Denied
+        );
+        assert_eq!(
+            FsError::from(PortError::Failed(vec![9])),
+            FsError::Io("the Fs port reported an error that does not decode".into())
+        );
     }
 
     #[test]

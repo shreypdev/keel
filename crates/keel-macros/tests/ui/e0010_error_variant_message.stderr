@@ -9,7 +9,7 @@ error: error[keel::E0010]: variant `NotFound` has no `#[error(..)]` message
 
 error: error[keel::E0010]: invalid message for variant `Missing`: `{1}` refers to field 1, but the variant has 1
          = note: the message is a template over the variant's fields
-         = help: use `{0}` / `{}` for tuple fields and `{name}` for named fields
+         = help: use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields
          = docs: https://keel.dev/errors/E0010
   --> tests/ui/e0010_error_variant_message.rs:10:13
    |

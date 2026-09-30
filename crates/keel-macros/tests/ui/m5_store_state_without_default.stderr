@@ -1,0 +1,21 @@
+error[E0277]: error[keel::E0013]: store `Sync` cannot be restored automatically: its field of type `Config` has no `Default`
+                = note: restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument)
+                = help: implement `Default` for the type, or add `#[keel::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store
+                = docs: https://keel.dev/errors/E0013
+  --> tests/ui/m5_store_state_without_default.rs:16:13
+   |
+16 |     config: Config,
+   |             ^^^^^^ this field type has no `Default`
+   |
+   = help: the trait `Default` is not implemented for `Config`
+note: required for `Config` to implement `__KeelRestoreDefault_Sync`
+  --> tests/ui/m5_store_state_without_default.rs:13:1
+   |
+13 | #[k::store]
+   | ^^^^^^^^^^^
+   = note: this error originates in the attribute macro `k::store` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider annotating `Config` with `#[derive(Default)]`
+   |
+ 9 + #[derive(Default)]
+10 | pub struct Config {
+   |

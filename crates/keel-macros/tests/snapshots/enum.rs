@@ -8,6 +8,9 @@ pub enum Shape {
 impl Shape {
     /// The stable Keel type id: `fnv1a32` of the type name.
     pub const KEEL_TYPE_ID: u32 = ::keel::meta::ids::type_id("Shape");
+    /// Whether this is a `#[keel::error]` enum (what a `Result` may throw).
+    #[doc(hidden)]
+    pub const KEEL_IS_ERROR: bool = false;
 }
 #[automatically_derived]
 impl ::keel::wire::Encode for Shape {
@@ -116,3 +119,21 @@ static __KEEL_META_Shape: ::keel::meta::EnumMeta = ::keel::meta::EnumMeta {
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Enum(& __KEEL_META_Shape)
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<f64, ::core::primitive::f64>();
+    }
+};

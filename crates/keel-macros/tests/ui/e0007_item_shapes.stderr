@@ -26,8 +26,8 @@ error: error[keel::E0007]: constructor `new` is `async`
    |         ^^^^^
 
 error: error[keel::E0007]: `helper` is neither a method nor a constructor
-         = note: a `pub fn` in a `#[keel::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor)
-         = help: add `&self`, make it return `Self`, or make it private / move it to a free `#[keel::api] fn`
+         = note: a `pub fn` in a `#[keel::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed
+         = help: add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[keel::api] fn`
          = docs: https://keel.dev/errors/E0007
   --> tests/ui/e0007_item_shapes.rs:19:12
    |

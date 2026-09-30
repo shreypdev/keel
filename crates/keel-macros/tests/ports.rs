@@ -23,6 +23,14 @@ pub enum WebError {
     Timeout,
 }
 
+/// A port that cannot answer (nobody registered it, the call was cancelled, the reply did not
+/// decode) is an ordinary outcome; a method with an error channel reports it as its error.
+impl From<PortError> for WebError {
+    fn from(error: PortError) -> Self {
+        WebError::Network(format!("port: {error}"))
+    }
+}
+
 #[k::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct WebRequest {
@@ -127,6 +135,9 @@ fn runtime_with_host() -> (Runtime, Ctx, Arc<Mutex<Vec<String>>>) {
         if method_id == id("Web", "ping") {
             let url = String::decode_exact(args).unwrap();
             log.lock().unwrap().push(format!("ping {url}"));
+            if url == "garbage" {
+                return Ok(vec![9, 9, 9]);
+            }
             return Ok(true.encode_to_vec());
         }
         if method_id == id("Web", "fire") {
@@ -189,7 +200,7 @@ fn plain_and_unit_returns() {
 }
 
 #[test]
-fn an_unavailable_port_panics_with_a_message_naming_port_and_method() {
+fn h2_a_method_without_an_error_channel_panics_with_a_message_that_teaches() {
     let rt = Runtime::new();
     let ctx = rt.ctx();
     let panic = catch_unwind(AssertUnwindSafe(|| {
@@ -197,37 +208,89 @@ fn an_unavailable_port_panics_with_a_message_naming_port_and_method() {
     }))
     .unwrap_err();
     let message = message_of(panic);
-    assert!(
-        message.contains("keel: port call `Web.ping` failed"),
-        "{message}"
-    );
-    assert!(message.contains("Unavailable"), "{message}");
+    for needle in [
+        "keel: the `Web` port has no adapter registered (method `ping`)",
+        "Register one with core.registerPort(..) (TypeScript, Kotlin, Swift) / keel_port_register (C)",
+        "or bind a Rust implementation",
+        "On the web this traps the core",
+        "https://keel.dev/errors/E0062",
+    ] {
+        assert!(message.contains(needle), "missing `{needle}` in: {message}");
+    }
 }
 
 #[test]
-fn a_reply_that_does_not_decode_panics_with_a_clear_message() {
+fn h2_an_undecodable_reply_of_an_infallible_method_names_the_port_and_method() {
     let (_rt, ctx, _) = runtime_with_host();
     let panic = catch_unwind(AssertUnwindSafe(|| {
-        let _ = block_on(web(&ctx).request(WebRequest {
-            url: "garbage".into(),
-            retries: 0,
-        }));
+        block_on(web(&ctx).ping("garbage".into()));
     }))
     .unwrap_err();
     let message = message_of(panic);
     assert!(
-        message.contains("port `Web.request` replied with a value that does not decode"),
+        message.contains("the `Web` port (method `ping`) replied with bytes that do not decode"),
         "{message}"
     );
-    // A transport-level failure on a `Result` method is not a typed error either.
-    let panic = catch_unwind(AssertUnwindSafe(|| {
-        let _ = block_on(web(&ctx).request(WebRequest {
-            url: "gone".into(),
-            retries: 0,
-        }));
+}
+
+#[test]
+fn h2_result_methods_return_an_unavailable_port_as_their_error() {
+    // No binding at all: SPEC 6.3 says a port nobody registered answers "unavailable".
+    let rt = Runtime::new();
+    let ctx = rt.ctx();
+    let error = block_on(web(&ctx).request(WebRequest {
+        url: "x".into(),
+        retries: 0,
     }))
     .unwrap_err();
-    assert!(message_of(panic).contains("Web.request` failed"));
+    assert_eq!(error, WebError::Network("port: port unavailable".into()));
+    // A unit `Ok` type takes the same path.
+    assert_eq!(
+        block_on(web(&ctx).check("x".into())),
+        Err(WebError::Network("port: port unavailable".into()))
+    );
+    // So does a synchronous port (`Vault::get` is not `async`).
+    assert_eq!(
+        vault(&ctx).get("k".into()),
+        Err(WebError::Network("port: port unavailable".into()))
+    );
+}
+
+#[test]
+fn h2_result_methods_return_undecodable_replies_and_transport_failures_as_their_error() {
+    let (_rt, ctx, _) = runtime_with_host();
+    // `garbage` answers with bytes that are not a `WebResponse`.
+    let error = block_on(web(&ctx).request(WebRequest {
+        url: "garbage".into(),
+        retries: 0,
+    }))
+    .unwrap_err();
+    assert!(
+        matches!(&error, WebError::Network(text) if text.starts_with("port: malformed port reply")),
+        "{error:?}"
+    );
+    // A transport-level failure is the method's error as well, not a panic.
+    let error = block_on(web(&ctx).request(WebRequest {
+        url: "gone".into(),
+        retries: 0,
+    }))
+    .unwrap_err();
+    assert_eq!(error, WebError::Network("port: port unavailable".into()));
+}
+
+#[test]
+fn h2_a_typed_error_the_adapter_reports_still_decodes_into_the_error_type() {
+    let rt = Runtime::new();
+    // The adapter reports a typed error whose bytes are not a `WebError`: that is a decode
+    // failure, reported through `From<PortError>`, never a panic.
+    rt.bind_foreign(<dyn Web as Port>::PORT_ID, |_, _| {
+        Err(PortError::Failed(vec![0xff, 0xff]))
+    });
+    let error = block_on(web(&rt.ctx()).check("x".into())).unwrap_err();
+    assert!(
+        matches!(&error, WebError::Network(text) if text.starts_with("port: malformed port reply")),
+        "{error:?}"
+    );
 }
 
 #[test]

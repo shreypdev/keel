@@ -629,3 +629,44 @@ fn fakes_tolerate_concurrent_use() {
     assert_eq!(fakes.clock.pending_timers(), 400);
     assert_eq!(fakes.clock.advance(Duration::from_millis(1)).len(), 400);
 }
+
+// ---- unavailable ports (review H2) -------------------------------------------------------------
+
+#[test]
+fn h2_request_reply_ports_report_an_unbound_port_as_their_typed_error() {
+    // No fakes installed: nobody registered `Http` or `Fs`, which SPEC 6.3 answers "unavailable".
+    let t = TestRuntime::new();
+    let http = HttpProxy::new(t.ctx());
+    assert_eq!(
+        t.run_until(http.request(HttpRequest::get("https://api.test/x"))),
+        Err(HttpError::Network(
+            "the Http port has no adapter registered".into()
+        ))
+    );
+    let fs = FsProxy::new(t.ctx());
+    let expected = FsError::Io("the Fs port has no adapter registered".into());
+    assert_eq!(t.run_until(fs.read("a".into())), Err(expected.clone()));
+    assert_eq!(
+        t.run_until(fs.write("a".into(), Bytes(vec![1]))),
+        Err(expected.clone())
+    );
+    assert_eq!(t.run_until(fs.delete("a".into())), Err(expected.clone()));
+    assert_eq!(t.run_until(fs.list("/".into())), Err(expected));
+}
+
+#[test]
+fn h2_a_port_without_an_error_channel_still_panics_and_says_how_to_bind_it() {
+    let t = TestRuntime::new();
+    let kv = KvProxy::new(t.ctx());
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        t.run_until(kv.get("k".into()))
+    }))
+    .expect_err("an unbound Kv cannot answer");
+    let message = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(
+        message.contains("the `Kv` port has no adapter registered (method `get`)"),
+        "{message}"
+    );
+    assert!(message.contains("registerPort"), "{message}");
+    assert!(message.contains("errors/E0062"), "{message}");
+}

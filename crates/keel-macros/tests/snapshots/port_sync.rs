@@ -47,6 +47,57 @@ static __KEEL_META_port_Clock: ::keel::meta::PortMeta = ::keel::meta::PortMeta {
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Port(& __KEEL_META_port_Clock)
 }
+#[doc(hidden)]
+#[cold]
+#[inline(never)]
+#[allow(non_snake_case, dead_code)]
+fn __keel_port_failure_Clock(
+    __keel_method: &str,
+    __keel_error: ::keel::runtime::PortError,
+) -> ! {
+    let (__keel_what, __keel_how) = match &__keel_error {
+        ::keel::runtime::PortError::Unavailable => {
+            (
+                ::std::format!(
+                    "the `{}` port has no adapter registered (method `{}`)", "Clock",
+                    __keel_method,
+                ),
+                "Register one with core.registerPort(..) (TypeScript, Kotlin, Swift) / keel_port_register (C), or bind a Rust implementation (`keel::ports::fakes` in tests)",
+            )
+        }
+        ::keel::runtime::PortError::Cancelled => {
+            (
+                ::std::format!(
+                    "a call to the `{}` port (method `{}`) was cancelled", "Clock",
+                    __keel_method,
+                ),
+                "A method without an error type cannot report an abandoned call; give it a `Result<T, E>` return type",
+            )
+        }
+        ::keel::runtime::PortError::Decode(__keel_why) => {
+            (
+                ::std::format!(
+                    "the `{}` port (method `{}`) replied with bytes that do not decode: {}",
+                    "Clock", __keel_method, __keel_why,
+                ),
+                "The adapter's reply does not match the schema; check its codec for this method",
+            )
+        }
+        __keel_other => {
+            (
+                ::std::format!(
+                    "a call to the `{}` port (method `{}`) failed: {}", "Clock",
+                    __keel_method, __keel_other,
+                ),
+                "A method without an error type cannot report a failed call; give it a `Result<T, E>` return type",
+            )
+        }
+    };
+    ::core::panic!(
+        "keel: {}. {}. On the web this traps the core. docs: {}", __keel_what,
+        __keel_how, "https://keel.dev/errors/E0062",
+    )
+}
 ///Calls the `Clock` port through the runtime's port table: the platform's binding, or a Rust fake.
 pub struct ClockProxy(::keel::runtime::Ctx);
 impl ClockProxy {
@@ -58,56 +109,52 @@ impl ClockProxy {
 #[automatically_derived]
 impl Clock for ClockProxy {
     fn now_ms(&self) -> i64 {
-        let __args = {
-            let mut __w = ::keel::wire::Writer::new();
-            __w.into_vec()
+        let __keel_args = {
+            let mut __keel_w = ::keel::wire::Writer::new();
+            __keel_w.into_vec()
         };
-        let __reply = self
+        let __keel_reply = self
             .0
             .port_call_sync(
                 ::keel::meta::ids::port_id("Clock"),
                 ::keel::meta::ids::port_method_id("Clock", "now_ms"),
-                &__args,
+                &__keel_args,
             );
-        match __reply {
-            ::core::result::Result::Ok(__bytes) => {
-                match <i64 as ::keel::wire::Decode>::decode_exact(&__bytes) {
-                    ::core::result::Result::Ok(__value) => __value,
-                    ::core::result::Result::Err(__error) => {
-                        ::core::panic!(
-                            "keel: port `{}.{}` replied with a value that does not decode: {:?}",
-                            "Clock", "now_ms", __error,
+        match __keel_reply {
+            ::core::result::Result::Ok(__keel_bytes) => {
+                match <i64 as ::keel::wire::Decode>::decode_exact(&__keel_bytes) {
+                    ::core::result::Result::Ok(__keel_value) => __keel_value,
+                    ::core::result::Result::Err(__keel_error) => {
+                        __keel_port_failure_Clock(
+                            "now_ms",
+                            ::keel::runtime::PortError::Decode(__keel_error),
                         )
                     }
                 }
             }
-            ::core::result::Result::Err(__error) => {
-                ::core::panic!(
-                    "keel: port call `{}.{}` failed: {:?}", "Clock", "now_ms", __error,
-                )
+            ::core::result::Result::Err(__keel_error) => {
+                __keel_port_failure_Clock("now_ms", __keel_error)
             }
         }
     }
     fn log(&self, level: u8, message: String) {
-        let __args = {
-            let mut __w = ::keel::wire::Writer::new();
-            ::keel::wire::Encode::encode(&level, &mut __w);
-            ::keel::wire::Encode::encode(&message, &mut __w);
-            __w.into_vec()
+        let __keel_args = {
+            let mut __keel_w = ::keel::wire::Writer::new();
+            ::keel::wire::Encode::encode(&level, &mut __keel_w);
+            ::keel::wire::Encode::encode(&message, &mut __keel_w);
+            __keel_w.into_vec()
         };
-        let __reply = self
+        let __keel_reply = self
             .0
             .port_call_sync(
                 ::keel::meta::ids::port_id("Clock"),
                 ::keel::meta::ids::port_method_id("Clock", "log"),
-                &__args,
+                &__keel_args,
             );
-        match __reply {
+        match __keel_reply {
             ::core::result::Result::Ok(_) => {}
-            ::core::result::Result::Err(__error) => {
-                ::core::panic!(
-                    "keel: port call `{}.{}` failed: {:?}", "Clock", "log", __error,
-                )
+            ::core::result::Result::Err(__keel_error) => {
+                __keel_port_failure_Clock("log", __keel_error)
             }
         }
     }
@@ -154,13 +201,13 @@ pub fn __keel_port_dispatch_Clock(
         }
         __KEEL_ID_log => {
             let mut __r = ::keel::wire::Reader::new(__args);
-            let level: u8 = match <u8 as ::keel::wire::Decode>::decode(&mut __r) {
+            let __keel_a0: u8 = match <u8 as ::keel::wire::Decode>::decode(&mut __r) {
                 ::core::result::Result::Ok(__v) => __v,
                 ::core::result::Result::Err(_) => {
                     return ::keel::runtime::PortDispatch::Sync(::std::vec![2u8]);
                 }
             };
-            let message: String = match <String as ::keel::wire::Decode>::decode(
+            let __keel_a1: String = match <String as ::keel::wire::Decode>::decode(
                 &mut __r,
             ) {
                 ::core::result::Result::Ok(__v) => __v,
@@ -172,7 +219,7 @@ pub fn __keel_port_dispatch_Clock(
                 return ::keel::runtime::PortDispatch::Sync(::std::vec![2u8]);
             }
             {
-                __imp.log(level, message);
+                __imp.log(__keel_a0, __keel_a1);
                 ::keel::runtime::PortDispatch::Sync(::std::vec![0u8])
             }
         }
@@ -199,3 +246,23 @@ fn __keel_port_dispatch_erased_Clock(
     ::keel::runtime::PortDispatcher { port_id : ::keel::meta::ids::port_id("Clock"),
     dispatch : __keel_port_dispatch_erased_Clock, }
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<i64, ::core::primitive::i64>();
+        __keel_same::<u8, ::core::primitive::u8>();
+        __keel_same::<String, ::std::string::String>();
+    }
+};

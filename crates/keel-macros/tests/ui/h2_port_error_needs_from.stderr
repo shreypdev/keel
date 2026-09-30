@@ -1,0 +1,41 @@
+error[E0277]: error[keel::E0033]: the error type `StoreError` of a method of the `Store` port cannot represent a port that is unavailable
+                = note: a port nobody registered, a cancelled call and a reply that does not decode are ordinary outcomes (SPEC 6.3), and a method that returns `Result<T, E>` reports them as its error instead of panicking; that needs `From<PortError>` for the error type
+                = help: implement `From<keel::runtime::PortError>` for `StoreError`, mapping it to a variant such as `Unavailable`, or to the `Display` text of the `PortError`
+                = docs: https://keel.dev/errors/E0033
+  --> tests/ui/h2_port_error_needs_from.rs:18:56
+   |
+18 |     async fn load(&self, key: String) -> Result<Bytes, StoreError>;
+   |                                                        ^^^^^^^^^^ `From<PortError>` is not implemented for this error type
+   |
+help: the trait `From<PortError>` is not implemented for `StoreError`
+  --> tests/ui/h2_port_error_needs_from.rs:11:1
+   |
+11 | pub enum StoreError {
+   | ^^^^^^^^^^^^^^^^^^^
+note: required for `StoreError` to implement `__KeelPortError_Store`
+  --> tests/ui/h2_port_error_needs_from.rs:16:1
+   |
+16 | #[k::port]
+   | ^^^^^^^^^^
+   = note: this error originates in the attribute macro `k::port` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: error[keel::E0033]: the error type `StoreError` of a method of the `Store` port cannot represent a port that is unavailable
+                = note: a port nobody registered, a cancelled call and a reply that does not decode are ordinary outcomes (SPEC 6.3), and a method that returns `Result<T, E>` reports them as its error instead of panicking; that needs `From<PortError>` for the error type
+                = help: implement `From<keel::runtime::PortError>` for `StoreError`, mapping it to a variant such as `Unavailable`, or to the `Display` text of the `PortError`
+                = docs: https://keel.dev/errors/E0033
+  --> tests/ui/h2_port_error_needs_from.rs:19:67
+   |
+19 |     async fn save(&self, key: String, value: Bytes) -> Result<(), StoreError>;
+   |                                                                   ^^^^^^^^^^ `From<PortError>` is not implemented for this error type
+   |
+help: the trait `From<PortError>` is not implemented for `StoreError`
+  --> tests/ui/h2_port_error_needs_from.rs:11:1
+   |
+11 | pub enum StoreError {
+   | ^^^^^^^^^^^^^^^^^^^
+note: required for `StoreError` to implement `__KeelPortError_Store`
+  --> tests/ui/h2_port_error_needs_from.rs:16:1
+   |
+16 | #[k::port]
+   | ^^^^^^^^^^
+   = note: this error originates in the attribute macro `k::port` (in Nightly builds, run with -Z macro-backtrace for more info)

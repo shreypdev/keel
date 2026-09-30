@@ -454,3 +454,276 @@ fn the_wrong_kind_of_item_is_e0007_with_the_item_kept() {
         "struct S",
     );
 }
+
+#[test]
+fn e0007_records_need_fields() {
+    for item in [
+        quote!(
+            pub struct Marker;
+        ),
+        quote!(
+            pub struct Braces {}
+        ),
+    ] {
+        expect("E0007", api(item), "struct");
+    }
+}
+
+#[test]
+fn e0007_misplaced_keel_attributes_on_methods_are_reported_once() {
+    // A method exposed one by one, and a query inside an impl block: the impl block's macro sees
+    // the attributes unexpanded and reports them; the fallback drops them, so the method's own
+    // expansion does not report them again.
+    let tokens = api(quote!(
+        impl C {
+            #[keel::api]
+            pub fn f(&self) {}
+            #[keel::query(key = "k")]
+            pub async fn q(ctx: &Ctx) -> Result<u8, E> {}
+        }
+    ));
+    let all = messages(&tokens);
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert!(all[0].contains("`#[keel::api]` on a method"), "{}", all[0]);
+    assert!(all[1].contains("`#[keel::query]` inside an `impl` block"));
+    assert!(!tokens.to_string().contains("keel :: query"), "{tokens}");
+    expect(
+        "E0007",
+        api(quote!(impl C { #[keel::mutation] pub async fn m(ctx: &Ctx) {} })),
+        "impl C",
+    );
+    // A receiver on a function the attribute was put on.
+    expect(
+        "E0007",
+        api(quote!(
+            pub fn f(&self) {}
+        )),
+        "fn f",
+    );
+}
+
+#[test]
+fn e0001_result_error_type_must_be_a_name() {
+    expect(
+        "E0001",
+        api(quote!(
+            pub fn f() -> Result<u8, String> {}
+        )),
+        "fn f",
+    );
+    expect(
+        "E0001",
+        api(quote!(impl C { pub fn new() -> Result<Self, String> {} })),
+        "impl C",
+    );
+    expect(
+        "E0001",
+        api(quote!(
+            pub fn f(h: Handle) {}
+        )),
+        "fn f",
+    );
+}
+
+#[test]
+fn e0042_a_query_cannot_cache_unit_or_option() {
+    for ret in [quote!(Result<(), E>), quote!(Result<Option<Todo>, E>)] {
+        expect(
+            "E0042",
+            impl_::expand_query(
+                Flavor::Query,
+                quote!(key = "k"),
+                quote!(
+                    pub async fn q(ctx: &Ctx) -> #ret {}
+                ),
+            ),
+            "fn q",
+        );
+    }
+    // A mutation may return `()`.
+    let ok = impl_::expand_query(
+        Flavor::Mutation,
+        quote!(),
+        quote!(
+            pub async fn m(ctx: &Ctx) -> Result<(), E> {}
+        ),
+    );
+    assert!(messages(&ok).is_empty());
+}
+
+#[test]
+fn e0063_nested_options() {
+    expect(
+        "E0063",
+        api(quote!(
+            pub struct S {
+                a: Option<Option<u8>>,
+            }
+        )),
+        "struct S",
+    );
+}
+
+#[test]
+fn e0010_error_enum_helpers_on_a_plain_enum_and_implicit_placeholders() {
+    expect(
+        "E0010",
+        api(quote!(
+            pub enum E {
+                #[error("x")]
+                A,
+            }
+        )),
+        "enum E",
+    );
+    expect(
+        "E0010",
+        impl_::expand_error(
+            quote!(),
+            quote!(
+                pub enum E {
+                    #[error("{} and {}")]
+                    A(u8, u8),
+                }
+            ),
+        ),
+        "enum E",
+    );
+}
+
+#[test]
+fn e0008_values_of_the_wrong_kind_are_keel_diagnostics() {
+    let cases = [
+        (
+            impl_::expand_api(
+                quote!(crate),
+                quote!(
+                    pub fn f() {}
+                ),
+            ),
+            "`crate` needs a value",
+        ),
+        (
+            impl_::expand_api(
+                quote!(crate = 5),
+                quote!(
+                    pub fn f() {}
+                ),
+            ),
+            "`crate` must be a string literal",
+        ),
+        (
+            impl_::expand_port(
+                quote!(sync = true),
+                quote!(
+                    pub trait P {
+                        fn f(&self);
+                    }
+                ),
+            ),
+            "`sync` takes no value",
+        ),
+        (
+            impl_::expand_store(
+                quote!(restore = 5),
+                quote!(
+                    pub struct S {
+                        a: Signal<u8>,
+                    }
+                ),
+            ),
+            "`restore` must name a function",
+        ),
+        (
+            api(quote!(
+                pub struct S {
+                    #[keel(default = true)]
+                    a: u8,
+                }
+            )),
+            "`default` takes no value",
+        ),
+    ];
+    for (tokens, expected) in cases {
+        let all = messages(&tokens);
+        assert!(
+            all.iter()
+                .any(|m| m.starts_with("error[keel::E0008]") && m.contains(expected)),
+            "{expected}: {all:?}"
+        );
+    }
+    let query = impl_::expand_query(
+        Flavor::Query,
+        quote!(key = "k", retry = "3"),
+        quote!(
+            pub async fn q(ctx: &Ctx) -> Result<u8, E> {}
+        ),
+    );
+    let all = messages(&query);
+    assert!(all[0].starts_with("error[keel::E0040]") && all[0].contains("`retry` must be"));
+}
+
+#[test]
+fn a_failed_store_still_provides_what_its_impl_block_uses() {
+    // M1: the error is the only error because the struct keeps the hidden field and the members
+    // the `#[keel::api(store)]` impl block refers to.
+    let tokens = impl_::expand_store(
+        quote!(crate = "::k"),
+        quote!(
+            pub struct S {
+                #[keel(key = "id")]
+                a: Signal<Vec<Row>>,
+                b: Computed<u8>,
+            }
+        ),
+    );
+    let rendered = tokens.to_string();
+    let all = messages(&tokens);
+    assert_eq!(all.len(), 1, "{all:?}");
+    for needle in [
+        "pub __keel_cell : :: k :: signals :: CellSlot",
+        "pub const __KEEL_IS_STORE : bool = true",
+        "pub const __KEEL_STORE_META : :: k :: meta :: StoreMeta",
+        "pub fn __keel_attach_all",
+        "pub fn __keel_set_handle",
+        "pub fn __keel_cell_ref",
+        "pub fn __keel_restore",
+    ] {
+        assert!(
+            rendered.contains(needle),
+            "missing `{needle}` in {rendered}"
+        );
+    }
+    assert!(!rendered.contains("# [keel ("), "{rendered}");
+}
+
+#[test]
+fn error_helpers_are_left_to_another_derive_that_owns_them() {
+    // `#[derive(thiserror::Error)]` brings its own `#[error]`, `#[from]` and `#[source]`: the
+    // E0010 for a plain enum must not fire, and the fallback must keep them.
+    let tokens = api(quote!(
+        #[derive(Debug, thiserror::Error)]
+        pub enum E {
+            #[error("one {0}")]
+            A(u8),
+            #[error("two")]
+            B(#[source] String),
+        }
+    ));
+    let rendered = tokens.to_string();
+    assert!(messages(&tokens).is_empty(), "{rendered}");
+    assert!(rendered.contains("# [error (\"one {0}\")]"), "{rendered}");
+    assert!(rendered.contains("# [source]"), "{rendered}");
+    // A failing item that keeps the helpers keeps them in the fallback too.
+    let tokens = api(quote!(
+        #[derive(Debug, thiserror::Error)]
+        pub enum E {
+            #[error("one")]
+            A(&str),
+        }
+    ));
+    assert!(
+        tokens.to_string().contains("# [error (\"one\")]"),
+        "{tokens}"
+    );
+}

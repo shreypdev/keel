@@ -98,3 +98,28 @@ static __KEEL_META_Todo: ::keel::meta::RecordMeta = ::keel::meta::RecordMeta {
 ::keel::meta::inventory::submit! {
     ::keel::meta::Registration::Record(& __KEEL_META_Todo)
 }
+#[doc(hidden)]
+#[allow(non_camel_case_types, dead_code, unused, unused_braces, clippy::all)]
+const _: () = {
+    #[diagnostic::on_unimplemented(
+        message = "error[keel::E0060]: `{Self}` is spelled like the built-in Keel type `{T}`, but it is a different type\n  = note: the schema records this position as the built-in type, so the platforms would read the bytes of `{T}` where the generated code writes `{Self}`\n  = help: rename your type, or import the built-in one (`{T}`) where it is used\n  = docs: https://keel.dev/errors/E0060",
+        label = "this is not `{T}`"
+    )]
+    trait __KeelSameAs<T: ?::core::marker::Sized> {}
+    impl<T: ?::core::marker::Sized> __KeelSameAs<T> for T {}
+    fn __keel_same<A, B>()
+    where
+        A: ?::core::marker::Sized + __KeelSameAs<B>,
+        B: ?::core::marker::Sized,
+    {}
+    fn __keel_identity() {
+        __keel_same::<Uuid, ::keel::wire::Uuid>();
+        __keel_same::<String, ::std::string::String>();
+        __keel_same::<bool, ::core::primitive::bool>();
+        __keel_same::<Vec<String>, ::std::vec::Vec<String>>();
+        __keel_same::<Option<Timestamp>, ::core::option::Option<Timestamp>>();
+        __keel_same::<Timestamp, ::keel::wire::Timestamp>();
+        __keel_same::<HashMap<String, i32>, ::std::collections::HashMap<String, i32>>();
+        __keel_same::<i32, ::core::primitive::i32>();
+    }
+};
