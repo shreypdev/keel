@@ -51,7 +51,7 @@ name: Bench
 # measures the optimised module with the same optimiser) and fails when the gzipped wasm is over
 # `[size."web/hello-wasm"]` in bench/budgets.toml: the 120 KB budget, or 5% over the recorded size,
 # whichever is lower. What the hello app ships of the JavaScript runtime is gated the same way by
-# `[size."web/hello-runtime-js"]` (24 KB), and a run that cannot measure either fails. A change that
+# `[size."web/hello-runtime-js"]` (26 KB), and a run that cannot measure either fails. A change that
 # grows one on purpose re-records with `scripts/wasm-size.sh --record` in the same commit; CI never
 # records. Sizes do not depend on the runner's speed, so there is no scale and no baseline here.
 

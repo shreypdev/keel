@@ -40,12 +40,14 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Accepted 2026-10-01 with four decis
 * **R6 on the web**: panic → level-5 `log` import → trap → `UndraTransportError("trap")` in the TS runtime;
   pinned by `raw.test.mjs` and `ts-runtime.test.mjs`, which pass on the dev and the release-wasm build.
 * **Gate**: `scripts/wasm-size.sh` (+ `scripts/web-size-runtime.mjs`), `[size."web/hello-wasm"]` in
-  `bench/budgets.toml` (budget 120,000, record 95,684 after the review's path remapping, tolerance 0.05 →
-  ceiling 100,468) and `[size."web/hello-runtime-js"]` (budget 24,000, record 22,521 → ceiling 23,647), a
+  `bench/budgets.toml` (budget 120,000; record 95,684 at the branch's base after the review's path remapping,
+  **102,722** after the merges, tolerance 0.05 → ceiling 107,858) and `[size."web/hello-runtime-js"]` (budget
+  26,000 as restated after the merge, record 24,841 → ceiling 26,000), a
   `size` job in `bench.yml` with binaryen version_133 pinned, the record in `bench/results/web-size.jsonl`.
   The budgets parser learned the table; a unit test fails when the record and the table disagree.
 * **Accepted decisions (2026-10-01, the integrator)**: ADR-052 accepted; the JavaScript runtime's budget is
-  restated at 24 KB and gated like the wasm, and the follow-up piece **`ts-runtime-size`** targets 16 KB
+  restated at 24 KB and gated like the wasm (then at 26 KB after the merge with the parity failure model,
+  whose error channel added 2.3 KB), and the follow-up piece **`ts-runtime-size`** targets 16 KB
   (its levers are in the ADR); the 5% tolerance stays; no second landing card, the landing row says it is
   the wasm alone.
 * **Published number**: `site/scripts/build-numbers.mjs` writes the `web-size` row's value from the record
@@ -72,7 +74,7 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Accepted 2026-10-01 with four decis
 1. ~~ADR-052 open decisions 1-3~~: decided (see above). Follow-up piece **`ts-runtime-size`**: what a hello app
    ships of `@undra/runtime` from 22.5 KB to 16 KB gzipped, lowering `[size."web/hello-runtime-js"]` in the
    same commit.
-1a. **Blocking, after the merge with `main` (`38ea11d`)**: the merged hello world is 102,722 bytes gzipped (`main`
+1a. ~~Blocking~~, **decided 2026-10-01: the JavaScript budget is 26 KB, re-recorded.** After the merge with `main` (`38ea11d`): the merged hello world is 102,722 bytes gzipped (`main`
    alone: 143,384) and what it ships of `@undra/runtime` 24,841, over the 24 KB of decision 2 (`main`'s parity
    work grew the runtime by 2.3 KB after the decision's 22.5 KB was measured). The size job fails until the
    JavaScript budget is restated (25 KB would leave 159 bytes of headroom; at 26 KB the ceiling is the budget, 1,159 bytes above the record) or

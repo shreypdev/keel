@@ -41,7 +41,8 @@ world app ships of `@undra/runtime` (tree-shaken and minified, the app's own `sr
 lazily loaded worker script excluded): **72,659 bytes, 22,521 gzipped** with the runtime's own pinned Vite 8
 (what the gate records), 84,512 / 25,882 with the template's Vite 6 app build. The generated bindings are
 1.2 KB gzipped more, the app's loader 0.2 KB. It is far over the blueprint's 8 KB, which predates the
-transports, reconnect, coalescing and worker mode: decision 2 at the end restates it at 24 KB and gates it.
+transports, reconnect, coalescing and worker mode: decision 2 at the end restates it (24 KB, then 26 KB after the
+merge with the parity failure model) and gates it.
 
 ### Where the 353 KB go
 
@@ -89,7 +90,8 @@ blueprint's published promise, and the code coming next (the v1.x wire revision 
 function table of ADR-044) lands in this module; a tighter budget would be spent by the roadmap rather than
 by regressions, which is what the tolerance below is for.
 
-The JavaScript runtime is measured next to it and gated the same way at 24,000 bytes (decision 2 at the end).
+The JavaScript runtime is measured next to it and gated the same way at 26,000 bytes (decision 2 at the end, as
+restated on 2026-10-01 after the merge).
 
 ### 2. The levers, in order of bytes per unit of risk
 
@@ -218,8 +220,8 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
   where a reviewer sees it. The ceiling is computed from the committed record, never from the build being
   measured, and CI never records. The budgets parser (`bench/src/budget.rs`) reads the table strictly like
   the others, rejects a record already over its own gate, and its test fails when a record line has no
-  table or a table no record line. `[size."web/hello-runtime-js"]`: `budget_gzip_bytes = 24000`, the record
-  and `tolerance = 0.05` (23,647 bytes today).
+  table or a table no record line. `[size."web/hello-runtime-js"]`: `budget_gzip_bytes = 26000`, the record
+  and `tolerance = 0.05` (the ceiling is the budget today: 26,000 bytes against a 24,841 record).
 * CI: a `size` job in `bench.yml` (Rust 1.98.1 with the wasm target, as every CI job pins it; binaryen
   `version_133` from its GitHub release, the step failing unless `wasm-opt --version` says 133; Node and
   `npm ci` for the runtime line) runs the script and uploads the JSON as an artifact. It needs no secret
@@ -265,17 +267,18 @@ script, not twiggy's shallow bytes (gzip is not additive).
 
 ## Consequences
 
-* The hello-world web core is 95.7 KB gzipped (95,684 bytes; 228,532 raw), 80% of its budget; what the app
-  ships of the JavaScript runtime is 22.5 KB (22,521 bytes), 94% of its 24 KB. A core without queries also
-  starts faster and makes no `Kv` call at start-up.
+* At the branch's base the hello-world web core was 95.7 KB gzipped (95,684 bytes; 228,532 raw) and the
+  JavaScript runtime 22.5 KB (22,521 bytes). The record, after the merges below: **102,722** bytes gzipped
+  (244,382 raw), 86% of the budget, and **24,841** for the JavaScript runtime, 96% of its 26 KB. A core without
+  queries also starts faster and makes no `Kv` call at start-up.
 * **After the merge with `main` at `38ea11d`** (Track A's WeakCtx, write checks and typed stream failures,
   the parity failure model, React Native), measured by the review: `main` alone builds the hello world at
   372,540 / 143,384 bytes gzipped (it was 136,243 at `a0d638f`); with this ADR's levers 244,382 / **102,722**
   (86% of the budget, but 7.4% over the pre-merge record, so the gate asks for a re-record); the JavaScript
   runtime is **24,841** bytes, over decision 2's 24 KB (`main`'s parity work grew `@undra/runtime` by 2.3 KB).
   The playground: `main` alone 591,974 / 226,344, merged 543,096 / 219,972 (lever A, −6.4 KB gzipped).
-  The record stays at its pre-merge values until the integrator restates the JavaScript budget (or lands
-  `ts-runtime-size`) and re-records both with `scripts/wasm-size.sh --record`.
+  The integrator restated the JavaScript budget at 26 KB (decision 2, below), and both were re-recorded with
+  `scripts/wasm-size.sh --record` on the merged tree (with `main` at `7d5b73c`, the tooling piece: unchanged).
 * An app that removes its last query or mutation leaves what it persisted (cache entries, the offline
   queue) in `Kv` unread: before, its next start-up deleted them as written under another schema hash; now
   nothing reads them until a version that declares a query again deletes them the same way. Nothing a
@@ -310,7 +313,7 @@ script, not twiggy's shallow bytes (gzip is not additive).
 ## Decisions (2026-10-01, the integrator)
 
 1. **ADR-052 is accepted** as written above.
-2. **The JavaScript runtime's budget is 24 KB gzipped** for what a hello app ships of `@undra/runtime`
+2. **The JavaScript runtime's budget is 24 KB gzipped** (restated at 26 KB after the merge, below) for what a hello app ships of `@undra/runtime`
    (the blueprint's 8 KB predates the transports, reconnect, coalescing and worker mode), recorded and
    gated exactly like the wasm: over the budget, or more than 5% over the record, fails
    (`[size."web/hello-runtime-js"]`, 22,521 bytes recorded, ceiling 23,647). A budget that fails forever
@@ -319,6 +322,12 @@ script, not twiggy's shallow bytes (gzip is not additive).
    imported statically by `index.ts`, which defeats `core.ts`'s dynamic import; the `remote` transport
    bundled because the mode is a runtime string; `core.ts` + `mirror.ts`, 47.7 KB before minification).
    That piece lowers the budget in the same commit that reaches it.
+
+   *Restated 2026-10-01, after the merge with `main` at `38ea11d`:* the budget is **26 KB** (26,000 bytes; the
+   ceiling is the budget). The parity failure model's error channel (the closed `UndraCallError` set,
+   `report` / `onError`, snapshot and restore, worker sync ports) added 2.3 KB to what the hello app ships, so the
+   record is 24,841 bytes; 24 KB would have failed from the day it was set, which is not a test (R9). The
+   record is the honest number; `ts-runtime-size` still targets 16 KB.
 3. **The 5% tolerance over the record stays**, alongside the budget, for both artefacts.
 4. **No second landing card.** The landing row says plainly that it is the wasm alone ("Web core, hello
    world: the wasm alone, gzipped"); the README states the JavaScript number and its budget in prose.
