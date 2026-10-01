@@ -315,7 +315,10 @@ mod tests {
         for (step, set) in sets.iter().enumerate() {
             assert_eq!(set.entries.len(), 1);
             let entry = &set.entries[0];
-            assert_eq!((entry.signal_id, entry.op), (ROWS_SIGNAL, ChangeOp::KeyedPatch));
+            assert_eq!(
+                (entry.signal_id, entry.op),
+                (ROWS_SIGNAL, ChangeOp::KeyedPatch)
+            );
             let mut r = Reader::new(&entry.value);
             let patch = KeyedPatch::<Item>::decode(&mut r).unwrap();
             assert_eq!(patch.ops.len(), 1);

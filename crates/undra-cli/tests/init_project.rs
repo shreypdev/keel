@@ -129,19 +129,27 @@ fn undra_toml_round_trips_through_the_cli() {
 #[test]
 fn the_android_shell_installs_the_choreographer_frame_pacer() {
     let project = init_project("pacer", "android");
-    let app_path = find_file(&project.root.join("android/app/src/main/kotlin"), "UndraApp.kt")
-        .expect("init writes the Application class");
+    let app_path = find_file(
+        &project.root.join("android/app/src/main/kotlin"),
+        "UndraApp.kt",
+    )
+    .expect("init writes the Application class");
     let app = std::fs::read_to_string(&app_path).unwrap();
     for needle in [
         "import dev.undra.android.ChoreographerFramePacer",
         "import dev.undra.runtime.MirrorOptions",
         "mirror = MirrorOptions(framePacer = ChoreographerFramePacer())",
     ] {
-        assert!(app.contains(needle), "{} lacks `{needle}`:\n{app}", app_path.display());
+        assert!(
+            app.contains(needle),
+            "{} lacks `{needle}`:\n{app}",
+            app_path.display()
+        );
     }
 
     // The Gradle module the import comes from is a dependency, at the version the runtime has.
-    let gradle = std::fs::read_to_string(project.root.join("android/app/build.gradle.kts")).unwrap();
+    let gradle =
+        std::fs::read_to_string(project.root.join("android/app/build.gradle.kts")).unwrap();
     assert_eq!(
         dependency_version(&gradle, "android-adapters"),
         dependency_version(&gradle, "runtime"),
@@ -152,10 +160,17 @@ fn the_android_shell_installs_the_choreographer_frame_pacer() {
     // module (when an Android SDK is present) and names the class the template imports.
     let runtime = repo_root().join("runtimes/kotlin/undra-runtime");
     let settings = std::fs::read_to_string(runtime.join("settings.gradle.kts")).unwrap();
-    assert!(settings.contains("include(\":android-adapters\")"), "{settings}");
+    assert!(
+        settings.contains("include(\":android-adapters\")"),
+        "{settings}"
+    );
     let pacer = std::fs::read_to_string(
-        runtime.join("android-adapters/src/main/kotlin/dev/undra/android/ChoreographerFramePacer.kt"),
+        runtime
+            .join("android-adapters/src/main/kotlin/dev/undra/android/ChoreographerFramePacer.kt"),
     )
     .unwrap();
-    assert!(pacer.contains("public class ChoreographerFramePacer"), "{pacer}");
+    assert!(
+        pacer.contains("public class ChoreographerFramePacer"),
+        "{pacer}"
+    );
 }
