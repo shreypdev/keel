@@ -76,7 +76,7 @@ Every suite is local; nothing needs the network after install.
 | Rust workspace | `cargo test --workspace` | 2,100+ pass |
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 890+ pass |
-| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 454 cases, 0 failed |
+| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 527 cases, 0 failed |
 | Kotlin over the real JNI core | `cargo build -p undra-ffi --features jni`, then `UNDRA_NATIVE_LIB_DIR=$PWD/target/debug UNDRA_NATIVE_NAME=undra_ffi runtimes/kotlin/undra-runtime/scripts/test-local.sh` | the JNI smoke cases run |
 | Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 328 pass |
 | wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
@@ -86,6 +86,11 @@ Every suite is local; nothing needs the network after install.
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
+
+Gotcha worth knowing: the bindgen tests that compile and run the generated Kotlin, TypeScript and
+Swift (`typecheck_kotlin`, `typecheck_ts`, `run_ts`, `typecheck_swift`) **skip, and pass, when their
+compiler is not found** (`kotlinc`, `tsc`, `swift`). Put `runtimes/ts/@undra/runtime/node_modules/.bin`
+and a JDK 17 on `PATH`, and run with `UNDRA_REQUIRE_TOOLCHAINS=1` so a missing tool fails instead of skipping.
 
 Gotcha worth knowing: the C harness builds `undra-ffi` **without** the `jni` feature and
 overwrites `target/debug/libundra_ffi.dylib`. If you run the Kotlin JNI leg afterwards,
