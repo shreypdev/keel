@@ -147,6 +147,7 @@ EXAMPLES
     undra dev --addr 0.0.0.0:7443           reachable from a phone on your network (no authentication!)
     undra dev --no-watch                    build once and serve
     undra dev --no-keep-state               every rebuilt core starts fresh, as before the state was carried over
+    undra dev --record session.json         also write the session as an undra.recording, to preview or test with (docs/TESTING.md)
 
 CONNECTING
     web       UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash })   (or ?undra=ws://... in the page URL)

@@ -61,7 +61,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: wasm32 build (core crates)
         run: |
-          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-ffi undra playground-core; do
+          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-testkit undra-ffi undra playground-core; do
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
@@ -78,6 +78,14 @@ jobs:
         run: |
           npm ci
           npm test
+      # The testing kit (docs/TESTING.md): its tests, and its build config, which compiles against the runtime's emitted declarations.
+      - name: Testing kit (@undra/testkit)
+        run: |
+          (cd runtimes/ts/@undra/runtime && npm run build)
+          cd runtimes/ts/@undra/testkit
+          npm ci
+          npm test
+          npm run typecheck
 
   kotlin:
     name: Kotlin runtime (JVM)
@@ -154,6 +162,13 @@ jobs:
           cargo check -p undra-ffi --target aarch64-apple-ios-sim
       - name: Xcode builds the core in its Run Script phase (undra init's project; Debug, Release, Debug)
         run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test build_systems -- xcode --nocapture
+      # The playground's SwiftUI previews (#Preview over UndraTestKit) are compiled with the app: a Debug build of it.
+      - name: The playground's iOS app builds, SwiftUI previews and the testing kit included
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra build -C examples/playground --platform ios
+          UNDRA_LINK_CORE=1 xcodebuild -quiet -project examples/playground/ios/PlaygroundApp.xcodeproj -scheme PlaygroundApp \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' build
 
   android:
     name: Android cross-build
@@ -182,6 +197,10 @@ jobs:
           "$sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- gradle --nocapture
+      # The playground's Compose previews (@Preview over dev.undra:testkit, a debug dependency) are compiled with the app.
+      - name: The playground's Android app builds, Compose previews and the testing kit included
+        working-directory: examples/playground/android
+        run: ./gradlew --no-daemon :app:assembleDebug
 
   ffi-miri:
     # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
@@ -266,6 +285,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift
+
+  playground-web:
+    # The playground's web app and its stories page (src/stories, rendered by stories.html with Vite alone; the modules are Component Story Format
+    # over @undra/testkit): type-checked and built against the wasm core `undra build` makes.
+    name: Playground web (app and stories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The undra CLI, then the playground core for the web
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra build -C examples/playground --platform web
+      - name: Type-check and build the app and the stories page
+        working-directory: examples/playground/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
 
   react-native:
     # The React Native runtime without a device (docs/REACT_NATIVE.md, "What is tested where"): the C++ host
