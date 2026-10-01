@@ -9,7 +9,7 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * The pure parts of the package's Android library on the JVM (ADR-038 amendment B, B10): the secure-store seal with a
  * software key, against a vector computed independently with Node's AES-256-GCM (the layout of android-adapters and
- * the web adapter), and the network classification. The Keystore and ConnectivityManager themselves are exercised on
+ * the web adapter), the network classification, and the bytes the Db port's JNI calls carry ({@link DbWire}). The Keystore and ConnectivityManager themselves are exercised on
  * the device (scripts/rn-device-checks.sh). Run by android/test/run.sh; prints {@code ok - <name>} per check.
  */
 public final class PureTest {
@@ -87,6 +87,46 @@ public final class PureTest {
         check(NetworkClassifier.classify(true, false, false, false) == NetworkClassifier.UNKNOWN, "else unknown");
         check(NetworkClassifier.WIFI == 0 && NetworkClassifier.NONE == 4, "NetKind wire indices");
         ok("the network classification is android-adapters' (and NWPath's)");
+
+        // The Db port's bytes across JNI (DbWire): the wire format of docs/SPEC.md section 3, as UndraDb.cpp writes it.
+        byte[] params = hex("05000000" + "0000" + "0100feffffffffffffff" + "0200000000000000f03f" + "030002000000c3a9" + "04000100000009");
+        Object[] values = DbWire.readParams(params);
+        check(values.length == 5 && values[0] == null, "Null is null");
+        check(Long.valueOf(-2).equals(values[1]), "Integer(-2) is a Long");
+        check(Double.valueOf(1.0).equals(values[2]), "Real(1.0) is a Double");
+        check("\u00e9".equals(values[3]), "Text is a String, from UTF-8");
+        check(values[4] instanceof byte[] blob && Arrays.equals(blob, new byte[] {9}), "Blob is a byte[]");
+        check(DbWire.readParams(hex("00000000")).length == 0, "no parameters");
+        for (String bad : new String[] {"01000000", "010000000900", "0100000001000000", "00000000ff"}) {
+            boolean refused = false;
+            try {
+                DbWire.readParams(hex(bad));
+            } catch (IllegalArgumentException e) {
+                refused = true;
+            }
+            check(refused, "malformed parameters are refused: " + bad);
+        }
+        ok("DbWire reads the parameters of a statement (every DbValue variant; malformed input refused)");
+
+        check(Arrays.equals(DbWire.executed(3, -1), hex("00" + "0300000000000000" + "ffffffffffffffff")), "OK, DbExecuted { 3, -1 }");
+        check(Arrays.equals(DbWire.failure("C", "m"), hex("01" + "0100000043" + "010000006d")), "FAILED, class, message");
+        DbWire.Rows rows = new DbWire.Rows(new String[] {"a", "b"});
+        rows.beginRow();
+        rows.integer(1);
+        rows.text("x");
+        rows.beginRow();
+        rows.nullCell();
+        rows.blob(new byte[0]);
+        rows.beginRow();
+        rows.real(-0.5);
+        rows.blob(new byte[] {0, (byte) 0xff});
+        byte[] expected = hex("00" + "02000000" + "0100000061" + "0100000062" + "03000000"
+                + "02000000" + "01000100000000000000" + "03000100000078"
+                + "02000000" + "0000" + "040000000000"
+                + "02000000" + "0200000000000000e0bf" + "04000200000000ff");
+        check(Arrays.equals(rows.finish(), expected), "OK, DbRows: the columns, then each row's cells");
+        check(Arrays.equals(new DbWire.Rows(new String[0]).finish(), hex("00" + "00000000" + "00000000")), "no columns, no rows");
+        ok("DbWire writes DbExecuted, DbRows and a failure as the C++ side reads them");
 
         System.out.println("# " + checks + " checks passed");
     }

@@ -4,7 +4,9 @@
 # a pure C++ dependency) after `find_package(ReactAndroid)`, and links the static library below into
 # the app's `libappmodules.so`. The Undra core itself is not linked here: the module `dlopen`s the
 # APK's `libundra_core.so` (`undra build --platform rn`, or android) the first time it starts. The
-# default ports' Java half is the Gradle library next to this file (ADR-038 amendment B, B8).
+# default ports' Java half is the Gradle library next to this file (ADR-038 amendment B, B8). The Db
+# port's SQLite is Android's own, through that Java half: UndraDbSqlite.cpp (the sqlite3 C API, which
+# the NDK does not offer) is iOS's and not built here.
 cmake_minimum_required(VERSION 3.13)
 project(undra_react_native CXX)
 
@@ -12,6 +14,7 @@ set(UNDRA_RN_CPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../cpp)
 
 add_library(undra_react_native STATIC
   ${UNDRA_RN_CPP_DIR}/UndraApiAndroid.cpp
+  ${UNDRA_RN_CPP_DIR}/UndraDb.cpp
   ${UNDRA_RN_CPP_DIR}/UndraDefaults.cpp
   ${UNDRA_RN_CPP_DIR}/UndraFrameSource.cpp
   ${UNDRA_RN_CPP_DIR}/UndraHost.cpp

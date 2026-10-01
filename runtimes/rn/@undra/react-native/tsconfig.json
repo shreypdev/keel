@@ -32,6 +32,9 @@
       "@undra/runtime": [
         "../../../ts/@undra/runtime/src/index.ts"
       ],
+      "@undra/runtime/realtime": [
+        "../../../ts/@undra/runtime/src/realtime.ts"
+      ],
       "@playground/core": [
         "../../../../examples/playground/generated/ts/src/index.ts"
       ],

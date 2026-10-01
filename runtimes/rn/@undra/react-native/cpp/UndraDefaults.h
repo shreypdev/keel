@@ -1,13 +1,14 @@
-// The standard ports @undra/react-native answers natively: `Kv`, `SecureStore`, `Fs` and the
-// `Connectivity` event source (ADR-038, amendment B).
+// The standard ports @undra/react-native answers natively: `Kv`, `SecureStore`, `Fs`, `Db` (ADR-048) and
+// the `Connectivity` event source (ADR-038, amendment B).
 //
 // `Platform` is what a phone supplies (iOS: `ios/UndraPlatformApple.mm`, Android:
 // `cpp/UndraPlatformAndroid.cpp`; the host test supplies its own): where the files live, the
-// platform's secret store and its network monitor. `NativeDefaults` is one running host's use of
-// it: a port callback hands each call to that port's serial worker thread, which does the I/O and
-// answers with `undra_port_reply`; JavaScript is never involved (B2). `stop()` ends the event source
-// and joins the workers, and `Host::shutdown` calls it before it releases the process's core slot, so
-// nothing a stopped core asked for can reach the next one (B3).
+// platform's secret store, its SQLite and its network monitor. `NativeDefaults` is one running host's
+// use of it: a port callback hands each call to that port's serial worker thread (`Db`: to the thread of
+// the database it names, `UndraDb.h`), which does the I/O and answers with `undra_port_reply`;
+// JavaScript is never involved (B2). `stop()` ends the event source and joins the workers, and
+// `Host::shutdown` calls it before it releases the process's core slot, so nothing a stopped core asked
+// for can reach the next one (B3).
 #pragma once
 
 #include <condition_variable>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include "UndraApi.h"
+#include "UndraDb.h"
 #include "UndraHost.h"
 #include "UndraStores.h"
 
@@ -91,6 +93,11 @@ class Platform {
   virtual std::unique_ptr<SecretStore> makeSecretStore() = 0;
   /// The network monitor; null when the platform has none.
   virtual std::unique_ptr<ConnectivitySource> makeConnectivity() = 0;
+  /// The platform's SQLite for the `Db` port (ADR-048); null when it has none (the port is then not
+  /// native). Cheap: no file is touched until a database is opened.
+  virtual std::unique_ptr<DbBackend> makeDbBackend() {
+    return nullptr;
+  }
   /// A worker thread named `name` starts, on that thread (Android attaches it to the VM under that name, which
   /// would otherwise replace the thread's own). Must not throw.
   virtual void workerStarted(const char * /*name*/) noexcept {}
@@ -103,7 +110,7 @@ class Platform {
 /// the platform cannot be reached (`error` says why).
 std::unique_ptr<Platform> makePlatform(std::string &error);
 
-/// The ports of `ids` the platform can answer natively (`Kv`, `SecureStore`, `Fs`, `Connectivity`).
+/// The ports of `ids` the platform can answer natively (`Kv`, `SecureStore`, `Fs`, `Connectivity`, `Db`).
 std::vector<uint32_t> nativePortsOf(Platform &platform);
 
 /// One serial worker thread: jobs run in the order they were posted.
@@ -145,11 +152,16 @@ class NativeDefaults {
 
   /// Whether `portId` is one of the request/reply ports answered here (not `Connectivity`).
   bool answers(uint32_t portId) const noexcept;
+  /// The `Db` port's binding options (tests shorten the busy timeout). Before the first `Db` call.
+  void setDbOptions(DbOptions options) noexcept {
+    dbOptions_ = options;
+  }
   /// Whether the `Connectivity` source is to be started.
   bool reportsConnectivity() const noexcept { return connectivity_; }
   /// A port call from the core (any thread, possibly under the core lock): queues it on the port's
-  /// worker and returns 1, or 2 (unavailable) when it cannot be queued. Never blocks, never throws.
-  uint8_t post(uint32_t portId, uint32_t methodId, uint32_t portCallId, const uint8_t *args, uint32_t len) noexcept;
+  /// worker and returns 1, or 2 (unavailable) when it cannot be queued. `Db` may also answer at once
+  /// into `out` and return 0 (an id that names nothing, a refused argument). Never blocks, never throws.
+  uint8_t post(uint32_t portId, uint32_t methodId, uint32_t portCallId, const uint8_t *args, uint32_t len, UndraBuf *out = nullptr) noexcept;
   /// Starts the `Connectivity` source after `undra_init` succeeded; reports go to the core with
   /// `undra_event`, the first one at once, identical consecutive ones once.
   void startConnectivity() noexcept;
@@ -173,10 +185,17 @@ class NativeDefaults {
   bool secureStore_ = false;
   bool fs_ = false;
   bool connectivity_ = false;
+  bool db_ = false;
   std::unique_ptr<KvStore> kvStore_;
   std::unique_ptr<FsRoot> fsRoot_;
   std::unique_ptr<SecretStore> secrets_;
   std::unique_ptr<ConnectivitySource> monitor_;
+  /// The `Db` binding, made on the first `Db` call (it starts one thread per open database).
+  std::shared_ptr<DbBackend> dbBackend_;
+  DbOptions dbOptions_;
+  std::mutex dbMutex_;
+  std::shared_ptr<DbPort> dbPort_;
+  bool dbStopped_ = false;
   Worker kvWorker_;
   Worker secureWorker_;
   Worker fsWorker_;

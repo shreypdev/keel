@@ -7,7 +7,10 @@
 //  * `SecureStore`: Keychain generic passwords, service `dev.undra.securestore`, account = key,
 //    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`: the Swift `SecureStoreAdapter`'s items;
 //  * `Connectivity`: `nw_path_monitor` on a serial queue of its own, classified as the Swift
-//    `ConnectivityAdapter` does (online when the path is satisfied; Wi-Fi, cellular, wired, unknown).
+//    `ConnectivityAdapter` does (online when the path is satisfied; Wi-Fi, cellular, wired, unknown);
+//  * `Db` (ADR-048): the sqlite3 C API of the system `libsqlite3` (`cpp/UndraDbSqlite.cpp`) over
+//    `<Application Support>/<bundle id>/Undra/db/<name>.sqlite`, the Swift `SQLiteDbAdapter`'s files (the root of
+//    its `KvAdapter.defaultDirectory(named: "db")`), so either shell reads the other's database.
 #import <Foundation/Foundation.h>
 #import <Network/Network.h>
 #import <Security/Security.h>
@@ -235,6 +238,12 @@ class ApplePlatform final : public Platform {
   }
   std::unique_ptr<ConnectivitySource> makeConnectivity() override {
     return std::make_unique<PathMonitor>();
+  }
+  std::unique_ptr<DbBackend> makeDbBackend() override {
+    // Created on the first open.
+    const std::string directory = undraDirectory(@"db");
+    if (directory.empty()) return nullptr;
+    return makeSqliteDbBackend(directory);
   }
 };
 

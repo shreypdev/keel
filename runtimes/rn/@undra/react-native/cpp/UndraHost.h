@@ -133,8 +133,8 @@ class Platform;
 
 /// What `Host::start` is given besides the configuration and the schema's ports.
 struct StartOptions {
-  /// The standard ports the module answers natively (ADR-038 amendment B): ids of `Kv`,
-  /// `SecureStore`, `Fs` and `Connectivity` that `platform` supports. The others stay JavaScript's.
+  /// The standard ports the module answers natively (ADR-038 amendment B; ADR-048): ids of `Kv`,
+  /// `SecureStore`, `Fs`, `Connectivity` and `Db` that `platform` supports. The others stay JavaScript's.
   std::vector<uint32_t> nativePorts;
   /// The phone's platform; null for none (every port is then JavaScript's, as before). Shared: the
   /// native defaults keep it until they are destroyed.

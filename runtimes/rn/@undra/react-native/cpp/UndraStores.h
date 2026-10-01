@@ -27,7 +27,9 @@ class WireReader {
  public:
   WireReader(const uint8_t *data, std::size_t len) noexcept : data_(data), len_(len) {}
   uint8_t u8() noexcept;
+  uint16_t u16() noexcept;
   uint32_t u32() noexcept;
+  uint64_t u64() noexcept;
   /// A `String`: `u32` byte length, then UTF-8 (validated).
   std::string str();
   /// A `Bytes`: `u32` length, then the bytes.
@@ -35,6 +37,8 @@ class WireReader {
   /// Whether every read succeeded and nothing is left over.
   bool finish() const noexcept { return ok_ && at_ == len_; }
   bool ok() const noexcept { return ok_; }
+  /// Marks the input malformed (an unknown enum variant, say).
+  void fail() noexcept { ok_ = false; }
 
  private:
   bool need(std::size_t n) noexcept;
@@ -50,6 +54,7 @@ class WireWriter {
   WireWriter &u8(uint8_t v);
   WireWriter &u16(uint16_t v);
   WireWriter &u32(uint32_t v);
+  WireWriter &u64(uint64_t v);
   WireWriter &str(std::string_view s);
   WireWriter &bytes(const uint8_t *data, std::size_t len);
   WireWriter &bytes(const std::vector<uint8_t> &data) { return bytes(data.data(), data.size()); }

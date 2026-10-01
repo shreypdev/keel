@@ -1,11 +1,15 @@
 import {
   CallTarget,
+  DbError,
   FsError,
   HttpError,
   PortIds,
+  SseError,
   UndraCallError,
   UndraSchemaMismatchError,
   UndraWriter,
+  WsError,
+  type WsMessage,
   codecs,
   decodeValue,
   type UndraCore,
@@ -15,11 +19,16 @@ import {
   BigList,
   Counter,
   LabError,
+  Live,
+  Notes,
   Probe,
   Stress,
   UndraIds,
   add,
   addLater,
+  dbCells,
+  dbMigrate,
+  dbRun,
   explode,
   fileDelete,
   fileList,
@@ -36,6 +45,8 @@ import {
   secretKeys,
   secretPut,
   secretRemove,
+  sseFollow,
+  wsEcho,
 } from '@playground/core';
 import { PLAYGROUND_HEADER, nativeCounters, type Log, type Playground } from './undra';
 
@@ -69,8 +80,18 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 const fromUtf8 = (bytes: Uint8Array | null): string | null => (bytes === null ? null : new TextDecoder().decode(bytes));
 
-/** The loopback server `scripts/rn-device-checks.sh` runs (the simulator shares the Mac's loopback; Android reaches it through `adb reverse`). */
+/**
+ * The loopback server `scripts/rn-device-checks.sh` runs, `contract-tests/servers/realtime-server.mjs` (the simulator
+ * shares the Mac's loopback; Android reaches it through `adb reverse`): HTTP, WebSocket and server-sent events.
+ */
 const LOOPBACK = 'http://127.0.0.1:8737';
+const LOOPBACK_WS = 'ws://127.0.0.1:8737';
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** The messages as one line, for a check's detail. */
+const shown = (messages: readonly WsMessage[]): string =>
+  messages.map(m => (m.kind === 'text' ? JSON.stringify(m.value) : `binary(${(m.value as Uint8Array).length})`)).join(', ');
 
 /** Whether the module answers `portId` natively on this device (ADR-038 amendment B). */
 function native(portId: number): boolean {
@@ -331,6 +352,126 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       expect(await eventually(() => device.lifecycleReports.get() >= 1, 5000), 'at least one report within 5 s');
       expect(device.appState.get() === 'active', `active, got ${device.appState.get()}`);
       return `state=${device.appState.get()} after ${device.lifecycleReports.get()} report(s)`;
+    },
+  ],
+  [
+    'RN17',
+    'Db default: Notes in SQLite through the core (open with migrations, add, count, close, reopen), answered natively',
+    async (core, playground) => {
+      expect(native(PortIds.Db.portId), 'the module answers Db natively on this device');
+      const before = nativeCounters(core)?.nativePortCalls ?? 0;
+      const notes = await Notes.create(core);
+      try {
+        expect((await notes.open('rn-checks')) === 2, 'open migrates to version 2');
+        const start = await notes.count();
+        const added = await notes.add(`note ${playground.nonce}`);
+        await notes.add('and another');
+        expect((await notes.count()) === start + 2, 'count reads the two new rows from the database');
+        expect(notes.notes.get().some(n => n.id === added.id && n.title === `note ${playground.nonce}`), 'the mirror shows the new note');
+        const taken = await rejects(() => notes.addWithId(added.id, 'duplicate'));
+        expect(taken instanceof DbError.Constraint && taken.message.includes('UNIQUE'), `an id in use is DbError.Constraint (unique), got ${String(taken)}`);
+        await notes.closeDatabase();
+        const closed = await rejects(() => notes.count());
+        expect(closed instanceof DbError.Unavailable, `after close: DbError.Unavailable, got ${String(closed)}`);
+        expect((await notes.open('rn-checks')) === 2, 'reopened at version 2');
+        expect((await notes.count()) === start + 2, 'the rows are in the file');
+        await notes.closeDatabase();
+      } finally {
+        notes.close();
+      }
+      const calls = (nativeCounters(core)?.nativePortCalls ?? 0) - before;
+      expect(calls >= 10, `the core's Db calls were answered by the module (${calls})`);
+      return `notes kept across close and reopen in ${nativePlatformDefaults().db ?? '?'}; unique id refused; ${calls} native port calls`;
+    },
+  ],
+  [
+    'RN18',
+    'Db typed cells: every storage class through the platform\'s SQLite (i64 extremes, empty text and blob, NULL)',
+    async core => {
+      const min = -(2n ** 63n);
+      const max = 2n ** 63n - 1n;
+      const blob = new Uint8Array([0, 1, 254, 255]);
+      const a = await dbCells(min, 1.5, 'héllo \u{1F30D}\n', blob, null, core);
+      expect(a.int === min && a.real === 1.5 && a.text === 'héllo \u{1F30D}\n' && sameBytes(a.blob, blob) && a.none === null, `round trip 1: ${String(a.int)} ${a.real} ${JSON.stringify(a.text)} ${a.none}`);
+      expect(a.types.join(',') === 'integer,real,text,blob,null', `storage classes ${a.types.join(',')}`);
+      const b = await dbCells(max, -0.25, '', new Uint8Array(0), 'x', core);
+      expect(b.int === max && b.real === -0.25 && b.text === '' && b.blob.length === 0 && b.none === 'x', `round trip 2: ${String(b.int)} ${b.real} ${b.blob.length} ${b.none}`);
+      expect(b.types.join(',') === 'integer,real,text,blob,text', `an empty text is text and an empty blob is a blob, got ${b.types.join(',')}`);
+      return `i64 ${String(min)}..${String(max)}, reals, text, blobs (empty too) and NULL come back by storage class`;
+    },
+  ],
+  [
+    'RN19',
+    'Db migrations: a failed migration rolls everything back; typed SQL errors',
+    async core => {
+      const name = 'rn-checks-migrate';
+      // From scratch: what an earlier launch left goes (one statement per call; no migrations, so no downgrade check).
+      await dbRun(name, 'DROP TABLE IF EXISTS a', core);
+      await dbRun(name, 'DROP TABLE IF EXISTS b', core);
+      await dbRun(name, 'PRAGMA user_version = 0', core);
+      const failed = await rejects(() => dbMigrate(name, true, core));
+      expect(failed instanceof DbError.Migration && failed.version === 2 && failed.message.includes('nowhere'), `the broken second migration: ${String(failed)}`);
+      const gone = await rejects(() => dbRun(name, 'INSERT INTO a VALUES (1)', core));
+      expect(gone instanceof DbError.Sql && gone.message.includes('no such table'), `migration 1 was rolled back with it, got ${String(gone)}`);
+      expect((await dbMigrate(name, false, core)) === 2, 'the good pair then runs from version 0 to 2');
+      expect((await dbRun(name, 'INSERT INTO a VALUES (1)', core)) === 1n, 'and its table exists');
+      const two = await rejects(() => dbRun(name, 'INSERT INTO a VALUES (2); INSERT INTO a VALUES (3)', core));
+      expect(two instanceof DbError.Sql && two.message.includes('only one statement'), `two statements in one call, got ${String(two)}`);
+      return `Migration { version: 2 } and nothing of it kept; then version 2; one statement per call`;
+    },
+  ],
+  [
+    'RN20',
+    'WebSocket default: an echo through the core to the loopback server; headers, the peer\'s close and a refusal typed',
+    async (core, playground) => {
+      const sent: WsMessage[] = [
+        { kind: 'text', value: `hello ${playground.nonce}` },
+        { kind: 'binary', value: new Uint8Array([1, 2, 0, 255]) },
+      ];
+      const back = await wsEcho(`${LOOPBACK_WS}/ws/echo`, sent, core);
+      expect(back.length === 2 && back[0]?.kind === 'text' && back[0].value === sent[0]?.value, `the text came back, got ${shown(back)}`);
+      expect(back[1]?.kind === 'binary' && sameBytes(back[1].value as Uint8Array, sent[1]?.value as Uint8Array), `the binary came back, got ${shown(back)}`);
+      // Headers ride React Native's third constructor argument; the server echoes the upgrade's headers.
+      const live = await Live.create(core);
+      try {
+        await live.connect(`${LOOPBACK_WS}/ws/headers`, [], [{ name: 'x-undra-token', value: playground.nonce }]);
+        const [headers] = await live.read(1);
+        const seen = headers?.kind === 'text' ? (JSON.parse(headers.value) as Record<string, string>)['x-undra-token'] : undefined;
+        expect(seen === playground.nonce, `the upgrade carried the header, the server saw ${String(seen)}`);
+        await live.disconnect(1000, 'done');
+        await live.connect(`${LOOPBACK_WS}/ws/close?code=4000&reason=bye`, [], []);
+        const [hello] = await live.read(1);
+        expect(hello?.kind === 'text' && hello.value === 'hello', 'the message before the close frame');
+        const closed = await rejects(() => live.read(1));
+        expect(closed instanceof WsError.Closed && closed.code === 4000 && closed.reason === 'bye', `the peer's close is WsError.Closed(4000, bye), got ${String(closed)}`);
+      } finally {
+        live.close();
+      }
+      const refused = await rejects(() => wsEcho(`${LOOPBACK_WS}/ws/deny?status=401`, [], core));
+      expect(refused instanceof WsError.Refused, `a refused upgrade is WsError.Refused, got ${String(refused)}`);
+      return `echo of ${shown(back)}; a header on the upgrade; Closed(4000, "bye"); /ws/deny is Refused`;
+    },
+  ],
+  [
+    'RN21',
+    'Sse default: server-sent events through the core from the loopback server (parse, resume, end, refusal)',
+    async core => {
+      const feed = `${LOOPBACK}/sse/feed`;
+      const all = await sseFollow(feed, null, 10, core);
+      const summary = all.events.map(e => `${e.id ?? '-'}:${e.event}:${JSON.stringify(e.data)}`).join(' ');
+      expect(all.ended, 'the server ended the stream (SseError.Ended)');
+      expect(
+        summary === '1:message:"one" 2:tick:"two\\nlines" 2:message:"three" 4:message:"four"',
+        `the feed parses as the HTML standard says, got ${summary}`,
+      );
+      expect(all.events[0]?.retryMs === 1500, 'retry: 1500');
+      const resumed = await sseFollow(feed, '2', 10, core);
+      expect(resumed.events.map(e => e.data).join(',') === 'three,four' && resumed.ended, 'resumed after Last-Event-ID 2');
+      const refused = await rejects(() => sseFollow(`${LOOPBACK}/sse/status?code=500`, null, 10, core));
+      expect(refused instanceof SseError.Refused && refused.status === 500, `a 500 is SseError.Refused(500), got ${String(refused)}`);
+      const html = await rejects(() => sseFollow(`${LOOPBACK}/sse/html`, null, 10, core));
+      expect(html instanceof SseError.Protocol, `text/html is SseError.Protocol, got ${String(html)}`);
+      return `${all.events.length} events then Ended; resumed after id 2; 500 Refused; text/html Protocol`;
     },
   ],
 ];

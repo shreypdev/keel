@@ -1,6 +1,6 @@
 import { loadNative, nativePlatformDefaults, reactNativeHttp, type NativeTransport } from '@undra/react-native';
 import type { HttpAdapter, UndraCore } from '@undra/runtime';
-import { BigList, Device, Todos, UndraIds, kvGet, kvPut } from '@playground/core';
+import { BigList, Device, Notes, Todos, UndraIds, kvGet, kvPut } from '@playground/core';
 
 /** What the screens share: the core and its long-lived stores. */
 export interface Playground {
@@ -12,6 +12,8 @@ export interface Playground {
   readonly bigList: BigList;
   /** The `Connectivity` and `Lifecycle` reports the core received (the platform module of the core). */
   readonly device: Device;
+  /** Notes kept in SQLite through the native `Db` port (ADR-048); the Notes screen opens its database. */
+  readonly notes: Notes;
   /** Milliseconds from `loadNative` to the stores being observed. */
   readonly startupMs: number;
   /** A fresh token of this launch, which the checks write into the stores (and the device script looks for). */
@@ -29,8 +31,9 @@ const RESTART_KEY = 'rn.checks.restart';
 
 /**
  * The sample of overriding a default (ADR-038 amendment B): every other port is the package's own (`Kv`,
- * `SecureStore`, `Fs` and `Connectivity` native, `Lifecycle` from `AppState`), but `Http` is wrapped to add a header
- * to the core's requests. It still goes through the package's default, `reactNativeHttp()` (React Native's `fetch`).
+ * `SecureStore`, `Fs`, `Db` and `Connectivity` native, `Lifecycle` from `AppState`, `WebSocket` and `Sse` from React
+ * Native's networking), but `Http` is wrapped to add a header to the core's requests. It still goes through the
+ * package's default, `reactNativeHttp()` (React Native's `fetch`).
  */
 function taggedHttp(inner: HttpAdapter = reactNativeHttp()): HttpAdapter {
   return {
@@ -56,7 +59,9 @@ export async function startUndra(log: Log): Promise<Playground> {
     )}`,
   );
   const defaults = nativePlatformDefaults();
-  log(`UNDRA-RN defaults native=${defaults.ports.length} kv=${defaults.kv ?? '-'} fs=${defaults.fs ?? '-'} secure=${defaults.secureStore ?? '-'}${defaults.error ? ` error=${defaults.error}` : ''}`);
+  log(
+    `UNDRA-RN defaults native=${defaults.ports.length} kv=${defaults.kv ?? '-'} fs=${defaults.fs ?? '-'} secure=${defaults.secureStore ?? '-'} db=${defaults.db ?? '-'}${defaults.error ? ` error=${defaults.error}` : ''}`,
+  );
 
   // What the previous launch left in Kv, then this launch's token: the device script kills the app between two
   // launches and compares (a Kv round trip that survives the process).
@@ -65,7 +70,7 @@ export async function startUndra(log: Log): Promise<Playground> {
   await kvPut(RESTART_KEY, text.encode(nonce), core);
   log(`UNDRA-RN KV wrote=${nonce}`);
 
-  const [todos, bigList, device] = await Promise.all([Todos.create(core), BigList.create(core), Device.create(core)]);
+  const [todos, bigList, device, notes] = await Promise.all([Todos.create(core), BigList.create(core), Device.create(core), Notes.create(core)]);
   // Every report the core receives, as the core's store shows it (the device script waits for these lines).
   const showNet = (): void =>
     log(`UNDRA-RN CONNECTIVITY online=${String(device.online.get())} kind=${device.netKind.get()} reports=${device.connectivityReports.get()}`);
@@ -79,7 +84,7 @@ export async function startUndra(log: Log): Promise<Playground> {
   log(
     `UNDRA-RN stores observed: todos=${todos.todos.get().length} biglist rows=${bigList.items.get().length} count=${bigList.count.get()} in ${startupMs.toFixed(1)} ms`,
   );
-  return { core, todos, bigList, device, startupMs, nonce };
+  return { core, todos, bigList, device, notes, startupMs, nonce };
 }
 
 /** The transport's native counters, when the core is the native one. */

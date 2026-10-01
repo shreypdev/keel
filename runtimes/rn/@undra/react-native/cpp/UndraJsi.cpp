@@ -621,7 +621,7 @@ void Binding::install(jsi::Runtime &rt) {
     return jsi::Value(rt, out);
   });
   // The default ports this platform answers natively, and where they keep their data
-  // (ADR-038 amendment B): `{ ports, kv, fs, secureStore }`, or `{ ports: [], error }`.
+  // (ADR-038 amendment B; ADR-048): `{ ports, kv, fs, secureStore, db }`, or `{ ports: [], error }`.
   define("platformDefaults", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
     jsi::Object out(rt);
     std::shared_ptr<Platform> platform = self->platform();
@@ -632,6 +632,9 @@ void Binding::install(jsi::Runtime &rt) {
       out.setProperty(rt, "fs", jsi::String::createFromUtf8(rt, platform->fsRoot()));
       if (std::unique_ptr<SecretStore> secrets = platform->makeSecretStore()) {
         out.setProperty(rt, "secureStore", jsi::String::createFromUtf8(rt, secrets->describe()));
+      }
+      if (std::unique_ptr<DbBackend> db = platform->makeDbBackend()) {
+        out.setProperty(rt, "db", jsi::String::createFromUtf8(rt, db->describe()));
       }
     } else {
       std::lock_guard<std::mutex> lock(self->mutex_);
