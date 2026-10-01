@@ -76,7 +76,7 @@ uses the SQLite every platform already ships (iOS, Android) or a vetted build (J
    | JVM | `java.sql` (JDBC, in the JDK), driver supplied by the app: `org.xerial:sqlite-jdbc` (Apache-2.0, bundles SQLite) | none in `:runtime`; the driver at test/run time |
    | Node | `node:sqlite` (`DatabaseSync`, Node 22.5+) | built in |
    | web | **wa-sqlite** (MIT) sync build in a dedicated worker with OPFS `AccessHandlePoolVFS` (no COOP/COEP needed) | opt-in entry `@undra/runtime/db` + `db-worker` |
-   | React Native | C++ over the sqlite3 C API, the `UndraStores` pattern (one worker thread per database, JS never involved); iOS links the system `libsqlite3`, Android compiles the vendored amalgamation (public domain) | amalgamation |
+   | React Native | the binding in portable C++, the `UndraStores` pattern (one worker thread per database, JS never involved), over the system `libsqlite3` on iOS and JNI to `android.database.sqlite` on Android (the file `android-adapters` uses, so either shell reads the other's database) | none |
    **Size:** wa-sqlite's sync wasm is about 0.6 MB raw, ~0.28 MB gzipped (recorded in `bench/results/web-size.jsonl`
    as `web/db-adapter`, informational); it is a separate opt-in bundle loaded by its own worker, never part of the
    core's wasm or the hello-world JS, so ADR-052's two gates are untouched. sql.js was rejected: in-memory only, a
@@ -100,7 +100,8 @@ uses the SQLite every platform already ships (iOS, Android) or a vetted build (J
 * **A connection per transaction** (SQLite's own locking instead of the queue): `BUSY` storms under WAL writers and
   a file handle per transaction on the web, where OPFS access handles are exclusive.
 * **`sqlite-jdbc` inside `:runtime`**: breaks "stdlib + kotlinx-coroutines only"; JDBC keeps the module clean.
-* **Android through the amalgamation** too: 1 MB per ABI for a library Android already has.
+* **The SQLite amalgamation in the React Native module** (and on Android generally): 1 MB per ABI for a library
+  Android already has, a 9 MB vendored source, and a second SQLite whose file the native shell would not share.
 
 ## Consequences and proof (R4)
 
