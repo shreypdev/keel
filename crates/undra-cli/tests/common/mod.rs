@@ -1,6 +1,8 @@
 //! Helpers shared by the integration tests: they drive the real `undra` binary.
 #![allow(dead_code)]
 
+pub mod devserver;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -123,6 +125,51 @@ impl Project {
     }
 }
 
+/// A copy of the playground (its core and `undra.toml`) in a scratch directory, with the core
+/// depending on this repository's crates by path, so a test can edit the core's sources and run
+/// `undra dev` on it without touching the checkout.
+pub fn playground_copy(tag: &str) -> Project {
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    let repo = repo_root();
+    let dir = TempDir::new(tag);
+    let root = dir.path().join("playground");
+    copy_dir(
+        &repo.join("examples/playground/core/src"),
+        &root.join("core/src"),
+    );
+    std::fs::write(
+        root.join("core/Cargo.toml"),
+        format!(
+            "[package]\nname = \"playground-core\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.85\"\npublish = false\n\n\
+[dependencies]\nundra = {{ path = \"{}\" }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n",
+            repo.join("crates/undra").display()
+        ),
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(repo.join("examples/playground/undra.toml")).unwrap();
+    std::fs::write(
+        root.join("undra.toml"),
+        manifest.replace(
+            "path = \"../..\"",
+            &format!("path = \"{}\"", repo.display()),
+        ),
+    )
+    .unwrap();
+    let _ = std::fs::copy(repo.join("Cargo.lock"), root.join("Cargo.lock"));
+    Project { dir, root }
+}
+
 /// Whether the Rust standard library for `triple` is installed.
 pub fn has_rust_target(triple: &str) -> bool {
     let Ok(out) = Command::new("rustc").args(["--print", "sysroot"]).output() else {
@@ -147,4 +194,18 @@ pub fn has_tool(program: &str, version_arg: &str) -> bool {
 /// `true` when environment variable `name` is `1`: how the heavy platform tests are switched on.
 pub fn flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v == "1")
+}
+
+/// `PATH` with the directory of the `undra` under test in front: what the build systems of a generated
+/// project (the Gradle task, the Xcode build phase, the Vite plugin) find `undra` through.
+pub fn path_with_undra() -> std::ffi::OsString {
+    let dir = Path::new(env!("CARGO_BIN_EXE_undra"))
+        .parent()
+        .expect("the binary has a directory")
+        .to_path_buf();
+    let mut dirs = vec![dir];
+    dirs.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(dirs).expect("a PATH")
 }

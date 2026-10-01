@@ -361,3 +361,33 @@ Matrix at checkpoint 8: Rust 2,351 · TS 1,049 · Kotlin 588 · Swift 467 · RN 
 Matrix at checkpoint 9: Rust 2,400 · TS 1,102 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
 In flight: `wasm-size` (E5, review), `tooling` (D2–D5, review), `dev-reload` (B3, ADR-053 accepted), `docs-reference` (H3), `rn-adapters` (G1b).
 Unblocked now that Track A is in: `abi-table` (ADR-044), `persistence-v2` (ADR-037/049), `derived-lists` (ADR-039), E4, `ts-runtime-size`, `testkit`, the Rust 1.99 bump.
+
+### Checkpoint 10 (2026-10-01, night) — the API reference
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| H3 API reference: rustdoc for `undra` + the six re-exported crates built in the site workflow with `-D warnings` and published at `/reference/rust/` (site palette and Geist laid over rustdoc's theme); `/reference/{swift,kotlin,typescript}.html` generated from the committed playground bindings by `site/scripts/build-reference.mjs` (declarations only, parser `decls.mjs` with tests, collapsed per file), covered by the "generated files up to date" check | `a22b8ed` | fable review (screenshots, desktop + phone, dark + light); open: a custom port in the playground so the Ports section has an example; `undra bindgen --declarations` would replace the parser; rustdoc has no link back to the site |
+
+### Checkpoint 11 (2026-10-02) — tooling landed
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **D2–D5 tooling**: `undra doctor` with 34 checks (`--fix` prints, `--json`), Gradle `undraBuild` before `preBuild`, an Xcode Run Script phase with per-file inputs and a per-configuration stamp, `@undra/runtime/vite` (zero deps; skips vitest), `undra init` emits `.github/workflows/undra.yml`, `undra upgrade` moves every pin in lockstep with migration notes (atomic, refuses newer projects with C0014); release builds remap the builder's home path | `aa66ce9` | opus review `.10x/reviews/2026-10-01-tooling-review.md`: merge after fixes; 6 Medium fixed (a Swift URL match that caught `undra-charts`; non-atomic upgrade; the shim's stale `Cargo.lock`; vitest building the core; doctor fixes that did not run in the printed shell; false migration notes), 11 Low; debug→release→debug proven on Gradle and Xcode; Rust 2,530 · TS 1,128 · Kotlin 612 · Swift 480 · contracts 54/54. Open: first post-merge CI run (the android job's Gradle step can skip silently); version catalogs; the `0.1.0` migration key at 1.0.0; no RN scope in doctor |
+
+Matrix at checkpoint 11: Rust 2,530 · TS 1,128 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
+
+### Checkpoint 12 (2026-10-02) — the web bundle under budget
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **E5 wasm-size** (ADR-052 Accepted): the hello-world web core goes from 136.2 KB to **102.7 KB gzipped** (budget 120 KB) by one stable sort routine for the schema code (16 monomorphised copies gone) and `undra-query` linked only into cores that declare a query or mutation; `scripts/wasm-size.sh` records to `bench/results/web-size.jsonl`, `[size]` tables in `budgets.toml` gate the wasm and the JS runtime (24.8 KB against a restated 26 KB; `ts-runtime-size` targets 16 KB), a `size` job in `bench.yml`, and `build-numbers.mjs` fills README/site/posts from the record; release builds remap the builder's home path | `2b7534d` | opus review `.10x/reviews/2026-10-01-wasm-size-review.md`: merge after fixes; M1 the query bench had broken (now run in CI), M2 hand-written queries were never hydrated, M3 home paths in every release binary, M4 the JS gate; the sort costs ≈2 µs at cold start, paid for by lever B; Rust 2,556. Open: binaryen tarball sha256 not pinned |
+
+Matrix at checkpoint 12: Rust 2,556 · TS 1,128 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
+
+### Checkpoint 13 (2026-10-02) — state-preserving reload
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **B3 dev-reload** (ADR-053 Accepted): on a successful rebuild `undra dev` starts the new core in standby, suspends the old server (2 s settle), snapshots it (memory only, 16 MiB cap), restores before the new core listens, hands the ADR-051 session over; the dev bar says "Reloaded, state kept" or "state reset: <reason>"; `onDevNotice` last in every runtime signature, dev-only; `--no-keep-state`; a Kotlin `RemoteTransport` `Hello` race fixed | `e119d4c` | opus review `.10x/reviews/2026-10-02-dev-reload-review.md`: merge after fixes; M1 a call made during the swap vanished silently (now counted and shown: "N calls lost in the reload"), M2 a core could speak as the dev server (target filtered at the bridge); runner stdout bounded; the generation floor asserted across processes; proven on the `undra` AVD, iOS simulator and web; snapshot 204 KiB / restore 1.6 ms for the playground; Rust 2,603 · TS 1,132 · Kotlin 616 · Swift 482 · contracts 54/54. Open: query handles do not survive a reload (needs its own ADR); L3/I1/I4 |
+
+Matrix at checkpoint 13: Rust 2,603 · TS 1,132 · Kotlin 616 · Swift 482 · RN 59 · contracts 54/54.

@@ -94,3 +94,15 @@ h2:hover .anchor, h3:hover .anchor, .anchor:focus { opacity: 1; }
 .figure svg .arrowhead-acc { fill: var(--accent); }
 .figure svg .cell { fill: var(--surface-3); stroke: var(--line-strong); }
 .figure svg .cell-acc { fill: var(--accent-soft); stroke: var(--accent-line); }
+
+/* API reference pages (build-reference.mjs): a file per section, its declarations collapsed behind a toggle */
+.prose .ref-note { margin: 0 0 .2rem; font-size: .9rem; line-height: 1.6; color: var(--text-3); }
+.ref-blurb code { white-space: nowrap; overflow-wrap: normal; }
+.prose .ref-names { margin: 0; font-size: .95rem; line-height: 2.2; }
+.ref-names code { margin-right: 3px; }
+.reveal-code.ref { margin-top: 12px; }
+.reveal-code.ref > summary span { font: 400 .76rem/1 var(--font-mono); color: var(--text-3); }
+.reveal-code.ref .code { margin: 12px 0 0; }
+.reveal-code.ref .code pre { font-size: .8rem; line-height: 1.65; }
+.reveal-code.ref .code-bar a { color: inherit; text-decoration-color: var(--line-strong); }
+.reveal-code.ref .code-bar a:hover { color: var(--text); text-decoration-color: var(--accent); }

@@ -33,6 +33,11 @@ impl QueryDef for Count {
 }
 
 undra_runtime::inventory::submit! { undra_query::QueryRegistration::of::<Count>() }
+// What `#[undra::query]` submits next to the registration (ADR-052): without the layer the
+// platform's constructor call below finds no dispatcher, and without the hook nothing hydrates at
+// start-up as it does in an app.
+undra_runtime::inventory::submit! { undra_query::__private::HYDRATE }
+undra_runtime::inventory::submit! { undra_query::__private::LAYER }
 
 fn runtime() -> TestRuntime {
     let t = TestRuntime::new();

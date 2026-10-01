@@ -244,22 +244,22 @@ impl Schema {
         let mut s = self.without_docs();
 
         for en in &mut s.enums {
-            en.variants.sort_by_key(|v| v.index);
+            crate::sort::by_index(&mut en.variants, |v| v.index);
         }
         for object in &mut s.objects {
-            object.constructors.sort_by(|a, b| a.name.cmp(&b.name));
-            object.methods.sort_by(|a, b| a.name.cmp(&b.name));
+            crate::sort::by_name(&mut object.constructors, |m| &m.name);
+            crate::sort::by_name(&mut object.methods, |m| &m.name);
         }
         for port in &mut s.ports {
-            port.methods.sort_by(|a, b| a.name.cmp(&b.name));
+            crate::sort::by_name(&mut port.methods, |m| &m.name);
         }
 
-        s.records.sort_by(|a, b| a.name.cmp(&b.name));
-        s.enums.sort_by(|a, b| a.name.cmp(&b.name));
-        s.objects.sort_by(|a, b| a.name.cmp(&b.name));
-        s.functions.sort_by(|a, b| a.name.cmp(&b.name));
-        s.ports.sort_by(|a, b| a.name.cmp(&b.name));
-        s.queries.sort_by(|a, b| a.name.cmp(&b.name));
+        crate::sort::by_name(&mut s.records, |d| &d.name);
+        crate::sort::by_name(&mut s.enums, |d| &d.name);
+        crate::sort::by_name(&mut s.objects, |d| &d.name);
+        crate::sort::by_name(&mut s.functions, |d| &d.name);
+        crate::sort::by_name(&mut s.ports, |d| &d.name);
+        crate::sort::by_name(&mut s.queries, |d| &d.name);
         s
     }
 }
@@ -855,6 +855,147 @@ mod tests {
         assert_eq!(
             schema.canonical_json(),
             r#"{"records":[],"enums":[],"objects":[],"functions":[],"ports":[],"queries":[]}"#
+        );
+    }
+
+    /// A schema whose every sorted list holds equal keys with different contents, short lists
+    /// (at most 16 items) and long ones: what the sort decides and a valid playground does not
+    /// show (its names are unique). `collect_schema` validates afterwards, but the order of
+    /// duplicates still decides the canonical form, and so the hash, of what it hashes.
+    fn equal_keyed_schema() -> Schema {
+        use crate::fixtures::{field, method, object, param, record};
+        use crate::{EnumDef, FunctionDef, PortDef, PortKind, QueryDef, QueryKind, VariantDef};
+        const NAMES: [&str; 4] = ["Todo", "A", "b", "A"];
+        let name = |i: usize| NAMES[(i * 7 + i / 3) % NAMES.len()];
+        let mut s = Schema::new("equal-keyed");
+        for i in 0..40 {
+            s.records
+                .push(record(name(i), vec![field(&format!("f{i}"), TypeRef::U32)]));
+        }
+        for i in 0..20 {
+            s.enums.push(EnumDef {
+                name: name(i).into(),
+                type_id: crate::ids::type_id(&format!("E{i}")),
+                is_error: i % 2 == 0,
+                variants: (0..(i + 3))
+                    .map(|v| VariantDef {
+                        name: format!("V{v}"),
+                        index: ((v * 5) % 3) as u16,
+                        fields: Vec::new(),
+                        tuple: false,
+                        message: None,
+                        docs: String::new(),
+                    })
+                    .collect(),
+                docs: String::new(),
+            });
+        }
+        for i in 0..18 {
+            let ctors = (0..3)
+                .map(|c| {
+                    method(
+                        name(i),
+                        name(c),
+                        vec![param(&format!("p{c}"), TypeRef::U8)],
+                        TypeRef::Unit,
+                        false,
+                    )
+                })
+                .collect();
+            let methods = (0..(i + 2))
+                .map(|m| method(name(i), name(m), vec![], TypeRef::U16, m % 2 == 1))
+                .collect();
+            s.objects.push(object(name(i), ctors, methods));
+        }
+        for i in 0..17 {
+            s.functions.push(FunctionDef {
+                name: name(i).into(),
+                method_id: i as u32,
+                params: vec![param(&format!("x{i}"), TypeRef::I64)],
+                returns: TypeRef::Bool,
+                is_async: false,
+                takes_ctx: false,
+                docs: String::new(),
+            });
+        }
+        for i in 0..3 {
+            s.ports.push(PortDef {
+                name: name(i).into(),
+                port_id: i as u32,
+                kind: PortKind::Async,
+                methods: (0..(20 - i))
+                    .map(|m| method(name(i), name(m), vec![], TypeRef::String, true))
+                    .collect(),
+                docs: String::new(),
+            });
+        }
+        for i in 0..17 {
+            s.queries.push(QueryDef {
+                name: name(i).into(),
+                query_id: i as u32,
+                kind: if i % 2 == 0 {
+                    QueryKind::Query
+                } else {
+                    QueryKind::Mutation
+                },
+                key: format!("k{i}"),
+                params: Vec::new(),
+                returns: TypeRef::Unit,
+                stale_ms: None,
+                persist: false,
+                idempotent: false,
+            });
+        }
+        s
+    }
+
+    /// What `canonicalized` produced before `crate::sort` (ADR-052): `slice::sort_by` /
+    /// `sort_by_key` with the same keys, list by list.
+    fn canonicalized_with_std_sort(schema: &Schema) -> Schema {
+        let mut s = schema.without_docs();
+        for en in &mut s.enums {
+            en.variants.sort_by_key(|v| v.index);
+        }
+        for object in &mut s.objects {
+            object.constructors.sort_by(|a, b| a.name.cmp(&b.name));
+            object.methods.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        for port in &mut s.ports {
+            port.methods.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        s.records.sort_by(|a, b| a.name.cmp(&b.name));
+        s.enums.sort_by(|a, b| a.name.cmp(&b.name));
+        s.objects.sort_by(|a, b| a.name.cmp(&b.name));
+        s.functions.sort_by(|a, b| a.name.cmp(&b.name));
+        s.ports.sort_by(|a, b| a.name.cmp(&b.name));
+        s.queries.sort_by(|a, b| a.name.cmp(&b.name));
+        s
+    }
+
+    #[test]
+    fn equal_keys_keep_the_order_and_the_hash_they_had_before_the_schema_sort() {
+        let schema = equal_keyed_schema();
+        assert_eq!(schema.canonicalized(), canonicalized_with_std_sort(&schema));
+        let representative = representative_schema();
+        assert_eq!(
+            representative.canonicalized(),
+            canonicalized_with_std_sort(&representative)
+        );
+        // The hash `main` computed for this schema at a0d638f, before `crate::sort` existed.
+        assert_eq!(schema.hash(), 0xef9b_4b0c_dcd2_89c2);
+
+        // The fixture is sensitive to the order of equal keys: the same lists in reverse
+        // declaration order canonicalize differently, so a sort that was not stable would move
+        // the hash above.
+        let mut reversed = schema.clone();
+        reversed.records.reverse();
+        assert_ne!(reversed.hash(), schema.hash());
+        for en in &mut reversed.enums {
+            en.variants.reverse();
+        }
+        assert_eq!(
+            reversed.canonicalized(),
+            canonicalized_with_std_sort(&reversed)
         );
     }
 }

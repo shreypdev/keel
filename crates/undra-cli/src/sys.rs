@@ -70,6 +70,9 @@ pub trait Sys {
     /// Runs `program args...` with `env` added, capturing its output. `None` when it cannot be
     /// started.
     fn run(&self, program: &Path, args: &[&str], env: &[(String, String)]) -> Option<CmdOutput>;
+    /// Free space, in bytes, on the volume that holds `path` (or the nearest parent that exists);
+    /// `None` when it cannot be told.
+    fn free_disk_bytes(&self, path: &Path) -> Option<u64>;
 }
 
 /// The real machine.
@@ -139,6 +142,30 @@ impl Sys for RealSys {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         })
     }
+
+    fn free_disk_bytes(&self, path: &Path) -> Option<u64> {
+        // `df -Pk` has one POSIX layout everywhere (macOS and Linux): a header, then
+        // `filesystem 1024-blocks used available capacity mounted-on`.
+        let existing = path.ancestors().find(|p| p.exists())?;
+        let output = Command::new("df")
+            .arg("-Pk")
+            .arg(existing)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        parse_df(&String::from_utf8_lossy(&output.stdout))
+    }
+}
+
+/// The available bytes in the output of `df -Pk`.
+fn parse_df(output: &str) -> Option<u64> {
+    let line = output.lines().nth(1)?;
+    let available: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
+    available.checked_mul(1024)
 }
 
 fn executable_names(program: &str) -> Vec<String> {
@@ -186,6 +213,8 @@ pub(crate) mod fake {
         pub(crate) tools: BTreeMap<String, PathBuf>,
         /// `"<program file name> <args joined by space>"` to its output.
         pub(crate) outputs: BTreeMap<String, CmdOutput>,
+        /// Free disk space, when the machine says.
+        pub(crate) free_disk: Option<u64>,
     }
 
     impl FakeSys {
@@ -248,6 +277,40 @@ pub(crate) mod fake {
         }
     }
 
+    impl FakeSys {
+        /// A command that runs and fails, printing `text` to stderr.
+        pub(crate) fn with_failing_output(mut self, tool: &str, args: &str, text: &str) -> FakeSys {
+            self.outputs.insert(
+                format!("{tool} {args}").trim().to_owned(),
+                CmdOutput {
+                    success: false,
+                    stdout: String::new(),
+                    stderr: text.to_owned(),
+                },
+            );
+            self
+        }
+
+        /// A command whose output goes to stderr (as `java -version` and `kotlinc -version` do).
+        pub(crate) fn with_stderr_output(mut self, tool: &str, args: &str, text: &str) -> FakeSys {
+            self.outputs.insert(
+                format!("{tool} {args}").trim().to_owned(),
+                CmdOutput {
+                    success: true,
+                    stdout: String::new(),
+                    stderr: text.to_owned(),
+                },
+            );
+            self
+        }
+
+        /// The free disk space the machine reports.
+        pub(crate) fn with_free_disk(mut self, bytes: u64) -> FakeSys {
+            self.free_disk = Some(bytes);
+            self
+        }
+    }
+
     impl Sys for FakeSys {
         fn os(&self) -> Os {
             self.os.unwrap_or(Os::Linux)
@@ -301,5 +364,30 @@ pub(crate) mod fake {
             let key = format!("{name} {}", args.join(" ")).trim().to_owned();
             self.outputs.get(&key).cloned()
         }
+
+        fn free_disk_bytes(&self, _path: &Path) -> Option<u64> {
+            self.free_disk
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn df_output_is_read() {
+        let macos = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s1s1 1953595632 12582912 1394147328 1% /\n";
+        assert_eq!(parse_df(macos), Some(1_394_147_328 * 1024));
+        let linux = "Filesystem     1024-blocks     Used Available Capacity Mounted on\noverlay           61255492 22000000  39255492      36% /\n";
+        assert_eq!(parse_df(linux), Some(39_255_492 * 1024));
+        assert_eq!(parse_df("Filesystem\n"), None);
+        assert_eq!(parse_df("h\nx y z notanumber\n"), None);
+    }
+
+    #[test]
+    fn the_real_machine_reports_some_free_space_for_the_temp_directory() {
+        // Not asserting a number: only that `df` is understood on this machine.
+        assert!(RealSys.free_disk_bytes(&std::env::temp_dir()).is_some());
     }
 }

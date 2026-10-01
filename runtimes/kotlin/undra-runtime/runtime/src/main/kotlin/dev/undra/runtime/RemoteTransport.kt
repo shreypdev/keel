@@ -303,10 +303,16 @@ internal class RemoteTransport(
 
     private fun dispatch(connection: Connection, envelope: Envelope) {
         if (envelope.kind == Envelope.Kind.HELLO) {
+            // From here on this connection speaks the core's schema. Set on the reader thread, before it reads the
+            // next frame, not by the thread that waits for the Hello: the server may send something right behind it
+            // (`undra dev` tells a client that came back what became of its state, ADR-053).
+            connection.handshakeDone = true
             connection.hello.complete(Payloads.Hello.decode(envelope.payload))
             return
         }
-        if (!connection.handshakeDone || connection !== current) return
+        // A frame right behind the Hello can arrive before the connecting thread has made the connection current:
+        // it belongs to the connection being opened as much as to the current one.
+        if (!connection.handshakeDone || (connection !== current && connection !== opening)) return
         val target = events ?: return
         when (envelope.kind) {
             Envelope.Kind.REPLY -> Payloads.Reply.decode(envelope.payload).let { target.onReply(it.callId, it.status, it.body) }

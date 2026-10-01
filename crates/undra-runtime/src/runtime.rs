@@ -415,6 +415,8 @@ pub struct Runtime {
     /// The last snapshot description: for which store types, and its bytes (a snapshot of the
     /// same set of types reuses it).
     description: Mutex<Option<(Vec<u32>, Arc<str>)>>,
+    /// The sections layered crates added to `stats_json`, one per name.
+    stats_sections: Mutex<Vec<crate::ext::StatsSection>>,
     port_dispatchers: HashMap<u32, &'static PortDispatcher>,
     calls: Mutex<HashMap<u32, CallEntry>>,
     stats: Stats,
@@ -771,6 +773,7 @@ impl Runtime {
             restorers,
             store_fingerprints: Mutex::new(HashMap::new()),
             description: Mutex::new(None),
+            stats_sections: Mutex::new(Vec::new()),
             port_dispatchers,
             calls: Mutex::new(HashMap::new()),
             stats: Stats::default(),
@@ -842,14 +845,19 @@ impl Runtime {
         GLOBAL.lock().clone()
     }
 
-    /// Runs the registered [`InitHook`]s (done automatically by `init` and `new`; the test
-    /// runtime leaves it to the test, after it has bound its fakes).
+    /// Runs the registered [`InitHook`]s, one per name (done automatically by `init` and `new`;
+    /// the test runtime leaves it to the test, after it has bound its fakes).
     pub fn run_init_hooks(&self) {
         let ctx = self.ctx();
         let Ok(_guard) = self.enter_core() else {
             return;
         };
+        let mut ran: Vec<&'static str> = Vec::new();
         for hook in inventory::iter::<InitHook> {
+            if ran.contains(&hook.name) {
+                continue;
+            }
+            ran.push(hook.name);
             if let Err(report) = guard::guarded(|| (hook.run)(&ctx)) {
                 self.log_panic(&format!("init hook `{}` panicked", hook.name), &report);
             }
@@ -1025,6 +1033,16 @@ impl Runtime {
     /// The `T` of [`extension`](Runtime::extension), if something created it; never creates it.
     pub fn try_extension<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.extensions.get::<T>()
+    }
+
+    /// Adds a section to [`stats_json`](Runtime::stats_json) (one per name: a second section with
+    /// a name already added is ignored). A layered crate calls it when it first keeps state on
+    /// this runtime.
+    pub fn add_stats_section(&self, section: crate::ext::StatsSection) {
+        let mut sections = self.stats_sections.lock();
+        if sections.iter().all(|s| s.name != section.name) {
+            sections.push(section);
+        }
     }
 
     /// Like [`extension`](Runtime::extension) with an explicit initializer (which may run
@@ -2839,7 +2857,8 @@ impl Runtime {
         // Sections of layered crates (`undra-query`'s persistence counters), before the closing
         // brace of the document.
         let mut sections = String::new();
-        for section in inventory::iter::<crate::ext::StatsSection> {
+        let registered = self.stats_sections.lock().clone();
+        for section in registered {
             if let Ok(Some(json)) = guard::guarded(|| (section.json)(self)) {
                 sections.push(',');
                 push_json_string(&mut sections, section.name);

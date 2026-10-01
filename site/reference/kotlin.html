@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kotlin reference · Undra docs</title>
+<meta name="description" content="Every declaration Undra generates for Kotlin from the playground: types, errors, objects, stores, queries and ports, with their docs.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/reference/kotlin.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Kotlin reference · Undra docs">
+<meta property="og:description" content="Every declaration Undra generates for Kotlin from the playground: types, errors, objects, stores, queries and ports, with their docs.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/reference/kotlin.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Kotlin reference · Undra docs">
+<meta name="twitter:description" content="Every declaration Undra generates for Kotlin from the playground: types, errors, objects, stores, queries and ports, with their docs.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/reference/kotlin.html#article","headline":"Kotlin reference · Undra docs","description":"Every declaration Undra generates for Kotlin from the playground: types, errors, objects, stores, queries and ports, with their docs.","url":"https://shreypdev.github.io/undra/reference/kotlin.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Kotlin reference","item":"https://shreypdev.github.io/undra/reference/kotlin.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/web.html">Workers &amp; crash recovery</a></li><li><a href="../docs/updates.html">Shipping an update</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/web.html">Workers &amp; crash recovery</a></li><li><a href="../docs/updates.html">Shipping an update</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+<!-- reference:start -->
+<p class="crumb">API reference</p>
+<h1>Kotlin reference</h1>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x9cd826cc7ca51a21</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
+<p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
+<h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A data class for each record, an enum or sealed interface for each enum, each with its codec.</p>
+<p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>StorageStatus</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>204 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Types.kt" rel="noopener">Types.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * A record that nests the other kinds: lists, options, maps, enums with data and a map with
+ * integer keys.
+ */
+data class Composite(
+    /** A name. */
+    val name: String,
+    /** Several strings. */
+    val tags: List&lt;String&gt;,
+    /** Maybe a figure. */
+    val figure: Figure?,
+    /** Figures, in order. */
+    val history: List&lt;Figure&gt;,
+    /** A map keyed by string. */
+    val scores: Map&lt;String, Int&gt;,
+    /** A map keyed by integer. */
+    val names: Map&lt;UInt, String&gt;,
+    /** Maybe a number. */
+    val limit: UInt?,
+) : UndraRecord {
+    companion object : UndraCodec&lt;Composite&gt; { … }
+}
+
+/** One row of a list, identified by `id`. */
+data class Item(
+    /** Identity of the row; lists are patched by it, never by position. */
+    val id: UInt,
+    /** The text of the row. */
+    val label: String,
+    /** How many times the row was updated. */
+    val version: UInt,
+) : UndraRecord {
+    companion object : UndraCodec&lt;Item&gt; { … }
+}
+
+/** One value of every primitive the wire has, so a single call covers them all. */
+data class Primitives(
+    /** A boolean. */
+    val flag: Boolean,
+    /** An `i8`. */
+    val tiny: Byte,
+    /** An `i16`. */
+    val small: Short,
+    /** An `i32`. */
+    val int: Int,
+    /** An `i64`: a `bigint` in TypeScript. */
+    val long: Long,
+    /** A `u8`. */
+    val byte: UByte,
+    /** A `u16`. */
+    val word: UShort,
+    /** A `u32`. */
+    val dword: UInt,
+    /** A `u64`: a `bigint` in TypeScript. */
+    val qword: ULong,
+    /** An `f32`. */
+    val single: Float,
+    /** An `f64`. */
+    val double: Double,
+    /** A string, UTF-8 on the wire. */
+    val text: String,
+    /** Raw bytes. */
+    val blob: ByteArray,
+    /** A span of time, whole nanoseconds on the wire. */
+    val span: Duration,
+    /** A moment, milliseconds since the Unix epoch on the wire. */
+    val at: Timestamp,
+    /** A UUID, sixteen bytes on the wire. */
+    val id: UUID,
+) : UndraRecord {
+    companion object : UndraCodec&lt;Primitives&gt; { … }
+}
+
+/** What a [`Probe`] has seen. */
+data class ProbeCounters(
+    /** Calls that started running in the core. */
+    val started: UInt,
+    /** Calls that ran to the end. */
+    val completed: UInt,
+    /** Calls the core dropped before they ended, because the platform cancelled them. */
+    val cancelled: UInt,
+    /** Items the core produced for streams (whether or not the platform has read them yet). */
+    val produced: UInt,
+) : UndraRecord {
+    companion object : UndraCodec&lt;ProbeCounters&gt; { … }
+}
+
+/** Where the server is: what an app supplies once, at start-up. */
+data class RemoteConfig(
+    /** The server's address without a trailing slash, such as `https://api.example.com`. */
+    val baseUrl: String,
+) : UndraRecord {
+    companion object : UndraCodec&lt;RemoteConfig&gt; { … }
+}
+
+/** One to-do item on the server. */
+data class RemoteTodo(
+    /**
+     * The server's identity of the item. An item that is only shown optimistically, and that the
+     * server has not answered for yet, has an identity counting down from `u32::MAX`.
+     */
+    val id: UInt,
+    /** What has to be done. */
+    val title: String,
+    /** Whether it is finished. */
+    val done: Boolean,
+) : UndraRecord {
+    companion object : UndraCodec&lt;RemoteTodo&gt; { … }
+}
+
+/** What the query client's persistence did so far: [`storage_status`]. */
+data class StorageStatus(
+    /** Mutations waiting in the offline queue. */
+    val pending: UInt,
+    /** The dead letters, as `"&lt;mutation&gt;: &lt;reason&gt;"`. */
+    val deadLetters: List&lt;String&gt;,
+    /**
+     * Whether the stored offline queue has been read (`false` while the store cannot be read:
+     * the queue is then neither replayed nor written).
+     */
+    val queueReadable: Boolean,
+    /** Writes to the `Kv` store that failed. */
+    val writeFailed: ULong,
+    /** Persisted cache entries dropped because they could not be migrated. */
+    val dropped: ULong,
+    /** Cache entries and queued mutations an older build wrote that were migrated. */
+    val migrated: ULong,
+    /** Queued mutations moved to the dead-letter queue. */
+    val deadLettered: ULong,
+) : UndraRecord {
+    companion object : UndraCodec&lt;StorageStatus&gt; { … }
+}
+
+/** One item of the to-do list. */
+data class Todo(
+    /** Identity of the item; the list is updated by key, so the UI diffs by it. */
+    val id: UUID,
+    /** What has to be done. */
+    val title: String,
+    /** Whether it is finished. */
+    val done: Boolean,
+) : UndraRecord {
+    companion object : UndraCodec&lt;Todo&gt; { … }
+}
+
+/** A shape: an enum with named fields, a tuple variant and a unit variant. */
+sealed interface Figure : UndraEnum {
+    /** A circle. */
+    data class Circle(val radius: Double) : Figure
+    /** A rectangle. */
+    data class Rect(val width: Double, val height: Double) : Figure
+    /** A shape that is only a name. */
+    data class Label(val value: String) : Figure
+    /** No shape at all. */
+    data object Empty : Figure
+
+    companion object : UndraCodec&lt;Figure&gt; { … }
+}
+
+/** Which items the list shows. */
+enum class Filter(val index: UShort) : UndraEnum {
+    /** Every item. */
+    ALL(0u),
+    /** Items that are not finished. */
+    ACTIVE(1u),
+    /** Items that are finished. */
+    DONE(2u);
+
+    companion object : UndraCodec&lt;Filter&gt; { … }
+}
+
+/** Whether the count is even or odd: a value derived from `count` in the core. */
+enum class Parity(val index: UShort) : UndraEnum {
+    /** The count is divisible by two. */
+    EVEN(0u),
+    /** The count is not divisible by two. */
+    ODD(1u);
+
+    companion object : UndraCodec&lt;Parity&gt; { … }
+}
+
+/** Which signal `burst` and `start` write. */
+enum class StressMode(val index: UShort) : UndraEnum {
+    /** `value` + 1 per transaction: a firehose the platforms apply once per frame. */
+    FIREHOSE(0u),
+    /** `progress` + 1 per transaction: a `no_coalesce` signal the platforms apply step by step. */
+    PROGRESS(1u);
+
+    companion object : UndraCodec&lt;StressMode&gt; { … }
+}
+
+/** The fetch state of a query (SPEC section 9). */
+enum class QueryStatus(val index: UShort) : UndraEnum {
+    /** No fetch has started. */
+    IDLE(0u),
+    /** A fetch is in flight. */
+    FETCHING(1u),
+    /** The latest fetch succeeded. */
+    SUCCESS(2u),
+    /** The latest fetch failed. */
+    ERROR(3u);
+
+    companion object : UndraCodec&lt;QueryStatus&gt; { … }
+}
+</code></pre></div>
+</details>
+<h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A sealed class for each <code>#[undra::error]</code>, one subclass per variant.</p>
+<p class="ref-names"><code>LabError</code> <code>ListError</code> <code>RemoteError</code> <code>StressError</code> <code>TodoError</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>51 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Errors.kt" rel="noopener">Errors.kt</a></span></div><pre><code data-lang="kotlin">/** Why a lab call failed. */
+sealed class LabError(message: String) : UndraException(message) {
+    /** Nothing was given. */
+    data object Empty : LabError("nothing was given")
+    /** The text is longer than `max` characters. */
+    data class TooLong(val max: UInt) : LabError("longer than ${max} characters")
+    /** The text is not a number. */
+    data class NotANumber(val value: String) : LabError("`${value}` is not a number")
+    /** A failure chosen by the caller. */
+    data class Rejected(val code: Int, val reason: String) : LabError("rejected with code ${code}: ${reason}")
+
+    companion object : UndraCodec&lt;LabError&gt; { … }
+}
+
+/** Why an operation on a list was refused. */
+sealed class ListError(message: String) : UndraException(message) {
+    /** A position is not in the list. */
+    data class OutOfRange(val index: UInt, val len: UInt) : ListError("position ${index} is outside a list of ${len} items")
+
+    companion object : UndraCodec&lt;ListError&gt; { … }
+}
+
+/** Why a request to the server failed. */
+sealed class RemoteError(message: String) : UndraException(message) {
+    /** [`configure_remote`] was not called. */
+    data object NotConfigured : RemoteError("the remote server is not configured")
+    /** The `Http` port failed: no network, a timeout, a bad URL, or a cancelled request. */
+    data class Http(override val cause: HttpError) : RemoteError("network: ${cause.message}")
+    /** The server answered with a status that is not a success. */
+    data class Status(val code: UShort) : RemoteError("the server answered ${code}")
+    /** The server's answer is not the JSON this core expects. */
+    data class BadBody(val value: String) : RemoteError("the response is not what was expected: ${value}")
+
+    companion object : UndraCodec&lt;RemoteError&gt; { … }
+}
+
+/** Why `start` refused to start. */
+sealed class StressError(message: String) : UndraException(message) {
+    /** The rate is zero or above the fastest generator there is (1,000,000 updates a second). */
+    data class RateOutOfRange(val rate: UInt, val max: UInt) : StressError("${rate} updates per second is outside 1..=${max}")
+
+    companion object : UndraCodec&lt;StressError&gt; { … }
+}
+
+/** Why an item could not be added. */
+sealed class TodoError(message: String) : UndraException(message) {
+    /** The title is empty once spaces are trimmed. */
+    data object EmptyTitle : TodoError("the title cannot be empty")
+
+    companion object : UndraCodec&lt;TodoError&gt; { … }
+}
+</code></pre></div>
+</details>
+<h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
+<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>localizedGreeting</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>storageStatus</code> <code>version</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>197 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
+    /**
+     * A probe with every counter at zero.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraCore.shared)
+
+    /**
+     * What the probe has seen so far.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun counters(): ProbeCounters
+
+    /**
+     * Waits forever. The only way it ends is cancellation, which the `cancelled` counter shows.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
+    suspend fun hang(): UInt
+
+    /**
+     * Sets every counter back to zero.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun reset()
+
+    /**
+     * A stream of the numbers `0..count`, produced one per poll. The runtime sends an item only
+     * against credit the platform granted and polls at most one item ahead of it, so `produced`
+     * stays within one of what the platform has asked for, however large `count` is.
+     * Collecting throws UndraCallError; cancelling the collector ends it quietly.
+     */
+    fun ticks(count: UInt): Flow&lt;UInt&gt;
+
+    /**
+     * The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
+     * `code`) where the number `fail_at` would come, when `fail_at &lt; count`: a stream that ends
+     * with its typed error part-way (ADR-036). The items before it arrive first.
+     * Collecting throws LabError or UndraCallError; cancelling the collector ends it quietly.
+     */
+    fun ticksThenFail(count: UInt, failAt: UInt, code: Int): Flow&lt;UInt&gt;
+
+    /**
+     * Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
+    suspend fun wait(ms: UInt): UInt
+
+    companion object {
+        /**
+         * A probe with every counter at zero.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraCore.shared): Probe
+    }
+}
+
+/**
+ * Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
+
+/**
+ * Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
+ * port.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun addLater(a: Int, b: Int, delayMs: UInt, ctx: UndraCore = UndraCore.shared): Int
+
+/**
+ * The area of a circle or a rectangle. A label and an empty figure have none.
+ * @throws LabError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun area(figure: Figure, ctx: UndraCore = UndraCore.shared): Double
+
+/**
+ * Tells the core where the server is. Call it once at start-up, before anything observes
+ * [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
+ * stale).
+ * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+ */
+fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraCore.shared)
+
+/**
+ * Adds an item to `list` the way a UI wants it: the list shows it at once (an optimistic placeholder), the
+ * server is asked, and the placeholder is taken back if the server refuses. On success the cached
+ * list is refetched, so the placeholder gives way to the server's item.
+ *
+ * While the device is offline the request is queued (the mutation is idempotent) and the call
+ * keeps waiting; the placeholder stays visible until the network returns and the request is
+ * replayed.
+ * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun createRemoteTodo(
+    list: String,
+    title: String,
+    ctx: UndraCore = UndraCore.shared,
+): RemoteTodo
+
+/**
+ * Returns `value` unchanged.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun echoComposite(value: Composite, ctx: UndraCore = UndraCore.shared): Composite
+
+/**
+ * Returns `value` unchanged.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun echoFigure(value: Figure, ctx: UndraCore = UndraCore.shared): Figure
+
+/**
+ * Returns `value` unchanged.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraCore.shared): Primitives
+
+/**
+ * Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
+ * crash, on the platforms that can unwind (R6).
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun explode(reason: String, ctx: UndraCore = UndraCore.shared): UInt
+
+/**
+ * Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun explodeLater(delayMs: UInt, reason: String, ctx: UndraCore = UndraCore.shared): UInt
+
+/**
+ * Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
+ * call with a typed error.
+ * @throws LabError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraCore.shared): UInt
+
+/**
+ * A greeting.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun greet(name: String, ctx: UndraCore = UndraCore.shared): String
+
+/**
+ * Greets `name` in the user's language, through the [`Locale`] port.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun localizedGreeting(name: String, ctx: UndraCore = UndraCore.shared): String
+
+/**
+ * Reads an unsigned number of at most nine digits.
+ * @throws LabError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun parseCount(text: String, ctx: UndraCore = UndraCore.shared): UInt
+
+/**
+ * Does nothing and returns nothing: a call with neither arguments nor a result.
+ * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+ */
+fun ping(ctx: UndraCore = UndraCore.shared)
+
+/**
+ * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
+ * refuses.
+ * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun setRemoteDone(
+    list: String,
+    id: UInt,
+    done: Boolean,
+    ctx: UndraCore = UndraCore.shared,
+): RemoteTodo
+
+/**
+ * What the query client's persistence did: the offline queue, its dead letters and the
+ * persistence counters.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun storageStatus(ctx: UndraCore = UndraCore.shared): StorageStatus
+
+/**
+ * The name and version of the core.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
+fun version(ctx: UndraCore = UndraCore.shared): String
+</code></pre></div>
+</details>
+<h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>StateFlow</code>, then its methods.</p>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Legacy</code> <code>Profile</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>326 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Stores.kt" rel="noopener">Stores.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
+ * exercise the boundary.
+ */
+class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val rows: StateFlow&lt;List&lt;Item&gt;&gt;
+    val s000: StateFlow&lt;UInt&gt;
+    // … 126 more with the same shape …
+    val s127: StateFlow&lt;UInt&gt;
+
+    /**
+     * A store with every counter at zero and [`ROWS`] rows numbered from 1.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraCore.shared)
+
+    /**
+     * Adds two numbers: the cheapest call there is, for the handle-call row.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun benchAdd(a: UInt, b: UInt): UInt
+
+    /**
+     * Returns `data` unchanged: a payload of `data.len()` bytes crosses the boundary
+     * twice.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun benchEchoBytes(data: ByteArray): ByteArray
+
+    /**
+     * Inserts one new row so that it ends at position `i` (a position past the end
+     * appends): one keyed `Insert` on a list of about 10,000 rows. The list grows by
+     * one row per call; `bench_list_reset` starts over.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun benchListInsert(i: UInt)
+
+    /**
+     * Puts the list back to its [`ROWS`] starting rows and writes zero to every counter,
+     * in one transaction: one change-set with the list and all [`SIGNALS`] counters.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun benchListReset()
+
+    /**
+     * Updates `n` rows of the list, **one transaction each**: `n` change-sets, each a
+     * keyed patch of a single `Update` (the row's `version` goes up by one), the way a
+     * socket or a sensor feed that writes a row at a time reaches the platform. The rows
+     * are spread over the list (consecutive updates are far apart) and the same
+     * positions come out for the same list length, so a run is repeatable. This is what
+     * the device benchmarks drain (ADR-031: 100,000 patches a second is 1,667 a frame).
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun benchListUpdateBurst(n: UInt)
+
+    /**
+     * Adds one to the first `k` counters (at most [`SIGNALS`]) inside one transaction:
+     * `k` dirty signals, one change-set.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun benchTouchSignals(k: UInt)
+
+    companion object {
+        /**
+         * A store with every counter at zero and [`ROWS`] rows numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraCore.shared): Bench
+    }
+}
+
+/** A list of [`LIST_LEN`] items with operations that change one item at a time. */
+class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val items: StateFlow&lt;List&lt;Item&gt;&gt;
+    /** Computed by the core; read-only. */
+    val count: StateFlow&lt;UInt&gt;
+
+    /**
+     * A list of [`LIST_LEN`] items numbered from 1.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraCore.shared)
+
+    /**
+     * Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
+     * returns its identity. One keyed `Insert`.
+     * @throws ListError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun insertAt(index: UInt, label: String): UInt
+
+    /**
+     * Moves the row at `from` so that it ends at `to`. One keyed `Move`.
+     * @throws ListError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun moveItem(from: UInt, to: UInt)
+
+    /**
+     * Removes the row at `index`. One keyed `Remove`.
+     * @throws ListError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun removeAt(index: UInt)
+
+    /**
+     * Replaces the list with a fresh one of [`LIST_LEN`] items. The platform receives the keyed
+     * patch that turns the old list into the new one (a full value if they have little in
+     * common).
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun reset()
+
+    /**
+     * Changes the label of the row at `index` and bumps its version. One keyed `Update`.
+     * @throws ListError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun updateAt(index: UInt, label: String)
+
+    companion object {
+        /**
+         * A list of [`LIST_LEN`] items numbered from 1.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraCore.shared): BigList
+    }
+}
+
+/** A counter with a change tally and a computed parity. */
+class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val count: StateFlow&lt;Int&gt;
+    val changes: StateFlow&lt;UInt&gt;
+    /** Computed by the core; read-only. */
+    val parity: StateFlow&lt;Parity&gt;
+
+    /**
+     * A counter at zero with no changes made.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraCore.shared)
+
+    /**
+     * Adds `amount` (which may be negative) and counts the change: one transaction, so one
+     * change-set for `count`, `changes` and `parity` together. The count saturates instead of
+     * overflowing.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun add(amount: Int)
+
+    /**
+     * Subtracts one.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun decrement()
+
+    /**
+     * Adds one.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun increment()
+
+    /**
+     * Sets the count back to zero and forgets the changes, in one transaction.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun reset()
+
+    companion object {
+        /**
+         * A counter at zero with no changes made.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraCore.shared): Counter
+    }
+}
+
+/** A store whose one signal build B changes incompatibly. */
+class Legacy private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val score: StateFlow&lt;Int&gt;
+
+    /**
+     * `score=..`.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun describe(): String
+
+    companion object {
+        /**
+         * A score of `score`.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(score: Int, ctx: UndraCore = UndraCore.shared): Legacy
+    }
+}
+
+/** A user profile: build A's signals are `name`, then `visits`. */
+class Profile private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val name: StateFlow&lt;String&gt;
+    val visits: StateFlow&lt;UInt&gt;
+
+    /**
+     * `name=..;visits=..`: what both builds can be compared by.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun describe(): String
+
+    /**
+     * Counts one visit.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun visit()
+
+    companion object {
+        /**
+         * A profile called `name`, never visited.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(name: String, ctx: UndraCore = UndraCore.shared): Profile
+    }
+}
+
+/**
+ * A store that commits many transactions, for the coalesced-delivery scenarios and the
+ * playground's stress screen.
+ */
+class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(1u)) {
+    val value: StateFlow&lt;ULong&gt;
+    val progress: StateFlow&lt;UInt&gt;
+    val generated: StateFlow&lt;ULong&gt;
+    val running: StateFlow&lt;Boolean&gt;
+
+    /**
+     * A store with every signal at its start: zeros, and no generator running.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraCore.shared)
+
+    /**
+     * Commits `transactions` transactions now, each one write of the signal `mode` names: one
+     * change-set per transaction, the way data that arrives in the core on its own does.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun burst(mode: StressMode, transactions: UInt)
+
+    /**
+     * Starts generating updates of the signal the mode names, at the given number a second,
+     * each its own transaction, until `stop`. Called while a generator runs, it retunes that
+     * generator (new mode, new rate) instead of starting a second one. Fails, starting
+     * nothing, when the rate is zero or above 1,000,000.
+     * @throws StressError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    fun start(mode: StressMode, perSecond: UInt)
+
+    /**
+     * Stops the generator: no update is committed after this returns. `generated` keeps its
+     * count. Does nothing when no generator runs.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun stop()
+
+    companion object {
+        /**
+         * A store with every signal at its start: zeros, and no generator running.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraCore.shared): Stress
+    }
+}
+
+/** The to-do list: what the UI observes (`todos`, `filter`, `visible`, `remaining`) and calls. */
+class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    val todos: StateFlow&lt;List&lt;Todo&gt;&gt;
+    val filter: StateFlow&lt;Filter&gt;
+    /** Computed by the core; read-only. */
+    val visible: StateFlow&lt;List&lt;Todo&gt;&gt;
+    /** Computed by the core; read-only. */
+    val remaining: StateFlow&lt;UInt&gt;
+
+    /**
+     * An empty list showing every item.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraCore.shared)
+
+    /**
+     * Adds an item at the end of the list.
+     * @throws TodoError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
+    suspend fun add(title: String): Todo
+
+    /**
+     * Removes every finished item.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun clearDone()
+
+    /**
+     * Removes the item with `id`; unknown ids are ignored.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun remove(id: UUID)
+
+    /**
+     * Chooses which items `visible` holds.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun setFilter(filter: Filter)
+
+    /**
+     * Flips the `done` flag of the item with `id`; unknown ids are ignored.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun toggle(id: UUID)
+
+    companion object {
+        /**
+         * An empty list showing every item.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraCore.shared): Todos
+    }
+}
+</code></pre></div>
+</details>
+<h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">An interface for each port the core declares, and an adapter that registers your implementation.</p>
+<p class="ref-names"><code>Locale</code> <code>localePortImpl</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>12 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ports.kt" rel="noopener">Ports.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * The app's own synchronous port (ADR-049 decision 2): how the platform says hello in the
+ * user's language. In the TypeScript `wasm-worker` mode a synchronous port is answered in the
+ * worker, so the web app registers it in `worker.ports`.
+ */
+interface Locale : UndraPort {
+    /** "Hello" in the user's language. */
+    fun hello(): String
+}
+
+/** Adapts an implementation of `Locale` to `UndraCore.registerPort(UndraIds.Ports.Locale.PORT_ID, ..)`. */
+fun localePortImpl(impl: Locale): PortImpl
+</code></pre></div>
+</details>
+<h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
+<p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code> <code>saveNote</code> <code>tagNote</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>74 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Queries.kt" rel="noopener">Queries.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * Observes the `remote_todos` query (cache key `remote-todos:{list}`).
+ * Constructing it registers an observer and fetches when the data is stale or missing.
+ */
+class RemoteTodosQueryHandle private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle) {
+    /** The latest successful result, if any. */
+    val data: StateFlow&lt;List&lt;RemoteTodo&gt;?&gt;
+    /** Where the query is in its fetch lifecycle. */
+    val status: StateFlow&lt;QueryStatus&gt;
+    /** The error of the latest failed fetch, cleared by the next success. */
+    val error: StateFlow&lt;RemoteError?&gt;
+    /** Whether a fetch is in flight (also true while refetching stale data). */
+    val fetching: StateFlow&lt;Boolean&gt;
+    /** When `data` was last updated. */
+    val updatedAt: StateFlow&lt;Timestamp?&gt;
+
+    /**
+     * Fetches again now, even if the data is fresh.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun refetch()
+
+    /**
+     * Marks the cached entry stale; it refetches while observed.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
+    fun invalidate()
+
+    companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
+        fun create(list: String, ctx: UndraCore = UndraCore.shared): RemoteTodosQueryHandle
+    }
+}
+
+/**
+ * Runs the `patch_remote_todo` mutation.
+ * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun patchRemoteTodo(
+    list: String,
+    id: UInt,
+    done: Boolean,
+    ctx: UndraCore = UndraCore.shared,
+): RemoteTodo
+
+/**
+ * Runs the `post_remote_todo` mutation.
+ * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun postRemoteTodo(
+    list: String,
+    title: String,
+    ctx: UndraCore = UndraCore.shared,
+): RemoteTodo
+
+/**
+ * Runs the `save_note` mutation.
+ * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun saveNote(list: String, text: String, ctx: UndraCore = UndraCore.shared): Boolean
+
+/**
+ * Runs the `tag_note` mutation.
+ * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun tagNote(list: String, id: UInt, ctx: UndraCore = UndraCore.shared): Boolean
+</code></pre></div>
+</details>
+<h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
+<p class="ref-names"><code>UndraIds</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>116 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt" rel="noopener">Ids.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
+ * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ */
+object UndraIds {
+    const val SCHEMA_HASH: ULong = 0x9cd826cc7ca51a21uL
+
+    object Objects {
+        object Probe {
+            const val TYPE_ID: UInt = 0x4fdd3051u
+            const val NEW: UInt = 0xb843ab99u
+            const val COUNTERS: UInt = 0xc3958518u
+            const val HANG: UInt = 0x98f10ca1u
+            const val RESET: UInt = 0xce3a32f8u
+            const val TICKS: UInt = 0x9ea5858du
+            const val TICKS_THEN_FAIL: UInt = 0xa48a6ac2u
+            const val WAIT: UInt = 0x6bab3fb8u
+        }
+        object Bench {
+            const val TYPE_ID: UInt = 0x346ad459u
+            const val NEW: UInt = 0x36809c61u
+            const val BENCH_ADD: UInt = 0xe6f91ad9u
+            const val BENCH_ECHO_BYTES: UInt = 0x677eb967u
+            const val BENCH_LIST_INSERT: UInt = 0x914b8e82u
+            const val BENCH_LIST_RESET: UInt = 0x0c07aab2u
+            const val BENCH_LIST_UPDATE_BURST: UInt = 0x7411fd03u
+            const val BENCH_TOUCH_SIGNALS: UInt = 0x3fc0389fu
+        }
+        object BigList {
+            const val TYPE_ID: UInt = 0x3b9271c5u
+            const val NEW: UInt = 0xf5e4a11du
+            const val INSERT_AT: UInt = 0x8f234904u
+            const val MOVE_ITEM: UInt = 0x58a6cbdeu
+            const val REMOVE_AT: UInt = 0x1237d7afu
+            const val RESET: UInt = 0x65063b1cu
+            const val UPDATE_AT: UInt = 0x0e5ff480u
+        }
+        object Counter {
+            const val TYPE_ID: UInt = 0xfc0f33c3u
+            const val NEW: UInt = 0xcff00e37u
+            const val ADD: UInt = 0x8adcbf02u
+            const val DECREMENT: UInt = 0xe6593ac4u
+            const val INCREMENT: UInt = 0x0584c6acu
+            const val RESET: UInt = 0x0c5ad256u
+        }
+        object Legacy {
+            const val TYPE_ID: UInt = 0x055b887eu
+            const val NEW: UInt = 0x14d6ac0eu
+            const val DESCRIBE: UInt = 0x642670b9u
+        }
+        object Profile {
+            const val TYPE_ID: UInt = 0xcd17328eu
+            const val NEW: UInt = 0xed94ae7eu
+            const val DESCRIBE: UInt = 0xa05219a9u
+            const val VISIT: UInt = 0xa008fdabu
+        }
+        object Stress {
+            const val TYPE_ID: UInt = 0xafa58985u
+            const val NEW: UInt = 0x6799185du
+            const val BURST: UInt = 0xf4b7ad05u
+            const val START: UInt = 0xb710bb83u
+            const val STOP: UInt = 0xb5c8e111u
+        }
+        object Todos {
+            const val TYPE_ID: UInt = 0xf5e31faau
+            const val NEW: UInt = 0x35935deau
+            const val ADD: UInt = 0xd13d7ad7u
+            const val CLEAR_DONE: UInt = 0x27ffa842u
+            const val REMOVE: UInt = 0xa977479cu
+            const val SET_FILTER: UInt = 0x07781993u
+            const val TOGGLE: UInt = 0x1cc45d38u
+        }
+        object RemoteTodosQueryHandle {
+            const val TYPE_ID: UInt = 0x2a794167u
+            const val NEW: UInt = 0x2a794167u
+            const val REFETCH: UInt = 0x21d1b9e2u
+            const val INVALIDATE: UInt = 0x44cec2fau
+        }
+    }
+
+    object Functions {
+        const val ADD: UInt = 0x65b4cd58u
+        const val ADD_LATER: UInt = 0xc5ca16e9u
+        const val AREA: UInt = 0x293fbad8u
+        const val CONFIGURE_REMOTE: UInt = 0xa991dd26u
+        const val CREATE_REMOTE_TODO: UInt = 0x3f635105u
+        const val ECHO_COMPOSITE: UInt = 0x769db4ecu
+        const val ECHO_FIGURE: UInt = 0xeeb27e01u
+        const val ECHO_PRIMITIVES: UInt = 0x59ba77e7u
+        const val EXPLODE: UInt = 0x4b8e88d2u
+        const val EXPLODE_LATER: UInt = 0xe5a63d4bu
+        const val FAIL_LATER: UInt = 0x977e4974u
+        const val GREET: UInt = 0x0594d9aeu
+        const val LOCALIZED_GREETING: UInt = 0x247f9a6cu
+        const val PARSE_COUNT: UInt = 0x1c438944u
+        const val PING: UInt = 0x60e670d5u
+        const val SET_REMOTE_DONE: UInt = 0xa1e08a5fu
+        const val STORAGE_STATUS: UInt = 0x79205099u
+        const val VERSION: UInt = 0xceb9168bu
+    }
+
+    object Ports {
+        object Locale {
+            const val PORT_ID: UInt = 0xcc469822u
+            const val HELLO: UInt = 0x9e2a48e9u
+        }
+    }
+
+    object Queries {
+        const val PATCH_REMOTE_TODO: UInt = 0x77fe653eu
+        const val POST_REMOTE_TODO: UInt = 0x5c84eed2u
+        const val REMOTE_TODOS: UInt = 0x2a794167u
+        const val SAVE_NOTE: UInt = 0xaef633c6u
+        const val TAG_NOTE: UInt = 0xb9224861u
+    }
+}
+</code></pre></div>
+</details>
+<p class="tok-dim">Generated by <code>site/scripts/build-reference.mjs</code> from <code>examples/playground/generated/kotlin</code>, with the declarations read by <code>site/scripts/decls.mjs</code>. To change this page, change the core's code or comments and run <code>undra bindgen -C examples/playground --docs</code>.</p>
+<!-- reference:end -->
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
+<!-- reference-toc:start -->
+<ul><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
+<!-- reference-toc:end -->
+</aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

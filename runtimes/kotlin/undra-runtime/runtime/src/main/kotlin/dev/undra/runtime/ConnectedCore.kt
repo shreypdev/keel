@@ -56,6 +56,7 @@ internal class ConnectedCore(
     main: MainThread = UndraDispatchers.mainThread(),
     private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     private val onError: ((UndraUnhandledError) -> Unit)? = null,
+    private val onDevNotice: ((String) -> Unit)? = null,
 ) : UndraCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -638,6 +639,20 @@ internal class ConnectedCore(
 
     override fun onLog(level: UByte, target: String, message: String) {
         JulLog.log(level, target, message)
+        // Only `undra dev` says things to the developer; a core in this process never does (ADR-053).
+        if (target == DEV_NOTICE_TARGET && transport.mode == Mode.REMOTE) notifyDevNotice(message)
+    }
+
+    /** Hands a dev server's message to [LoadOptions.onDevNotice] on the delivery thread: a core callback only queues. */
+    private fun notifyDevNotice(message: String) {
+        val callback = onDevNotice ?: return
+        UndraDispatchers.delivery.execute {
+            try {
+                callback(message)
+            } catch (e: Exception) {
+                UndraLog.warn("LoadOptions.onDevNotice failed", e)
+            }
+        }
     }
 
     override fun onClosed(cause: Throwable?) {
@@ -696,6 +711,9 @@ internal class ConnectedCore(
     }
 
     private companion object {
+        /** The `Log` target of the messages `undra dev` addresses to the developer (ADR-053). */
+        const val DEV_NOTICE_TARGET = "undra::dev"
+
         /** Items the collector grants a stream when it opens (SPEC 3.7). */
         const val INITIAL_CREDIT: UInt = 16u
 

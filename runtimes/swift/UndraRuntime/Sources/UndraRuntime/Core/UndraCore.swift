@@ -60,6 +60,9 @@ public final class UndraCore: @unchecked Sendable {
 
     private static let sharedSlot = Guarded<UndraCore?>(nil)
 
+    /// The `Log` target of the messages `undra dev` addresses to the developer (ADR-053).
+    private static let devNoticeTarget = "undra::dev"
+
     /// What `shared` returns when no core is loaded: shut down from the start, over a transport
     /// that reaches nothing.
     private static let unloaded = UndraCore(transport: UnloadedTransport(), isShutDown: true)
@@ -80,6 +83,7 @@ public final class UndraCore: @unchecked Sendable {
     private let blockingTimeout: Double
     private let onError: (@Sendable (UndraUnhandledError) -> Void)?
     private let onConnectionChange: (@Sendable (UndraConnectionState) -> Void)?
+    private let onDevNotice: (@Sendable (String) -> Void)?
     private let deferredQueue = DispatchQueue(label: "dev.undra.runtime.deferred")
 
     /// True while `onError` runs on this task or thread, so a handler that makes a failing call
@@ -94,13 +98,15 @@ public final class UndraCore: @unchecked Sendable {
         maxPendingEntries: Int = Mirror.defaultMaxPendingEntries,
         maxPendingBytes: Int = Mirror.defaultMaxPendingBytes,
         frameScheduler: (any FrameScheduler)? = nil,
-        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil
+        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
+        onDevNotice: (@Sendable (String) -> Void)? = nil
     ) {
         self.transport = transport
         self.mirror = Mirror(maxPendingEntries: maxPendingEntries, maxPendingBytes: maxPendingBytes, scheduler: frameScheduler)
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
         self.onConnectionChange = onConnectionChange
+        self.onDevNotice = onDevNotice
         var initial = State(isShutDown: isShutDown)
         if isShutDown {
             initial.connection = .closed(.requested)
@@ -205,7 +211,8 @@ public final class UndraCore: @unchecked Sendable {
             maxPendingEntries: options.maxPendingEntries,
             maxPendingBytes: options.maxPendingBytes,
             frameScheduler: frameScheduler,
-            onConnectionChange: options.onConnectionChange
+            onConnectionChange: options.onConnectionChange,
+            onDevNotice: options.onDevNotice
         )
         options.onConnectionChange?(.connecting)
         let startOptions = TransportStartOptions(
@@ -1135,6 +1142,12 @@ extension UndraCore: UndraInbound {
     }
 
     func onLog(level: UInt8, target: String, message: String) {
+        // Only `undra dev` says things to the developer; a core in this process never does (ADR-053).
+        if target == Self.devNoticeTarget, transport.mode == .remote, let notify = onDevNotice {
+            deferToQueue {
+                notify(message)
+            }
+        }
         let impl = state.withLock { (current: inout State) -> PortImpl? in
             return current.ports[StandardPorts.Log.portId]
         }

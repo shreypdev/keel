@@ -69,10 +69,24 @@
 //!   have the same method ids on every handle ([`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`]),
 //!   the five signals travel in ordinary change-sets, and releasing the object handle removes the
 //!   observer. For each mutation an async function whose method id is the mutation id. None of
-//!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the crate
-//!   registers an `undra_runtime::DispatchLayer` and the macros submit a [`QueryRegistration`] /
-//!   [`MutationRegistration`] per definition. Query handles are transient: a snapshot leaves them
-//!   out and the platform re-creates them after a restore.
+//!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the macros
+//!   submit a [`QueryRegistration`] / [`MutationRegistration`] per definition, and with it this
+//!   crate's `undra_runtime::DispatchLayer` and its start-up `undra_runtime::InitHook` (the runtime
+//!   keeps one of each per name). Query handles are transient: a snapshot leaves them out and the
+//!   platform re-creates them after a restore.
+//! * **Linked by use.** Because the layer and the hook are submitted by `#[undra::query]` and
+//!   `#[undra::mutation]`, not by this crate, a core that declares neither does not link the
+//!   query runtime at all, and its start-up reads nothing from `Kv` (ADR-052: the layer was
+//!   34 KB of the 136 KB gzipped hello-world web core). What such a core persisted while it had
+//!   queries stays in the store unread (an app that removes its last query leaves its old cache
+//!   entries and queue there; the next version that declares one deletes them, since their
+//!   schema hash no longer matches). A [`QueryDef`] written by hand, in a core without
+//!   macro-declared queries, is hydrated on the first use of the client (`ctx.query()`,
+//!   `ctx.mutate(..)`) rather than at start-up. A [`QueryRegistration`] or
+//!   [`MutationRegistration`] submitted by hand is reachable from a platform only through the
+//!   layer: submit [`__private::LAYER`] (and [`__private::HYDRATE`], for start-up hydration)
+//!   next to it, as the macros do; without the layer a platform's call is answered "unknown
+//!   object type" or "unknown function".
 //!
 //! # Deviations from SPEC 9 and 5.3
 //!
@@ -129,7 +143,7 @@ pub use shared::{DEFAULT_GC_MS, PERSIST_DEBOUNCE_MS};
 pub use status::QueryStatus;
 pub use storage::DEFAULT_MAX_PERSISTED_ENTRIES;
 
-use undra_runtime::{Ctx, InitHook, Runtime, StatsSection, inventory};
+use undra_runtime::{Ctx, Runtime};
 
 /// Reads the persisted cache and queue when a runtime starts. The task holds the runtime weakly
 /// (ADR-034), so an idle runtime whose owner lets go is freed even while hydration still waits
@@ -137,21 +151,37 @@ use undra_runtime::{Ctx, InitHook, Runtime, StatsSection, inventory};
 pub(crate) fn init(ctx: &Ctx) {
     let shared = shared::shared_of(ctx.runtime());
     shared.start(ctx);
-    let weak = ctx.downgrade();
-    ctx.spawn(async move { shared.hydrate(&weak).await });
+    shared.spawn_hydration(ctx);
 }
 
-inventory::submit! {
-    InitHook { name: "undra-query.hydrate", run: init }
+/// What `#[undra::query]` and `#[undra::mutation]` submit next to their registration, so the
+/// query runtime is linked into a core only when the core declares a query or a mutation
+/// (ADR-052). Not a stable API: generated code names it through `::undra::query::__private`.
+///
+/// Every definition submits both, so a core with several queries registers them several times;
+/// the runtime runs an [`InitHook`](undra_runtime::InitHook) and consults a
+/// [`DispatchLayer`](undra_runtime::DispatchLayer) once per name.
+#[doc(hidden)]
+pub mod __private {
+    use undra_runtime::{DispatchLayer, InitHook};
+
+    /// Hydrates the cache and the offline queue from the `Kv` port when a runtime starts.
+    pub const HYDRATE: InitHook = InitHook {
+        name: "undra-query.hydrate",
+        run: crate::init,
+    };
+
+    /// Serves query handles (constructor, `refetch`, `invalidate`) and mutations by id.
+    pub const LAYER: DispatchLayer = DispatchLayer {
+        name: "undra-query",
+        dispatch: crate::dispatch::dispatch,
+    };
 }
 
 /// The `query` section of `stats_json`: cache and queue sizes, whether the stored queue was read,
 /// and the persistence counters (`persist.write_failed`, `read_failed`, `dropped`, `migrated`,
-/// `dead_lettered`; ADR-037, ADR-049). Absent until the client exists on the runtime.
-fn stats_section(runtime: &Runtime) -> Option<String> {
+/// `dead_lettered`; ADR-037, ADR-049). Registered on a runtime when its client is created
+/// (`shared::shared_of`), so a core that never uses the query runtime does not link it (ADR-052).
+pub(crate) fn stats_section(runtime: &Runtime) -> Option<String> {
     shared::existing(runtime).map(|shared| shared.stats_json())
-}
-
-inventory::submit! {
-    StatsSection { name: "query", json: stats_section }
 }

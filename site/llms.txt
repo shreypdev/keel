@@ -20,6 +20,13 @@ Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`,
 - [API overview, Kotlin · Undra docs](https://shreypdev.github.io/undra/docs/api-kotlin.html): What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.
 - [API overview, TypeScript · Undra docs](https://shreypdev.github.io/undra/docs/api-typescript.html): What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.
 
+## Reference
+
+- [Swift reference · Undra docs](https://shreypdev.github.io/undra/reference/swift.html): Every declaration Undra generates for Swift from the playground: types, errors, objects, stores, queries and ports, with their docs.
+- [Kotlin reference · Undra docs](https://shreypdev.github.io/undra/reference/kotlin.html): Every declaration Undra generates for Kotlin from the playground: types, errors, objects, stores, queries and ports, with their docs.
+- [TypeScript reference · Undra docs](https://shreypdev.github.io/undra/reference/typescript.html): Every declaration Undra generates for TypeScript from the playground: types, errors, objects, stores, queries and ports, with their docs.
+- [Rust API reference](https://shreypdev.github.io/undra/reference/rust/undra/index.html): rustdoc for the undra crate and the runtime, signals, query, ports, wire and meta crates it re-exports
+
 ## Roadmap
 
 - [Undra roadmap: shipped, now, next and later](https://shreypdev.github.io/undra/roadmap/): The Undra roadmap: what shipped in v1.0, what is in flight for v1.x, what is planned next and what is on the horizon. Updated with the project record.

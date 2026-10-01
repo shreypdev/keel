@@ -25,6 +25,7 @@ use std::io::{self, Read};
 use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -41,7 +42,8 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
 
 use crate::bridge::{Bridge, ClientInfo};
-use crate::conn::{Conn, Item};
+use crate::conn::{Begin, Conn, Item};
+use crate::notice::{self, NOTICE_TARGET, Notices};
 use crate::resume::{self, Resume, short_token};
 use crate::server::{Shared, ServerConfig};
 use crate::ws::{self, ReadHalf, close};
@@ -101,6 +103,31 @@ fn decode<'a, T>(
         .map_err(|e| Violation::protocol(format!("malformed {what} payload: {e}")))
 }
 
+/// What the server shares with every session beyond the runtime: the flag that stops calls
+/// from being run while the server is being suspended (ADR-053), the count of the calls that were
+/// not run because of it, and what it tells a client that attaches.
+#[derive(Clone)]
+pub(crate) struct Hooks {
+    /// Set by [`Server::suspend`](crate::Server::suspend): calls are no longer run.
+    pub(crate) frozen: Arc<AtomicBool>,
+    /// Calls a client sent while [`frozen`](Hooks::frozen) was set: not run, not answered (the
+    /// client fails them as unavailable when the socket closes). `undra dev` says how many, so a
+    /// write made during the reload does not vanish behind "state kept".
+    pub(crate) dropped: Arc<AtomicUsize>,
+    /// The dev notices of this server.
+    pub(crate) notices: Arc<Notices>,
+}
+
+impl Default for Hooks {
+    fn default() -> Self {
+        Hooks {
+            frozen: Arc::new(AtomicBool::new(false)),
+            dropped: Arc::new(AtomicUsize::new(0)),
+            notices: Arc::new(Notices::new(notice::AttachNotices::default())),
+        }
+    }
+}
+
 /// What the reader thread does with one client's envelopes.
 pub(crate) struct Session {
     rt: Arc<Runtime>,
@@ -109,6 +136,7 @@ pub(crate) struct Session {
     resume: Arc<Resume>,
     release_on_disconnect: bool,
     busy_grace: Duration,
+    hooks: Hooks,
 }
 
 impl Session {
@@ -118,6 +146,7 @@ impl Session {
         conn: Arc<Conn>,
         resume: Arc<Resume>,
         config: &ServerConfig,
+        hooks: Hooks,
     ) -> Session {
         Session {
             rt,
@@ -126,11 +155,30 @@ impl Session {
             resume,
             release_on_disconnect: config.release_on_disconnect,
             busy_grace: config.busy_grace,
+            hooks,
+        }
+    }
+
+    /// Says the dev notice that is due to this client, if any (ADR-053).
+    fn tell(&self, kind: notice::Kind) {
+        let token = self.conn.session().map(|s| s.token.as_str());
+        if let Some(text) = self.hooks.notices.for_client(kind, token) {
+            self.conn.on_log(INFO, NOTICE_TARGET, &text);
         }
     }
 
     fn note(&self, level: u8, message: &str) {
         self.rt.log(level, TARGET, message);
+    }
+
+    /// A frame that arrived after the connection began to close, which is not processed: when the
+    /// server is being suspended and it is a `Call`, it is one more call the reload did not run.
+    fn ignored_while_closing(&self, data: &[u8]) {
+        if self.hooks.frozen.load(Ordering::Acquire)
+            && Envelope::parse(data).is_ok_and(|env| env.kind == Kind::Call)
+        {
+            self.hooks.dropped.fetch_add(1, Ordering::AcqRel);
+        }
     }
 
     /// The server's own `Hello`: its version, schema hash, platform and mode.
@@ -229,6 +277,7 @@ impl Session {
                             kept.handles.len()
                         ),
                     );
+                    self.tell(notice::Kind::Resumed);
                     Ok(())
                 }
                 None => {
@@ -271,6 +320,7 @@ impl Session {
                 info.platform, info.mode, info.undra_version
             ),
         );
+        self.tell(notice::Kind::Fresh);
         Ok(())
     }
 
@@ -342,12 +392,32 @@ impl Session {
         let call = decode(payload, "Call", Call::decode)?;
         let constructor = matches!(call.target, CallTarget::Constructor { .. });
         // Recorded before the runtime sees it: a sync method replies before `call` returns.
-        if !self.conn.begin_call(call.call_id, constructor) {
-            self.note(
-                WARN,
-                &format!("ignoring a call that reuses the open call id {}", call.call_id),
-            );
-            return Ok(());
+        match self
+            .conn
+            .begin_call(call.call_id, constructor, &self.hooks.frozen)
+        {
+            Begin::Started => {}
+            Begin::Frozen => {
+                // The server is being suspended (ADR-053): the core is about to be replaced, so
+                // a call that starts now would run on state the snapshot may already have missed.
+                // It is not answered; the client fails it as unavailable when the socket closes,
+                // and it is counted, so that `undra dev` can say its write was lost.
+                self.hooks.dropped.fetch_add(1, Ordering::AcqRel);
+                self.note(
+                    DEBUG,
+                    &format!("not running call {}: the core is being reloaded", call.call_id),
+                );
+                return Ok(());
+            }
+            // The client fails it when the socket closes, a moment from now.
+            Begin::Closing => return Ok(()),
+            Begin::Duplicate => {
+                self.note(
+                    WARN,
+                    &format!("ignoring a call that reuses the open call id {}", call.call_id),
+                );
+                return Ok(());
+            }
         }
         if self.rt.call(payload) != 0 {
             // Refused without a reply (call id 0, a runtime shutting down): answer for it, or
@@ -479,6 +549,7 @@ fn serve(shared: &Arc<Shared>, id: u64, tcp: TcpStream) {
         conn.clone(),
         shared.resume.clone(),
         config,
+        shared.hooks.clone(),
     );
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         session_loop(shared, &session, tcp, &control, write_tcp, queue);
@@ -573,6 +644,7 @@ fn session_loop(
         match socket.read() {
             Ok(Message::Binary(data)) => {
                 if conn.is_closing() {
+                    session.ignored_while_closing(&data);
                     continue;
                 }
                 if attached {
@@ -711,6 +783,7 @@ mod tests {
                 conn,
                 Resume::new(Duration::ZERO),
                 &ServerConfig::default(),
+                Hooks::default(),
             );
             Rig {
                 rt,

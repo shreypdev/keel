@@ -17,12 +17,19 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "bench/results/web-size.jsonl"
+      - "README.md"
       - ".github/workflows/site.yml"
   pull_request:
     paths:
       - "site/**"
       - "examples/playground/**"
       - "runtimes/ts/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "bench/results/web-size.jsonl"
+      - "README.md"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -70,23 +77,35 @@ jobs:
           npm ci
           npx vite build --base=/undra/playground/
 
-      # 2. The site's generated files (benchmark table, roadmap, blog index, feed, sitemap, search
-      #    index, llms.txt) must be what is committed. If this fails, run
-      #    `node site/scripts/build-all.mjs` locally and commit the result.
+      # 1b. The Rust API reference: rustdoc for the `undra` crate and the crates it re-exports,
+      #     with warnings as errors, so a pub item without docs or a broken link fails here (R4).
+      #     Not committed: stage.sh publishes target/doc at /reference/rust/.
+      - name: Build the Rust API reference (rustdoc)
+        run: bash site/scripts/build-rustdoc.sh
+
+      # 2. The site's generated files (benchmark table, roadmap, error codes, blog index, feed,
+      #    sitemap, search index, llms.txt, and the Swift, Kotlin and TypeScript API reference pages
+      #    built from examples/playground/generated) must be what is committed. If this fails, run
+      #    `node site/scripts/build-all.mjs` locally and commit the result. The measured numbers in
+      #    README.md come from the same records (bench/results/web-size.jsonl, ADR-052), so it is
+      #    checked with them.
+      - name: Site script tests
+        run: node --test site/scripts/decls.test.mjs
       - name: Generated files are up to date
         run: |
           node site/scripts/build-all.mjs
-          if [ -n "$(git status --porcelain site/)" ]; then
-            git --no-pager diff --stat site/
-            echo "::error::site/ is stale. Run 'node site/scripts/build-all.mjs' and commit the result."
+          if [ -n "$(git status --porcelain site/ README.md)" ]; then
+            git --no-pager diff --stat site/ README.md
+            echo "::error::site/ or README.md is stale. Run 'node site/scripts/build-all.mjs' and commit the result."
             exit 1
           fi
 
       # 3. Stage and check: every internal link and fragment resolves, every page has its title,
       #    description, canonical, Open Graph card and JSON-LD, and the shared header and footer match.
+      #    The staged site holds the playground and the Rust reference too.
       - name: Check the source tree
         run: node site/scripts/check-links.mjs
-      - name: Stage _site/ (site plus playground)
+      - name: Stage _site/ (site, playground, Rust reference)
         run: bash site/scripts/stage.sh
       - name: Check the staged site
         run: node site/scripts/check-links.mjs --root _site

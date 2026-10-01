@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // Builds site/search-index.json for the Cmd/Ctrl-K search (site/assets/search.js): one entry per page
-// and one per heading of the docs, the roadmap and every blog post, with the text under it.
+// and one per heading of the docs, the API reference, the roadmap and every blog post, with the text under it.
 // Entries: { u: url relative to the site root, p: page title, h: heading ("" for the page itself), x: text }.
 //
 //   node site/scripts/build-search-index.mjs
 import { readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { SITE, read, writeIfChanged, innerOf, textOf, titleOf, decode, rel } from "./lib.mjs";
 
 const navData = JSON.parse(read(join(SITE, "data", "docs.json")));
-const DOCS_ORDER = ["index", ...navData.groups.flatMap((g) => g.pages.map((p) => p.file.replace(/\.html$/, "")))];
+const DOCS_ORDER = ["index", ...navData.groups.flatMap((g) => g.pages.filter((p) => !p.external).map((p) => p.file.replace(/\.html$/, "")))];
 const CAP = 1200;
 const clip = (t) => (t.length <= CAP ? t : t.slice(0, CAP).replace(/\s+\S*$/, "") + " …");
 
@@ -17,6 +17,8 @@ function pages() {
   const docs = readdirSync(join(SITE, "docs")).filter((f) => f.endsWith(".html")).map((f) => f.slice(0, -5));
   docs.sort((a, b) => ((DOCS_ORDER.indexOf(a) + 1 || 99) - (DOCS_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
   const out = docs.map((d) => `docs/${d}.html`);
+  // the generated API reference (build-reference.mjs); rustdoc's own pages have their own search
+  for (const f of navData.also ?? []) if (existsSync(join(SITE, "docs", f))) out.push(posix.normalize(posix.join("docs", f)));
   if (existsSync(join(SITE, "roadmap/index.html"))) out.push("roadmap/index.html");
   const blog = join(SITE, "blog");
   if (existsSync(blog)) for (const d of readdirSync(blog, { withFileTypes: true }).filter((x) => x.isDirectory()).map((x) => x.name).sort()) out.push(`blog/${d}/index.html`);

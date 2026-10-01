@@ -1,6 +1,7 @@
 {
-  "note": "The docs sidebar and the previous/next pager, written into every docs page by site/scripts/sync-docs-nav.mjs. Also the order of the docs in the search index and llms-full.txt.",
+  "note": "The docs sidebar and the previous/next pager, written into every docs page by site/scripts/sync-docs-nav.mjs. Also the order of the docs in the search index and llms-full.txt. A page with \"external\": true is a link only (rustdoc, built in CI), not a page of the docs: no pager, no search entry. `also` lists pages outside docs/ that wear the sidebar without being in it (the generated reference pages); paths are relative to docs/.",
   "overview": { "file": "index.html", "title": "Overview" },
+  "also": ["../reference/swift.html", "../reference/kotlin.html", "../reference/typescript.html"],
   "groups": [
     { "title": "Start", "pages": [{ "file": "getting-started.html", "title": "Getting started" }] },
     { "title": "Guides", "pages": [
@@ -13,7 +14,8 @@
     { "title": "Reference", "pages": [
       { "file": "cli.html", "title": "The CLI" },
       { "file": "architecture.html", "title": "Architecture" },
-      { "file": "errors.html", "title": "Error codes" }
+      { "file": "errors.html", "title": "Error codes" },
+      { "file": "../reference/rust/undra/index.html", "title": "Rust API", "external": true }
     ] },
     { "title": "API overview", "pages": [
       { "file": "api-swift.html", "title": "Swift", "pager": "API overview, Swift" },

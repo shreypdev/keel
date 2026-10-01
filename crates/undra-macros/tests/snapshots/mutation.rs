@@ -27,6 +27,8 @@ macro_rules! _undra_error_E0007_a_mutation_is_a_free_function_move_it_out_of_the
         ::undra::meta::inventory::submit! { ::undra::meta::Registration::Query(&
         __UNDRA_META_AddTodoMutation) } ::undra::meta::inventory::submit! {
         ::undra::query::MutationRegistration::of:: < AddTodoMutation > () }
+        ::undra::meta::inventory::submit! { ::undra::query::__private::HYDRATE }
+        ::undra::meta::inventory::submit! { ::undra::query::__private::LAYER }
     };
 }
 _undra_error_E0007_a_mutation_is_a_free_function_move_it_out_of_the_impl_block!();

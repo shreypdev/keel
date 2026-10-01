@@ -1,10 +1,12 @@
 # The dev loop: `undra dev`
 
-Edit Rust, save, and the app on every platform is on the new core within a second. A dropped connection
-heals itself: no restart, no relaunch. This page is what `undra dev` does per platform, which URL each
-platform uses, how reconnecting works, and what to check when it does not.
+Edit Rust, save, and the app on every platform is on the new core within a second, **on the screen it was on, with
+the state it had**. A dropped connection heals itself: no restart, no relaunch. This page is what `undra dev` does
+per platform, which URL each platform uses, how state is carried across a rebuild, how reconnecting works, and what
+to check when it does not.
 
-The design is [ADR-051](../.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md). The wire is
+The designs are [ADR-051](../.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md) (reconnect and session
+resume) and [ADR-053](../.10x/adrs/ADR-053-state-preserving-reload.md) (state across a rebuild). The wire is
 unchanged (SPEC section 3.2): a client that does none of this still works.
 
 ## What it does
@@ -23,8 +25,8 @@ platform's: its UI, its mirror of the core's state, and the adapters of the port
 `Connectivity`, ...), which the core calls over the socket. Clocks, randomness and logging are answered by your
 machine, because a remote client cannot answer a synchronous port.
 
-On a change `undra dev` rebuilds, stops the old runner (a Close frame, 1001) and starts the new one on the same
-address. While a rebuild fails, the old core keeps serving: a typo does not take the app down.
+On a change `undra dev` rebuilds, takes the old core's state, and starts the new core on the same address with that
+state restored (next section). While a rebuild fails, the old core keeps serving: a typo does not take the app down.
 
 `undra dev` serves **one client at a time**. A second one is told to try again later (close 1013) and retries
 by itself, so closing the first lets it in. There is no authentication: keep the default loopback address unless
@@ -62,18 +64,83 @@ writes the steps).
 
 ## What happens when you save
 
-1. `undra dev` rebuilds the core (a second or two for a small one) and swaps the runner.
-2. The apps' sockets close; each runtime goes to **reconnecting** and retries with backoff.
-3. The first retry that finds the new runner is told **session lost** (close code 4001): the new core has none of
-   the old core's objects, so the runtime closes that core (`closed(sessionLost)`) instead of letting every call
-   fail with a stale handle.
-4. The app loads a new core and starts over on it: the web playground reloads its page, the iOS and Android
-   playgrounds load the core again and rebuild their screens. Their stores start from the new core's initial
-   state.
+```
+rebuild ok
+  1. the new core starts in standby: its runtime exists, nothing listens yet      (it cannot start? the old core keeps serving)
+  2. the old core is suspended: no new calls, the open ones get up to 2 s to finish, its client is
+     closed (1001), the session it left is kept; then its state is snapshotted (SPEC 5.9)
+  3. the old core exits; the new core restores the snapshot, then listens and holds the old session
+  4. the apps reconnect, resume their session, observe again and get the restored values first
+```
 
-State is not carried across a rebuild yet: that is the next piece (a snapshot before the rebuild, a restore
-after, so you stay on the screen you were on). Changing the **schema** (a public type or signature) changes the
-hash: run `undra bindgen`, rebuild the app, relaunch it. `undra dev` says so when it sees the hash change.
+The snapshot lives in the memory of the `undra dev` process only, for the milliseconds it takes to hand it from one
+process to the next, over a pipe nobody else can read. It is never written to a file. It is limited to 16 MiB (the
+playground's, with a 10,000-row list, is 205 KiB); over that the state is not carried and says so.
+
+You see this:
+
+```
+==> Change detected, rebuilding
+    built in 0.5s
+Restarted: ws://127.0.0.1:7443  (schema hash 0x...); state kept (3 stores, 205 KiB, restored in 0.2 ms); 1 object not carried over: their handles are stale, the app creates them again; connected apps reconnect by themselves
+```
+
+and each app's dev bar says the same for four seconds: **`Reloaded, state kept`**, with `(N objects not carried over)` when
+that applies and `(N calls lost in the reload)` when a call was cut off (below). Whatever stops the state from being carried falls back to the loop as it was before: the old core stops, the
+new one starts fresh, and the line says why (`state reset: ...`):
+
+| The line says | Why | What the app does |
+|---|---|---|
+| `state reset: schema changed (was 0x.., now 0x..)` | A public type or signature changed, so the apps' bindings are not the core's. A snapshot restores by position into whatever types the new core has; across a schema change that could put wrong values in the right places, so the state is not carried (this changes when persisted-state migrations, ADR-037, land). | An app built from the old bindings reports a schema mismatch and stops (`closed(schemaMismatch)`, the bar says so). Run `undra bindgen`, rebuild the app, relaunch it. |
+| `state reset: snapshot over 16 MiB` | A core with more state than that is better reset than stalled. | The app is told its session is lost (4001), loads a new core and starts over; its dev bar says `Reloaded, state reset: snapshot over 16 MiB`. |
+| `state reset: the core refused the snapshot: ...` | The new core could not rebuild a store from the snapshot (it is unchanged: restore is all or nothing). | As above. |
+| `state reset: the previous core did not ...` | The old core could not produce a snapshot (it died, or did not answer in 15 s). | As above. |
+| `state reset: undra dev --no-keep-state` | You asked for it. | As above. |
+| `the rebuilt core did not start; still serving the previous build` | The new core's process exited before it was ready. Nothing was touched: the old core keeps serving, with its state. | Nothing happens; fix the error shown and save again. |
+
+### What carries over, and what does not
+
+* **Stores** carry over, with their handles, so everything the app constructed (`Todos`, a counter, a 10,000-row list)
+  is where it was: the mirrors converge on the restored values, and commands work at once. Computed signals are
+  recomputed by the store's `restore` hook (the same code as its constructor).
+* **Objects that are not stores, and query handles**, do not. Their handles are stale after a reload: a call on one fails
+  with `UndraCallError.Refused` (the core's status 5), the line above counts them, and the app creates them again. **A
+  stale query handle: run the query again** (construct the query handle again, for example by re-mounting the screen that
+  owns it); until then the screen keeps the last values it had and `refetch()` is refused.
+* **Tasks, timers and streams** do not: a task is a future, not data. A call that is running when the core is replaced gets
+  up to two seconds to finish (so an `async` command in the middle of a port call completes); one that does not is cancelled
+  and fails as `Unavailable`, and a store it half-wrote keeps that value (a `loading = true` nobody clears: tap again). A store
+  that must keep a background task alive across a reload starts it from its `restore = ".."` hook, which receives the `Ctx`.
+* **Calls made during the swap** are not run: from the moment the old core is suspended it runs no new call (a tap in those
+  milliseconds, or in the up to two seconds an open call is given), and the client fails it as `Unavailable` when the socket
+  closes. A command that fails that way is only logged (the connection state already says the core is reconnecting), so
+  the `Restarted:` line and the dev bar count such calls together with the cancelled ones: `1 call sent during the reload
+  was not run`, `(2 calls lost in the reload)`. The state is the state before them: tap again.
+* **The query cache and the offline queue** are not store state: queries refetch when observed again.
+* **State reached by old logic** is restored into new logic; that is what a reload is. If it confuses you, relaunch the app
+  (a new session replaces the carried one and builds fresh stores on the new code), or run `undra dev --no-keep-state`.
+
+### The runner protocol
+
+`undra dev` and its runner (`undra-dev-runner`, the process that runs the core) talk over the runner's stdin and stdout, in
+lines, and nothing else: no port, no file. It is internal, and documented here because the integration tests speak it.
+
+```
+undra dev -> runner  (stdin)                     runner -> undra dev  (stdout)
+  snapshot                                         UNDRA-DEV snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>
+                                                   UNDRA-DEV snapshot failed <reason>
+  state <old-hash> <lost calls> <token|-> <handles|-> <hex>
+                                                   UNDRA-DEV restored <stores> <lost objects> <bytes> <microseconds>
+                                                   UNDRA-DEV reset <reason>
+  reset <reason>                                   (nothing)
+  listen                                           UNDRA-DEV ready <ws-url> <schema-hash>
+  (a runner started with --standby)                UNDRA-DEV standby <schema-hash>
+  (stdin closes: stop)
+```
+
+`undra dev` reads at most 48 MiB of one stdout line (a snapshot at the 16 MiB limit is 32 MiB of hex) and does not
+require UTF-8: the core's own `print!` output shares the pipe and is shown as it comes; a protocol line that follows
+`print!` output without a newline is still recognised.
 
 ## Reconnecting
 
@@ -84,9 +151,17 @@ All three runtimes do the same, with the idiom of their platform.
 | The state | `core.connection` (a `Signal`; `useSignal(core.connection)` in React) | `core.connectionState` (a `StateFlow`) | `core.connectionState`, `core.connection.state` (`@Observable`), `core.connectionStates()` (`AsyncStream`) |
 | Every change | `onConnectionChange` | `LoadOptions.onConnectionChange` | `LoadOptions.onConnectionChange` |
 | The policy | `reconnect: false \| { initialDelayMs, maxDelayMs, jitter, maxAttempts }` | `ReconnectPolicy(...)`, `null` is off | `UndraReconnectPolicy(...)`, `nil` is off |
+| What `undra dev` says about a reload (dev only) | `onDevNotice: (message) => void` | `LoadOptions.onDevNotice` | `LoadOptions.onDevNotice`, and the `onDevNotice:` of `.remote(...)` |
 
 The states are `connecting` (during `load`), `connected`, `reconnecting(attempt)` and `closed(reason)`, where the
 reason is `requested` (you closed the core), `schemaMismatch`, `sessionLost` or `failed`.
+
+`onDevNotice` receives the one-line messages the dev server says about itself (`Reloaded, state kept`, `Reloaded, state
+reset: schema changed`): a `Log` record with the target `undra::dev`, sent once to every client that attaches within 30
+seconds of a rebuild. It is for a status bar; the playground's and the generated apps' bars show it for four seconds. It is
+**development only and inert otherwise**: an in-process or production core never produces such a record, and each runtime
+dispatches it from its `remote` transport only. The target is the dev server's: a record your core logs under
+`undra::dev` is printed in the terminal but never sent to a client, so the bar only ever shows what `undra dev` said.
 
 * **Backoff.** Attempt `n` waits `min(5 s, 250 ms * 2^(n-1))`, less up to half of it at random, so many clients
   do not retry in step: 250, 500, 1000, 2000, 4000, 5000, 5000 ms, jittered. Each attempt gets at most 5 s.
@@ -112,7 +187,7 @@ the dev server **keeps the objects its constructors made** for ten minutes inste
 reconnecting client that holds objects adds `&undra_resume=1` and finds them again, with their state. They are
 released when the time passes, when a different client attaches (a relaunched app), or when the server stops, so
 a dev core holds at most one launch's objects. A client that asks to resume something the server does not hold
-(it was restarted) is answered with close code 4001. A client back on a new socket under its own token replaces
+(a core that could not carry its state) is answered with close code 4001. A client back on a new socket under its own token replaces
 its stale one at once: a phone that changed network does not wait for the keepalive.
 
 The token is not a password. The dev server has no authentication: whoever can reach its port can use the core,
@@ -125,6 +200,8 @@ The server prints every step:
 client connected: platform=android mode=dev undra=0.1.0
 client disconnected (0 calls cancelled, 1 object(s) kept for 600 s so it can reconnect)
 client reconnected: platform=android mode=dev undra=0.1.0 (session 356b33fa, away 6.0 s, 1 object(s) kept)
+suspended for a reload: 0 call(s) were still open, 0 sent meanwhile were not run, session 356b33fa (1 object(s)) handed over
+holding session 356b33fa (1 object(s)) for its client
 a client (ios) asked to resume session 319c2156, which this core does not hold (it was restarted, ...)
 ```
 
@@ -142,7 +219,10 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
   that is trusted and names the host.
 * The playground and the template show the state in a thin bar (green, amber while reconnecting, red when it is
   over) and a screen with the reason and a Retry button when the dev server cannot be reached at launch.
-* No native library is needed in remote mode: you can skip `undra build --platform android`.
+* No native library is needed in remote mode. The generated Gradle app builds the core itself (its `undraBuild` task runs
+  `undra build --platform android` before every build, and is skipped while the core is unchanged); a build that will
+  only run against `undra dev` can skip it with `./gradlew -PundraSkipBuild=true -PundraDevUrl=... :app:installDebug`
+  (or `UNDRA_SKIP_BUILD=1`).
 
 ## Troubleshooting
 
@@ -156,7 +236,32 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
 | The status stays amber | The server is down or unreachable: check the terminal running `undra dev` (a failed rebuild keeps the old core serving, a crashed core stops the server: run it again). |
 | `adb reverse` fails or `--android` finds nothing | `adb devices`: a device must say `device`, not `unauthorized` or `offline`. With several devices set `ANDROID_SERIAL`. |
 | A web page does not reconnect | The page must be allowed to reach the address (`undra dev` accepts pages on this machine and private networks); try `127.0.0.1`, not `localhost`, and a plain `ws://` URL from an `http://` page. |
-| The app's screen resets after every save | That is the current behaviour: state is not carried across a rebuild yet (see above). A change to state-shaping code shows at once from the first screen. |
+| The app's screen resets after every save | Read the `Restarted:` line: it says whether the state was carried and, if not, why (a schema change, a state over 16 MiB, `--no-keep-state`). The app's dev bar says it too. |
+| `1 object not carried over`, and `refetch` is refused with a stale handle | A query handle (or another object that is not a store) does not survive a reload. Run the query again: construct the query handle again, for example by re-mounting its screen. |
+| A spinner or a `loading` flag stays on after a save | A call that was still running when the core was replaced was cancelled and left its store at the value it had written; trigger the action again. |
+| A tap right as you saved did nothing; the bar said `(1 call lost in the reload)` | Calls made while the old core was being swapped out are not run (their writes are not in the carried state); tap again. |
 
-`undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode); `undra dev --help` has
-the command reference.
+`undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode, `adb` and whether a device is
+attached, `undra` on `PATH`), with the fix command for each gap; `undra dev --help` has the command reference.
+
+## Production builds are not a separate step
+
+The dev loop above is `undra dev`. The other half, the build of what you ship, needs no command either: a project made by
+`undra init` builds its core from the app's own build system, each time only when the core changed.
+
+| App | What runs `undra build` | When | Skipped by |
+|---|---|---|---|
+| Android | the `undraBuild` Gradle task, `preBuild` depends on it | every Gradle build; `assembleRelease` and `bundleRelease` build a release core, anything else a debug one (`-PundraRelease=true\|false` overrides; a build that asks for both variants at once, `./gradlew build`, gets a release core in both) | Gradle's up-to-date check over `core/src/**`, the Cargo manifests, `Cargo.lock` and `build/android/jniLibs` (a path dependency outside `core/` is an input only once added with `undraBuild { sources.from(...) }`); `-PundraSkipBuild=true`, `UNDRA_SKIP_BUILD=1` |
+| iOS | the **Build the Undra core** Run Script phase, before Compile Sources, with `undra build --platform ios --configuration $CONFIGURATION` | every Xcode build | Xcode's input/output analysis over `ios/Config/undra-core-inputs.xcfilelist` (every file of the core and of its path dependencies, the Cargo manifests and `Cargo.lock`, kept in step by `undra build`) and `undra-core-outputs.xcfilelist` (the XCFramework and a stamp per configuration) |
+| Web | the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) | `vite build` and `vite dev`; under `vite dev` also on every change of the core's `src/**`, its manifests or `Cargo.lock` (one build at a time, the first included), followed by a full reload; never under Vitest (mode `test`) unless `inTests: true` | `UNDRA_SKIP_BUILD=1`, the `skip` option |
+
+All three find `undra` on `PATH` and in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories, because an app launched
+from the Dock or an IDE has a short `PATH`; the Gradle task and the Vite plugin take `UNDRA_BIN` first (the Xcode phase
+does not: Xcode's environment is the project's build settings, not your shell's). When it is
+missing they say how to install it, in the shape of the CLI's own errors (`error[undra::C0003]`). A build that fails keeps
+its own output (`C0004`); under `vite dev` it shows in the page's error overlay, the page keeps the core it had, and the
+next save retries.
+
+What none of the three sees: `.cargo/config.toml`, `rust-toolchain.toml`, a new Rust compiler and a new `undra`. After
+changing one of those, build once with `undra build` (or `./gradlew :app:undraBuild --rerun`, or Xcode's Clean Build
+Folder).

@@ -1,4 +1,5 @@
-# Host budgets for the budgets test (`cargo test -p undra-bench --test budgets --release`).
+# Host budgets for the budgets test (`cargo test -p undra-bench --test budgets --release`), and at the
+# end the size gates of shipped artefacts that `scripts/wasm-size.sh` enforces (ADR-052).
 #
 # WHAT THESE ARE. Regression guards for a host machine, not the blueprint's device targets
 # (docs/blueprint.html section 14 is per device: A15 iPhone, mid-range 2022 Android, Chromium;
@@ -555,3 +556,36 @@ num = "snapshot/restore_100kb_migrated"
 den = "snapshot/restore_100kb"
 max = 10
 measured = 3.12
+
+# ---------------------------------------------------------------------------------------------
+# Sizes of shipped artefacts (ADR-052): measured by `scripts/wasm-size.sh`, not by the budgets test,
+# in bytes after gzip (zlib's deflate at level 9; KB below means 1,000 bytes). The budgets test only
+# checks that each table is consistent with itself and with its record, bench/results/web-size.jsonl.
+#   budget_gzip_bytes    the published budget: never more than this
+#   measured_gzip_bytes  the record, written with the JSON by `scripts/wasm-size.sh --record`
+#   tolerance            never more than this fraction over the record. A change that grows the
+#                        artefact more than that re-records it in the same commit, where review sees
+#                        it; a toolchain update that does the same is re-recorded after a look at why.
+# The gate is min(budget, floor(record x (1 + tolerance))). UNDRA_BENCH_SCALE never applies.
+# ---------------------------------------------------------------------------------------------
+
+# The hello-world web core: the `undra init` template (a store with a keyed list and two computeds,
+# a record, an enum, an error, a function; no query) built by `undra build --platform web`
+# (release-wasm: opt-level z, LTO fat, panic abort; then wasm-opt -Oz, binaryen 133). The wasm module
+# alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB.
+[size."web/hello-wasm"]
+budget_gzip_bytes = 120000
+measured_gzip_bytes = 102722
+tolerance = 0.05
+
+# What a hello-world app ships of the JavaScript runtime: `@undra/runtime` as the template's
+# web/src/undra.ts imports it, tree-shaken and minified by the Vite of the runtime's lockfile
+# (scripts/web-size-runtime.mjs); the generated bindings, the app's loader and the lazily loaded
+# worker script are not in it. The blueprint's 8 KB predates the transports, reconnect, coalescing
+# and worker mode: ADR-052's decision 2 (2026-10-01) restated it at 24 KB, and after the merge with
+# the parity failure model (its error channel added the bytes) at 26 KB; the follow-up piece
+# `ts-runtime-size` targets 16 KB. Gated like the wasm.
+[size."web/hello-runtime-js"]
+budget_gzip_bytes = 26000
+measured_gzip_bytes = 24841
+tolerance = 0.05

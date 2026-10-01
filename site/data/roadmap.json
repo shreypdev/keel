@@ -101,6 +101,18 @@
         {
           "title": "One error channel on every platform (ADR-032)",
           "text": "Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event."
+        },
+        {
+          "title": "No manual build step",
+          "text": "A Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix."
+        },
+        {
+          "title": "The web bundle under its budget (ADR-052)",
+          "text": "The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record."
+        },
+        {
+          "title": "State-preserving reload (ADR-053)",
+          "text": "undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not."
         }
       ]
     },
@@ -128,20 +140,8 @@
           "text": "@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI."
         },
         {
-          "title": "No manual build step",
-          "text": "A Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project; undra doctor names every fix."
-        },
-        {
-          "title": "The web bundle under its budget (ADR-052)",
-          "text": "135 KB gzipped today against a 120 KB budget; the levers, and a size gate so it never creeps back."
-        },
-        {
           "title": "Persisted-state migrations (ADR-037)",
           "text": "A schema that changes shape still loads what the last version stored."
-        },
-        {
-          "title": "State-preserving reload",
-          "text": "undra dev snapshots before a rebuild and restores after, so editing Rust never loses the screen you were on."
         }
       ]
     },

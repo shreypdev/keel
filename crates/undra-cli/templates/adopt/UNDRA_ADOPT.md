@@ -22,6 +22,14 @@ undra build --release           # libraries for the platforms below
 ```
 
 @@STEPS@@
+## Optional: build the core from your own build system
+
+A project made by `undra init` never runs `undra build` by hand. To get the same here, copy the pieces from a fresh
+`undra init` project: the `undraBuild` Gradle task (`android/app/build.gradle.kts`), the "Build the Undra core" Run Script
+phase of the Xcode project with its two file lists (`ios/Config/*.xcfilelist`), and the `undra()` plugin of
+`web/vite.config.ts` (from `@undra/runtime/vite`). Each runs `undra build` before the app builds and skips it while the core
+is unchanged; `undra doctor` checks that `undra` is on `PATH`.
+
 ## Then
 
 Replace the example store with the logic you want to share. The rule of thumb: start with one screen's state

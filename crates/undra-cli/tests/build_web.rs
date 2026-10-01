@@ -34,6 +34,21 @@ fn the_web_build_produces_a_loadable_wasm_core() {
         );
     }
 
+    // The builder's home directory is not in what ships (ADR-052): the Undra crates of this
+    // checkout and the registry crates live below it, and every panic location would name them.
+    if let Some(home) = std::env::var_os("HOME").filter(|h| h.len() > 1) {
+        let home = home.to_string_lossy().into_owned();
+        let bytes = std::fs::read(&wasm).unwrap();
+        let found = bytes
+            .windows(home.len())
+            .filter(|w| *w == home.as_bytes())
+            .count();
+        assert_eq!(
+            found, 0,
+            "the wasm module names the home directory {home} {found} times"
+        );
+    }
+
     // The schema hash of the module is the hash of the bindings (`undra bindgen` wrote them at
     // init): load the module under Node with stub imports and ask it.
     if !has_tool("node", "--version") {

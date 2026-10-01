@@ -958,6 +958,9 @@ class CoalesceTests : Suite() {
             attach(t).use { core ->
                 core.mirror.register(5L) { _, _, _ -> }
                 core.observe(5L, UInt.MAX_VALUE, true)
+                // The change-set is delivered and drained off this thread; a slow runner read the
+                // counters before the drain had run.
+                eventually("the observe's change-set is drained") { core.stats().mirror.drains == 1L }
                 val m = core.stats().mirror
                 assertEq(1L, m.changeSetsReceived)
                 assertEq(1L, m.entriesReceived)

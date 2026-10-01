@@ -40,13 +40,18 @@ const fail = (page, msg) => failures.push(`${page}: ${msg}`);
 const pending = new Set(existsSync(join(SITE, "data/pending.json")) ? JSON.parse(read(join(SITE, "data/pending.json"))).pages : []);
 
 // What CI builds into _site and the repository does not hold: present only when checking a staged site.
+// The playground is an app build and reference/rust/ is rustdoc's output (its own pages and links are
+// rustdoc's to get right, under -D warnings); a page of the site that links into either is checked
+// against the staged tree and skipped in the source tree.
 const hasPlayground = existsSync(join(ROOT, "playground"));
-const BUILT = (p) => !hasPlayground && p.startsWith("playground/");
+const hasRustdoc = existsSync(join(ROOT, "reference/rust"));
+const BUILT = (p) => (!hasPlayground && p.startsWith("playground/")) || (!hasRustdoc && p.startsWith("reference/rust/"));
+const RUSTDOC = "reference/rust/";
 const EXEMPT = new Set(["404.html", "og/index.html"]); // self-contained pages with no SEO contract
 
-const files = htmlFiles(ROOT);
-const ids = new Map(); // page path -> Set of ids
 const pathOf = (f) => relative(ROOT, f).split(sep).join("/");
+const files = htmlFiles(ROOT).filter((f) => !pathOf(f).startsWith(RUSTDOC));
+const ids = new Map(); // page path -> Set of ids
 const idsOf = (html) => new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
 for (const f of files) ids.set(pathOf(f), idsOf(read(f)));
 
