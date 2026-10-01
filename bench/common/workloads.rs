@@ -28,22 +28,24 @@ use super::fixtures::{self, Item, Shape};
 use super::host::{Core, CountingHost, call_ok, construct, method_call, runtime};
 
 /// Every operation the budgets test gates: one per wire type (the round trip), plus dispatch,
-/// signals and snapshot.
+/// signals, snapshot and the per-operation rows of the harsh-conditions scenarios (`stress`).
 pub fn all() -> Vec<Workload> {
     let mut all = wire();
     all.extend(dispatch());
     all.extend(signals());
     all.extend(snapshot());
+    all.extend(super::stress::workloads());
     all
 }
 
-/// The operations of one group (`wire`, `dispatch`, `signals`, `snapshot`).
+/// The operations of one group (`wire`, `dispatch`, `signals`, `snapshot`, `stress`).
 pub fn group(name: &str) -> Vec<Workload> {
     match name {
         "wire" => wire(),
         "dispatch" => dispatch(),
         "signals" => signals(),
         "snapshot" => snapshot(),
+        "stress" => super::stress::workloads(),
         other => panic!("no benchmark group `{other}`"),
     }
 }

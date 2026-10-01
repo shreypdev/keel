@@ -26,6 +26,25 @@
 #
 # To set or re-base a budget: `cargo test -p keel-bench --test budgets --release -- --ignored
 # --nocapture baseline`, then apply the rule above.
+#
+# HARSH CONDITIONS (layer B). The `[stress."name"]` tables at the end gate the sustained scenarios
+# of `cargo test -p keel-bench --test stress --release` (and, for `soak/mixed`, the soak binary):
+# what the core does at rates far above any UI, for seconds at a time. Same machine, same best-of-
+# three rule, measured with KEEL_STRESS_SECONDS=10; each scenario's invariants (nothing lost,
+# nothing reordered, the host list equals the core list, a stream never more than one item ahead)
+# are asserted in code and are not negotiable. The rules:
+#   min_per_sec     measured throughput / 5, rounded DOWN to two significant figures
+#   p99_ns          5x the measured p99, rounded up to two significant figures
+#   p999_ns         10x the measured p999, rounded up (tails on a shared runner are noisier)
+#   bytes_per_op    change-set bytes per operation, at most this: the exact measured value, because
+#                   every load is a fixed cycle at fixed widths and so ships the same bytes each run
+#   rss_growth_pct  resident memory may grow by this percent (or 64 KiB) from the first sample after
+#                   the warm-up to the last
+# KEEL_BENCH_SCALE divides the floors and multiplies the ceilings; it never touches bytes, RSS or
+# the invariants. These are the CORE SIDE of the pipeline on a host; what a platform does with a
+# change-set afterwards is measured on the platform (bench/RESULTS.md, "Harsh conditions").
+# To set or re-base: `KEEL_STRESS_SECONDS=10 cargo test -p keel-bench --test stress --release --
+# --ignored --nocapture stress_baseline`, best of three runs, then apply the rules above.
 
 [meta]
 machine = "Apple M5 Pro, 18 cores, macOS 26.5"
@@ -255,3 +274,139 @@ budget_ns = 1000000
 measured_ns = 76625.0
 blueprint_ns = 3000000
 blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the keel-core thread)"
+
+# ---------------------------------------------------------------------------------------------
+# Harsh conditions, layer A: the unit of work of each stress scenario, gated like every row above
+# (p50 per iteration, 5x, floor 250 ns). Design: .10x/specs/2026-09-30-stress-bench-design.md.
+# ---------------------------------------------------------------------------------------------
+
+# 1,000 implicit transactions on one observed Signal<u64> in one call (a core-side producer):
+# 1,000 change-sets of 37 bytes. About 79 ns per transaction.
+[bench."stress/firehose/txn_x1000"]
+budget_ns = 400000
+measured_ns = 78812.5
+
+# One `Ticker.set(v)` through `Runtime::call_sync`: a host pushing updates one call at a time.
+[bench."stress/firehose/call_set"]
+budget_ns = 630
+measured_ns = 124.7
+
+# One event through `Runtime::event` whose subscriber writes an observed signal: the path a
+# WebSocket or sensor feed takes into the core.
+[bench."stress/firehose/event"]
+budget_ns = 580
+measured_ns = 115.5
+
+# 1,000 recorded list ops on a 10,000-row keyed list in the fixed cycle (4 update, 2 insert, 2 remove,
+# 2 move per 10, at seeded random positions), each its own transaction, each applied to a host-side
+# list: commit, delivery and host apply.
+[bench."stress/keyed_churn_10k/ops_x1000"]
+budget_ns = 30000000
+measured_ns = 5847000.0
+
+# One transaction writing 1,000 of 100,000 observed signals of one store cell: one change-set of
+# 21,012 bytes. Cache-bound: 38-42 us across runs on a loaded host.
+[bench."stress/fanout/100k_observed_1k_dirty"]
+budget_ns = 190000
+measured_ns = 37611.1
+
+# The same 1,000 dirty signals over 10,000 observed: the pair shows cost follows the dirty count.
+[bench."stress/fanout/10k_observed_1k_dirty"]
+budget_ns = 130000
+measured_ns = 25644.6
+
+# One transaction writing one signal in each of 1,000 stores: 1,000 change-sets of 33 bytes.
+[bench."stress/fanout/1k_stores_1k_dirty"]
+budget_ns = 580000
+measured_ns = 114859.4
+
+# 1,000 stream items: grant 1,000 credits, run the executor until idle.
+[bench."stress/stream/items_x1000"]
+budget_ns = 180000
+measured_ns = 34648.1
+
+# ---------------------------------------------------------------------------------------------
+# Harsh conditions, layer B: sustained runs (`cargo test -p keel-bench --test stress --release`).
+# Rules in the header. Measured with KEEL_STRESS_SECONDS=10, best of three runs.
+# ---------------------------------------------------------------------------------------------
+
+# One observed Signal<u64>, one transaction per update, pushed through `call_sync`; latency is one
+# call (commit, delivery, a copy of the change-set as every FFI callback makes).
+[stress."firehose/sustained"]
+min_per_sec = 1100000
+p99_ns = 1100
+p999_ns = 3000
+bytes_per_op = 37
+measured_per_sec = 5928807
+measured_p99_ns = 211
+measured_p999_ns = 295
+measured_bytes_per_op = 37
+
+# The same through `Runtime::event` on an event port whose subscriber writes the signal.
+[stress."event/sustained"]
+min_per_sec = 1400000
+p99_ns = 840
+p999_ns = 2600
+bytes_per_op = 37
+measured_per_sec = 7280290
+measured_p99_ns = 167
+measured_p999_ns = 251
+measured_bytes_per_op = 37
+
+# A 10,000-row keyed list, one recorded operation per transaction; latency is one operation
+# including the host-side patch apply. 61 bytes per operation, every run.
+[stress."keyed_churn_10k/sustained"]
+min_per_sec = 33000
+p99_ns = 90000
+p999_ns = 270000
+bytes_per_op = 61
+measured_per_sec = 169032
+measured_p99_ns = 17919
+measured_p999_ns = 26623
+measured_bytes_per_op = 61
+
+# 1,000 of 100,000 observed signals written per transaction (the 10,000-observed companion run
+# is checked against it in code: one change-set and 21,012 bytes either way, cost under 4x).
+[stress."fanout/sustained"]
+min_per_sec = 4600
+p99_ns = 410000
+p999_ns = 1300000
+bytes_per_op = 21012
+measured_per_sec = 23296
+measured_p99_ns = 81919
+measured_p999_ns = 129023
+measured_bytes_per_op = 21012
+
+# One transaction writing one signal in each of 1,000 stores: 1,000 change-sets (33,000 bytes).
+[stress."fanout_stores/sustained"]
+min_per_sec = 1600
+p99_ns = 1300000
+p999_ns = 3600000
+bytes_per_op = 33000
+measured_per_sec = 8241
+measured_p99_ns = 253951
+measured_p999_ns = 352255
+measured_bytes_per_op = 33000
+
+# An always-ready stream against a consumer granting 16 credits a round, then 100,000: items per
+# second is the fast-consumer half; the producer is never more than one item ahead (in code).
+[stress."stream/backpressure"]
+min_per_sec = 5700000
+rss_growth_pct = 1
+measured_per_sec = 28751999
+
+# 8 threads answering async port calls, a keel-core thread, a 60 Hz drain, 256 calls in flight;
+# latency is call to reply. Nothing lost, nothing reordered (in code).
+[stress."completions/8_threads"]
+min_per_sec = 69000
+p99_ns = 3700000
+p999_ns = 9700000
+bytes_per_op = 37
+measured_per_sec = 348684
+measured_p99_ns = 737279
+measured_p999_ns = 966655
+measured_bytes_per_op = 37
+
+# The soak binary (`cargo run -p keel-bench --release --bin soak`): only the RSS gate lives here.
+[stress."soak/mixed"]
+rss_growth_pct = 1

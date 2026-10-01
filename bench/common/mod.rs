@@ -7,6 +7,7 @@
 
 pub mod fixtures;
 pub mod host;
+pub mod stress;
 pub mod workloads;
 
 use std::time::{Duration, Instant};
