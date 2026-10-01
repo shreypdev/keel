@@ -87,7 +87,7 @@ private fun burstArgs(mode: StressMode, transactions: UInt): ByteArray {
 }
 
 /** Runs [block] on the main thread ([UndraDispatchers.main]) and returns what it returned. */
-private fun <T> onMain(block: () -> T): T {
+internal fun <T> onMain(block: () -> T): T {
     val result = CompletableFuture<T>()
     UndraDispatchers.main.dispatch(
         EmptyCoroutineContext,
