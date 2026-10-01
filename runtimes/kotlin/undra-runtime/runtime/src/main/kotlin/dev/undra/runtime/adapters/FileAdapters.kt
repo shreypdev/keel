@@ -12,11 +12,14 @@ import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.DirectoryNotEmptyException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +31,8 @@ import kotlinx.coroutines.withContext
  * Each entry is one file named after the SHA-256 of its key (so any key is a valid file name, whatever
  * the case rules or length limits of the file system) and holding `key length u32, key, value`. Writes
  * go to a temporary file that is moved into place, so a crash leaves the old or the new value, never a
- * torn one. `list` reads the key of every file, so it costs a directory scan.
+ * torn one. `list` reads only the key at the start of every file (4 + the key's bytes), so it costs a directory scan
+ * and an `open` per entry, not the size of the values.
  *
  * **This is not secure storage.** The files are only readable by their owner where the file system
  * supports permissions; nothing is encrypted. On a JVM that is the best a default can do; a real
@@ -71,7 +75,7 @@ public class FileKv(private val dir: Path) {
             for (file in entries) {
                 if (file.fileName.toString().endsWith(TEMP_SUFFIX)) continue
                 val key = try {
-                    readEntry(Files.readAllBytes(file)).first
+                    readKey(file)
                 } catch (e: IOException) {
                     continue // removed meanwhile
                 } catch (e: WireException) {
@@ -120,6 +124,41 @@ public class FileKv(private val dir: Path) {
         return key to r.readRemaining()
     }
 
+    /**
+     * The key of the entry file [file], reading only its first `4 + key` bytes (the Swift adapter reads the same
+     * header): the value, which may be megabytes, is never read.
+     *
+     * @throws WireException if the file is not an entry (a length that does not fit in it, a key that is not UTF-8).
+     * @throws IOException if it cannot be read, or was removed meanwhile.
+     */
+    private fun readKey(file: Path): String {
+        Files.newInputStream(file).use { input ->
+            val head = ByteArray(Int.SIZE_BYTES)
+            if (!readFully(input, head)) throw WireException.UnexpectedEof(head.size, 0)
+            val declared = (head[0].toLong() and 0xFF) or ((head[1].toLong() and 0xFF) shl 8) or
+                ((head[2].toLong() and 0xFF) shl 16) or ((head[3].toLong() and 0xFF) shl 24)
+            // A length that does not fit in the file is not an entry; the check also bounds the allocation by the file's size.
+            val size = Files.size(file)
+            if (declared > size - head.size || declared > Int.MAX_VALUE - head.size) throw WireException.LengthTooLarge(declared.toUInt(), 0)
+            val entry = head.copyOf(head.size + declared.toInt())
+            val body = ByteArray(declared.toInt())
+            if (!readFully(input, body)) throw WireException.UnexpectedEof(entry.size, head.size) // the file shrank meanwhile
+            body.copyInto(entry, head.size)
+            return UndraReader(entry).readStr()
+        }
+    }
+
+    /** Fills [into] from [input]; `false` if the stream ends first. */
+    private fun readFully(input: java.io.InputStream, into: ByteArray): Boolean {
+        var read = 0
+        while (read < into.size) {
+            val n = input.read(into, read, into.size - read)
+            if (n < 0) return false
+            read += n
+        }
+        return true
+    }
+
     private companion object {
         val optionBytes: UndraCodec<ByteArray?> = Codecs.option(Codecs.bytes)
         val stringList: UndraCodec<List<String>> = Codecs.vec(Codecs.string)
@@ -155,11 +194,34 @@ public class FsAdapter(root: Path) {
     }
 
     /**
-     * Deletes the file or empty directory at [path].
+     * Deletes the file at [path], or the directory with everything in it, as Swift's `removeItem` and the web adapter's
+     * recursive `removeEntry` do. A symbolic link is removed and never followed: what it points at stays (as with `rm`).
+     * The root itself cannot be deleted.
      *
      * @throws FsError.NotFound if it does not exist.
+     * @throws FsError.Denied for the root, or a path that leads out of it.
      */
-    public suspend fun delete(path: String): Unit = io { Files.delete(resolve(path)) }
+    public suspend fun delete(path: String): Unit = io {
+        val target = resolve(path)
+        if (target == root) throw FsError.Denied
+        // Iterative (a tree of any depth), and `walkFileTree` does not follow links without being told to: a link to a
+        // directory is visited as a file and unlinked, so nothing outside the root can be reached from inside the walk.
+        Files.walkFileTree(
+            target,
+            object : SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                    Files.delete(file)
+                    return FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                    if (exc != null) throw exc
+                    Files.delete(dir)
+                    return FileVisitResult.CONTINUE
+                }
+            },
+        )
+    }
 
     /**
      * The names of the entries of the directory [dir] (empty string for the root), sorted.

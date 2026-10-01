@@ -10,10 +10,7 @@ import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.encodeToByteArray
 import java.io.File
-import java.nio.file.Files
 import java.nio.file.Path
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * The `Fs` port over a directory of the app's private storage: `<filesDir>/undra/fs`.
@@ -32,7 +29,7 @@ import kotlinx.coroutines.withContext
  *
  * Files under `Context.getFilesDir()` are private to the app and included in Android's Auto Backup. To serve another
  * directory (`Context.getExternalFilesDir`, the no-backup directory) pass it as [root]. All operations run on
- * `Dispatchers.IO`; [FsAdapter] does the confinement and the atomic writes.
+ * `Dispatchers.IO`; [FsAdapter] does the confinement, the recursive delete and the atomic writes.
  *
  * @param root the directory acting as the file system's root; created on the first write.
  */
@@ -58,16 +55,12 @@ public class AndroidFsAdapter(root: File) {
     public suspend fun write(path: String, data: ByteArray): Unit = fs.write(confined(path), data)
 
     /**
-     * Deletes the file at [path], or the directory with everything in it.
+     * Deletes the file at [path], or the directory with everything in it. A symbolic link is removed, never followed.
      *
      * @throws FsError.NotFound if it does not exist.
      * @throws FsError.Denied for the root.
      */
-    public suspend fun delete(path: String) {
-        val target = confined(path)
-        if (segments(target).isEmpty()) throw FsError.Denied
-        deleteTree(target)
-    }
+    public suspend fun delete(path: String): Unit = fs.delete(confined(path))
 
     /**
      * The names of the entries of the directory [dir] (the empty string is the root), sorted.
@@ -107,28 +100,6 @@ public class AndroidFsAdapter(root: File) {
             }
         },
     )
-
-    /** Deletes [path] and, if it is a directory, everything below it first. Every step goes through [fs], so none can leave the root. */
-    private suspend fun deleteTree(path: String) {
-        // A symbolic link is removed, not followed: listing it would list (and then empty) the directory it points at.
-        // `list` of a file is an I/O error; of a missing path, NotFound (which is the answer to deleting it).
-        val children = if (isSymbolicLink(path)) {
-            null
-        } else {
-            try {
-                fs.list(path)
-            } catch (e: FsError.Io) {
-                null
-            }
-        }
-        if (children != null) for (child in children) deleteTree("$path/$child")
-        fs.delete(path)
-    }
-
-    /** Whether the entry at [path] (already [confined]) is itself a symbolic link; its parents are resolved as [fs] does. */
-    private suspend fun isSymbolicLink(path: String): Boolean = withContext(Dispatchers.IO) {
-        Files.isSymbolicLink(root.resolve(path.trimStart('/', '\\')).normalize())
-    }
 
     /** Runs [block], turning an [FsError] into the port's typed error reply. */
     private inline fun fsResult(block: () -> ByteArray): ByteArray =
