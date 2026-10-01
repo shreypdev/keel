@@ -166,7 +166,7 @@ jobs:
         run: |
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform ios
-          UNDRA_LINK_CORE=1 xcodebuild -quiet -project examples/playground/ios/PlaygroundApp.xcodeproj -scheme PlaygroundApp \
+          xcodebuild -quiet -project examples/playground/ios/PlaygroundApp.xcodeproj -scheme PlaygroundApp \
             -configuration Debug -destination 'generic/platform=iOS Simulator' build
 
   android:
