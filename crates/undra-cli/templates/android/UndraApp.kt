@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import @@KOTLIN_PACKAGE@@.UndraIds
+import dev.undra.android.AndroidPlatform
+import dev.undra.android.AndroidPlatformDefaults
 import dev.undra.android.ChoreographerFramePacer
 import dev.undra.runtime.ClosedReason
 import dev.undra.runtime.ConnectionState
@@ -21,6 +23,10 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Attaches the app to its Rust core once per process, before any store is created ([start], from the activity). The
  * core is `libundra_core.so`, which `undra build --platform android` writes to `build/android/jniLibs`.
+ *
+ * `AndroidPlatformDefaults.install` gives the core every platform capability in one call: `Http` over
+ * `HttpURLConnection`, `Kv` and `Fs` in the app's files, `SecureStore` under an Android Keystore key, and the
+ * `Connectivity` and `Lifecycle` events. They need the `INTERNET` and `ACCESS_NETWORK_STATE` permissions of the manifest.
  *
  * What the core produces on its own (timers, streams, port completions) is applied to the stores once per
  * display frame, at the display's own frames: [ChoreographerFramePacer] (the `android-adapters` module) hands the
@@ -55,6 +61,7 @@ class UndraApp : Application() {
 
     private val main = Handler(Looper.getMainLooper())
     private var started = false
+    private var platform: AndroidPlatform? = null
 
     /**
      * Loads the core, once per process: in process, or from the dev server [requested] names (see [DevServer]).
@@ -80,7 +87,7 @@ class UndraApp : Application() {
     private fun load(): Boolean {
         val url = devUrl
         return try {
-            UndraCore.load(
+            val core = UndraCore.load(
                 LoadOptions(
                     mode = if (url == null) Mode.INPROC else Mode.REMOTE,
                     remoteUrl = url,
@@ -90,6 +97,9 @@ class UndraApp : Application() {
                     onConnectionChange = ::onConnection,
                 ),
             )
+            // A core the dev server replaced is gone: stop reporting to it before the new one gets its own ports.
+            platform?.close()
+            platform = AndroidPlatformDefaults.install(core, this)
             _failure.value = null
             true
         } catch (e: UndraSchemaMismatchException) {

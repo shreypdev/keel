@@ -150,6 +150,12 @@ await UndraCore.load({ mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.sch
 What reaches `onError`, on every platform: a failed command, and a change from the core that a store cannot decode
 (operation `"Todos.apply(signal: 2)"`; the change is skipped, never half applied). Kotlin and TypeScript also report a
 malformed change-set (dropped whole) and a port implementation that failed (operation `"port 0x... method 0x..."`).
+A port that has an error type answers its failures with it (`HttpError` and `FsError`: the Android adapters answer a lost network
+with `HttpError.Network`, and a refused permission or a path outside the root with `FsError.Denied`): the core gets a typed reply
+and the failure never reaches `onError`. An
+exception that is not that type (a Keystore failure, a full disk under `Kv`) answers the core `unavailable` and arrives here as
+`Malformed`, whose message names the exception. `Unavailable` is not used for a device that is offline: it means the *core* cannot
+be reached.
 
 The handler runs synchronously on the thread (Swift: the task) that made the call: the main actor for a store, the main
 thread for a Compose click. Keep it short, and do not call into Undra from it: a failure reported while a handler runs

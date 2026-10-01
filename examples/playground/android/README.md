@@ -50,8 +50,8 @@ adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws:/
 
 The launch extra wins over the build property; neither does anything in a release build. `10.0.2.2` is the
 emulator's name for your computer; a USB device uses `adb reverse` and `127.0.0.1`. The debug build type has what
-the connection needs and release does not: `app/src/debug/AndroidManifest.xml` (the `INTERNET` permission and
-`usesCleartextTraffic`) and the `UNDRA_DEV_URL` `BuildConfig` field. A bar above the screens shows the connection
+the connection needs and release does not: `app/src/debug/AndroidManifest.xml` (`usesCleartextTraffic`) and the
+`UNDRA_DEV_URL` `BuildConfig` field. A bar above the screens shows the connection
 (`core.connectionState`, a `StateFlow`): green, amber while the runtime reconnects, red when it is over. If the dev
 server cannot be reached at launch, the app says so with a Retry button.
 
@@ -62,10 +62,30 @@ dropped connection alone (the emulator slept, adb restarted) is resumed with the
 ## How the app is wired
 
 * `UndraApp` loads the core once per process (`UndraCore.load`, which checks the schema hash of the bindings against the
-  library's; `MainActivity` starts it, with the URL of `DevServer`, if any), supplies the two ports Android does not
-  default (`Http`, `Kv`), and calls `configureRemote`.
-* `remote/DemoServer.kt` is the server of the Remote tab: in memory, three seeded items, 300 ms of latency,
-  JSON by hand with `org.json`. With the Offline switch on it fails every request with `HttpError.Network` and the
-  screen tells the core through `ConnectivityEvents`; switching back sends "online", which replays the queue.
+  library's; `MainActivity` starts it, with the URL of `DevServer`, if any), calls `AndroidPlatformDefaults.install(core, this)`
+  (module `android-adapters`: `Http`, `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Lifecycle` are all the real ones, nothing is
+  faked) and calls `configureRemote`. The persisted query cache and the offline queue live in the app's files, so they survive
+  the process being killed. Against `undra dev` the same adapters stay on the device (the core is on the laptop and calls
+  them over the connection), and a rebuilt core gets a fresh `install`.
+* `remote/DemoServer.kt` is the server of the Remote tab: a small HTTP server on the device's loopback interface (the
+  playground has no backend to ship), three seeded items, 300 ms of latency, JSON by hand with `org.json`. The core reaches
+  it through the real `Http` adapter and a real socket. Like a host on the internet it is reachable only while the device
+  has a network: while the Offline switch is on, or in airplane mode, it drops the connection, and the core sees
+  `HttpError.Network`. The switch also tells the core through `ConnectivityEvents` (a simulated outage); airplane mode needs
+  no switch, the Connectivity adapter reports it. Every request is logged under the tag `UndraDemoServer`.
+* The manifest declares `INTERNET` and `ACCESS_NETWORK_STATE` (the adapters need them; `android-adapters` declares the same
+  two) and `res/xml/network_security_config.xml` allows cleartext traffic to `127.0.0.1` and `localhost` only.
 * Controls carry test tags (`todo-add`, `counter-inc`, `biglist-count`, `remote-offline`, ...) that are also
   resource ids (`testTagsAsResourceId`), so `uiautomator dump` and UI tests can find them.
+
+## Smoke test
+
+```sh
+ANDROID_SERIAL=emulator-5554 ./smoke.sh      # SKIP_CORE=1 reuses build/android/jniLibs
+```
+
+Builds the core and the app, installs it, launches every tab and screenshots it, then drives the Remote tab's offline story
+with `uiautomator`: fetch (persisted to `files/undra/kv`), Offline switch on, add an item (queued), kill the process, real
+airplane mode on, relaunch (the cached list comes from `Kv` while offline, the core holds the queue because the Connectivity
+adapter says there is no network), airplane mode off (the core replays the queue; the server receives the
+`Idempotency-Key` generated before the kill). Output: `.proof/android-adapters-smoke.log` and `.proof/android-adapters-*.png`.

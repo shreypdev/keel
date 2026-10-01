@@ -435,11 +435,11 @@ impl Steps<'_> {
         ));
         let deps = if kts {
             format!(
-                "implementation(project(\":core-bindings\"))\n   implementation(\"dev.undra:runtime:{version}\")"
+                "implementation(project(\":core-bindings\"))\n   implementation(\"dev.undra:runtime:{version}\")\n   implementation(\"dev.undra:android-adapters:{version}\")"
             )
         } else {
             format!(
-                "implementation project(':core-bindings')\n   implementation 'dev.undra:runtime:{version}'"
+                "implementation project(':core-bindings')\n   implementation 'dev.undra:runtime:{version}'\n   implementation 'dev.undra:android-adapters:{version}'"
             )
         };
         let jni_line = if kts {
@@ -452,10 +452,10 @@ impl Steps<'_> {
             self.config.android.min_sdk
         ));
         text.push_str(&format!(
-            "3. **Load the core once per process**, in your `Application` subclass (register it with `android:name` in the manifest):\n\n   ```kotlin\n   import {package}.UndraIds\n   import dev.undra.runtime.UndraCore\n   import dev.undra.runtime.LoadOptions\n\n   class App : Application() {{\n       override fun onCreate() {{\n           super.onCreate()\n           UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH))\n       }}\n   }}\n   ```\n\n   then `val todos = Todos()` (a generated store; its `StateFlow` properties work with `collectAsState()`).\n"
+            "3. **Load the core once per process**, in your `Application` subclass (register it with `android:name` in the manifest):\n\n   ```kotlin\n   import {package}.UndraIds\n   import dev.undra.android.AndroidPlatformDefaults\n   import dev.undra.runtime.UndraCore\n   import dev.undra.runtime.LoadOptions\n\n   class App : Application() {{\n       override fun onCreate() {{\n           super.onCreate()\n           val core = UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH))\n           AndroidPlatformDefaults.install(core, this)\n       }}\n   }}\n   ```\n\n   `install` gives the core every platform port: `Http`, `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Lifecycle` (without it an Android core has no network or\n   storage). It needs the `INTERNET` and `ACCESS_NETWORK_STATE` permissions; `android-adapters` declares both, so they merge into your manifest.\n   Then `val todos = Todos()` (a generated store; its `StateFlow` properties work with `collectAsState()`).\n"
         ));
         text.push_str("4. **Shrinking.** If you minify, keep the natives the library registers by name: `-keep class dev.undra.runtime.UndraNative { *; }` and\n   `-keep class dev.undra.runtime.UndraNative$Callbacks { *; }`.\n\n");
-        text.push_str("5. **Optional, for `undra dev`:** in debug builds pass `mode = Mode.REMOTE, remoteUrl = \"ws://10.0.2.2:7443\"` (the emulator's name for your computer; a USB device uses `adb reverse tcp:7443 tcp:7443`\n   and `ws://127.0.0.1:7443`, which `undra dev --android` sets up) to `LoadOptions`, and allow cleartext traffic and the `INTERNET` permission in a **debug-only** manifest\n   (`app/src/debug/AndroidManifest.xml`: `<uses-permission android:name=\"android.permission.INTERNET\" />` and `<application android:usesCleartextTraffic=\"true\" />`).\n   The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `Closed(SESSION_LOST)` and the app loads a new core.\n\n");
+        text.push_str("5. **Optional, for `undra dev`:** in debug builds pass `mode = Mode.REMOTE, remoteUrl = \"ws://10.0.2.2:7443\"` (the emulator's name for your computer; a USB device uses `adb reverse tcp:7443 tcp:7443`\n   and `ws://127.0.0.1:7443`, which `undra dev --android` sets up) to `LoadOptions`, and allow cleartext traffic in a **debug-only** manifest\n   (`app/src/debug/AndroidManifest.xml`: `<application android:usesCleartextTraffic=\"true\" />`; the `INTERNET` permission is already in your manifest through `android-adapters`).\n   The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `Closed(SESSION_LOST)` and the app loads a new core.\n\n");
         text
     }
 

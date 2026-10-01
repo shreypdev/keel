@@ -581,6 +581,8 @@ Records: `HttpRequest { method: HttpMethod, url: String, headers: Vec<Header>, b
 The standard surface (these ten ports and these types, plus `HttpMethod { Get, Post, Put, Delete, Patch, Head, Options }`) ships in each platform runtime (`@undra/runtime`, `dev.undra.runtime.adapters`, `UndraRuntime`), not in generated code: every core links `undra-ports`, so its schema contains all of it and the schema hash covers it, but `undra-bindgen` leaves it out of an app's bindings and the generated code refers to the runtime's own types (section 10.5, ADR-024).
 
 `HttpError` and `FsError` implement `From<PortError>` (§5.7): an unavailable port is `Network("the Http port has no adapter registered (E0062: register one, see <docs link>)")` / `Io("the Fs port has no adapter registered (E0062: ..)")`, a cancelled call is `Cancelled` / `Io(..)`, a reply that does not decode is `Network("malformed port reply: ..")` / `Io(..)`; the wire layouts are unchanged.
+`Fs` semantics shared by every adapter: paths are relative to the adapter's root (a leading `/` is ignored) and one that would leave it, through `..` or a symbolic link, is `Denied`; `write` creates missing parent directories and is atomic; `delete` removes a file, or a directory with everything in it (a symbolic link is removed, never followed), and a path that names the root itself is refused (`Denied` on Swift, Android and the JVM, `Io` on the web, which has no handle for its root); `list` returns the names of one directory, sorted.
+
 Fakes (all in `undra-ports::fakes`, `Send + Sync`): `FakeHttp` (script responses by matcher; records calls), `MemKv`, `MemSecureStore`, `MemFs`, `FakeClock` (settable `now`, `advance(d)` fires due timers; implements `Clock` + `Timer`), `SeededRng` (xorshift64\*), `CaptureLog`, `ScriptedConnectivity`, `ScriptedLifecycle`. `TestRuntime::new()` installs all fakes and runs the executor on the test thread (`run_until(fut)` / `run_pending()`).
 
 ---
@@ -737,12 +739,14 @@ Handle lifetime: explicit `close()`/`[Symbol.dispose]`; finalizers (`deinit`, `C
 Default adapters:
 | Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) |
 |---|---|---|---|---|---|
-| Http | URLSession | OkHttp (optional dep) or HttpURLConnection | HttpURLConnection | fetch | fetch |
-| Kv / SecureStore | files in Application Support / Keychain | SharedPreferences-backed files / EncryptedFile (Keystore) | files | IndexedDB / IndexedDB + WebCrypto | files |
-| Fs | FileManager | Context.filesDir | java.io | OPFS | fs |
-| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / Log | same | built-in (§7) | built-in |
-| Timer | DispatchQueue | Handler / ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
-| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ProcessLifecycleOwner | stubs | navigator.onLine / visibilitychange | stubs |
+| Http | URLSession | HttpURLConnection | HttpURLConnection | fetch | fetch |
+| Kv / SecureStore | files in Application Support / Keychain | files in `filesDir` / AES-256-GCM under an Android Keystore key (files in `noBackupFilesDir`) | files | IndexedDB / IndexedDB + WebCrypto | files |
+| Fs | FileManager | `filesDir` | java.io | OPFS | fs |
+| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / `android.util.Log` | same | built-in (§7) | built-in |
+| Timer | DispatchQueue | ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
+| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ActivityLifecycleCallbacks | stubs | navigator.onLine / visibilitychange | stubs |
+
+On Android all of it is installed by one call, `AndroidPlatformDefaults.install(core, context)` (module `android-adapters`; `android-adapters/README.md`); the runtime alone installs only Clock, Rng, Log and Timer.
 
 ### 11.0 The remote transport reconnects (ADR-051)
 

@@ -29,7 +29,8 @@ public enum class Mode {
  *   with [UndraSchemaMismatchException] if the core reports another one.
  * @property defaultAdapters install the JVM default adapters (`dev.undra.runtime.adapters.JvmAdapters`) for
  *   every standard port not in [adapters]. On Android only the portable ones (Clock, Rng, Log, Timer) are
- *   installed; Http, Kv, SecureStore and Fs come from the `android-adapters` module.
+ *   installed; Http, Kv, SecureStore, Fs, Connectivity and Lifecycle come from the `android-adapters` module, which
+ *   installs all ten with `AndroidPlatformDefaults.install(core, context)` after [UndraCore.load].
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
