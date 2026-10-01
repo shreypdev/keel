@@ -1,0 +1,14 @@
+{
+  "scenario": "completions/contended",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": null,
+  "command": "UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd"},
+  "load_average": {"before": 2.34, "after": 2.31},
+  "run": {"seconds": 10, "warmup_ms": 200, "elapsed_s": 10.001718, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"},
+  "result": {"ops": 3450288, "per_sec": 344969.5342340186, "p50_ns": 147455, "p99_ns": 335871, "p999_ns": 475135, "max_ns": 1103500, "bytes_per_op": 37, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 70 k ops/s, p99 at most 1.80 ms", "passed": true, "failures": []},
+  "invariants": [{"what": "every call was answered (3083770 replies for 3083770 calls; 0 rejected)", "holds": true, "timing": false}, {"what": "the completer threads answered every port call (3083770 of 3083770)", "holds": true, "timing": false}, {"what": "every write from the host thread succeeded (434662 of 434662 call_sync)", "holds": true, "timing": false}, {"what": "no change-set was lost (3518432 delivered for 3083770 completions and 434662 writes)", "holds": true, "timing": false}, {"what": "every change-set is one 37-byte entry (130181984 bytes in 3518432)", "holds": true, "timing": false}, {"what": "the main thread saw every change-set (3518433 of 3518433)", "holds": true, "timing": false}, {"what": "nothing arrived out of order (0 change-sets went backwards in transaction id)", "holds": true, "timing": false}, {"what": "the store's total arrived as an exact count, one more each change-set (0 steps were not +1)", "holds": true, "timing": false}, {"what": "the store's total is the completions plus the writes (3518432 for 3083770 + 434662)", "holds": true, "timing": false}, {"what": "the last change-set the main thread applied carries that total (Some(3518432))", "holds": true, "timing": false}, {"what": "every reply was Ok (0 were not)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": ["largest drain 9145 change-sets over 613 frames; call to reply p50 147455 ns, p99 335871 ns", "writer thread: 426732 call_sync writes (42666/s), each p50 1215 ns, p99 151551 ns, max 485125 ns"]
+}

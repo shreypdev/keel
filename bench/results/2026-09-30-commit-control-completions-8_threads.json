@@ -1,0 +1,14 @@
+{
+  "scenario": "completions/8_threads",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": "commit-control",
+  "command": "UNDRA_BENCH_RESULTS_TAG=commit-control UNDRA_STRESS_SECONDS=2 UNDRA_BENCH_BASELINE=/private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd-dirty"},
+  "load_average": {"before": 3.15, "after": 3.25},
+  "run": {"seconds": 2, "warmup_ms": 200, "elapsed_s": 2.00158325, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml"},
+  "result": {"ops": 691946, "per_sec": 345699.3357633264, "p50_ns": 172031, "p99_ns": 638975, "p999_ns": 1032191, "max_ns": 1545125, "bytes_per_op": 37, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 69 k ops/s, p99 at most 3.70 ms", "passed": true, "failures": []},
+  "invariants": [{"what": "every call was answered (760482 replies for 760482 calls; 0 rejected)", "holds": true, "timing": false}, {"what": "the completer threads answered every port call (760482 of 760482)", "holds": true, "timing": false}, {"what": "no change-set was lost (760482 delivered for 760482 completions and 0 writes)", "holds": true, "timing": false}, {"what": "every change-set is one 37-byte entry (28137834 bytes in 760482)", "holds": true, "timing": false}, {"what": "the main thread saw every change-set (760483 of 760483)", "holds": true, "timing": false}, {"what": "nothing arrived out of order (0 change-sets went backwards in transaction id)", "holds": true, "timing": false}, {"what": "the store's total arrived as an exact count, one more each change-set (0 steps were not +1)", "holds": true, "timing": false}, {"what": "the store's total is the completions plus the writes (760482 for 760482 + 0)", "holds": true, "timing": false}, {"what": "the last change-set the main thread applied carries that total (Some(760482))", "holds": true, "timing": false}, {"what": "every reply was Ok (0 were not)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": ["largest drain 8446 change-sets over 133 frames; call to reply p50 172031 ns, p99 638975 ns"]
+}

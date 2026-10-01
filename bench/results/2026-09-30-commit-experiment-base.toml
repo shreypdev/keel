@@ -1,0 +1,214 @@
+[meta]
+cores = "18"
+cpu = "Apple M5 Pro"
+date = "2026-09-30"
+git = "acc4a22494bd-dirty"
+load_layer_a = "2.72 before, 2.58 after (one-minute load average)"
+load_layer_b = "2.60 before, 3.00 after (one-minute load average)"
+os = "macOS 26.5"
+recorded_by = "budgets test, best p50 of 3 attempts per row"
+rustc = "rustc 1.98.1 (48a229cea 2026-09-01)"
+stress_seconds = "2"
+
+[bench."dispatch/call_async/ready_add"]
+p50_ns = 206.7
+
+[bench."dispatch/call_sync/add"]
+p50_ns = 43.4
+
+[bench."dispatch/call_sync/echo_record1k"]
+p50_ns = 133.0
+
+[bench."dispatch/call_sync/function"]
+p50_ns = 34.4
+
+[bench."dispatch/call_sync_with/add"]
+p50_ns = 31.6
+
+[bench."signals/changeset_100/cell"]
+p50_ns = 707.0
+
+[bench."signals/changeset_100/decode"]
+p50_ns = 190.1
+
+[bench."signals/changeset_100/runtime"]
+p50_ns = 2171.4
+
+[bench."signals/computed/recompute_1"]
+p50_ns = 41.0
+
+[bench."signals/computed/recompute_chain_10"]
+p50_ns = 247.1
+
+[bench."signals/keyed_100/insert"]
+p50_ns = 291.0
+
+[bench."signals/keyed_10k/insert"]
+p50_ns = 6125.0
+
+[bench."signals/keyed_10k/move"]
+p50_ns = 9057.7
+
+[bench."signals/keyed_10k/raw_update_diff"]
+p50_ns = 493458.5
+
+[bench."signals/keyed_10k/update"]
+p50_ns = 265.9
+
+[bench."signals/keyed_1k/insert"]
+p50_ns = 583.0
+
+[bench."signals/observe_100_initial"]
+p50_ns = 2625.0
+
+[bench."snapshot/cold_start_restore_100kb"]
+p50_ns = 71250.0
+
+[bench."snapshot/cold_start_restore_100kb_core_thread"]
+p50_ns = 82542.0
+
+[bench."snapshot/encode_100kb"]
+p50_ns = 12580.7
+
+[bench."snapshot/restore_100kb"]
+p50_ns = 27858.3
+
+[bench."snapshot/restore_1mb"]
+p50_ns = 259666.7
+
+[bench."stress/fanout/100k_observed_1k_dirty"]
+p50_ns = 33115.0
+
+[bench."stress/fanout/10k_observed_1k_dirty"]
+p50_ns = 24975.2
+
+[bench."stress/fanout/1k_stores_1k_dirty"]
+p50_ns = 95467.7
+
+[bench."stress/firehose/call_set"]
+p50_ns = 128.1
+
+[bench."stress/firehose/event"]
+p50_ns = 116.2
+
+[bench."stress/firehose/txn_x1000"]
+p50_ns = 78000.0
+
+[bench."stress/keyed_churn_10k/ops_x1000"]
+p50_ns = 5389000.0
+
+[bench."stress/stream/items_x1000"]
+p50_ns = 34725.0
+
+[bench."wire/bool/roundtrip"]
+p50_ns = 22.6
+
+[bench."wire/bytes_1kb/roundtrip"]
+p50_ns = 54.3
+
+[bench."wire/duration/roundtrip"]
+p50_ns = 15.2
+
+[bench."wire/enum_label/roundtrip"]
+p50_ns = 48.3
+
+[bench."wire/enum_rect/roundtrip"]
+p50_ns = 50.9
+
+[bench."wire/f64/roundtrip"]
+p50_ns = 16.0
+
+[bench."wire/i64/roundtrip"]
+p50_ns = 16.8
+
+[bench."wire/keyed_patch_10k/apply"]
+p50_ns = 2167.0
+
+[bench."wire/keyed_patch_10k/diff"]
+p50_ns = 415521.0
+
+[bench."wire/keyed_patch_10k/roundtrip"]
+p50_ns = 118.5
+
+[bench."wire/map100_string_u32/roundtrip"]
+p50_ns = 6032.5
+
+[bench."wire/map100_u32_u32/roundtrip"]
+p50_ns = 3049.9
+
+[bench."wire/option_none/roundtrip"]
+p50_ns = 15.9
+
+[bench."wire/option_some/roundtrip"]
+p50_ns = 15.1
+
+[bench."wire/record1k/roundtrip"]
+p50_ns = 181.8
+
+[bench."wire/record5/roundtrip"]
+p50_ns = 88.4
+
+[bench."wire/result_err/roundtrip"]
+p50_ns = 62.2
+
+[bench."wire/result_ok/roundtrip"]
+p50_ns = 17.1
+
+[bench."wire/string_1kb/roundtrip"]
+p50_ns = 73.9
+
+[bench."wire/string_short/roundtrip"]
+p50_ns = 37.5
+
+[bench."wire/timestamp/roundtrip"]
+p50_ns = 15.2
+
+[bench."wire/u32/roundtrip"]
+p50_ns = 18.2
+
+[bench."wire/u8/roundtrip"]
+p50_ns = 19.8
+
+[bench."wire/uuid/roundtrip"]
+p50_ns = 15.8
+
+[bench."wire/vec_u32_1k/roundtrip"]
+p50_ns = 1050.7
+
+[stress."completions/8_threads"]
+per_sec = 343501
+p99_ns = 589823
+p999_ns = 835583
+
+[stress."completions/contended"]
+per_sec = 343508
+p99_ns = 352255
+p999_ns = 557055
+
+[stress."event/sustained"]
+per_sec = 7453129
+p99_ns = 167
+p999_ns = 251
+
+[stress."fanout/sustained"]
+per_sec = 28778
+p99_ns = 58367
+p999_ns = 69631
+
+[stress."fanout_stores/sustained"]
+per_sec = 9817
+p99_ns = 151551
+p999_ns = 176127
+
+[stress."firehose/sustained"]
+per_sec = 6302207
+p99_ns = 167
+p999_ns = 295
+
+[stress."keyed_churn_10k/sustained"]
+per_sec = 181858
+p99_ns = 16895
+p999_ns = 21503
+
+[stress."stream/backpressure"]
+per_sec = 29956762

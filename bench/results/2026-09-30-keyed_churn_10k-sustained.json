@@ -1,0 +1,14 @@
+{
+  "scenario": "keyed_churn_10k/sustained",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": null,
+  "command": "UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd"},
+  "load_average": {"before": 2.34, "after": 2.31},
+  "run": {"seconds": 10, "warmup_ms": 200, "elapsed_s": 10.000003333, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"},
+  "result": {"ops": 1821720, "per_sec": 182171.93928209262, "p50_ns": 3839, "p99_ns": 16895, "p999_ns": 22015, "max_ns": 192125, "bytes_per_op": 61, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 33 k ops/s, p99 at most 90.00 us", "passed": true, "failures": []},
+  "invariants": [{"what": "the host list equals the core list, field for field (10000 and 10000 rows)", "holds": true, "timing": false}, {"what": "every operation was applied on the host as one keyed patch (1858470 patches for 1858470 operations, warm-up included; 1 full values, 1 expected)", "holds": true, "timing": false}, {"what": "61 bytes per operation, exactly (111124920 for 1821720)", "holds": true, "timing": false}, {"what": "the list is back at 10000 rows after 1858470 operations (10000)", "holds": true, "timing": false}, {"what": "every patch applied on the host (0 failed)", "holds": true, "timing": false}, {"what": "one change-set per operation (1821720 for 1821720)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": []
+}

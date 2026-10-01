@@ -1,0 +1,14 @@
+{
+  "scenario": "fanout_stores/sustained",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": null,
+  "command": "UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd"},
+  "load_average": {"before": 2.34, "after": 2.31},
+  "run": {"seconds": 10, "warmup_ms": 200, "elapsed_s": 10.000105375, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"},
+  "result": {"ops": 98866, "per_sec": 9886.495821050285, "p50_ns": 98303, "p99_ns": 147455, "p999_ns": 180223, "max_ns": 375417, "bytes_per_op": 33000, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 2 k ops/s, p99 at most 1.30 ms", "passed": true, "failures": []},
+  "invariants": [{"what": "1,000 change-sets per transaction, one per store (98866000 for 98866)", "holds": true, "timing": false}, {"what": "33000 bytes per transaction (33000)", "holds": true, "timing": false}],
+  "notes": []
+}
