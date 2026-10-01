@@ -337,6 +337,69 @@ impl ChurnState {
     }
 }
 
+/// Seeds `rows` with `count` rows (ids `1..=count`) and restarts `state`'s generator.
+fn seed_rows(rows: &Signal<Vec<Item>>, state: &mut ChurnState, count: u32) {
+    *state = ChurnState {
+        rng: ChurnState::SEED,
+        step: 0,
+        next_id: u64::from(count) + 1,
+        len: count as usize,
+    };
+    let seeded = (0..count)
+        .map(|n| Item {
+            id: u64::from(n) + 1,
+            title: title_of(n, 24),
+            done: false,
+        })
+        .collect();
+    rows.set(seeded);
+}
+
+/// `count` operations on `rows`, each its own transaction, following the fixed cycle (`Churn` and
+/// `ChurnViews` share it).
+fn churn_rows(rows: &Signal<Vec<Item>>, state: &mut ChurnState, count: u32) {
+    for _ in 0..count {
+        let mut op = CHURN_CYCLE[(state.step % 10) as usize];
+        state.step = state.step.wrapping_add(1);
+        // A list too short to update, remove or move from can only grow.
+        if state.len < 2 {
+            op = ChurnOp::Insert;
+        }
+        match op {
+            ChurnOp::Update => {
+                let at = state.pick(state.len);
+                rows.update_at(at, |row| row.done = !row.done);
+            }
+            ChurnOp::Insert => {
+                let at = state.pick(state.len + 1);
+                let id = state.next_id;
+                state.next_id += 1;
+                state.len += 1;
+                rows.insert(
+                    at,
+                    Item {
+                        id,
+                        title: title_of(id as u32, 24),
+                        done: false,
+                    },
+                );
+            }
+            ChurnOp::Remove => {
+                let at = state.pick(state.len);
+                state.len -= 1;
+                rows.remove(at);
+            }
+            ChurnOp::Move => {
+                let from = state.pick(state.len);
+                // A different position, so the move is a real change (a move onto itself
+                // commits nothing).
+                let to = (from + 1 + state.pick(state.len - 1)) % state.len;
+                rows.move_item(from, to);
+            }
+        }
+    }
+}
+
 /// A store with one keyed list that is changed, one recorded operation per transaction, in a
 /// fixed cycle at seeded random positions: what a chat, a feed or a live board does under load.
 #[undra::store]
@@ -359,67 +422,14 @@ impl Churn {
     /// Replaces the list with `count` rows (ids `1..=count`) and restarts the generator.
     pub fn seed(&self, count: u32) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        *state = ChurnState {
-            rng: ChurnState::SEED,
-            step: 0,
-            next_id: u64::from(count) + 1,
-            len: count as usize,
-        };
-        let rows = (0..count)
-            .map(|n| Item {
-                id: u64::from(n) + 1,
-                title: title_of(n, 24),
-                done: false,
-            })
-            .collect();
-        self.rows.set(rows);
+        seed_rows(&self.rows, &mut state, count);
     }
 
     /// `count` operations, each its own transaction (one change-set when observed), following
     /// the fixed cycle. Every tenth operation leaves the list at its seeded length.
     pub fn churn(&self, count: u32) {
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let state: &mut ChurnState = &mut guard;
-        for _ in 0..count {
-            let mut op = CHURN_CYCLE[(state.step % 10) as usize];
-            state.step = state.step.wrapping_add(1);
-            // A list too short to update, remove or move from can only grow.
-            if state.len < 2 {
-                op = ChurnOp::Insert;
-            }
-            match op {
-                ChurnOp::Update => {
-                    let at = state.pick(state.len);
-                    self.rows.update_at(at, |row| row.done = !row.done);
-                }
-                ChurnOp::Insert => {
-                    let at = state.pick(state.len + 1);
-                    let id = state.next_id;
-                    state.next_id += 1;
-                    state.len += 1;
-                    self.rows.insert(
-                        at,
-                        Item {
-                            id,
-                            title: title_of(id as u32, 24),
-                            done: false,
-                        },
-                    );
-                }
-                ChurnOp::Remove => {
-                    let at = state.pick(state.len);
-                    state.len -= 1;
-                    self.rows.remove(at);
-                }
-                ChurnOp::Move => {
-                    let from = state.pick(state.len);
-                    // A different position, so the move is a real change (a move onto itself
-                    // commits nothing).
-                    let to = (from + 1 + state.pick(state.len - 1)) % state.len;
-                    self.rows.move_item(from, to);
-                }
-            }
-        }
+        churn_rows(&self.rows, &mut guard, count);
     }
 
     /// The ids of the rows, in order (for the final equality checks).
@@ -434,6 +444,182 @@ impl Churn {
     pub fn rows_now(&self) -> Vec<Item> {
         self.rows.get()
     }
+}
+
+/// `Churn` with a derived view (ADR-039): `open`, the rows not done sorted by title, kept from the
+/// same recorded operations. Every `Update` of the cycle toggles `done`, so it moves a row into or
+/// out of the view; the view's ops follow the source's one for one (at most two per source op).
+#[undra::store(restore = "Self::assemble")]
+pub struct ChurnViews {
+    #[undra(key = "id")]
+    rows: Signal<Vec<Item>>,
+    #[undra(key = "id")]
+    open: DerivedList<Item>,
+    state: Mutex<ChurnState>,
+}
+
+#[undra::api(store)]
+impl ChurnViews {
+    pub fn new(ctx: Ctx) -> Self {
+        Self::assemble(ctx, Signal::new(Vec::new()))
+    }
+
+    fn assemble(_ctx: Ctx, rows: Signal<Vec<Item>>) -> Self {
+        let open = rows
+            .derive()
+            .filter(|row: &Item| !row.done)
+            .sort_by_key(|row: &Item| row.title.clone())
+            .build();
+        ChurnViews {
+            rows,
+            open,
+            state: Mutex::new(ChurnState::default()),
+        }
+    }
+
+    /// Replaces the list with `count` rows (ids `1..=count`) and restarts the generator.
+    pub fn seed(&self, count: u32) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        seed_rows(&self.rows, &mut state, count);
+    }
+
+    /// `count` operations of `Churn`'s cycle, each its own transaction.
+    pub fn churn(&self, count: u32) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        churn_rows(&self.rows, &mut guard, count);
+    }
+}
+
+/// What the stress scenario checks beyond the wire (not part of the store's API).
+impl ChurnViews {
+    /// The rows, in order.
+    pub fn rows_now(&self) -> Vec<Item> {
+        self.rows.get()
+    }
+
+    /// The view as the core has it.
+    pub fn open_now(&self) -> Vec<Item> {
+        self.open.get()
+    }
+
+    /// What maintaining the view did.
+    pub fn open_stats(&self) -> undra::signals::DerivedStats {
+        self.open.stats()
+    }
+}
+
+/// `filter + stable sort` of `rows`, written the obvious way: what `ChurnViews.open` must equal.
+pub fn open_by_title(rows: &[Item]) -> Vec<Item> {
+    let mut open: Vec<Item> = rows.iter().filter(|row| !row.done).cloned().collect();
+    open.sort_by(|a, b| a.title.cmp(&b.title));
+    open
+}
+
+/// A keyed list and four derived views of it (ADR-039), for the `signals/derived_*` rows: each
+/// workload observes only what its row measures. Seeded rows: every fourth one is done, so `open`
+/// holds three quarters of them and flipping `show` moves a quarter.
+#[undra::store(restore = "Self::assemble")]
+pub struct Views {
+    #[undra(key = "id")]
+    rows: Signal<Vec<Item>>,
+    show: Signal<bool>,
+    /// The rows not done, in source order.
+    #[undra(key = "id")]
+    open: DerivedList<Item>,
+    /// The rows not done, by title.
+    #[undra(key = "id")]
+    by_title: DerivedList<Item>,
+    /// Every row while `show`, else the rows not done: a parameter.
+    #[undra(key = "id")]
+    shown: DerivedList<Item>,
+    /// How many rows are not done.
+    open_count: Computed<u32>,
+    /// A copy of the seeded rows `reset` swaps in, so the row it serves measures the views'
+    /// rebuild, not 10,000 freshly formatted titles.
+    spare: Mutex<Vec<Item>>,
+}
+
+#[undra::api(store)]
+impl Views {
+    pub fn new(ctx: Ctx) -> Self {
+        Self::assemble(ctx, Signal::new(Vec::new()), Signal::new(true))
+    }
+
+    fn assemble(_ctx: Ctx, rows: Signal<Vec<Item>>, show: Signal<bool>) -> Self {
+        let open = rows.derive().filter(|row: &Item| !row.done).build();
+        let by_title = rows
+            .derive()
+            .filter(|row: &Item| !row.done)
+            .sort_by_key(|row: &Item| row.title.clone())
+            .build();
+        let shown = rows
+            .derive()
+            .filter_with(&show, |show, row: &Item| *show || !row.done)
+            .build();
+        let open_count = rows.derive().filter(|row: &Item| !row.done).count();
+        Views {
+            rows,
+            show,
+            open,
+            by_title,
+            shown,
+            open_count,
+            spare: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Replaces the list with `count` rows (ids `2n + 1`, titles of 24 characters, every fourth
+    /// done). A raw write: every view rebuilds.
+    pub fn seed(&self, count: u32) {
+        let rows = views_rows(count);
+        *self.spare.lock().unwrap_or_else(|e| e.into_inner()) = rows.clone();
+        self.rows.replace(rows);
+    }
+
+    /// A raw write of the same rows `seed` wrote (swapped in, nothing allocated): every view
+    /// rebuilds and is sent whole. The `rebuild_after_replace` row.
+    pub fn reset(&self) {
+        let mut spare = self.spare.lock().unwrap_or_else(|e| e.into_inner());
+        self.rows.update(|rows| std::mem::swap(rows, &mut *spare));
+    }
+
+    /// Changes the title of the row at `index`. Recorded: one `Update` of the source.
+    pub fn rename(&self, index: u32, title: String) {
+        self.rows.update_at(index as usize, |row| row.title = title);
+    }
+
+    /// Flips `done` of the row at `index`. Recorded: one `Update` of the source, an `Insert` or a
+    /// `Remove` of the views that filter on it.
+    pub fn toggle(&self, index: u32) {
+        self.rows
+            .update_at(index as usize, |row| row.done = !row.done);
+    }
+
+    /// Inserts `item` so it ends up at `index`. Recorded.
+    pub fn insert_at(&self, index: u32, item: Item) {
+        self.rows.insert(index as usize, item);
+    }
+
+    /// Removes the row at `index`. Recorded.
+    pub fn remove_at(&self, index: u32) {
+        self.rows.remove(index as usize);
+    }
+
+    /// Flips `show`: `shown` gains or loses every done row.
+    pub fn flip(&self) {
+        self.show.update(|show| *show = !*show);
+    }
+}
+
+/// The rows `Views.seed` writes.
+pub fn views_rows(count: u32) -> Vec<Item> {
+    (0..count)
+        .map(|n| Item {
+            id: u64::from(n) * 2 + 1,
+            title: title_of(n, 24),
+            done: n % 4 == 3,
+        })
+        .collect()
 }
 
 /// An object whose stream is always ready: its rate is whatever the core polls, far above any

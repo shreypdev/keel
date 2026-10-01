@@ -265,6 +265,8 @@ pub struct ListMirror {
     pub patches: u64,
     /// Full values applied.
     pub fulls: u64,
+    /// Operations in the keyed patches applied.
+    pub ops: u64,
     /// Entries that did not decode or apply: a mirror that has desynchronised.
     pub errors: u64,
     /// Fault injection: every n-th keyed patch is dropped (0 never), so a scenario's equality
@@ -272,7 +274,8 @@ pub struct ListMirror {
     skip_every: u64,
     /// Fault injection: only the n-th keyed patch (counting from 1) is dropped (0 never).
     skip_nth: u64,
-    patches_seen: u64,
+    /// Keyed patches delivered for this list, applied or dropped by fault injection.
+    pub patches_seen: u64,
 }
 
 impl ListMirror {
@@ -284,6 +287,7 @@ impl ListMirror {
             list: Vec::new(),
             patches: 0,
             fulls: 0,
+            ops: 0,
             errors: 0,
             skip_every: 0,
             skip_nth: 0,
@@ -323,8 +327,11 @@ impl ListMirror {
                     return;
                 }
                 let patch = KeyedPatch::<Item>::decode(&mut Reader::new(entry.value));
-                match patch.map(|patch| patch.apply(&mut self.list)) {
-                    Ok(Ok(())) => self.patches += 1,
+                match patch.map(|patch| (patch.len(), patch.apply(&mut self.list))) {
+                    Ok((len, Ok(()))) => {
+                        self.patches += 1;
+                        self.ops += len as u64;
+                    }
                     _ => self.errors += 1,
                 }
             }
@@ -350,23 +357,29 @@ impl ListMirror {
     }
 }
 
-/// A [`CountingHost`] that applies every change-set to a [`ListMirror`] inside the callback:
-/// the commit, the delivery and the list apply of one operation, on the committing thread.
+/// A [`CountingHost`] that applies every change-set to the [`ListMirror`]s it watches inside the
+/// callback: the commit, the delivery and the list apply of one operation, on the committing
+/// thread. Several lists (a source and its derived views) can be mirrored at once.
 #[derive(Default)]
 pub struct ApplyingHost {
     pub counts: CountingHost,
-    mirror: Mutex<Option<ListMirror>>,
+    mirrors: Mutex<Vec<ListMirror>>,
 }
 
 impl ApplyingHost {
-    /// Starts mirroring; change-sets delivered from now on are applied.
+    /// Starts mirroring one more list; change-sets delivered from now on are applied to it.
     pub fn watch(&self, mirror: ListMirror) {
-        *locked(&self.mirror) = Some(mirror);
+        locked(&self.mirrors).push(mirror);
     }
 
-    /// Reads the mirror (panics if nothing is watched).
+    /// Reads the first mirror (panics if nothing is watched).
     pub fn with_mirror<R>(&self, f: impl FnOnce(&ListMirror) -> R) -> R {
-        f(locked(&self.mirror).as_ref().expect("a watched list"))
+        self.with_mirror_at(0, f)
+    }
+
+    /// Reads the `index`th mirror, in the order they were watched.
+    pub fn with_mirror_at<R>(&self, index: usize, f: impl FnOnce(&ListMirror) -> R) -> R {
+        f(locked(&self.mirrors).get(index).expect("a watched list"))
     }
 }
 
@@ -377,7 +390,7 @@ impl Host for ApplyingHost {
 
     fn change_set(&self, payload: &[u8]) {
         self.counts.change_set(payload);
-        if let Some(mirror) = locked(&self.mirror).as_mut() {
+        for mirror in locked(&self.mirrors).iter_mut() {
             mirror.apply(payload);
         }
     }
