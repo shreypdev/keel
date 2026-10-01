@@ -39,8 +39,9 @@ final class ManualClock: UndraAdapter, @unchecked Sendable {
             },
             StandardPorts.Clock.monotonicNs: { _ in
                 // Only differences mean anything; deriving it from the manual reading keeps
-                // the two clocks consistent.
-                return UInt64(milliseconds.snapshot - ManualClock.start).undraEncoded()
+                // the two clocks consistent. In nanoseconds, as the port says (the Kotlin and
+                // TypeScript clocks do the same).
+                return (UInt64(milliseconds.snapshot - ManualClock.start) * 1_000_000).undraEncoded()
             },
         ])
     }

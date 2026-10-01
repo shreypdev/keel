@@ -1,6 +1,6 @@
 # Notes on the TypeScript column
 
-`run.sh` runs S01..S17 of `../scenarios.md` against the real wasm build of the playground core
+`run.sh` runs S01..S18 of `../scenarios.md` against the real wasm build of the playground core
 (`examples/playground/build/web/undra_core.wasm`, built by `undra build -C examples/playground --platform web`)
 through `@undra/runtime` in `wasm-main` mode, on Node, under vitest. `src/reporter.ts` prints one
 `SCENARIO Sxx PASS|FAIL|SKIP <title>` line per scenario; `../check.sh ts` grades them. `NOTE` lines carry
@@ -13,8 +13,8 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   a core and isolate themselves with list names; nothing here depends on that, and the list names are kept so the
   three columns read the same. Scenarios still compare **deltas** of the statistics, never absolute values.
 * `boot()` uses `UndraCore.load({ mode: "wasm-main" })`, the call an app makes. `bootRaw()` builds the
-  `WasmMainTransport` itself and `UndraCore.attach`es to it (what `load` does for this mode) so S15, S16 and S17
-  can reach the wasm exports (`undra_snapshot`, `undra_schema_json`, `undra_schema_hash`) and send `Kind.Restore`.
+  `WasmMainTransport` itself and `UndraCore.attach`es to it (what `load` does for this mode) so S07, S15, S16 and
+  S17 can reach the wasm exports (`undra_snapshot`, `undra_schema_json`, `undra_schema_hash`) and send `Kind.Restore`.
 * Adapters (`src/`): `ManualClock` (starts 1,700,000,000,000 ms), `FakeServer` (routes by method and exact URL,
   records requests, delays, network errors, 404 otherwise), `MemoryKv` (remembers every call), `CapturingLog`.
   `Rng` and `Timer` are the runtime defaults (`crypto`, `setTimeout`). `Connectivity` is emitted by the test with
@@ -35,6 +35,11 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   S17.5 (re-entry) and S17.6 (shutdown) have no wasm counterpart: see the platform notes of scenarios.md.
 * S07.4: "`produced` stays below 200" is read as the growth since the stream was opened: the counter is
   cumulative (1000 after step 3) and `reset()` is not part of the step.
+* S07.6 and S07.7 (ADR-036): the generated `ticksThenFail` maps a failure with `LabError.fromReply`, so step 6's
+  flag-2 item arrives as `LabError.Rejected` and step 7's flag-3 item (status 3) passes through as the runtime's
+  `UndraReplyError` with status 3. Step 7 takes its snapshot through `undra_snapshot` and restores with
+  `Kind.Restore`, as S15 does. The items the core had sent against credit before the restore are still delivered
+  first (they continue `2, 3, ...` in order); "within 1 s" bounds the reads from the restore to the rejection.
 * S12.1: scenarios.md's `loading` is the core's `QueryStatus.fetching`; the status history is exactly
   `fetching`, `success`.
 * S13: "records every value of `data`" subscribes to `handle.data`; a value that arrives twice in a row counts

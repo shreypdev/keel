@@ -1,12 +1,15 @@
 import { expect, test } from "vitest";
-import { Probe } from "@playground/core";
-import { boot } from "../src/harness.js";
+import { ReplyStatus, UndraReplyError, WireError } from "@undra/runtime";
+import { LabError, Probe } from "@playground/core";
+import { bootRaw } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { sleep, step, waitFor } from "../src/wait.js";
+import { restore, snapshot } from "../src/wasm-exports.js";
 
 // S07 stream with backpressure: the core produces items only against credit the consumer grants
 // (16 at subscribe, topped up as the consumer drains), so a consumer that stops reading stops the
-// producer, one that leaves early cancels it, and short streams end.
+// producer, one that leaves early cancels it, and short streams end. A stream ends with its own
+// typed error part-way, and one the core ends itself fails as cancelled by the core (ADR-036).
 
 /** Reads `count` items from an iterator. */
 async function read(iterator: AsyncIterator<number>, count: number): Promise<number[]> {
@@ -25,8 +28,33 @@ async function collect(stream: AsyncIterable<number>): Promise<number[]> {
   return items;
 }
 
+/** Reads `iterator` until it rejects, which it must do within `timeoutMs`; returns the items read on the way and the rejection. */
+async function failureOf(iterator: AsyncIterator<number>, timeoutMs: number): Promise<{ items: number[]; error: unknown }> {
+  const deadline = Date.now() + timeoutMs;
+  const items: number[] = [];
+  for (;;) {
+    const left = deadline - Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), Math.max(left, 0));
+    });
+    let next: IteratorResult<number> | "timeout";
+    try {
+      next = await Promise.race([iterator.next(), timeout]);
+    } catch (error) {
+      return { items, error };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (next === "timeout") throw new Error(`the stream did not fail within ${timeoutMs} ms (read ${items.length} more items)`);
+    if (next.done === true) throw new Error(`the stream ended normally after ${items.length} more items instead of failing`);
+    items.push(next.value);
+  }
+}
+
 test("S07 stream with backpressure", async ({ task }) => {
-  const { core } = await boot();
+  // bootRaw: step 7 takes a snapshot through the wasm export, as S15 does.
+  const { core, transport } = await bootRaw();
   const probe = await Probe.create(core);
 
   await probe.reset();
@@ -70,6 +98,46 @@ test("S07 stream with backpressure", async ({ task }) => {
   await step("5. short streams end", async () => {
     expect(await collect(probe.ticks(3))).toEqual([0, 1, 2]);
     expect(await collect(probe.ticks(0))).toEqual([]);
+  });
+
+  await step("6. a typed error part-way ends the stream with its own E, after the items before it", async () => {
+    const seen: number[] = [];
+    let failure: unknown;
+    try {
+      for await (const item of probe.ticksThenFail(5, 3, 7)) seen.push(item);
+    } catch (error) {
+      failure = error;
+    }
+    expect(seen).toEqual([0, 1, 2]);
+    expect(failure, "the stream's own error, not a wire error").not.toBeInstanceOf(WireError);
+    expect(failure).toBeInstanceOf(LabError);
+    expect(failure).toBeInstanceOf(LabError.Rejected);
+    const rejected = failure as LabError.Rejected;
+    expect(rejected.kind).toBe("rejected");
+    expect(rejected.code).toBe(7);
+    expect(rejected.reason).toBe("stopped at 3");
+    // When `fail_at` is past the end, the stream completes normally.
+    expect(await collect(probe.ticksThenFail(3, 9, 7))).toEqual([0, 1, 2]);
+    expect((await core.stats()).openStreams, "both streams are finished in the runtime").toBe(0);
+  });
+
+  await step("7. a stream the core cancels (a restore) fails as cancelled by the core, not as its E or a wire error", async () => {
+    const bytes = snapshot(transport);
+    const before = await counters(core);
+    const iterator = probe.ticksThenFail(1_000_000, 999_999, 1)[Symbol.asyncIterator]();
+    expect(await read(iterator, 2)).toEqual([0, 1]);
+    // The probe is not a store: the restore invalidates it and ends its stream.
+    restore(transport, bytes);
+    const { items, error } = await failureOf(iterator, 1_000);
+    // What the core had already sent against credit is still delivered first, in order.
+    expect(items, "the items delivered before the failure").toEqual(Array.from({ length: items.length }, (_, i) => i + 2));
+    expect(items.length).toBeLessThanOrEqual(64);
+    expect(error, "not a wire decode error").not.toBeInstanceOf(WireError);
+    expect(error, "not the stream's own error").not.toBeInstanceOf(LabError);
+    expect(error).toBeInstanceOf(UndraReplyError);
+    expect((error as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
+    await waitFor("the core to close the stream", async () => (await counters(core)).openStreams === before.openStreams, { timeoutMs: 1_000 });
+    expect((await core.stats()).openStreams, "the runtime forgot the stream too").toBe(0);
   });
 
   probe.close();

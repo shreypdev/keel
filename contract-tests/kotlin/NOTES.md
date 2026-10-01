@@ -8,10 +8,11 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
 
 ## How it is arranged
 
-* **One core per process, and S16 loads it.** `UndraCore.load` claims the native library for good, so S16 runs
-  first: its failing load (`expectedSchemaHash = generated ^ 1`) leaves nothing behind (the runtime compares
-  the hash before `undra_init`), and the load right after it is the one every other scenario uses. If S16 cannot
-  load the core, the others fail with "the core is not loaded".
+* **One core at a time, and S16 loads it.** `UndraCore.load` claims the native library until that core is closed
+  (ADR-034), so S16 runs first: its failing load (`expectedSchemaHash = generated ^ 1`) leaves nothing behind (the
+  runtime compares the hash before `undra_init`), and the load right after it is the one every other scenario uses.
+  If S16 cannot load the core, the others fail with "the core is not loaded". S17, the last scenario, closes that
+  core and loads a fresh one with the same options (`World.options`).
 * **Generated bindings for what a UI does, `UndraCore` for the rest.** Stores are `Todos`, `Counter`,
   `BigList`, `RemoteTodosQueryHandle` and the free functions of the bindings. Raw signal entries (S08 to S11),
   raw calls (S03, S05), snapshot and restore (S15) and statistics use `RawStore` and `UndraCore` directly.
@@ -19,6 +20,8 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   the in-memory `Http` server, an in-memory `Kv` that records writes, a capturing `Log`. `Rng` and `Timer` are
   the runtime's JVM defaults, and so are `SecureStore` and `Fs` (kept in a throwaway `undra.data.dir`).
   The adapters are `PortImpl`s built on `StandardPorts` and `StandardRecords`; no transport is reimplemented.
+  Each of the four is wrapped by `PortCallCounter` (`World.portCalls`), which counts the calls it receives by port
+  name, for S17.7.
 * **Waiting** is a poll every 10 ms with a 5 s limit (`awaitUntil`, `awaitEq`), "for 200 ms nothing happens" is
   `holdsFor`. Each look first drains the mirror on the main thread (`drainLoadedMirror`): since ADR-031 a store
   shows what the core did on its own at the next frame (the runtime's 16.67 ms grid on the JVM), so without the
@@ -42,6 +45,14 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   `Deferred`, whose only observable effect would be `crossings.cancelled`, which is asserted not to move.
 * S07.1: Kotlin has no way to "stop reading a `Flow` without cancelling" except not returning from the collector;
   the collector suspends inside `collect`, which also stops the runtime granting more credit.
+* S07.6: the generated `Probe.ticksThenFail` maps the flag-2 item through `LabError.fromReply`, so the collection
+  throws `LabError.Rejected(code = 7, reason = "stopped at 3")` itself.
+* S07.7: "read 2 items" is the S07.1 idiom again: the collector suspends after its second item until the restore has
+  returned, then reads on, so it drains what the core sent before the restore (at most the credit window) and then
+  sees the failure. The core sends flag 3 with status 3, and the runtime raises `UndraReplyException(CANCELLED)`,
+  which the generated `fromReply` passes through. The 1 s is measured from the start of `restore`. The restore is
+  of a snapshot taken a moment before, so the stores of other scenarios keep their values; objects that are not
+  stores (only the probe is still in use) are invalidated.
 * S12.1: there is no `loading` status; the scenario's "loading" is `QueryStatus.FETCHING`. The GET is delayed
   by 50 ms so that the state in between can be seen.
 * S13: `data` is recorded with a `StateFlow` collector on `Dispatchers.Unconfined` (`Recorder`), so every value
@@ -52,9 +63,20 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
 * S17.5: a call made from inside the `Log` port is refused by the Kotlin runtime itself (`InprocTransport` knows it is inside
   a callback and throws an `UndraException` "called from inside a core callback"), before the core can answer it with
   `E_REENTRANT`; the Swift column sees the core's bad request. The scenario accepts either refusal.
-* S17.6 ends the core (`core.close()`), and S17 is the last entry of `SCENARIOS`, so nothing runs after it. The generated
-  `add(1, 2)` passes the closed core explicitly, because `UndraCore.shared` is forgotten on close and would fail with
-  "no UndraCore has been loaded" instead of "closed".
+* S17.6 ends the core (`core.close()`), and S17 is the last entry of `SCENARIOS`, so nothing but S17.7 runs after it. The
+  generated `add(1, 2)` passes the closed core explicitly, because `UndraCore.shared` is forgotten on close and would
+  fail with "no UndraCore has been loaded" instead of "closed".
+* S17.7: the timer-paced task is `Stress.start(StressMode.FIREHOSE, 1000u)`, started after step 5. Its generator
+  reads the `Clock` port every 10 ms (the manual clock does not move, so it commits nothing), and the step waits for
+  three such reads before step 6 starts the shutdown. The port-call counts are read when `close()` returns and must
+  not change for 200 ms. On the JVM `InprocTransport.close()` detaches from the core before
+  `UndraNative.shutdown()`, so a call during the shutdown itself would be answered "unavailable" by the transport,
+  never by an adapter. The fresh core is loaded with the same `LoadOptions` (the same adapter instances), and its
+  `add(1, 2)` gets the fresh core explicitly. It hydrates the query cache from the `Kv` contents S12 to S14 left, so
+  `Kv` calls start again after the reload. That is the new core's own work, and it is why the quiet window ends
+  before the load. Because the transport detaches first, the window after `close()` cannot fail on the JVM; the
+  check with teeth is the last one: for 200 ms on the fresh core the `Clock` count must not move (a generator that
+  survived the shutdown would read the Clock through the fresh core's callbacks every 10 ms).
 * S16: the order (S16 first) is described above. Step 2 ("a subsequent load succeeds") is the load every other
   scenario uses.
 
