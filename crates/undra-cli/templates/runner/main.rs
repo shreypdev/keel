@@ -121,7 +121,13 @@ fn main() {
         return;
     }
 
-    let server = match Server::start(addr.as_str(), ServerConfig::default(), |host| {
+    // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
+    // for ten minutes if it comes back with its session token (ADR-034).
+    let config = ServerConfig {
+        resume_grace: std::time::Duration::from_secs(600),
+        ..ServerConfig::default()
+    };
+    let server = match Server::start(addr.as_str(), config, |host| {
         host.set_log_sink(print_log);
         let runtime = Runtime::new(
             RuntimeConfig {

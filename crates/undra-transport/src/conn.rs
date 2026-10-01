@@ -26,6 +26,7 @@ use undra_wire::{Envelope, Kind, Reader, Writer};
 use parking_lot::Mutex;
 
 use crate::bridge::ClientInfo;
+use crate::resume::SessionRequest;
 use crate::tracker::{Leftovers, Tracker};
 
 /// The target of the runtime's development-mode records (SPEC 5.10).
@@ -97,6 +98,8 @@ pub(crate) struct Conn {
     /// A handle on the socket used only to abort it.
     tcp: Option<TcpStream>,
     client: OnceLock<ClientInfo>,
+    /// What the upgrade request said about the client's session (ADR-034).
+    session: OnceLock<SessionRequest>,
     /// Where the keepalive reads the time.
     clock: Clock,
     /// Milliseconds on `clock` at which bytes last arrived from the peer; until then, when the
@@ -140,6 +143,7 @@ impl Conn {
             }),
             tcp,
             client: OnceLock::new(),
+            session: OnceLock::new(),
             last_rx: AtomicU64::new(clock().as_millis().try_into().unwrap_or(u64::MAX)),
             clock,
         };
@@ -159,6 +163,22 @@ impl Conn {
     /// The client's Hello, once it has been received.
     pub(crate) fn client(&self) -> Option<&ClientInfo> {
         self.client.get()
+    }
+
+    /// Records the session parameters of the upgrade request.
+    pub(crate) fn set_session(&self, request: SessionRequest) {
+        let _ = self.session.set(request);
+    }
+
+    /// The session the client announced in its URL, if it did.
+    pub(crate) fn session(&self) -> Option<&SessionRequest> {
+        self.session.get()
+    }
+
+    /// Makes `handles` (objects of a session this client resumed) this connection's own: its
+    /// disconnect retains or releases them like objects its constructors made.
+    pub(crate) fn adopt(&self, handles: &[u64]) {
+        self.state.lock().tracker.adopt(handles);
     }
 
     /// The keepalive's clock, now.

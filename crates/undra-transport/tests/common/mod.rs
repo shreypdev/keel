@@ -327,6 +327,11 @@ impl Fixture {
         TestClient::connect(&self.url(), self.schema())
     }
 
+    /// A client that announced session `token` (resuming it when `resume`).
+    pub fn session_client(&self, token: &str, resume: bool) -> TestClient {
+        TestClient::connect_session(&self.url(), self.schema(), token, resume)
+    }
+
     pub fn log_lines(&self) -> Vec<String> {
         self.logs
             .lock()
@@ -392,6 +397,14 @@ pub enum Received {
     Silence,
 }
 
+/// `url` with the session parameters of ADR-034 in its query.
+pub fn session_url(url: &str, token: &str, resume: bool) -> String {
+    format!(
+        "{url}/?undra_session={token}{}",
+        if resume { "&undra_resume=1" } else { "" }
+    )
+}
+
 pub struct TestClient {
     ws: WebSocket<TcpStream>,
     /// The schema hash the client stamps on its envelopes.
@@ -414,7 +427,12 @@ impl TestClient {
     /// Like [`connect_raw`](TestClient::connect_raw), presenting `origin` as a browser would.
     pub fn connect_with_origin(url: &str, schema: u64, origin: Option<&str>) -> TestClient {
         use tungstenite::client::IntoClientRequest;
-        let host = url.trim_start_matches("ws://");
+        // The host part only: the URL may carry a path and a query (`?undra_session=...`).
+        let host = url
+            .trim_start_matches("ws://")
+            .split(['/', '?'])
+            .next()
+            .expect("a host");
         let tcp = TcpStream::connect(host).expect("the server accepts");
         tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         tcp.set_nodelay(true).unwrap();
@@ -435,6 +453,14 @@ impl TestClient {
             call_id: 0,
             replies: std::collections::HashMap::new(),
         }
+    }
+
+    /// Connects with the session parameters of ADR-034 in the URL (`resume` adds
+    /// `undra_resume=1`) and completes the handshake as `platform = "test"`, `mode = "dev"`.
+    pub fn connect_session(url: &str, schema: u64, token: &str, resume: bool) -> TestClient {
+        let mut client = TestClient::connect_raw(&session_url(url, token, resume), schema);
+        client.handshake("test", "dev");
+        client
     }
 
     /// Connects and completes the handshake as `platform = "test"`, `mode = "dev"`.

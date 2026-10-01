@@ -17,6 +17,7 @@ use crate::bridge::Bridge;
 use crate::conn::Conn;
 use crate::error::ServeError;
 use crate::origin::OriginPolicy;
+use crate::resume::{self, Resume};
 use crate::session;
 use crate::ws::close;
 
@@ -53,6 +54,12 @@ pub struct ServerConfig {
     /// Release the objects a client's constructors made when it disconnects (its observations
     /// and open calls are always ended). Default `true`.
     pub release_on_disconnect: bool,
+    /// How long a client that announced a session token (`?undra_session=` in its URL) may be
+    /// gone before the objects its constructors made are released; a client that comes back with
+    /// the same token within the time finds them again (ADR-034). They are released earlier when
+    /// another client attaches. `Duration::ZERO` (the default) keeps nothing: objects are
+    /// released at disconnect, as for a client that sends no token. `undra dev` sets ten minutes.
+    pub resume_grace: Duration,
     /// How long a client may be silent before it is sent a WebSocket Ping, and (three times
     /// as long) before it is dropped as dead. Every client answers pings without any code of
     /// its own, so this only catches connections that died without a FIN: a phone that left the
@@ -76,6 +83,7 @@ impl Default for ServerConfig {
             max_queued_bytes: 64 << 20,
             max_connections: 16,
             release_on_disconnect: true,
+            resume_grace: Duration::ZERO,
             ping_interval: Duration::from_secs(5),
             origin_policy: OriginPolicy::default(),
         }
@@ -99,6 +107,7 @@ pub(crate) struct Shared {
     pub(crate) rt: Arc<Runtime>,
     pub(crate) bridge: Arc<Bridge>,
     pub(crate) config: ServerConfig,
+    pub(crate) resume: Arc<Resume>,
     stopping: AtomicBool,
     next_id: AtomicU64,
     registry: Mutex<Registry>,
@@ -259,6 +268,7 @@ pub struct Server {
     shared: Arc<Shared>,
     addr: SocketAddr,
     accept: Mutex<Option<JoinHandle<()>>>,
+    reaper: Mutex<Option<JoinHandle<()>>>,
     shut: Mutex<bool>,
 }
 
@@ -308,10 +318,12 @@ impl Server {
     ) -> io::Result<Server> {
         let listener = TcpListener::bind(addr)?;
         let addr = listener.local_addr()?;
+        let resume = Resume::new(config.resume_grace);
         let shared = Arc::new(Shared {
             rt: runtime,
             bridge,
             config,
+            resume,
             stopping: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
             registry: Mutex::new(Registry::default()),
@@ -323,6 +335,11 @@ impl Server {
                 .name("undra-transport-accept".to_owned())
                 .spawn(move || shared.accept_loop(&listener))?
         };
+        let reaper = if shared.resume.enabled() {
+            Some(shared.resume.spawn_reaper(shared.rt.clone())?)
+        } else {
+            None
+        };
         shared
             .rt
             .log(INFO, TARGET, &format!("serving on ws://{addr}"));
@@ -330,6 +347,7 @@ impl Server {
             shared,
             addr,
             accept: Mutex::new(Some(accept)),
+            reaper: Mutex::new(reaper),
             shut: Mutex::new(false),
         })
     }
@@ -389,6 +407,13 @@ impl Server {
         for handle in threads {
             let _ = handle.join();
         }
+        // Whatever a dropped client left for its return goes back to the runtime.
+        if let Some(left) = shared.resume.stop() {
+            resume::release_all(&shared.rt, &left.handles);
+        }
+        if let Some(handle) = self.reaper.lock().take() {
+            let _ = handle.join();
+        }
         *done = true;
     }
 }
@@ -432,5 +457,6 @@ mod tests {
         assert_eq!(c.max_message_bytes, 64 << 20);
         assert_eq!(c.max_connections, 16);
         assert!(c.release_on_disconnect);
+        assert!(c.resume_grace.is_zero(), "resuming is opt in");
     }
 }
