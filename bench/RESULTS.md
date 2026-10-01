@@ -598,7 +598,7 @@ the day hardware is attached):
 
 ```sh
 # an iPhone (USB, trusted, Developer Mode on; the team id is the one in Xcode > Settings > Accounts)
-UNDRA_IOS_TEAM=<team id> scripts/bench-device.sh --device ios --target <udid from `xcrun devicectl list devices`> --runs 3
+UNDRA_IOS_TEAM=<team id> scripts/bench-device.sh --device ios --target <udid from `xcrun xctrace list devices`> --runs 3
 # an Android phone (USB debugging on; `adb devices` shows the serial)
 scripts/bench-device.sh --device android --target <serial> --runs 3
 ```

@@ -25,8 +25,8 @@
 #
 # A PHYSICAL DEVICE. The row is labelled a device only when the target is one, and that is what turns the verdict
 # column of RESULTS.md on. iPhone: plug it in, trust the computer, enable Developer Mode, and set UNDRA_IOS_TEAM to your
-# development team id (`UNDRA_IOS_TEAM=ABCDE12345 scripts/bench-device.sh --device ios --target <udid>`; the id is in
-# `xcrun devicectl list devices`). Android: enable USB debugging and run
+# development team id (`UNDRA_IOS_TEAM=ABCDE12345 scripts/bench-device.sh --device ios --target <udid>`; the UDID is in
+# `xcrun xctrace list devices`, the team id in Xcode > Settings > Accounts). Android: enable USB debugging and run
 # `scripts/bench-device.sh --device android --target <serial>` (`adb devices` lists it). Keep the phone cool, charged
 # and out of low-power mode (the file records the thermal state and the mode), screen on and unlocked.
 #
@@ -166,8 +166,8 @@ bench_ios() {
     dest="platform=iOS Simulator,id=$udid"
   else
     kind=device
-    [ -n "${UNDRA_IOS_TEAM:-}" ] || die "a physical iPhone needs UNDRA_IOS_TEAM=<your development team id> (xcrun devicectl list devices shows the device; the team is in Xcode > Settings > Accounts)"
-    xcrun devicectl list devices 2>/dev/null | grep -qi "$udid" || die "$udid is neither a simulator nor a device xcrun devicectl knows (is it unlocked and trusted?)"
+    [ -n "${UNDRA_IOS_TEAM:-}" ] || die "a physical iPhone needs UNDRA_IOS_TEAM=<your development team id> (the team is in Xcode > Settings > Accounts)"
+    xcrun xctrace list devices 2>/dev/null | grep -qi "$udid" || die "$udid is neither a simulator nor a device xcrun xctrace list devices shows (is it plugged in, unlocked and trusted, with Developer Mode on?)"
     name="iPhone"
     dest="platform=iOS,id=$udid"
     team=(-allowProvisioningUpdates DEVELOPMENT_TEAM="$UNDRA_IOS_TEAM")
