@@ -425,7 +425,9 @@ or build from the command line as above.
 
 **Against `undra dev`.** In the scheme's Run environment variables set `UNDRA_DEV_URL` to the `ws://` URL
 `undra dev` prints (a simulator can use `ws://127.0.0.1:7443`; a device needs your computer's address and
-`undra dev --addr 0.0.0.0:7443`). Debug builds then use that core instead of the linked one.
+`undra dev --addr 0.0.0.0:7443`). Debug builds then use that core instead of the linked one: edit the Rust,
+save, and the app reconnects and starts over on the rebuilt core (a bar at the top shows the connection;
+`core.connectionState` and `core.connection` are the API). See docs/DEV_LOOP.md in the Undra repository.
 ";
 
 const README_ANDROID: &str = "
@@ -444,8 +446,21 @@ The app module packages `build/android/jniLibs` (the path in `android/app/build.
 the module, `android/app`; after a build `undra` checks that it still names the directory it wrote) and
 depends on the generated Kotlin module (`generated/kotlin`, included by `android/settings.gradle.kts`) and on
 the Undra runtime (`dev.undra:runtime`).
-The Kotlin runtime has no remote transport on Android yet, so `undra dev` serves the web and iOS shells and
-the JVM; an Android build always runs the core in process.
+
+**Against `undra dev`.** Debug builds can run against the core `undra dev` serves instead of the one in the
+APK, so a Rust change needs no rebuild of the app and `undra build --platform android` is not needed at all:
+
+```sh
+undra dev --android                                            # prints the addresses; adb reverse for attached devices
+cd android && ./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug    # the emulator's name for this machine
+adb shell am start -n @@APP_ID@@/.MainActivity --es undra_dev_url ws://127.0.0.1:7443   # or switch at run time (USB device)
+```
+
+`10.0.2.2` is how the emulator reaches this machine; a USB device uses `adb reverse tcp:7443 tcp:7443` (which
+`undra dev --android` runs) and `127.0.0.1`. Cleartext traffic and the dev URL exist in debug builds only
+(`android/app/src/debug/AndroidManifest.xml`; release builds get neither). Edit the Rust, save, and the app
+reconnects and starts over on the rebuilt core; a bar at the top shows the connection (`core.connectionState`
+is a `StateFlow`). See docs/DEV_LOOP.md in the Undra repository.
 ";
 
 const README_WEB: &str = "
@@ -457,8 +472,9 @@ cd web && npm install && npm run dev          # http://localhost:5173
 ```
 
 The page loads the wasm core and runs it on the main thread. Add `?undra=ws://127.0.0.1:7443` to the URL
-(with `undra dev` running) to use the core that `undra dev` serves instead, so a Rust change needs only a
-reload. `npm run build` type-checks and bundles.
+(with `undra dev` running) to use the core that `undra dev` serves instead: edit the Rust, save, and the page
+reloads onto the rebuilt core (a dropped connection is reconnected by the runtime; a bar at the top shows what
+it is doing, and `core.connection` is the signal behind it). `npm run build` type-checks and bundles.
 ";
 
 /// What `init` generated from the embedded schema.

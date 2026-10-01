@@ -39,6 +39,7 @@
 //!   labels. `undra bindgen` adds the labels; `--docs` reads the full schema from the dev runner
 //!   instead when the generated code should carry the Rust docs.
 
+mod adb;
 mod binary;
 mod bindgen;
 mod builds;
