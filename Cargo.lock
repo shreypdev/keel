@@ -1296,6 +1296,7 @@ dependencies = [
 name = "undra-ports"
 version = "0.1.0"
 dependencies = [
+ "futures-core",
  "parking_lot",
  "proptest",
  "undra-bindgen",
