@@ -2090,6 +2090,20 @@ The framework you can build on today.
 - 18 contract scenarios on 3 platformsThe same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 54 of 54 pass.
 - Adversarial reviews of every core crateSignals, runtime, macros and ffi were each reviewed by someone who did not write them.
 
+Shipped
+
+## Since v1.0
+
+30 Sep – 1 Oct 2026
+
+Landed in the day after v1.0, each behind an ADR and an adversarial review.
+
+- Frame-coalesced delivery (ADR-031)The platform mirrors merge queued change-set entries once per frame, bound their backlog and re-observe on overflow; keyed-list firehoses cost ~10x less per frame on the web. Contract scenario S18 proves a 1,000-transaction burst applies in one drain on all three platforms.
+- Harsh-conditions benchmark suite and the live stress screenFirehose, event firehose, keyed churn, fan-out, stream backpressure, concurrent completions and a soak, with CI budgets that pass on the GitHub runner; the playground's stress screen shows the same numbers live in your browser.
+- Swift error channel (ADR-032)Generated Swift never traps: calls throw the method's own error, CancellationError or UndraCallError; commands report through onError.
+- A schema loader that survives dead-stripping (ADR-029)The loaded host core keeps its schema and JNI exports whatever else touched the target directory.
+- The name (ADR-030) and the wire magic (ADR-033)Keel became Undra before anything was published; the envelope's magic bytes read UNDR.
+
 Now
 
 ## v1.x
@@ -2098,10 +2112,8 @@ in flight
 
 In flight for the v1.x releases.
 
-- Distributionbrew, npm, a curl installer and cargo-from-git, each proved by a release dry run.
-- Harsh-conditions benchmark suiteVery high-frequency data: firehose transactions, keyed-list churn, stream backpressure and a soak run, with CI budgets.
+- Distributionbrew, npm, a curl installer and cargo-from-git. The release pipeline is built, security-reviewed and proved by a green dry run; the three package channels go live with the v1.0.0 tag.
 - Device-measured benchmark rowsThe same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies.
-- A schema loader that survives dead-strippingSo the tooling sees the schema in debug and release builds without linker flags.
 - Android undra dev remote modeThe Kotlin runtime gains the WebSocket transport the web and iOS already have.
 - Dev-client auto-reconnectAfter a rebuild, a running app reconnects to undra dev on its own instead of needing a reload.
 - WeakCtxLong-lived tasks stop pinning a runtime that was dropped.
@@ -2118,7 +2130,6 @@ planned
 Planned for the releases after v1.0. The order may change with what the benchmarks show.
 
 - crates.io publishingPublish the crates under a registry-safe prefix; needs its own ADR for the renames.
-- Frame-coalesced deliveryNot shipped, and a runtime-model change that needs an ADR first. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed.
 - Maven Central for the Kotlin runtimeDepend on it from Gradle without a local build.
 - Windows CLIRelease binaries and docs for the undra command on Windows.
 - undra upgradeMove a project to a newer Undra version.

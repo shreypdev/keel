@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-30",
+  "updated": "2026-10-01",
   "source": "https://github.com/shreypdev/undra/blob/main/.10x/handoff.md",
   "sections": [
     {
@@ -9,17 +9,79 @@
       "when": "30 Sep 2026",
       "intro": "The framework you can build on today.",
       "items": [
-        { "title": "Records, enums, typed errors, objects", "text": "Every public type comes from the schema and arrives in each language as that language would write it." },
-        { "title": "Stores, signals, computeds, keyed lists", "text": "Reactive state in the core; list changes cross as O(change) patches." },
-        { "title": "Ten ports with adapters and fakes", "text": "Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity and Lifecycle, with platform adapters and deterministic Rust fakes." },
-        { "title": "Queries and mutations", "text": "Staleness, dedup, retry, optimistic rollback, an offline queue and persistence." },
-        { "title": "Streams and cancellation", "text": "Streams with backpressure; cancelling a call drops its future." },
-        { "title": "Snapshot and restore", "text": "Stores snapshot for crash recovery." },
-        { "title": "Schema-hash gate", "text": "Checked at load and at build; a mismatched UI and core refuse to talk." },
-        { "title": "undra dev", "text": "A live core over a WebSocket, rebuilt on save." },
-        { "title": "Teaching diagnostics", "text": "Every macro error says what, why and how to fix it." },
-        { "title": "18 contract scenarios on 3 platforms", "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 54 of 54 pass." },
-        { "title": "Adversarial reviews of every core crate", "text": "Signals, runtime, macros and ffi were each reviewed by someone who did not write them." }
+        {
+          "title": "Records, enums, typed errors, objects",
+          "text": "Every public type comes from the schema and arrives in each language as that language would write it."
+        },
+        {
+          "title": "Stores, signals, computeds, keyed lists",
+          "text": "Reactive state in the core; list changes cross as O(change) patches."
+        },
+        {
+          "title": "Ten ports with adapters and fakes",
+          "text": "Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity and Lifecycle, with platform adapters and deterministic Rust fakes."
+        },
+        {
+          "title": "Queries and mutations",
+          "text": "Staleness, dedup, retry, optimistic rollback, an offline queue and persistence."
+        },
+        {
+          "title": "Streams and cancellation",
+          "text": "Streams with backpressure; cancelling a call drops its future."
+        },
+        {
+          "title": "Snapshot and restore",
+          "text": "Stores snapshot for crash recovery."
+        },
+        {
+          "title": "Schema-hash gate",
+          "text": "Checked at load and at build; a mismatched UI and core refuse to talk."
+        },
+        {
+          "title": "undra dev",
+          "text": "A live core over a WebSocket, rebuilt on save."
+        },
+        {
+          "title": "Teaching diagnostics",
+          "text": "Every macro error says what, why and how to fix it."
+        },
+        {
+          "title": "18 contract scenarios on 3 platforms",
+          "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 54 of 54 pass."
+        },
+        {
+          "title": "Adversarial reviews of every core crate",
+          "text": "Signals, runtime, macros and ffi were each reviewed by someone who did not write them."
+        }
+      ]
+    },
+    {
+      "id": "since-v1",
+      "status": "Shipped",
+      "title": "Since v1.0",
+      "when": "30 Sep – 1 Oct 2026",
+      "intro": "Landed in the day after v1.0, each behind an ADR and an adversarial review.",
+      "items": [
+        {
+          "title": "Frame-coalesced delivery (ADR-031)",
+          "text": "The platform mirrors merge queued change-set entries once per frame, bound their backlog and re-observe on overflow; keyed-list firehoses cost ~10x less per frame on the web. Contract scenario S18 proves a 1,000-transaction burst applies in one drain on all three platforms."
+        },
+        {
+          "title": "Harsh-conditions benchmark suite and the live stress screen",
+          "text": "Firehose, event firehose, keyed churn, fan-out, stream backpressure, concurrent completions and a soak, with CI budgets that pass on the GitHub runner; the playground's stress screen shows the same numbers live in your browser."
+        },
+        {
+          "title": "Swift error channel (ADR-032)",
+          "text": "Generated Swift never traps: calls throw the method's own error, CancellationError or UndraCallError; commands report through onError."
+        },
+        {
+          "title": "A schema loader that survives dead-stripping (ADR-029)",
+          "text": "The loaded host core keeps its schema and JNI exports whatever else touched the target directory."
+        },
+        {
+          "title": "The name (ADR-030) and the wire magic (ADR-033)",
+          "text": "Keel became Undra before anything was published; the envelope's magic bytes read UNDR."
+        }
       ]
     },
     {
@@ -29,16 +91,38 @@
       "when": "in flight",
       "intro": "In flight for the v1.x releases.",
       "items": [
-        { "title": "Distribution", "text": "brew, npm, a curl installer and cargo-from-git, each proved by a release dry run." },
-        { "title": "Harsh-conditions benchmark suite", "text": "Very high-frequency data: firehose transactions, keyed-list churn, stream backpressure and a soak run, with CI budgets." },
-        { "title": "Device-measured benchmark rows", "text": "The same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies." },
-        { "title": "A schema loader that survives dead-stripping", "text": "So the tooling sees the schema in debug and release builds without linker flags." },
-        { "title": "Android undra dev remote mode", "text": "The Kotlin runtime gains the WebSocket transport the web and iOS already have." },
-        { "title": "Dev-client auto-reconnect", "text": "After a rebuild, a running app reconnects to undra dev on its own instead of needing a reload." },
-        { "title": "WeakCtx", "text": "Long-lived tasks stop pinning a runtime that was dropped." },
-        { "title": "Macro diagnostic polish", "text": "Better wording for the query-in-impl and split-impl cases." },
-        { "title": "Swift Port types public", "text": "Custom ports in Swift without the bindgen fallback." },
-        { "title": "Full-JSON undra_schema_json", "text": "So the dlopen-based bindgen keeps doc comments." }
+        {
+          "title": "Distribution",
+          "text": "brew, npm, a curl installer and cargo-from-git. The release pipeline is built, security-reviewed and proved by a green dry run; the three package channels go live with the v1.0.0 tag."
+        },
+        {
+          "title": "Device-measured benchmark rows",
+          "text": "The same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies."
+        },
+        {
+          "title": "Android undra dev remote mode",
+          "text": "The Kotlin runtime gains the WebSocket transport the web and iOS already have."
+        },
+        {
+          "title": "Dev-client auto-reconnect",
+          "text": "After a rebuild, a running app reconnects to undra dev on its own instead of needing a reload."
+        },
+        {
+          "title": "WeakCtx",
+          "text": "Long-lived tasks stop pinning a runtime that was dropped."
+        },
+        {
+          "title": "Macro diagnostic polish",
+          "text": "Better wording for the query-in-impl and split-impl cases."
+        },
+        {
+          "title": "Swift Port types public",
+          "text": "Custom ports in Swift without the bindgen fallback."
+        },
+        {
+          "title": "Full-JSON undra_schema_json",
+          "text": "So the dlopen-based bindgen keeps doc comments."
+        }
       ]
     },
     {
@@ -48,13 +132,30 @@
       "when": "planned",
       "intro": "Planned for the releases after v1.0. The order may change with what the benchmarks show.",
       "items": [
-        { "title": "crates.io publishing", "text": "Publish the crates under a registry-safe prefix; needs its own ADR for the renames." },
-        { "title": "Frame-coalesced delivery", "text": "Not shipped, and a runtime-model change that needs an ADR first. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed." },
-        { "title": "Maven Central for the Kotlin runtime", "text": "Depend on it from Gradle without a local build." },
-        { "title": "Windows CLI", "text": "Release binaries and docs for the undra command on Windows." },
-        { "title": "undra upgrade", "text": "Move a project to a newer Undra version." },
-        { "title": "Migration guides", "text": "From Kotlin Multiplatform and from UniFFI." },
-        { "title": "A custom domain", "text": "A home for the site and docs that is ours." }
+        {
+          "title": "crates.io publishing",
+          "text": "Publish the crates under a registry-safe prefix; needs its own ADR for the renames."
+        },
+        {
+          "title": "Maven Central for the Kotlin runtime",
+          "text": "Depend on it from Gradle without a local build."
+        },
+        {
+          "title": "Windows CLI",
+          "text": "Release binaries and docs for the undra command on Windows."
+        },
+        {
+          "title": "undra upgrade",
+          "text": "Move a project to a newer Undra version."
+        },
+        {
+          "title": "Migration guides",
+          "text": "From Kotlin Multiplatform and from UniFFI."
+        },
+        {
+          "title": "A custom domain",
+          "text": "A home for the site and docs that is ours."
+        }
       ]
     },
     {
@@ -64,10 +165,22 @@
       "when": "exploring",
       "intro": "Directions under consideration, not scheduled.",
       "items": [
-        { "title": "Desktop targets", "text": "macOS, Windows and Linux over the same C ABI." },
-        { "title": "A first-party inspector", "text": "Time-travel over change-sets; the wire makes it natural." },
-        { "title": "A sync engine", "text": "A separate package, not part of the core." },
-        { "title": "Compose Multiplatform interop", "text": "Use an Undra core under a Compose Multiplatform UI." }
+        {
+          "title": "Desktop targets",
+          "text": "macOS, Windows and Linux over the same C ABI."
+        },
+        {
+          "title": "A first-party inspector",
+          "text": "Time-travel over change-sets; the wire makes it natural."
+        },
+        {
+          "title": "A sync engine",
+          "text": "A separate package, not part of the core."
+        },
+        {
+          "title": "Compose Multiplatform interop",
+          "text": "Use an Undra core under a Compose Multiplatform UI."
+        }
       ]
     }
   ],

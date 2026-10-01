@@ -148,6 +148,7 @@
 {"u":"docs/api-typescript.html#testing","p":"API overview, TypeScript","h":"Testing","x":"The runtime is testable without a browser: over the remote transport against a native core, and against a WAT stub of the wasm ABI. The contract suite runs the same scenarios as the Swift and Kotlin runners, against the real wasm module."},
 {"u":"roadmap/","p":"What is shipped, in flight and next.","h":"","x":"Undra v1.0 shipped on 30 September 2026. This page follows the project's working record, .10x/handoff.md, and changes with it. Last updated 30 Sep 2026. ShippedNowNextLaterNot planned Shipped"},
 {"u":"roadmap/#shipped-h","p":"What is shipped, in flight and next.","h":"v1.0","x":"30 Sep 2026 The framework you can build on today."},
+{"u":"roadmap/#since-v1-h","p":"What is shipped, in flight and next.","h":"Since v1.0","x":"30 Sep – 1 Oct 2026 Landed in the day after v1.0, each behind an ADR and an adversarial review."},
 {"u":"roadmap/#now-h","p":"What is shipped, in flight and next.","h":"v1.x","x":"in flight In flight for the v1.x releases."},
 {"u":"roadmap/#next-h","p":"What is shipped, in flight and next.","h":"v1.1 and v1.2","x":"planned Planned for the releases after v1.0. The order may change with what the benchmarks show."},
 {"u":"roadmap/#later-h","p":"What is shipped, in flight and next.","h":"Horizon","x":"exploring Directions under consideration, not scheduled."},
