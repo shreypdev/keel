@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.security.keystore.KeyInfo
 import android.os.Process
+import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import java.security.KeyStore
@@ -87,6 +88,35 @@ class SecureStoreOnDeviceTest {
         assertTrue(found.toString(), found.any { it.startsWith("shared_prefs/") })
         assertTrue(found.toString(), found.any { it.startsWith("files/undra/kv/") })
         assertFalse(found.toString(), found.any { it.contains("undra/secure") })
+    }
+
+    /** The app's own logcat lines (an app without `READ_LOGS` sees only those), as one text. */
+    private fun ownLogcat(): String {
+        val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "raw", "--pid=${Process.myPid()}"))
+        return process.inputStream.bufferedReader().use { it.readText() }.also { process.waitFor() }
+    }
+
+    @Test
+    fun the_secret_is_in_no_log_line_after_a_write_a_read_and_a_failing_read() = runBlocking {
+        val marker = "undra-secure-log-scan-${System.nanoTime()}"
+        Log.i("UndraTest", marker)
+        val secure = AndroidSecureStoreAdapter(context)
+        secure.set("session.token", secret)
+        assertArrayEquals(secret, secure.get("session.token"))
+        // The failure path: the exception the runtime logs (message, cause and stack) must not carry the value either.
+        val file = secureDir.listFiles { f -> f.isFile && !f.name.startsWith(".") }!!.single()
+        val bytes = file.readBytes()
+        bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 1).toByte()
+        file.writeBytes(bytes)
+        try {
+            secure.get("session.token")
+            throw AssertionError("a damaged file must not open")
+        } catch (e: SecureStoreException) {
+            Log.w("UndraTest", "async port 3 method 0 failed (as the runtime logs it)", e)
+        }
+        val log = ownLogcat()
+        assertTrue("the scan sees this process's lines", log.contains(marker))
+        assertFalse("the value must not appear in the log", log.contains(String(secret, Charsets.ISO_8859_1)))
     }
 
     @Test

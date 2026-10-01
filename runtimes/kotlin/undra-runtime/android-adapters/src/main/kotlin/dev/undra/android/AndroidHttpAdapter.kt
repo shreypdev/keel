@@ -37,9 +37,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  *    TLS failure, cleartext traffic the app's network security config forbids, ...) is `Network` with the platform's
  *    description. Only `http` and `https` URLs are accepted.
  *  - `HttpRequest.timeoutMs` bounds the whole exchange: connecting, sending, redirects and reading the body. Without
- *    one, connecting may take 30 s and the connection may sit idle for 60 s (the defaults of `URLSession`).
+ *    one, connecting may take 30 s and the connection may sit idle for 60 s (the defaults of `URLSession`). The one
+ *    step `disconnect()` cannot interrupt is the name lookup, so a request to a host whose resolution hangs returns
+ *    `Timeout` only when the resolver gives up (a few seconds on Android), not at the millisecond asked for.
  *  - **Cancelling the calling coroutine aborts the connection**: the socket is closed from the cancelling thread, so a
- *    blocked read ends at once, and the caller sees `CancellationException`, as with every suspend call.
+ *    blocked read ends at once, and the caller sees `CancellationException`, as with every suspend call. Each request
+ *    holds one `Dispatchers.IO` thread while it is in flight, which the Kv, Fs and SecureStore adapters share.
  *  - The response body is read in chunks and held in memory; one larger than [maxResponseBytes] fails with `Network`
  *    instead of exhausting the heap. A request body over 256 KiB is streamed with a fixed length instead of being
  *    buffered by the connection.

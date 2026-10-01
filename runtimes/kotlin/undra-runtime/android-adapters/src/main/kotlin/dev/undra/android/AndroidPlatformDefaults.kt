@@ -32,8 +32,9 @@ public class AndroidPlatform internal constructor(
     private val timer: TimerAdapter,
 ) : AutoCloseable {
     /**
-     * Stops reporting `Connectivity` and `Lifecycle` events and cancels pending timers. The ports stay registered; an
-     * app that never closes the core never needs this.
+     * Stops reporting `Connectivity` and `Lifecycle` events and cancels pending timers. The ports stay registered (a
+     * timer the core sets afterwards is answered `unavailable`, since its executor is gone); an app that never closes
+     * the core never needs this. Tests that reuse a core call [AndroidPlatformDefaults.install] again instead.
      */
     override fun close() {
         stopEventSources()

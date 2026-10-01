@@ -24,8 +24,14 @@ import kotlinx.coroutines.withContext
  * never leaves it, and the ciphertext is kept in a file under `<noBackupFilesDir>/undra/secure`.
  *
  *  - **The key** is generated on first use in the `AndroidKeyStore` provider (hardware-backed where the device has a TEE
- *    or StrongBox; not extractable; usable only by this app) under the alias [keyAlias]. Creating it is guarded by a
- *    lock inside the process and a file lock across processes.
+ *    or StrongBox; not extractable; usable only by this app) under the alias [keyAlias]: AES-256, GCM, no padding, for
+ *    encryption and decryption, with the Keystore drawing a fresh 12-byte IV for every encryption (the provider's
+ *    default, `setRandomizedEncryptionRequired`, is kept, so a caller can never supply or repeat one). It is **not**
+ *    bound to the user's authentication or to the device being unlocked, on purpose: the core replays the offline queue
+ *    and refreshes queries in the background, when no one is there to confirm, as the Keychain item of the Swift adapter
+ *    (`AfterFirstUnlockThisDeviceOnly`) does. Like that item it is usable only once the device has been unlocked after
+ *    boot, because its files live in credential-encrypted storage. Creating it is guarded by a lock inside the process
+ *    and a file lock across processes.
  *  - **The values** are sealed as `format, iv, ciphertext + tag`, with the key name as authenticated data, so a file
  *    cannot be copied to another key (the layout of the web adapter). They are written like [AndroidKvAdapter]'s,
  *    atomically, and survive the process being killed.
@@ -35,7 +41,10 @@ import kotlinx.coroutines.withContext
  *    could not be opened on another device (Keystore keys do not travel). Uninstalling the app deletes both.
  *  - **Failures** (a Keystore that is unavailable, a key that was lost, a file that fails authentication) throw
  *    [SecureStoreException]; the port has no error channel, so the core sees `PortError::Unavailable`, and a read never
- *    pretends that a value which exists is missing.
+ *    pretends that a value which exists is missing. If the Keystore no longer has the key (it is not bound to the lock
+ *    screen, so an OS upgrade or a changed lock screen does not invalidate it; a wiped Keystore does), a new one is
+ *    made and every value sealed under the old one fails authentication until the app replaces or deletes it, which is
+ *    the moment to ask the user to sign in again.
  *
  * Use it for tokens and keys, not for bulk data: every value goes through the Keystore service. It is the library's own
  * `javax.crypto` and `AndroidKeyStore` code rather than `androidx.security:security-crypto`, which is deprecated and

@@ -78,8 +78,8 @@ Every suite is local; nothing needs the network after install.
 | TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 890+ pass |
 | Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 454 cases, 0 failed |
 | Kotlin over the real JNI core | `cargo build -p undra-ffi --features jni`, then `UNDRA_NATIVE_LIB_DIR=$PWD/target/debug UNDRA_NATIVE_NAME=undra_ffi runtimes/kotlin/undra-runtime/scripts/test-local.sh` | the JNI smoke cases run |
-| Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 127 pass, 1 skipped (the debug and release variants both run) |
-| Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 109 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
+| Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 130 pass, 1 skipped (the debug and release variants both run) |
+| Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 112 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
 | Playground Android app on the real adapters (offline queue surviving a killed process) | `bash examples/playground/android/smoke.sh` (needs a booted emulator; it switches airplane mode on and off) | `SMOKE PASSED` |
 | Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 328 pass |
 | wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |

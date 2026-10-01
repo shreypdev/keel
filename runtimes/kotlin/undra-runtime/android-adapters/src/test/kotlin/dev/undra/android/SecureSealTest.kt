@@ -2,6 +2,7 @@ package dev.undra.android
 
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -83,4 +84,20 @@ class SecureSealTest {
     fun the_authenticated_data_names_the_key() {
         assertArrayEquals("undra.secure:session/token".toByteArray(), SecureSeal.aad("session/token"))
     }
+
+    /**
+     * A value sealed by the web adapter (`webCryptoSecureStore` in `runtimes/ts/@undra/runtime/src/adapters/secure.ts`,
+     * run under Node's WebCrypto with a fixed key and IV) opens here: the format byte, the IV, the tag length and the
+     * authenticated data are byte-for-byte the same. The key never travels between platforms; the layout does.
+     */
+    @Test
+    fun a_value_sealed_by_the_web_adapter_opens_with_the_same_key_name_and_not_another() {
+        val key = SecretKeySpec(hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), "AES")
+        val sealedByWebCrypto = hex("01a0a1a2a3a4a5a6a7a8a9aaab8e6d125920b9301d0fd4ef9116c715270548bd33a919ee")
+        assertEquals(1 + 12 + "hunter2".length + 16, sealedByWebCrypto.size)
+        assertArrayEquals("hunter2".toByteArray(), SecureSeal.open(key, "session.token", sealedByWebCrypto))
+        assertThrows(SecureStoreException::class.java) { SecureSeal.open(key, "session.other", sealedByWebCrypto) }
+    }
+
+    private fun hex(text: String): ByteArray = ByteArray(text.length / 2) { text.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
 }

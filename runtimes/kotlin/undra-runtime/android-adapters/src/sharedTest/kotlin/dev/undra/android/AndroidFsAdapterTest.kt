@@ -123,10 +123,37 @@ class AndroidFsAdapterTest {
     @Test
     fun the_root_cannot_be_deleted() = runBlocking {
         fs.write("a.txt", byteArrayOf(1))
-        for (path in listOf("", "/", ".", "./", "//", "/./")) {
+        // the backslash forms resolve to the root too (FsAdapter ignores leading `/` and `\`), so they must be refused alike
+        for (path in listOf("", "/", ".", "./", "//", "/./", "\\", "\\\\", "\\/", "/\\", "\\.")) {
             assertEquals("'$path'", FsError.Denied, failure { fs.delete(path) })
         }
         assertEquals(listOf("a.txt"), fs.list(""))
+        assertTrue(root.isDirectory)
+    }
+
+    @Test
+    fun a_nul_byte_in_a_path_is_a_typed_io_error_not_an_untyped_exception() = runBlocking {
+        fs.write("a.txt", byteArrayOf(1))
+        for (path in listOf("a\u0000.txt", "\u0000", "dir/\u0000/x")) {
+            assertTrue("read $path", failure { fs.read(path) } is FsError.Io)
+            assertTrue("write $path", failure { fs.write(path, byteArrayOf(1)) } is FsError.Io)
+            assertTrue("delete $path", failure { fs.delete(path) } is FsError.Io)
+            assertTrue("list $path", failure { fs.list(path) } is FsError.Io)
+        }
+        assertEquals(listOf("a.txt"), fs.list(""))
+    }
+
+    @Test
+    fun deleting_a_symbolic_link_to_a_directory_removes_the_link_and_not_what_it_points_at() = runBlocking {
+        fs.write("target/keep.txt", byteArrayOf(1))
+        fs.write("target/sub/deep.txt", byteArrayOf(2))
+        Files.createSymbolicLink(File(root, "link").toPath(), File(root, "target").toPath())
+        assertEquals(listOf("keep.txt", "sub"), fs.list("link")) // a link inside the root may be read through
+        fs.delete("link")
+        assertFalse(Files.isSymbolicLink(File(root, "link").toPath()))
+        assertEquals(listOf("keep.txt", "sub"), fs.list("target"))
+        assertArrayEquals(byteArrayOf(2), fs.read("target/sub/deep.txt"))
+        assertEquals(listOf("target"), fs.list(""))
     }
 
     @Test

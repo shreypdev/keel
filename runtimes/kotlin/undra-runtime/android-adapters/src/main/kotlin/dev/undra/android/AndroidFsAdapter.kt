@@ -10,6 +10,10 @@ import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.encodeToByteArray
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The `Fs` port over a directory of the app's private storage: `<filesDir>/undra/fs`.
@@ -18,9 +22,10 @@ import java.io.File
  *
  *  - Paths from the core are relative to the root (`"notes/a.txt"`); a leading `/` is ignored. A path with a `..`
  *    component is [FsError.Denied], and so is one that leads out of the root through a symbolic link, so the core cannot
- *    reach anything outside the root.
+ *    reach anything outside the root. A path with a NUL byte is [FsError.Io] (no file system accepts it).
  *  - `write` creates missing parent directories and is atomic (a temporary file moved into place).
  *  - `delete` removes a file, or a directory with everything in it; the root itself cannot be deleted ([FsError.Denied]).
+ *    A symbolic link is removed, never followed: what it points at stays (as with `rm` and Swift's `removeItem`).
  *  - `list` returns the names of the entries of one directory, sorted; a directory has no trailing slash.
  *  - A missing file or directory is [FsError.NotFound]; a refused permission is [FsError.Denied]; any other failure
  *    (reading a directory, listing a file, a full disk, ...) is [FsError.Io] with the platform's description.
@@ -35,7 +40,8 @@ public class AndroidFsAdapter(root: File) {
     /** The adapter over `<filesDir>/undra/fs` of [context]'s application. */
     public constructor(context: Context) : this(File(context.applicationContext.filesDir, DEFAULT_PATH))
 
-    private val fs = FsAdapter(root.toPath())
+    private val root: Path = root.toPath().toAbsolutePath().normalize()
+    private val fs = FsAdapter(this.root)
 
     /**
      * The contents of the file at [path].
@@ -104,14 +110,24 @@ public class AndroidFsAdapter(root: File) {
 
     /** Deletes [path] and, if it is a directory, everything below it first. Every step goes through [fs], so none can leave the root. */
     private suspend fun deleteTree(path: String) {
+        // A symbolic link is removed, not followed: listing it would list (and then empty) the directory it points at.
         // `list` of a file is an I/O error; of a missing path, NotFound (which is the answer to deleting it).
-        val children = try {
-            fs.list(path)
-        } catch (e: FsError.Io) {
+        val children = if (isSymbolicLink(path)) {
             null
+        } else {
+            try {
+                fs.list(path)
+            } catch (e: FsError.Io) {
+                null
+            }
         }
         if (children != null) for (child in children) deleteTree("$path/$child")
         fs.delete(path)
+    }
+
+    /** Whether the entry at [path] (already [confined]) is itself a symbolic link; its parents are resolved as [fs] does. */
+    private suspend fun isSymbolicLink(path: String): Boolean = withContext(Dispatchers.IO) {
+        Files.isSymbolicLink(root.resolve(path.trimStart('/', '\\')).normalize())
     }
 
     /** Runs [block], turning an [FsError] into the port's typed error reply. */
@@ -125,11 +141,18 @@ public class AndroidFsAdapter(root: File) {
     private companion object {
         const val DEFAULT_PATH = "undra/fs"
 
-        /** The non-empty components of [path] (`.` and empty ones dropped). */
-        fun segments(path: String): List<String> = path.split('/').filter { it.isNotEmpty() && it != "." }
+        /**
+         * The non-empty components of [path] (`.` and empty ones dropped), after the leading separators that [FsAdapter]
+         * ignores (`/` and `\`): what it resolves to the root must count as the root here too.
+         */
+        fun segments(path: String): List<String> = path.trimStart('/', '\\').split('/').filter { it.isNotEmpty() && it != "." }
 
-        /** [path] if no component is `..`: the other platforms refuse it outright, even where it would stay inside the root. */
+        /**
+         * [path] if no component is `..` (the other platforms refuse it outright, even where it would stay inside the root)
+         * and no byte is NUL (no file system takes it; the JVM would throw an untyped `InvalidPathException`).
+         */
         fun confined(path: String): String {
+            if (path.indexOf('\u0000') >= 0) throw FsError.Io("the path contains a NUL byte")
             if (segments(path).any { it == ".." }) throw FsError.Denied
             return path
         }

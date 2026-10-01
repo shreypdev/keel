@@ -155,6 +155,8 @@ class DemoServer(context: Context) {
             if (colon > 0) headers[line.substring(0, colon).trim().lowercase()] = line.substring(colon + 1).trim()
         }
         val length = headers["content-length"]?.toIntOrNull() ?: 0
+        // The loopback interface is shared by every app on the device: a body is read only up to a size the demo can hold.
+        if (length < 0 || length > MAX_BODY_BYTES) return null
         val body = ByteArray(length)
         var read = 0
         while (read < length) {
@@ -196,6 +198,7 @@ class DemoServer(context: Context) {
         const val LATENCY_MS: Long = 300L
 
         private const val BACKLOG = 16
+        private const val MAX_BODY_BYTES = 1024 * 1024
         private val ROUTE = Regex("^/lists/([^/]+)/todos(?:/(\\d+))?$")
         private val REASONS = mapOf(200 to "OK", 201 to "Created", 400 to "Bad Request", 404 to "Not Found", 405 to "Method Not Allowed")
     }
