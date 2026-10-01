@@ -31,6 +31,7 @@
 #include <atomic>
 #include <fstream>
 #include <iterator>
+#include <new>
 #include <optional>
 
 #include "../UndraApi.h"
@@ -616,6 +617,7 @@ struct TestPlatformState {
   std::condition_variable cv;
   std::map<std::string, std::vector<uint8_t>> secrets;
   bool fail = false;
+  bool throwBadAlloc = false;
   bool block = false;
   bool entered = false;
   ConnectivitySource::Report report;
@@ -635,6 +637,7 @@ struct TestSecrets final : SecretStore {
       error = "the test keychain is locked";
       return false;
     }
+    if (s->throwBadAlloc) throw std::bad_alloc();
     auto it = s->secrets.find(key);
     if (it == s->secrets.end()) value.reset();
     else value = it->second;
@@ -702,7 +705,7 @@ struct TestPlatform final : Platform {
   std::string fsRoot() override { return fsDir; }
   std::unique_ptr<SecretStore> makeSecretStore() override { return std::make_unique<TestSecrets>(state); }
   std::unique_ptr<ConnectivitySource> makeConnectivity() override { return std::make_unique<ScriptedSource>(state); }
-  void workerStarted() noexcept override { state->workersStarted++; }
+  void workerStarted(const char *) noexcept override { state->workersStarted++; }
   void workerEnded() noexcept override { state->workersEnded++; }
   std::string kvDir;
   std::string fsDir;
@@ -820,7 +823,24 @@ void testsWithNativeDefaults(const Api *api) {
     {
       std::lock_guard<std::mutex> lock(platform.state->mutex);
       platform.state->fail = false;
+      platform.state->throwBadAlloc = true;
     }
+    // Review (2026-10-02): a store that runs out of memory is answered "unavailable" by a reply built
+    // without allocating, and the worker lives on.
+    r = await(kSecretGet, get.bytes);
+    check(r->payload[4] == 2, "a store out of memory is unavailable too");
+    bool oom = false;
+    for (const Record &rec : f.seen) {
+      const std::string text(rec.payload.begin(), rec.payload.end());
+      oom = oom || (rec.kind == RecordKind::Log && text.find("ran out of memory") != std::string::npos);
+    }
+    check(oom, "and logged");
+    {
+      std::lock_guard<std::mutex> lock(platform.state->mutex);
+      platform.state->throwBadAlloc = false;
+    }
+    r = await(kSecretGet, get.bytes);
+    check(r->payload[4] == 0 && r->payload[5] == 1, "the same worker answers the next call");
     check(noJsPortCall(kSecureStorePort), "no SecureStore port call reached JavaScript");
   }
   ok("SecureStore through the core; a failing store answers unavailable and logs");
@@ -922,6 +942,140 @@ void testsWithNativeDefaults(const Api *api) {
   if (std::system(cmd.c_str()) != 0) std::printf("# could not remove %s\n", base);
 }
 
+/// Whether the core logged that a port reply answered nothing it was waiting for (what a reply of
+/// a stopped core that reached the next one would produce).
+bool sawStrayReply(const std::vector<Record> &records) {
+  for (const Record &r : records) {
+    if (r.kind != RecordKind::Log) continue;
+    const std::string text(r.payload.begin(), r.payload.end());
+    if (text.find("port_reply") != std::string::npos) return true;
+  }
+  return false;
+}
+
+void testsWithNativeDefaultsAcrossAReload(const Api *api) {
+  // Review (2026-10-02): a reload's new runtime starts its core on its own JS thread while the old
+  // runtime's module shuts the old one down, and an old port worker is still inside a job. The new
+  // start must wait until that worker has been joined: its `undra_port_reply` comes after the old
+  // `undra_shutdown` and must reach no core, least of all the new one, whose port call ids restart
+  // from 1 (ADR-038 amendment B, B3; the M2 class of the React Native review).
+  char pattern[] = "/tmp/undra-rn-reload.XXXXXX";
+  const char *base = ::mkdtemp(pattern);
+  check(base != nullptr, "a temporary directory");
+  const std::vector<uint8_t> cfg = config();
+  const std::vector<PortSpec> specs{{kHttp, {}}, {kKv, {}}, {kSecureStorePort, {}}, {kFsPort, {}}};
+
+  auto oldPlatform = std::make_shared<TestPlatform>(std::string(base) + "/old-kv", std::string(base) + "/old-fs");
+  Fixture old(api);
+  StartOptions oldOptions;
+  oldOptions.nativePorts = nativePortsOf(*oldPlatform);
+  oldOptions.platform = oldPlatform;
+  {
+    CallScope scope(*old.host, nullptr);
+    check(old.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), specs, oldOptions) == 0, "the old core starts");
+  }
+  old.settle();
+  {
+    std::lock_guard<std::mutex> lock(oldPlatform->state->mutex);
+    oldPlatform->state->block = true;
+    oldPlatform->state->entered = false;
+  }
+  Writer put;
+  put.str("in-flight").u32(1).u8('x');
+  check(old.call(freeCall(kSecretPut, old.nextCall++, put.bytes)) == 0, "secret_put is accepted");
+  check(old.call(freeCall(kSecretPut, old.nextCall++, put.bytes)) == 0, "a second one queues behind it");
+  {
+    std::unique_lock<std::mutex> lock(oldPlatform->state->mutex);
+    check(oldPlatform->state->cv.wait_for(lock, std::chrono::seconds(5), [&] { return oldPlatform->state->entered; }),
+          "the old SecureStore worker is inside a job");
+  }
+  // The old runtime's module goes away on the old JS thread...
+  std::thread oldJsThread([&] { old.host->shutdown(); });
+  while (old.host->running()) std::this_thread::yield();
+
+  // ...while the reloaded runtime starts its core on a JS thread of its own.
+  auto newPlatform = std::make_shared<TestPlatform>(std::string(base) + "/new-kv", std::string(base) + "/new-fs");
+  Fixture fresh(api);
+  StartOptions newOptions;
+  newOptions.nativePorts = nativePortsOf(*newPlatform);
+  newOptions.platform = newPlatform;
+  std::atomic<bool> started{false};
+  uint32_t code = 99;
+  int oldWorkersEndedAtStart = -1;
+  std::thread newJsThread([&] {
+    CallScope scope(*fresh.host, nullptr);
+    code = fresh.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), specs, newOptions);
+    oldWorkersEndedAtStart = oldPlatform->state->workersEnded.load();
+    started = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  check(!started.load(), "the new core does not start while an old port worker is still running a job");
+  {
+    std::lock_guard<std::mutex> lock(oldPlatform->state->mutex);
+    oldPlatform->state->block = false; // the old job finishes and replies to a core that is gone
+  }
+  oldPlatform->state->cv.notify_all();
+  oldJsThread.join();
+  newJsThread.join();
+  check(code == 0, "then the new core starts, got " + std::to_string(code));
+  check(oldWorkersEndedAtStart == oldPlatform->state->workersStarted.load(),
+        "every old worker had ended before the new core existed (" + std::to_string(oldWorkersEndedAtStart) + " of " +
+            std::to_string(oldPlatform->state->workersStarted.load()) + ")");
+  {
+    std::lock_guard<std::mutex> lock(oldPlatform->state->mutex);
+    check(oldPlatform->state->secrets.count("in-flight") == 1, "the running job finished (its reply went nowhere)");
+  }
+  // The new core works through its own defaults and never saw the old core's reply.
+  fresh.settle();
+  {
+    const uint32_t id = fresh.nextCall++;
+    Writer args;
+    args.str("after.reload").u32(1).u8('y');
+    check(fresh.call(freeCall(kKvPut, id, args.bytes)) == 0, "kv_put on the new core is accepted");
+    check(fresh.waitFor([&] { return fresh.replied(id); }) && fresh.reply(id)->payload[4] == 0, "and answered by the new Kv worker");
+  }
+  fresh.settle();
+  check(!sawStrayReply(fresh.seen), "no reply of the old core reached the new one");
+  fresh.host->shutdown();
+  check(Host::runningHost() == nullptr, "no host holds the slot afterwards");
+  ok("a reload's start waits for the old host's port workers; their late reply reaches no core");
+
+  // A Kv write of 32 MiB, in flight when the core is shut down: the job runs to its end on the Kv
+  // worker after `undra_shutdown`, its buffers are freed once (ASan), its reply is dropped.
+  {
+    auto platform = std::make_shared<TestPlatform>(std::string(base) + "/big-kv", std::string(base) + "/big-fs");
+    Fixture f(api);
+    StartOptions options;
+    options.nativePorts = nativePortsOf(*platform);
+    options.platform = platform;
+    {
+      CallScope scope(*f.host, nullptr);
+      check(f.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), specs, options) == 0, "the core starts");
+    }
+    f.settle();
+    Writer args;
+    args.str("big");
+    const uint32_t size = 32u << 20;
+    args.u32(size);
+    args.bytes.resize(args.bytes.size() + size, 0x5a);
+    const auto before = f.host->counters().nativePortCalls;
+    for (int i = 0; i < 4; ++i) check(f.call(freeCall(kKvPut, f.nextCall++, args.bytes)) == 0, "a 32 MiB kv_put is accepted");
+    // Shut down once the first write has reached the Kv worker: it is running, the others queue.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (f.host->counters().nativePortCalls == before && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+    const auto calls = f.host->counters().nativePortCalls - before;
+    check(calls >= 1, "a kv_put reached the Kv worker before the shutdown");
+    f.host->shutdown();
+    check(Host::runningHost() == nullptr, "the slot is released after the Kv worker is joined");
+    check(platform->state->workersStarted.load() == platform->state->workersEnded.load(), "every worker that started has ended");
+    std::printf("# %llu of the 4 writes had been queued on the Kv worker when the core was shut down\n", static_cast<unsigned long long>(calls));
+  }
+  ok("a large Kv write in flight at shutdown finishes on its worker and its reply is dropped");
+
+  std::string cmd = std::string("rm -rf '") + base + "'";
+  if (std::system(cmd.c_str()) != 0) std::printf("# could not remove %s\n", base);
+}
+
 } // namespace
 
 int main() {
@@ -935,6 +1089,7 @@ int main() {
   testsWithSyncPorts(api);
   testsWithAReloadRace(api);
   testsWithNativeDefaults(api);
+  testsWithNativeDefaultsAcrossAReload(api);
   std::printf("# %d checks passed\n", g_checks);
   return 0;
 }

@@ -8,8 +8,15 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <stdio.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 #include <cstdio>
 #include <cstdlib>
@@ -290,7 +297,102 @@ void testFs() {
   }
 }
 
+/// Swaps two directory entries atomically (both always exist, each takes the other's place).
+bool swapEntries(const std::string &a, const std::string &b) {
+#if defined(__APPLE__)
+  return ::renamex_np(a.c_str(), b.c_str(), RENAME_SWAP) == 0;
+#elif defined(__linux__)
+  return ::renameat2(AT_FDCWD, a.c_str(), AT_FDCWD, b.c_str(), RENAME_EXCHANGE) == 0;
+#else
+  (void)a;
+  (void)b;
+  return false;
+#endif
+}
+
+void testFsRaces() {
+  // Review (2026-10-02): a directory on the path is swapped, atomically and over and over, with a link
+  // to the outside while the store reads and writes through it. Every component is opened from its
+  // parent's descriptor with O_NOFOLLOW, so the path check and the use are one step: the outside is
+  // never read or written, whatever the timing.
+  const std::string base = freshDir("race");
+  const std::string root = base + "/root";
+  const std::string outside = freshDir("race/outside");
+  writeFile(outside + "/f.txt", "SECRET");
+  FsRoot fs(root);
+  const std::vector<uint8_t> inside = bytesOf("inside");
+  check(!fs.write("d/f.txt", inside.data(), inside.size()), "a file in a directory");
+  check(::symlink(outside.c_str(), (root + "/link").c_str()) == 0, "a link to the outside");
+  if (!swapEntries(root + "/d", root + "/link") || !swapEntries(root + "/d", root + "/link")) {
+    std::printf("# skipped the swap race: no atomic rename exchange here\n");
+    return;
+  }
+  std::atomic<bool> stop{false};
+  std::thread swapper([&] {
+    while (!stop.load()) {
+      swapEntries(root + "/d", root + "/link");
+      std::this_thread::yield();
+    }
+  });
+  int reads = 0, denied = 0, leaked = 0;
+  std::vector<uint8_t> data;
+  const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+  while (std::chrono::steady_clock::now() < until) {
+    auto failure = fs.read("d/f.txt", data);
+    ++reads;
+    if (!failure && std::string(data.begin(), data.end()) == "SECRET") ++leaked;
+    if (failure && failure->kind == FsErrorKind::Denied) ++denied;
+    fs.write("d/w.txt", inside.data(), inside.size());
+    fs.remove("d/w.txt");
+    fs.write("d/w.txt", inside.data(), inside.size());
+  }
+  stop = true;
+  swapper.join();
+  check(denied > 0, "the swap was seen (some reads met the link)");
+  check(leaked == 0, "never read through the link: " + std::to_string(leaked) + " reads leaked the outside");
+  check(!exists(outside + "/w.txt") && readFile(outside + "/f.txt") == "SECRET", "never written or deleted through it");
+  std::printf("# %d reads during the swaps, %d of them Denied\n", reads, denied);
+  ok("Fs: a directory swapped for a link to the outside mid-operation is never followed (no check-then-use gap)");
+}
+
+void testKvKilledMidWrite() {
+  // Review (2026-10-02): a process killed (SIGKILL) at a random moment of a write leaves the old value
+  // or the new one, never a torn one; a temporary file it leaves behind is skipped by list.
+  const std::string dir = g_base + "/killed";
+  KvStore kv(dir, KvNaming::Sha256);
+  std::string error;
+  const std::vector<uint8_t> a(4 << 20, 'A'), b(4 << 20, 'B');
+  check(kv.set("k", a.data(), a.size(), error), "the first value");
+  int pending = 0;
+  for (int round = 0; round < 40; ++round) {
+    const pid_t pid = ::fork();
+    check(pid >= 0, "fork");
+    if (pid == 0) {
+      KvStore child(dir, KvNaming::Sha256);
+      std::string ignored;
+      for (int n = 0;; ++n) child.set("k", (n % 2 != 0 ? a : b).data(), a.size(), ignored);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(3 + (round * 7) % 29));
+    ::kill(pid, SIGKILL);
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    std::optional<std::vector<uint8_t>> value;
+    check(kv.get("k", value, error) && value && (*value == a || *value == b), "a whole value after the kill (round " + std::to_string(round) + ")");
+    std::vector<std::string> keys;
+    check(kv.list("", keys, error) && keys == std::vector<std::string>{"k"}, "list sees the one key, not the leftover");
+    for (const std::string &name : entries(dir)) {
+      if (name.size() > 4 && name.substr(name.size() - 4) == ".tmp") {
+        ++pending;
+        ::unlink((dir + "/" + name).c_str());
+      }
+    }
+  }
+  std::printf("# 40 kills, %d of them with a write's temporary file pending\n", pending);
+  ok("Kv: a writer killed mid-write leaves a whole value");
+}
+
 } // namespace
+
 
 int main() {
   char pattern[] = "/tmp/undra-rn-stores.XXXXXX";
@@ -303,6 +405,8 @@ int main() {
   testKv(KvNaming::Fnv, "fnv");
   testKv(KvNaming::Sha256, "sha256");
   testFs();
+  testFsRaces();
+  testKvKilledMidWrite();
   std::string cmd = "rm -rf '" + g_base + "'";
   if (std::system(cmd.c_str()) != 0) std::printf("# could not remove %s\n", g_base.c_str());
   std::printf("# %d checks passed\n", g_checks);

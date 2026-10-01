@@ -192,11 +192,19 @@ bool resolveJava(std::string &error) {
   if (local == nullptr) return false;
   side.platform = static_cast<jclass>(env->NewGlobalRef(local));
   env->DeleteLocalRef(local);
-  side.directories = env->GetStaticMethodID(side.platform, "directories", "()[Ljava/lang/String;");
-  side.seal = env->GetStaticMethodID(side.platform, "seal", "(Ljava/lang/String;[B)[B");
-  side.open = env->GetStaticMethodID(side.platform, "open", "(Ljava/lang/String;[B)[B");
-  side.startConnectivity = env->GetStaticMethodID(side.platform, "startConnectivity", "(J)Ldev/undra/reactnative/NetworkMonitor;");
-  std::string why = takeException(env);
+  // Each lookup clears what the one before it threw (NoSuchMethodError when the Java and C++ halves
+  // differ): no JNI call but a handful may run with an exception pending, and CheckJNI aborts.
+  std::string why;
+  auto lookup = [&](const char *name, const char *signature) -> jmethodID {
+    jmethodID id = env->GetStaticMethodID(side.platform, name, signature);
+    const std::string thrown = takeException(env);
+    if (id == nullptr && why.empty()) why = thrown.empty() ? std::string("no ") + name : thrown;
+    return id;
+  };
+  side.directories = lookup("directories", "()[Ljava/lang/String;");
+  side.seal = lookup("seal", "(Ljava/lang/String;[B)[B");
+  side.open = lookup("open", "(Ljava/lang/String;[B)[B");
+  side.startConnectivity = lookup("startConnectivity", "(J)Ldev/undra/reactnative/NetworkMonitor;");
   if (side.directories == nullptr || side.seal == nullptr || side.open == nullptr || side.startConnectivity == nullptr) {
     error = "dev.undra.reactnative.UndraPlatform does not have the methods this module calls (" + why + "): the Java and C++ halves of the package differ";
     env->DeleteGlobalRef(side.platform);
@@ -382,9 +390,10 @@ class AndroidPlatform final : public Platform {
     if (java_.stop == nullptr) return nullptr;
     return std::make_unique<JavaNetworkSource>(java_);
   }
-  void workerStarted() noexcept override {
+  void workerStarted(const char *name) noexcept override {
     JNIEnv *env = nullptr;
-    JavaVMAttachArgs args{JNI_VERSION_1_6, "undra-port-worker", nullptr};
+    // The worker's own name (`undra-kv`, ...): attaching renames the thread to the name given here.
+    JavaVMAttachArgs args{JNI_VERSION_1_6, name, nullptr};
     attached_ = java_.vm != nullptr && java_.vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_EDETACHED &&
         java_.vm->AttachCurrentThread(&env, &args) == JNI_OK;
   }

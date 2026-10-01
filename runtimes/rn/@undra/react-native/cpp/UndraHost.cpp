@@ -206,7 +206,9 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
     registered_.clear();
     syncMethods_.clear();
     if (defaults_ != nullptr) {
-      defaults_->stop(); // nothing was posted: no core asked
+      // A start-up hook may have queued a native call before `undra_init` failed: the worker is joined
+      // here, its reply reaching no core, before the slot is released.
+      defaults_->stop();
       defaults_.reset();
     }
     releaseSlot(this);

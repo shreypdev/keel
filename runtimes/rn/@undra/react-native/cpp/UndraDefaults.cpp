@@ -91,7 +91,7 @@ void Worker::run() {
 #else
   pthread_setname_np(pthread_self(), name_);
 #endif
-  if (platform_ != nullptr) platform_->workerStarted();
+  if (platform_ != nullptr) platform_->workerStarted(name_);
   while (true) {
     std::function<void()> job;
     {
@@ -133,7 +133,8 @@ NativeDefaults::NativeDefaults(const Api &api, std::shared_ptr<Platform> shared,
       platform_(std::move(shared)),
       log_(std::move(log)),
       kvWorker_(platform_.get(), "undra-kv"),
-      secureWorker_(platform_.get(), "undra-securestore"),
+      // At most 15 characters: Linux and Android refuse a longer thread name (ERANGE).
+      secureWorker_(platform_.get(), "undra-secure"),
       fsWorker_(platform_.get(), "undra-fs") {
   Platform &platform = *platform_;
   for (uint32_t id : ports) {
@@ -185,6 +186,7 @@ uint8_t NativeDefaults::post(uint32_t portId, uint32_t methodId, uint32_t portCa
 
 void NativeDefaults::answer(uint32_t portId, uint32_t methodId, uint32_t portCallId, const std::vector<uint8_t> &args) noexcept {
   std::vector<uint8_t> reply;
+  bool built = false;
   try {
     if (portId == ports::kKv) {
       reply = kv(*kvStore_, portId, methodId, portCallId, args);
@@ -193,15 +195,31 @@ void NativeDefaults::answer(uint32_t portId, uint32_t methodId, uint32_t portCal
     } else {
       reply = fs(methodId, portCallId, args);
     }
+    built = true;
   } catch (const std::bad_alloc &) {
-    reply = portReply(portCallId, kUnavailable);
-    log_(4, std::string("the ") + portName(portId) + " port ran out of memory");
+    logQuietly(4, "a default port ran out of memory; the call is answered unavailable");
   } catch (...) {
-    reply = portReply(portCallId, kUnavailable);
   }
   // Allowed from any thread (host contract 4). After `undra_shutdown` it reaches no runtime and is
   // ignored; `Host::shutdown` joins this thread before another core can exist (B3).
-  api_.port_reply(reply.data(), static_cast<uint32_t>(reply.size()));
+  if (built) {
+    api_.port_reply(reply.data(), static_cast<uint32_t>(reply.size()));
+    return;
+  }
+  // "Unavailable" without allocating: this function is `noexcept`, and a failure to build the reply is
+  // most likely memory exhaustion, which would make a throw here an abort (R6).
+  uint8_t unavailable[5];
+  putU32(unavailable, portCallId);
+  unavailable[4] = kUnavailable;
+  api_.port_reply(unavailable, sizeof(unavailable));
+}
+
+void NativeDefaults::logQuietly(uint8_t level, const char *message) noexcept {
+  try {
+    log_(level, message);
+  } catch (...) {
+    // The record is lost; nothing may unwind out of a worker's answer or the event source's start.
+  }
 }
 
 std::vector<uint8_t> NativeDefaults::kv(KvStore &store, uint32_t portId, uint32_t methodId, uint32_t portCallId, const std::vector<uint8_t> &args) {
@@ -344,13 +362,14 @@ std::vector<uint8_t> NativeDefaults::fs(uint32_t methodId, uint32_t portCallId, 
 
 void NativeDefaults::startConnectivity() noexcept {
   if (!connectivity_ || monitor_ == nullptr) return;
+  bool started = false;
   try {
-    const bool started = monitor_->start([this](bool online, NetKind kind) { report(online, kind); });
-    if (!started) {
-      log_(3, "the Connectivity source could not start (a missing permission?); the core assumes the network is up");
-    }
+    started = monitor_->start([this](bool online, NetKind kind) { report(online, kind); });
   } catch (...) {
-    log_(3, "the Connectivity source failed to start; the core assumes the network is up");
+    started = false;
+  }
+  if (!started) {
+    logQuietly(3, "the Connectivity source could not start (a missing permission?); the core assumes the network is up");
   }
 }
 

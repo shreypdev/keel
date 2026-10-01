@@ -66,8 +66,12 @@ final class NetworkMonitor {
         };
         try {
             manager.registerDefaultNetworkCallback(callback, handler);
-        } catch (SecurityException e) {
-            Log.w(TAG, "ACCESS_NETWORK_STATE is not granted; Connectivity events are not reported", e);
+        } catch (RuntimeException e) {
+            // A SecurityException (no ACCESS_NETWORK_STATE), or the platform's limit of callbacks per app
+            // (ConnectivityManager.TooManyRequestsException): no reports, and no handler thread left behind.
+            Log.w(TAG, e instanceof SecurityException
+                    ? "ACCESS_NETWORK_STATE is not granted; Connectivity events are not reported"
+                    : "the default-network callback could not be registered; Connectivity events are not reported", e);
             callback = null;
             thread.quitSafely();
             return false;

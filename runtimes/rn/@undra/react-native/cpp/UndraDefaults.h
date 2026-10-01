@@ -91,8 +91,10 @@ class Platform {
   virtual std::unique_ptr<SecretStore> makeSecretStore() = 0;
   /// The network monitor; null when the platform has none.
   virtual std::unique_ptr<ConnectivitySource> makeConnectivity() = 0;
-  /// A worker thread starts or ends (Android attaches it to the VM). Must not throw.
-  virtual void workerStarted() noexcept {}
+  /// A worker thread named `name` starts, on that thread (Android attaches it to the VM under that name, which
+  /// would otherwise replace the thread's own). Must not throw.
+  virtual void workerStarted(const char * /*name*/) noexcept {}
+  /// The worker thread ends, on that thread (Android detaches it). Must not throw.
   virtual void workerEnded() noexcept {}
 };
 
@@ -160,6 +162,8 @@ class NativeDefaults {
   std::vector<uint8_t> secure(uint32_t methodId, uint32_t portCallId, const std::vector<uint8_t> &args);
   std::vector<uint8_t> fs(uint32_t methodId, uint32_t portCallId, const std::vector<uint8_t> &args);
   void report(bool online, NetKind kind) noexcept;
+  /// Writes a log record, dropping it if even that fails (out of memory).
+  void logQuietly(uint8_t level, const char *message) noexcept;
 
   const Api &api_;
   /// Kept alive while anything made from it (stores, the monitor, the workers) may run.
