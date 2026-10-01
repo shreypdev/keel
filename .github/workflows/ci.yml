@@ -303,6 +303,8 @@ jobs:
         run: |
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform host
+          # the C++ test's second core: the same crate under the namespace playground_a (ADR-044)
+          target/debug/undra build -C examples/two-cores/a --platform host
           target/debug/undra build -C examples/playground --platform web
       # The package's build config (tsconfig.build.json) compiles against @undra/runtime's emitted declarations,
       # as an app that installs both sees them; dist/ is not committed.
