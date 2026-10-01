@@ -107,3 +107,10 @@ extension FsError: LocalizedError {
         return description
     }
 }
+
+/// `StorageError` is a `LocalizedError` whose description is its message.
+extension StorageError: LocalizedError {
+    public var errorDescription: String? {
+        return description
+    }
+}

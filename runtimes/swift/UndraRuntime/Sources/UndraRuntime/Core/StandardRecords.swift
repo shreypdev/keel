@@ -1,11 +1,11 @@
 // The records the standard ports exchange (docs/SPEC.md section 8), with their hand-written wire
 // codecs: `HttpMethod`, `Header`, `HttpRequest`, `HttpResponse`, `HttpError`, `FsError`,
-// `NetKind` and `UndraAppState`.
+// `StorageError`, `NetKind` and `UndraAppState`.
 //
 // They are public API. Generated bindings refer to them where an app's own port, method or record
 // mentions a standard type (`func upload(_ request: HttpRequest) async throws(HttpError) ->
 // HttpResponse`) and declare none of them (ADR-024 and its amendment), and an app that
-// implements `Http`, `Fs` or `Connectivity` itself builds and reads them. The names are the Rust
+// implements `Http`, `Fs`, `Kv`, `SecureStore` or `Connectivity` itself builds and reads them. The names are the Rust
 // ones, as in the Kotlin and TypeScript runtimes, and the shapes are what generated code for
 // `undra-ports` would contain (a struct per record, `Codable` where it can be, an enum per error
 // with the messages of the Rust `#[error]` attributes). Two spellings differ from the Rust:
@@ -246,7 +246,8 @@ extension HttpError: CustomStringConvertible {
 
 /// Why a file operation failed.
 ///
-/// `FsError { NotFound, Denied, Io(String) }`.
+/// `FsError { NotFound, Denied, Io(String), Full, Unavailable(String) }`. `Full` and `Unavailable`
+/// were added by ADR-049 after the others, so their wire indices (3 and 4) follow `Io`.
 public enum FsError: UndraError, Error, Sendable, Hashable {
     /// The file or directory does not exist.
     case notFound
@@ -254,6 +255,10 @@ public enum FsError: UndraError, Error, Sendable, Hashable {
     case denied
     /// Any other I/O failure; the text is the platform's.
     case io(String)
+    /// The disk or the storage quota is exhausted (ADR-049).
+    case full
+    /// No file system in this context, or no adapter registered; the text says which (ADR-049).
+    case unavailable(String)
 
     public static func undraDecode(_ r: inout UndraReader) throws -> FsError {
         let at = r.position
@@ -266,6 +271,11 @@ public enum FsError: UndraError, Error, Sendable, Hashable {
         case 2:
             let reason = try r.readString()
             return .io(reason)
+        case 3:
+            return .full
+        case 4:
+            let reason = try r.readString()
+            return .unavailable(reason)
         default:
             throw WireError.invalidTag(tag: UInt32(tag), at: at, type: "FsError")
         }
@@ -280,6 +290,11 @@ public enum FsError: UndraError, Error, Sendable, Hashable {
         case .io(let reason):
             w.writeU16(2)
             w.writeString(reason)
+        case .full:
+            w.writeU16(3)
+        case .unavailable(let reason):
+            w.writeU16(4)
+            w.writeString(reason)
         }
     }
 }
@@ -293,6 +308,96 @@ extension FsError: CustomStringConvertible {
             return "access denied"
         case .io(let reason):
             return "I/O error: \(reason)"
+        case .full:
+            return "the disk is full"
+        case .unavailable(let reason):
+            return "the file system is unavailable: \(reason)"
+        }
+    }
+}
+
+// MARK: - Storage records
+
+/// Why a `Kv` or `SecureStore` operation failed (ADR-049).
+///
+/// `StorageError { Unavailable(String), Full, Locked, Corrupt(String), Io(String) }`.
+///
+/// Every method of the two storage ports reports a failure as one of these instead of making the
+/// call "unavailable", and the default adapters (``KvAdapter``, ``SecureStoreAdapter``) map their
+/// platform failures onto it: an out-of-space write is ``full``, a Keychain or a data-protected
+/// file that cannot be read before the device's first unlock is ``locked``, a stored entry that
+/// cannot be read back is ``corrupt(_:)``, anything else is ``io(_:)`` with the platform's message.
+/// An app that implements `Kv` or `SecureStore` itself answers a failure by throwing
+/// `UndraPortError(body: error.undraEncoded())` (generated port adapters do that for a method
+/// that throws `StorageError`).
+public enum StorageError: UndraError, Error, Sendable, Hashable {
+    /// No adapter is registered, or the platform has no backend in this context; the text says
+    /// which.
+    case unavailable(String)
+    /// The quota or the disk is exhausted.
+    case full
+    /// Protected data cannot be read now (before the device's first unlock, or a key that needs
+    /// the user to authenticate).
+    case locked
+    /// The stored bytes (or ciphertext) cannot be read back; the key is still there.
+    case corrupt(String)
+    /// Any other failure; the text is the platform's.
+    case io(String)
+
+    public static func undraDecode(_ r: inout UndraReader) throws -> StorageError {
+        let at = r.position
+        let tag = try r.readU16()
+        switch tag {
+        case 0:
+            let reason = try r.readString()
+            return .unavailable(reason)
+        case 1:
+            return .full
+        case 2:
+            return .locked
+        case 3:
+            let reason = try r.readString()
+            return .corrupt(reason)
+        case 4:
+            let reason = try r.readString()
+            return .io(reason)
+        default:
+            throw WireError.invalidTag(tag: UInt32(tag), at: at, type: "StorageError")
+        }
+    }
+
+    public func undraEncode(_ w: inout UndraWriter) {
+        switch self {
+        case .unavailable(let reason):
+            w.writeU16(0)
+            w.writeString(reason)
+        case .full:
+            w.writeU16(1)
+        case .locked:
+            w.writeU16(2)
+        case .corrupt(let reason):
+            w.writeU16(3)
+            w.writeString(reason)
+        case .io(let reason):
+            w.writeU16(4)
+            w.writeString(reason)
+        }
+    }
+}
+
+extension StorageError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .unavailable(let reason):
+            return "storage is unavailable: \(reason)"
+        case .full:
+            return "the storage is full"
+        case .locked:
+            return "the storage is locked"
+        case .corrupt(let reason):
+            return "stored data is corrupt: \(reason)"
+        case .io(let reason):
+            return "storage I/O error: \(reason)"
         }
     }
 }
