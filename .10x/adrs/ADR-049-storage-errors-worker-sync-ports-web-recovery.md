@@ -1,6 +1,7 @@
 # ADR-049: storage ports have an error channel, worker mode answers sync ports in the worker, and a trapped web core restarts from its last snapshot
 
-Status: **Proposed** (2026-10-01, `wt/boundary-adrs`; Amendment C items 2 (pieces A6 and A7) and the gap
+Status: **Accepted** (2026-10-01, implemented in `wt/persistence-v2`; see "Implementation notes" at the end for what
+the code decided where this text left room, and the deviations). Proposed 2026-10-01 (`wt/boundary-adrs`; Amendment C items 2 (pieces A6 and A7) and the gap
 audit's PO-3, PO-4, PO-11 and PC-2, PA-5). Amends **ADR-024** (the standard surface: `Kv` and `SecureStore`
 signatures, a new `StorageError`, two `FsError` variants) and **ADR-025** (which standard methods may lack an
 error channel). Touches SPEC 7 (built-in sync ports in worker mode; the `random` import), 8, 9 (how
@@ -244,3 +245,54 @@ ADR-037 (the snapshot's identity makes a recovery restore safe across an update 
 the dead-letter key), ADR-046 (the panic report precedes a restart; background runs retry an unreadable queue),
 C4a (Android storage adapters return `StorageError` from day one), C4c (TypeScript snapshot parity is decision
 3.1). PO-4's fix (decision 2.1) is small and can land first, in the parity piece, as Amendment C allows.
+
+## Implementation notes (2026-10-01, `wt/persistence-v2`)
+
+Landed items 1 to 10, with ADR-037 in the same piece. No wire change, no C ABI or wasm ABI change; every core's schema
+hash moved once (the standard surface alone is `0xbbf6_f70d_0c56_7f47`). What the code decided where the text left
+room, and the deviations:
+
+* **Scenario numbers.** The provisional S29, S30 and S31 are **S19** (storage failures are typed; every column),
+  **S20** (worker sync ports; TypeScript) and **S21** (web recovery; TypeScript), the next free numbers in
+  `contract-tests/scenarios.md`.
+* **`random` without a signature change** (decision 2.5). A JavaScript exception thrown through wasm frames abandons
+  them without unwinding (the core's locks stay held), so the import cannot throw *into* the core. The built-in
+  `Rng.fill` instead asks for 16 bytes more, pre-filled with a canary (`undra-rng-canary`); a host that wrote nothing,
+  or zeros, leaves it detectable, and the port answers unavailable after an ERROR naming the cause, so the proxy's
+  E0062 traps loudly. The TypeScript import throws internally and its guard writes nothing.
+* **The bridges' untyped-throw path** logs at ERROR naming the port, the method and the adapter (Swift, Kotlin,
+  TypeScript). Kotlin also accepts a standard error type thrown raw (additive). TypeScript types `StorageError`, and
+  the raw platform errors it recognises (`QuotaExceededError`, `ENOSPC` → `Full`; `SecurityError` → `Unavailable`);
+  any other throw stays the bug path. `browserAdapters()` registers `Fs` anyway too (answering `Unavailable("needs the
+  origin private file system")`), like `Kv` and `SecureStore`. Android registers no stand-in storage ports: an adapter
+  installed after load would otherwise end hydration's wait for one. Swift maps more Keychain statuses than the table
+  (`errSecAuthFailed` → `Locked`, `errSecDecode` → `Corrupt`, `errSecNotAvailable`/`errSecMissingEntitlement` →
+  `Unavailable`, `errSecDiskFull` → `Full`); `EPERM` before first unlock is `Locked`, `EACCES` is `Io`.
+* **`undra-query`** (decision 1.4): one WARN per (operation, reason); `Full` pauses new entries with one probe write
+  per trigger; the queue read retries on `Active`, `Background` and a backoff; the raw `list` loop is a typed call that
+  retries a typed `Unavailable` for five seconds at start-up. A queue the store reports `Corrupt` cannot be moved with
+  its bytes (they cannot be read): a dead letter with empty bytes, and the queue counts as read. The counters are in
+  `stats_json` under `query.persist`, through a new runtime extension point (`StatsSection`).
+* **Worker protocol 3** adds, beyond decision 2.3's list, `restart` / `restarted`, `init.recovery` and the trap's
+  stack in the worker's failure message: the worker takes and keeps the snapshots and serves the restart (decision
+  3.3). A port registered on the host after load sends `ports`. Explicit `adapters.clock`/`rng`/`timer` in worker mode
+  log a warning once rather than fail `load` (the contract harness passes `clock`); `load`'s WebCrypto check is
+  skipped in `wasm-main` when `adapters.rng` is given (the app supplies its own source).
+* **Snapshots are taken after the core emits a change-set**, where the core runs, not after a main-thread drain
+  (decision 3.3): that is what lets the worker keep its own.
+* **The panic report.** ADR-046 is not implemented yet, so `onPanic` receives a minimal `UndraPanicReport { message,
+  location, operation, frames, schemaHash, trap }` built from the FATAL `undra::panic` record and the trap's stack;
+  ADR-046's `thread`, `namespace`, `core_version`, `image_id` and address frames remain for that piece.
+  `UndraCoreRestarted` extends `UndraUnhandledError` (operation `"wasm core"`, error `Panicked`), so `onError`'s type
+  is unchanged.
+* **Generation floor** (ADR-022): the restart's restore raises the snapshot's floor to the highest generation the host
+  holds; with no snapshot kept it restores an empty one carrying only that floor. Calls made during the restart
+  window reject `restarted`; releases made during it are deferred. A port reply that settles after the restart, for a
+  call of the instance that trapped, is dropped (an epoch check); the new instance's own init-time port calls are
+  answered.
+* **`remote` keeps `UndraModeError` for `snapshot()` / `restore()`** (decision 3.1 mentions the envelopes): the wire
+  has no host-to-core snapshot request (kind 15 flows from the core only), and recovery is wasm-only. The dev server's
+  reload is ADR-053's.
+* **Bench.** `ts/snapshot_take_100kb` p50 0.041–0.043 ms (budget 2 ms) and `ts/recovery_restart_100kb` p50
+  1.55–1.64 ms, p99 at most 5.86 ms (budget 50 ms), headless Chromium, wasm-main, five runs (`bench/RESULTS.md`, "Web
+  recovery"); `examples/playground/web/bench/recovery.spec.ts` fails a run over its budget.
