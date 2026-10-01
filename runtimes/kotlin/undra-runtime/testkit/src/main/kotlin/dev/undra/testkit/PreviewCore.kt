@@ -35,8 +35,12 @@ public class PreviewCore private constructor(
     /** The manual clock: [FakeClock.nowMs] reads it, [FakeClock.setNowMs] jumps the wall clock, [advance] moves time. */
     public val clock: FakeClock get() = fakes.clock
 
-    /** Lets the core catch up and the stores see what it produced: waits until the core has been idle for a few milliseconds and answered every port call. */
-    public fun settle(timeoutMs: Long = 5_000) {
+    /**
+     * Lets the core catch up and the stores see what it produced: waits until the core's counters have stood still for [quietMs] and it has answered
+     * every port call, then applies what the mirror holds. The core runs on a thread of its own, so "idle" is observed, not known: raise [quietMs] on a
+     * machine that is busy.
+     */
+    public fun settle(quietMs: Long = 20, timeoutMs: Long = 5_000) {
         val deadline = System.nanoTime() + timeoutMs * 1_000_000
         var quiet = 0
         var last = ""
@@ -45,7 +49,7 @@ public class PreviewCore private constructor(
             val now = "${field(stats.raw, "polls")}:${stats.pendingPortCalls}:${stats.activeCalls}:${stats.hostPendingCalls}"
             if (now == last && stats.pendingPortCalls <= 0) quiet++ else quiet = 0
             last = now
-            if (quiet >= 3) break
+            if (quiet >= (quietMs / 2).coerceAtLeast(1)) break
             Thread.sleep(2)
         }
         applied()

@@ -56,16 +56,28 @@ fi
 # --- 2. the Kotlin runtime (main sources only) -----------------------------------------------------------
 UNDRA_BUILD_DIR="$OUT/runtime" "$REPO/runtimes/kotlin/undra-runtime/scripts/test-local.sh" main
 
+# --- 2b. the testing kit (dev.undra.testkit), compiled against those runtime classes ----------------------------
+KIT_SRC="$REPO/runtimes/kotlin/undra-runtime/testkit/src/main/kotlin"
+KIT="$OUT/kit"
+if [ ! -f "$OUT/kit.stamp" ] || [ "$OUT/runtime/main.stamp" -nt "$OUT/kit.stamp" ] \
+   || [ -n "$(find "$KIT_SRC" -type f -newer "$OUT/kit.stamp" -print -quit)" ]; then
+  echo "==> compiling the testing kit"
+  rm -rf "$KIT" "$OUT/kit.stamp"
+  mkdir -p "$KIT"
+  kotlinc -cp "$OUT/runtime/main:$UNDRA_KOTLINX_COROUTINES" -jvm-target 11 -opt-in=dev.undra.runtime.UndraEmbeddingApi -d "$KIT" "$KIT_SRC"
+  touch "$OUT/kit.stamp"
+fi
+
 # --- 3. the generated bindings and the runner ------------------------------------------------------------
 GENERATED="$PLAYGROUND/generated/kotlin/src/main/kotlin"
 CLASSES="$OUT/classes"
 STAMP="$OUT/classes.stamp"
 if [ ! -f "$STAMP" ] || [ "$OUT/runtime/main.stamp" -nt "$STAMP" ] \
-   || [ -n "$(find "$HERE/src" "$GENERATED" -type f -newer "$STAMP" -print -quit)" ]; then
+   || [ "$OUT/kit.stamp" -nt "$STAMP" ] || [ -n "$(find "$HERE/src" "$GENERATED" -type f -newer "$STAMP" -print -quit)" ]; then
   echo "==> compiling the bindings and the runner"
   rm -rf "$CLASSES" "$STAMP"
   mkdir -p "$CLASSES"
-  kotlinc -cp "$OUT/runtime/main:$UNDRA_KOTLINX_COROUTINES" -jvm-target 11 -d "$CLASSES" "$GENERATED" "$HERE/src"
+  kotlinc -cp "$OUT/runtime/main:$KIT:$UNDRA_KOTLINX_COROUTINES" -jvm-target 11 -d "$CLASSES" "$GENERATED" "$HERE/src"
   touch "$STAMP"
 fi
 
@@ -77,4 +89,10 @@ java -Xmx1g -Djava.library.path="$LIB_DIR" \
   -cp "$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" \
   dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?
 "$REPO/contract-tests/check.sh" kotlin "$OUT/run.log" || status=1
+
+# --- 5. the testing kit against the same core (not part of the grid) -------------------------------------------
+echo "==> running the testing kit against ${LIB#"$REPO"/}"
+java -Xmx1g -Djava.library.path="$LIB_DIR" \
+  -cp "$OUT/runtime/main:$KIT:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" \
+  dev.undra.contract.TestKitMainKt 2>&1 | tee "$OUT/testkit.log" || status=$?
 exit "$status"
