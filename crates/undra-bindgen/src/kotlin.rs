@@ -1466,7 +1466,7 @@ impl<'a> Ctx<'a> {
                     kdoc(w, &c.docs, &[THROWS_CALL.to_owned()]);
                     let ids = format!("UndraIds.Objects.{}", o.name);
                     w.call(
-                        &format!("constructor(ctx: UndraCore = {}) : this", self.g.default_core()),
+                        format!("constructor(ctx: UndraCore = {}) : this", self.g.default_core()),
                         &[
                             "ctx".to_owned(),
                             format!("ctx.constructObject({ids}.TYPE_ID, {ids}.NEW, ByteArray(0))"),
