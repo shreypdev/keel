@@ -1035,7 +1035,7 @@ impl TsGen<'_> {
         let mut cx = Ctx::new(self, Module::Queries);
         let mut w = CodeWriter::new("  ");
         for handle in &self.model.query_handles {
-            cx.object(&mut w, handle);
+            cx.object_with(&mut w, handle, true);
             w.blank();
         }
         for mutation in &self.model.mutations {
@@ -1569,6 +1569,14 @@ impl<'a> Ctx<'a> {
     }
 
     fn object(&mut self, w: &mut CodeWriter, o: &ObjectDef) {
+        self.object_with(w, o, false);
+    }
+
+    /// An object or store class. A `recreatable` store (a query handle, which a snapshot leaves out) records its
+    /// constructor call, so the runtime can re-create it after a web core's crash recovery and move the wrapper to
+    /// the new handle (ADR-049): its private constructor takes the encoded arguments and passes the call as the
+    /// `recreate` option of `UndraStore`.
+    fn object_with(&mut self, w: &mut CodeWriter, o: &ObjectDef, recreatable: bool) {
         self.ids();
         let is_store = o.store.is_some();
         let base = if is_store {
@@ -1598,30 +1606,56 @@ impl<'a> Ctx<'a> {
             }
             // The `no_coalesce` signals: the mirror applies every entry of them (ADR-031).
             let no_coalesce = model::no_coalesce_ids(o);
-            w.block(
-                "private constructor(core: UndraCore, handle: bigint)",
-                |w| {
-                    if no_coalesce.is_empty() {
-                        w.line("super(core, handle);");
-                    } else {
-                        let ids: Vec<String> = no_coalesce.iter().map(u32::to_string).collect();
-                        w.line(format!(
-                            "super(core, handle, {{ noCoalesce: [{}] }});",
-                            ids.join(", ")
-                        ));
+            // A re-creatable store's one constructor, recorded (ADR-049): the object's ids and the constructor's.
+            let recreate = if recreatable && is_store {
+                o.constructors.first().map(|c| {
+                    (
+                        format!("UndraIds.Objects.{}", o.name),
+                        naming::ts_member(&naming::camel(&c.name)),
+                    )
+                })
+            } else {
+                None
+            };
+            let signature = if recreate.is_some() {
+                "private constructor(core: UndraCore, handle: bigint, args: Uint8Array)"
+            } else {
+                "private constructor(core: UndraCore, handle: bigint)"
+            };
+            w.block(signature, |w| {
+                let no_coalesce = (!no_coalesce.is_empty()).then(|| {
+                    let ids: Vec<String> = no_coalesce.iter().map(u32::to_string).collect();
+                    format!("noCoalesce: [{}]", ids.join(", "))
+                });
+                match (&no_coalesce, &recreate) {
+                    (None, None) => w.line("super(core, handle);"),
+                    (Some(no_coalesce), None) => {
+                        w.line(format!("super(core, handle, {{ {no_coalesce} }});"));
                     }
-                    if !signals.is_empty() {
-                        let list: Vec<String> = signals
-                            .iter()
-                            .map(|g| format!("this.{}", signal_prop(g)))
-                            .collect();
-                        array_assignment(w, "this._signals", &list);
+                    (_, Some((ids, method))) => {
+                        w.block_with("super(core, handle, {", "});", |w| {
+                            if let Some(no_coalesce) = &no_coalesce {
+                                w.line(format!("{no_coalesce},"));
+                            }
+                            w.block_with("recreate: {", "},", |w| {
+                                w.line(format!("typeId: {ids}.typeId,"));
+                                w.line(format!("methodId: {ids}.{method},"));
+                                w.line("args,");
+                            });
+                        });
                     }
-                },
-            );
+                }
+                if !signals.is_empty() {
+                    let list: Vec<String> = signals
+                        .iter()
+                        .map(|g| format!("this.{}", signal_prop(g)))
+                        .collect();
+                    array_assignment(w, "this._signals", &list);
+                }
+            });
             for c in &o.constructors {
                 w.blank();
-                self.constructor(w, o, c, is_store);
+                self.constructor(w, o, c, is_store, recreate.is_some());
             }
             for m in &o.methods {
                 w.blank();
@@ -1646,7 +1680,14 @@ impl<'a> Ctx<'a> {
         });
     }
 
-    fn constructor(&mut self, w: &mut CodeWriter, o: &ObjectDef, c: &MethodDef, is_store: bool) {
+    fn constructor(
+        &mut self,
+        w: &mut CodeWriter,
+        o: &ObjectDef,
+        c: &MethodDef,
+        is_store: bool,
+        recreatable: bool,
+    ) {
         let name = if c.name == "new" {
             "create".to_owned()
         } else {
@@ -1660,6 +1701,7 @@ impl<'a> Ctx<'a> {
         let writer = naming::avoid("w", &taken_refs);
         let handle = naming::avoid("handle", &taken_refs);
         let store = naming::avoid("store", &taken_refs);
+        let recorded = naming::avoid("args", &taken_refs);
         let mut params = self.param_list(&c.params);
         params.push(format!("{core}: UndraCore = UndraCore.shared"));
         let mut extra = Vec::new();
@@ -1671,7 +1713,12 @@ impl<'a> Ctx<'a> {
         let prefix = format!("static async {name}");
         let suffix = format!(": Promise<{}>", o.name);
         w.call_block(prefix, &params, suffix, true, |w| {
-            let args = self.encode_args(w, &c.params, &writer);
+            let mut args = self.encode_args(w, &c.params, &writer);
+            if recreatable {
+                // The encoded arguments are kept: the runtime runs this constructor again after a restart (ADR-049).
+                w.line(format!("const {recorded} = {args};"));
+                args.clone_from(&recorded);
+            }
             let construct_args = [
                 format!("UndraIds.Objects.{}.typeId", o.name),
                 format!(
@@ -1696,7 +1743,14 @@ impl<'a> Ctx<'a> {
                 },
                 |w| w.line(format!("throw {mapped};")),
             );
-            if is_store {
+            if is_store && recreatable {
+                w.line(format!(
+                    "const {store} = new {}({core}, {handle}, {recorded});",
+                    o.name
+                ));
+                w.line(format!("await {store}._observeAll();"));
+                w.line(format!("return {store};"));
+            } else if is_store {
                 w.line(format!("const {store} = new {}({core}, {handle});", o.name));
                 w.line(format!("await {store}._observeAll();"));
                 w.line(format!("return {store};"));

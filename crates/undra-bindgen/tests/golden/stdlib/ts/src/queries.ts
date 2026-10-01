@@ -37,24 +37,31 @@ export class LatestResponseQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint) {
-    super(core, handle);
+  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
+    super(core, handle, {
+      recreate: {
+        typeId: UndraIds.Objects.LatestResponseQueryHandle.typeId,
+        methodId: UndraIds.Objects.LatestResponseQueryHandle.new,
+        args,
+      },
+    });
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraCore.shared): Promise<LatestResponseQueryHandle> {
+    const args = new Uint8Array(0);
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.LatestResponseQueryHandle.typeId,
         UndraIds.Objects.LatestResponseQueryHandle.new,
-        new Uint8Array(0),
+        args,
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new LatestResponseQueryHandle(core, handle);
+    const store = new LatestResponseQueryHandle(core, handle, args);
     await store._observeAll();
     return store;
   }
