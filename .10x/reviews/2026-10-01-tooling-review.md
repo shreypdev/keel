@@ -1,8 +1,9 @@
 # Track D2–D5 tooling (`undra doctor`, build-system integration, CI from `undra init`, `undra upgrade`) — adversarial review
 
 **Date:** 2026-10-01 · **Reviewer:** fable (adversarial, `docs/AGENT_WORKFLOW.md` section 3) · **Piece:** `wt/tooling` at
-`e3207e1` (cut from `a0d638f`; 95 files, +11,076/−899), `main` merged twice on the branch (`6cb7a71` at `e518653`: parity,
-React Native, `cas_update`, CI on 1.98.1; `2bea5d9` at `38ea11d`: Android adapters, Track A) · **Read:** `CLAUDE.md` (R4, R6,
+`e3207e1` (cut from `a0d638f`; 95 files, +11,076/−899), `main` merged three times on the branch (`6cb7a71` at `e518653`:
+parity, React Native, `cas_update`, CI on 1.98.1; `2bea5d9` at `38ea11d`: Android adapters, Track A; `620f5e2` at `b7996c3`: the
+API reference, site and state files only, after the counts below) · **Read:** `CLAUDE.md` (R4, R6,
 R8, R9), the design spec's Track D, the SDE record `.10x/decisions/sde/tooling.md`, `docs/SPEC.md` 12 and 13, `docs/DEV_LOOP.md`,
 `docs/ONBOARDING.md` 1, `docs/RELEASING.md`, `docs/ERRORS.md`, ADR-031/032 (+A)/033/034/035/036/050/051, `.10x/status.md`, and the
 diff (`commands/doctor/*`, `commands/upgrade.rs`, `upgrade.rs`, `migrations.rs`, `semver.rs`, `ci.rs`, `builds/xcode.rs`,
