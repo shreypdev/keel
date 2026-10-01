@@ -9,7 +9,10 @@
 //!
 //! Every case becomes one target of a single scratch SwiftPM package below the target
 //! directory, so that one `swift build` type-checks all of them and nothing is written
-//! into the repository. A compiler error fails the test; warnings do not (the generator
+//! into the repository. Each case also brings the C module bindgen generates for its core,
+//! `<Namespace>CoreFFI` (the declaration of `<namespace>_undra_api`, ADR-044), which its Swift
+//! target depends on; an execution check, which is linked, gets a C target that defines that
+//! function as returning NULL (the checks never load a core in process). A compiler error fails the test; warnings do not (the generator
 //! still escapes a few keyword argument labels that Swift accepts bare). Skipped, with a
 //! message on stderr, when `swift` is not on the path or the host is not macOS (the
 //! runtime builds against the Apple SDKs); `UNDRA_REQUIRE_TOOLCHAINS=1` turns the skip
@@ -40,6 +43,31 @@ fn check_name(case: &str) -> String {
     format!("{}Check", target_name(case))
 }
 
+/// The C module of a case's core (`GoldenRecordsCoreFFI`, `PlaygroundCoreFFI`), as generated.
+fn ffi_module(case: &str) -> String {
+    common::generator_for(case, &common::case(case))
+        .core_names()
+        .ffi_module()
+}
+
+/// The C target that stands in for a check's core at link time.
+fn stub_name(case: &str) -> String {
+    format!("{}CoreStub", check_name(case))
+}
+
+/// The source of `stub_name(case)`: the core's entry point, returning no table.
+fn stub_source(case: &str) -> String {
+    let symbol = common::generator_for(case, &common::case(case))
+        .core_names()
+        .api_symbol();
+    format!(
+        "/* A stand-in for the core's entry point: the check never loads the core in process. */
+         const void *{symbol}(void);
+         const void *{symbol}(void) {{ return 0; }}
+"
+    )
+}
+
 /// Why the Swift toolchain cannot be used, or `None` when it can.
 fn unavailable() -> Option<&'static str> {
     if std::env::var("UNDRA_SKIP_SWIFT").is_ok_and(|v| v == "1") {
@@ -53,24 +81,28 @@ fn unavailable() -> Option<&'static str> {
     }
 }
 
-/// The manifest of the scratch package: one target per case and one executable per check, all
-/// on the real runtime.
+/// The manifest of the scratch package: per case, the C module of its core and its Swift target;
+/// per check, the stand-in for the core and the executable; all on the real runtime.
 fn manifest(runtime: &Path, cases: &[&str], checks: &[(&str, &str)]) -> String {
     let runtime_product = ".product(name: \"UndraRuntime\", package: \"UndraRuntime\")";
     let mut targets: String = cases
         .iter()
         .map(|case| {
+            let ffi = ffi_module(case);
             format!(
-                "        .target(name: \"{}\", dependencies: [{runtime_product}]),\n",
+                "        .target(name: \"{ffi}\", path: \"Sources/{ffi}\", publicHeadersPath: \"include\"),\n        \
+                 .target(name: \"{}\", dependencies: [\"{ffi}\", {runtime_product}]),\n",
                 target_name(case)
             )
         })
         .collect();
     for (case, _) in checks {
         targets.push_str(&format!(
-            "        .executableTarget(name: \"{}\", dependencies: [\"{}\", {runtime_product}]),\n",
+            "        .target(name: \"{stub}\", path: \"Sources/{stub}\"),\n        \
+             .executableTarget(name: \"{}\", dependencies: [\"{}\", {runtime_product}, \"{stub}\"]),\n",
             check_name(case),
-            target_name(case)
+            target_name(case),
+            stub = stub_name(case)
         ));
     }
     format!(
@@ -93,12 +125,17 @@ fn lay_out(root: &Path, runtime: &Path, cases: &[&str]) {
         let schema = common::case(case);
         let generator = common::generator_for(case, &schema);
         let files = generator.swift(&schema).unwrap();
-        // The generated sources never name their own module, so a case compiles under any
-        // target name; the golden path's module (`PlaygroundCore`, `GoldenRecords`, ...) is
-        // replaced by the case's own.
+        // The generated Swift never names its own module, so a case compiles under any target
+        // name; the golden path's module (`PlaygroundCore`, `GoldenRecords`, ...) is replaced by
+        // the case's own. The C module of the core keeps its generated name and layout: the
+        // Swift imports it by that name.
+        let ffi = format!("Sources/{}/", ffi_module(case));
         let renamed: Vec<GeneratedFile> = files
             .into_iter()
             .map(|f| {
+                if f.path.starts_with(&ffi) {
+                    return f;
+                }
                 let file = f.path.rsplit('/').next().unwrap_or(&f.path).to_owned();
                 GeneratedFile {
                     path: format!("Sources/{}/Generated/{file}", target_name(case)),
@@ -106,9 +143,16 @@ fn lay_out(root: &Path, runtime: &Path, cases: &[&str]) {
                 }
             })
             .collect();
+        assert!(
+            renamed.iter().any(|f| f.path.starts_with(&ffi)),
+            "`{case}` generates no C module {ffi}"
+        );
         GeneratedFile::write_all(&renamed, root).unwrap();
     }
     for (case, fixture) in CHECKS {
+        let stub = root.join("Sources").join(stub_name(case));
+        fs::create_dir_all(stub.join("include")).unwrap();
+        fs::write(stub.join("core_stub.c"), stub_source(case)).unwrap();
         let dir = root.join("Sources").join(check_name(case));
         fs::create_dir_all(&dir).unwrap();
         fs::copy(
@@ -213,14 +257,24 @@ fn the_scratch_package_names_one_target_per_case_and_one_executable_per_check() 
     // Needs no Swift toolchain: the layout is plain text.
     let manifest = manifest(Path::new("/runtime"), common::CASES, CHECKS);
     for case in common::CASES {
-        assert!(manifest.contains(&format!(".target(name: \"{}\"", target_name(case))));
+        let ffi = ffi_module(case);
+        assert!(manifest.contains(&format!(
+            ".target(name: \"{}\", dependencies: [\"{ffi}\", ",
+            target_name(case)
+        )));
+        assert!(manifest.contains(&format!(
+            ".target(name: \"{ffi}\", path: \"Sources/{ffi}\", publicHeadersPath: \"include\")"
+        )));
     }
+    assert!(manifest.contains("\"PlaygroundCoreFFI\""), "the full case keeps its core's module name");
     for (case, fixture) in CHECKS {
         assert!(manifest.contains(&format!(
             ".executableTarget(name: \"{}\", dependencies: [\"{}\"",
             check_name(case),
             target_name(case)
         )));
+        assert!(manifest.contains(&format!("\"{}\"]", stub_name(case))));
+        assert!(stub_source(case).contains("_undra_api(void) { return 0; }"));
         assert!(
             manifest_dir()
                 .join("tests/fixtures/swift-run")

@@ -92,7 +92,7 @@ const transport = { mode: "test" };
 assert.equal(await UndraGoldenObjects.attach(transport, { shared: false }), attached);
 assert.deepEqual(seen, { transport, options: { shared: false, expectedSchemaHash: UndraIds.schemaHash } });
 assert.equal(UndraGoldenObjects.core, attached);
-assert.throws(() => UndraGoldenObjects.attach(transport), (e) => e instanceof rt.UndraError && e.kind === "state");
+await assert.rejects(UndraGoldenObjects.attach(transport), (e) => e instanceof rt.UndraError && e.kind === "state");
 await objects.Calculator.create();
 assert.equal(attached.constructed.length, 1, "a generated constructor without a core uses the entry's");
 Object.defineProperty(attached, "closed", { get: () => true });

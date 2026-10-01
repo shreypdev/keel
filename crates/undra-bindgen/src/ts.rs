@@ -1192,7 +1192,7 @@ impl TsGen<'_> {
             w.line(" * this core is already loaded.");
             w.line(" */");
             w.block_with(
-                "load(options: Omit<LoadOptions, \"expectedSchemaHash\">): Promise<UndraCore> {",
+                "async load(options: Omit<LoadOptions, \"expectedSchemaHash\">): Promise<UndraCore> {",
                 "},",
                 |w| {
                     w.line("claim();");
@@ -1207,7 +1207,7 @@ impl TsGen<'_> {
             w.line(" * with this package's schema hash, and makes it `core`.");
             w.line(" */");
             w.block_with(
-                "attach(transport: Transport, options: Omit<AttachOptions, \"expectedSchemaHash\"> = {}): Promise<UndraCore> {",
+                "async attach(transport: Transport, options: Omit<AttachOptions, \"expectedSchemaHash\"> = {}): Promise<UndraCore> {",
                 "},",
                 |w| {
                     w.line("claim();");

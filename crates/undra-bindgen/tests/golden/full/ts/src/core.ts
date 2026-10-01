@@ -44,7 +44,7 @@ export const UndraPlaygroundCore = {
    * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while
    * this core is already loaded.
    */
-  load(options: Omit<LoadOptions, "expectedSchemaHash">): Promise<UndraCore> {
+  async load(options: Omit<LoadOptions, "expectedSchemaHash">): Promise<UndraCore> {
     claim();
     return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash }));
   },
@@ -53,7 +53,7 @@ export const UndraPlaygroundCore = {
    * Attaches the core over a transport you provide (React Native's `NativeTransport`, a test double),
    * with this package's schema hash, and makes it `core`.
    */
-  attach(transport: Transport, options: Omit<AttachOptions, "expectedSchemaHash"> = {}): Promise<UndraCore> {
+  async attach(transport: Transport, options: Omit<AttachOptions, "expectedSchemaHash"> = {}): Promise<UndraCore> {
     claim();
     return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash }));
   },
