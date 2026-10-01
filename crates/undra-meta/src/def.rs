@@ -194,6 +194,18 @@ pub struct SignalDef {
     pub computed: bool,
     /// The `#[undra(key = "id")]` field enabling keyed patches on `Vec<T>`.
     pub key: Option<String>,
+    /// `#[undra(no_coalesce)]`: every commit of the signal is delivered, and the platform mirrors
+    /// apply every entry of it instead of the last one per drain (ADR-031). Serialized only when
+    /// `true`, so the canonical JSON, and with it the schema hash, of a schema without such a
+    /// signal is what it was before the field existed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub no_coalesce: bool,
+}
+
+/// `skip_serializing_if` for flags that are written only when set.
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde passes a reference
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 /// A free function.

@@ -359,6 +359,7 @@ pub fn store(mut o: ObjectDef, signals: Vec<(&str, TypeRef, bool, Option<&str>)>
                 ty,
                 computed,
                 key: key.map(str::to_owned),
+                no_coalesce: false,
             })
             .collect(),
     });
@@ -923,6 +924,9 @@ fn stores() -> Schema {
         ),
         vec![("now", TypeRef::Timestamp, false, None)],
     ));
+    // A clock that ticks wants every tick delivered: `#[undra(no_coalesce)]` (ADR-031).
+    let clock = s.objects.last_mut().and_then(|o| o.store.as_mut()).unwrap();
+    clock.signals[0].no_coalesce = true;
     s
 }
 

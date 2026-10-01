@@ -21,7 +21,7 @@ use undra_meta::{
 };
 
 use crate::emit::CodeWriter;
-use crate::model::{Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
+use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
 use crate::naming;
 use crate::{GeneratedFile, Generator};
 
@@ -1246,10 +1246,18 @@ impl<'a> Ctx<'a> {
         self.import("dev.undra.runtime.UndraCore");
         self.import(&format!("dev.undra.runtime.{base}"));
         let signals: Vec<&SignalDef> = o.store.iter().flat_map(|s| s.signals.iter()).collect();
+        // The `no_coalesce` signals: the mirror applies every entry of them (ADR-031).
+        let no_coalesce = model::no_coalesce_ids(o);
+        let super_args = if no_coalesce.is_empty() {
+            "core, handle".to_owned()
+        } else {
+            let ids: Vec<String> = no_coalesce.iter().map(|id| format!("{id}u")).collect();
+            format!("core, handle, noCoalesce = setOf({})", ids.join(", "))
+        };
         kdoc(w, &o.docs, &[]);
         w.block(
             format!(
-                "class {} private constructor(core: UndraCore, handle: Long) : {base}(core, handle)",
+                "class {} private constructor(core: UndraCore, handle: Long) : {base}({super_args})",
                 o.name
             ),
             |w| {

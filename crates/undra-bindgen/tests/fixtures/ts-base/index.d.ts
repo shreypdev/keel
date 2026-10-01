@@ -42,8 +42,18 @@ export interface PortImpl {
 }
 
 export interface Mirror {
-  register(handle: Handle, apply: (signalId: number, op: ChangeOp, value: Uint8Array) => void): void;
+  /** Addition (ADR-031): `options.noCoalesce` lists the store's `no_coalesce` signals. */
+  register(
+    handle: Handle,
+    apply: (signalId: number, op: ChangeOp, value: Uint8Array) => void,
+    options?: { readonly noCoalesce?: Iterable<number> },
+  ): void;
   unregister(handle: Handle): void;
+}
+
+/** Addition (ADR-031): what a generated store tells its base class (its `no_coalesce` signals). */
+export interface StoreOptions {
+  readonly noCoalesce?: readonly number[];
 }
 
 export declare class UndraCore {
@@ -74,6 +84,7 @@ export declare abstract class UndraObject {
 }
 
 export declare abstract class UndraStore extends UndraObject {
+  protected constructor(core: UndraCore, handle: Handle, options?: StoreOptions);
   protected _signals: Signal<unknown>[];
   protected abstract _apply(signalId: number, op: ChangeOp, value: Uint8Array): void;
 }

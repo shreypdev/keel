@@ -23,7 +23,7 @@ use undra_meta::{
 };
 
 use crate::emit::CodeWriter;
-use crate::model::{Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
+use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
 use crate::naming;
 use crate::{GeneratedFile, Generator};
 
@@ -899,10 +899,20 @@ impl SwiftGen<'_> {
             if !signals.is_empty() {
                 w.blank();
             }
+            // The `no_coalesce` signals: the mirror applies every entry of them (ADR-031).
+            let no_coalesce = model::no_coalesce_ids(o);
             w.block(
                 "private init(adopting handle: UndraHandle, core: UndraCore)",
                 |w| {
-                    w.line("super.init(core: core, handle: handle)");
+                    if no_coalesce.is_empty() {
+                        w.line("super.init(core: core, handle: handle)");
+                    } else {
+                        let ids: Vec<String> = no_coalesce.iter().map(u32::to_string).collect();
+                        w.line(format!(
+                            "super.init(core: core, handle: handle, noCoalesce: [{}])",
+                            ids.join(", ")
+                        ));
+                    }
                     if store {
                         w.line("core.observe(handle, signal: Observe.allSignals, on: true)");
                     }

@@ -53,8 +53,8 @@ class LoadOptions(
 class UndraStats(val liveHandles: Int)
 
 open class Mirror {
-    open fun register(handle: Long, apply: (UInt, ChangeOp, UndraReader) -> Unit) {
-        throw UnsupportedOperationException("fixture: $handle $apply")
+    open fun register(handle: Long, noCoalesce: Set<UInt> = emptySet(), apply: (UInt, ChangeOp, UndraReader) -> Unit) {
+        throw UnsupportedOperationException("fixture: $handle $noCoalesce $apply")
     }
 
     open fun unregister(handle: Long) {
@@ -117,12 +117,12 @@ abstract class UndraObject(val core: UndraCore, val handle: Long) : AutoCloseabl
     }
 }
 
-abstract class UndraStore(core: UndraCore, handle: Long) : UndraObject(core, handle) {
+abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<UInt> = emptySet()) : UndraObject(core, handle) {
     protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader)
 
     protected fun <T> signal(initial: T): MutableStateFlow<T> = MutableStateFlow(initial)
 
     init {
-        core.mirror.register(handle) { signalId, op, reader -> apply(signalId, op, reader) }
+        core.mirror.register(handle, noCoalesce) { signalId, op, reader -> apply(signalId, op, reader) }
     }
 }

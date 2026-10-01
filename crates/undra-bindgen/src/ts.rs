@@ -20,7 +20,7 @@ use undra_meta::{
 };
 
 use crate::emit::CodeWriter;
-use crate::model::{Model, MsgPart, NamedKind, Ret, doc_lines, parse_message};
+use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, parse_message};
 use crate::naming;
 use crate::{GeneratedFile, Generator};
 
@@ -1571,10 +1571,20 @@ impl<'a> Ctx<'a> {
             if !signals.is_empty() {
                 w.blank();
             }
+            // The `no_coalesce` signals: the mirror applies every entry of them (ADR-031).
+            let no_coalesce = model::no_coalesce_ids(o);
             w.block(
                 "private constructor(core: UndraCore, handle: bigint)",
                 |w| {
-                    w.line("super(core, handle);");
+                    if no_coalesce.is_empty() {
+                        w.line("super(core, handle);");
+                    } else {
+                        let ids: Vec<String> = no_coalesce.iter().map(u32::to_string).collect();
+                        w.line(format!(
+                            "super(core, handle, {{ noCoalesce: [{}] }});",
+                            ids.join(", ")
+                        ));
+                    }
                     if !signals.is_empty() {
                         let list: Vec<String> = signals
                             .iter()

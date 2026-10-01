@@ -74,9 +74,9 @@ export class UndraObject {
 }
 
 export class UndraStore extends UndraObject {
-  constructor(core, handle) {
+  constructor(core, handle, options = {}) {
     super(core, handle);
     this._signals = [];
-    core.mirror.register(handle, (signalId, op, value) => this._apply(signalId, op, value));
+    core.mirror.register(handle, (signalId, op, value) => this._apply(signalId, op, value), options);
   }
 }

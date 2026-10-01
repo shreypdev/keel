@@ -425,7 +425,8 @@
               "kind": "timestamp"
             },
             "computed": false,
-            "key": null
+            "key": null,
+            "no_coalesce": true
           }
         ]
       },
