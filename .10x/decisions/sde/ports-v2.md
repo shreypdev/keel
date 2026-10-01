@@ -73,6 +73,7 @@ integrated here.
 | `scripts/wasm-size.sh` | hello wasm 102,537 B gz (record 102,722; gate 107,858), hello JS 25,062 B gz (gate 26,000) |
 | `cargo test -p undra-bench --test budgets --release` | ok; `ports/ws_roundtrip` 417 ns (budget 2.1 µs), `db/insert_1k` 0.98-1.29 ms (6.5 ms), `db/query_10k` 1.23-1.78 ms (9 ms) |
 | Site `build-all`, `check-links --words` | clean (landing prose 342/350 words) |
+| React Native on the iPhone 17 Pro simulator, after the merge (`scripts/rn-device-checks.sh ios`) | `UNDRA-RN CHECKS 21/21` in the app, `24/24` with the script's own (RN17..RN21: Db natively, WebSocket and SSE against the realtime server) |
 
 Device evidence from the runtime pieces (before the merge): iOS playground XCUITest tour 6 tests incl. `testNotes`
 on "iPhone 17"; Android Notes on the `undra` AVD against real SQLite (survives a killed process), android-adapters
