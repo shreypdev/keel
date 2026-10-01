@@ -168,3 +168,22 @@ seven concurrent pieces makes timing-sensitive suites lie):
 | B4 devtools | after `dev-loop` and B3 merge | the dev server, state-preserving reload | opus, opus review |
 | G3 `Db` port (SQLite) | after ADR-037 and G2 | persistence model (ADR-037); the port pattern of G2 | opus design, sonnet implement, opus review |
 | G4 Flutter/Dart bindgen | after G1 proves the fourth-host pattern | G1 | opus design, sonnet implement, opus review |
+
+## Amendment B — findings from the competitive catalogue (2026-10-01)
+
+`.10x/specs/2026-10-01-competitive-limitations.md` (68 sourced limitations, a 36-row matrix,
+18 ranked missing items) adds pieces the first draft did not have. They are scheduled now:
+
+| New piece | Track | What | ADR | Starts |
+|---|---|---|---|---|
+| **Android platform adapters** | C4 → its own piece | real Kv, SecureStore, Fs, Http, Connectivity and Lifecycle adapters in `android-adapters`, installed by default, instrumented tests on the emulator, the playground stops faking them | none (adapters) | now, `wt/android-adapters` |
+| Boundary surface | C3 escalated | objects as parameters and returns (E0064), host callback interfaces / listeners (E0004), newtypes (E0007), limited generics (E0002) | ADR-040 objects, ADR-041 callbacks, ADR-042 newtypes and generics | ADRs now (`wt/boundary-adrs`), code in phase 2 |
+| Data layer completion | A5/E3 re-scoped | interval polling (SPEC §9 promises it), paged and infinite queries with lazy lists, queued offline mutations keep their optimistic state and invalidations across restarts | ADR-043 paged queries and lazy lists; A5's ADR-037 covers the queue | ADR now, code after ADR-037 |
+| Production operations | new Track I | crash-symbol files (dSYM, wasm source maps, Android symbols) from `undra build`, a documented debugging path into Rust on each platform, OS background execution to drain the offline queue (BGTaskScheduler / WorkManager through the Lifecycle port) | ADR-046 | phase 2 |
+| Multiple cores per app | compatibility | per-library symbol namespacing so two Undra libraries can coexist in one process | ADR-044 (decided together with ADR-038) | ADR now |
+| iOS floor | compatibility | an iOS 15/16 mode for generated stores (`ObservableObject` where `Observation` is unavailable) | ADR-045 | ADR now |
+
+Renumbering: the WebSocket port becomes ADR-047, the `Db` port ADR-048. The post must not reuse
+the blueprint claims the catalogue found unbacked (time-travel devtools, a worker core by default,
+lazy collections, newtypes, optimistic state surviving restarts, Telemetry/Push ports, `undra adopt`)
+until the code backs them.
