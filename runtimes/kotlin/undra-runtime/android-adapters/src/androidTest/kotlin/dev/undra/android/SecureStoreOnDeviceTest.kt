@@ -36,7 +36,11 @@ class SecureStoreOnDeviceTest {
     }
 
     @After
-    fun tearDown() = clean()
+    fun tearDown() {
+        clean()
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        for (alias in listOf("dev.undra.test.alias-a", "dev.undra.test.alias-b")) if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+    }
 
     /** Whether any file under the app's data directory, whatever its name or place, contains [needle]. */
     private fun filesContaining(needle: ByteArray): List<String> {

@@ -16,6 +16,8 @@ import java.security.GeneralSecurityException
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The `SecureStore` port: each value is encrypted with AES-256-GCM under a key that lives in the Android Keystore and
@@ -62,7 +64,8 @@ public class AndroidSecureStoreAdapter internal constructor(
      */
     public suspend fun get(key: String): ByteArray? {
         val stored = store.get(key) ?: return null
-        return SecureSeal.open(keys.secret(), key, stored)
+        // The Keystore is a call into another process: never on the thread of the caller.
+        return withContext(Dispatchers.IO) { SecureSeal.open(keys.secret(), key, stored) }
     }
 
     /** Seals [value] and stores it under [key], replacing what was there.
@@ -70,7 +73,8 @@ public class AndroidSecureStoreAdapter internal constructor(
      * @throws SecureStoreException if the value cannot be encrypted.
      */
     public suspend fun set(key: String, value: ByteArray) {
-        store.set(key, SecureSeal.seal(keys.secret(), key, value))
+        val sealed = withContext(Dispatchers.IO) { SecureSeal.seal(keys.secret(), key, value) }
+        store.set(key, sealed)
     }
 
     /** Removes [key]; removing a missing key is not an error. */

@@ -248,11 +248,12 @@ public class AndroidHttpAdapter internal constructor(
 
         private fun read(opened: HttpURLConnection, status: Int, method: HttpMethod): HttpResponse {
             val headers = HttpRules.responseHeaders(opened.headerFields)
-            val body = if (method == HttpMethod.HEAD) {
-                NO_BODY
-            } else {
-                val stream = if (status >= 400) opened.errorStream else opened.inputStream
-                if (stream == null) NO_BODY else stream.use { readBounded(it, opened.contentLengthLong) }
+            val stream = if (status >= 400) opened.errorStream else opened.inputStream
+            // A HEAD answer has no body to read, but its stream is closed all the same so that the connection is released.
+            val body = when {
+                stream == null -> NO_BODY
+                method == HttpMethod.HEAD -> stream.use { NO_BODY }
+                else -> stream.use { readBounded(it, opened.contentLengthLong) }
             }
             return HttpResponse(status.toUShort(), headers, body)
         }

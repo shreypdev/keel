@@ -1,6 +1,7 @@
 package dev.undra.android
 
 import android.content.Context
+import android.util.Log
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.adapters.ClockAdapter
 import dev.undra.runtime.adapters.RngAdapter
@@ -35,9 +36,14 @@ public class AndroidPlatform internal constructor(
      * app that never closes the core never needs this.
      */
     override fun close() {
+        stopEventSources()
+        timer.close()
+    }
+
+    /** Stops the `Connectivity` and `Lifecycle` reports only; timers the core already armed keep running. */
+    internal fun stopEventSources() {
         connectivity.close()
         lifecycle.close()
-        timer.close()
     }
 }
 
@@ -75,6 +81,7 @@ public class AndroidPlatform internal constructor(
  * app's. Cleartext (`http://`) requests are blocked by Android unless the app's network security config allows the host.
  */
 public object AndroidPlatformDefaults {
+    private const val TAG = "Undra"
     private val installed = WeakHashMap<UndraCore, AndroidPlatform>()
 
     /**
@@ -104,7 +111,8 @@ public object AndroidPlatformDefaults {
         val lifecycle = AndroidLifecycleAdapter(app)
         val platform = AndroidPlatform(http, kv, secureStore, fs, log, connectivity, lifecycle, timer)
 
-        synchronized(installed) { installed.put(core, platform) }?.close()
+        // Installing again replaces the event sources; timers the core armed through the earlier adapter still fire.
+        synchronized(installed) { installed.put(core, platform) }?.stopEventSources()
 
         // Kv first: the query client hydrates its cache and queue from it while the core starts.
         core.registerPort(StandardPorts.Kv.PORT_ID, kv.portImpl())
@@ -117,6 +125,7 @@ public object AndroidPlatformDefaults {
         core.registerPort(StandardPorts.Timer.PORT_ID, timer.portImpl())
         connectivity.attach(core)
         lifecycle.attach(core)
+        Log.i(TAG, "AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity and Lifecycle")
         return platform
     }
 }
