@@ -24,8 +24,9 @@ import java.nio.file.Path
  *  - `delete` removes a file, or a directory with everything in it; the root itself cannot be deleted ([FsError.Denied]).
  *    A symbolic link is removed, never followed: what it points at stays (as with `rm` and Swift's `removeItem`).
  *  - `list` returns the names of the entries of one directory, sorted; a directory has no trailing slash.
- *  - A missing file or directory is [FsError.NotFound]; a refused permission is [FsError.Denied]; any other failure
- *    (reading a directory, listing a file, a full disk, ...) is [FsError.Io] with the platform's description.
+ *  - A missing file or directory is [FsError.NotFound]; a refused permission is [FsError.Denied]; a full disk or quota
+ *    (`ENOSPC`, `EDQUOT`) is [FsError.Full] (ADR-049); any other failure (reading a directory, listing a file, ...) is
+ *    [FsError.Io] with the platform's description.
  *
  * Files under `Context.getFilesDir()` are private to the app and included in Android's Auto Backup. To serve another
  * directory (`Context.getExternalFilesDir`, the no-backup directory) pass it as [root]. All operations run on
@@ -33,11 +34,14 @@ import java.nio.file.Path
  *
  * @param root the directory acting as the file system's root; created on the first write.
  */
-public class AndroidFsAdapter(root: File) {
+public class AndroidFsAdapter internal constructor(root: Path) {
+    /** The adapter over the directory [root]; created on the first write. */
+    public constructor(root: File) : this(root.toPath())
+
     /** The adapter over `<filesDir>/undra/fs` of [context]'s application. */
     public constructor(context: Context) : this(File(context.applicationContext.filesDir, DEFAULT_PATH))
 
-    private val root: Path = root.toPath().toAbsolutePath().normalize()
+    private val root: Path = root.toAbsolutePath().normalize()
     private val fs = FsAdapter(this.root)
 
     /**

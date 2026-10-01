@@ -5,14 +5,13 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import dev.undra.runtime.PortImpl
 import dev.undra.runtime.adapters.FileKv
+import dev.undra.runtime.adapters.KeyValueBackend
 import dev.undra.runtime.adapters.StandardPorts
-import dev.undra.runtime.wire.Codecs
-import dev.undra.runtime.wire.UndraCodec
-import dev.undra.runtime.wire.UndraReader
-import dev.undra.runtime.wire.encodeToByteArray
+import dev.undra.runtime.adapters.StorageError
+import dev.undra.runtime.adapters.StoragePort
 import java.io.File
 import java.io.RandomAccessFile
-import java.security.GeneralSecurityException
+import java.nio.file.Path
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -39,12 +38,21 @@ import kotlinx.coroutines.withContext
  *    Keychain and in IndexedDB). Put the secret in the value.
  *  - **Not backed up**: the directory is `noBackupFilesDir`, excluded from Auto Backup, because a restored ciphertext
  *    could not be opened on another device (Keystore keys do not travel). Uninstalling the app deletes both.
- *  - **Failures** (a Keystore that is unavailable, a key that was lost, a file that fails authentication) throw
- *    [SecureStoreException]; the port has no error channel, so the core sees `PortError::Unavailable`, and a read never
- *    pretends that a value which exists is missing. If the Keystore no longer has the key (it is not bound to the lock
- *    screen, so an OS upgrade or a changed lock screen does not invalidate it; a wiped Keystore does), a new one is
- *    made and every value sealed under the old one fails authentication until the app replaces or deletes it, which is
- *    the moment to ask the user to sign in again.
+ *  - **Failures** are [StorageError]s, which the port answers the core with (ADR-049), and a read never pretends that a
+ *    value which exists is missing:
+ *
+ *    | Failure | StorageError |
+ *    |---|---|
+ *    | no Android Keystore (or no `AndroidKeyStore` provider) | [StorageError.Unavailable] |
+ *    | a key that needs the user to authenticate first (`UserNotAuthenticatedException`) | [StorageError.Locked] |
+ *    | a key invalidated for good (`KeyPermanentlyInvalidatedException`), a value that fails authentication, a stored file in another format | [StorageError.Corrupt] |
+ *    | a full disk (`ENOSPC`) | [StorageError.Full] |
+ *    | anything else the Keystore, the cipher or the file system reports | [StorageError.Io] |
+ *
+ *    If the Keystore no longer has the key (it is not bound to the lock screen, so an OS upgrade or a changed lock
+ *    screen does not invalidate it; a wiped Keystore does), a new one is made and every value sealed under the old one
+ *    is [StorageError.Corrupt] until the app replaces or deletes it, which is the moment to ask the user to sign in
+ *    again.
  *
  * Use it for tokens and keys, not for bulk data: every value goes through the Keystore service. It is the library's own
  * `javax.crypto` and `AndroidKeyStore` code rather than `androidx.security:security-crypto`, which is deprecated and
@@ -56,67 +64,70 @@ import kotlinx.coroutines.withContext
  * @param keyAlias the Keystore alias of the AES key.
  */
 public class AndroidSecureStoreAdapter internal constructor(
-    directory: File,
+    directory: Path,
     private val keys: SecretKeySource,
-) {
+) : KeyValueBackend {
+    /** An adapter over [directory] whose AES key comes from [keys] (the tests' software key). */
+    internal constructor(directory: File, keys: SecretKeySource) : this(directory.toPath(), keys)
+
     /** An adapter keeping its files in [directory] and its key in the Keystore under [keyAlias]. */
-    public constructor(directory: File, keyAlias: String = DEFAULT_KEY_ALIAS) : this(directory, KeystoreKeySource(keyAlias, File(directory, KEY_LOCK_FILE)))
+    public constructor(directory: File, keyAlias: String = DEFAULT_KEY_ALIAS) :
+        this(directory.toPath(), KeystoreKeySource(keyAlias, File(directory, KEY_LOCK_FILE)))
 
     /** The adapter over `<noBackupFilesDir>/undra/secure` of [context]'s application, with the default key alias. */
     public constructor(context: Context) : this(File(context.applicationContext.noBackupFilesDir, DEFAULT_PATH))
 
-    private val store = FileKv(directory.toPath())
+    private val store = FileKv(directory)
 
-    /** The value stored under [key], or `null` if there is none.
+    /**
+     * The value stored under [key], or `null` if there is none.
      *
-     * @throws SecureStoreException if the value cannot be decrypted or authenticated.
+     * @throws StorageError.Corrupt if the value cannot be authenticated or is not in the sealed format.
+     * @throws StorageError.Locked if the key needs the user to authenticate first.
+     * @throws StorageError.Unavailable if there is no Android Keystore.
+     * @throws StorageError if it cannot be read otherwise.
      */
-    public suspend fun get(key: String): ByteArray? {
+    override suspend fun get(key: String): ByteArray? {
         val stored = store.get(key) ?: return null
         // The Keystore is a call into another process: never on the thread of the caller.
-        return withContext(Dispatchers.IO) { SecureSeal.open(keys.secret(), key, stored) }
+        return withContext(Dispatchers.IO) { SecureSeal.open(secret(), key, stored) }
     }
 
-    /** Seals [value] and stores it under [key], replacing what was there.
+    /**
+     * Seals [value] and stores it under [key], replacing what was there.
      *
-     * @throws SecureStoreException if the value cannot be encrypted.
+     * @throws StorageError.Full if the disk is full (the old value stays).
+     * @throws StorageError if the value cannot be encrypted or written (see the class documentation).
      */
-    public suspend fun set(key: String, value: ByteArray) {
-        val sealed = withContext(Dispatchers.IO) { SecureSeal.seal(keys.secret(), key, value) }
+    override suspend fun set(key: String, value: ByteArray) {
+        val sealed = withContext(Dispatchers.IO) { SecureSeal.seal(secret(), key, value) }
         store.set(key, sealed)
     }
 
-    /** Removes [key]; removing a missing key is not an error. */
-    public suspend fun delete(key: String): Unit = store.delete(key)
+    /**
+     * Removes [key]; removing a missing key is not an error.
+     *
+     * @throws StorageError if it cannot be removed.
+     */
+    override suspend fun delete(key: String): Unit = store.delete(key)
 
-    /** Every stored key that starts with [prefix], sorted. */
-    public suspend fun list(prefix: String): List<String> = store.list(prefix)
+    /**
+     * Every stored key that starts with [prefix], sorted.
+     *
+     * @throws StorageError if the directory cannot be read.
+     */
+    override suspend fun list(prefix: String): List<String> = store.list(prefix)
 
-    /** This adapter as an async [PortImpl] for [StandardPorts.SecureStore]; a failure answers `unavailable` (see the class documentation). */
-    public fun portImpl(): PortImpl = PortImpl(
-        sync = false,
-        methods = portMethods {
-            this[StandardPorts.SecureStore.GET] = { args ->
-                val key = readArgs(args) { it.readStr() }
-                OPTION_BYTES.encodeToByteArray(this@AndroidSecureStoreAdapter.get(key))
-            }
-            this[StandardPorts.SecureStore.SET] = { args ->
-                val reader = UndraReader(args)
-                val key = reader.readStr()
-                val value = reader.readBytes()
-                reader.finish()
-                this@AndroidSecureStoreAdapter.set(key, value)
-                NO_REPLY
-            }
-            this[StandardPorts.SecureStore.DELETE] = { args ->
-                this@AndroidSecureStoreAdapter.delete(readArgs(args) { it.readStr() })
-                NO_REPLY
-            }
-            this[StandardPorts.SecureStore.LIST] = { args ->
-                STRING_LIST.encodeToByteArray(this@AndroidSecureStoreAdapter.list(readArgs(args) { it.readStr() }))
-            }
-        },
-    )
+    /** This adapter as an async [PortImpl] for [StandardPorts.SecureStore]; a failure answers the core with its [StorageError]. */
+    public fun portImpl(): PortImpl = StoragePort.SECURE_STORE.portImpl(this)
+
+    /** The AES key, with what obtaining it can throw as a [StorageError]. */
+    private fun secret(): SecretKey =
+        try {
+            keys.secret()
+        } catch (e: Exception) {
+            throw SecureSeal.failure(e, "obtaining the Keystore key")
+        }
 
     /** Where the AES key comes from. */
     internal fun interface SecretKeySource {
@@ -131,12 +142,18 @@ public class AndroidSecureStoreAdapter internal constructor(
 
         override fun secret(): SecretKey = cached ?: synchronized(PROCESS_LOCK) { cached ?: load().also { cached = it } }
 
+        /**
+         * The key under [alias], made if there is none.
+         *
+         * @throws StorageError.Unavailable if this device has no Android Keystore (or it cannot be opened).
+         * @throws StorageError otherwise, as [SecureSeal.failure] maps it.
+         */
         private fun load(): SecretKey {
             try {
                 lockFile.parentFile?.mkdirs()
                 RandomAccessFile(lockFile, "rw").use { file ->
                     file.channel.lock().use {
-                        val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+                        val keyStore = openKeystore()
                         (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
                         val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -146,14 +163,18 @@ public class AndroidSecureStoreAdapter internal constructor(
                         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).apply { init(spec) }.generateKey()
                     }
                 }
-            } catch (e: GeneralSecurityException) {
-                throw SecureStoreException("the Android Keystore key '$alias' is unavailable: ${e.message}", e)
-            } catch (e: java.io.IOException) {
-                throw SecureStoreException("the Android Keystore key '$alias' is unavailable: ${e.message}", e)
-            } catch (e: RuntimeException) {
-                throw SecureStoreException("the Android Keystore key '$alias' is unavailable: ${e.message}", e)
+            } catch (e: Exception) {
+                throw SecureSeal.failure(e, "obtaining the Android Keystore key '$alias'")
             }
         }
+
+        /** The `AndroidKeyStore`, loaded; a device (or a desktop JVM) without one is [StorageError.Unavailable]. */
+        private fun openKeystore(): KeyStore =
+            try {
+                KeyStore.getInstance(KEYSTORE).apply { load(null) }
+            } catch (e: Exception) {
+                throw StorageError.Unavailable("the Android Keystore is not available: ${e.javaClass.simpleName}: ${e.message}")
+            }
     }
 
     /** Defaults. */
@@ -166,7 +187,5 @@ public class AndroidSecureStoreAdapter internal constructor(
         private const val KEYSTORE = "AndroidKeyStore"
         private const val KEY_BITS = 256
         private val PROCESS_LOCK = Any()
-        private val OPTION_BYTES: UndraCodec<ByteArray?> = Codecs.option(Codecs.bytes)
-        private val STRING_LIST: UndraCodec<List<String>> = Codecs.vec(Codecs.string)
     }
 }

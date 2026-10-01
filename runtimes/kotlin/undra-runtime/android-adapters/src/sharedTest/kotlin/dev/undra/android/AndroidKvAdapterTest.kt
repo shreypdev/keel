@@ -1,6 +1,8 @@
 package dev.undra.android
 
+import dev.undra.runtime.UndraPortException
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.StorageError
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.decodeAll
 import java.io.File
@@ -13,11 +15,15 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** The Kv adapter over a real directory: round trips, listing, persistence across instances and the port methods. */
+/**
+ * The Kv adapter over a real directory: round trips, listing, persistence across instances, the port methods, and the
+ * typed failures of real damage (`StorageFailureTests` injects the rest).
+ */
 class AndroidKvAdapterTest {
     private lateinit var dir: File
     private lateinit var kv: AndroidKvAdapter
@@ -142,5 +148,35 @@ class AndroidKvAdapterTest {
         assertEquals(listOf("q.one", "q.two"), Codecs.vec(Codecs.string).decodeAll(call(impl, StandardPorts.Kv.LIST, argsOf("q."))))
         assertEquals(0, call(impl, StandardPorts.Kv.DELETE, argsOf("q.one")).size)
         assertNull(option.decodeAll(call(impl, StandardPorts.Kv.GET, argsOf("q.one"))))
+    }
+
+    @Test
+    fun an_entry_that_does_not_decode_is_corrupt_and_is_neither_missing_nor_deleted() = runBlocking {
+        kv.set("undra.query.queue", byteArrayOf(1, 2, 3))
+        val file = dir.listFiles()!!.single()
+        file.writeBytes(byteArrayOf(0xff.toByte(), 0xff.toByte(), 0xff.toByte(), 0x7f, 1)) // a key length the file cannot hold
+        val e = assertThrows(StorageError.Corrupt::class.java) { runBlocking { kv.get("undra.query.queue") } }
+        assertTrue(e.reason, e.reason.contains("undra.query.queue"))
+        assertTrue("the damaged file is kept", file.exists())
+        // Through the port: the typed reply the core receives (status 1, this body).
+        val port = assertThrows(UndraPortException::class.java) { call(kv.portImpl(), StandardPorts.Kv.GET, argsOf("undra.query.queue")) }
+        assertEquals(StorageError.Corrupt(e.reason), StorageError.decodeAll(port.body))
+        // Writing the key again replaces it.
+        kv.set("undra.query.queue", byteArrayOf(4))
+        assertArrayEquals(byteArrayOf(4), kv.get("undra.query.queue"))
+    }
+
+    @Test
+    fun a_store_whose_directory_is_a_file_fails_with_io_on_every_method_that_touches_it() = runBlocking {
+        val blocked = File(dir, "blocked")
+        blocked.writeBytes(byteArrayOf(1)) // the store's directory is a regular file
+        val broken = AndroidKvAdapter(blocked)
+        val write = assertThrows(StorageError.Io::class.java) { runBlocking { broken.set("k", byteArrayOf(1)) } }
+        assertTrue(write.reason, write.reason.isNotEmpty())
+        assertThrows(StorageError.Io::class.java) { runBlocking { broken.get("k") } }
+        // A directory that is not one lists as empty (nothing was ever stored), as before ADR-049.
+        assertEquals(emptyList<String>(), broken.list(""))
+        val port = assertThrows(UndraPortException::class.java) { call(broken.portImpl(), StandardPorts.Kv.SET, argsOf("k", byteArrayOf(1))) }
+        assertTrue(StorageError.decodeAll(port.body) is StorageError.Io)
     }
 }

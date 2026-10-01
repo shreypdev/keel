@@ -30,6 +30,9 @@ android {
         // the file system and the Keystore are Android's own). They live in src/sharedTest.
         getByName("test").java.srcDir("src/sharedTest/kotlin")
         getByName("androidTest").java.srcDir("src/sharedTest/kotlin")
+        // FaultyFileSystem (a file system that fails on demand, ADR-049), shared with :runtime's tests.
+        getByName("test").java.srcDir("../test-support/kotlin")
+        getByName("androidTest").java.srcDir("../test-support/kotlin")
     }
 
     testOptions {

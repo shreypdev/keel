@@ -1,5 +1,6 @@
 package dev.undra.android
 
+import dev.undra.runtime.adapters.StorageError
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
@@ -10,7 +11,10 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The sealed layout of secrets (the same as the web adapter's), with a software AES key standing in for the Keystore's. */
+/**
+ * The sealed layout of secrets (the same as the web adapter's), with a software AES key standing in for the Keystore's.
+ * Whatever does not open is [StorageError.Corrupt] (ADR-049): altered, moved to another key name, another key, another format.
+ */
 class SecureSealTest {
     private fun newKey(): SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
 
@@ -50,7 +54,7 @@ class SecureSealTest {
     fun a_value_cannot_be_moved_to_another_key_name() {
         val key = newKey()
         val sealed = SecureSeal.seal(key, "a", secret)
-        val e = assertThrows(SecureStoreException::class.java) { SecureSeal.open(key, "b", sealed) }
+        val e = assertThrows(StorageError.Corrupt::class.java) { SecureSeal.open(key, "b", sealed) }
         assertTrue(e.message, e.message!!.contains("failed authentication"))
     }
 
@@ -60,14 +64,14 @@ class SecureSealTest {
         val sealed = SecureSeal.seal(key, "k", secret)
         for (at in listOf(1, 5, 13, sealed.size - 1)) {
             val tampered = sealed.copyOf().also { it[at] = (it[at].toInt() xor 1).toByte() }
-            assertThrows("byte $at", SecureStoreException::class.java) { SecureSeal.open(key, "k", tampered) }
+            assertThrows("byte $at", StorageError.Corrupt::class.java) { SecureSeal.open(key, "k", tampered) }
         }
     }
 
     @Test
     fun another_key_cannot_open_it() {
         val sealed = SecureSeal.seal(newKey(), "k", secret)
-        assertThrows(SecureStoreException::class.java) { SecureSeal.open(newKey(), "k", sealed) }
+        assertThrows(StorageError.Corrupt::class.java) { SecureSeal.open(newKey(), "k", sealed) }
     }
 
     @Test
@@ -75,9 +79,9 @@ class SecureSealTest {
         val key = newKey()
         val sealed = SecureSeal.seal(key, "k", secret)
         val wrongFormat = sealed.copyOf().also { it[0] = 2 }
-        assertTrue(assertThrows(SecureStoreException::class.java) { SecureSeal.open(key, "k", wrongFormat) }.message!!.contains("not in the secure-store format"))
-        assertTrue(assertThrows(SecureStoreException::class.java) { SecureSeal.open(key, "k", ByteArray(20)) }.message!!.contains("not in the secure-store format"))
-        assertThrows(SecureStoreException::class.java) { SecureSeal.open(key, "k", ByteArray(0)) }
+        assertTrue(assertThrows(StorageError.Corrupt::class.java) { SecureSeal.open(key, "k", wrongFormat) }.message!!.contains("not in the secure-store format"))
+        assertTrue(assertThrows(StorageError.Corrupt::class.java) { SecureSeal.open(key, "k", ByteArray(20)) }.message!!.contains("not in the secure-store format"))
+        assertThrows(StorageError.Corrupt::class.java) { SecureSeal.open(key, "k", ByteArray(0)) }
     }
 
     @Test
@@ -96,7 +100,7 @@ class SecureSealTest {
         val sealedByWebCrypto = hex("01a0a1a2a3a4a5a6a7a8a9aaab8e6d125920b9301d0fd4ef9116c715270548bd33a919ee")
         assertEquals(1 + 12 + "hunter2".length + 16, sealedByWebCrypto.size)
         assertArrayEquals("hunter2".toByteArray(), SecureSeal.open(key, "session.token", sealedByWebCrypto))
-        assertThrows(SecureStoreException::class.java) { SecureSeal.open(key, "session.other", sealedByWebCrypto) }
+        assertThrows(StorageError.Corrupt::class.java) { SecureSeal.open(key, "session.other", sealedByWebCrypto) }
     }
 
     private fun hex(text: String): ByteArray = ByteArray(text.length / 2) { text.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
