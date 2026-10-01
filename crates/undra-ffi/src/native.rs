@@ -1,7 +1,10 @@
-//! The native C ABI (SPEC 6): every `undra_*` function, exported with `#[unsafe(no_mangle)]`.
+//! The native C ABI (SPEC 6): the entry points the [`UndraApi`](crate::UndraApi) table points at.
 //!
-//! The C prototypes are in `runtimes/swift/UndraRuntime/Sources/UndraFFI/include/undra.h`; each
-//! function documents its own. Conventions:
+//! Since C ABI version 2 (ADR-044) none of them is exported: a core exports one
+//! `<namespace>_undra_api()` ([`export_core!`](crate::export_core)) and a host calls these through
+//! the table's fields, which carry the same names without the `undra_` prefix. The C declarations
+//! are in `runtimes/swift/UndraRuntime/Sources/UndraFFI/include/undra.h`; each function documents
+//! its own. Conventions:
 //!
 //! * every `ptr, len` pair is borrowed for the duration of the call (a null `ptr` is an empty
 //!   payload);
@@ -12,7 +15,7 @@
 //!   other, and must be thread-safe, must not unwind and must not call back into the core
 //!   (SPEC 5.1) except the entries that never take the core lock: [`undra_buf_free`],
 //!   [`undra_port_reply`], [`undra_stream_credit`], [`undra_timer_fired`], [`undra_stats_json`] and
-//!   the read-only [`undra_abi_version`], [`undra_schema_hash`] and [`undra_schema_json`]; the
+//!   the read-only [`undra_schema_json`] (the table's `abi_version` and `schema_hash` are data); the
 //!   others are refused (`E_REENTRANT`) or must not be called from a callback at all. The
 //!   complete host contract is the header comment of `undra.h` and SPEC 6;
 //! * the callbacks and their `user` pointers stay valid until [`undra_shutdown`] returns, a port
@@ -221,25 +224,11 @@ unsafe fn bytes<'a>(ptr: *const u8, len: u32) -> &'a [u8] {
     }
 }
 
-/// `uint32_t undra_abi_version(void)`: the C ABI version this library implements, `1`.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_abi_version() -> u32 {
-    api::ABI_VERSION
-}
-
-/// `uint64_t undra_schema_hash(void)`: the hash of the schema this core was built with
-/// (`fnv1a64` of the canonical schema JSON, SPEC 2.3). Works before `undra_init`.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_schema_hash() -> u64 {
-    guarded("undra_schema_hash", |_| 0, api::schema_hash)
-}
-
 /// `UndraBuf undra_schema_json(void)`: an owned copy of the schema as JSON (UTF-8), doc comments
 /// included (`Schema::to_json`, SPEC 2.3 and 6). It is not the canonical form the hash is computed
-/// over; `Schema::from_json(..)` reads it and its `hash()` is [`undra_schema_hash`]. Free it with
+/// over; `Schema::from_json(..)` reads it and its `hash()` is the table's `schema_hash`. Free it with
 /// [`undra_buf_free`]. Works before `undra_init`; `undra-cli` calls it to run bindgen.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_schema_json() -> UndraBuf {
+pub(crate) extern "C" fn undra_schema_json() -> UndraBuf {
     guarded(
         "undra_schema_json",
         |_| UndraBuf::EMPTY,
@@ -250,12 +239,12 @@ pub extern "C" fn undra_schema_json() -> UndraBuf {
 /// `uint32_t undra_init(const uint8_t *cfg, uint32_t len, undra_reply_cb reply,
 /// undra_changeset_cb changes, undra_stream_cb stream, void *user)`.
 ///
-/// Starts the process-global runtime. `cfg, len` is an encoded `RuntimeConfig`
+/// Starts this core's runtime (one per core image: two cores in a process each have their own). `cfg, len` is an encoded `RuntimeConfig`
 /// (`platform String, mode String, core_threads u8, blocking_threads u8, log_level u8`); the
 /// three callbacks and `user` are how the core reaches the host. The native ABI has no
 /// `undra_poll`, so `core_threads == 0` is treated as `1`: the `undra-core` thread always runs.
 ///
-/// Returns `0` on success, otherwise an [`init_code`]. **Idempotent per process**: calling it
+/// Returns `0` on success, otherwise an [`init_code`]. **Idempotent per core**: calling it
 /// again with the same callbacks and `user` while the runtime is up does nothing and returns `0`;
 /// with different ones it returns `ALREADY_INITIALIZED` and changes nothing. After
 /// [`undra_shutdown`] it can be called again.
@@ -265,8 +254,7 @@ pub extern "C" fn undra_schema_json() -> UndraBuf {
 /// `cfg` must be null or valid for `len` bytes. The callbacks and `user` must stay valid, and
 /// the callbacks must be thread-safe (they run concurrently on arbitrary threads) and must not
 /// unwind, until [`undra_shutdown`] returns. See the host contract in `undra.h`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_init(
+pub(crate) unsafe extern "C" fn undra_init(
     cfg: *const u8,
     len: u32,
     reply: Option<UndraReplyCb>,
@@ -303,8 +291,7 @@ pub unsafe extern "C" fn undra_init(
 /// `undra_init`, so an init on another thread waits for it. The host must not call it from inside
 /// a callback (debug builds assert; release builds skip the waits that could never finish) nor
 /// while holding a lock a port callback needs.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_shutdown() {
+pub(crate) extern "C" fn undra_shutdown() {
     session::stop();
 }
 
@@ -316,8 +303,7 @@ pub extern "C" fn undra_shutdown() {
 /// # Safety
 ///
 /// `ptr` must be null or valid for `len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_call(ptr: *const u8, len: u32) -> u32 {
+pub(crate) unsafe extern "C" fn undra_call(ptr: *const u8, len: u32) -> u32 {
     // SAFETY: the caller guarantees `ptr` is valid for `len` bytes.
     api::call(unsafe { bytes(ptr, len) })
 }
@@ -329,8 +315,7 @@ pub unsafe extern "C" fn undra_call(ptr: *const u8, len: u32) -> u32 {
 /// # Safety
 ///
 /// `ptr` must be null or valid for `len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_call_sync(ptr: *const u8, len: u32) -> UndraBuf {
+pub(crate) unsafe extern "C" fn undra_call_sync(ptr: *const u8, len: u32) -> UndraBuf {
     // SAFETY: the caller guarantees `ptr` is valid for `len` bytes.
     let payload = unsafe { bytes(ptr, len) };
     guarded(
@@ -342,30 +327,26 @@ pub unsafe extern "C" fn undra_call_sync(ptr: *const u8, len: u32) -> UndraBuf {
 
 /// `void undra_cancel(uint32_t call_id)`: cancels an in-flight call or stream. A plain call is
 /// answered with status 3 exactly once; unknown ids are ignored.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_cancel(call_id: u32) {
+pub(crate) extern "C" fn undra_cancel(call_id: u32) {
     api::cancel(call_id);
 }
 
 /// `void undra_stream_credit(uint32_t call_id, uint32_t credit)`: lets the stream `call_id` send
 /// `credit` more items (SPEC 3.7). Never takes the core lock.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_stream_credit(call_id: u32, credit: u32) {
+pub(crate) extern "C" fn undra_stream_credit(call_id: u32, credit: u32) {
     api::stream_credit(call_id, credit);
 }
 
 /// `void undra_observe(uint64_t handle, uint32_t signal_id, uint8_t on)`: starts (`on != 0`) or
 /// stops observing a signal of a store (`signal_id == UINT32_MAX` for all). Starting delivers the
 /// current values through `changeset_cb` before this returns. Unknown handles are ignored.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_observe(handle: u64, signal_id: u32, on: u8) {
+pub(crate) extern "C" fn undra_observe(handle: u64, signal_id: u32, on: u8) {
     api::observe(handle, signal_id, on != 0);
 }
 
 /// `void undra_release(uint64_t handle)`: releases an object handle. Stale or unknown handles are
 /// ignored.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_release(handle: u64) {
+pub(crate) extern "C" fn undra_release(handle: u64) {
     api::release(handle);
 }
 
@@ -386,8 +367,7 @@ pub extern "C" fn undra_release(handle: u64) {
 /// `cb` and `user` must stay valid until the registration is removed or replaced (this call
 /// returns for that id) or [`undra_shutdown`] returns, and `cb` must be thread-safe (port calls
 /// arrive concurrently on arbitrary threads) and must not unwind.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_port_register(
+pub(crate) unsafe extern "C" fn undra_port_register(
     port_id: u32,
     cb: Option<UndraPortCb>,
     user: *mut c_void,
@@ -418,8 +398,7 @@ pub unsafe extern "C" fn undra_port_register(
 /// # Safety
 ///
 /// `ptr` must be null or valid for `len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_port_reply(ptr: *const u8, len: u32) {
+pub(crate) unsafe extern "C" fn undra_port_reply(ptr: *const u8, len: u32) {
     // SAFETY: the caller guarantees `ptr` is valid for `len` bytes.
     api::port_reply(unsafe { bytes(ptr, len) });
 }
@@ -431,23 +410,25 @@ pub unsafe extern "C" fn undra_port_reply(ptr: *const u8, len: u32) {
 /// # Safety
 ///
 /// `ptr` must be null or valid for `len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_event(port_id: u32, method_id: u32, ptr: *const u8, len: u32) {
+pub(crate) unsafe extern "C" fn undra_event(
+    port_id: u32,
+    method_id: u32,
+    ptr: *const u8,
+    len: u32,
+) {
     // SAFETY: the caller guarantees `ptr` is valid for `len` bytes.
     api::event(port_id, method_id, unsafe { bytes(ptr, len) });
 }
 
 /// `void undra_timer_fired(uint32_t timer_id)`: tells the core that timer `timer_id` came due
 /// (only used with a host-owned `Timer` port). Never takes the core lock.
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_timer_fired(timer_id: u32) {
+pub(crate) extern "C" fn undra_timer_fired(timer_id: u32) {
     api::timer_fired(timer_id);
 }
 
 /// `UndraBuf undra_snapshot(void)`: every store as a `Snapshot` payload (SPEC 5.9); an empty
 /// snapshot before `undra_init`. Free the buffer with [`undra_buf_free`].
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_snapshot() -> UndraBuf {
+pub(crate) extern "C" fn undra_snapshot() -> UndraBuf {
     guarded(
         "undra_snapshot",
         |_| UndraBuf::EMPTY,
@@ -462,16 +443,14 @@ pub extern "C" fn undra_snapshot() -> UndraBuf {
 /// # Safety
 ///
 /// `ptr` must be null or valid for `len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_restore(ptr: *const u8, len: u32) -> u32 {
+pub(crate) unsafe extern "C" fn undra_restore(ptr: *const u8, len: u32) -> u32 {
     // SAFETY: the caller guarantees `ptr` is valid for `len` bytes.
     api::restore(unsafe { bytes(ptr, len) })
 }
 
 /// `UndraBuf undra_stats_json(void)`: a JSON document with the live handle count, tasks, calls,
 /// transactions and the boundary crossing counters. Free the buffer with [`undra_buf_free`].
-#[unsafe(no_mangle)]
-pub extern "C" fn undra_stats_json() -> UndraBuf {
+pub(crate) extern "C" fn undra_stats_json() -> UndraBuf {
     guarded(
         "undra_stats_json",
         |_| UndraBuf::EMPTY,
@@ -485,8 +464,7 @@ pub extern "C" fn undra_stats_json() -> UndraBuf {
 /// # Safety
 ///
 /// `buf` must be exactly a buffer this library returned, not yet freed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn undra_buf_free(buf: UndraBuf) {
+pub(crate) unsafe extern "C" fn undra_buf_free(buf: UndraBuf) {
     // SAFETY: the caller guarantees `buf` came from this library and is freed once.
     unsafe { buf.free() };
 }

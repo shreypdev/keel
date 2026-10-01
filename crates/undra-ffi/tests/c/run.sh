@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Builds libundra_ffi and runs the C hosts written against undra.h, with -Wall -Wextra -Werror:
+# Builds the fixture core (libundra_fixture, namespace `undra_fixture`) and runs the C hosts written
+# against undra.h, with -Wall -Wextra -Werror. Since C ABI version 2 (ADR-044) a host reaches a core
+# through the table its one export returns (`undra_fixture_undra_api()`), so both hosts call `api->...`:
 #
-#   smoke.c     the ABI end to end (init, sync port, calls, snapshot layout, shutdown, re-init)
+#   smoke.c     the ABI end to end (the table's header fields, init, sync port, calls, snapshot
+#               layout, shutdown, re-init)
 #   lifetime.c  the host contract: a port's `user` is free()d the moment its removal returns, callbacks
 #               run concurrently, a late Log answer does not loop. Built with AddressSanitizer when the
 #               compiler has it (UNDRA_C_SANITIZE=1 makes that a requirement, =0 turns it off), so a
@@ -13,10 +16,11 @@ HEADER="$REPO/runtimes/swift/UndraRuntime/Sources/UndraFFI/include"
 OUT="${UNDRA_C_SCRATCH:-$(mktemp -d)}"
 CC="${CC:-cc}"
 
-cargo build --manifest-path "$REPO/Cargo.toml" -p undra-ffi
-LIBDIR="${CARGO_TARGET_DIR:-$REPO/target}/debug"
+FIXTURE="$HERE/../fixture"
+cargo build --manifest-path "$FIXTURE/Cargo.toml"
+LIBDIR="${CARGO_TARGET_DIR:-$FIXTURE/target}/debug"
 CFLAGS=(-std=c11 -Wall -Wextra -Werror -I"$HEADER")
-LINK=(-L"$LIBDIR" -lundra_ffi -Wl,-rpath,"$LIBDIR" -pthread)
+LINK=(-L"$LIBDIR" -lundra_fixture -Wl,-rpath,"$LIBDIR" -pthread)
 
 "$CC" "${CFLAGS[@]}" "$HERE/smoke.c" "${LINK[@]}" -o "$OUT/smoke"
 "$OUT/smoke"

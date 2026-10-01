@@ -14,7 +14,7 @@ node --test crates/undra-ffi/tests/wasm/raw.test.mjs                 # the ABI, 
 node --test crates/undra-ffi/tests/wasm/ts-runtime.test.mjs
 ```
 
-`UNDRA_FFI_FIXTURE_WASM=/path/to/undra_core.wasm` picks another build (for example a release one
+`UNDRA_FFI_FIXTURE_WASM=/path/to/undra_fixture.wasm` picks another build (for example a release one
 optimised with `wasm-opt`); `UNDRA_TS_DIST` points at the TypeScript runtime's `dist/index.js` (run.sh otherwise builds one; it
 never uses a `dist/` that happens to be lying around, and `UNDRA_SKIP_TS=1` skips that leg explicitly).
 `run.sh` does all of the above.

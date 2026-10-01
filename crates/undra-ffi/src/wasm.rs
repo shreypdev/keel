@@ -294,7 +294,7 @@ pub unsafe extern "C" fn undra_free(ptr: *mut u8, len: u32) {
 /// `undra_abi_version() -> i32`: `1`.
 #[unsafe(no_mangle)]
 pub extern "C" fn undra_abi_version() -> u32 {
-    api::ABI_VERSION
+    api::WASM_ABI_VERSION
 }
 
 /// `undra_schema_hash() -> i64`: the schema hash of this core (`u64` as `i64` bits).
