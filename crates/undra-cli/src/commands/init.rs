@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use undra_bindgen::Generator;
+use undra_bindgen::naming::CoreNames;
 
 use crate::bindgen::{self, Plan, canonicalize_lenient};
 use crate::cli::InitArgs;
@@ -148,6 +149,13 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     let generated = root.join(&config.generated);
     let build = root.join(&config.build);
     let kotlin_package = format!("{}.core", config.id);
+    // ADR-044: the core's namespace names its symbol, its libraries and the bindings' entry.
+    let core_names = CoreNames::new(
+        &config
+            .core_namespace
+            .clone()
+            .unwrap_or_else(|| CoreNames::default_namespace(&names.core_package)),
+    );
     let ts_package = format!("@app/{}", names.core_package);
     let id_path = config.id.replace('.', "/");
 
@@ -180,7 +188,10 @@ pub(super) fn variables(setup: &Setup) -> Vars {
         .with("KOTLIN_PACKAGE", kotlin_package)
         .with("TS_PACKAGE", ts_package)
         .with("UNDRA_DEP", undra_dep)
-        .with("UNDRA_VERSION", UNDRA_VERSION);
+        .with("UNDRA_VERSION", UNDRA_VERSION)
+        .with("NAMESPACE", core_names.namespace().to_owned())
+        .with("CORE_ENTRY", core_names.entry())
+        .with("CORE_BUNDLE", core_names.bundle());
 
     // iOS
     let ios_dir = root.join("ios");
@@ -191,10 +202,13 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     } else {
         "ios-arm64-simulator"
     };
-    let xcframework = build.join("ios/UndraCore.xcframework");
+    let xcframework = build.join(format!("ios/{}.xcframework", core_names.bundle()));
     let xcframework_rel = rel(&ios_dir, &xcframework);
+    // The prelinked core links like any archive: the bindings reference its entry, which pulls the one
+    // object that holds the whole core (ADR-044), so no -force_load.
+    let library = format!("lib{}.a", core_names.namespace());
     let link_flags = format!(
-        "\"OTHER_LDFLAGS[sdk=iphoneos*]\" = (\n\t\t\t\t\t\"$(inherited)\",\n\t\t\t\t\t\"-force_load\",\n\t\t\t\t\t\"$(SRCROOT)/{xcframework_rel}/ios-arm64/libundra_core.a\",\n\t\t\t\t);\n\t\t\t\t\"OTHER_LDFLAGS[sdk=iphonesimulator*]\" = (\n\t\t\t\t\t\"$(inherited)\",\n\t\t\t\t\t\"-force_load\",\n\t\t\t\t\t\"$(SRCROOT)/{xcframework_rel}/{slice_sim}/libundra_core.a\",\n\t\t\t\t);"
+        "\"OTHER_LDFLAGS[sdk=iphoneos*]\" = (\n\t\t\t\t\t\"$(inherited)\",\n\t\t\t\t\t\"$(SRCROOT)/{xcframework_rel}/ios-arm64/{library}\",\n\t\t\t\t);\n\t\t\t\t\"OTHER_LDFLAGS[sdk=iphonesimulator*]\" = (\n\t\t\t\t\t\"$(inherited)\",\n\t\t\t\t\t\"$(SRCROOT)/{xcframework_rel}/{slice_sim}/{library}\",\n\t\t\t\t);"
     );
     // A generic simulator destination builds every architecture Xcode knows; the XCFramework has
     // only the slices of `[ios] simulator_archs`, so exclude the others instead of failing to link.
@@ -269,7 +283,10 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     vars.set("PROJECT_ROOT_PATH", rel(&web_dir, root));
     vars.set(
         "WASM_IMPORT",
-        rel(&web_dir.join("src"), &build.join("web/undra_core.wasm")),
+        rel(
+            &web_dir.join("src"),
+            &build.join(format!("web/{}.wasm", core_names.namespace())),
+        ),
     );
     match &runtimes.ts {
         RuntimeRef::Path(dir) => {
@@ -453,26 +470,21 @@ const README_IOS: &str = "
 ## iOS
 
 ```sh
-UNDRA_LINK_CORE=1 xcodebuild -project ios/@@APP@@.xcodeproj -scheme @@APP@@ \\
+xcodebuild -project ios/@@APP@@.xcodeproj -scheme @@APP@@ \\
     -destination 'generic/platform=iOS Simulator' build
 ```
 
 Open `ios/@@APP@@.xcodeproj` in Xcode 16 or newer to run it. There is no `undra build` to run first: the **Build the
 Undra core** Run Script phase, before Compile Sources, runs `undra build --platform ios --configuration $CONFIGURATION`
-(a Debug build makes a debug core, a Release build a release one, `build/ios/UndraCore.xcframework`). Xcode skips it
+(a Debug build makes a debug core, a Release build a release one, `build/ios/@@CORE_BUNDLE@@.xcframework`). Xcode skips it
 while the files in `ios/Config/undra-core-inputs.xcfilelist` are older than the ones in
 `ios/Config/undra-core-outputs.xcfilelist`; `undra build` keeps the input list in step with the core's sources, so
 commit it. The phase finds `undra` on `PATH` or in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories (Xcode
 started from the Dock has a short `PATH`) and says how to install it when it is missing; it turns user script
-sandboxing off for the target, since it runs Cargo. The app links the core with `-force_load` (a debug static library
-has many object files and the linker would otherwise drop the ones that register the core's `#[undra::api]` items;
-release builds do not need it, and it is harmless there), not as a framework: Xcode reads an XCFramework while it
-plans the build, before the phase could have made it.
-
-**`UNDRA_LINK_CORE=1`.** The Swift runtime package ships link-time stand-ins for the core so that it builds
-and tests without one; that variable switches them off so the real core is linked. Xcode reads it when it
-resolves packages, so start Xcode with it set: `UNDRA_LINK_CORE=1 open --env UNDRA_LINK_CORE=1 -a Xcode ios/@@APP@@.xcodeproj`,
-or build from the command line as above.
+sandboxing off for the target, since it runs Cargo. The app links the core's library, `lib@@NAMESPACE@@.a`, by its path
+in Other Linker Flags, not as a framework: Xcode reads an XCFramework while it plans the build, before the phase could
+have made it. Each slice is one prelinked object whose only global symbol is the core's entry, which the bindings call
+(`@@CORE_ENTRY@@.load()`), so it needs no `-force_load` and another Undra core can sit next to it in the app.
 
 **Against `undra dev`.** In the scheme's Run environment variables set `UNDRA_DEV_URL` to the `ws://` URL
 `undra dev` prints (a simulator can use `ws://127.0.0.1:7443`; a device needs your computer's address and
@@ -628,9 +640,9 @@ fn next_steps(setup: &Setup) -> String {
     out.push_str("\nThen run an app:\n");
     for platform in &setup.config.platforms {
         match platform {
-            Platform::Ios => out.push_str(
-                "  iOS      open ios/ in Xcode (README.md: the UNDRA_LINK_CORE=1 note)\n",
-            ),
+            Platform::Ios => {
+                out.push_str("  iOS      open ios/ in Xcode, or xcodebuild (README.md)\n")
+            }
             Platform::Android => out.push_str(
                 "  Android  open android/ in Android Studio, or ./gradlew :app:installDebug\n",
             ),
@@ -980,14 +992,18 @@ mod tests {
             2
         );
         assert!(
-            !pbx.contains("UndraCore.xcframework in Frameworks"),
+            !pbx.contains("PhasedCore.xcframework in Frameworks"),
             "Xcode would read it before the phase made it"
         );
+        // ADR-044: the prelinked library is linked by its path, without -force_load.
         assert!(
-            pbx.contains("-force_load")
-                && pbx.contains("build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a"),
+            pbx.contains("\"$(SRCROOT)/../build/ios/PhasedCore.xcframework/ios-arm64/libphased_core.a\"")
+                && pbx.contains(
+                    "\"$(SRCROOT)/../build/ios/PhasedCore.xcframework/ios-arm64-simulator/libphased_core.a\""
+                ),
             "{pbx}"
         );
+        assert!(!pbx.contains("\"-force_load\""), "{pbx}");
         // Every object the file refers to is defined.
         let (defined, seen) = pbx_ids(&pbx);
         assert!(defined.contains("A0A0A0A0A0A0A0A000000092"));
@@ -1008,7 +1024,7 @@ mod tests {
             std::fs::read_to_string(root.join("ios/Config/undra-core-outputs.xcfilelist")).unwrap();
         assert_eq!(
             outputs,
-            "$(SRCROOT)/../build/ios/UndraCore.xcframework/Info.plist\n$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a\n$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64-simulator/libundra_core.a\n$(SRCROOT)/../build/ios/.undra-configuration-$(CONFIGURATION)\n"
+            "$(SRCROOT)/../build/ios/PhasedCore.xcframework/Info.plist\n$(SRCROOT)/../build/ios/PhasedCore.xcframework/ios-arm64/libphased_core.a\n$(SRCROOT)/../build/ios/PhasedCore.xcframework/ios-arm64-simulator/libphased_core.a\n$(SRCROOT)/../build/ios/.undra-configuration-$(CONFIGURATION)\n"
         );
         let _ = std::fs::remove_dir_all(parent);
     }
@@ -1047,9 +1063,9 @@ mod tests {
             outputs
         };
         assert!(
-            setup(&["arm64", "x86_64"]).contains("/ios-arm64_x86_64-simulator/libundra_core.a")
+            setup(&["arm64", "x86_64"]).contains("/ios-arm64_x86_64-simulator/libslices_core.a")
         );
-        assert!(setup(&["x86_64"]).contains("/ios-x86_64-simulator/libundra_core.a"));
+        assert!(setup(&["x86_64"]).contains("/ios-x86_64-simulator/libslices_core.a"));
     }
 
     #[test]

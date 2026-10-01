@@ -14,7 +14,8 @@ enum UndraBootstrap {
     /// core and starts over on it (`MainApp.reload`).
     @MainActor static var coreLost: (() -> Void)?
 
-    /// Loads the core linked into the app (`undra build --platform ios`). In debug builds, when
+    /// Loads the core linked into the app (`undra build --platform ios`) through the bindings' entry,
+    /// `@@CORE_ENTRY@@`, which checks it was built from their schema. In debug builds, when
     /// `UNDRA_DEV_URL` is set (for example `ws://192.168.1.20:7443`), attaches to the core that
     /// `undra dev` serves instead: edit the Rust, save, and the app is on the rebuilt core within a second, no rebuild
     /// of the app.
@@ -23,9 +24,8 @@ enum UndraBootstrap {
         #if DEBUG
         if let url = ProcessInfo.processInfo.environment["UNDRA_DEV_URL"], !url.isEmpty {
             devURL = url
-            core = try UndraCore.load(.remote(
+            core = try @@CORE_ENTRY@@.load(.remote(
                 url: url,
-                expectedSchemaHash: UndraIds.schemaHash,
                 // The runtime reconnects by itself; when it finds a new core instead of its own, it says so.
                 onConnectionChange: { state in
                     if case .closed(.sessionLost) = state {
@@ -36,6 +36,6 @@ enum UndraBootstrap {
             return
         }
         #endif
-        core = try UndraCore.load(.inproc(expectedSchemaHash: UndraIds.schemaHash))
+        core = try @@CORE_ENTRY@@.load()
     }
 }

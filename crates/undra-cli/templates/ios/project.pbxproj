@@ -25,9 +25,10 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /*
- * The core (build/ios/UndraCore.xcframework) is linked with -force_load in OTHER_LDFLAGS (build settings below), not as a
- * framework of this phase: Xcode reads an XCFramework while it plans the build, before the "Build the Undra core" phase
- * could have created it ("There is no XCFramework found").
+ * The core (build/ios/@@CORE_BUNDLE@@.xcframework) is linked by its library's path in OTHER_LDFLAGS (build settings
+ * below), not as a framework of this phase: Xcode reads an XCFramework while it plans the build, before the "Build the
+ * Undra core" phase could have created it ("There is no XCFramework found"). The library is one prelinked object whose
+ * entry, `@@NAMESPACE@@_undra_api`, the bindings reference, so it links like any other archive (no -force_load).
  */
 
 /* Begin PBXFrameworksBuildPhase section */

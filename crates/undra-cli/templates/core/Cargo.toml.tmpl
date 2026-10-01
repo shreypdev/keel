@@ -6,8 +6,8 @@ rust-version = "1.85"
 publish = false
 description = "The Undra core of @@NAME@@"
 
-# A plain library. `undra build` links it with the Undra C ABI into libundra_core (an XCFramework, a
-# .so per ABI, a wasm module) and `undra dev` serves it over a WebSocket, so the core itself names
+# A plain library. `undra build` links it with the Undra C ABI into one library named after the core's
+# namespace (`[core] namespace` in undra.toml: an XCFramework, a .so per ABI, a wasm module) and `undra dev` serves it over a WebSocket, so the core itself names
 # no crate type and depends on nothing but `undra`.
 [dependencies]
 undra = @@UNDRA_DEP@@

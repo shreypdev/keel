@@ -10,7 +10,7 @@ cd todo
 undra doctor                         # what this machine has, what is missing, the exact fix (--fix prints them all)
 undra dev                            # ws://127.0.0.1:7443: the core, served; rebuilt when core/ changes
 undra bindgen                        # after changing a public type: Swift, Kotlin and TypeScript again
-undra build --release                # build/ios/UndraCore.xcframework, build/android/jniLibs, build/web/undra_core.wasm
+undra build --release                # build/ios/TodoCore.xcframework, build/android/jniLibs, build/web/todo_core.wasm
 undra upgrade                        # a newer undra: every pin moved in step, bindings regenerated, migration notes
 ```
 
@@ -37,9 +37,11 @@ Every failure prints what happened, why and what to do, with a stable code
 A project is a directory with an `undra.toml`. Its core is an ordinary library crate that depends on
 `undra`. What ships to a platform is built from two crates the CLI generates under `target/undra/`:
 
-* the **shim** links the core and the C ABI (`undra-ffi`) into a library named `undra_core` (the name
-  the Kotlin runtime loads), with the release profiles of SPEC 7: `cdylib` for the host, Android
-  and web, `staticlib` for iOS;
+* the **shim** links the core and the C ABI (`undra-ffi`) into one library that exports the core under
+  its namespace (`[core] namespace` in undra.toml, default the core's package name in snake case:
+  `todo_core`): one symbol, `todo_core_undra_api`, returning the core's C ABI table (ADR-044). It is
+  built with the release profiles of SPEC 7: `cdylib` for the host, Android and web
+  (`libtodo_core.{dylib,so}`, `todo_core.wasm`), `staticlib` for iOS;
 * the **dev runner** links the core and `undra-transport` into an executable. It is a separate process
   so a core that panics or is being rebuilt cannot take `undra dev` down, and it exits when its
   stdin closes, so it never outlives the CLI.
@@ -49,12 +51,13 @@ copy of `undra-runtime` in the build.
 
 ### iOS
 
-`UndraCore.xcframework` has one static library per slice and **no header**: the Swift runtime's
-`UndraFFI` target declares the C ABI as a module, and a second definition fails the build. The app
-links with `-force_load` (a debug static library has many object files and the linker drops the ones
-that register the core's items) and builds the runtime package with `UNDRA_LINK_CORE=1` so its
-link-time stand-ins do not shadow the real core. The generated Xcode project does the first;
-`undra init`'s README says how to do the second.
+`TodoCore.xcframework` has one static library per slice, `libtodo_core.a`, **prelinked** (`ld -r`) into
+a single object whose only global symbol is `_todo_core_undra_api`: a Rust static library otherwise
+exports every Rust symbol it holds, and two of them in one app would collide or silently merge into one
+runtime. Each slice carries the core's header, `todo_core_undra.h`, without a module map (the generated
+Swift package declares the module `TodoCoreFFI`, and a second definition would fail the build). The
+generated package calls the entry, which pulls the one object that holds the whole core, so the app
+links the library like any other: no `-force_load`, and another Undra core can sit next to it.
 
 ## Tests
 

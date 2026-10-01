@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn docs_are_kept_only_when_asked_for_and_refused_when_the_library_has_none() {
-        let library = Path::new("/build/host/libundra_core.dylib");
+        let library = Path::new("/build/host/libtodo_core.dylib");
         let kept = with_docs_or_without(sample(), Export::Whole, true, library).unwrap();
         assert_eq!(kept.records[0].docs, "An item.");
         let dropped = with_docs_or_without(sample(), Export::Whole, false, library).unwrap();
@@ -429,7 +429,7 @@ mod tests {
         let e = with_docs_or_without(old, Export::Canonical, true, library).unwrap_err();
         assert_eq!(e.code, Code::Schema);
         assert!(
-            e.what.contains("--docs") && e.what.contains("libundra_core"),
+            e.what.contains("--docs") && e.what.contains("libtodo_core"),
             "{e}"
         );
         assert!(e.why.contains("older"), "{e}");

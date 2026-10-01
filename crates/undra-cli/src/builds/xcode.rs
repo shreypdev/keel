@@ -205,10 +205,10 @@ mod tests {
             "the Debug stamp is gone: Xcode runs the phase again for Debug"
         );
         // Writing the same stamp again keeps it, and other files in the directory are left alone.
-        std::fs::write(build.join("ios/UndraCore.xcframework"), "x").unwrap();
+        std::fs::write(build.join("ios/TodoCore.xcframework"), "x").unwrap();
         write_stamp(&build, "Release").unwrap();
         assert!(release.is_file());
-        assert!(build.join("ios/UndraCore.xcframework").is_file());
+        assert!(build.join("ios/TodoCore.xcframework").is_file());
         let text = std::fs::read_to_string(&release).unwrap();
         assert!(
             text.contains("release core of the Release configuration"),

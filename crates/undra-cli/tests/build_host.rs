@@ -24,11 +24,12 @@ fn the_host_library_does_not_carry_the_path_of_the_machine_that_built_it() {
     }
     let project = init_project("hostbuild", "web");
     run_ok(project.undra().args(["build", "--platform", "host"]));
-    let library = project.root.join("build/host/libundra_core.dylib");
+    // Named after the core's namespace (ADR-044): `hostbuild_core`.
+    let library = project.root.join("build/host/libhostbuild_core.dylib");
     assert!(library.is_file(), "no library at {}", library.display());
     assert_eq!(
         install_name(&library),
-        "@rpath/libundra_core.dylib",
+        "@rpath/libhostbuild_core.dylib",
         "an absolute install name would put the build machine's target/ path into every app that embeds the library"
     );
 }

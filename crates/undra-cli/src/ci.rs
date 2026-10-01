@@ -182,13 +182,14 @@ mod tests {
             "-project ios/TodoApp.xcodeproj",
             "-scheme TodoApp",
             "-sdk iphonesimulator",
-            "UNDRA_LINK_CORE: \"1\"",
             "targets: aarch64-linux-android, x86_64-linux-android",
             "targets: aarch64-apple-ios, aarch64-apple-ios-sim",
             "targets: wasm32-unknown-unknown",
         ] {
             assert!(text.contains(needle), "no {needle:?}:\n{text}");
         }
+        // ADR-044: the Swift runtime has no link-time stand-in any more, so nothing switches it off.
+        assert!(!text.contains("UNDRA_LINK_CORE"), "{text}");
     }
 
     #[test]

@@ -81,7 +81,8 @@ pub fn shim_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
 /// reused and stripped. A dedicated directory always builds the core fresh with the shim's
 /// (non-incremental) profile, so the result does not depend on what else touched the project's
 /// target. It still lives under the resolved target directory, so `CARGO_TARGET_DIR` is honoured.
-/// Android (ELF keeps the symbols) and iOS (its staticlib is `-force_load`ed) do not need this.
+/// Android (ELF keeps the symbols) and iOS (its staticlib is prelinked with `-all_load` in debug)
+/// do not need this.
 #[must_use]
 pub fn host_lib_target_dir(target_dir: &Path, project_root: &Path) -> PathBuf {
     target_dir
@@ -356,7 +357,7 @@ mod tests {
             "# v1\n[[package]]\nname = \"itoa\"\nversion = \"1.0.18\"\n",
         )
         .unwrap();
-        let manifest = write_shim(&target, &project, &core(false), "s").unwrap();
+        let manifest = write_shim(&target, &project, &core(false), &names(), "s").unwrap();
         let shim_lock = manifest.with_file_name("Cargo.lock");
         assert_eq!(
             std::fs::read_to_string(&shim_lock).unwrap(),
@@ -365,7 +366,7 @@ mod tests {
         // Cargo completes the shim's lock with what the shim adds: kept while the project's is unchanged.
         let completed = "# v1\n[[package]]\nname = \"itoa\"\nversion = \"1.0.18\"\n\n[[package]]\nname = \"shim\"\n";
         std::fs::write(&shim_lock, completed).unwrap();
-        write_shim(&target, &project, &core(false), "s").unwrap();
+        write_shim(&target, &project, &core(false), &names(), "s").unwrap();
         assert_eq!(std::fs::read_to_string(&shim_lock).unwrap(), completed);
         // `cargo update -p itoa --precise 1.0.5` in the project: the next build uses it.
         std::fs::write(
@@ -373,7 +374,7 @@ mod tests {
             "# v2\n[[package]]\nname = \"itoa\"\nversion = \"1.0.5\"\n",
         )
         .unwrap();
-        write_shim(&target, &project, &core(false), "s").unwrap();
+        write_shim(&target, &project, &core(false), &names(), "s").unwrap();
         assert!(
             std::fs::read_to_string(&shim_lock)
                 .unwrap()
