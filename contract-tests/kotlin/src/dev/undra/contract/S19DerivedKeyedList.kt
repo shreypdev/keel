@@ -4,7 +4,6 @@ import dev.undra.playground.core.Filter
 import dev.undra.playground.core.Todo
 import dev.undra.playground.core.Todos
 import dev.undra.playground.core.UndraIds
-import dev.undra.runtime.UndraDispatchers
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.KeyedPatch
 import dev.undra.runtime.wire.PatchOp
@@ -17,10 +16,6 @@ import dev.undra.runtime.wire.decodeAll
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
-import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * S19: `Todos.visible` is a derived list (ADR-039): it reaches the platform as keyed patches, never as a
@@ -118,7 +113,7 @@ fun s19DerivedKeyedList(w: World) {
 
     // 7. Through the generated class, visible equals the model after every step (calls on the main thread,
     //    where a synchronous call drains the mirror before it returns: read-your-writes).
-    onMain {
+    onMain(timeoutMs = 60_000L) {
         Todos(w.core).use { store ->
             val model = ArrayList<Todo>()
             var filter = Filter.ALL
@@ -260,26 +255,4 @@ private fun replayDerivedVectors() {
     }
     r.finish()
     check(patches > 50_000) { "only $patches patches were replayed" }
-}
-
-/** Runs [block] on the main thread ([UndraDispatchers.main]) and returns what it returned. */
-private fun <T> onMain(block: () -> T): T {
-    val result = CompletableFuture<T>()
-    UndraDispatchers.main.dispatch(
-        EmptyCoroutineContext,
-        Runnable {
-            try {
-                result.complete(block())
-            } catch (e: Throwable) {
-                result.completeExceptionally(e)
-            }
-        },
-    )
-    try {
-        return result.get(60_000L, TimeUnit.MILLISECONDS)
-    } catch (e: ExecutionException) {
-        throw e.cause ?: e
-    } catch (e: java.util.concurrent.TimeoutException) {
-        fail("the main thread did not run the scenario's block within 60 s")
-    }
 }

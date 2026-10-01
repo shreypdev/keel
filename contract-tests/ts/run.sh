@@ -2,14 +2,14 @@
 # The TypeScript column of the contract scenarios (contract-tests/scenarios.md): @undra/runtime over
 # the real wasm build of the playground core, in wasm-main mode, under vitest on Node.
 #
-#   contract-tests/ts/run.sh              # build the core if it is missing or stale, run S01..S19, grade
+#   contract-tests/ts/run.sh              # build the core if it is missing or stale, run S01..S19 and S26, grade
 #   contract-tests/ts/run.sh -t S07       # extra arguments go to vitest (here: only scenario S07)
 #
 # Builds with the undra CLI (`undra build -C examples/playground --platform web`, which writes
 # examples/playground/build/web/playground_core.wasm) unless UNDRA_PLAYGROUND_WASM points somewhere else,
 # and the same core under the namespaces of S26 (examples/two-cores/{a,b}/build/web/playground_{a,b}.wasm).
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless all nineteen pass.
+# contract-tests/check.sh, so the exit status is non-zero unless all twenty (S01..S19, S26) pass.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 

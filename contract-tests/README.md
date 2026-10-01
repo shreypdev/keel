@@ -17,7 +17,7 @@ contract-tests/run-all.sh ts kotlin  # a subset
 * `scenarios.md` is the shared manifest: each scenario, its wire-level steps and what is expected, and the
   harness (manual clock, in-memory `Http` server, `Kv`, `Log`, `Connectivity`) every runner implements.
 * Every runner prints `SCENARIO S07 PASS|FAIL|SKIP <title>` lines; `check.sh <platform>` fails unless all
-  nineteen pass.
+  twenty pass.
 * Each runner builds the core it needs with the `undra` CLI (`undra build -C examples/playground --platform
   web|host`) and uses the bindings `undra bindgen` generated (`examples/playground/generated`), plus the runtime's
   own API for what bindings do not expose (raw signal updates, statistics, snapshots, schema checks).
