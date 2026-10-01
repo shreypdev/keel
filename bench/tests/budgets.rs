@@ -257,7 +257,9 @@ fn budgets() {
             continue;
         };
         let limit = budget.budget_ns * scale;
-        let gate = baseline.as_ref().and_then(|b| b.bench_gate(&workload.name));
+        let gate = baseline
+            .as_ref()
+            .and_then(|b| b.bench_gate_with(&workload.name, budget.baseline_tolerance));
         // The attempts stop at the first one under both gates; a recording keeps the best of all.
         let effective = gate.map_or(limit, |g| limit.min(g.limit_ns));
         let stop_at = if recording.is_some() { 0.0 } else { effective };
@@ -520,6 +522,17 @@ fn record(path: &Path, p50s: &BTreeMap<String, f64>, load_before: Option<f64>) {
             "recorded_by",
             format!("budgets test, best p50 of {ATTEMPTS} attempts per row"),
         ),
+        (
+            "command_layer_a",
+            undra_bench::results::command(
+                "cargo test -p undra-bench --test budgets --release",
+                &[
+                    "UNDRA_BENCH_RECORD",
+                    "UNDRA_BENCH_RECORD_BEST",
+                    "UNDRA_BENCH_FILTER",
+                ],
+            ),
+        ),
     ] {
         baseline.meta.insert(key.to_owned(), value);
     }
@@ -545,10 +558,13 @@ fn record(path: &Path, p50s: &BTreeMap<String, f64>, load_before: Option<f64>) {
 
 /// Layer A p50s, nanoseconds per iteration, of the rows the ratio gates use, in the order of
 /// [`SAMPLE_ROWS`]: the reference host as `budgets.toml` recorded it (a loaded machine), the same
-/// host in a quiet run of 2026-09-30, and six runs of the Bench workflow on a GitHub `ubuntu-latest`
-/// runner (Oct 2026; the runs are 36798191863, 36798621059, 36799125443, 36799240121,
-/// 36799876008 and 36800063172, read from their logs). The pool is not one machine class: the
-/// same row differs by up to 2.2x between those runs, which is why the ratios are the gate there.
+/// host in a quiet run of 2026-09-30, and twelve runs of the Bench workflow on a GitHub
+/// `ubuntu-latest` runner (Oct 2026, read from their logs with `gh run view <id> --log`; each is
+/// named by its run id). The first six set the gates; the last six (36800899301 on) came after
+/// and are the out-of-sample check, which `fanout_100k_vs_10k_observed` failed at its first
+/// maximum (2.37 against 2.3 in 36806665630, a docs-only commit). The pool is not one machine
+/// class: the same row differs by up to 2.2x between those runs, which is why the ratios are the
+/// gate there.
 const SAMPLE_ROWS: [&str; 7] = [
     "stress/firehose/txn_x1000",
     "dispatch/call_sync/add",
@@ -559,7 +575,7 @@ const SAMPLE_ROWS: [&str; 7] = [
     "stress/keyed_churn_10k/ops_x1000",
 ];
 
-const SAMPLES: [(&str, [f64; 7]); 8] = [
+const SAMPLES: [(&str, [f64; 7]); 14] = [
     (
         "host, as budgets.toml recorded it",
         [
@@ -621,7 +637,7 @@ const SAMPLES: [(&str, [f64; 7]); 8] = [
         ],
     ),
     (
-        "runner 36799240121 (the fastest)",
+        "runner 36799240121",
         [
             122_800.0,
             97.8,
@@ -654,6 +670,78 @@ const SAMPLES: [(&str, [f64; 7]); 8] = [
             106_300.0,
             106_840.0,
             6_950_000.0,
+        ],
+    ),
+    (
+        "runner 36800899301",
+        [
+            144_350.0,
+            108.9,
+            274.8,
+            225.4,
+            105_330.0,
+            67_870.0,
+            7_490_000.0,
+        ],
+    ),
+    (
+        "runner 36803857331",
+        [
+            142_140.0,
+            110.0,
+            276.8,
+            225.0,
+            102_780.0,
+            68_300.0,
+            7_520_000.0,
+        ],
+    ),
+    (
+        "runner 36804070521",
+        [
+            157_390.0,
+            124.3,
+            345.0,
+            281.5,
+            95_960.0,
+            68_470.0,
+            6_420_000.0,
+        ],
+    ),
+    (
+        "runner 36806665630",
+        [
+            134_630.0,
+            105.3,
+            236.7,
+            208.7,
+            127_880.0,
+            54_060.0,
+            5_370_000.0,
+        ],
+    ),
+    (
+        "runner 36808385622",
+        [
+            275_860.0,
+            151.2,
+            428.6,
+            381.8,
+            171_390.0,
+            114_180.0,
+            6_470_000.0,
+        ],
+    ),
+    (
+        "runner 36808470795",
+        [
+            157_950.0,
+            127.6,
+            286.9,
+            237.1,
+            97_580.0,
+            68_870.0,
+            6_330_000.0,
         ],
     ),
 ];
@@ -693,9 +781,10 @@ fn with_slower_commit(p50s: &BTreeMap<String, f64>, factor: f64) -> BTreeMap<Str
 
 #[test]
 fn ratios_hold_on_every_recorded_sample() {
-    // The reference host's loaded and quiet runs and six runs on the CI runner pool: every ratio
-    // gate passes on every one, which is what makes the gate safe on that runner by construction
-    // (the machine's speed cancels, and the spread the samples show is inside each `max`).
+    // The reference host's loaded and quiet runs and twelve runs on the CI runner pool: every
+    // ratio gate passes on every one. That is evidence, not proof: a `max` holds on the runner
+    // only as long as the next run's hardware stays inside the spread these samples show (the
+    // fan-out ratio did not, at its first maximum: see SAMPLES).
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let budgets = load_budgets();
     for (name, values) in SAMPLES {
@@ -719,11 +808,13 @@ fn a_commit_twice_as_slow_fails_the_commit_ratio_on_every_recorded_sample() {
 }
 
 #[test]
-fn a_commit_1_8_times_as_slow_fails_the_commit_ratio_on_the_host_and_all_but_the_fastest_runner() {
-    // The review's experiment (a commit path made 1.8x slower) on the recorded samples. The
-    // fastest runner run is the one that passes: its commit is the cheapest against its bare
-    // call, so 1.8x lands at 2.26 against a maximum of 2.3. A ratio gate can only see a shift
-    // larger than the spread of the ratio across hardware, and this is where that spread ends.
+fn a_commit_1_8_times_as_slow_fails_the_commit_ratio_on_the_host_and_most_runners() {
+    // The review's experiment (a commit path made 1.8x slower) on the recorded samples. Three
+    // runner runs of the fast class pass: their commit is the cheapest against their bare call
+    // (a ratio of 1.24 to 1.27), so 1.8x lands at 2.23 to 2.28 against a maximum of 2.3. A ratio
+    // gate can only see a shift larger than the spread of the ratio across hardware, and this is
+    // where that spread ends; the baseline of the base commit, measured on the same VM, is what
+    // catches 1.8x there (`txn_x1000` alone reads 1.8x its base, over the 1.5x gate).
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let budgets = load_budgets();
     let mut passed = Vec::new();
@@ -734,7 +825,15 @@ fn a_commit_1_8_times_as_slow_fails_the_commit_ratio_on_the_host_and_all_but_the
             passed.push(name);
         }
     }
-    assert_eq!(passed, ["runner 36799240121 (the fastest)"], "{passed:?}");
+    assert_eq!(
+        passed,
+        [
+            "runner 36799240121",
+            "runner 36804070521",
+            "runner 36808470795"
+        ],
+        "{passed:?}"
+    );
 }
 
 /// Not a test: prints measurements as `budgets.toml` tables.

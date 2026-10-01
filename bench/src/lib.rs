@@ -36,7 +36,8 @@
 //! (`[ratio."name"]` in `budgets.toml`, [`budget::RatioBudget`]) compare two rows measured in the
 //! same run, so the machine's speed cancels; and a **baseline** ([`baseline`]) records what one
 //! machine class measured and fails a run on that class that is 1.5x worse, which in CI is the
-//! merge base measured on the same VM minutes earlier (`scripts/bench-vs-base.sh`).
+//! base commit (a pull request's target, or the commit a push replaced) measured on the same VM
+//! minutes earlier (`scripts/bench-record-base.sh`).
 //!
 //! # Wall-clock time is fine here
 //!

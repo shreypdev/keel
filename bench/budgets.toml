@@ -56,10 +56,14 @@
 # mechanisms close that without depending on how fast the machine is:
 #   [ratio."name"]  at the end of this file: the ratio of two layer A rows measured in the SAME run
 #                   must stay under `max`. Speed cancels. The rule: `max` is 1.15x the largest ratio
-#                   seen on any healthy sample (the reference host's quiet and loaded runs, and the six
-#                   GitHub-runner runs of Oct 2026, runs 36798191863 .. 36800063172, whose rows are the
-#                   fixture of `ratios_hold_on_every_recorded_sample` in tests/budgets.rs), rounded up
-#                   to 0.1 (a whole number from 10 up). The limit of a ratio is the SPREAD OF THAT
+#                   seen on any healthy sample (the reference host's quiet and loaded runs, and the
+#                   twelve GitHub-runner runs of Oct 2026, runs 36798191863 .. 36808470795, whose rows
+#                   are the fixture of `ratios_hold_on_every_recorded_sample` in tests/budgets.rs),
+#                   rounded up to 0.1 (a whole number from 10 up). The rule holds only for a ratio
+#                   whose spread across hardware is well under 1.15x of its largest sample; a
+#                   cache-bound one (the fan-out ratio: 0.99 to 2.37 on the runners, and 2.37 came
+#                   after its first `max` of 2.3 was set) gets the bound of what it guards instead,
+#                   and says so. The limit of a ratio is the SPREAD OF THAT
 #                   RATIO ACROSS HARDWARE, which the runner data puts at 1.2x-1.5x for rows of one
 #                   family and 2x-3x for rows of different families (a memmove-bound list operation
 #                   against an atomics-bound call): a ratio gate catches a relative shift bigger than
@@ -69,9 +73,13 @@
 #   baselines       bench/baselines/<name>.toml, selected with UNDRA_BENCH_BASELINE: what one machine
 #                   class measured for every row, and a gate at 1.5x of it (p50 and throughput; 2.5x
 #                   for p99). It catches a 1.8x regression on the class it was recorded on. The CI
-#                   runner pool is NOT one class (the same row measured 1.1x-3.3x apart across the six
-#                   runs), so CI records the baseline from the merge base in the same job, on the same
-#                   VM (scripts/bench-vs-base.sh). UNDRA_BENCH_SCALE does not apply to a baseline.
+#                   runner pool is NOT one class (the same row measured 1.1x-3.3x apart across the
+#                   runs), so CI records the baseline from the base commit in the same job, on the
+#                   same VM (scripts/bench-record-base.sh). UNDRA_BENCH_SCALE does not apply to a
+#                   baseline. A row or scenario that proves noisy against its base on the runner gets
+#                   `baseline_tolerance = X` (at least X, X >= 1) in its own table below: the CI
+#                   baseline is recorded afresh in every job, so this file is the only place a
+#                   per-row factor survives. Never widen every row for one.
 # The absolute budgets and `UNDRA_BENCH_SCALE` stay the outer guard on a class with no baseline.
 
 [meta]
@@ -333,20 +341,26 @@ budget_ns = 30000000
 measured_ns = 5847000.0
 
 # One transaction writing 1,000 of 100,000 observed signals of one store cell: one change-set of
-# 21,012 bytes. Cache-bound: 38-42 us across runs on a loaded host.
+# 21,012 bytes. Cache-bound: 38-42 us across runs on a loaded host. The three fan-out rows get 2x
+# against a baseline, not 1.5x: they move with whatever shares the cache (88-132 us across runner VMs
+# of one class, against 1.3x for the commit rows), and a commit regression shows in the firehose rows,
+# not in these.
 [bench."stress/fanout/100k_observed_1k_dirty"]
 budget_ns = 190000
 measured_ns = 37611.1
+baseline_tolerance = 2
 
 # The same 1,000 dirty signals over 10,000 observed: the pair shows cost follows the dirty count.
 [bench."stress/fanout/10k_observed_1k_dirty"]
 budget_ns = 130000
 measured_ns = 25644.6
+baseline_tolerance = 2
 
 # One transaction writing one signal in each of 1,000 stores: 1,000 change-sets of 33 bytes.
 [bench."stress/fanout/1k_stores_1k_dirty"]
 budget_ns = 580000
 measured_ns = 114859.4
+baseline_tolerance = 2
 
 # 1,000 stream items: grant 1,000 credits, run the executor until idle.
 [bench."stress/stream/items_x1000"]
@@ -394,7 +408,11 @@ measured_p999_ns = 26623
 measured_bytes_per_op = 61
 
 # 1,000 of 100,000 observed signals written per transaction (the 10,000-observed companion run
-# is checked against it in code: one change-set and 21,012 bytes either way, cost under 4x).
+# is checked against it in code: one change-set and 21,012 bytes either way, cost under 4x). The two
+# fan-out scenarios get 3x against a baseline (throughput floor and p99): cache-bound, their p99
+# moved 82 to 295 us between runs on the busier reference host (bench/RESULTS.md) and their
+# throughput halved under load (the stress-bench review), which a 1.5x floor or a 2.5x tail reads as
+# a regression.
 [stress."fanout/sustained"]
 min_per_sec = 4600
 p99_ns = 410000
@@ -404,6 +422,7 @@ measured_per_sec = 23296
 measured_p99_ns = 81919
 measured_p999_ns = 129023
 measured_bytes_per_op = 21012
+baseline_tolerance = 3
 
 # One transaction writing one signal in each of 1,000 stores: 1,000 change-sets (33,000 bytes).
 [stress."fanout_stores/sustained"]
@@ -415,6 +434,7 @@ measured_per_sec = 8241
 measured_p99_ns = 253951
 measured_p999_ns = 352255
 measured_bytes_per_op = 33000
+baseline_tolerance = 3
 
 # An always-ready stream against a consumer granting 16 credits a round, then 100,000: items per
 # second is the fast-consumer half; the producer is never more than one item ahead (in code).
@@ -456,13 +476,13 @@ rss_growth_pct = 1
 # ---------------------------------------------------------------------------------------------
 # Ratios between two layer A rows of the same run (bench review M1). Rule in the header. The
 # healthy samples behind each `max` are the reference host (budgets.toml's measured_ns, and a quiet
-# run) and the six runner runs; `measured` is the quiet host. An operation that is `*_x1000` runs
-# 1,000 operations per iteration, hence the `_div`.
+# run) and the twelve runner runs; `measured` is the quiet host. An operation that is `*_x1000`
+# runs 1,000 operations per iteration, hence the `_div`.
 # ---------------------------------------------------------------------------------------------
 
 # What a transaction commit (an update, the change-set, delivery to a counting host) costs against
 # a bare method call that writes nothing: `Calculator.add` through `call_sync`. The tightest gate
-# here: healthy 1.26-1.94 on every sample, 3.1 on the reference host with the commit path made 1.8x
+# here: healthy 1.24-1.94 on every sample, 3.1 on the reference host with the commit path made 1.8x
 # slower on purpose (bench/RESULTS.md, "Gates that catch a 2x regression"), 2.3 maximum.
 [ratio."commit_vs_bare_call"]
 num = "stress/firehose/txn_x1000"
@@ -472,7 +492,7 @@ max = 2.3
 measured = 1.75
 
 # The same relationship through the host-facing path: `Ticker.set` through `call_sync` (decode,
-# dispatch, write, commit, delivery, reply) against the bare call. Healthy 2.30-3.05; 5.1 with the
+# dispatch, write, commit, delivery, reply) against the bare call. Healthy 2.25-3.05; 5.1 with the
 # commit 1.8x slower on the reference host.
 [ratio."set_vs_bare_call"]
 num = "stress/firehose/call_set"
@@ -489,11 +509,16 @@ max = 1.1
 measured = 0.85
 
 # Commit cost follows the dirty count, not the observed count (the layer B scenario asserts the same
-# on its sustained run, at 4x). Healthy 0.99-1.92 (cache-size dependent), 2.3 maximum.
+# on its sustained run, at 4x). Cache-bound, so it is the one ratio whose spread across hardware is
+# as wide as what it could see: healthy 0.99-2.37 over twelve runner runs. Its first maximum, 2.3
+# (1.15x the six runs it was set from), failed a docs-only commit at 2.37 on the very next class of
+# runner (36806665630). The bound is now what it guards: commit cost following the observed count
+# would put this near 10 (100,000 against 10,000 observed), so 4, the scenario's own bound, sees it
+# on every runner, and no cache size seen so far comes near it.
 [ratio."fanout_100k_vs_10k_observed"]
 num = "stress/fanout/100k_observed_1k_dirty"
 den = "stress/fanout/10k_observed_1k_dirty"
-max = 2.3
+max = 4
 measured = 1.22
 
 # One recorded list operation on 10,000 rows (commit, delivery, host apply) against a scalar write

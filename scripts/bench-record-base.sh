@@ -52,9 +52,13 @@ if [ "$BASE_SHA" = "$HEAD_SHA" ] && [ -z "$(git status --porcelain --untracked-f
 fi
 
 TARGET="${BENCH_BASE_TARGET:-$ROOT/target/bench-base}"
-case "$(cd "$(dirname "$TARGET")" 2>/dev/null && pwd)/$(basename "$TARGET")" in
-  "$(cd "${CARGO_TARGET_DIR:-$ROOT/target}" 2>/dev/null && pwd)") die "BENCH_BASE_TARGET must not be the target dir of the tree under test" ;;
-esac
+HEAD_TARGET="${CARGO_TARGET_DIR:-$ROOT/target}"
+# Both exist before they are compared (a directory that does not exist yet would compare as
+# nothing and pass), and they are compared as physical paths (a symlink is the same directory).
+mkdir -p "$TARGET" "$HEAD_TARGET"
+TARGET="$(cd "$TARGET" && pwd -P)"
+[ "$TARGET" != "$(cd "$HEAD_TARGET" && pwd -P)" ] \
+  || die "BENCH_BASE_TARGET must not be the target dir of the tree under test ($TARGET)"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/bench-base.XXXXXX")"
 cleanup() {
   git worktree remove --force "$WORK/tree" >/dev/null 2>&1 || true

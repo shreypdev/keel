@@ -1171,8 +1171,10 @@ pub fn completions(cfg: &StressConfig) -> StressReport {
 
 /// **Contended completions** (e'): scenario e plus a host thread that writes the **same store**
 /// through `call_sync` as fast as it gets the core lock, so two threads (the `undra-core` thread
-/// running the completions, and the writer) commit to one store at once, while 8 threads answer
-/// port calls and the main thread drains. The total is one signal that every completion and every
+/// running the completions, and the writer) commit to one store, interleaved: the core lock
+/// serialises the two committers (a task poll and `call_sync` both take it), so this proves the
+/// hand-off between them and the delivery under it, not two commits running in parallel, while
+/// 8 threads answer port calls and the main thread drains. The total is one signal that every completion and every
 /// write adds one to, so the main thread must see exactly `0, 1, 2, .., completions + writes`: any
 /// lost, repeated or reordered change-set breaks the sequence, whoever committed it.
 pub fn completions_contended(cfg: &StressConfig) -> StressReport {

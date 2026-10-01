@@ -253,17 +253,20 @@ CI.
 
 **Ratio gates** (`[ratio."..."]` tables in `budgets.toml`) compare two layer A rows measured **in the same run**, so
 the machine's speed cancels. Each `max` is 1.15x the largest ratio seen on any healthy sample (the reference host's
-runs and six runs of the Bench workflow on a GitHub runner, Oct 2026), rounded up to 0.1.
+runs and runs of the Bench workflow on a GitHub runner, Oct 2026), rounded up to 0.1. They were set from six runner
+runs; six more came after and are the out-of-sample check (the review of these gates read them): four ratios stayed
+inside what the first six showed, and the fan-out ratio did not (2.37 against its first maximum of 2.3, on a docs-only
+commit), so its maximum is now the bound of what it guards (below).
 
-| Gate | Rows | Healthy, host and six runner runs | `max` | Control | Commit slowed |
+| Gate | Rows | Healthy, host and twelve runner runs | `max` | Control | Commit slowed |
 |---|---|---|---|---|---|
-| `commit_vs_bare_call` | `txn_x1000` per transaction / `dispatch/call_sync/add` | 1.26 to 1.94 | 2.3 | 1.74 | **3.37 (fails)** |
-| `set_vs_bare_call` | `call_set` / `dispatch/call_sync/add` | 2.30 to 3.05 | 3.6 | 2.82 | **5.08 (fails)** |
+| `commit_vs_bare_call` | `txn_x1000` per transaction / `dispatch/call_sync/add` | 1.24 to 1.94 | 2.3 | 1.74 | **3.37 (fails)** |
+| `set_vs_bare_call` | `call_set` / `dispatch/call_sync/add` | 2.25 to 3.05 | 3.6 | 2.82 | **5.08 (fails)** |
 | `event_vs_set` | `event` / `call_set` | 0.76 to 0.93 | 1.1 | 0.94 | 0.92 (the commit is in both) |
-| `fanout_100k_vs_10k_observed` | the two fan-out rows | 0.99 to 1.92 | 2.3 | 1.39 | 1.37 (commit cost follows the dirty count) |
+| `fanout_100k_vs_10k_observed` | the two fan-out rows | 0.99 to 2.37 | 4 (not 1.15x: cache-bound; commit cost following the observed count would read about 10) | 1.39 | 1.37 (commit cost follows the dirty count) |
 | `keyed_churn_vs_set` | `keyed_churn_10k` per operation / `call_set` | 15 to 47 | 54 | 43.6 | 25.5 |
 
-A ratio can only see a shift larger than **its own spread across hardware**, and the six runner runs show how large
+A ratio can only see a shift larger than **its own spread across hardware**, and the runner runs show how large
 that is. The ubuntu-latest pool is not one machine class: the same row measured up to 2.2x apart between runs
 (`stress/firehose/txn_x1000` 123 to 275 us, `signals/changeset_100/cell` 1.56 to 4.44 us), in two clusters. Rows of one
 family (a commit against a bare call) keep their ratio within 1.2x to 1.5x; rows of different families (a memmove-bound
@@ -273,14 +276,18 @@ one. Only the two commit-versus-call ratios are tight enough to see a commit tha
 of the whole machine is, by construction, invisible to a ratio. `ratios_hold_on_every_recorded_sample` in
 `bench/tests/budgets.rs` holds the recorded samples (the runs are named in its comment) and checks that every gate
 passes on every one; the next two tests model a commit `S` times slower on the same samples (a transaction costs `S`
-times as much, and `call_set` and `event` pay the difference once). At 2x, `commit_vs_bare_call` fails on all eight
-samples; at 1.8x on seven, and the one it misses is the fastest runner run (2.26 against a maximum of 2.3).
+times as much, and `call_set` and `event` pay the difference once). At 2x, `commit_vs_bare_call` fails on all fourteen
+samples; at 1.8x on eleven, and the three it misses are fast-class runner runs whose commit is the cheapest against their
+call (2.23 to 2.28 against a maximum of 2.3). There the baseline below is the gate: `txn_x1000` alone reads 1.8x its base.
 
 **Baselines** (`bench/baselines/<name>.toml`, `UNDRA_BENCH_BASELINE=<name or path>`) record what one machine class
 measured for every layer A row and sustained scenario, and fail a run on that class that is more than 1.5x worse
 (p50 1.5x, or 20 ns more where that is more for rows of a few tens of nanoseconds; a throughput under 1/1.5; a p99 over
-2.5x). `UNDRA_BENCH_RECORD=path` records one (best of three attempts, `UNDRA_BENCH_RECORD_BEST=1` keeps the better
-of what the file holds), with the CPU, the load average and the commit next to the numbers.
+2.5x). The cache-bound fan-out rows get 2x and the two fan-out scenarios 3x (`baseline_tolerance` in their
+`budgets.toml` tables: their tails moved 82 to 295 us between runs on a busy host, and a commit regression shows in the
+firehose rows, not in these). `UNDRA_BENCH_RECORD=path` records one (best of three attempts, `UNDRA_BENCH_RECORD_BEST=1`
+keeps the better of what the file holds), with the CPU, the commands, the load average and the commit next to the
+numbers.
 `bench/baselines/apple-m5-pro.toml` is the reference host's (three recordings at load 2.1 to 2.4, best of each row).
 Against it, with the spin back on (a weaker one that run, `2026-09-30-commit-spin-vs-host-baseline-*.json`): `txn_x1000`
 at **1.61x** its baseline, `call_set` 1.70x, `event` 1.72x, both ratio gates failing (2.85 and 4.92), and the sustained
@@ -290,12 +297,13 @@ scenario dilutes a commit regression with the call, the clock and the host's cop
 instrument and the sustained gates catch a commit regression of about 1.6x and up**. `UNDRA_BENCH_SCALE` does not apply
 to a baseline.
 
-**On CI the baseline is the merge base, measured in the same job.** A baseline recorded on one machine is worth
+**On CI the baseline is the base commit, measured in the same job.** A baseline recorded on one machine is worth
 nothing on another, and the runner pool is at least two machines, so `bench.yml` records the baseline from the
 **base commit on the same VM** with `scripts/bench-record-base.sh` (this tree's harness against the base's crates, in
 a target directory of its own, best of three attempts per row, 2 s per scenario), then gates the head against it. For
-a pull request the base is the first parent of the merge ref; for a push it is the commit the push replaced. The same
-machine, minutes apart: its speed cancels by construction. Run end to end on the reference host (the baseline is
+a pull request the base is the first parent of the merge ref; for a push it is the commit the push replaced, which is
+why no push's run is cancelled by the next push's (a cancelled run would leave that push compared with nothing, and the
+next one compared against it). The same machine, minutes apart: its speed cancels by construction. Run end to end on the reference host (the baseline is
 `bench/results/2026-09-30-commit-experiment-base.toml`, recorded about two minutes before the runs it gates):
 
 | | Layer A rows against the base | Ratio gates | `firehose/sustained`, `event/sustained` |
@@ -308,11 +316,13 @@ every commit leaves the firehose p50 at 251 ns, 847 ns and 3.52 us at 1 s, 10 s 
 fails it (`2026-09-30-commit-ramp-soak-60s.json`, below).
 
 What none of this sees: a regression under 1.5x (the baseline) or under a ratio's own spread, a regression in a row the
-base does not have, and anything when the base does not build against the head's harness (the step then says so and the
-gates are the absolute budgets and the ratios). Noise is the other side of 1.5x: in the spin run a row the spin cannot
+base does not have, and anything when the base does not build against the head's harness (the run then carries a
+warning saying so, and the gates are the absolute budgets and the ratios). Noise is the other side of 1.5x: in the spin run a row the spin cannot
 touch, `signals/keyed_100/insert` (333 ns), read 1.43x its baseline on a machine at load 3, and it passed because the
 best of three attempts counts; the first CI run of this workflow is the first time `bench-record-base.sh` runs on a
-runner, and a row that proves too noisy there gets its own `tolerance` in the baseline file.
+runner, and it is an A/A run by construction (this change touches no crate, so the base and the head build the same
+core): a row that proves too noisy there gets `baseline_tolerance` in its own `budgets.toml` table, the only place a
+per-row factor survives a baseline recorded afresh in every job.
 
 ### What these numbers are not
 
@@ -550,9 +560,9 @@ just smoke-runs every operation, so `cargo test --workspace` stays green and fas
 
 Two more steps follow it in the same job. `cargo test -p undra-bench --test stress --release` runs the eight
 sustained scenarios of [Harsh conditions](#harsh-conditions) for 2 s each and fails over their
-`[stress."..."]` tables in `budgets.toml` (a throughput floor, p99 and p999 ceilings, exact change-set bytes,
-RSS growth) or on a broken invariant (nothing lost, nothing reordered, the host's list equals the core's, a
-stream never more than one item ahead); a noisy run gets three attempts, an invariant none. Then
+`[stress."..."]` tables in `budgets.toml` (a throughput floor, p99 and p999 ceilings, a change-set bytes ceiling,
+RSS growth) or on a broken invariant (nothing lost, nothing reordered, the exact byte count, the host's list equals
+the core's, a stream never more than one item ahead); a noisy run gets three attempts, an invariant none. Then
 `cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2` runs the mixed paced load and fails
 on RSS growth, drift in the firehose's p99, a broken invariant or a host that could not carry the load. The
 debug build of the stress test checks invariants only (500 churn rows, 100 ms per scenario), so

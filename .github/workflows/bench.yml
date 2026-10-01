@@ -20,12 +20,15 @@ name: Bench
 #     the runner's speed cancels. They run in every step below, on every runner.
 #   * A BASELINE recorded from the BASE commit, in this same job on this same VM, minutes before the
 #     head is measured (scripts/bench-record-base.sh: the head's harness against the base's crates).
-#     The head must be within 1.5x of it on every row (p50, throughput; 2.5x for p99). It is the
+#     The head must be within 1.5x of it on every row (p50, throughput; 2.5x for p99; the
+#     cache-bound fan-out rows have `baseline_tolerance` 2 and 3 in budgets.toml). It is the
 #     base measured here, not a number from another machine, because the ubuntu-latest pool is not
 #     one machine class: the same row measured 1.1x to 3.3x apart across six runs. For a pull request
 #     the base is the first parent of the merge ref; for a push it is the commit the push replaced.
 #     When there is no base to measure (a new branch, a base that does not build against this
-#     harness) the step says so and the gates are the absolute budgets and the ratios.
+#     harness) the run carries a warning saying so, and the gates are the absolute budgets and the
+#     ratios. A noisy row on the runner gets `baseline_tolerance` in its budgets.toml table (the
+#     baseline is recorded afresh in every job, so it cannot carry one), never a looser default.
 #
 # Harsh conditions (the stress and soak steps): the sustained scenarios of `bench/tests/stress.rs`
 # run for 2 s each (UNDRA_STRESS_SECONDS) at rates far above any UI, with 8 threads completing port
@@ -49,7 +52,12 @@ on:
   pull_request:
 
 concurrency:
-  group: bench-${{ github.ref }}
+  # A pull request's newer run replaces its older one: each run compares the whole pull request
+  # with its base. A push to main is NEVER cancelled (one group per commit): its baseline is the
+  # commit the push replaced, so a cancelled run would leave that push compared with nothing, and
+  # the next push would be gated against it, regression included. (Before this, a merge followed a
+  # minute later by its state commit had the merge's run cancelled: 36803857331, 36808385622.)
+  group: bench-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 env:
@@ -73,21 +81,30 @@ jobs:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # A key of its own since the base build: rust-cache saves only on a miss, and the cache
+          # of the earlier key had no target/bench-base, so the base's dependencies would have been
+          # built cold on every run until Cargo.lock or the toolchain changed. rust-cache keeps a
+          # nested target directory's dependencies and drops its workspace crates, like target/'s.
+          key: with-base-target
       - name: Baseline from the base commit (same VM)
         id: base
         # A base that does not build against this harness must not fail the job: the gates below
-        # then run without it, and say so.
+        # then run without it. It must not be silent either: a warning on the run says so.
         continue-on-error: true
         env:
           BASE_REV: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
         run: |
           case "$BASE_REV" in
             ''|0000000000000000000000000000000000000000)
-              echo "no base commit to measure against: the gates are the absolute budgets and the ratios"
+              echo "::warning title=No baseline gate::no base commit to measure against; this run is gated by the absolute budgets and the ratios only"
               exit 0 ;;
           esac
-          scripts/bench-record-base.sh "$BASE_REV" "$RUNNER_TEMP/base-baseline.toml" 2
-          echo "path=$RUNNER_TEMP/base-baseline.toml" >> "$GITHUB_OUTPUT"
+          if scripts/bench-record-base.sh "$BASE_REV" "$RUNNER_TEMP/base-baseline.toml" 2; then
+            echo "path=$RUNNER_TEMP/base-baseline.toml" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=No baseline gate::the base $BASE_REV could not be measured with this harness (see the step's log); this run is gated by the absolute budgets and the ratios only, which miss most regressions under 2x"
+          fi
       - name: Budgets
         env:
           UNDRA_BENCH_BASELINE: ${{ steps.base.outputs.path }}

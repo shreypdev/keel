@@ -13,9 +13,9 @@
 //!
 //! * a bare name, `apple-m5-pro`, reads `bench/baselines/apple-m5-pro.toml`;
 //! * a path (anything with a `/` or ending in `.toml`) reads that file, which is how CI gates a
-//!   change against the merge base it measured **in the same job, on the same VM** minutes
-//!   earlier (`scripts/bench-vs-base.sh`): the machine's speed cancels by construction, whatever
-//!   hardware the runner pool hands out;
+//!   change against the base commit it measured **in the same job, on the same VM** minutes
+//!   earlier (`scripts/bench-record-base.sh`): the machine's speed cancels by construction,
+//!   whatever hardware the runner pool hands out;
 //! * unset (or `off`): no baseline gate, and the run says so.
 //!
 //! A name or path that does not exist is an error, never a silent skip. Record one with
@@ -45,6 +45,12 @@
 //! `UNDRA_BENCH_BASELINE_TOLERANCE` and `UNDRA_BENCH_BASELINE_TAIL_TOLERANCE` override the two
 //! factors for one run. `UNDRA_BENCH_SCALE` does **not** apply to a baseline: it exists for a
 //! machine class that has no baseline, and a baseline already is that class.
+//!
+//! A row's own factor can also live in `budgets.toml` (`baseline_tolerance` in its `[bench."..."]`
+//! or `[stress."..."]` table), which is the only place it can live for CI: that baseline is
+//! recorded afresh in every job and carries no per-row factor. It gives the row **at least** that
+//! factor ([`Selected::bench_gate_with`], [`Selected::stress_failures_with`]); a `tolerance` in
+//! the baseline file's own row still wins, being about that machine class.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -561,10 +567,23 @@ impl Selected {
         .map(Some)
     }
 
+    /// The factor for a row: the baseline row's own, else at least `row_tolerance` (the row's
+    /// `baseline_tolerance` in `budgets.toml`), else the run's.
+    fn factor_for(&self, own: Option<f64>, row_tolerance: Option<f64>) -> f64 {
+        own.unwrap_or_else(|| row_tolerance.map_or(self.tolerance, |t| t.max(self.tolerance)))
+    }
+
     /// The gate for layer A row `name`, if the baseline has it.
     pub fn bench_gate(&self, name: &str) -> Option<BenchGate> {
+        self.bench_gate_with(name, None)
+    }
+
+    /// Like [`bench_gate`](Selected::bench_gate), with `row_tolerance` (the row's
+    /// `baseline_tolerance` in `budgets.toml`) as the least factor of a row the baseline file
+    /// gives none of its own.
+    pub fn bench_gate_with(&self, name: &str, row_tolerance: Option<f64>) -> Option<BenchGate> {
         let row = self.baseline.benches.get(name)?;
-        let tolerance = row.tolerance.unwrap_or(self.tolerance);
+        let tolerance = self.factor_for(row.tolerance, row_tolerance);
         Some(BenchGate {
             baseline_ns: row.p50_ns,
             tolerance,
@@ -575,8 +594,20 @@ impl Selected {
     /// How a sustained run compares with the baseline of scenario `name`: the sentences of every
     /// gate it missed (empty: it passed), or `None` when the baseline has no such scenario.
     pub fn stress_failures(&self, name: &str, observed: &StressObserved) -> Option<Vec<String>> {
+        self.stress_failures_with(name, observed, None)
+    }
+
+    /// Like [`stress_failures`](Selected::stress_failures), with `row_tolerance` (the scenario's
+    /// `baseline_tolerance` in `budgets.toml`) as the least factor of a scenario the baseline file
+    /// gives none of its own. The p99 gets the larger of it and the tail factor.
+    pub fn stress_failures_with(
+        &self,
+        name: &str,
+        observed: &StressObserved,
+        row_tolerance: Option<f64>,
+    ) -> Option<Vec<String>> {
         let row = self.baseline.stress.get(name)?;
-        let tolerance = row.tolerance.unwrap_or(self.tolerance);
+        let tolerance = self.factor_for(row.tolerance, row_tolerance);
         let mut failures = Vec::new();
         let floor = row.per_sec / tolerance;
         if observed.per_sec < floor {
@@ -786,6 +817,54 @@ per_sec = 28_000_000
         assert!(
             sel.stress_failures("not/a/scenario", &observed(1.0, None))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_row_factor_from_the_budgets_file_widens_a_row_the_baseline_gives_none() {
+        // What CI needs: its baseline is recorded afresh in each job and carries no row factor,
+        // so a row that proves noisy on the runner gets one from budgets.toml.
+        let dir = tempdir("row-factor");
+        std::fs::write(dir.join("m.toml"), SAMPLE).unwrap();
+        let sel =
+            Selected::resolve(dir.join("m.toml").to_str().unwrap(), &dir, None, None).unwrap();
+        // [meta] tolerance = 1.4; the row has none of its own.
+        let row = "stress/firehose/txn_x1000";
+        assert_eq!(sel.bench_gate_with(row, None).unwrap().tolerance, 1.4);
+        assert_eq!(sel.bench_gate_with(row, Some(2.0)).unwrap().tolerance, 2.0);
+        // At least: a budgets.toml factor below the run's never tightens the row.
+        assert_eq!(sel.bench_gate_with(row, Some(1.1)).unwrap().tolerance, 1.4);
+        // The baseline file's own row factor is about that machine class, and wins.
+        assert_eq!(
+            sel.bench_gate_with("a/b", Some(5.0)).unwrap().tolerance,
+            3.0
+        );
+        // A scenario: throughput floor 5.93 M/s / 2 = 2.96 M/s, p99 ceiling 211 * 2.5.
+        let slow = observed(3_000_000.0, Some(300.0));
+        assert_eq!(
+            sel.stress_failures("firehose/sustained", &slow)
+                .unwrap()
+                .len(),
+            1,
+            "3.0 M/s is under 5.93 / 1.4"
+        );
+        assert!(
+            sel.stress_failures_with("firehose/sustained", &slow, Some(2.0))
+                .unwrap()
+                .is_empty()
+        );
+        // The p99 gets the larger of the row factor and the tail factor.
+        let tail = observed(5_900_000.0, Some(211.0 * 2.9));
+        assert_eq!(
+            sel.stress_failures_with("firehose/sustained", &tail, Some(2.0))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            sel.stress_failures_with("firehose/sustained", &tail, Some(3.0))
+                .unwrap()
+                .is_empty()
         );
     }
 

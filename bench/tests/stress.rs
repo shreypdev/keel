@@ -315,10 +315,12 @@ fn stress() {
                     .map(|check| check.what.clone()),
             );
             // What a machine class measured earlier: a regression on it fails whatever the budgets say.
-            match baseline
-                .as_ref()
-                .map(|b| (b, b.stress_failures(name, &observed)))
-            {
+            match baseline.as_ref().map(|b| {
+                (
+                    b,
+                    b.stress_failures_with(name, &observed, budget.baseline_tolerance),
+                )
+            }) {
                 Some((b, Some(over))) => verdict.failures.extend(
                     over.into_iter()
                         .map(|f| format!("{f}, against the baseline in {}", b.path.display())),
@@ -544,6 +546,19 @@ fn record(path: &std::path::Path, mut baseline: Baseline, load_before: Option<f6
         ("git", hostinfo::git_revision()),
         ("stress_seconds", seconds().to_string()),
         (
+            "command_layer_b",
+            undra_bench::results::command(
+                "cargo test -p undra-bench --test stress --release",
+                &[
+                    "UNDRA_BENCH_RECORD",
+                    "UNDRA_BENCH_RECORD_BEST",
+                    "UNDRA_STRESS_SECONDS",
+                    "UNDRA_STRESS_WARMUP_MS",
+                    "UNDRA_BENCH_FILTER",
+                ],
+            ),
+        ),
+        (
             "load_layer_b",
             format!(
                 "{} before, {} after (one-minute load average)",
@@ -693,7 +708,15 @@ fn the_completions_scenario_stops_near_its_deadline() {
         warmup: None,
     };
     for _ in 0..4 {
-        let report = common::stress::completions(&cfg);
+        // On a thread with a watchdog: the old loop did not return at all (over 150 s, twice, in
+        // review), and a test that hangs fails only when the CI job times out.
+        let (done, report) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(common::stress::completions(&cfg));
+        });
+        let report = report
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a 100 ms run did not end in 60 s: the issuer ignored its deadline");
         assert!(
             report.elapsed < Duration::from_secs(5),
             "a 100 ms run took {:?}: the issuer ignored its deadline",

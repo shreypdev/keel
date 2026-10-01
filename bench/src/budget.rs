@@ -11,6 +11,7 @@
 //! measured_ns = 80                    # criterion median when the budget was set
 //! blueprint_ns = 60                   # the blueprint's section 14 target, when the row exists
 //! blueprint = "<= 60 ns on iOS (A15)" # the target in words
+//! baseline_tolerance = 2              # optional: against a baseline, this row gets at least 2x
 //! ```
 //!
 //! Numbers are nanoseconds and may use `_` separators. Anything else is a syntax error, with the
@@ -31,7 +32,12 @@
 //! measured_p99_ns = 209               # (kept for humans, and checked to be inside the gates)
 //! measured_p999_ns = 292
 //! measured_bytes_per_op = 37
+//! baseline_tolerance = 2              # optional: against a baseline, at least 2x (not a gate)
 //! ```
+//!
+//! `baseline_tolerance` (at least 1) is the one per-row knob of the baseline gate
+//! ([`crate::baseline`]) that survives a baseline recorded afresh in every CI job: a row or
+//! scenario that proves noisy on a machine class gets more room here, and only it.
 //!
 //! `UNDRA_BENCH_SCALE` divides `min_per_sec` and multiplies the two latency ceilings; it never
 //! touches `bytes_per_op`, `rss_growth_pct` or a scenario's own invariants (nothing lost,
@@ -71,6 +77,9 @@ pub struct Budget {
     pub blueprint_ns: Option<f64>,
     /// The same target in words (device and unit), for reports.
     pub blueprint: Option<String>,
+    /// Against a baseline (`UNDRA_BENCH_BASELINE`), this row's p50 gets at least this factor:
+    /// a row that proves noisy on a machine class gets room here rather than every row getting it.
+    pub baseline_tolerance: Option<f64>,
 }
 
 /// A ratio between two layer A rows measured in the same run (a `[ratio."name"]` table): the
@@ -149,6 +158,9 @@ pub struct StressBudget {
     pub measured_p999_ns: Option<f64>,
     /// Bytes per operation measured when the gates were set.
     pub measured_bytes_per_op: Option<f64>,
+    /// Against a baseline (`UNDRA_BENCH_BASELINE`), this scenario's throughput gets at least this
+    /// factor, and its p99 at least this or the tail factor. Not a gate of its own.
+    pub baseline_tolerance: Option<f64>,
 }
 
 /// What a sustained run observed, in the terms a [`StressBudget`] gates.
@@ -513,11 +525,13 @@ impl Budgets {
                         "measured_p99_ns" => entry.measured_p99_ns = Some(n),
                         "measured_p999_ns" => entry.measured_p999_ns = Some(n),
                         "measured_bytes_per_op" => entry.measured_bytes_per_op = Some(n),
+                        "baseline_tolerance" if n >= 1.0 => entry.baseline_tolerance = Some(n),
                         _ => {
                             return Err(syntax(
                                 "a stress table takes min_per_sec, p99_ns, p999_ns, bytes_per_op, \
                                  rss_growth_pct, measured_per_sec, measured_p99_ns, \
-                                 measured_p999_ns and measured_bytes_per_op",
+                                 measured_p999_ns, measured_bytes_per_op and baseline_tolerance \
+                                 (at least 1)",
                             ));
                         }
                     }
@@ -546,10 +560,14 @@ impl Budgets {
                         ("measured_ns", Value::Number(n)) => entry.measured_ns = Some(n),
                         ("blueprint_ns", Value::Number(n)) => entry.blueprint_ns = Some(n),
                         ("blueprint", Value::Text(t)) => entry.blueprint = Some(t),
+                        ("baseline_tolerance", Value::Number(n)) if n >= 1.0 => {
+                            entry.baseline_tolerance = Some(n);
+                        }
                         _ => {
                             return Err(syntax(
                                 "a bench table takes budget_ns, measured_ns, blueprint_ns \
-                                 (numbers) and blueprint (a string)",
+                                 (numbers), blueprint (a string) and baseline_tolerance (a number \
+                                 of at least 1)",
                             ));
                         }
                     }
@@ -593,6 +611,7 @@ impl Budgets {
                     measured_ns: partial.measured_ns,
                     blueprint_ns: partial.blueprint_ns,
                     blueprint: partial.blueprint,
+                    baseline_tolerance: partial.baseline_tolerance,
                 },
             );
         }
@@ -616,6 +635,7 @@ struct PartialBudget {
     measured_ns: Option<f64>,
     blueprint_ns: Option<f64>,
     blueprint: Option<String>,
+    baseline_tolerance: Option<f64>,
 }
 
 /// Removes a `#` comment, unless the `#` is inside a double-quoted string.
@@ -822,6 +842,30 @@ measured = 1.8
         ] {
             let err = Budgets::parse(text).unwrap_err();
             assert!(matches!(err, BudgetError::Syntax { .. }), "{text}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_row_or_scenario_may_carry_its_own_baseline_factor_of_at_least_one() {
+        let b = Budgets::parse(
+            "[bench.\"a\"]\nbudget_ns = 10\nbaseline_tolerance = 2\n\
+             [stress.\"s\"]\nmin_per_sec = 5\nbaseline_tolerance = 1.8\n",
+        )
+        .unwrap();
+        assert_eq!(b.benches["a"].baseline_tolerance, Some(2.0));
+        assert_eq!(b.stress["s"].baseline_tolerance, Some(1.8));
+        // It is not a gate: a scenario with only it still has none.
+        assert!(Budgets::parse("[stress.\"s\"]\nbaseline_tolerance = 2\n").is_err());
+        // Below 1 it would fail an unchanged run.
+        for text in [
+            "[bench.\"a\"]\nbudget_ns = 10\nbaseline_tolerance = 0.9\n",
+            "[stress.\"s\"]\nmin_per_sec = 5\nbaseline_tolerance = 0.5\n",
+        ] {
+            let err = Budgets::parse(text).unwrap_err();
+            assert!(
+                matches!(err, BudgetError::Syntax { line: 3, .. }),
+                "{text}: {err}"
+            );
         }
     }
 
