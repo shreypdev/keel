@@ -8,7 +8,7 @@
 //!   times slower".
 //! * **Layer B**, [`scenarios`]: each scenario runs for a fixed wall time with its producers,
 //!   consumers and threads, times every operation into a
-//!   [`Histogram`](keel_bench::stats::Histogram), counts change-set bytes, samples RSS and
+//!   [`Histogram`], counts change-set bytes, samples RSS and
 //!   checks invariants (nothing lost, nothing reordered, the host's list equals the core's, a
 //!   stream never more than one item ahead of its credit). It is gated by the
 //!   `[stress."..."]` tables. It catches "fast once, but not for two seconds": tails, leaks,

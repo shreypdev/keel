@@ -8,6 +8,9 @@ measure, the full criterion tables behind them, and what is still waiting for de
 * The CI gate is different and cheaper: `cargo test -p keel-bench --test budgets --release`
   times the same operations with plain `Instant` and fails over `bench/budgets.toml` (see
   [The CI gate](#the-ci-gate)).
+* Harsh conditions (sustained load, tails, memory, invariants) have their own gate and a soak:
+  `cargo test -p keel-bench --test stress --release` and
+  `cargo run -p keel-bench --release --bin soak` (see [Harsh conditions](#harsh-conditions)).
 * Medians are criterion's; the bracket is its 95% confidence interval on the median.
 
 ## Machine
@@ -50,6 +53,99 @@ Also measured, not a row: the same handle method call through the C ABI (`keel_c
 `boundary/call_sync/add`) is 49.8 ns (79.3 ns before ADR-028), so the ABI itself adds about 6 ns (the
 `Runtime::global()` lookup and the `KeelBuf` hand-off). Without the one allocation that hand-off owes, the
 same call is 31.5 ns (`dispatch/call_sync_with/add`).
+
+## Harsh conditions
+
+The question a demanding app team asks is not "how fast is one call" but "what happens at a hundred times
+any UI's rate, for minutes, with several threads, and does it stay correct and flat in memory". These
+scenarios answer it for **the core side** of the pipeline, on a host: a transaction committed, its
+change-set built and handed to the host's callback, the host's list updated, a stream and a port call
+completed. What a platform does with a change-set afterwards (copy it, decode it, apply it on the main
+thread, render) is **not** measured here: it is measured in the browser (the playground's stress screen)
+and, for iOS and Android, on the blueprint's devices in the device phase, and the rows for it are empty
+until then (see [Device numbers](#device-numbers-ios-android-web) and ADR-031, which is about exactly that
+platform half). A host number says "the core is not the bottleneck"; it does not say "the app is smooth".
+
+Numbers below are from `KEEL_STRESS_SECONDS=10` (best of three runs for the gates, the last run for the
+medians) and a 60 s soak, on the machine above. **The machine was shared**: other builds ran throughout (load
+average 3 to 8), the cache-bound tails moved by up to 4x between runs (fan-out p99 82 to 295 us), and one
+gated run of three needed a second and third attempt for a tail. The gates are 5x to 10x the best run for that
+reason; no number was tuned to pass.
+
+| # | Scenario | What it proves | Measured (10 s run) | CI gate | Verdict |
+|---|---|---|---|---|---|
+| a | **Firehose**: one observed `Signal<u64>`, one transaction per update, a host calling `call_sync` | each transaction is O(1) in the core at 100x any UI rate: one change-set of exactly 37 bytes | **5.8 M transactions/s**; p50 167 ns, p99 211 ns, p999 295 ns per call (commit + delivery + the copy every FFI callback makes); a core-side burst commits at 79 ns each, 12.7 M/s | at least 1.1 M/s, p99 at most 1.1 us, p999 at most 3 us, 37 bytes; layer A: 1,000-burst 400 us, call 630 ns | within, 5x margin |
+| g | **Event firehose**: `Runtime::event` on an event port whose subscriber writes the signal | the path a WebSocket or sensor feed takes into the core | **6.5 M events/s**; p50 125 ns, p99 167 ns, p999 295 ns; 37 bytes | at least 1.4 M/s, p99 840 ns, p999 2.6 us; layer A 580 ns | within |
+| b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **170 k operations/s**; p50 4.1 us, p99 17.9 us, p999 26.6 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
+| c | **Fan-out**: 1,000 of 100,000 observed signals written per transaction, then the same 1,000 over 10,000 observed (signal-table layer, no runtime) | commit time and bytes follow the dirty count, not the observed count | **22 k transactions/s**; p50 42 us, p99 98 us; one change-set of **21,012 bytes** either way; the 10,000-observed run has p50 27 us (ratio 1.5, gated at 4) | at least 4.6 k/s, p99 410 us, p999 1.3 ms, 21,012 bytes; layer A 190 us and 130 us | within |
+| c' | **Fan-out across stores**: 1,000 stores of 100 signals, one written in each, one transaction | the per-store overhead when one transaction touches many stores: 1,000 change-sets sharing a transaction | **7.5 k transactions/s** (7.5 M change-sets/s); p50 100 us, p99 377 us; 33,000 bytes | at least 1.6 k/s, p99 1.3 ms, 33,000 bytes; layer A 580 us | within |
+| d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Keel buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **29 M items/s** with credit; produced minus delivered never above **1** in 7.4 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
+| e | **Concurrent completions**: 8 host threads answering async port calls, a `keel-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
+| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, no drift | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
+
+Allocations: one observed single-signal commit allocates **exactly 3 times** (the two vectors of
+`group_by_store` and the `claimed` vector), an unobserved one **0**; `crates/keel-ffi/tests/commit_alloc.rs`
+holds the first at "at most 3" and the second at 0 with a counting allocator (only that crate may count,
+R2). At 100,000 commits a second those 3 are 300,000 `malloc`/`free` pairs a second, which is the next thing
+to remove (a roadmap line, not a budget here).
+
+### The soak, 60 s
+
+| | Target | Achieved (mean, slowest second) |
+|---|---|---|
+| firehose, `Ticker.set` through `call_sync` | 100,000/s | 99,999/s, 99,856/s |
+| keyed churn, 20 operations per call on 10,000 rows | 20,000 ops/s | 20,000/s, 19,959/s |
+| completions, 128 in flight, 8 completer threads | 50,000/s | 49,999/s, 49,916/s |
+| stream, the consumer granting 1,000 credits a millisecond | 1,000,000 items/s | 999,987/s, 998,608/s |
+
+6.0 M firehose writes, 1.2 M churn operations, 3.0 M completions, 60.0 M stream items and 10.2 M change-sets
+were delivered; the drain thread (60 Hz) found at most 4,280 change-sets in one frame. Every invariant held:
+nothing out of order, no completion lost, the store's total equals the number of completions and is the last
+value the main thread applied, the host's 10,000-row list equals the core's after 1.2 M patches, the stream
+never more than one item ahead of its credit, no warning logged. **RSS** (`ps`, sampled once a second): 10.39 MB
+at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s to the end, so +0.00% after the half-run warm-up. The firehose's own
+p99 inside the mix is 59 us (median over the seconds, worst 76 us), not the 211 ns it has alone: it is the
+wait for the core lock behind a 20-operation churn call or a completion burst, which is what mixed load costs;
+the drift gate compares each second with the others, so the number is not itself gated.
+
+RSS on macOS climbs in page-sized steps early under this load (allocator magazines and thread stacks
+settling): 10.39 MB at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s on in the run above, and in two of the four
+60 s runs that counted only the first 20% as warm-up it took further steps at 17 to 33 s and ended at +0.88% and
++2.05%. It is flat afterwards, so the soak's warm-up is the first half of the run; both 60 s runs with that rule
+ended at +0.00%, and the 10 s CI configuration (5 s of warm-up) passed five runs in a row, after one of an
+earlier six ended at +1.44% and one missed its completion rate while another build ran. That is the host
+allocator, not the core, and it is why CI runs the soak with `--attempts 2`: a run that fails only a noisy gate
+is repeated, a broken invariant is not.
+
+### Method
+
+* **Sustained throughput** is operations divided by the wall time of the whole run, not the sum of
+  per-operation samples. **Latencies** time every operation with one `Instant` pair into a fixed log-linear
+  histogram (1/32 relative error, no allocation per sample), so p999 is of millions of samples; a percentile is
+  the upper bound of its bucket. `Instant` ticks at 41.67 ns on this host, so a 167 ns p50 is four ticks.
+* **Bytes** are what the host's callback was handed (`payload.len()`), deterministic, so gated exactly.
+* **Memory** is resident set size (`/proc/self/status` on Linux, `ps -o rss=` on macOS, nothing else), sampled
+  outside the timed region and page-granular (16 KiB here), so the gate is "at most 1% **or** 64 KiB" from the
+  first sample after the warm-up to the last. A platform that cannot be sampled reports the gate as skipped, never
+  as passed.
+* **Invariants** are asserted in code and are not scaled or retried: a fast core that loses or reorders a
+  change-set fails. They have teeth: tests make the host drop a patch and make the main-thread model swap two
+  change-sets, and require the equality and order invariants to fail.
+* **Host stand-ins**: a copy of every change-set (what each FFI callback does), a host list that decodes and
+  applies each keyed patch, and a "main thread" that drains once a frame and checks per-store order. They stand
+  in for the platform's mailbox and list state; they cost far less than the platform's own work does.
+* **Budgets** follow the file's rule: floor = measured / 5, p99 ceiling 5x, p999 ceiling 10x, bytes exact,
+  RSS 1%; each layer A row 5x its p50. Reproduce: `KEEL_STRESS_SECONDS=10 cargo test -p keel-bench --test
+  stress --release -- --nocapture`, `cargo run -p keel-bench --release --bin soak -- --seconds 60`,
+  `cargo bench -p keel-bench --bench stress` (criterion, for humans).
+
+### What these numbers are not
+
+They are a host's core side, not a device's, and not the platform half. The same firehose reaches the UI
+as 100,000 change-sets a second to copy, decode and apply (and a keyed patch copies the whole list on
+TypeScript and Kotlin), which is what ADR-031 changes; the before and after on the same screen, in the
+browser and on the devices, will be recorded here. Until then the only claim these rows support is the one
+they measure: **the core commits, delivers and keeps order and memory at rates 100x any UI's.**
 
 ## Findings
 
@@ -266,8 +362,8 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 
 ## The CI gate
 
-`bench/budgets.toml` holds a host budget for each of the 46 operations the gate runs (the wire round trips,
-dispatch, signals, snapshot). Each is about **5x** what this machine measures (with a 250 ns floor and two
+`bench/budgets.toml` holds a host budget for each of the 55 operations the gate runs (the wire round trips,
+dispatch, signals, snapshot and the eight per-operation rows of the harsh-conditions scenarios). Each is about **5x** what this machine measures (with a 250 ns floor and two
 significant figures), which is what makes a shared CI runner pass while an operation that became several
 times slower fails. The budgets guard against **regressions on a host**; they are not the section 14 device
 targets, and none of them sits above its device target today. (The keyed-patch rows were one miss until
@@ -276,6 +372,16 @@ ADR-027: the insert row's gate is 31 µs, 5x what it measures, and what it measu
 it measures, not the allocator.) The test takes the best p50 of up to three attempts, runs in `--release` only (a debug build
 just smoke-runs every operation, so `cargo test --workspace` stays green and fast), and supports
 `KEEL_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
+
+Two more steps follow it in the same job. `cargo test -p keel-bench --test stress --release` runs the seven
+sustained scenarios of [Harsh conditions](#harsh-conditions) for 2 s each and fails over their
+`[stress."..."]` tables in `budgets.toml` (a throughput floor, p99 and p999 ceilings, exact change-set bytes,
+RSS growth) or on a broken invariant (nothing lost, nothing reordered, the host's list equals the core's, a
+stream never more than one item ahead); a noisy run gets three attempts, an invariant none. Then
+`cargo run -p keel-bench --release --bin soak -- --seconds 10 --attempts 2` runs the mixed paced load and fails
+on RSS growth, drift in the firehose's p99, a broken invariant or a host that could not carry the load. The
+debug build of the stress test checks invariants only (500 churn rows, 100 ms per scenario), so
+`cargo test --workspace` stays green and about 4 s slower.
 
 ## Device numbers (iOS, Android, Web)
 

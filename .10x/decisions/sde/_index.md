@@ -9,3 +9,4 @@ playground, bench. Per-piece notes land here as `<slug>.md` when each piece merg
 
 - `playground.md` — the playground core, apps, contract scenarios (17 x 3), findings for the integrator (2026-09-30).
 - `keel-cli.md` — the CLI: layout, shim/runner design, XCFramework and shell decisions, open items (2026-09-30).
+- `stress-bench.md` — the Rust half of the harsh-conditions benchmark: sustained scenarios, the `[stress]` budget table, the soak, the ffi allocation gate, numbers, deviations from the design (2026-09-30).
