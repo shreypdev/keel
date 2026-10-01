@@ -10,6 +10,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { LabErrorCodec, RemoteErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -36,7 +37,7 @@ export class Probe extends UndraObject {
    * A probe with every counter at zero.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Probe> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<Probe> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -171,7 +172,7 @@ export class Probe extends UndraObject {
 export async function add(
   a: number,
   b: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise<number> {
   const w = new UndraWriter();
   w.writeI32(a);
@@ -198,7 +199,7 @@ export async function addLater(
   a: number,
   b: number,
   delayMs: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<number> {
   const w = new UndraWriter();
@@ -223,7 +224,10 @@ export async function addLater(
  * @throws {LabError}
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export async function area(figure: Figure, core: UndraCore = UndraCore.shared): Promise<number> {
+export async function area(
+  figure: Figure,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise<number> {
   const w = new UndraWriter();
   FigureCodec.encode(w, figure);
   try {
@@ -246,7 +250,7 @@ export async function area(figure: Figure, core: UndraCore = UndraCore.shared): 
  */
 export async function configureRemote(
   config: RemoteConfig,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise<void> {
   try {
     const w = new UndraWriter();
@@ -276,7 +280,7 @@ export async function configureRemote(
 export async function createRemoteTodo(
   list: string,
   title: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<RemoteTodo> {
   const w = new UndraWriter();
@@ -301,7 +305,7 @@ export async function createRemoteTodo(
  */
 export async function echoComposite(
   value: Composite,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise<Composite> {
   const w = new UndraWriter();
   CompositeCodec.encode(w, value);
@@ -323,7 +327,7 @@ export async function echoComposite(
  */
 export async function echoFigure(
   value: Figure,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise<Figure> {
   const w = new UndraWriter();
   FigureCodec.encode(w, value);
@@ -345,7 +349,7 @@ export async function echoFigure(
  */
 export async function echoPrimitives(
   value: Primitives,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise<Primitives> {
   const w = new UndraWriter();
   PrimitivesCodec.encode(w, value);
@@ -366,7 +370,10 @@ export async function echoPrimitives(
  * crash, on the platforms that can unwind (R6).
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export async function explode(reason: string, core: UndraCore = UndraCore.shared): Promise<number> {
+export async function explode(
+  reason: string,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise<number> {
   const w = new UndraWriter();
   w.writeStr(reason);
   try {
@@ -389,7 +396,7 @@ export async function explode(reason: string, core: UndraCore = UndraCore.shared
 export async function explodeLater(
   delayMs: number,
   reason: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<number> {
   const w = new UndraWriter();
@@ -418,7 +425,7 @@ export async function explodeLater(
 export async function failLater(
   delayMs: number,
   code: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<number> {
   const w = new UndraWriter();
@@ -441,7 +448,10 @@ export async function failLater(
  * A greeting.
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export async function greet(name: string, core: UndraCore = UndraCore.shared): Promise<string> {
+export async function greet(
+  name: string,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise<string> {
   const w = new UndraWriter();
   w.writeStr(name);
   try {
@@ -463,7 +473,7 @@ export async function greet(name: string, core: UndraCore = UndraCore.shared): P
  */
 export async function parseCount(
   text: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise<number> {
   const w = new UndraWriter();
   w.writeStr(text);
@@ -483,7 +493,7 @@ export async function parseCount(
  * Does nothing and returns nothing: a call with neither arguments nor a result.
  * A failure is logged and passed to `onError`; the returned promise never rejects.
  */
-export async function ping(core: UndraCore = UndraCore.shared): Promise<void> {
+export async function ping(core: UndraCore = UndraPlaygroundCore.core): Promise<void> {
   try {
     await core.call(
       { target: CallTarget.FreeFunction },
@@ -506,7 +516,7 @@ export async function setRemoteDone(
   list: string,
   id: number,
   done: boolean,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<RemoteTodo> {
   const w = new UndraWriter();
@@ -530,7 +540,7 @@ export async function setRemoteDone(
  * The name and version of the core.
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export async function version(core: UndraCore = UndraCore.shared): Promise<string> {
+export async function version(core: UndraCore = UndraPlaygroundCore.core): Promise<string> {
   try {
     const body = await core.call(
       { target: CallTarget.FreeFunction },

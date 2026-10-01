@@ -15,6 +15,7 @@ import {
   decodePatch,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { ListErrorCodec, StressErrorCodec, TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -304,7 +305,7 @@ export class Bench extends UndraStore {
    * A store with every counter at zero and [`ROWS`] rows numbered from 1.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Bench> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<Bench> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -1130,7 +1131,7 @@ export class BigList extends UndraStore {
    * A list of [`LIST_LEN`] items numbered from 1.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async create(core: UndraCore = UndraCore.shared): Promise<BigList> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<BigList> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -1302,7 +1303,7 @@ export class Counter extends UndraStore {
    * A counter at zero with no changes made.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Counter> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<Counter> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -1432,7 +1433,7 @@ export class Stress extends UndraStore {
    * A store with every signal at its start: zeros, and no generator running.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Stress> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<Stress> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -1558,7 +1559,7 @@ export class Todos extends UndraStore {
    * An empty list showing every item.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Todos> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<Todos> {
     let handle: bigint;
     try {
       handle = await core.construct(

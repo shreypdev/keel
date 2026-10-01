@@ -10,7 +10,7 @@ public final class Probe: UndraObject, @unchecked Sendable {
 
     /// A probe with every counter at zero.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -126,7 +126,7 @@ public final class Probe: UndraObject, @unchecked Sendable {
 
 /// Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -> Int32 {
+public func add(a: Int32, b: Int32, ctx: UndraCore = UndraPlaygroundCore.core) throws -> Int32 {
     var w = UndraWriter()
     a.undraEncode(&w)
     b.undraEncode(&w)
@@ -149,7 +149,7 @@ public func addLater(
     a: Int32,
     b: Int32,
     delayMs: UInt32,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> Int32 {
     var w = UndraWriter()
     a.undraEncode(&w)
@@ -169,7 +169,7 @@ public func addLater(
 
 /// The area of a circle or a rectangle. A label and an empty figure have none.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double {
+public func area(_ figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core) throws -> Double {
     var w = UndraWriter()
     figure.undraEncode(&w)
     do {
@@ -188,7 +188,7 @@ public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double {
 /// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
-public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
+public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core) {
     var w = UndraWriter()
     config.undraEncode(&w)
     do {
@@ -213,7 +213,7 @@ public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
 public func createRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
@@ -232,7 +232,10 @@ public func createRemoteTodo(
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -> Composite {
+public func echoComposite(
+    _ value: Composite,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> Composite {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -249,7 +252,10 @@ public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -> Figure {
+public func echoFigure(
+    _ value: Figure,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> Figure {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -266,7 +272,10 @@ public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -> Figu
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws -> Primitives {
+public func echoPrimitives(
+    _ value: Primitives,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -> Primitives {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -284,7 +293,7 @@ public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws
 /// Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
 /// crash, on the platforms that can unwind (R6).
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func explode(reason: String, ctx: UndraCore = .shared) throws -> UInt32 {
+public func explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> UInt32 {
     var w = UndraWriter()
     reason.undraEncode(&w)
     do {
@@ -304,7 +313,7 @@ public func explode(reason: String, ctx: UndraCore = .shared) throws -> UInt32 {
 public func explodeLater(
     delayMs: UInt32,
     reason: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> UInt32 {
     var w = UndraWriter()
     delayMs.undraEncode(&w)
@@ -327,7 +336,7 @@ public func explodeLater(
 public func failLater(
     delayMs: UInt32,
     code: Int32,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> UInt32 {
     var w = UndraWriter()
     delayMs.undraEncode(&w)
@@ -346,7 +355,7 @@ public func failLater(
 
 /// A greeting.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
+public func greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -363,7 +372,7 @@ public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
 
 /// Reads an unsigned number of at most nine digits.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func parseCount(text: String, ctx: UndraCore = .shared) throws -> UInt32 {
+public func parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> UInt32 {
     var w = UndraWriter()
     text.undraEncode(&w)
     do {
@@ -380,7 +389,7 @@ public func parseCount(text: String, ctx: UndraCore = .shared) throws -> UInt32 
 
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
-public func ping(ctx: UndraCore = .shared) {
+public func ping(ctx: UndraCore = UndraPlaygroundCore.core) {
     do {
         _ = try ctx.callSync(
             .freeFunction(methodId: UndraIds.Functions.ping),
@@ -399,7 +408,7 @@ public func setRemoteDone(
     list: String,
     id: UInt32,
     done: Bool,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
@@ -419,7 +428,7 @@ public func setRemoteDone(
 
 /// The name and version of the core.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func version(ctx: UndraCore = .shared) throws -> String {
+public func version(ctx: UndraCore = UndraPlaygroundCore.core) throws -> String {
     do {
         let body = try ctx.callSync(
             .freeFunction(methodId: UndraIds.Functions.version),
