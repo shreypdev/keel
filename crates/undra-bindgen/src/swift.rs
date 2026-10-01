@@ -304,9 +304,6 @@ impl Types<'_> {
         match t {
             TypeRef::Option(i) | TypeRef::Vec(i) => self.codable(i, visiting),
             TypeRef::Map(k, v) => self.codable(k, visiting) && self.codable(v, visiting),
-            // A standard type the runtime provides is not `Codable` (`UndraAppState` is only an
-            // `UndraCodec`), so a struct that holds one cannot derive it.
-            TypeRef::Named(name) if self.model.external(name).is_some() => false,
             TypeRef::Named(name) => match self.model.kind(name) {
                 Some(NamedKind::UnitEnum) => true,
                 Some(NamedKind::Record) => {
