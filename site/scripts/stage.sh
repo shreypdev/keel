@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stages the deployable site into _site/: site/ plus the built playground at _site/playground/.
-# Expects examples/playground/web/dist (npx vite build --base=/keel/playground/) to exist.
+# Expects examples/playground/web/dist (npx vite build --base=/undra/playground/) to exist.
 #
 #   bash site/scripts/stage.sh
 set -euo pipefail

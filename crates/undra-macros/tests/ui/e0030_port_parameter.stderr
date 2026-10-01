@@ -1,0 +1,17 @@
+error: error[undra::E0030]: parameter `url` of port method `request` is not a wire type
+         = note: `&str` cannot cross the boundary (references have no wire representation; every value crosses by copy)
+         = help: use an owned `String`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0030
+ --> tests/ui/e0030_port_parameter.rs:7:34
+  |
+7 |     async fn request(&self, url: &str, on_progress: Box<dyn Fn(u8)>) -> u16;
+  |                                  ^^^^
+
+error: error[undra::E0030]: parameter `on_progress` of port method `request` is not a wire type
+         = note: trait object `dyn Fn(u8)` cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript)
+         = help: use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0030
+ --> tests/ui/e0030_port_parameter.rs:7:57
+  |
+7 |     async fn request(&self, url: &str, on_progress: Box<dyn Fn(u8)>) -> u16;
+  |                                                         ^^^^^^^^^^

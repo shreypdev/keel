@@ -55,7 +55,7 @@ function target(page, url) {
   if (/^(?:mailto:|tel:|data:|javascript:)/i.test(url)) return null;
   if (/^https?:\/\//i.test(url)) return url.startsWith(ORIGIN) ? url.slice(ORIGIN.length) : null;
   if (url.startsWith("//")) return null;
-  if (url.startsWith("/keel/")) return url.slice("/keel/".length); // root-absolute under the Pages base path: the 404 page and the playground build
+  if (url.startsWith("/undra/")) return url.slice("/undra/".length); // root-absolute under the Pages base path: the 404 page and the playground build
   if (url.startsWith("/")) return url.slice(1);
   return posix.join(posix.dirname(page), url);
 }
@@ -74,7 +74,7 @@ for (const f of files) {
     const [bare] = noHash.split("?");
     let t = raw.startsWith("#") ? page : target(page, bare);
     if (t === null) continue;
-    if (EXEMPT.has(page) && raw.startsWith("/") && !raw.startsWith("/keel/")) continue; // the 404 page's fallback for a site served at the root
+    if (EXEMPT.has(page) && raw.startsWith("/") && !raw.startsWith("/undra/")) continue; // the 404 page's fallback for a site served at the root
     if (t === "" || t.endsWith("/")) t += "index.html";
     if (BUILT(t)) continue;
     const exists = existsSync(join(ROOT, t));

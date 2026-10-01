@@ -1,4 +1,4 @@
-/* Keel site, landing page only: the live demo. Progressive enhancement: with JS off the demo links to the playground. */
+/* Undra site, landing page only: the live demo. Progressive enhancement: with JS off the demo links to the playground. */
 (function () {
   "use strict";
   var doc = document;
@@ -28,7 +28,7 @@
       gotStats = false; clearTimeout(giveUp);
       frame = doc.createElement("iframe");
       frame.loading = "lazy"; frame.src = url(screen);
-      frame.title = "Keel playground: the real Rust core, running in this page as WebAssembly";
+      frame.title = "Undra playground: the real Rust core, running in this page as WebAssembly";
       mount.appendChild(frame);
       if (note) note.hidden = true;
       giveUp = setTimeout(function () {
@@ -38,17 +38,16 @@
     };
     window.addEventListener("message", function (e) {
       var d = e.data;
-      // "undra-stats" is the name; the pre-rename spelling is accepted too so a half-merged tree keeps working.
-      if (!frame || e.source !== frame.contentWindow || e.origin !== location.origin || !d || (d.type !== "undra-stats" && d.type !== "keel-stats")) return;
+      if (!frame || e.source !== frame.contentWindow || e.origin !== location.origin || !d || d.type !== "undra-stats") return;
       var r = Number(d.changeSetsPerSec), a = Number(d.applyP50Us), b = Number(d.applyP99Us);
       if (!isFinite(r) || !isFinite(a) || !isFinite(b)) return;
       if (!gotStats) { gotStats = true; clearTimeout(giveUp); if (note) note.hidden = true; }
       if (isFinite(Number(d.timerResolutionUs))) step = Math.max(floorUs, Number(d.timerResolutionUs));
       stat.rate.textContent = r.toFixed(1); stat.p50.textContent = fmt(a); stat.p99.textContent = fmt(b);
     });
-    doc.addEventListener("keel:theme", function (e) {
+    doc.addEventListener("undra:theme", function (e) {
       if (!frame || !frame.contentWindow) return;
-      ["undra-theme", "keel-theme"].forEach(function (type) { frame.contentWindow.postMessage({ type: type, theme: e.detail }, location.origin); });
+      frame.contentWindow.postMessage({ type: "undra-theme", theme: e.detail }, location.origin);
     });
     if (pushBtn) pushBtn.addEventListener("click", function () { open("stress"); pushBtn.disabled = true; });
     if (src && canObserve) {

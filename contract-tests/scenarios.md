@@ -6,9 +6,9 @@ scenarios, each run by every platform runtime against the **real playground core
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
-| TypeScript | `contract-tests/ts` (vitest) | `@keel/runtime` `WasmMainTransport` over the real `keel_core.wasm` |
-| Kotlin | `contract-tests/kotlin` (kotlinc + JVM) | `dev.keel.runtime` `KeelCore` over JNI and the real `libkeel_core` |
-| Swift | `contract-tests/swift` (XCTest) | `KeelRuntime` `KeelCore` over the C ABI and the real static core |
+| TypeScript | `contract-tests/ts` (vitest) | `@undra/runtime` `WasmMainTransport` over the real `undra_core.wasm` |
+| Kotlin | `contract-tests/kotlin` (kotlinc + JVM) | `dev.undra.runtime` `UndraCore` over JNI and the real `libundra_core` |
+| Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI and the real static core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
 `contract-tests/check.sh` fails unless all seventeen ids are `PASS` (a `SKIP` needs its reason here,
@@ -16,12 +16,12 @@ in the platform notes of the scenario).
 
 ## The harness (the same on every platform)
 
-The core is built by the `keel` CLI (`keel build --platform web|host|ios`) and its bindings by
-`keel bindgen` (`examples/playground/generated/`). A runner uses the **generated bindings** for
-everything a UI would use and the runtime's own API (`KeelCore`) for what bindings do not expose
+The core is built by the `undra` CLI (`undra build --platform web|host|ios`) and its bindings by
+`undra bindgen` (`examples/playground/generated/`). A runner uses the **generated bindings** for
+everything a UI would use and the runtime's own API (`UndraCore`) for what bindings do not expose
 (raw signal updates, statistics, snapshots, cancellation, schema checks).
 
-* **One core per process** on the native platforms (`keel_init` is once per process), so scenarios
+* **One core per process** on the native platforms (`undra_init` is once per process), so scenarios
   create their own stores and objects, and the state they share (the query cache, the offline queue,
   the Clock) is isolated by **list names** (`s12`, `s13`, `s14`) and left clean.
 * **Adapters** the runner supplies at load time:
@@ -51,7 +51,7 @@ everything a UI would use and the runtime's own API (`KeelCore`) for what bindin
   readings, since other scenarios share the core.
 
 Ids: a method's id is `fnv1a32("Type.method")`, a free function's `fnv1a32("fn.name")`; the bindings
-carry them (`KeelIds`).
+carry them (`UndraIds`).
 
 ## The scenarios
 
@@ -94,7 +94,7 @@ Expected: typed errors arrive as the language's typed error (Swift `throws(LabEr
 
 ### S03 sync call
 
-The synchronous path (`callSync` / the `keel_call_sync` ABI; wasm-main in TypeScript) answers without
+The synchronous path (`callSync` / the `undra_call_sync` ABI; wasm-main in TypeScript) answers without
 waiting for an event loop.
 
 1. `add(40, 2)` through the sync path is `42`; `add(2147483647, 1)` is `-2147483648`;
@@ -109,8 +109,9 @@ waiting for an event loop.
 ### S04 async call
 
 1. `add_later(20, 22, 50)` resolves to `42` after at least 45 ms and less than 2 s.
-2. Three concurrent calls `add_later(i, 0, d)` with `(i, d) = (1, 60), (2, 20), (3, 40)` resolve
-   in delay order `2, 3, 1` and with the right values.
+2. Three concurrent calls `add_later(i, 0, d)` with `(i, d) = (1, 400), (2, 50), (3, 200)` resolve
+   in delay order `2, 3, 1` and with the right values (the delays are 150 ms apart on purpose: a stalled
+   runner must not be able to reorder them).
 3. `Probe.wait(10)` resolves to `10`.
 4. A call made from inside a change observer or another call's completion (re-entrancy on the
    platform side: the continuation of `add_later` calls `add_later` again) works: the second call
@@ -268,14 +269,14 @@ List `s14`; the server serves `[]`. A handle observes it.
    route to `[{"id":9,...}]`. The test emits `Connectivity.changed(online=true, kind=Wifi)`.
 5. The pending `create_remote_todo` **resolves** to `RemoteTodo(9,"Offline item",false)`; the server saw
    exactly 2 POSTs; both carry the **same** `Idempotency-Key`; the handle ends with `data == [id 9]`.
-6. The Kv port saw a write of the key `keel.query.queue` while offline (the queue is persisted) and the
+6. The Kv port saw a write of the key `undra.query.queue` while offline (the queue is persisted) and the
    queue was emptied after the replay (last write is an empty queue).
 
 ### S15 snapshot and restore
 
 1. `Todos` (observed) with `add("a")`, `add("b")`, `toggle(b)`; `Counter` (observed) with `add(5)`;
    `BigList` (observed).
-2. `snapshot = core.snapshot()` (TypeScript: the wasm export `keel_snapshot`; Kotlin/Swift:
+2. `snapshot = core.snapshot()` (TypeScript: the wasm export `undra_snapshot`; Kotlin/Swift:
    `core.snapshot()`); it is non-empty and opaque.
 3. Mutate: `Todos.add("c")`, `toggle(a)`, `set_filter(Done)`; `Counter.add(10)`; `BigList.remove_at(0)`.
 4. `core.restore(snapshot)`. The **same handles** still work: each store's mirror returns to the snapshot
@@ -292,15 +293,15 @@ List `s14`; the server serves `[]`. A handle observes it.
 
 ### S16 schema mismatch rejection
 
-1. `KeelCore.load` with `expectedSchemaHash = generatedHash ^ 1` fails **before the core is initialised**
+1. `UndraCore.load` with `expectedSchemaHash = generatedHash ^ 1` fails **before the core is initialised**
    with the runtime's schema-mismatch error carrying `expected` and `got` (`got == generatedHash`)
-   and a message that names both in hex (TypeScript `KeelSchemaMismatchError`, Kotlin
-   `KeelSchemaMismatch`, Swift `KeelSchemaMismatchError`).
-2. A subsequent load with `KeelIds.schemaHash` succeeds (the failed attempt did not leave the process
+   and a message that names both in hex (TypeScript `UndraSchemaMismatchError`, Kotlin
+   `UndraSchemaMismatch`, Swift `UndraSchemaMismatchError`).
+2. A subsequent load with `UndraIds.schemaHash` succeeds (the failed attempt did not leave the process
    half-initialised).
 3. The hash in the bindings equals the hash the core reports (`stats().schema_hash`) and the hash of the
-   schema the core exports (`keel_schema_hash`).
-4. (TypeScript and Kotlin) the core's JSON schema (`keel_schema_json`) lists the playground's types
+   schema the core exports (`undra_schema_hash`).
+4. (TypeScript and Kotlin) the core's JSON schema (`undra_schema_json`) lists the playground's types
    (`Todos`, `Counter`, `BigList`, `Bench`, `Probe`, the queries) and the standard ports.
 
 ### S17 panic containment
@@ -312,24 +313,24 @@ List `s14`; the server serves `[]`. A handle observes it.
 2. `explode_later(10, "later")` (an async call) fails the same way.
 3. The core keeps working: `add(1, 2) == 3`; a store constructed before still updates;
    `stats().panics` grew by 2.
-4. The Log port received a record with level >= 4 (error/fatal) and target `keel::panic` for each.
+4. The Log port received a record with level >= 4 (error/fatal) and target `undra::panic` for each.
 
 **wasm (TypeScript)** — the shipped wasm profile aborts on panic (SPEC section 7), so containment means
 the host survives and recovers:
 
-1. Before the panic: `snapshot = keel_snapshot()` of a core with a `Todos` holding two items.
-2. `explode("kaboom")` makes the call **fail** (it does not hang or crash the test process) with a
-   `KeelError` whose message says the core trapped; `core.closed` is true and `onClose` fired; the Log
+1. Before the panic: `snapshot = undra_snapshot()` of a core with a `Todos` holding two items.
+2. `explode("kaboom")` makes the call **fail** (it does not hang or crash the test process) with an
+   `UndraError` whose message says the core trapped; `core.closed` is true and `onClose` fired; the Log
    adapter received a **fatal** (5) record containing `kaboom` before the trap.
-3. The page can **restart**: a fresh `KeelCore.load` of the same module succeeds and the snapshot restores:
+3. The page can **restart**: a fresh `UndraCore.load` of the same module succeeds and the snapshot restores:
    `Todos` (re-created from the restored handle) shows the two items.
 4. A second core loaded in the same process before the panic was not affected.
 
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); snapshot goes through the
-  wasm export because `KeelCore` has no public `snapshot()` (finding: SPEC 17.1 does not list one).
-* The Kotlin runner runs on the JVM with a single-thread "main" executor (`KeelDispatchers`), the Swift
+  wasm export because `UndraCore` has no public `snapshot()` (finding: SPEC 17.1 does not list one).
+* The Kotlin runner runs on the JVM with a single-thread "main" executor (`UndraDispatchers`), the Swift
   runner on the main actor; both load the real native library.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.

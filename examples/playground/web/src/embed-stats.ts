@@ -2,12 +2,12 @@
  * The live numbers the landing page shows next to the embedded playground, and how they are
  * measured. In embed mode (`?embed=1`, inside an iframe) the page posts
  *
- *   { type: "keel-stats", changeSetsPerSec, applyP50Us, applyP99Us, timerResolutionUs }
+ *   { type: "undra-stats", changeSetsPerSec, applyP50Us, applyP99Us, timerResolutionUs }
  *
  * to its parent every 500 ms.
  *
  * WHAT THE APPLY TIME MEASURES. The runtime exposes no "a change-set was applied" callback, so
- * the number is taken around the one public seam there is: `KeelCore.shared.mirror.flush()`
+ * the number is taken around the one public seam there is: `UndraCore.shared.mirror.flush()`
  * (see `instrumentMirror`, which wraps that method on the live `Mirror` instance and leaves the
  * runtime's sources untouched). A sample is the `performance.now()` time the mirror spends in
  * one flush: decoding the entries of the change-sets that flush applies into the stores' signals
@@ -37,7 +37,7 @@
 
 /** The message the page posts to its parent: what the landing page's counters read. */
 export interface StatsMessage {
-  readonly type: "keel-stats";
+  readonly type: "undra-stats";
   /** Change-sets applied per second, over the last two seconds. May be fractional. */
   readonly changeSetsPerSec: number;
   /** Median apply time of one change-set, in microseconds; 0 when there are no samples. */
@@ -163,7 +163,7 @@ const tenth = (value: number): number => Math.round(value * 10) / 10;
 /** The message for a snapshot and the clock's resolution: numbers rounded to a tenth. */
 export function toStatsMessage(snapshot: StatsSnapshot, timerResolutionUs: number): StatsMessage {
   return {
-    type: "keel-stats",
+    type: "undra-stats",
     changeSetsPerSec: tenth(snapshot.changeSetsPerSec),
     applyP50Us: tenth(snapshot.applyP50Us),
     applyP99Us: tenth(snapshot.applyP99Us),

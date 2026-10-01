@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { KeelSchemaMismatchError } from "@keel/runtime";
-import { KeelIds, add } from "@playground/core";
+import { UndraSchemaMismatchError } from "@undra/runtime";
+import { UndraIds, add } from "@playground/core";
 import { CapturingLog } from "../src/capturing-log.js";
 import { boot, bootRaw } from "../src/harness.js";
 import { MemoryKv } from "../src/memory-kv.js";
@@ -34,7 +34,7 @@ interface ExportedSchema {
 const camel = (name: string): string => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 
 test("S16 schema mismatch rejection", async () => {
-  const generated = KeelIds.schemaHash;
+  const generated = UndraIds.schemaHash;
   const kv = new MemoryKv();
   const log = new CapturingLog();
 
@@ -43,13 +43,13 @@ test("S16 schema mismatch rejection", async () => {
       () => undefined,
       (e: unknown) => e,
     );
-    expect(failure).toBeInstanceOf(KeelSchemaMismatchError);
-    const mismatch = failure as KeelSchemaMismatchError;
+    expect(failure).toBeInstanceOf(UndraSchemaMismatchError);
+    const mismatch = failure as UndraSchemaMismatchError;
     expect(mismatch.expected).toBe(generated ^ 1n);
     expect(mismatch.got).toBe(generated);
     expect(mismatch.message).toContain(hex(generated ^ 1n));
     expect(mismatch.message).toContain(hex(generated));
-    // A core that ran `keel_init` would have read its persisted query cache (see step 2): this one touched nothing.
+    // A core that ran `undra_init` would have read its persisted query cache (see step 2): this one touched nothing.
     expect(kv.operations, "the refused core never reached the Kv port").toEqual([]);
     expect(log.records, "and logged nothing").toEqual([]);
   });
@@ -81,15 +81,15 @@ test("S16 schema mismatch rejection", async () => {
     }
 
     // What the bindings carry is what the core exports. (The handle of a query is constructed with the query's own id.)
-    const { RemoteTodosQueryHandle: queryHandle, ...objects } = KeelIds.Objects;
+    const { RemoteTodosQueryHandle: queryHandle, ...objects } = UndraIds.Objects;
     for (const [name, ids] of Object.entries(objects)) {
       expect(schema.objects.find((o) => o.name === name)?.type_id, `type id of ${name}`).toBe(ids.typeId);
     }
-    expect(queryHandle.typeId).toBe(KeelIds.Queries.remoteTodos);
-    for (const [name, id] of Object.entries(KeelIds.Functions)) {
+    expect(queryHandle.typeId).toBe(UndraIds.Queries.remoteTodos);
+    for (const [name, id] of Object.entries(UndraIds.Functions)) {
       expect(schema.functions.find((f) => camel(f.name) === name)?.method_id, `method id of ${name}`).toBe(id);
     }
-    for (const [name, id] of Object.entries(KeelIds.Queries)) {
+    for (const [name, id] of Object.entries(UndraIds.Queries)) {
       expect(schema.queries.find((q) => camel(q.name) === name)?.query_id, `query id of ${name}`).toBe(id);
     }
   });

@@ -23,9 +23,9 @@ test("S04 async call", async () => {
     const values = await Promise.all(
       (
         [
-          [1, 60],
-          [2, 20],
-          [3, 40],
+          [1, 400],
+          [2, 50],
+          [3, 200],
         ] as const
       ).map(async ([i, delayMs]) => {
         const sum = await addLater(i, 0, delayMs, core);

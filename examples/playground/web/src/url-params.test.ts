@@ -106,10 +106,10 @@ describe("resolveTab", () => {
 });
 
 describe("parseThemeMessage", () => {
-  test("accepts keel-theme with light or dark", () => {
-    expect(parseThemeMessage({ type: "keel-theme", theme: "light" })).toBe("light");
-    expect(parseThemeMessage({ type: "keel-theme", theme: "dark" })).toBe("dark");
-    expect(parseThemeMessage({ type: "keel-theme", theme: "dark", extra: 1 })).toBe("dark");
+  test("accepts undra-theme with light or dark", () => {
+    expect(parseThemeMessage({ type: "undra-theme", theme: "light" })).toBe("light");
+    expect(parseThemeMessage({ type: "undra-theme", theme: "dark" })).toBe("dark");
+    expect(parseThemeMessage({ type: "undra-theme", theme: "dark", extra: 1 })).toBe("dark");
   });
 
   test("ignores everything else without throwing", () => {
@@ -117,18 +117,18 @@ describe("parseThemeMessage", () => {
       undefined,
       null,
       0,
-      "keel-theme",
+      "undra-theme",
       "dark",
       [],
-      ["keel-theme", "dark"],
+      ["undra-theme", "dark"],
       {},
-      { type: "keel-theme" },
-      { type: "keel-theme", theme: "DARK" },
-      { type: "keel-theme", theme: "sepia" },
-      { type: "keel-theme", theme: 1 },
-      { type: "keel-stats", theme: "dark" },
+      { type: "undra-theme" },
+      { type: "undra-theme", theme: "DARK" },
+      { type: "undra-theme", theme: "sepia" },
+      { type: "undra-theme", theme: 1 },
+      { type: "undra-stats", theme: "dark" },
       { theme: "dark" },
-      { type: ["keel-theme"], theme: "dark" },
+      { type: ["undra-theme"], theme: "dark" },
     ];
     for (const data of other) expect(parseThemeMessage(data)).toBeUndefined();
   });

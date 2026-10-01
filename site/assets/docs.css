@@ -1,4 +1,4 @@
-/* Keel site, documentation: sidebar, prose, on-this-page, edit link, pager, figures. */
+/* Undra site, documentation: sidebar, prose, on-this-page, edit link, pager, figures. */
 .docs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 56px; padding-top: 28px; align-items: start; }
 .docs > * { min-width: 0; }
 @media (min-width: 900px) { .docs { grid-template-columns: 232px minmax(0, 1fr); padding-top: 44px; } }

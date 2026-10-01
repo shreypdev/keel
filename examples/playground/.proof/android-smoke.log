@@ -1,4 +1,4 @@
-# Android smoke proof: the playground app on the 'keel' AVD (headless), 2026-09-30 12:13
+# Android smoke proof: the playground app on the 'undra' AVD (headless), 2026-09-30 12:13
 
 ## Environment
 $ adb shell getprop ro.product.model ro.product.cpu.abi ro.build.version.sdk
@@ -6,20 +6,20 @@ sdk_gphone64_arm64
 arm64-v8a
 35
 
-## Build the core for Android (debug), the keel CLI
-$ target/debug/keel build -C examples/playground --platform android
+## Build the core for Android (debug), the undra CLI
+$ target/debug/undra build -C examples/playground --platform android
 ==> Building the core for android (debug)
     ANDROID_NDK_HOME is not set; using the NDK found at /opt/homebrew/share/android-commandlinetools/ndk/27.2.12479018
     Building arm64-v8a (aarch64-linux-android)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.78s
     Building x86_64 (x86_64-linux-android)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.71s
-     Copying libraries to /Users/shrey/Desktop/src/.work/playground/examples/playground/target/keel/playground-51156ab0/android-ndk
+     Copying libraries to /Users/shrey/Desktop/src/.work/playground/examples/playground/target/undra/playground-51156ab0/android-ndk
 
 Built:
 artifact           size                                                                     where
-android arm64-v8a  42.0 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/arm64-v8a/libkeel_core.so
-android x86_64     41.9 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/x86_64/libkeel_core.so
+android arm64-v8a  42.0 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/arm64-v8a/libundra_core.so
+android x86_64     41.9 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/x86_64/libundra_core.so
 
 ## Build the APK
 $ (cd examples/playground/android && ./gradlew :app:assembleDebug)
@@ -27,19 +27,19 @@ BUILD SUCCESSFUL in 1s
 38 actionable tasks: 4 executed, 34 up-to-date
 $ ls -l examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
 95580672 examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
-$ unzip -l app-debug.apk | grep libkeel_core
- 41968664  01-01-1981 01:01   lib/arm64-v8a/libkeel_core.so
- 41905552  01-01-1981 01:01   lib/x86_64/libkeel_core.so
+$ unzip -l app-debug.apk | grep libundra_core
+ 41968664  01-01-1981 01:01   lib/arm64-v8a/libundra_core.so
+ 41905552  01-01-1981 01:01   lib/x86_64/libundra_core.so
 
 ## Install and run
 $ adb install -r app-debug.apk
 Success
 
 ## Drive every screen (uiautomator finds the controls by their test tags)
-$ adb shell am force-stop dev.keel.playground && adb logcat -c
-$ adb shell am start -n dev.keel.playground/.MainActivity --es tab todos
-Starting: Intent { cmp=dev.keel.playground/.MainActivity (has extras) }
-$ adb shell pidof dev.keel.playground
+$ adb shell am force-stop dev.undra.playground && adb logcat -c
+$ adb shell am start -n dev.undra.playground/.MainActivity --es tab todos
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+$ adb shell pidof dev.undra.playground
 6238
 
 ## Todos: add (typed TodoError.EmptyTitle), toggle, remaining
@@ -92,7 +92,7 @@ $ adb exec-out screencap -p > .proof/android-biglist.png
 $ ui tap biglist-stream
 tapped biglist-stream 110 700
 $ adb exec-out screencap -p > .proof/android-biglist-streaming.png
-$ adb shell dumpsys gfxinfo dev.keel.playground   # frames while ~10 updates/s land
+$ adb shell dumpsys gfxinfo dev.undra.playground   # frames while ~10 updates/s land
 Total frames rendered: 1159
 Janky frames: 100 (8.63%)
 Janky frames (legacy): 160 (13.81%)
@@ -157,35 +157,35 @@ remote-toggle text=  desc=  bounds= [43,1069][169,1195] checked= true
 $ adb exec-out screencap -p > .proof/android-remote.png
 
 ## Process and log
-$ adb shell pidof dev.keel.playground
+$ adb shell pidof dev.undra.playground
 6238
 $ adb logcat -d   # 8055 lines
-crash markers for the app (FATAL EXCEPTION, Fatal signal, SIGSEGV, SIGABRT, ANR in dev.keel, JNI DETECTED):
+crash markers for the app (FATAL EXCEPTION, Fatal signal, SIGSEGV, SIGABRT, ANR in dev.undra, JNI DETECTED):
 0
-Keel runtime and JNI warnings (tags dev.keel.runtime, keel::, CheckJNI):
+Undra runtime and JNI warnings (tags dev.undra.runtime, undra::, CheckJNI):
 0
 error-level lines of the app process:
-  09-30 12:13:41.159  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.keel.playground>
-  09-30 12:13:46.899  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.keel.playground>
-  09-30 12:14:56.613  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.keel.playground>
-  09-30 12:15:08.425  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.keel.playground>
-keel and native-library lines of the app process:
-  09-30 12:13:14.234  6238  6238 I keel.playground: Late-enabling -Xcheck:jni
-  09-30 12:13:14.541  6238  6238 D nativeloader: Load /data/app/~~Yk195M6IR55bTbPoGhneWQ==/dev.keel.playground-_-Wo4hDXm9h4icUxHFAIrQ==/base.apk!/lib/arm64-v8a/libkeel_core.so using ns clns-7 from class
+  09-30 12:13:41.159  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.undra.playground>
+  09-30 12:13:46.899  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.undra.playground>
+  09-30 12:14:56.613  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.undra.playground>
+  09-30 12:15:08.425  6238  6238 E FrameTracker: force finish cuj, time out: J<IME_INSETS_HIDE_ANIMATION::1@1@dev.undra.playground>
+undra and native-library lines of the app process:
+  09-30 12:13:14.234  6238  6238 I undra.playground: Late-enabling -Xcheck:jni
+  09-30 12:13:14.541  6238  6238 D nativeloader: Load /data/app/~~Yk195M6IR55bTbPoGhneWQ==/dev.undra.playground-_-Wo4hDXm9h4icUxHFAIrQ==/base.apk!/lib/arm64-v8a/libundra_core.so using ns clns-7 from class
 
-## The same flow on the release core (keel build --release --platform android)
-$ target/debug/keel build -C examples/playground --platform android --release   # 41 s on this machine
+## The same flow on the release core (undra build --release --platform android)
+$ target/debug/undra build -C examples/playground --platform android --release   # 41 s on this machine
 Built:
 artifact           size                                                                    where
-android arm64-v8a  1.5 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/arm64-v8a/libkeel_core.so
-android x86_64     1.6 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/x86_64/libkeel_core.so
+android arm64-v8a  1.5 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/arm64-v8a/libundra_core.so
+android x86_64     1.6 MB (16 KB aligned)  [budget 1.2 MB per ABI (hello world, release)]  build/android/jniLibs/x86_64/libundra_core.so
 $ (cd examples/playground/android && ./gradlew :app:assembleDebug) && ls -l app-debug.apk   # debug-compiled app code with the release core
-13328368 app-debug.apk (libkeel_core.so: 1502616 arm64-v8a, 1629056 x86_64)
+13328368 app-debug.apk (libundra_core.so: 1502616 arm64-v8a, 1629056 x86_64)
 $ adb install -r app-debug.apk && smoke.sh quick
-$ adb shell am force-stop dev.keel.playground && adb logcat -c
-$ adb shell am start -n dev.keel.playground/.MainActivity --es tab todos
-Starting: Intent { cmp=dev.keel.playground/.MainActivity (has extras) }
-$ adb shell pidof dev.keel.playground
+$ adb shell am force-stop dev.undra.playground && adb logcat -c
+$ adb shell am start -n dev.undra.playground/.MainActivity --es tab todos
+Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
+$ adb shell pidof dev.undra.playground
 5150
 
 ## Todos: add (typed TodoError.EmptyTitle), toggle, remaining
@@ -283,12 +283,12 @@ tapped remote-toggle 106 1132
 $ ui find remote-toggle 0
 remote-toggle text=  desc=  bounds= [43,1069][169,1195] checked= true
 
-$ adb shell pidof dev.keel.playground
+$ adb shell pidof dev.undra.playground
 5150
 $ adb logcat -d   # 7790 lines
-crash markers for the app (FATAL EXCEPTION, Fatal signal, SIGSEGV, SIGABRT, ANR in dev.keel, JNI DETECTED):
+crash markers for the app (FATAL EXCEPTION, Fatal signal, SIGSEGV, SIGABRT, ANR in dev.undra, JNI DETECTED):
 0
-Keel runtime and JNI warnings (tags dev.keel.runtime, keel::, CheckJNI):
+Undra runtime and JNI warnings (tags dev.undra.runtime, undra::, CheckJNI):
 0
 (no error-level lines from the app process other than FrameTracker IME-animation timeouts of the software-rendered emulator)
 

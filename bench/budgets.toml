@@ -1,4 +1,4 @@
-# Host budgets for the budgets test (`cargo test -p keel-bench --test budgets --release`).
+# Host budgets for the budgets test (`cargo test -p undra-bench --test budgets --release`).
 #
 # WHAT THESE ARE. Regression guards for a host machine, not the blueprint's device targets
 # (docs/blueprint.html section 14 is per device: A15 iPhone, mid-range 2022 Android, Chromium;
@@ -17,14 +17,14 @@
 # fails a change that makes an operation 5x slower, which is the size of regression that
 # matters (an accidental O(n) on a hot path, a lock taken per call, a copy per item). A smaller
 # regression is what criterion's before/after comparison is for. If CI proves consistently
-# slower, set KEEL_BENCH_SCALE in the workflow instead of loosening this file.
+# slower, set UNDRA_BENCH_SCALE in the workflow instead of loosening this file.
 #
 # `blueprint_ns` / `blueprint` record the section 14 row an operation relates to, so the
 # report prints how far this host is from the device target. Where the host is already over the
 # target (see "Findings" in bench/RESULTS.md), the budget here still only guards the regression:
 # fixing the operation, not the budget, is what closes the gap.
 #
-# To set or re-base a budget: `cargo test -p keel-bench --test budgets --release -- --ignored
+# To set or re-base a budget: `cargo test -p undra-bench --test budgets --release -- --ignored
 # --nocapture baseline`, then apply the rule above.
 
 [meta]
@@ -139,10 +139,10 @@ measured_ns = 128.4
 budget_ns = 12000
 measured_ns = 2333.0
 
-# `call_sync/*` are `Runtime::call_sync`, which returns a `Vec` (one allocation: what `keel_call_sync`
-# hands the host as a `KeelBuf`); `call_sync_with/add` lends the reply buffer and allocates nothing
+# `call_sync/*` are `Runtime::call_sync`, which returns a `Vec` (one allocation: what `undra_call_sync`
+# hands the host as an `UndraBuf`); `call_sync_with/add` lends the reply buffer and allocates nothing
 # (ADR-028). The floor applies to the first two: 5x their measurements is under 250 ns. The
-# allocation count itself is guarded exactly by `crates/keel-ffi/tests/sync_alloc.rs`.
+# allocation count itself is guarded exactly by `crates/undra-ffi/tests/sync_alloc.rs`.
 [bench."dispatch/call_sync/add"]
 budget_ns = 250
 measured_ns = 42.9
@@ -247,11 +247,11 @@ measured_ns = 66459.0
 blueprint_ns = 3000000
 blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (no dlopen, no wasm compile here)"
 
-# Starts a real thread, so the time depends on the scheduler as well as on Keel (on a loaded
+# Starts a real thread, so the time depends on the scheduler as well as on Undra (on a loaded
 # machine thread wake-up alone can take a millisecond). The budget is about 13x the quiet number,
 # the blueprint's 3 ms divided by three, instead of the usual 5x.
 [bench."snapshot/cold_start_restore_100kb_core_thread"]
 budget_ns = 1000000
 measured_ns = 76625.0
 blueprint_ns = 3000000
-blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the keel-core thread)"
+blueprint = "Core cold start with 100 KB snapshot restore: <= 3 ms iOS (A15), <= 5 ms Android, <= 8 ms web (includes starting the undra-core thread)"

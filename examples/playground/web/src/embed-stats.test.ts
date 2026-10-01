@@ -1,4 +1,4 @@
-import { ChangeOp, Mirror, encodeChangeSet } from "@keel/runtime";
+import { ChangeOp, Mirror, encodeChangeSet } from "@undra/runtime";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { STATS_INTERVAL_MS, StatsWindow, instrumentMirror, startStatsPoster, timerResolutionUs, toStatsMessage } from "./embed-stats";
 
@@ -183,14 +183,14 @@ describe("StatsWindow", () => {
 describe("toStatsMessage", () => {
   test("types the message and rounds to a tenth", () => {
     expect(toStatsMessage({ changeSetsPerSec: 9.987654, applyP50Us: 100.00000000000142, applyP99Us: 249.96 }, 99.99999999999)).toEqual({
-      type: "keel-stats",
+      type: "undra-stats",
       changeSetsPerSec: 10,
       applyP50Us: 100,
       applyP99Us: 250,
       timerResolutionUs: 100,
     });
     expect(toStatsMessage({ changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0 }, 0)).toEqual({
-      type: "keel-stats",
+      type: "undra-stats",
       changeSetsPerSec: 0,
       applyP50Us: 0,
       applyP99Us: 0,
@@ -407,7 +407,7 @@ describe("startStatsPoster", () => {
     vi.useRealTimers();
   });
 
-  test("posts a keel-stats message to the parent every 500 ms, zeros while idle", () => {
+  test("posts an undra-stats message to the parent every 500 ms, zeros while idle", () => {
     vi.useFakeTimers();
     const clock = fakeClock();
     const mirror = new Mirror({ schedule: () => {} });
@@ -419,7 +419,7 @@ describe("startStatsPoster", () => {
     expect(posted).toEqual([]);
     vi.advanceTimersByTime(1);
     // The fake clock never moves by itself, so no timer step can be observed.
-    expect(posted).toEqual([{ message: { type: "keel-stats", changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0, timerResolutionUs: 0 }, origin: "*" }]);
+    expect(posted).toEqual([{ message: { type: "undra-stats", changeSetsPerSec: 0, applyP50Us: 0, applyP99Us: 0, timerResolutionUs: 0 }, origin: "*" }]);
 
     vi.advanceTimersByTime(1000);
     expect(posted).toHaveLength(3);
@@ -456,7 +456,7 @@ describe("startStatsPoster", () => {
     vi.advanceTimersByTime(500);
     expect(posted).toHaveLength(1);
     const message = posted[0] as { type: string; changeSetsPerSec: number; applyP50Us: number; applyP99Us: number; timerResolutionUs: number };
-    expect(message.type).toBe("keel-stats");
+    expect(message.type).toBe("undra-stats");
     expect(message.applyP50Us).toBeCloseTo(200, 6);
     expect(message.applyP99Us).toBeCloseTo(200, 6);
     // The fake clock advanced 5 * (100 + 0.2) ms = 501 ms; 5 change-sets in that span is about 10 per second.

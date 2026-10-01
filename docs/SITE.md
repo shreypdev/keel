@@ -1,6 +1,6 @@
-# The Keel website
+# The Undra website
 
-Static HTML, CSS and JS in `site/`, published to <https://shreypdev.github.io/keel/> by
+Static HTML, CSS and JS in `site/`, published to <https://shreypdev.github.io/undra/> by
 `.github/workflows/site.yml`. No framework, no runtime dependencies, no third-party JavaScript. The scripts
 that keep it consistent are plain Node (20+) with no packages.
 
@@ -46,12 +46,12 @@ Everything, including the real playground (the Rust core as wasm under the React
 ```sh
 bash site/scripts/build-local.sh
 python3 -m http.server 8765 --directory _site
-# open http://localhost:8765/keel/
+# open http://localhost:8765/undra/
 ```
 
 `build-local.sh` sources `scripts/env.sh`, regenerates the site's files, runs
-`keel build --platform web -C examples/playground`, builds the web app with `vite build --base=/keel/playground/`,
-stages `_site/` (and links `_site/keel -> .` so the playground's `/keel/...` asset URLs resolve), and runs the link
+`undra build --platform web -C examples/playground`, builds the web app with `vite build --base=/undra/playground/`,
+stages `_site/` (and links `_site/undra -> .` so the playground's `/undra/...` asset URLs resolve), and runs the link
 checker on the result. Without `binaryen` the build warns and keeps an unoptimised wasm, which is fine for a
 preview.
 
@@ -97,7 +97,7 @@ All live in `site/scripts/` and run from the repository root.
 * **`dateModified`:** every page states its last change in its JSON-LD (`dateModified`, or `datePublished` for a
   post) and the sitemap's `lastmod` is read from it. Bump it when you change the page; it is a hand-maintained
   date on purpose, so the generated files are deterministic in CI.
-* **Package names** are written `@keel/runtime` and `@keel/cli` everywhere; the integrator replaces them in one
+* **Package names** are written `@undra/runtime` and `@undra/cli` everywhere; the integrator replaces them in one
   global pass when the registry scope is final.
 * **Pages that are linked before they exist** go in `data/pending.json`; the checker reports those links as notes
   instead of failures and tells you to remove the entry once the page exists.
@@ -110,8 +110,8 @@ All live in `site/scripts/` and run from the repository root.
 On a pull request that touches the site or the playground, and on `main`:
 
 1. Install Rust with the wasm32 target, `binaryen` and Node.
-2. `cargo run -p keel-cli -- build --platform web -C examples/playground` (the real core as wasm).
-3. In `examples/playground/web`: `npm ci` and `npx vite build --base=/keel/playground/`.
+2. `cargo run -p undra-cli -- build --platform web -C examples/playground` (the real core as wasm).
+3. In `examples/playground/web`: `npm ci` and `npx vite build --base=/undra/playground/`.
 4. `node site/scripts/build-all.mjs`, then fail if anything under `site/` changed (a committed generated file is stale).
 5. `node site/scripts/check-links.mjs` on the source tree (this includes `sync-chrome --check`).
 6. `bash site/scripts/stage.sh` to build `_site/`, then `check-links.mjs --root _site`.
@@ -122,8 +122,8 @@ One-time repository setting: Settings, Pages, Source = "GitHub Actions".
 
 ## SEO, in one place
 
-* The brand phrase is "Keel, the Rust core for native apps"; titles say "Keel framework" or "Keel (Rust)" where
-  they can, because "keel" alone belongs to keel.sh (Kubernetes), keel.so and boats.
+* The brand phrase is "Undra, the Rust core for native apps"; titles say "Undra framework" or "Undra (Rust)" where
+  they can, so the name is always paired with what the product is (the name's own history is ADR-030).
 * Every page has a canonical, Open Graph and Twitter tags, and one JSON-LD block: `WebSite`, `Organization`,
   `SoftwareSourceCode` and `SoftwareApplication` on the landing page; `TechArticle` and `BreadcrumbList` on docs
   pages; `ItemList` on the roadmap; `Blog` on the blog index; `BlogPosting` on posts.
@@ -138,13 +138,13 @@ These cannot be automated from the repository.
 ### Google Search Console
 
 1. Open <https://search.google.com/search-console> and choose **Add property**, then **URL prefix**, and enter
-   `https://shreypdev.github.io/keel/`.
+   `https://shreypdev.github.io/undra/`.
 2. Choose the **HTML tag** verification method and copy the `<meta name="google-site-verification" content="...">`
    tag it shows.
 3. Paste that tag into the `<head>` of `site/index.html` (next to the canonical link, **outside** the
    `chrome:head` markers), commit, and let the Site workflow deploy it.
 4. Back in Search Console, click **Verify**.
-5. Under **Sitemaps**, submit `sitemap.xml` (the full URL is `https://shreypdev.github.io/keel/sitemap.xml`).
+5. Under **Sitemaps**, submit `sitemap.xml` (the full URL is `https://shreypdev.github.io/undra/sitemap.xml`).
 6. Optionally use **URL inspection** on the landing page and the blog index and click **Request indexing**.
 
 ### Bing

@@ -3,31 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API overview, Kotlin · Keel docs</title>
-<meta name="description" content="What Keel's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
-<link rel="canonical" href="https://shreypdev.github.io/keel/docs/api-kotlin.html">
+<title>API overview, Kotlin · Undra docs</title>
+<meta name="description" content="What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/api-kotlin.html">
 <meta property="og:type" content="article">
-<meta property="og:site_name" content="Keel">
-<meta property="og:title" content="API overview, Kotlin · Keel docs">
-<meta property="og:description" content="What Keel's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
-<meta property="og:url" content="https://shreypdev.github.io/keel/docs/api-kotlin.html">
-<meta property="og:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="API overview, Kotlin · Undra docs">
+<meta property="og:description" content="What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/api-kotlin.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Keel — the Rust core for native apps">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="API overview, Kotlin · Keel docs">
-<meta name="twitter:description" content="What Keel's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
-<meta name="twitter:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta name="twitter:title" content="API overview, Kotlin · Undra docs">
+<meta name="twitter:description" content="What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/keel/docs/api-kotlin.html#article","headline":"API overview, Kotlin · Keel docs","description":"What Keel's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.","url":"https://shreypdev.github.io/keel/docs/api-kotlin.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Keel team"},"publisher":{"@id":"https://shreypdev.github.io/keel/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/keel/#website"},"about":{"@type":"SoftwareApplication","name":"Keel"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Keel","item":"https://shreypdev.github.io/keel/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/keel/docs/"},{"@type":"ListItem","position":3,"name":"API overview, Kotlin","item":"https://shreypdev.github.io/keel/docs/api-kotlin.html"}]}]}
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/api-kotlin.html#article","headline":"API overview, Kotlin · Undra docs","description":"What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.","url":"https://shreypdev.github.io/undra/docs/api-kotlin.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"API overview, Kotlin","item":"https://shreypdev.github.io/undra/docs/api-kotlin.html"}]}]}
 </script>
 <!-- chrome:head -->
 <meta name="theme-color" content="#0a0a0a">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="alternate" type="application/rss+xml" title="Keel blog" href="../feed.xml">
-<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -40,14 +40,14 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
     <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="../docs/" aria-current="page">Docs</a>
       <a href="../blog/">Blog</a>
       <a href="../roadmap/">Roadmap</a>
       <a href="../playground/">Playground</a>
       <span class="sp"></span>
-      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
     </nav>
     <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
     <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
@@ -61,38 +61,38 @@
     <p class="crumb">API overview</p>
     <h1>API overview, Kotlin</h1>
     <p class="lede">Generated Kotlin is what a Kotlin engineer would write by hand: data classes, sealed hierarchies, suspend functions, Flow, and StateFlows you read with collectAsState(). The runtime needs only the standard library and kotlinx-coroutines.</p>
-<p><code>keel bindgen</code> writes a Gradle module (<code>src/main/kotlin/&lt;package&gt;/*.kt</code>, a <code>build.gradle.kts</code> and a <code>.gitignore</code>) that depends only on <code>keel-runtime</code>. The shapes below come from the playground's generated code and the specification (§10.2).</p>
+<p><code>undra bindgen</code> writes a Gradle module (<code>src/main/kotlin/&lt;package&gt;/*.kt</code>, a <code>build.gradle.kts</code> and a <code>.gitignore</code>) that depends only on <code>undra-runtime</code>. The shapes below come from the playground's generated code and the specification (§10.2).</p>
 <h2 id="loading-the-core">Loading the core<a class="anchor" href="#loading-the-core" aria-label="Link to this section">#</a></h2>
-<p>Attach the app to its core once per process, before any store is created, typically in <code>Application.onCreate</code>. <code>KeelCore.load</code> checks that the native library was built from the same schema as the bindings.</p>
-<div class="code"><div class="code-bar"><span>KeelApp.kt</span></div><pre><code data-lang="kotlin">class KeelApp : Application() {
+<p>Attach the app to its core once per process, before any store is created, typically in <code>Application.onCreate</code>. <code>UndraCore.load</code> checks that the native library was built from the same schema as the bindings.</p>
+<div class="code"><div class="code-bar"><span>UndraApp.kt</span></div><pre><code data-lang="kotlin">class UndraApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        KeelCore.load(
+        UndraCore.load(
             LoadOptions(
-                expectedSchemaHash = KeelIds.SCHEMA_HASH,
+                expectedSchemaHash = UndraIds.SCHEMA_HASH,
                 adapters = mapOf(StandardPorts.Http.PORT_ID to myHttp.portImpl()),
             ),
         )
     }
 }</code></pre></div>
-<p>The core is <code>libkeel_core.so</code>, which <code>keel build --platform android</code> writes to <code>build/android/jniLibs/&lt;abi&gt;/</code>. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: <code>Todos()</code> is <code>Todos(ctx = KeelCore.shared)</code>.</p>
+<p>The core is <code>libundra_core.so</code>, which <code>undra build --platform android</code> writes to <code>build/android/jniLibs/&lt;abi&gt;/</code>. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: <code>Todos()</code> is <code>Todos(ctx = UndraCore.shared)</code>.</p>
 <h2 id="type-mapping">Type mapping<a class="anchor" href="#type-mapping" aria-label="Link to this section">#</a></h2>
 <div class="table-wrap"><table><thead><tr><th>Rust</th><th>Kotlin</th></tr></thead><tbody><tr><td><code>bool</code>, <code>f32</code>, <code>f64</code></td><td><code>Boolean</code>, <code>Float</code>, <code>Double</code></td></tr><tr><td><code>i8</code> … <code>i64</code></td><td><code>Byte</code>, <code>Short</code>, <code>Int</code>, <code>Long</code></td></tr><tr><td><code>u8</code> … <code>u64</code></td><td><code>UByte</code>, <code>UShort</code>, <code>UInt</code>, <code>ULong</code></td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>String</code>, <code>ByteArray</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Timestamp</code>, <code>UUID</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T?</code>, <code>List&lt;T&gt;</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>Map&lt;K, V&gt;</code></td></tr><tr><td>record, enum, error</td><td><code>data class</code>, <code>enum class</code> or <code>sealed interface</code>, <code>sealed class</code></td></tr></tbody></table></div>
-<p>Names follow the platform: Rust <code>snake_case</code> becomes <code>camelCase</code> for functions and properties and <code>PascalCase</code> for types. Unit enum variants become <code>UPPER_SNAKE</code> constants; data enum variants become <code>PascalCase</code> classes. Keel does not support <code>Option&lt;Option&lt;T&gt;&gt;</code> because Kotlin cannot express nested optionality (<code>E0063</code>).</p>
+<p>Names follow the platform: Rust <code>snake_case</code> becomes <code>camelCase</code> for functions and properties and <code>PascalCase</code> for types. Unit enum variants become <code>UPPER_SNAKE</code> constants; data enum variants become <code>PascalCase</code> classes. Undra does not support <code>Option&lt;Option&lt;T&gt;&gt;</code> because Kotlin cannot express nested optionality (<code>E0063</code>).</p>
 <h2 id="records">Records<a class="anchor" href="#records" aria-label="Link to this section">#</a></h2>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">/** One item of the to-do list. */
 data class Todo(
     val id: UUID,
     val title: String,
     val done: Boolean,
-) : KeelRecord</code></pre></div>
+) : UndraRecord</code></pre></div>
 <h2 id="enums">Enums<a class="anchor" href="#enums" aria-label="Link to this section">#</a></h2>
 <p>A unit enum is an <code>enum class</code> with its wire index. A data enum is a <code>sealed interface</code> whose variants are data classes, <code>data object</code>s for the ones without fields.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">enum class Filter(val index: UShort) : KeelEnum {
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">enum class Filter(val index: UShort) : UndraEnum {
     ALL(0u), ACTIVE(1u), DONE(2u);
 }
 
-sealed interface Figure : KeelEnum {
+sealed interface Figure : UndraEnum {
     data class Circle(val radius: Double) : Figure
     data class Rect(val width: Double, val height: Double) : Figure
     data class Label(val value: String) : Figure
@@ -100,8 +100,8 @@ sealed interface Figure : KeelEnum {
 }</code></pre></div>
 <p><code>when (figure)</code> over a sealed interface is exhaustive, so adding a variant in Rust is a compile error in every <code>when</code> that forgot it.</p>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
-<p>A <code>#[keel::error]</code> becomes a <code>sealed class</code> extending <code>KeelException</code>, with the message from <code>#[error("…")]</code>. A failing <code>suspend</code> function throws the typed error, so <code>catch (e: TodoError)</code> and <code>when (e)</code> work.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">sealed class TodoError(message: String) : KeelException(message) {
+<p>A <code>#[undra::error]</code> becomes a <code>sealed class</code> extending <code>UndraException</code>, with the message from <code>#[error("…")]</code>. A failing <code>suspend</code> function throws the typed error, so <code>catch (e: TodoError)</code> and <code>when (e)</code> work.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">sealed class TodoError(message: String) : UndraException(message) {
     data object EmptyTitle : TodoError("the title cannot be empty")
     // a variant wrapping another error carries it: data class Http(val cause: HttpError)
 }
@@ -117,25 +117,25 @@ viewModelScope.launch {
 }</code></pre></div>
 <h2 id="objects-and-functions">Objects and functions<a class="anchor" href="#objects-and-functions" aria-label="Link to this section">#</a></h2>
 <p>An object is a class holding a handle into the core. Sync methods are plain functions, async methods are <code>suspend</code>, and stream methods return a <code>Flow</code>. A free Rust function is a top-level Kotlin function that takes the core as its last, defaulted parameter.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: KeelCore, handle: Long) : KeelObject(core, handle) {
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     fun counters(): ProbeCounters                       // sync
     suspend fun wait(ms: UInt): UInt                    // async, cancellable
     fun ticks(count: UInt): Flow&lt;UInt&gt;                  // stream
-    companion object { fun create(ctx: KeelCore = KeelCore.shared): Probe }
+    companion object { fun create(ctx: UndraCore = UndraCore.shared): Probe }
 }
 
-fun add(a: Int, b: Int, ctx: KeelCore = KeelCore.shared): Int
-suspend fun createRemoteTodo(list: String, title: String, ctx: KeelCore = KeelCore.shared): RemoteTodo</code></pre></div>
+fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
+suspend fun createRemoteTodo(list: String, title: String, ctx: UndraCore = UndraCore.shared): RemoteTodo</code></pre></div>
 <p>Cancelling the coroutine cancels the call in the core, and a <code>Flow</code> applies backpressure: the runtime grants credit as your collector consumes items. The runtime contains core panics at the boundary, so a bug in the core is a typed failure, not a crash.</p>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
-<p>A store extends <code>KeelStore</code>. Every signal is a read-only <code>StateFlow</code>; computed signals are updated by the core. Read them in Compose with <code>collectAsState()</code>, no extra module needed.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Todos : KeelStore {
+<p>A store extends <code>UndraStore</code>. Every signal is a read-only <code>StateFlow</code>; computed signals are updated by the core. Read them in Compose with <code>collectAsState()</code>, no extra module needed.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Todos : UndraStore {
     val todos: StateFlow&lt;List&lt;Todo&gt;&gt;
     val filter: StateFlow&lt;Filter&gt;
     val visible: StateFlow&lt;List&lt;Todo&gt;&gt;        // computed by the core
     val remaining: StateFlow&lt;UInt&gt;            // computed by the core
 
-    constructor(ctx: KeelCore = KeelCore.shared)
+    constructor(ctx: UndraCore = UndraCore.shared)
     fun setFilter(f: Filter)
     suspend fun add(title: String): Todo      // throws TodoError
 }</code></pre></div>
@@ -152,21 +152,21 @@ fun TodosScreen(vm: TodosViewModel = viewModel()) {
 <div class="callout"><p><strong>Hold on to the store.</strong> The runtime's mirror holds a store weakly. A <code>StateFlow</code> on its own does not keep the store, and the core object behind it, alive. Keep the store in a <code>ViewModel</code> and close it in <code>onCleared()</code>.</p>
 </div>
 <h2 id="query-handles">Query handles<a class="anchor" href="#query-handles" aria-label="Link to this section">#</a></h2>
-<p>A <code>#[keel::query]</code> becomes a store with five <code>StateFlow</code>s (<code>data</code>, <code>status</code>, <code>error</code>, <code>fetching</code>, <code>updatedAt</code>) plus <code>refetch()</code> and <code>invalidate()</code>. Constructing it observes the query and fetches when the data is missing or stale.</p>
+<p>A <code>#[undra::query]</code> becomes a store with five <code>StateFlow</code>s (<code>data</code>, <code>status</code>, <code>error</code>, <code>fetching</code>, <code>updatedAt</code>) plus <code>refetch()</code> and <code>invalidate()</code>. Constructing it observes the query and fetches when the data is missing or stale.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val inbox = RemoteTodosQueryHandle.create("inbox")
 val items by inbox.data.collectAsState()        // List&lt;RemoteTodo&gt;?
 val busy by inbox.fetching.collectAsState()</code></pre></div>
 <p>See <a href="queries.html">Queries &amp; mutations</a>.</p>
 <h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
-<p>The ten standard ports are implemented in <code>dev.keel.runtime.adapters</code> (<code>OkHttp</code> or <code>HttpURLConnection</code>, <code>SharedPreferences</code>-backed files, <code>EncryptedFile</code>, <code>ConnectivityManager</code>, <code>ProcessLifecycleOwner</code> and so on) and are not generated into your module. You replace one by passing an implementation in <code>LoadOptions.adapters</code>, keyed by its port id. A port you define yourself becomes an <code>interface</code>:</p>
-<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">interface Http : KeelPort {
+<p>The ten standard ports are implemented in <code>dev.undra.runtime.adapters</code> (<code>OkHttp</code> or <code>HttpURLConnection</code>, <code>SharedPreferences</code>-backed files, <code>EncryptedFile</code>, <code>ConnectivityManager</code>, <code>ProcessLifecycleOwner</code> and so on) and are not generated into your module. You replace one by passing an implementation in <code>LoadOptions.adapters</code>, keyed by its port id. A port you define yourself becomes an <code>interface</code>:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">interface Http : UndraPort {
     suspend fun request(req: HttpRequest): HttpResponse     // throws HttpError
 }</code></pre></div>
 <p>See <a href="ports.html">Ports &amp; adapters</a> for the defaults. Android-specific adapters live in the <code>android-adapters</code> module, not in the runtime.</p>
 <h2 id="threading-and-lifetime">Threading and lifetime<a class="anchor" href="#threading-and-lifetime" aria-label="Link to this section">#</a></h2>
-<ul><li>Signals are updated on <code>Dispatchers.Main.immediate</code>, in one hop per transaction. On a JVM without Android the runtime falls back to a single-thread executor, which is what the JVM test suite uses.</li><li><code>KeelStore</code> and <code>KeelObject</code> implement <code>AutoCloseable</code>. Call <code>close()</code> to release the handle (a <code>use { }</code> block works); a <code>Cleaner</code> releases leaked handles as a backstop. <code>KeelCore.stats()</code> exposes live handle counts.</li><li>Over JNI, callbacks arrive from core threads and are decoded immediately; you never see a raw buffer.</li></ul>
+<ul><li>Signals are updated on <code>Dispatchers.Main.immediate</code>, in one hop per transaction. On a JVM without Android the runtime falls back to a single-thread executor, which is what the JVM test suite uses.</li><li><code>UndraStore</code> and <code>UndraObject</code> implement <code>AutoCloseable</code>. Call <code>close()</code> to release the handle (a <code>use { }</code> block works); a <code>Cleaner</code> releases leaked handles as a backstop. <code>UndraCore.stats()</code> exposes live handle counts.</li><li>Over JNI, callbacks arrive from core threads and are decoded immediately; you never see a raw buffer.</li></ul>
   
-<p class="edit"><a href="https://github.com/shreypdev/keel/edit/main/site/docs/api-kotlin.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/api-kotlin.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
 <nav class="pager" aria-label="Previous and next">
     <a class="prev" href="api-swift.html"><span>Previous</span><b>API overview, Swift</b></a>
     <a class="next" href="api-typescript.html"><span>Next</span><b>API overview, TypeScript</b></a>
@@ -178,8 +178,8 @@ val busy by inbox.fetching.collectAsState()</code></pre></div>
   <div class="wrap">
     <div class="footer-grid">
       <div>
-        <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
-        <p class="footer-note">The Rust core for native apps. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>
         <h3>Docs</h3>
@@ -193,7 +193,7 @@ val busy by inbox.fetching.collectAsState()</code></pre></div>
         </ul>
       </div>
       <div>
-        <h3>Keel</h3>
+        <h3>Undra</h3>
         <ul>
           <li><a href="../blog/">Blog</a></li>
           <li><a href="../roadmap/">Roadmap</a></li>
@@ -205,16 +205,16 @@ val busy by inbox.fetching.collectAsState()</code></pre></div>
       <div>
         <h3>Project</h3>
         <ul>
-          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
-          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
         </ul>
       </div>
     </div>
     <div class="footer-base">
-      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
       <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
     </div>
   </div>

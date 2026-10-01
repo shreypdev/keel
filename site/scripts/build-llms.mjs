@@ -99,11 +99,11 @@ for (const p of pages) {
 // ---- llms.txt
 const groups = ["Docs", "Roadmap", "Blog"];
 const lines = [
-  "# Keel",
+  "# Undra",
   "",
-  "> Keel is a Rust framework that owns everything under the pixels of native iOS, Android and web apps: domain logic, reactive state, the data layer, persistence and the dev loop. It generates idiomatic Swift, Kotlin and TypeScript from one Rust core, and the UI stays SwiftUI, Jetpack Compose and React. Not to be confused with keel.sh (Kubernetes) or keel.so.",
+  "> Undra is a Rust framework that owns everything under the pixels of native iOS, Android and web apps: domain logic, reactive state, the data layer, persistence and the dev loop. It generates idiomatic Swift, Kotlin and TypeScript from one Rust core, and the UI stays SwiftUI, Jetpack Compose and React. Not to be confused with undra.sh (Kubernetes) or undra.so.",
   "",
-  "Keel is open source (MIT OR Apache-2.0) and ships a `keel` CLI (`keel init`, `keel dev`, `keel build`, `keel bindgen`, `keel doctor`). Reads never cross the language boundary: each platform holds a mirror of the state, updated by one binary change-set per transaction.",
+  "Undra is open source (MIT OR Apache-2.0) and ships an `undra` CLI (`undra init`, `undra dev`, `undra build`, `undra bindgen`, `undra doctor`). Reads never cross the language boundary: each platform holds a mirror of the state, updated by one binary change-set per transaction.",
   "",
 ];
 for (const g of groups) {
@@ -111,12 +111,12 @@ for (const g of groups) {
   if (!list.length) continue;
   lines.push(`## ${g}`, "", ...list.map((p) => `- [${p.title}](${p.url}): ${p.desc}`), "");
 }
-lines.push("## Source and numbers", "", "- [GitHub repository](https://github.com/shreypdev/keel): source, issues and releases", "- [Specification](https://github.com/shreypdev/keel/blob/main/docs/SPEC.md): the binding implementation spec (wire format, ABI, schema)", "- [Benchmark results](https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md): host-measured numbers and budgets", "");
+lines.push("## Source and numbers", "", "- [GitHub repository](https://github.com/shreypdev/undra): source, issues and releases", "- [Specification](https://github.com/shreypdev/undra/blob/main/docs/SPEC.md): the binding implementation spec (wire format, ABI, schema)", "- [Benchmark results](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md): host-measured numbers and budgets", "");
 lines.push("## Optional", "", `- [All documentation in one file](${ORIGIN}llms-full.txt): every docs page, the roadmap and every post as Markdown`, `- [RSS feed](${ORIGIN}feed.xml)`, "");
 const a = writeIfChanged(join(SITE, "llms.txt"), lines.join("\n"));
 
 // ---- llms-full.txt
-const full = ["# Keel: full documentation", "", `> Everything on ${ORIGIN} that explains Keel, as Markdown: the docs, the roadmap and the blog. Index: ${ORIGIN}llms.txt`, ""];
+const full = ["# Undra: full documentation", "", `> Everything on ${ORIGIN} that explains Undra, as Markdown: the docs, the roadmap and the blog. Index: ${ORIGIN}llms.txt`, ""];
 for (const p of pages) {
   const main = innerOf(p.html, /<main[^>]*>/) || innerOf(p.html, /<article[^>]*>/);
   full.push("---", "", `Source: ${p.url}`, "", toMarkdown(main, p.path));

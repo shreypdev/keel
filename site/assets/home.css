@@ -1,4 +1,4 @@
-/* Keel site, landing page. v1's arc with less text: hero, thesis, live demo, numbers, how it works (code collapsed),
+/* Undra site, landing page. v1's arc with less text: hero, thesis, live demo, numbers, how it works (code collapsed),
    features, receipts, principles, compared, roadmap, final call to action. */
 .section { padding: clamp(64px, 9vw, 112px) 0 0; position: relative; }
 .kicker { display: inline-flex; align-items: center; gap: 10px; font: 500 .74rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }

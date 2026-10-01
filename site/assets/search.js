@@ -1,4 +1,4 @@
-/* Keel site: Cmd/Ctrl-K search over search-index.json (built by site/scripts/build-search-index.mjs).
+/* Undra site: Cmd/Ctrl-K search over search-index.json (built by site/scripts/build-search-index.mjs).
    Loaded on first use by site.js. No dependencies. Entries: { u: url, p: page title, h: heading, x: text }. */
 (function () {
   "use strict";
@@ -10,7 +10,7 @@
   function build() {
     root = doc.createElement("div");
     root.className = "kbar"; root.hidden = true;
-    root.innerHTML = '<div class="kbar-panel" role="dialog" aria-modal="true" aria-label="Search Keel">' +
+    root.innerHTML = '<div class="kbar-panel" role="dialog" aria-modal="true" aria-label="Search Undra">' +
       '<div class="kbar-in"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>' +
       '<input type="search" role="combobox" aria-expanded="true" aria-controls="kbar-list" aria-autocomplete="list" placeholder="Search the docs, the roadmap and the blog" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">' +
       '<kbd>Esc</kbd></div><ul id="kbar-list" role="listbox" aria-label="Results"></ul><p class="kbar-status" role="status" aria-live="polite"></p></div>';
@@ -101,5 +101,5 @@
   }
   function toggle(siteBase) { if (root && !root.hidden) close(); else open(siteBase); }
 
-  window.KeelSearch = { open: open, close: close, toggle: toggle };
+  window.UndraSearch = { open: open, close: close, toggle: toggle };
 })();

@@ -1,7 +1,7 @@
 {
-  "description": "Keel bindings for `playground-core`.",
+  "description": "Undra bindings for `playground-core`.",
   "devDependencies": {
-    "@keel/runtime": "^0.1.0",
+    "@undra/runtime": "^0.1.0",
     "typescript": "^5.5.0"
   },
   "exports": {
@@ -17,7 +17,7 @@
   "main": "./dist/index.js",
   "name": "@playground/core",
   "peerDependencies": {
-    "@keel/runtime": "^0.1.0"
+    "@undra/runtime": "^0.1.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

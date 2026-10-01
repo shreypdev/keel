@@ -26,7 +26,7 @@ sections.push(`<section class="rm" id="not-planned" aria-labelledby="not-planned
 
 const list = [];
 for (const sec of data.sections) for (const it of sec.items) list.push({ "@type": "ListItem", position: list.length + 1, name: `${it.title} (${sec.status})`, description: it.text, url: `${ORIGIN}roadmap/#${sec.id}-${slug(it.title)}` });
-const ld = { "@context": "https://schema.org", "@type": "ItemList", name: "Keel roadmap", description: "What is shipped, in flight, next and later for the Keel framework.", url: `${ORIGIN}roadmap/`, dateModified: data.updated, numberOfItems: list.length, itemListElement: list };
+const ld = { "@context": "https://schema.org", "@type": "ItemList", name: "Undra roadmap", description: "What is shipped, in flight, next and later for the Undra framework.", url: `${ORIGIN}roadmap/`, dateModified: data.updated, numberOfItems: list.length, itemListElement: list };
 
 const file = join(SITE, "roadmap", "index.html");
 let html = read(file);

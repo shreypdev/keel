@@ -32,7 +32,7 @@ export function applyPageMode(root: RootLike, params: PlaygroundParams): void {
 }
 
 /**
- * Applies `{ type: "keel-theme", theme }` messages from `from` (the embedding page) to `root`,
+ * Applies `{ type: "undra-theme", theme }` messages from `from` (the embedding page) to `root`,
  * so the landing page's theme toggle restyles the iframe. A message of any other shape, or from
  * any other window, is ignored. Returns a function that stops listening.
  */

@@ -30,7 +30,7 @@ const posts = slugs.map((slug) => {
   const words = textOf(prose).split(/\s+/).filter(Boolean).length;
   const minutes = Math.max(1, Math.ceil(words / WPM));
   const header = innerOf(html, /<header class="post-header"[^>]*>/);
-  const h1 = textOf(innerOf(header, /<h1[^>]*>/)) || titleOf(html).replace(/\s*\|\s*Keel blog$/, "");
+  const h1 = textOf(innerOf(header, /<h1[^>]*>/)) || titleOf(html).replace(/\s*\|\s*Undra blog$/, "");
   const time = /<time datetime="(\d{4}-\d{2}-\d{2})"/.exec(header);
   if (!time) throw new Error(`blog/${slug}: the post-meta line needs <time datetime="YYYY-MM-DD">`);
   const description = metaOf(html, "description");
@@ -53,7 +53,7 @@ const cards = posts.length
 const landing = read(join(SITE, "index.html"));
 const newest = posts.reduce((d, p) => (p.modified > d ? p.modified : d), "");
 const blogDate = newest || modifiedOf(landing);
-const ld = { "@context": "https://schema.org", "@type": "Blog", name: "Keel blog", description: "Comparisons, architecture and design notes from the Keel team.", url: `${ORIGIN}blog/`, inLanguage: "en", dateModified: blogDate, publisher: { "@id": `${ORIGIN}#org` }, blogPost: posts.map((p) => ({ "@type": "BlogPosting", headline: p.title, url: p.url, datePublished: p.date, description: p.description })) };
+const ld = { "@context": "https://schema.org", "@type": "Blog", name: "Undra blog", description: "Comparisons, architecture and design notes from the Undra team.", url: `${ORIGIN}blog/`, inLanguage: "en", dateModified: blogDate, publisher: { "@id": `${ORIGIN}#org` }, blogPost: posts.map((p) => ({ "@type": "BlogPosting", headline: p.title, url: p.url, datePublished: p.date, description: p.description })) };
 
 const indexFile = join(blogDir, "index.html");
 let index = read(indexFile);
@@ -63,7 +63,7 @@ const a = writeIfChanged(indexFile, index);
 
 // ---- RSS 2.0
 const items = posts.map((p) => `    <item>\n      <title>${esc(p.title)}</title>\n      <link>${p.url}</link>\n      <guid isPermaLink="true">${p.url}</guid>\n      <pubDate>${rfc822(p.date)}</pubDate>\n      <category>${esc(p.eyebrow)}</category>\n      <description>${esc(p.description)}</description>\n    </item>`);
-const rss = ['<?xml version="1.0" encoding="UTF-8"?>', '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">', "  <channel>", "    <title>Keel blog</title>", `    <link>${ORIGIN}blog/</link>`, "    <description>Comparisons, architecture and design notes from the Keel team.</description>", "    <language>en</language>", `    <atom:link href="${ORIGIN}feed.xml" rel="self" type="application/rss+xml"/>`, ...(posts.length ? [`    <lastBuildDate>${rfc822(posts[0].date)}</lastBuildDate>`] : []), ...items, "  </channel>", "</rss>", ""].join("\n");
+const rss = ['<?xml version="1.0" encoding="UTF-8"?>', '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">', "  <channel>", "    <title>Undra blog</title>", `    <link>${ORIGIN}blog/</link>`, "    <description>Comparisons, architecture and design notes from the Undra team.</description>", "    <language>en</language>", `    <atom:link href="${ORIGIN}feed.xml" rel="self" type="application/rss+xml"/>`, ...(posts.length ? [`    <lastBuildDate>${rfc822(posts[0].date)}</lastBuildDate>`] : []), ...items, "  </channel>", "</rss>", ""].join("\n");
 const b = writeIfChanged(join(SITE, "feed.xml"), rss);
 
 const c = writeSitemap(newest);

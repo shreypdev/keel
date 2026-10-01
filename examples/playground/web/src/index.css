@@ -71,7 +71,7 @@ main {
 /*
  * Embedded (`?embed=1`, `data-embed` on <html>): one view inside the landing page's iframe. The
  * page shows through (a transparent body and panel), so text must read on the site's own canvas:
- * pass `theme=` (or post a `keel-theme` message) to match it, otherwise the system preference decides.
+ * pass `theme=` (or post an `undra-theme` message) to match it, otherwise the system preference decides.
  */
 :root[data-embed] body {
   background: transparent;

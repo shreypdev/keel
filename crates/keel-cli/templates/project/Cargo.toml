@@ -1,6 +1,0 @@
-# The Rust workspace of @@NAME@@. It holds the core (and any crates you add next to it);
-# the libraries that ship to the platforms are built by `keel build` from crates it generates
-# under target/keel/, so nothing here names a crate type, a profile or a platform.
-[workspace]
-members = ["core"]
-resolver = "3"

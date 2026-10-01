@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Playground } from "./keel";
+import type { Playground } from "./undra";
 import { type PlaygroundParams, type TabId, resolveTab } from "./url-params";
 import { BigListView } from "./views/BigListView";
 import { CounterView } from "./views/CounterView";
@@ -14,7 +14,7 @@ const TABS = [
 ] as const satisfies readonly { readonly id: TabId; readonly label: string }[];
 
 /**
- * Four views over one core. Each reads the signals of its store with `useSignal` (`@keel/runtime/react`) and calls its methods.
+ * Four views over one core. Each reads the signals of its store with `useSignal` (`@undra/runtime/react`) and calls its methods.
  *
  * The first view comes from the URL: `?screen=` (`todos`, `counter`, `list`, `remote`), else the
  * `#fragment` (`#counter`, so a view can be linked to and reloaded). With `?embed=1` the page is
@@ -51,7 +51,7 @@ export function App({ playground, params }: { readonly playground: Playground; r
   return (
     <main>
       <header>
-        <h1>Keel playground</h1>
+        <h1>Undra playground</h1>
         <p className="tagline">One Rust core. This page is only the UI.</p>
       </header>
       <div role="tablist" aria-label="Views" className="tabs">

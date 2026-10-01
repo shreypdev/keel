@@ -2,7 +2,7 @@ name: Site
 
 # Builds the static site in `site/` and the real web playground (the Rust core as wasm plus the React
 # app), stages both into `_site/`, checks them, and publishes them to GitHub Pages
-# (https://shreypdev.github.io/keel/). Pull requests run the same build and checks without deploying.
+# (https://shreypdev.github.io/undra/). Pull requests run the same build and checks without deploying.
 # How it all fits together, and what the founder does by hand: docs/SITE.md.
 #
 # One-time repository setting: Settings > Pages > Build and deployment > Source = "GitHub Actions".
@@ -57,18 +57,18 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: examples/playground/web/package-lock.json
-      # wasm-opt: `keel build` runs it over the core when it is installed.
+      # wasm-opt: `undra build` runs it over the core when it is installed.
       - name: Install binaryen
         run: sudo apt-get update && sudo apt-get install -y binaryen
 
       # 1. The playground: one Rust core, compiled to wasm, under a React UI.
       - name: Build the playground core (wasm32)
-        run: cargo run -p keel-cli -- build --platform web -C examples/playground
+        run: cargo run -p undra-cli -- build --platform web -C examples/playground
       - name: Build the playground web app
         working-directory: examples/playground/web
         run: |
           npm ci
-          npx vite build --base=/keel/playground/
+          npx vite build --base=/undra/playground/
 
       # 2. The site's generated files (benchmark table, roadmap, blog index, feed, sitemap, search
       #    index, llms.txt) must be what is committed. If this fails, run

@@ -3,31 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API overview, TypeScript · Keel docs</title>
-<meta name="description" content="What Keel's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
-<link rel="canonical" href="https://shreypdev.github.io/keel/docs/api-typescript.html">
+<title>API overview, TypeScript · Undra docs</title>
+<meta name="description" content="What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/api-typescript.html">
 <meta property="og:type" content="article">
-<meta property="og:site_name" content="Keel">
-<meta property="og:title" content="API overview, TypeScript · Keel docs">
-<meta property="og:description" content="What Keel's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
-<meta property="og:url" content="https://shreypdev.github.io/keel/docs/api-typescript.html">
-<meta property="og:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="API overview, TypeScript · Undra docs">
+<meta property="og:description" content="What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/api-typescript.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Keel — the Rust core for native apps">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="API overview, TypeScript · Keel docs">
-<meta name="twitter:description" content="What Keel's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
-<meta name="twitter:image" content="https://shreypdev.github.io/keel/assets/og.png">
+<meta name="twitter:title" content="API overview, TypeScript · Undra docs">
+<meta name="twitter:description" content="What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/keel/docs/api-typescript.html#article","headline":"API overview, TypeScript · Keel docs","description":"What Keel's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.","url":"https://shreypdev.github.io/keel/docs/api-typescript.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Keel team"},"publisher":{"@id":"https://shreypdev.github.io/keel/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/keel/#website"},"about":{"@type":"SoftwareApplication","name":"Keel"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Keel","item":"https://shreypdev.github.io/keel/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/keel/docs/"},{"@type":"ListItem","position":3,"name":"API overview, TypeScript","item":"https://shreypdev.github.io/keel/docs/api-typescript.html"}]}]}
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/api-typescript.html#article","headline":"API overview, TypeScript · Undra docs","description":"What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.","url":"https://shreypdev.github.io/undra/docs/api-typescript.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"API overview, TypeScript","item":"https://shreypdev.github.io/undra/docs/api-typescript.html"}]}]}
 </script>
 <!-- chrome:head -->
 <meta name="theme-color" content="#0a0a0a">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="alternate" type="application/rss+xml" title="Keel blog" href="../feed.xml">
-<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -40,14 +40,14 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
     <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="../docs/" aria-current="page">Docs</a>
       <a href="../blog/">Blog</a>
       <a href="../roadmap/">Roadmap</a>
       <a href="../playground/">Playground</a>
       <span class="sp"></span>
-      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
     </nav>
     <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
     <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
@@ -61,24 +61,24 @@
     <p class="crumb">API overview</p>
     <h1>API overview, TypeScript</h1>
     <p class="lede">Generated TypeScript is strict-mode ESM with no any in exported types: plain interfaces and unions for data, promises for calls, signals for state, and hooks for React. The core package has no runtime dependencies.</p>
-<p><code>keel bindgen</code> writes an npm package (<code>src/*.ts</code>, <code>package.json</code>, <code>tsconfig.json</code>) that imports only from <code>@keel/runtime</code>. The shapes below come from the playground's generated code and the specification (§10.3).</p>
+<p><code>undra bindgen</code> writes an npm package (<code>src/*.ts</code>, <code>package.json</code>, <code>tsconfig.json</code>) that imports only from <code>@undra/runtime</code>. The shapes below come from the playground's generated code and the specification (§10.3).</p>
 <h2 id="loading-the-core">Loading the core<a class="anchor" href="#loading-the-core" aria-label="Link to this section">#</a></h2>
-<p>Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with <code>KeelSchemaMismatch</code>.</p>
-<div class="code"><div class="code-bar"><span>web/src/keel.ts</span></div><pre><code data-lang="ts">import { KeelCore } from "@keel/runtime";
-import { KeelIds, Todos } from "@playground/core";
-import wasmUrl from "../../build/web/keel_core.wasm?url";
+<p>Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with <code>UndraSchemaMismatch</code>.</p>
+<div class="code"><div class="code-bar"><span>web/src/undra.ts</span></div><pre><code data-lang="ts">import { UndraCore } from "@undra/runtime";
+import { UndraIds, Todos } from "@playground/core";
+import wasmUrl from "../../build/web/undra_core.wasm?url";
 
-await KeelCore.load({
+await UndraCore.load({
   mode: "wasm-main",                       // the core runs in a wasm module on this thread
   wasm: new URL(wasmUrl, location.href),
-  expectedSchemaHash: KeelIds.schemaHash,
+  expectedSchemaHash: UndraIds.schemaHash,
   adapters: { http, kv },                  // optional: replace a default adapter
 });
 
-const todos = await Todos.create();        // uses KeelCore.shared</code></pre></div>
-<div class="table-wrap"><table><thead><tr><th><code>mode</code></th><th>Where the core runs</th></tr></thead><tbody><tr><td><code>"wasm-main"</code></td><td>a wasm module on the page's main thread</td></tr><tr><td><code>"wasm-worker"</code></td><td>the same module in a worker, keeping the main thread free</td></tr><tr><td><code>"remote"</code></td><td>the core that <code>keel dev</code> serves, over a WebSocket: <code class="cw">{ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash }</code></td></tr></tbody></table></div>
+const todos = await Todos.create();        // uses UndraCore.shared</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th><code>mode</code></th><th>Where the core runs</th></tr></thead><tbody><tr><td><code>"wasm-main"</code></td><td>a wasm module on the page's main thread</td></tr><tr><td><code>"wasm-worker"</code></td><td>the same module in a worker, keeping the main thread free</td></tr><tr><td><code>"remote"</code></td><td>the core that <code>undra dev</code> serves, over a WebSocket: <code class="cw">{ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash }</code></td></tr></tbody></table></div>
 <h2 id="type-mapping">Type mapping<a class="anchor" href="#type-mapping" aria-label="Link to this section">#</a></h2>
-<div class="table-wrap"><table><thead><tr><th>Rust</th><th>TypeScript</th></tr></thead><tbody><tr><td><code>bool</code></td><td><code>boolean</code></td></tr><tr><td><code>i8</code> … <code>i32</code>, <code>u8</code> … <code>u32</code>, <code>f32</code>, <code>f64</code></td><td><code>number</code></td></tr><tr><td><code>i64</code>, <code>u64</code></td><td><code>bigint</code> (or <code>number</code> with <code>#[keel(js_number)]</code> / <code>ts_js_number</code>)</td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>string</code>, <code>Uint8Array</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Timestamp</code>, <code>string</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T | null</code>, <code>T[]</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>Map&lt;K, V&gt;</code></td></tr><tr><td>record</td><td><code>interface</code></td></tr><tr><td>unit enum, data enum</td><td>string-literal union, discriminated union on <code>kind</code></td></tr><tr><td>error</td><td>a class extending <code>KeelError</code>, with subclasses per variant</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Rust</th><th>TypeScript</th></tr></thead><tbody><tr><td><code>bool</code></td><td><code>boolean</code></td></tr><tr><td><code>i8</code> … <code>i32</code>, <code>u8</code> … <code>u32</code>, <code>f32</code>, <code>f64</code></td><td><code>number</code></td></tr><tr><td><code>i64</code>, <code>u64</code></td><td><code>bigint</code> (or <code>number</code> with <code>#[undra(js_number)]</code> / <code>ts_js_number</code>)</td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>string</code>, <code>Uint8Array</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Timestamp</code>, <code>string</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T | null</code>, <code>T[]</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>Map&lt;K, V&gt;</code></td></tr><tr><td>record</td><td><code>interface</code></td></tr><tr><td>unit enum, data enum</td><td>string-literal union, discriminated union on <code>kind</code></td></tr><tr><td>error</td><td>a class extending <code>UndraError</code>, with subclasses per variant</td></tr></tbody></table></div>
 <p>64-bit integers become <code>bigint</code> so no value is ever silently rounded; a 64-bit value outside the safe range is a decode error rather than a wrong number when you opt into <code>number</code>.</p>
 <h2 id="records-and-enums">Records and enums<a class="anchor" href="#records-and-enums" aria-label="Link to this section">#</a></h2>
 <div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">/** One item of the to-do list. */
@@ -93,8 +93,8 @@ export type Figure =
   | { kind: "empty" };</code></pre></div>
 <p>A <code>switch (figure.kind)</code> over the union is exhaustive under <code>strict</code>, so adding a variant in Rust breaks every <code>switch</code> that forgot it.</p>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
-<p>A <code>#[keel::error]</code> becomes an abstract class with a <code>kind</code> and one subclass per variant, so you can branch with <code>instanceof</code> or on <code>kind</code>. A rejected call carries the typed error, not a string to parse.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export abstract class TodoError extends KeelError {
+<p>A <code>#[undra::error]</code> becomes an abstract class with a <code>kind</code> and one subclass per variant, so you can branch with <code>instanceof</code> or on <code>kind</code>. A rejected call carries the typed error, not a string to parse.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export abstract class TodoError extends UndraError {
   readonly kind: "emptyTitle";
 }
 export namespace TodoError {
@@ -108,8 +108,8 @@ try {
 }</code></pre></div>
 <h2 id="objects-and-functions">Objects and functions<a class="anchor" href="#objects-and-functions" aria-label="Link to this section">#</a></h2>
 <p>An object is a class holding a handle. <strong>Every method returns a <code>Promise</code></strong>, which keeps the API uniform across main-thread, worker and remote modes. Stream methods return an <code>AsyncIterable</code>, and any call takes an optional <code>AbortSignal</code> as its last argument to cancel it in the core.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export class Probe extends KeelObject {
-  static create(core?: KeelCore): Promise&lt;Probe&gt;;
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export class Probe extends UndraObject {
+  static create(core?: UndraCore): Promise&lt;Probe&gt;;
   counters(): Promise&lt;ProbeCounters&gt;;
   wait(ms: number, signal?: AbortSignal): Promise&lt;number&gt;;
   ticks(count: number): AsyncIterable&lt;number&gt;;     // backpressure through stream credit
@@ -118,47 +118,47 @@ try {
 export function add(a: number, b: number): Promise&lt;number&gt;;</code></pre></div>
 <p>Release an object with <code>close()</code> (idempotent) or with <code>using</code> where <code>Symbol.dispose</code> exists (Node 20+ and current browsers); a <code>FinalizationRegistry</code> is the backstop.</p>
 <h2 id="stores-and-signals">Stores and signals<a class="anchor" href="#stores-and-signals" aria-label="Link to this section">#</a></h2>
-<p>A store extends <code>KeelStore</code>. Every signal is a read-only <code>Signal&lt;T&gt;</code>: <code>get()</code> returns the current value, <code>peek()</code> reads without subscribing, and <code>subscribe(fn)</code> calls you on change and returns an unsubscribe function. Computed signals are written by the core.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export class Todos extends KeelStore {
+<p>A store extends <code>UndraStore</code>. Every signal is a read-only <code>Signal&lt;T&gt;</code>: <code>get()</code> returns the current value, <code>peek()</code> reads without subscribing, and <code>subscribe(fn)</code> calls you on change and returns an unsubscribe function. Computed signals are written by the core.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export class Todos extends UndraStore {
   readonly todos: Signal&lt;Todo[]&gt;;
   readonly filter: Signal&lt;Filter&gt;;
   readonly visible: Signal&lt;Todo[]&gt;;        // computed by the core
   readonly remaining: Signal&lt;number&gt;;      // computed by the core
 
-  static create(core?: KeelCore): Promise&lt;Todos&gt;;
+  static create(core?: UndraCore): Promise&lt;Todos&gt;;
   setFilter(f: Filter): Promise&lt;void&gt;;
   add(title: string, signal?: AbortSignal): Promise&lt;Todo&gt;;
 }</code></pre></div>
 <p>Change-sets are batched with <code>queueMicrotask</code> into one flush per macrotask, so several signals that changed in one transaction update together and a component never renders a half-applied state.</p>
 <h2 id="react-and-the-other-frameworks">React and the other frameworks<a class="anchor" href="#react-and-the-other-frameworks" aria-label="Link to this section">#</a></h2>
-<p><code>@keel/runtime/react</code> exports two hooks. <code>useSignal</code> is <code>useSyncExternalStore</code> over a signal, with a server snapshot. <code>useKeel</code> creates a store when the component mounts and closes it when it unmounts; it returns <code>undefined</code> until the store exists, and <code>useSignal</code> accepts an undefined signal.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">import { useKeel, useSignal } from "@keel/runtime/react";
+<p><code>@undra/runtime/react</code> exports two hooks. <code>useSignal</code> is <code>useSyncExternalStore</code> over a signal, with a server snapshot. <code>useUndra</code> creates a store when the component mounts and closes it when it unmounts; it returns <code>undefined</code> until the store exists, and <code>useSignal</code> accepts an undefined signal.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">tsx</span></span></div><pre><code data-lang="tsx">import { useUndra, useSignal } from "@undra/runtime/react";
 
 export function CounterView() {
-  const counter = useKeel(Counter);            // undefined until created
+  const counter = useUndra(Counter);            // undefined until created
   const count = useSignal(counter?.count);
   const parity = useSignal(counter?.parity);   // computed in the core, same change-set
   if (counter === undefined) return null;
   return &lt;button onClick={() =&gt; void counter.increment()}&gt;{count} ({parity})&lt;/button&gt;;
 }</code></pre></div>
-<p>Adapters ship for the other frameworks as thin files, exported from <code>@keel/runtime/vue</code> (<code>useSignal</code> as a <code>shallowRef</code>, <code>useKeel</code>), <code>/svelte</code> (<code>signalStore</code>, a <code>Readable</code>) and <code>/solid</code> (<code>useSignal</code> as an <code>Accessor</code>, <code>useKeel</code>). The frameworks are optional peer dependencies; the core package imports none of them.</p>
+<p>Adapters ship for the other frameworks as thin files, exported from <code>@undra/runtime/vue</code> (<code>useSignal</code> as a <code>shallowRef</code>, <code>useUndra</code>), <code>/svelte</code> (<code>signalStore</code>, a <code>Readable</code>) and <code>/solid</code> (<code>useSignal</code> as an <code>Accessor</code>, <code>useUndra</code>). The frameworks are optional peer dependencies; the core package imports none of them.</p>
 <h2 id="query-handles">Query handles<a class="anchor" href="#query-handles" aria-label="Link to this section">#</a></h2>
-<p>A <code>#[keel::query]</code> becomes a store with five signals (<code>data</code>, <code>status</code>, <code>error</code>, <code>fetching</code>, <code>updatedAt</code>) plus <code>refetch()</code> and <code>invalidate()</code>.</p>
+<p>A <code>#[undra::query]</code> becomes a store with five signals (<code>data</code>, <code>status</code>, <code>error</code>, <code>fetching</code>, <code>updatedAt</code>) plus <code>refetch()</code> and <code>invalidate()</code>.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">const inbox = await RemoteTodosQueryHandle.create("inbox");
 const items = useSignal(inbox.data);        // RemoteTodo[] | null
 const busy = useSignal(inbox.fetching);
 await inbox.refetch();</code></pre></div>
 <p>See <a href="queries.html">Queries &amp; mutations</a>.</p>
 <h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
-<p>The ten standard ports and their types are exported from <code>@keel/runtime</code> and are not generated into your package. The browser defaults use <code>fetch</code>, IndexedDB, OPFS, <code>setTimeout</code>, <code>navigator.onLine</code> and <code>visibilitychange</code>; Node uses <code>fetch</code> and files. Replace one with <code>adapters</code> in <code>KeelCore.load</code>. A port you define yourself becomes an interface:</p>
-<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export interface Http extends KeelPort {
+<p>The ten standard ports and their types are exported from <code>@undra/runtime</code> and are not generated into your package. The browser defaults use <code>fetch</code>, IndexedDB, OPFS, <code>setTimeout</code>, <code>navigator.onLine</code> and <code>visibilitychange</code>; Node uses <code>fetch</code> and files. Replace one with <code>adapters</code> in <code>UndraCore.load</code>. A port you define yourself becomes an interface:</p>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export interface Http extends UndraPort {
   request(req: HttpRequest): Promise&lt;HttpResponse&gt;;
 }</code></pre></div>
 <p>See <a href="ports.html">Ports &amp; adapters</a>.</p>
 <h2 id="testing">Testing<a class="anchor" href="#testing" aria-label="Link to this section">#</a></h2>
 <p>The runtime is testable without a browser: over the <code>remote</code> transport against a native core, and against a WAT stub of the wasm ABI. The contract suite runs the same scenarios as the Swift and Kotlin runners, against the real wasm module.</p>
   
-<p class="edit"><a href="https://github.com/shreypdev/keel/edit/main/site/docs/api-typescript.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/api-typescript.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
 <nav class="pager" aria-label="Previous and next">
     <a class="prev" href="api-kotlin.html"><span>Previous</span><b>API overview, Kotlin</b></a>
   </nav>
@@ -169,8 +169,8 @@ await inbox.refetch();</code></pre></div>
   <div class="wrap">
     <div class="footer-grid">
       <div>
-        <a class="brand" href="../" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
-        <p class="footer-note">The Rust core for native apps. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>
         <h3>Docs</h3>
@@ -184,7 +184,7 @@ await inbox.refetch();</code></pre></div>
         </ul>
       </div>
       <div>
-        <h3>Keel</h3>
+        <h3>Undra</h3>
         <ul>
           <li><a href="../blog/">Blog</a></li>
           <li><a href="../roadmap/">Roadmap</a></li>
@@ -196,16 +196,16 @@ await inbox.refetch();</code></pre></div>
       <div>
         <h3>Project</h3>
         <ul>
-          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
-          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
         </ul>
       </div>
     </div>
     <div class="footer-base">
-      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
       <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
     </div>
   </div>

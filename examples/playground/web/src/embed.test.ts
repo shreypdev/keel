@@ -66,13 +66,13 @@ describe("applyPageMode", () => {
 describe("listenForTheme", () => {
   const parent = { name: "the landing page" };
 
-  test("applies keel-theme messages from the parent, as often as they come", () => {
+  test("applies undra-theme messages from the parent, as often as they come", () => {
     const win = fakeWindow();
     const root = fakeRoot();
     listenForTheme(win, root, parent);
-    win.deliver({ type: "keel-theme", theme: "dark" }, parent);
+    win.deliver({ type: "undra-theme", theme: "dark" }, parent);
     expect(root.attributes.get("data-theme")).toBe("dark");
-    win.deliver({ type: "keel-theme", theme: "light" }, parent);
+    win.deliver({ type: "undra-theme", theme: "light" }, parent);
     expect(root.attributes.get("data-theme")).toBe("light");
   });
 
@@ -80,12 +80,12 @@ describe("listenForTheme", () => {
     const win = fakeWindow();
     const root = fakeRoot();
     listenForTheme(win, root, parent);
-    win.deliver({ type: "keel-theme", theme: "dark" }, { name: "some other frame" });
-    win.deliver({ type: "keel-theme", theme: "dark" }, null);
-    win.deliver({ type: "keel-theme", theme: "purple" }, parent);
-    win.deliver("keel-theme", parent);
+    win.deliver({ type: "undra-theme", theme: "dark" }, { name: "some other frame" });
+    win.deliver({ type: "undra-theme", theme: "dark" }, null);
+    win.deliver({ type: "undra-theme", theme: "purple" }, parent);
+    win.deliver("undra-theme", parent);
     win.deliver(null, parent);
-    win.deliver({ type: "keel-stats" }, parent);
+    win.deliver({ type: "undra-stats" }, parent);
     expect([...root.attributes]).toEqual([]);
   });
 
@@ -96,7 +96,7 @@ describe("listenForTheme", () => {
     expect(win.listeners.size).toBe(1);
     stop();
     expect(win.listeners.size).toBe(0);
-    win.deliver({ type: "keel-theme", theme: "dark" }, parent);
+    win.deliver({ type: "undra-theme", theme: "dark" }, parent);
     expect([...root.attributes]).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-/* Keel site, blog: the index cards and the post skeleton (docs/ spec section 3). */
+/* Undra site, blog: the index cards and the post skeleton (docs/ spec section 3). */
 .blog-index { padding-bottom: 8px; }
 .post-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); padding-top: 12px; }
 @media (min-width: 720px) { .post-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

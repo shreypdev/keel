@@ -1,0 +1,420 @@
+import Foundation
+import XCTest
+@testable import UndraRuntime
+
+/// A scripted in-process "core" that speaks the wire through the same `UndraTransport` seam the
+/// real transports use. It records everything the host sends and lets a test play the core's
+/// side: replies, stream items (with the credit rules of docs/SPEC.md section 3.7), change-sets
+/// and port calls.
+final class FakeTransport: UndraTransport, @unchecked Sendable {
+    /// Something the host sent to the core.
+    enum Sent: Equatable {
+        case call(Wire.Call)
+        case cancel(UInt32)
+        case credit(UInt32, UInt32)
+        case observe(UInt64, UInt32, Bool)
+        case release(UInt64)
+        case registerPort(UInt32)
+        case portReply(Wire.PortReply)
+        case event(UInt32, UInt32, [UInt8])
+        case timerFired(UInt32)
+    }
+
+    /// One scripted stream: items sent only as far as credit allows, then an end or error marker.
+    struct FakeStream {
+        var items: [[UInt8]]
+        var failureBody: [UInt8]?
+        /// Keeps the stream open after the last item (no end marker).
+        var holdOpen = false
+        var credit: UInt32 = 0
+        var totalCredit: UInt32 = 0
+        var delivered = 0
+        var finished = false
+    }
+
+    private enum PumpAction {
+        case idle
+        case item([UInt8])
+        case end
+        case failure([UInt8])
+    }
+
+    private struct State {
+        var sent: [Sent] = []
+        var inbound: (any UndraInbound)? = nil
+        var streams: [UInt32: FakeStream] = [:]
+        var started = false
+        var shutDown = false
+    }
+
+    private let state = Guarded<State>(State())
+
+    let schemaHash: UInt64
+    let directSync: Bool
+
+    /// What the core does with a call: return `false` to reject it (`undra_call` returned 5).
+    var onCall: (@Sendable (Wire.Call, FakeTransport) -> Bool)?
+    /// The `Wire.Reply` bytes returned by an inline `callSync`.
+    var onCallSync: (@Sendable (Wire.Call) -> [UInt8])?
+    /// What the core does when the host observes a signal.
+    var onObserve: (@Sendable (UndraHandle, UInt32, Bool, FakeTransport) -> Void)?
+    var statsDocument: String?
+    var snapshotBytes: [UInt8] = []
+    var restoreCode: UInt32 = 0
+
+    init(schemaHash: UInt64 = 0x1234, directSync: Bool = true) {
+        self.schemaHash = schemaHash
+        self.directSync = directSync
+    }
+
+    // MARK: UndraTransport
+
+    var mode: UndraMode {
+        return directSync ? .inproc : .remote
+    }
+
+    var supportsDirectSync: Bool {
+        return directSync
+    }
+
+    func start(inbound: any UndraInbound, options: TransportStartOptions) throws -> TransportInfo {
+        state.withLock { (current: inout State) -> Void in
+            current.inbound = inbound
+            current.started = true
+        }
+        return TransportInfo(schemaHash: schemaHash)
+    }
+
+    func send(call payload: [UInt8]) -> Bool {
+        guard let call = try? Wire.Call.decode(payload) else {
+            return false
+        }
+        record(.call(call))
+        if let handler = onCall {
+            return handler(call, self)
+        }
+        return true
+    }
+
+    func callSync(_ payload: [UInt8]) throws -> [UInt8] {
+        let call = try Wire.Call.decode(payload)
+        record(.call(call))
+        if let handler = onCallSync {
+            return handler(call)
+        }
+        return Wire.Reply(callId: call.callId, status: .ok).encode()
+    }
+
+    func cancel(callId: UInt32) {
+        record(.cancel(callId))
+        state.withLock { (current: inout State) -> Void in
+            if var stream = current.streams[callId] {
+                stream.finished = true
+                current.streams[callId] = stream
+            }
+        }
+    }
+
+    func streamCredit(callId: UInt32, credit: UInt32) {
+        record(.credit(callId, credit))
+        state.withLock { (current: inout State) -> Void in
+            if var stream = current.streams[callId] {
+                stream.credit &+= credit
+                stream.totalCredit &+= credit
+                current.streams[callId] = stream
+            }
+        }
+        pump(callId)
+    }
+
+    func observe(handle: UndraHandle, signal: UInt32, on: Bool) {
+        record(.observe(handle.rawValue, signal, on))
+        if let handler = onObserve {
+            handler(handle, signal, on, self)
+        }
+    }
+
+    func release(handle: UndraHandle) {
+        record(.release(handle.rawValue))
+    }
+
+    func registerPort(_ portId: UInt32) {
+        record(.registerPort(portId))
+    }
+
+    func portReply(_ payload: [UInt8]) {
+        if let reply = try? Wire.PortReply.decode(payload) {
+            record(.portReply(reply))
+        }
+    }
+
+    func event(portId: UInt32, methodId: UInt32, payload: [UInt8]) {
+        record(.event(portId, methodId, payload))
+    }
+
+    func timerFired(_ timerId: UInt32) {
+        record(.timerFired(timerId))
+    }
+
+    func snapshot() throws -> [UInt8] {
+        return snapshotBytes
+    }
+
+    func restore(_ payload: [UInt8]) throws {
+        if restoreCode != 0 {
+            throw UndraRestoreError(code: restoreCode)
+        }
+    }
+
+    func statsJSON() -> String? {
+        return statsDocument
+    }
+
+    func shutdown() {
+        state.withLock { (current: inout State) -> Void in
+            current.shutDown = true
+        }
+    }
+
+    // MARK: Observations
+
+    var wasShutDown: Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.shutDown
+        }
+    }
+
+    var sent: [Sent] {
+        return state.withLock { (current: inout State) -> [Sent] in
+            return current.sent
+        }
+    }
+
+    var calls: [Wire.Call] {
+        var result: [Wire.Call] = []
+        for item in sent {
+            if case .call(let call) = item {
+                result.append(call)
+            }
+        }
+        return result
+    }
+
+    var cancels: [UInt32] {
+        var result: [UInt32] = []
+        for item in sent {
+            if case .cancel(let id) = item {
+                result.append(id)
+            }
+        }
+        return result
+    }
+
+    var releases: [UInt64] {
+        var result: [UInt64] = []
+        for item in sent {
+            if case .release(let handle) = item {
+                result.append(handle)
+            }
+        }
+        return result
+    }
+
+    var portReplies: [Wire.PortReply] {
+        var result: [Wire.PortReply] = []
+        for item in sent {
+            if case .portReply(let reply) = item {
+                result.append(reply)
+            }
+        }
+        return result
+    }
+
+    /// The credit grants for `callId`, in order.
+    func credits(for callId: UInt32) -> [UInt32] {
+        var result: [UInt32] = []
+        for item in sent {
+            if case .credit(let id, let credit) = item, id == callId {
+                result.append(credit)
+            }
+        }
+        return result
+    }
+
+    /// How many items of the scripted stream `callId` the core has sent.
+    func deliveredCount(_ callId: UInt32) -> Int {
+        return state.withLock { (current: inout State) -> Int in
+            return current.streams[callId]?.delivered ?? 0
+        }
+    }
+
+    /// The credit granted in total to the scripted stream `callId`.
+    func totalCredit(_ callId: UInt32) -> UInt32 {
+        return state.withLock { (current: inout State) -> UInt32 in
+            return current.streams[callId]?.totalCredit ?? 0
+        }
+    }
+
+    private func record(_ item: Sent) {
+        state.withLock { (current: inout State) -> Void in
+            current.sent.append(item)
+        }
+    }
+
+    // MARK: Playing the core
+
+    private func currentInbound() -> (any UndraInbound)? {
+        return state.withLock { (current: inout State) -> (any UndraInbound)? in
+            return current.inbound
+        }
+    }
+
+    func deliver(_ reply: Wire.Reply) {
+        currentInbound()?.onReply(callId: reply.callId, payload: reply.encode())
+    }
+
+    func replyOk(_ callId: UInt32, _ body: [UInt8] = []) {
+        deliver(Wire.Reply(callId: callId, status: .ok, body: ArraySlice(body)))
+    }
+
+    func replyError(_ callId: UInt32, _ body: [UInt8]) {
+        deliver(Wire.Reply(callId: callId, status: .error, body: ArraySlice(body)))
+    }
+
+    func deliverRawReply(_ callId: UInt32, _ payload: [UInt8]) {
+        currentInbound()?.onReply(callId: callId, payload: payload)
+    }
+
+    func deliverChangeSet(_ changeSet: Wire.ChangeSet) {
+        currentInbound()?.onChangeSet(changeSet.encode())
+    }
+
+    func deliverRawChangeSet(_ payload: [UInt8]) {
+        currentInbound()?.onChangeSet(payload)
+    }
+
+    func deliverStreamItem(_ item: Wire.StreamItem) {
+        currentInbound()?.onStreamItem(callId: item.callId, payload: item.encode())
+    }
+
+    func deliverRawStreamItem(_ callId: UInt32, _ payload: [UInt8]) {
+        currentInbound()?.onStreamItem(callId: callId, payload: payload)
+    }
+
+    func deliverLog(level: UInt8, target: String, message: String) {
+        currentInbound()?.onLog(level: level, target: target, message: message)
+    }
+
+    func disconnect(_ error: any Error) {
+        currentInbound()?.onDisconnect(error)
+    }
+
+    /// The core calls the host's port.
+    func callPort(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome {
+        guard let inbound = currentInbound() else {
+            return .unavailable
+        }
+        return inbound.onPortCall(portId: portId, methodId: methodId, portCallId: portCallId, args: args)
+    }
+
+    /// Opens a scripted stream for `callId`: replies "stream opened" and then delivers items as
+    /// credit arrives, followed by the end marker (or an error marker with `failureBody`).
+    func openStream(_ callId: UInt32, items: [[UInt8]], failureBody: [UInt8]? = nil, holdOpen: Bool = false) {
+        state.withLock { (current: inout State) -> Void in
+            current.streams[callId] = FakeStream(items: items, failureBody: failureBody, holdOpen: holdOpen)
+        }
+        deliver(Wire.Reply(callId: callId, status: .streamOpened))
+        pump(callId)
+    }
+
+    private func pump(_ callId: UInt32) {
+        while true {
+            let action = state.withLock { (current: inout State) -> PumpAction in
+                guard var stream = current.streams[callId] else {
+                    return .idle
+                }
+                if stream.finished {
+                    return .idle
+                }
+                if stream.delivered < stream.items.count {
+                    if stream.credit == 0 {
+                        return .idle
+                    }
+                    let item = stream.items[stream.delivered]
+                    stream.delivered += 1
+                    stream.credit -= 1
+                    current.streams[callId] = stream
+                    return .item(item)
+                }
+                if stream.holdOpen {
+                    return .idle
+                }
+                stream.finished = true
+                current.streams[callId] = stream
+                if let body = stream.failureBody {
+                    return .failure(body)
+                }
+                return .end
+            }
+            switch action {
+            case .idle:
+                return
+            case .item(let item):
+                deliverStreamItem(Wire.StreamItem(callId: callId, flag: .item, body: ArraySlice(item)))
+            case .end:
+                deliverStreamItem(Wire.StreamItem(callId: callId, flag: .end))
+                return
+            case .failure(let body):
+                deliverStreamItem(Wire.StreamItem(callId: callId, flag: .error, body: ArraySlice(body)))
+                return
+            }
+        }
+    }
+}
+
+// MARK: - Helpers
+
+/// Polls `condition` until it holds or `timeout` seconds pass; yields the main actor between polls.
+@MainActor
+func waitUntil(timeout: Double = 3, _ condition: () -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: 2_000_000)
+    }
+    return condition()
+}
+
+/// Runs `body` and returns the error it threw, or `nil`.
+@MainActor
+func captureError(_ body: @MainActor () async throws -> Void) async -> (any Error)? {
+    do {
+        try await body()
+        return nil
+    } catch {
+        return error
+    }
+}
+
+/// A core over `transport` with no adapters, for tests.
+func makeCore(
+    _ transport: FakeTransport,
+    adapters: Adapters = Adapters.none,
+    expectedSchemaHash: UInt64 = 0x1234,
+    blockingCallTimeout: Double = 30
+) throws -> UndraCore {
+    var options = LoadOptions.inproc(adapters: adapters, expectedSchemaHash: expectedSchemaHash)
+    options.blockingCallTimeout = blockingCallTimeout
+    return try UndraCore.connect(transport: transport, options: options)
+}
+
+/// A change-set with the given `(handle, signal, value)` full-value entries.
+func makeChangeSet(txn: UInt64 = 1, _ entries: [(UndraHandle, UInt32, [UInt8])]) -> Wire.ChangeSet {
+    var list: [Wire.ChangeEntry] = []
+    for entry in entries {
+        list.append(Wire.ChangeEntry(handle: entry.0, signalId: entry.1, op: .fullValue, value: ArraySlice(entry.2)))
+    }
+    return Wire.ChangeSet(txnId: txn, entries: list)
+}

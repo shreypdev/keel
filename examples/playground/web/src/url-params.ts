@@ -100,13 +100,13 @@ export function resolveTab(params: PlaygroundParams, hash: string): TabId {
 }
 
 /**
- * The colour scheme a message from the embedding page asks for: `{ type: "keel-theme", theme }`
+ * The colour scheme a message from the embedding page asks for: `{ type: "undra-theme", theme }`
  * with `theme` `"light"` or `"dark"`. Anything else, from any sender, gives `undefined`.
  * `event.data` is untrusted, so every step is checked.
  */
 export function parseThemeMessage(data: unknown): Theme | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const message = data as { readonly type?: unknown; readonly theme?: unknown };
-  if (message.type !== "keel-theme") return undefined;
+  if (message.type !== "undra-theme") return undefined;
   return message.theme === "light" || message.theme === "dark" ? message.theme : undefined;
 }

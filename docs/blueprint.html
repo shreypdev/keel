@@ -1,4 +1,4 @@
-<title>Keel Blueprint</title>
+<title>Undra Blueprint</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&display=swap">
@@ -187,7 +187,7 @@ figcaption b{color:var(--t1);font-weight:700}
 
 <header class="bar">
   <div class="bar-in">
-    <a class="brand" href="#verdict">keel / blueprint v0.1</a>
+    <a class="brand" href="#verdict">undra / blueprint v0.1</a>
     <span class="bar-meta">Design document · September 2026</span>
   </div>
   <div class="progress" aria-hidden="true"><i id="prog"></i></div>
@@ -196,9 +196,9 @@ figcaption b{color:var(--t1);font-weight:700}
 <div class="shell">
 <aside class="rail" aria-label="Contents">
 <details open>
-<summary>Keel</summary>
+<summary>Undra</summary>
 <div>
-<p class="brand-block"><b>Keel</b><small>blueprint · v0.1 · 2026-09</small></p>
+<p class="brand-block"><b>Undra</b><small>blueprint · v0.1 · 2026-09</small></p>
 <ol id="toc">
 <li class="group">Decision</li>
 <li><a href="#verdict"><span class="n">00</span>Verdict</a></li>
@@ -233,7 +233,7 @@ figcaption b{color:var(--t1);font-weight:700}
 <main>
 <header class="masthead">
 <span class="eyebrow">Design document · working name · prepared for Shrey</span>
-<h1>Keel</h1>
+<h1>Undra</h1>
 <p class="tagline">One Rust core under native iOS, Android and web apps. Everything below the pixels, with nothing to apologize for.</p>
 <div class="facts">
 <span class="pill">Verdict: build it</span>
@@ -249,9 +249,9 @@ figcaption b{color:var(--t1);font-weight:700}
 <span class="label">Go</span>
 <p>The gap is real and nobody is closing it. UniFFI generates bindings and stops. Crux gives you an architecture and a thin toolchain. Neither has a web story a frontend team would accept, neither has devtools, neither has a migration path for an existing app. KMP owns Android teams because it is Kotlin, and its iOS and web stories are its weakest parts. There is room for one framework that owns the whole workflow end to end, and the workflow is where the pain is.</p>
 </div>
-<p class="lede">The scope decision: Keel owns everything under the pixels. Domain logic, state, data fetching and caching, persistence, offline, auth flows, the dev loop. The UI stays SwiftUI, Jetpack Compose and React. This is the only scope in which "zero compromise" is a true statement rather than a slogan.</p>
+<p class="lede">The scope decision: Undra owns everything under the pixels. Domain logic, state, data fetching and caching, persistence, offline, auth flows, the dev loop. The UI stays SwiftUI, Jetpack Compose and React. This is the only scope in which "zero compromise" is a true statement rather than a slogan.</p>
 <p>The moment a cross-platform framework paints pixels on three platforms it becomes Flutter, and inherits Flutter's compromises: a non-native feel, accessibility drift, and a permanent lag behind each platform's newest UI features. KMP's Compose Multiplatform on iOS is a real product now, and it makes exactly this trade. We refuse it. A SwiftUI view bound to Rust state is indistinguishable from a SwiftUI view bound to Swift state, and that is the bar.</p>
-<p>Refusing the pixels still leaves us most of the app. The code below the UI is where the three platforms disagree, where the subtle bugs live, and where every company re-implements the same cache, retry policy, offline queue, pagination and session refresh three times and gets three different answers. That is the code Keel takes over, and taking it over once is what makes teams forget the alternatives.</p>
+<p>Refusing the pixels still leaves us most of the app. The code below the UI is where the three platforms disagree, where the subtle bugs live, and where every company re-implements the same cache, retry policy, offline queue, pagination and session refresh three times and gets three different answers. That is the code Undra takes over, and taking it over once is what makes teams forget the alternatives.</p>
 <h3>The thesis in one sentence</h3>
 <div class="callout">
 <p><strong>Reads never cross the boundary. Writes cross once per transaction. Native UI binds to Rust state as if it were native state.</strong> Every architectural decision in this document follows from that sentence, and most of the performance story is that sentence.</p>
@@ -268,9 +268,9 @@ figcaption b{color:var(--t1);font-weight:700}
 
 <section id="thesis">
 <h2><span class="sn">§01</span>Thesis: what makes teams trust a framework with their eyes closed</h2>
-<p class="lede">Blind trust is never given to a pitch. It is given to a tool that has been boring for long enough. Keel earns it with three product claims and five habits.</p>
+<p class="lede">Blind trust is never given to a pitch. It is given to a tool that has been boring for long enough. Undra earns it with three product claims and five habits.</p>
 <div class="grid3">
-<div class="tile"><span class="kicker">claim 1</span><h4>State is the product</h4><p>Calling a Rust function from Swift was solved years ago. What no one has shipped is Rust state that SwiftUI, Compose and React observe natively, with one FFI crossing per change instead of one per value. Keel's reactive core is the moat; bindings are table stakes.</p></div>
+<div class="tile"><span class="kicker">claim 1</span><h4>State is the product</h4><p>Calling a Rust function from Swift was solved years ago. What no one has shipped is Rust state that SwiftUI, Compose and React observe natively, with one FFI crossing per change instead of one per value. Undra's reactive core is the moat; bindings are table stakes.</p></div>
 <div class="tile"><span class="kicker">claim 2</span><h4>Idiomatic or nothing</h4><p>Generated Swift must pass review by a Swift engineer who does not know Rust exists: typed throws, <code>async</code>, <code>@Observable</code>, <code>Sendable</code>. Same for Kotlin (sealed interfaces, <code>suspend</code>, <code>Flow</code>, Compose <code>State</code>) and TypeScript (discriminated unions, <code>Promise</code>, hooks). No <code>RustBuffer</code> in anyone's autocomplete.</p></div>
 <div class="tile"><span class="kicker">claim 3</span><h4>The dev loop is the feature</h4><p>Change a Rust function and see it in the running iOS app in about a second without rebuilding the app. Time-travel any transaction in a devtools inspector on any platform. Test the whole core with <code>cargo test</code> and fake ports. This is what KMP cannot do and what makes engineers evangelize.</p></div>
 </div>
@@ -278,9 +278,9 @@ figcaption b{color:var(--t1);font-weight:700}
 <ol>
 <li><strong>One contract suite, three platforms.</strong> Every feature ships with a behavioral test that runs on the iOS simulator, an Android emulator and a headless browser. If the platforms disagree, CI is red.</li>
 <li><strong>Benchmarks are tests.</strong> The budgets in §14 are asserted in CI against UniFFI and KMP baselines, and the numbers are published on the site every release.</li>
-<li><strong>Compatibility is a promise.</strong> A core built with Keel 1.x loads against bindings from any Keel 1.x; a mismatch fails at startup with a message, never with undefined behavior.</li>
+<li><strong>Compatibility is a promise.</strong> A core built with Undra 1.x loads against bindings from any Undra 1.x; a mismatch fails at startup with a message, never with undefined behavior.</li>
 <li><strong>Error messages teach.</strong> Every macro error says what is wrong, why, and the fix, with a link. The compiler is the onboarding.</li>
-<li><strong>We ship on it first.</strong> A real store app with auth, offline cart and sync is built on public Keel APIs only, and it ships to TestFlight, Play internal testing and the web on every release.</li>
+<li><strong>We ship on it first.</strong> A real store app with auth, offline cart and sync is built on public Undra APIs only, and it ships to TestFlight, Play internal testing and the web on every release.</li>
 </ol>
 </section>
 
@@ -289,7 +289,7 @@ figcaption b{color:var(--t1);font-weight:700}
 <p class="lede">This table is deliberately fair to the competition. A framework that misdescribes its rivals gets caught in its first Hacker News thread.</p>
 <div class="scroll">
 <table>
-<thead><tr><th></th><th>KMP</th><th>UniFFI</th><th>Crux</th><th>Flutter / RN</th><th>Keel</th></tr></thead>
+<thead><tr><th></th><th>KMP</th><th>UniFFI</th><th>Crux</th><th>Flutter / RN</th><th>Undra</th></tr></thead>
 <tbody>
 <tr><td><b>Language</b></td><td>Kotlin</td><td>Rust</td><td>Rust</td><td>Dart / JS</td><td>Rust</td></tr>
 <tr><td><b>What is shared</b></td><td>Logic; optionally UI via Compose Multiplatform</td><td>Functions, objects, records</td><td>Logic + state (Elm-style app), effects via capabilities</td><td>Everything including UI</td><td>Logic, reactive state, data layer, persistence, dev loop</td></tr>
@@ -301,47 +301,47 @@ figcaption b{color:var(--t1);font-weight:700}
 <tr><td><b>Dev loop</b></td><td>Gradle; Compose hot reload on desktop</td><td>Rebuild app</td><td>Rebuild app</td><td>Hot reload (their strongest asset)</td><td>Remote core: Rust hot reload into the running native app; devtools with time travel</td></tr>
 <tr><td><b>Migration into an existing app</b></td><td>Natural on Android, awkward on iOS</td><td>Manual</td><td>All-or-nothing architecture</td><td>Rewrite</td><td>Ladder of five levels, each shippable (§04)</td></tr>
 <tr><td><b>Where it wins</b></td><td>Android-heavy orgs with Kotlin talent</td><td>Rust teams that need bindings and nothing else</td><td>Teams that want Elm on mobile</td><td>Startups that want one UI codebase</td><td>Teams that want one correct core and truly native UI</td></tr>
-<tr><td><b>Where Keel loses to it</b></td><td>A team with no Rust and no reason to learn it</td><td>A tiny library with three functions</td><td>Never, if we execute; Crux's ideas are absorbed</td><td>An app that is 90% UI and 10% logic</td><td></td></tr>
+<tr><td><b>Where Undra loses to it</b></td><td>A team with no Rust and no reason to learn it</td><td>A tiny library with three functions</td><td>Never, if we execute; Crux's ideas are absorbed</td><td>An app that is 90% UI and 10% logic</td><td></td></tr>
 </tbody>
 </table>
 </div>
 <div class="callout warn">
 <span class="label">Say it out loud</span>
-<p>Keel's adoption wall is hiring, not technology. Most mobile teams have zero Rust engineers. The product answer is that a Keel core reads like TypeScript with types that mean something: the macros hide lifetimes, the runtime hides threads, and the docs assume the reader has never opened a Rust book. The commercial answer is that the first customers are the companies already running Rust cores by hand (fintech, security, messaging, infrastructure-adjacent) who are paying three teams to maintain the glue.</p>
+<p>Undra's adoption wall is hiring, not technology. Most mobile teams have zero Rust engineers. The product answer is that an Undra core reads like TypeScript with types that mean something: the macros hide lifetimes, the runtime hides threads, and the docs assume the reader has never opened a Rust book. The commercial answer is that the first customers are the companies already running Rust cores by hand (fintech, security, messaging, infrastructure-adjacent) who are paying three teams to maintain the glue.</p>
 </div>
 </section>
 
 <section id="dx">
 <h2><span class="sn">§03</span>Fifteen minutes from nothing to three running apps</h2>
 <p class="lede">The onboarding is measured with a stopwatch and real engineers, and the number is a release gate. Here is what those fifteen minutes look like.</p>
-<pre data-lang="shell"><code>$ cargo install keel-cli                     <span class="c"># or: brew install keel</span>
-$ keel init acme-core --targets ios,android,web
-$ cd acme-core &amp;&amp; keel dev                   <span class="c"># core runs on your laptop; apps connect over the wire</span>
-$ keel build --release                       <span class="c"># AcmeCore.xcframework + Swift package</span>
+<pre data-lang="shell"><code>$ cargo install undra-cli                     <span class="c"># or: brew install undra</span>
+$ undra init acme-core --targets ios,android,web
+$ cd acme-core &amp;&amp; undra dev                   <span class="c"># core runs on your laptop; apps connect over the wire</span>
+$ undra build --release                       <span class="c"># AcmeCore.xcframework + Swift package</span>
                                              <span class="c"># acme-core.aar + Kotlin sources</span>
                                              <span class="c"># @acme/core: ESM + .d.ts + .wasm</span>
-$ keel adopt ios ../AcmeApp.xcodeproj        <span class="c"># adds the package and a bootstrap; touches nothing else</span>
-$ keel doctor                                <span class="c"># toolchains, SDKs, signing, on one screen, with fixes</span></code></pre>
+$ undra adopt ios ../AcmeApp.xcodeproj        <span class="c"># adds the package and a bootstrap; touches nothing else</span>
+$ undra doctor                                <span class="c"># toolchains, SDKs, signing, on one screen, with fixes</span></code></pre>
 <h3>The core you write</h3>
-<p>One attribute, <code>#[keel::api]</code>, marks anything that crosses the boundary. A few specialized attributes add semantics: <code>#[keel::error]</code>, <code>#[keel::store]</code>, <code>#[keel::port]</code>. There is no IDL file; the Rust source is the schema and <code>rustc</code> checks it.</p>
-<pre data-lang="rust"><code><span class="k">use</span> keel::prelude::*;
+<p>One attribute, <code>#[undra::api]</code>, marks anything that crosses the boundary. A few specialized attributes add semantics: <code>#[undra::error]</code>, <code>#[undra::store]</code>, <code>#[undra::port]</code>. There is no IDL file; the Rust source is the schema and <code>rustc</code> checks it.</p>
+<pre data-lang="rust"><code><span class="k">use</span> undra::prelude::*;
 
 <span class="c">// Records become Swift structs, Kotlin data classes, TS interfaces.</span>
-#[keel::api] #[derive(Clone)]
+#[undra::api] #[derive(Clone)]
 <span class="k">pub struct</span> Todo { <span class="k">pub</span> id: Uuid, <span class="k">pub</span> title: String, <span class="k">pub</span> done: bool }
 
-#[keel::api]
+#[undra::api]
 <span class="k">pub enum</span> Filter { All, Active, Done }
 
 <span class="c">// Typed errors: Swift typed throws, Kotlin sealed exceptions, TS error classes.</span>
-#[keel::error]
+#[undra::error]
 <span class="k">pub enum</span> TodoError {
     #[error(<span class="s">"title cannot be empty"</span>)] EmptyTitle,
     #[error(transparent)] Http(#[from] HttpError),
 }
 
 <span class="c">// A store: signals the UI observes, commands the UI calls.</span>
-#[keel::store]
+#[undra::store]
 <span class="k">pub struct</span> Todos {
     ctx: Ctx,
     todos: Signal&lt;Vec&lt;Todo&gt;&gt;,
@@ -349,7 +349,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
     visible: Computed&lt;Vec&lt;Todo&gt;&gt;,
 }
 
-#[keel::api]
+#[undra::api]
 <span class="k">impl</span> Todos {
     <span class="k">pub fn</span> new(ctx: Ctx) -&gt; Self {
         <span class="k">let</span> todos = Signal::new(vec![]);
@@ -387,7 +387,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
     }
 }</code></pre>
 <pre data-lang="kotlin"><code>@Composable
-<span class="k">fun</span> TodoScreen(todos: Todos = rememberKeel { Todos(ctx = Keel.shared) }) {
+<span class="k">fun</span> TodoScreen(todos: Todos = rememberUndra { Todos(ctx = Undra.shared) }) {
     <span class="k">val</span> visible <span class="k">by</span> todos.visible                 <span class="c">// Compose State&lt;List&lt;Todo&gt;&gt;, zero FFI calls</span>
     <span class="k">val</span> scope = rememberCoroutineScope()
     <span class="k">var</span> draft <span class="k">by</span> remember { mutableStateOf(<span class="s">""</span>) }
@@ -397,10 +397,10 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
     Button(onClick = { scope.launch { todos.add(draft) } }) { Text(<span class="s">"Add"</span>) }  <span class="c">// suspend, throws TodoError</span>
 }</code></pre>
 <pre data-lang="tsx"><code><span class="k">import</span> { Todos, TodoError } <span class="k">from</span> <span class="s">"@acme/core"</span>;
-<span class="k">import</span> { useKeel, useSignal } <span class="k">from</span> <span class="s">"@acme/core/react"</span>;
+<span class="k">import</span> { useUndra, useSignal } <span class="k">from</span> <span class="s">"@acme/core/react"</span>;
 
 <span class="k">export function</span> TodoScreen() {
-  <span class="k">const</span> todos = useKeel(Todos);               <span class="c">// core runs in a Worker; you never notice</span>
+  <span class="k">const</span> todos = useUndra(Todos);               <span class="c">// core runs in a Worker; you never notice</span>
   <span class="k">const</span> visible = useSignal(todos.visible);   <span class="c">// useSyncExternalStore, no round trip</span>
   <span class="k">const</span> [draft, setDraft] = useState(<span class="s">""</span>);
   <span class="k">return</span> (
@@ -412,19 +412,19 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 }</code></pre>
 <h3>When you get it wrong, the compiler explains</h3>
 <p>Every rejected type produces an error in the style of rustc's best diagnostics. This is the single highest-leverage onboarding investment we can make, because it is the one every engineer hits on day one.</p>
-<pre data-lang="rustc"><code><span class="k">error[keel::E0012]</span>: `Vec&lt;Box&lt;dyn Any&gt;&gt;` cannot cross the boundary
+<pre data-lang="rustc"><code><span class="k">error[undra::E0012]</span>: `Vec&lt;Box&lt;dyn Any&gt;&gt;` cannot cross the boundary
   --&gt; src/cart.rs:14:5
    |
 14 |     pub items: Vec&lt;Box&lt;dyn Any&gt;&gt;,
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ trait objects have no wire representation
    |
-   = <span class="s">help</span>: make `items` a concrete `#[keel::api]` type, or an enum listing the cases you need
-   = <span class="s">docs</span>: https://keel.dev/errors/E0012</code></pre>
+   = <span class="s">help</span>: make `items` a concrete `#[undra::api]` type, or an enum listing the cases you need
+   = <span class="s">docs</span>: https://shreypdev.github.io/undra/docs/errors.html#E0012</code></pre>
 </section>
 
 <section id="migration">
 <h2><span class="sn">§04</span>Migration ladder: every rung ships</h2>
-<p class="lede">Nobody rewrites a working app. Keel is adopted feature by feature, and each level is a state a company can stay in forever. The framework is designed so that the existing Swift, Kotlin and TypeScript code never has to know a migration is happening.</p>
+<p class="lede">Nobody rewrites a working app. Undra is adopted feature by feature, and each level is a state a company can stay in forever. The framework is designed so that the existing Swift, Kotlin and TypeScript code never has to know a migration is happening.</p>
 <figure>
 <div class="frame">
 <svg class="d" viewBox="0 0 900 330" role="img" aria-label="Five migration levels drawn as ascending steps: three codebases, pure functions, one feature store, data layer, core-first. Under the steps a bar shows the share of logic in Rust growing from none to almost all.">
@@ -485,8 +485,8 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 <figcaption><b>The ladder.</b> Each level is independently shippable and reversible. L3 is where most teams should aim first: the data layer is the code that is most duplicated, most subtle and least platform-specific, so moving it buys the most correctness per week.</figcaption>
 </figure>
 <h3>How coexistence works</h3>
-<p>At L1 and L2 the existing app keeps its own state management. The generated store class exposes signals that the old code can read like any other property, and the old code can push events into the core through ordinary commands. There is no "bridge" object to learn; a Kotlin <code>ViewModel</code> holding a Keel store next to its own <code>StateFlow</code>s is unremarkable code. The <code>keel adopt</code> command adds the package dependency and a one-line bootstrap, and edits nothing else in the project.</p>
-<p>The migration guides are written per source: "from KMP shared module", "from UniFFI", "from Crux", "from a TypeScript monorepo". Each is a checklist with a worked example and a codemod where one is possible (UniFFI's <code>.udl</code> maps mechanically onto <code>#[keel::api]</code>, so that one is automated).</p>
+<p>At L1 and L2 the existing app keeps its own state management. The generated store class exposes signals that the old code can read like any other property, and the old code can push events into the core through ordinary commands. There is no "bridge" object to learn; a Kotlin <code>ViewModel</code> holding an Undra store next to its own <code>StateFlow</code>s is unremarkable code. The <code>undra adopt</code> command adds the package dependency and a one-line bootstrap, and edits nothing else in the project.</p>
+<p>The migration guides are written per source: "from KMP shared module", "from UniFFI", "from Crux", "from a TypeScript monorepo". Each is a checklist with a worked example and a codemod where one is possible (UniFFI's <code>.udl</code> maps mechanically onto <code>#[undra::api]</code>, so that one is automated).</p>
 </section>
 
 <section id="arch">
@@ -494,15 +494,15 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 <p class="lede">The most useful architecture diagram answers one question for a new engineer: which parts do I write, which parts are generated, and which parts does the framework ship. Here it is.</p>
 <figure>
 <div class="frame">
-<svg class="d" viewBox="0 0 900 500" role="img" aria-label="Layered system diagram. Per platform column: native views you write, a generated package, a Keel runtime. A boundary band with one wire format. Below it the Rust core with your domain code next to signals, query and the runtime, a row of port traits, and platform adapters that implement the ports.">
+<svg class="d" viewBox="0 0 900 500" role="img" aria-label="Layered system diagram. Per platform column: native views you write, a generated package, an Undra runtime. A boundary band with one wire format. Below it the Rust core with your domain code next to signals, query and the runtime, a row of port traits, and platform adapters that implement the ports.">
 <defs><marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
 <!-- left gutter labels -->
 <text x="20" y="46" class="small acctext">You write</text>
 <text x="20" y="112" class="small muted">Generated</text>
-<text x="20" y="180" class="small muted">Keel ships</text>
+<text x="20" y="180" class="small muted">Undra ships</text>
 <text x="20" y="310" class="small acctext">You write</text>
-<text x="20" y="324" class="small muted">+ Keel ships</text>
-<text x="20" y="446" class="small muted">Keel ships,</text>
+<text x="20" y="324" class="small muted">+ Undra ships</text>
+<text x="20" y="446" class="small muted">Undra ships,</text>
 <text x="20" y="460" class="small muted">overridable</text>
 
 <!-- column headers row: views -->
@@ -532,13 +532,13 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 
 <!-- runtimes -->
 <rect class="box2" x="120" y="160" width="240" height="40" rx="6"/>
-<text x="240" y="177" text-anchor="middle" class="head">Keel runtime · Swift</text>
+<text x="240" y="177" text-anchor="middle" class="head">Undra runtime · Swift</text>
 <text x="240" y="191" text-anchor="middle" class="small muted">handles · continuations · mirror · main-thread apply</text>
 <rect class="box2" x="380" y="160" width="240" height="40" rx="6"/>
-<text x="500" y="177" text-anchor="middle" class="head">Keel runtime · Kotlin</text>
+<text x="500" y="177" text-anchor="middle" class="head">Undra runtime · Kotlin</text>
 <text x="500" y="191" text-anchor="middle" class="small muted">JNI registered natives · coroutines · mirror</text>
 <rect class="box2" x="640" y="160" width="240" height="40" rx="6"/>
-<text x="760" y="177" text-anchor="middle" class="head">Keel runtime · TS</text>
+<text x="760" y="177" text-anchor="middle" class="head">Undra runtime · TS</text>
 <text x="760" y="191" text-anchor="middle" class="small muted">wasm loader · Worker proxy · mirror</text>
 
 <!-- vertical arrows views<->generated: reads -->
@@ -559,7 +559,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 
 <!-- core -->
 <rect class="box" x="120" y="270" width="760" height="140" rx="8"/>
-<text x="134" y="290" class="head">Keel core · Rust · one cdylib per mobile target, one .wasm for web</text>
+<text x="134" y="290" class="head">Undra core · Rust · one cdylib per mobile target, one .wasm for web</text>
 <rect class="you" x="134" y="300" width="176" height="52" rx="5"/>
 <text x="222" y="320" text-anchor="middle" class="head">Your domain</text>
 <text x="222" y="335" text-anchor="middle" class="small">stores · commands · rules</text>
@@ -591,7 +591,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 <text x="252" y="420" class="small muted">implements</text>
 </svg>
 </div>
-<figcaption><b>Ownership map.</b> Engineers write the tinted boxes: native views on top, domain code in the core. Everything else is generated from the Rust source or shipped by Keel. Adapters are shipped defaults that any app can replace with its own implementation of the port trait, in Swift, Kotlin or TypeScript.</figcaption>
+<figcaption><b>Ownership map.</b> Engineers write the tinted boxes: native views on top, domain code in the core. Everything else is generated from the Rust source or shipped by Undra. Adapters are shipped defaults that any app can replace with its own implementation of the port trait, in Swift, Kotlin or TypeScript.</figcaption>
 </figure>
 <h3>Layer responsibilities</h3>
 <div class="grid2">
@@ -610,7 +610,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 <thead><tr><th>Rust</th><th>Swift</th><th>Kotlin</th><th>TypeScript</th><th>Boundary cost</th></tr></thead>
 <tbody>
 <tr><td><code>bool, i8…i32, u8…u32, f32, f64</code></td><td><code>Bool, Int8…Int32, UInt8…UInt32, Float, Double</code></td><td><code>Boolean, Byte…Int, UByte…UInt, Float, Double</code></td><td><code>boolean, number</code></td><td>register</td></tr>
-<tr><td><code>i64, u64</code></td><td><code>Int64, UInt64</code></td><td><code>Long, ULong</code></td><td><code>bigint</code>; <code>#[keel(js_number)]</code> opts into <code>number</code> with a range check</td><td>register</td></tr>
+<tr><td><code>i64, u64</code></td><td><code>Int64, UInt64</code></td><td><code>Long, ULong</code></td><td><code>bigint</code>; <code>#[undra(js_number)]</code> opts into <code>number</code> with a range check</td><td>register</td></tr>
 <tr><td><code>String</code></td><td><code>String</code></td><td><code>String</code></td><td><code>string</code></td><td>copy; UTF-8 to UTF-16 on JVM and JS</td></tr>
 <tr><td><code>Bytes</code></td><td><code>Data</code></td><td><code>ByteArray</code> or direct <code>ByteBuffer</code></td><td><code>Uint8Array</code></td><td>zero-copy view in process; copy over a transport</td></tr>
 <tr><td><code>Option&lt;T&gt;</code></td><td><code>T?</code></td><td><code>T?</code></td><td><code>T | undefined</code></td><td>1-byte tag</td></tr>
@@ -621,7 +621,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 <tr><td><code>enum</code>, data variants</td><td><code>enum</code> with associated values</td><td><code>sealed interface</code></td><td>discriminated union on <code>kind</code></td><td>u16 tag + payload</td></tr>
 <tr><td><code>Result&lt;T, E&gt;</code></td><td><code>throws(E)</code> typed throws</td><td><code>throws E</code>, sealed exception hierarchy</td><td><code>Promise</code> rejects with an <code>E</code> class, <code>instanceof</code>-able</td><td>tag + payload</td></tr>
 <tr><td>object (<code>impl</code> block)</td><td><code>final class: Sendable</code></td><td><code>class: AutoCloseable</code></td><td><code>class</code> with <code>[Symbol.dispose]</code></td><td>8-byte handle; refcounted</td></tr>
-<tr><td><code>#[keel::port] trait</code></td><td><code>protocol</code></td><td><code>interface</code></td><td><code>interface</code></td><td>vtable of callbacks</td></tr>
+<tr><td><code>#[undra::port] trait</code></td><td><code>protocol</code></td><td><code>interface</code></td><td><code>interface</code></td><td>vtable of callbacks</td></tr>
 <tr><td><code>Signal&lt;T&gt;</code></td><td><code>@Observable</code> stored property</td><td>Compose <code>State&lt;T&gt;</code>, plus <code>StateFlow&lt;T&gt;</code></td><td><code>Signal&lt;T&gt;</code> with framework hooks</td><td>mirrored: read is free; updates ride the change-set</td></tr>
 <tr><td><code>Computed&lt;T&gt;</code></td><td>read-only property</td><td><code>State&lt;T&gt;</code></td><td><code>ReadonlySignal&lt;T&gt;</code></td><td>same as Signal</td></tr>
 <tr><td><code>async fn</code></td><td><code>async throws</code></td><td><code>suspend</code></td><td><code>Promise</code></td><td>continuation; cancellable from either side</td></tr>
@@ -634,11 +634,11 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 </div>
 <h3>Rules the macro enforces</h3>
 <ul>
-<li><strong>Closed world.</strong> A type crosses only if it is in this table or is itself <code>#[keel::api]</code>. Generics are monomorphized per use; trait objects, lifetimes in public signatures, raw pointers and <code>Box&lt;dyn Fn&gt;</code> are rejected with a fix-it.</li>
+<li><strong>Closed world.</strong> A type crosses only if it is in this table or is itself <code>#[undra::api]</code>. Generics are monomorphized per use; trait objects, lifetimes in public signatures, raw pointers and <code>Box&lt;dyn Fn&gt;</code> are rejected with a fix-it.</li>
 <li><strong>Newtypes stay typed.</strong> <code>struct UserId(Uuid)</code> becomes a distinct Swift struct, a Kotlin value class and a branded TypeScript type, so IDs do not get mixed up across the boundary either.</li>
-<li><strong>Keyed collections.</strong> <code>#[keel(key = "id")]</code> on a <code>Vec&lt;T&gt;</code> field of a store tells the mirror to send keyed patches (insert, remove, move, update) instead of the whole list, and gives SwiftUI, Compose and React stable identity for animations.</li>
+<li><strong>Keyed collections.</strong> <code>#[undra(key = "id")]</code> on a <code>Vec&lt;T&gt;</code> field of a store tells the mirror to send keyed patches (insert, remove, move, update) instead of the whole list, and gives SwiftUI, Compose and React stable identity for animations.</li>
 <li><strong>Lazy collections.</strong> <code>Lazy&lt;Vec&lt;T&gt;&gt;</code> crosses as a handle with paged access, so a 50,000-row table is never serialized. Virtualized lists on every platform pull pages through it.</li>
-<li><strong>Evolvable records.</strong> Fields can be added with <code>#[keel(default)]</code> and removed with <code>#[keel(deprecated = "1.4")]</code>; the schema hash covers layout, so mixing versions fails loudly at load instead of silently misreading bytes.</li>
+<li><strong>Evolvable records.</strong> Fields can be added with <code>#[undra(default)]</code> and removed with <code>#[undra(deprecated = "1.4")]</code>; the schema hash covers layout, so mixing versions fails loudly at load instead of silently misreading bytes.</li>
 </ul>
 </section>
 
@@ -693,7 +693,7 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 <line class="ln" x1="300" y1="346" x2="110" y2="346" marker-end="url(#ar2)"/>
 </svg>
 </div>
-<figcaption><b>One command, three crossings, two render passes.</b> The same flow in a per-value binding design costs one crossing per signal per read. In a whole-view-model design (Crux) it re-sends the entire screen state on every event. Keel sends what changed, once, and never pays for reads.</figcaption>
+<figcaption><b>One command, three crossings, two render passes.</b> The same flow in a per-value binding design costs one crossing per signal per read. In a whole-view-model design (Crux) it re-sends the entire screen state on every event. Undra sends what changed, once, and never pays for reads.</figcaption>
 </figure>
 <h3>Why this design and not the alternatives</h3>
 <div class="grid2">
@@ -708,13 +708,13 @@ $ keel doctor                                <span class="c"># toolchains, SDKs,
 
 <section id="data">
 <h2><span class="sn">§08</span>Data layer: TanStack Query semantics, one implementation, three platforms</h2>
-<p class="lede">The most-loved library in web frontend exists because async server state is hard to get right. Keel ships those semantics in the core, so caching, staleness, retries, optimistic updates, persistence and the offline queue behave identically on every platform and are written once.</p>
-<pre data-lang="rust"><code>#[keel::query(key = <span class="s">"todos"</span>, stale = <span class="s">"30s"</span>, persist)]
+<p class="lede">The most-loved library in web frontend exists because async server state is hard to get right. Undra ships those semantics in the core, so caching, staleness, retries, optimistic updates, persistence and the offline queue behave identically on every platform and are written once.</p>
+<pre data-lang="rust"><code>#[undra::query(key = <span class="s">"todos"</span>, stale = <span class="s">"30s"</span>, persist)]
 <span class="k">async fn</span> todos(ctx: &amp;Ctx) -&gt; Result&lt;Vec&lt;Todo&gt;, HttpError&gt; {
     ctx.http().get(<span class="s">"/todos"</span>).json().await
 }
 
-#[keel::mutation(idempotent)]
+#[undra::mutation(idempotent)]
 <span class="k">async fn</span> save_todo(ctx: &amp;Ctx, todo: Todo) -&gt; Result&lt;Todo, HttpError&gt; {
     ctx.http().post(<span class="s">"/todos"</span>).json(&amp;todo).send().await
 }
@@ -776,13 +776,13 @@ ctx.mutate(SaveTodo(todo.clone()))
 
 <section id="ports">
 <h2><span class="sn">§09</span>Ports and adapters: the core never links a platform SDK</h2>
-<p class="lede">The core declares what it needs as traits. Keel ships a default implementation of each on every platform, and an app can replace any of them in Swift, Kotlin or TypeScript by implementing the generated protocol. Tests replace them with fakes. This one rule is what makes the core runnable on a laptop, testable in milliseconds, and portable to a fourth platform later.</p>
+<p class="lede">The core declares what it needs as traits. Undra ships a default implementation of each on every platform, and an app can replace any of them in Swift, Kotlin or TypeScript by implementing the generated protocol. Tests replace them with fakes. This one rule is what makes the core runnable on a laptop, testable in milliseconds, and portable to a fourth platform later.</p>
 <figure>
 <div class="frame">
 <svg class="d" viewBox="0 0 900 300" role="img" aria-label="Hexagonal diagram: the core on the left exposes port sockets for Http, Kv, SecureStore, Clock, Rng, Log, Fs, Connectivity and Lifecycle. On the right, four rows of adapters implement the ports: iOS defaults, Android defaults, web defaults, and test fakes.">
 <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
 <polygon class="box" points="150,40 250,40 300,150 250,260 150,260 100,150"/>
-<text x="200" y="120" text-anchor="middle" class="head">Keel core</text>
+<text x="200" y="120" text-anchor="middle" class="head">Undra core</text>
 <text x="200" y="140" text-anchor="middle" class="small">your stores + Query</text>
 <text x="200" y="156" text-anchor="middle" class="small muted">no platform SDK linked</text>
 <text x="200" y="176" text-anchor="middle" class="small muted">talks only through ports</text>
@@ -821,7 +821,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <text x="665" y="276" text-anchor="middle" class="small">Any adapter is replaceable per app by implementing the generated protocol / interface.</text>
 </svg>
 </div>
-<figcaption><b>Ports and adapters.</b> Rust declares the port as a <code>#[keel::port]</code> trait; the generated package exposes it as a Swift protocol, a Kotlin interface and a TypeScript interface. The default adapters are ordinary code in the runtime packages, so replacing one is a normal class, not a plugin system.</figcaption>
+<figcaption><b>Ports and adapters.</b> Rust declares the port as a <code>#[undra::port]</code> trait; the generated package exposes it as a Swift protocol, a Kotlin interface and a TypeScript interface. The default adapters are ordinary code in the runtime packages, so replacing one is a normal class, not a plugin system.</figcaption>
 </figure>
 <h3>Design notes</h3>
 <ul>
@@ -839,7 +839,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <div class="frame">
 <svg class="d" viewBox="0 0 900 160" role="img" aria-label="Byte layout of a wire message: magic, version, schema hash, kind, sequence, length, then payload. Below, the payload encoding rules for records, strings, options, vectors, enums, bytes and handles.">
 <g class="mono small">
-<rect class="box2" x="20" y="30" width="80" height="40" rx="3"/><text x="60" y="48" text-anchor="middle">"KEEL"</text><text x="60" y="62" text-anchor="middle" class="muted">4 B</text>
+<rect class="box2" x="20" y="30" width="80" height="40" rx="3"/><text x="60" y="48" text-anchor="middle">magic</text><text x="60" y="62" text-anchor="middle" class="muted">4 B</text>
 <rect class="box2" x="100" y="30" width="70" height="40" rx="3"/><text x="135" y="48" text-anchor="middle">version</text><text x="135" y="62" text-anchor="middle" class="muted">u16</text>
 <rect class="you" x="170" y="30" width="150" height="40" rx="3"/><text x="245" y="48" text-anchor="middle">schema hash</text><text x="245" y="62" text-anchor="middle" class="muted">u64 · checked at load</text>
 <rect class="box2" x="320" y="30" width="70" height="40" rx="3"/><text x="355" y="48" text-anchor="middle">kind</text><text x="355" y="62" text-anchor="middle" class="muted">u8</text>
@@ -862,14 +862,14 @@ ctx.mutate(SaveTodo(todo.clone()))
 <ul>
 <li>The core is a <code>cdylib</code> with a C ABI of a dozen exported functions (call, cancel, subscribe, release, restore) packaged as an XCFramework for device arm64 and simulator arm64/x86_64, inside a Swift Package with the generated sources. No Objective-C anywhere.</li>
 <li>Stores are generated as <code>@MainActor @Observable final class</code>; records are value types that are <code>Sendable</code>, <code>Hashable</code>, <code>Codable</code>. The mirror lives on the main actor, which is also what makes the whole package compile clean under Swift 6 strict concurrency.</li>
-<li>Async calls use <code>withCheckedThrowingContinuation</code>; the Rust future completes through a C callback carrying the continuation. Task cancellation calls <code>keel_cancel(call_id)</code>, which drops the future.</li>
+<li>Async calls use <code>withCheckedThrowingContinuation</code>; the Rust future completes through a C callback carrying the continuation. Task cancellation calls <code>undra_cancel(call_id)</code>, which drops the future.</li>
 <li>Objects are generation-tagged handles into a slab, never raw pointers, so a stale handle is an error rather than a use-after-free. <code>deinit</code> releases; explicit <code>close()</code> is available for deterministic cleanup.</li>
 </ul>
 <h3>Android</h3>
 <ul>
 <li>JNI, with natives registered in <code>JNI_OnLoad</code> so there is no name lookup per call. Primitives cross as JNI primitives; change-sets arrive in a direct <code>ByteBuffer</code> that Kotlin decodes without a copy. Strings cross as UTF-8 bytes and are decoded in Kotlin, which is both faster than modified UTF-8 and correct for supplementary characters.</li>
 <li>Stores expose Compose <code>State&lt;T&gt;</code> properties, with a <code>StateFlow&lt;T&gt;</code> view for non-Compose code. Mirror updates are posted to <code>Dispatchers.Main.immediate</code>.</li>
-<li>Commands are <code>suspend</code> functions over <code>suspendCancellableCoroutine</code>; coroutine cancellation calls <code>keel_cancel</code>. Handles are <code>AutoCloseable</code> and registered with <code>java.lang.ref.Cleaner</code> as a backstop.</li>
+<li>Commands are <code>suspend</code> functions over <code>suspendCancellableCoroutine</code>; coroutine cancellation calls <code>undra_cancel</code>. Handles are <code>AutoCloseable</code> and registered with <code>java.lang.ref.Cleaner</code> as a backstop.</li>
 <li>Built with NDK r27 or newer, 16 KB page-size aligned, ABIs arm64-v8a and x86_64 by default, armeabi-v7a opt-in. The AAR carries the <code>.so</code> files and the generated Kotlin.</li>
 </ul>
 <h3>Web</h3>
@@ -877,11 +877,11 @@ ctx.mutate(SaveTodo(todo.clone()))
 <li>Target <code>wasm32-unknown-unknown</code>. wasm-bindgen is used only for the runtime's dozen edge functions; per-type glue is generated from the schema as TypeScript codecs, identical in shape to the Swift and Kotlin ones. Output is an ESM package with <code>.d.ts</code>, built with LTO and <code>wasm-opt -Oz</code>, loaded with streaming compilation.</li>
 <li>The core runs in a Web Worker by default, so parsing a large response never janks the main thread. Worker mode is possible only because reads are local (§07); commands are already async, so nothing in the API changes.</li>
 <li>Main-thread mode is one flag away for SSR, tests and small apps; there the codecs read <code>Uint8Array</code> views straight from wasm memory with no copy. Node, Bun and Deno are supported targets for server rendering and CI.</li>
-<li>Framework bindings are thin: <code>useKeel</code> and <code>useSignal</code> for React (over <code>useSyncExternalStore</code>), a <code>toRef</code> adapter for Vue, the store contract for Svelte, passthrough for Solid.</li>
+<li>Framework bindings are thin: <code>useUndra</code> and <code>useSignal</code> for React (over <code>useSyncExternalStore</code>), a <code>toRef</code> adapter for Vue, the store contract for Svelte, passthrough for Solid.</li>
 </ul>
 <figure>
 <div class="frame">
-<svg class="d" viewBox="0 0 900 200" role="img" aria-label="Web worker mode: on the main thread, React components read from the Keel proxy's mirror synchronously and enqueue commands; the proxy exchanges wire bytes with a Web Worker over postMessage; the Worker runs the wasm core and the fetch and IndexedDB adapters.">
+<svg class="d" viewBox="0 0 900 200" role="img" aria-label="Web worker mode: on the main thread, React components read from the Undra proxy's mirror synchronously and enqueue commands; the proxy exchanges wire bytes with a Web Worker over postMessage; the Worker runs the wasm core and the fetch and IndexedDB adapters.">
 <defs><marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
 <rect class="box2" x="20" y="20" width="400" height="150" rx="8"/>
 <text x="34" y="40" class="head">Main thread</text>
@@ -889,7 +889,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <text x="220" y="72" text-anchor="middle" class="head">React / Vue / Svelte components</text>
 <text x="220" y="86" text-anchor="middle" class="small">read signals synchronously · call commands</text>
 <rect class="box" x="40" y="112" width="360" height="44" rx="5"/>
-<text x="220" y="130" text-anchor="middle" class="head">Keel proxy</text>
+<text x="220" y="130" text-anchor="middle" class="head">Undra proxy</text>
 <text x="220" y="145" text-anchor="middle" class="small">mirror of observed signals · command queue · codecs</text>
 <line class="thin" x1="220" y1="94" x2="220" y2="112"/>
 <rect class="box2" x="480" y="20" width="400" height="150" rx="8"/>
@@ -914,7 +914,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 
 <section id="threads">
 <h2><span class="sn">§11</span>Threading: one place mutates state</h2>
-<p class="lede">Every hard concurrency bug in a mobile app is two threads disagreeing about state. Keel removes the disagreement: exactly one thread owns signal state, and everyone else sends it messages.</p>
+<p class="lede">Every hard concurrency bug in a mobile app is two threads disagreeing about state. Undra removes the disagreement: exactly one thread owns signal state, and everyone else sends it messages.</p>
 <figure>
 <div class="frame">
 <svg class="d" viewBox="0 0 900 250" role="img" aria-label="Threading model: the main thread sends commands to the core loop and receives coalesced change-sets; the core loop, the only thread that mutates signals, spawns I/O futures on async workers and CPU work on a blocking pool, and both return values that the core loop commits as transactions.">
@@ -962,24 +962,24 @@ ctx.mutate(SaveTodo(todo.clone()))
 <h2><span class="sn">§12</span>Errors, panics and crash recovery</h2>
 <p class="lede">The host app must never die because the core did. A panic in Rust becomes a typed error on the platform, the state stays consistent, and on the web the core can restart itself from a snapshot faster than a user can notice.</p>
 <div class="grid2">
-<div class="tile"><h4>Errors are values</h4><p><code>Result&lt;T, E&gt;</code> with <code>#[keel::error]</code> enums becomes typed throws in Swift, a sealed exception hierarchy in Kotlin, and error classes in TypeScript. No stringly-typed errors, ever. Error enums may carry data, and <code>#[from]</code> conversions keep the Rust ergonomic.</p></div>
-<div class="tile"><h4>Panics are contained</h4><p>On native the core builds with <code>panic = "unwind"</code> and every boundary entry is wrapped in <code>catch_unwind</code>. A panic becomes <code>KeelPanic { message, backtrace }</code>, delivered as an error to the caller and as an event to the Telemetry port. The app keeps running.</p></div>
+<div class="tile"><h4>Errors are values</h4><p><code>Result&lt;T, E&gt;</code> with <code>#[undra::error]</code> enums becomes typed throws in Swift, a sealed exception hierarchy in Kotlin, and error classes in TypeScript. No stringly-typed errors, ever. Error enums may carry data, and <code>#[from]</code> conversions keep the Rust ergonomic.</p></div>
+<div class="tile"><h4>Panics are contained</h4><p>On native the core builds with <code>panic = "unwind"</code> and every boundary entry is wrapped in <code>catch_unwind</code>. A panic becomes <code>UndraPanic { message, backtrace }</code>, delivered as an error to the caller and as an event to the Telemetry port. The app keeps running.</p></div>
 <div class="tile"><h4>Transactions are atomic</h4><p>Signal writes inside a transaction go to a copy-on-write overlay and are committed at the end. A panic mid-transaction discards the overlay, so a half-applied state is impossible even when code is wrong.</p></div>
 <div class="tile"><h4>Web restarts from snapshot</h4><p>wasm has no unwinding, so a panic traps. The runtime catches the <code>RuntimeError</code>, re-instantiates the module, restores the last snapshot and replays the transaction log since then, typically in well under 100 ms. The UI sees a <code>recovering</code> signal flip and nothing else.</p></div>
 </div>
 <h3>Symbols and observability</h3>
-<p><code>keel build</code> emits symbol files for every target: Rust frames appear in the iOS dSYM, Android gets stripped <code>.so</code> files plus symbol files ready for Play Console and Crashlytics upload, and the wasm build gets a source map. A Rust backtrace in a crash report reads like a Rust backtrace, with file and line. The Telemetry port emits spans for every command, transaction, query fetch and port call, and the default adapters forward them to OpenTelemetry-compatible exporters, so an app's existing tracing sees inside the core on day one.</p>
+<p><code>undra build</code> emits symbol files for every target: Rust frames appear in the iOS dSYM, Android gets stripped <code>.so</code> files plus symbol files ready for Play Console and Crashlytics upload, and the wasm build gets a source map. A Rust backtrace in a crash report reads like a Rust backtrace, with file and line. The Telemetry port emits spans for every command, transaction, query fetch and port call, and the default adapters forward them to OpenTelemetry-compatible exporters, so an app's existing tracing sees inside the core on day one.</p>
 </section>
 
 <section id="devloop">
 <h2><span class="sn">§13</span>The dev loop: the reason engineers will evangelize</h2>
-<p class="lede">Flutter's most persuasive feature has always been hot reload. Keel gets the same effect for the core without owning the UI, because the core can run anywhere the wire reaches.</p>
+<p class="lede">Flutter's most persuasive feature has always been hot reload. Undra gets the same effect for the core without owning the UI, because the core can run anywhere the wire reaches.</p>
 <figure>
 <div class="frame">
 <svg class="d" viewBox="0 0 900 230" role="img" aria-label="Remote core development: on the laptop, cargo watch rebuilds the core as a native process next to the devtools inspector; the phone runs the real app with generated bindings whose transport is swapped from in-process FFI to a WebSocket; commands and change-sets travel over the socket, and port calls travel back to the phone's real adapters.">
 <defs><marker id="ar8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
 <rect class="box2" x="20" y="20" width="400" height="180" rx="8"/>
-<text x="34" y="40" class="head">Laptop · keel dev</text>
+<text x="34" y="40" class="head">Laptop · undra dev</text>
 <rect class="box" x="40" y="54" width="170" height="52" rx="5"/>
 <text x="125" y="74" text-anchor="middle" class="head">cargo watch</text>
 <text x="125" y="90" text-anchor="middle" class="small">rebuild core in ≈1 s</text>
@@ -1037,7 +1037,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <tr><td>Core cold start with 100 KB snapshot restore</td><td class="n">≤ 3 ms</td><td class="n">≤ 5 ms</td><td class="n">≤ 8 ms after wasm compile</td><td>App launch is the first impression</td></tr>
 <tr><td>Hello-world size added to the app</td><td class="n">≤ 900 KB (arm64, LTO, stripped)</td><td class="n">≤ 1.2 MB per ABI</td><td class="n">≤ 120 KB gz wasm + ≤ 8 KB gz runtime</td><td>Size is the first objection every mobile lead raises</td></tr>
 <tr><td>Runtime memory at idle</td><td class="n">≤ 2 MB</td><td class="n">≤ 2 MB</td><td class="n">≤ 3 MB</td><td>Background-kill thresholds</td></tr>
-<tr><td>Incremental core rebuild in <code>keel dev</code></td><td class="n" colspan="3">≤ 3 s for a 20k-line core on an M-series laptop</td><td>The dev loop promise</td></tr>
+<tr><td>Incremental core rebuild in <code>undra dev</code></td><td class="n" colspan="3">≤ 3 s for a 20k-line core on an M-series laptop</td><td>The dev loop promise</td></tr>
 <tr><td>Web crash recovery from snapshot</td><td class="n" colspan="3">≤ 100 ms for a 1 MB state</td><td>Invisible to the user</td></tr>
 </tbody>
 </table>
@@ -1049,8 +1049,8 @@ ctx.mutate(SaveTodo(todo.clone()))
 <h2><span class="sn">§15</span>Engineering constitution</h2>
 <p class="lede">This project will be built largely by AI coding agents working from this document. Agents drift unless the rules are explicit, checkable and few. These twelve are non-negotiable; each has a CI check or a review checklist item behind it.</p>
 <ol class="rules">
-<li><span class="r">R1</span><div><b>The schema is the only truth.</b> A public type or function exists only if <code>keel-meta</code> can describe it. Every language's output is derived from that description; nothing is hand-written per platform except the runtimes.</div></li>
-<li><span class="r">R2</span><div><b>Unsafe lives in two crates.</b> <code>unsafe</code> is permitted only in <code>keel-ffi</code> and <code>keel-wire</code>, every block carries a <code>// SAFETY:</code> comment, and both crates run under Miri and the sanitizers in CI. A PR that adds <code>unsafe</code> elsewhere is closed without review.</div></li>
+<li><span class="r">R1</span><div><b>The schema is the only truth.</b> A public type or function exists only if <code>undra-meta</code> can describe it. Every language's output is derived from that description; nothing is hand-written per platform except the runtimes.</div></li>
+<li><span class="r">R2</span><div><b>Unsafe lives in two crates.</b> <code>unsafe</code> is permitted only in <code>undra-ffi</code> and <code>undra-wire</code>, every block carries a <code>// SAFETY:</code> comment, and both crates run under Miri and the sanitizers in CI. A PR that adds <code>unsafe</code> elsewhere is closed without review.</div></li>
 <li><span class="r">R3</span><div><b>Generated code must pass native review.</b> A Swift, Kotlin or TypeScript engineer who has never seen Rust approves the generated package as code they would write. Golden-file snapshot tests lock the output; changing a snapshot requires a reviewer from that language.</div></li>
 <li><span class="r">R4</span><div><b>Every feature lands whole.</b> Rust unit tests, contract tests on all three platforms, a benchmark if the boundary is touched, and a docs page. A feature missing any of these is not merged, however good the code.</div></li>
 <li><span class="r">R5</span><div><b>Reads never cross; writes cross once.</b> No generated getter may call into the core. A transaction produces at most one change-set. A test counts crossings per scenario and fails on any increase.</div></li>
@@ -1067,25 +1067,25 @@ ctx.mutate(SaveTodo(todo.clone()))
 <section id="repo">
 <h2><span class="sn">§16</span>Repository layout</h2>
 <p class="lede">A single monorepo, one workspace, three runtime packages, one CLI. Crate boundaries follow the constitution: the two unsafe crates are isolated, the schema crate has no dependencies, and the runtime crates never import codegen.</p>
-<div class="tree">keel/
+<div class="tree">undra/
 ├─ crates/
-│  ├─ keel            <i>facade: prelude, re-exports, docs entry point</i>
-│  ├─ keel-macros     <i>#[keel::api] · error · store · port · query · mutation; diagnostics with codes</i>
-│  ├─ keel-meta       <i>schema types, schema hash, wire spec constants; zero dependencies</i>
-│  ├─ keel-wire       <i>binary codec, borrowed and owned variants; fuzz targets; unsafe allowed</i>
-│  ├─ keel-signals    <i>signals, computed, effects, transactions, change-sets, keyed patches</i>
-│  ├─ keel-runtime    <i>core loop, task runtime (tokio / wasm), priorities, panic guard, snapshots</i>
-│  ├─ keel-query      <i>cache, queries, mutations, offline queue, persistence</i>
-│  ├─ keel-ports      <i>port traits + shipped fakes: recorded Http, memory Kv, fake Clock, seeded Rng</i>
-│  ├─ keel-ffi        <i>C ABI, handle slab, callback vtables, cancellation; unsafe allowed</i>
-│  ├─ keel-transport  <i>WebSocket and in-process transports for remote core and worker mode</i>
-│  ├─ keel-bindgen    <i>codegen engine; templates for swift, kotlin, ts; golden tests</i>
-│  ├─ keel-devtools   <i>inspector protocol, server, time-travel log</i>
-│  └─ keel-cli        <i>keel init · dev · build · adopt · doctor · bench · migrate</i>
+│  ├─ undra            <i>facade: prelude, re-exports, docs entry point</i>
+│  ├─ undra-macros     <i>#[undra::api] · error · store · port · query · mutation; diagnostics with codes</i>
+│  ├─ undra-meta       <i>schema types, schema hash, wire spec constants; zero dependencies</i>
+│  ├─ undra-wire       <i>binary codec, borrowed and owned variants; fuzz targets; unsafe allowed</i>
+│  ├─ undra-signals    <i>signals, computed, effects, transactions, change-sets, keyed patches</i>
+│  ├─ undra-runtime    <i>core loop, task runtime (tokio / wasm), priorities, panic guard, snapshots</i>
+│  ├─ undra-query      <i>cache, queries, mutations, offline queue, persistence</i>
+│  ├─ undra-ports      <i>port traits + shipped fakes: recorded Http, memory Kv, fake Clock, seeded Rng</i>
+│  ├─ undra-ffi        <i>C ABI, handle slab, callback vtables, cancellation; unsafe allowed</i>
+│  ├─ undra-transport  <i>WebSocket and in-process transports for remote core and worker mode</i>
+│  ├─ undra-bindgen    <i>codegen engine; templates for swift, kotlin, ts; golden tests</i>
+│  ├─ undra-devtools   <i>inspector protocol, server, time-travel log</i>
+│  └─ undra-cli        <i>undra init · dev · build · adopt · doctor · bench · migrate</i>
 ├─ runtimes/
-│  ├─ swift/KeelRuntime        <i>Swift package: handles, continuations, mirror, @Observable glue, default adapters</i>
-│  ├─ kotlin/keel-runtime      <i>AAR: JNI glue, coroutines, Compose State, Flow, default adapters</i>
-│  └─ ts/@keel/runtime         <i>ESM: wasm loader, Worker proxy, signals, react/vue/svelte/solid, default adapters</i>
+│  ├─ swift/UndraRuntime        <i>Swift package: handles, continuations, mirror, @Observable glue, default adapters</i>
+│  ├─ kotlin/undra-runtime      <i>AAR: JNI glue, coroutines, Compose State, Flow, default adapters</i>
+│  └─ ts/@undra/runtime         <i>ESM: wasm loader, Worker proxy, signals, react/vue/svelte/solid, default adapters</i>
 ├─ contract-tests/             <i>schema-driven suites executed on simulator, emulator and headless browser</i>
 ├─ bench/                      <i>FFI microbenchmarks, device harness, size budgets, baselines vs UniFFI and KMP</i>
 ├─ examples/
@@ -1102,8 +1102,8 @@ ctx.mutate(SaveTodo(todo.clone()))
 <div class="phase">
 <div class="ph"><b>Phase 0 · Foundations</b><span class="when">weeks 1–3</span></div>
 <ul>
-<li><code>keel-meta</code> schema, <code>keel-wire</code> codec with fuzzing, <code>keel-macros</code> for records, enums, errors, functions and objects.</li>
-<li><code>keel-ffi</code> handle slab and C ABI; <code>keel-bindgen</code> for Swift only; hello world on the iOS simulator end to end.</li>
+<li><code>undra-meta</code> schema, <code>undra-wire</code> codec with fuzzing, <code>undra-macros</code> for records, enums, errors, functions and objects.</li>
+<li><code>undra-ffi</code> handle slab and C ABI; <code>undra-bindgen</code> for Swift only; hello world on the iOS simulator end to end.</li>
 </ul>
 <div class="done"><b>Done when:</b> the Swift contract suite passes on the simulator, the call-overhead benchmark runs on a device, and the generated Swift compiles clean under Swift 6 strict concurrency.</div>
 </div>
@@ -1111,14 +1111,14 @@ ctx.mutate(SaveTodo(todo.clone()))
 <div class="ph"><b>Phase 1 · Three platforms</b><span class="when">weeks 4–8</span></div>
 <ul>
 <li>Kotlin and TypeScript codegen and runtimes; async with cancellation; streams with credit-based backpressure; typed errors everywhere.</li>
-<li><code>keel init</code> and <code>keel build</code> producing an XCFramework and Swift package, an AAR, and an npm package from CI.</li>
+<li><code>undra init</code> and <code>undra build</code> producing an XCFramework and Swift package, an AAR, and an npm package from CI.</li>
 </ul>
 <div class="done"><b>Done when:</b> one contract suite is green on simulator, emulator and headless Chromium; packages publish from a tag; kill criteria for Android call cost and Swift 6 are checked and passed.</div>
 </div>
 <div class="phase">
 <div class="ph"><b>Phase 2 · Reactive core</b><span class="when">weeks 9–14</span></div>
 <ul>
-<li><code>keel-signals</code>: signals, computed, transactions, change-sets, keyed patches, coalescing; <code>#[keel::store]</code>.</li>
+<li><code>undra-signals</code>: signals, computed, transactions, change-sets, keyed patches, coalescing; <code>#[undra::store]</code>.</li>
 <li>Mirrors and bindings: <code>@Observable</code>, Compose <code>State</code>, TS signals with React, Vue, Svelte and Solid adapters; Worker mode on the web.</li>
 </ul>
 <div class="done"><b>Done when:</b> the todo example runs with shared state on all three platforms, the crossing counter proves one crossing per transaction, and the 100-signal change-set budget is met on the reference Android device.</div>
@@ -1126,7 +1126,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <div class="phase">
 <div class="ph"><b>Phase 3 · Data layer and ports</b><span class="when">weeks 15–22</span></div>
 <ul>
-<li><code>keel-query</code>: cache, staleness, retry, dedup, mutations with optimistic patches, invalidation, infinite queries, persistence, offline queue.</li>
+<li><code>undra-query</code>: cache, staleness, retry, dedup, mutations with optimistic patches, invalidation, infinite queries, persistence, offline queue.</li>
 <li>All ports with default adapters on every platform, shipped fakes, record and replay.</li>
 </ul>
 <div class="done"><b>Done when:</b> the offline-notes example survives airplane mode and a force-quit on all three platforms with identical behavior, verified by the contract suite.</div>
@@ -1134,7 +1134,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <div class="phase">
 <div class="ph"><b>Phase 4 · Developer experience</b><span class="when">weeks 23–30</span></div>
 <ul>
-<li><code>keel dev</code> remote core with state-preserving reloads; devtools inspector with time travel; <code>keel adopt</code>, <code>keel doctor</code>, <code>keel migrate</code> from UniFFI.</li>
+<li><code>undra dev</code> remote core with state-preserving reloads; devtools inspector with time travel; <code>undra adopt</code>, <code>undra doctor</code>, <code>undra migrate</code> from UniFFI.</li>
 <li>Error-message audit of every macro diagnostic; docs site with the error code pages; migration guides.</li>
 </ul>
 <div class="done"><b>Done when:</b> three engineers with no Rust background reach a running three-platform app in under fifteen minutes using only the docs, observed, and the fourth kill criterion is passed.</div>
@@ -1153,7 +1153,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <h2><span class="sn">§18</span>Decision log</h2>
 <p class="lede">Short records of the decisions that shape everything else. Each says what was chosen, what was rejected, and why. New ones are appended, never edited.</p>
 <div class="adr">
-<details><summary><span class="id">ADR-001</span>The Rust source is the IDL</summary><div><p><strong>Chosen:</strong> proc-macros emit schema metadata into the compiled artifact; <code>keel-bindgen</code> reads it. <strong>Rejected:</strong> a separate <code>.udl</code> or <code>.idl</code> file. <strong>Why:</strong> one source of truth that <code>rustc</code> type-checks, no drift, no second syntax to learn. UniFFI's proc-macro mode validates the approach.</p></div></details>
+<details><summary><span class="id">ADR-001</span>The Rust source is the IDL</summary><div><p><strong>Chosen:</strong> proc-macros emit schema metadata into the compiled artifact; <code>undra-bindgen</code> reads it. <strong>Rejected:</strong> a separate <code>.udl</code> or <code>.idl</code> file. <strong>Why:</strong> one source of truth that <code>rustc</code> type-checks, no drift, no second syntax to learn. UniFFI's proc-macro mode validates the approach.</p></div></details>
 <details><summary><span class="id">ADR-002</span>A binary wire format with generated codecs on every side</summary><div><p><strong>Chosen:</strong> dense little-endian format, versioned by a schema hash, codecs generated per type in Rust, Swift, Kotlin and TypeScript. <strong>Rejected:</strong> JSON (slow, lossy for integers and bytes), Protobuf and FlatBuffers (a second schema language and a dependency on every platform). <strong>Why:</strong> the format is small enough to own, fuzz and keep stable, and generating codecs from our own schema keeps every platform identical.</p></div></details>
 <details><summary><span class="id">ADR-003</span>Objects cross as generation-tagged handles</summary><div><p><strong>Chosen:</strong> <code>Arc&lt;T&gt;</code> in a slab; a u64 handle with a generation tag crosses; foreign finalizers release; explicit <code>close()</code> available. <strong>Rejected:</strong> raw pointers. <strong>Why:</strong> a stale or forged handle is an error, never memory corruption, and leaks are countable in devtools.</p></div></details>
 <details><summary><span class="id">ADR-004</span>One core loop owns all state</summary><div><p><strong>Chosen:</strong> a single thread commits transactions in order; I/O and CPU work run elsewhere and return values. <strong>Rejected:</strong> free-threaded signals with locks. <strong>Why:</strong> deterministic ordering, one change-set per transaction, and no lock a user can misuse. The cost, serialized commits, is invisible at app scale and measured by a budget.</p></div></details>
@@ -1174,7 +1174,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <table>
 <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th><th>Residual</th></tr></thead>
 <tbody>
-<tr><td>Teams have no Rust engineers</td><td><span class="tag bad">high</span></td><td>Docs written for app engineers; macros hide lifetimes and threads; fifteen-minute onboarding as a gate; first customers are companies already running Rust cores.</td><td>Real. Keel will be a niche before it is a default, and the niche has to be served brilliantly.</td></tr>
+<tr><td>Teams have no Rust engineers</td><td><span class="tag bad">high</span></td><td>Docs written for app engineers; macros hide lifetimes and threads; fifteen-minute onboarding as a gate; first customers are companies already running Rust cores.</td><td>Real. Undra will be a niche before it is a default, and the niche has to be served brilliantly.</td></tr>
 <tr><td>JNI overhead on Android breaks the budgets</td><td><span class="tag warn">medium</span></td><td>Registered natives, direct buffers, UTF-8 strings, batching by design. Kill criterion at the end of Phase 1.</td><td>Low once change-sets exist; the design tolerates a slow call because there are few of them.</td></tr>
 <tr><td>Swift 6 strict concurrency rejects generated code</td><td><span class="tag warn">medium</span></td><td>Stores on the main actor, records as <code>Sendable</code> value types, handles as immutable. Kill criterion at Phase 0.</td><td>Low; the shape is chosen to satisfy the checker rather than fight it.</td></tr>
 <tr><td>wasm cannot unwind panics</td><td><span class="tag warn">medium</span></td><td>Snapshot and replay restart (ADR-010); transactions are atomic so state is never torn.</td><td>A panic inside a port reply is lost and the command reports failure. Acceptable and documented.</td></tr>
@@ -1192,20 +1192,20 @@ ctx.mutate(SaveTodo(todo.clone()))
 <h2><span class="sn">§20</span>Horizon: what comes after 1.0, and what still does not</h2>
 <p class="lede">Everything here is designed for, and none of it is built in 1.0. The order is by leverage: each item makes the previous ones more valuable.</p>
 <div class="grid2">
-<div class="tile"><span class="kicker">horizon 1</span><h4>Keel Sync</h4><p>A local-first sync engine on top of Query: CRDT-backed documents, per-collection conflict policies, partial replication, end-to-end encryption through SecureStore. This is the product companies pay for, and every piece of 1.0 (transactions, keyed patches, offline queue, deterministic core) is a prerequisite for it.</p></div>
-<div class="tile"><span class="kicker">horizon 2</span><h4>Keel Cloud</h4><p>Hosted sync, shared devtools sessions (a teammate opens the transaction log from your bug report), core telemetry and crash symbolication as a service. The framework stays open source; the services are the business.</p></div>
-<div class="tile"><span class="kicker">horizon 3</span><h4>Desktop and beyond</h4><p>macOS already works through the Swift package. Windows and Linux arrive as a C# runtime and a GTK or Tauri-style shell; the wire and the port model are unchanged, which is the point of ADR-007. Any language with a C FFI can host a Keel core.</p></div>
+<div class="tile"><span class="kicker">horizon 1</span><h4>Undra Sync</h4><p>A local-first sync engine on top of Query: CRDT-backed documents, per-collection conflict policies, partial replication, end-to-end encryption through SecureStore. This is the product companies pay for, and every piece of 1.0 (transactions, keyed patches, offline queue, deterministic core) is a prerequisite for it.</p></div>
+<div class="tile"><span class="kicker">horizon 2</span><h4>Undra Cloud</h4><p>Hosted sync, shared devtools sessions (a teammate opens the transaction log from your bug report), core telemetry and crash symbolication as a service. The framework stays open source; the services are the business.</p></div>
+<div class="tile"><span class="kicker">horizon 3</span><h4>Desktop and beyond</h4><p>macOS already works through the Swift package. Windows and Linux arrive as a C# runtime and a GTK or Tauri-style shell; the wire and the port model are unchanged, which is the point of ADR-007. Any language with a C FFI can host an Undra core.</p></div>
 <div class="tile"><span class="kicker">horizon 4</span><h4>A port marketplace</h4><p>Payments, analytics, auth providers and feature flags as ports with community adapters, so a Stripe or Auth0 integration is written once in Rust and lands on three platforms with native UI hooks.</p></div>
 </div>
-<h3>What Keel still will not do</h3>
+<h3>What Undra still will not do</h3>
 <p>Render pixels. The question comes up every quarter and the answer is the same until shipped apps show that native views are where teams still lose time. If that evidence arrives, the honest experiment is a shared UI <em>schema</em> for content-heavy screens rendered by native components, never a shared renderer. Until then, a SwiftUI view that reads Rust state is the best possible iOS view, and that is the promise.</p>
 <div class="callout verdict">
 <span class="label">Closing</span>
-<p>The industry has spent a decade proving that sharing UI across platforms is a compromise and sharing logic is a chore. Keel's bet is that the chore is the whole opportunity: make one correct core so pleasant to write, bind, debug and ship that nobody wants to write the same cache a third time. Build the boundary first, then the state, then the dev loop, and measure everything with a stopwatch.</p>
+<p>The industry has spent a decade proving that sharing UI across platforms is a compromise and sharing logic is a chore. Undra's bet is that the chore is the whole opportunity: make one correct core so pleasant to write, bind, debug and ship that nobody wants to write the same cache a third time. Build the boundary first, then the state, then the dev loop, and measure everything with a stopwatch.</p>
 </div>
 </section>
 
-<p class="footer">Keel is a working name; check trademark and namespace availability before anything public. Timelines assume a small core team with AI agents doing most of the typing and a resident reviewer for each of Swift, Kotlin and TypeScript.</p>
+<p class="footer">Undra is a working name; check trademark and namespace availability before anything public. Timelines assume a small core team with AI agents doing most of the typing and a resident reviewer for each of Swift, Kotlin and TypeScript.</p>
 </main>
 </div>
 <script>

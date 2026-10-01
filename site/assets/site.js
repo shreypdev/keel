@@ -1,4 +1,4 @@
-/* Keel site: behaviour shared by every page: theme toggle, mobile menu, tabs, copy buttons on every code
+/* Undra site: behaviour shared by every page: theme toggle, mobile menu, tabs, copy buttons on every code
    block, a small syntax highlighter, scroll reveals, and the lazy loader for the docs search (search.js).
    Everything here is progressive enhancement: with JS off the content is readable, dark and complete. */
 (function () {
@@ -15,11 +15,11 @@
     root.dataset.theme = t;
     var meta = doc.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", t === "light" ? "#f7f6f2" : "#0a0a0a");
-    if (persist) { try { localStorage.setItem("keel-theme", t); } catch (e) { /* private mode */ } }
+    if (persist) { try { localStorage.setItem("undra-theme", t); } catch (e) { /* private mode */ } }
     $$("[data-theme-toggle]").forEach(function (b) {
       b.setAttribute("aria-label", t === "light" ? "Switch to dark theme" : "Switch to light theme");
     });
-    doc.dispatchEvent(new CustomEvent("keel:theme", { detail: t }));
+    doc.dispatchEvent(new CustomEvent("undra:theme", { detail: t }));
   }
   setTheme(root.dataset.theme === "light" ? "light" : "dark", false);
   $$("[data-theme-toggle]").forEach(function (b) {
@@ -48,7 +48,7 @@
     c: [["com", "\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/"], ["str", "\"(?:\\\\.|[^\"\\\\\\n])*\""]]
   };
   RX.tsx = RX.ts; RX.typescript = RX.ts; RX.kt = RX.kotlin; RX.sh = RX.bash; RX.shell = RX.bash;
-  var BASH_CMDS = "keel cargo npm git cd rustup brew source curl swift bash gradlew xcodebuild";
+  var BASH_CMDS = "undra cargo npm git cd rustup brew source curl swift bash gradlew xcodebuild";
 
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   function langOf(code) {
@@ -148,13 +148,13 @@
   /* ---------- search: search.js is fetched on first use (click or Cmd/Ctrl-K) ---------- */
   var searchLoading = null;
   function withSearch(then) {
-    if (window.KeelSearch) { then(window.KeelSearch); return; }
+    if (window.UndraSearch) { then(window.UndraSearch); return; }
     if (!searchLoading) {
       searchLoading = new Promise(function (ok, fail) {
         var s = doc.createElement("script"); s.src = assets + "search.js"; s.onload = ok; s.onerror = fail; doc.head.appendChild(s);
       });
     }
-    searchLoading.then(function () { then(window.KeelSearch); }, function () { searchLoading = null; });
+    searchLoading.then(function () { then(window.UndraSearch); }, function () { searchLoading = null; });
   }
   $$("[data-search-open]").forEach(function (b) { b.addEventListener("click", function () { withSearch(function (k) { k.open(assets + "../"); }); }); });
   doc.addEventListener("keydown", function (e) {

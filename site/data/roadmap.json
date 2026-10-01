@@ -1,6 +1,6 @@
 {
   "updated": "2026-09-30",
-  "source": "https://github.com/shreypdev/keel/blob/main/.10x/handoff.md",
+  "source": "https://github.com/shreypdev/undra/blob/main/.10x/handoff.md",
   "sections": [
     {
       "id": "shipped",
@@ -16,7 +16,7 @@
         { "title": "Streams and cancellation", "text": "Streams with backpressure; cancelling a call drops its future." },
         { "title": "Snapshot and restore", "text": "Stores snapshot for crash recovery." },
         { "title": "Schema-hash gate", "text": "Checked at load and at build; a mismatched UI and core refuse to talk." },
-        { "title": "keel dev", "text": "A live core over a WebSocket, rebuilt on save." },
+        { "title": "undra dev", "text": "A live core over a WebSocket, rebuilt on save." },
         { "title": "Teaching diagnostics", "text": "Every macro error says what, why and how to fix it." },
         { "title": "17 contract scenarios on 3 platforms", "text": "The same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 51 of 51 pass." },
         { "title": "Adversarial reviews of every core crate", "text": "Signals, runtime, macros and ffi were each reviewed by someone who did not write them." }
@@ -33,12 +33,12 @@
         { "title": "Harsh-conditions benchmark suite", "text": "Very high-frequency data: firehose transactions, keyed-list churn, stream backpressure and a soak run, with CI budgets." },
         { "title": "Device-measured benchmark rows", "text": "The same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies." },
         { "title": "A schema loader that survives dead-stripping", "text": "So the tooling sees the schema in debug and release builds without linker flags." },
-        { "title": "Android keel dev remote mode", "text": "The Kotlin runtime gains the WebSocket transport the web and iOS already have." },
-        { "title": "Dev-client auto-reconnect", "text": "After a rebuild, a running app reconnects to keel dev on its own instead of needing a reload." },
+        { "title": "Android undra dev remote mode", "text": "The Kotlin runtime gains the WebSocket transport the web and iOS already have." },
+        { "title": "Dev-client auto-reconnect", "text": "After a rebuild, a running app reconnects to undra dev on its own instead of needing a reload." },
         { "title": "WeakCtx", "text": "Long-lived tasks stop pinning a runtime that was dropped." },
         { "title": "Macro diagnostic polish", "text": "Better wording for the query-in-impl and split-impl cases." },
         { "title": "Swift Port types public", "text": "Custom ports in Swift without the bindgen fallback." },
-        { "title": "Full-JSON keel_schema_json", "text": "So the dlopen-based bindgen keeps doc comments." }
+        { "title": "Full-JSON undra_schema_json", "text": "So the dlopen-based bindgen keeps doc comments." }
       ]
     },
     {
@@ -51,8 +51,8 @@
         { "title": "crates.io publishing", "text": "Publish the crates under a registry-safe prefix; needs its own ADR for the renames." },
         { "title": "Frame-coalesced delivery", "text": "Not shipped, and a runtime-model change that needs an ADR first. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed." },
         { "title": "Maven Central for the Kotlin runtime", "text": "Depend on it from Gradle without a local build." },
-        { "title": "Windows CLI", "text": "Release binaries and docs for the keel command on Windows." },
-        { "title": "keel upgrade", "text": "Move a project to a newer Keel version." },
+        { "title": "Windows CLI", "text": "Release binaries and docs for the undra command on Windows." },
+        { "title": "undra upgrade", "text": "Move a project to a newer Undra version." },
         { "title": "Migration guides", "text": "From Kotlin Multiplatform and from UniFFI." },
         { "title": "A custom domain", "text": "A home for the site and docs that is ours." }
       ]
@@ -67,12 +67,12 @@
         { "title": "Desktop targets", "text": "macOS, Windows and Linux over the same C ABI." },
         { "title": "A first-party inspector", "text": "Time-travel over change-sets; the wire makes it natural." },
         { "title": "A sync engine", "text": "A separate package, not part of the core." },
-        { "title": "Compose Multiplatform interop", "text": "Use a Keel core under a Compose Multiplatform UI." }
+        { "title": "Compose Multiplatform interop", "text": "Use an Undra core under a Compose Multiplatform UI." }
       ]
     }
   ],
   "notPlanned": {
     "title": "Not planned",
-    "text": "Shared UI of any kind, and hosted services. Keel owns everything under the pixels and leaves the screens to SwiftUI, Compose and React."
+    "text": "Shared UI of any kind, and hosted services. Undra owns everything under the pixels and leaves the screens to SwiftUI, Compose and React."
   }
 }

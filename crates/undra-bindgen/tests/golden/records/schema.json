@@ -1,0 +1,374 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-records",
+  "records": [
+    {
+      "name": "Todo",
+      "type_id": 2995082141,
+      "fields": [
+        {
+          "name": "id",
+          "ty": {
+            "kind": "uuid"
+          },
+          "default": false,
+          "docs": "Stable identifier."
+        },
+        {
+          "name": "title",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "done",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": true
+        },
+        {
+          "name": "tags",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": true
+        },
+        {
+          "name": "due",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "timestamp"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "priority",
+          "ty": {
+            "kind": "named",
+            "of": "Priority"
+          },
+          "default": false
+        }
+      ],
+      "docs": "A todo item.\nShown in the list and synced to the server."
+    },
+    {
+      "name": "Numbers",
+      "type_id": 3594287049,
+      "fields": [
+        {
+          "name": "a",
+          "ty": {
+            "kind": "i8"
+          },
+          "default": false
+        },
+        {
+          "name": "b",
+          "ty": {
+            "kind": "i16"
+          },
+          "default": false
+        },
+        {
+          "name": "c",
+          "ty": {
+            "kind": "i32"
+          },
+          "default": false
+        },
+        {
+          "name": "d",
+          "ty": {
+            "kind": "i64"
+          },
+          "default": false
+        },
+        {
+          "name": "e",
+          "ty": {
+            "kind": "u8"
+          },
+          "default": false
+        },
+        {
+          "name": "f",
+          "ty": {
+            "kind": "u16"
+          },
+          "default": false
+        },
+        {
+          "name": "g",
+          "ty": {
+            "kind": "u32"
+          },
+          "default": false
+        },
+        {
+          "name": "h",
+          "ty": {
+            "kind": "u64"
+          },
+          "default": false
+        },
+        {
+          "name": "i",
+          "ty": {
+            "kind": "f32"
+          },
+          "default": false
+        },
+        {
+          "name": "j",
+          "ty": {
+            "kind": "f64"
+          },
+          "default": false
+        },
+        {
+          "name": "elapsed",
+          "ty": {
+            "kind": "duration"
+          },
+          "default": false
+        }
+      ],
+      "docs": "Every fixed-width number type."
+    },
+    {
+      "name": "Containers",
+      "type_id": 24604017,
+      "fields": [
+        {
+          "name": "lines",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "option",
+              "of": {
+                "kind": "string"
+              }
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "scores",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "i32"
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "by_id",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "uuid"
+              },
+              {
+                "kind": "vec",
+                "of": {
+                  "kind": "named",
+                  "of": "Todo"
+                }
+              }
+            ]
+          },
+          "default": false
+        },
+        {
+          "name": "blob",
+          "ty": {
+            "kind": "bytes"
+          },
+          "default": false
+        },
+        {
+          "name": "maybe_blob",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "bytes"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "matrix",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "vec",
+              "of": {
+                "kind": "f64"
+              }
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "counts",
+          "ty": {
+            "kind": "map",
+            "of": [
+              {
+                "kind": "u32"
+              },
+              {
+                "kind": "u64"
+              }
+            ]
+          },
+          "default": true
+        }
+      ],
+      "docs": "Nested containers and bytes."
+    },
+    {
+      "name": "Keywords",
+      "type_id": 4050491253,
+      "fields": [
+        {
+          "name": "default",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "in",
+          "ty": {
+            "kind": "i32"
+          },
+          "default": false
+        },
+        {
+          "name": "object",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": false
+        },
+        {
+          "name": "delete",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": false
+        },
+        {
+          "name": "new",
+          "ty": {
+            "kind": "bool"
+          },
+          "default": false
+        },
+        {
+          "name": "class_name",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        }
+      ],
+      "docs": "Field names that are reserved words in some target language."
+    },
+    {
+      "name": "Empty",
+      "type_id": 3512147854,
+      "fields": [],
+      "docs": "A record without fields."
+    },
+    {
+      "name": "Page",
+      "type_id": 3896349078,
+      "fields": [
+        {
+          "name": "items",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Todo"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "string"
+            }
+          },
+          "default": false
+        },
+        {
+          "name": "children",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Page"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A recursive record."
+    }
+  ],
+  "enums": [
+    {
+      "name": "Priority",
+      "type_id": 3868041001,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Low",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Normal",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "High",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ]
+    }
+  ],
+  "objects": [],
+  "functions": [],
+  "ports": [],
+  "queries": []
+}

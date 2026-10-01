@@ -1,4 +1,4 @@
-/* Keel site, shared foundation: tokens, type, header, buttons, code, tabs, tables, footer.
+/* Undra site, shared foundation: tokens, type, header, buttons, code, tabs, tables, footer.
    Dark is the default; light is opted into with data-theme="light". The palette is v1's (one orange accent). No italics in display type. */
 :root {
   color-scheme: dark;

@@ -1,34 +1,34 @@
-# Keel: full documentation
+# Undra: full documentation
 
-> Everything on https://shreypdev.github.io/keel/ that explains Keel, as Markdown: the docs, the roadmap and the blog. Index: https://shreypdev.github.io/keel/llms.txt
+> Everything on https://shreypdev.github.io/undra/ that explains Undra, as Markdown: the docs, the roadmap and the blog. Index: https://shreypdev.github.io/undra/llms.txt
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/
+Source: https://shreypdev.github.io/undra/docs/
 
-# Keel documentation
+# Undra documentation
 
-Keel owns the part of your app that is not pixels: domain logic, reactive state, the data layer, persistence and the dev loop. These pages take you from an empty directory to a running app, then explain how the pieces work.
+Undra owns the part of your app that is not pixels: domain logic, reactive state, the data layer, persistence and the dev loop. These pages take you from an empty directory to a running app, then explain how the pieces work.
 
 ## Where to start
 
-- **New here?** [Getting started](https://shreypdev.github.io/keel/docs/getting-started.html) installs the toolchain and CLI, scaffolds a project, runs the live dev loop and puts an app on each platform.
-- **Writing a core?** [Core concepts](https://shreypdev.github.io/keel/docs/concepts.html) covers stores, signals, computeds and keyed lists. [Queries & mutations](https://shreypdev.github.io/keel/docs/queries.html) covers the data layer, and [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html) covers everything that touches the outside world.
-- **Looking something up?** [The CLI](https://shreypdev.github.io/keel/docs/cli.html) lists every command and flag. [Architecture](https://shreypdev.github.io/keel/docs/architecture.html) explains the schema, the generators, the wire and the twelve rules. The API overviews show what a record, error, store or port looks like in [Swift](https://shreypdev.github.io/keel/docs/api-swift.html), [Kotlin](https://shreypdev.github.io/keel/docs/api-kotlin.html) and [TypeScript](https://shreypdev.github.io/keel/docs/api-typescript.html).
+- **New here?** [Getting started](https://shreypdev.github.io/undra/docs/getting-started.html) installs the toolchain and CLI, scaffolds a project, runs the live dev loop and puts an app on each platform.
+- **Writing a core?** [Core concepts](https://shreypdev.github.io/undra/docs/concepts.html) covers stores, signals, computeds and keyed lists. [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html) covers the data layer, and [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) covers everything that touches the outside world.
+- **Looking something up?** [The CLI](https://shreypdev.github.io/undra/docs/cli.html) lists every command and flag. [Architecture](https://shreypdev.github.io/undra/docs/architecture.html) explains the schema, the generators, the wire and the twelve rules. The API overviews show what a record, error, store or port looks like in [Swift](https://shreypdev.github.io/undra/docs/api-swift.html), [Kotlin](https://shreypdev.github.io/undra/docs/api-kotlin.html) and [TypeScript](https://shreypdev.github.io/undra/docs/api-typescript.html).
 
 ## The idea in four sentences
 
-You write your domain in Rust and mark it with a handful of attributes. Keel generates idiomatic Swift, Kotlin and TypeScript from the schema those attributes produce, so the UI stays SwiftUI, Compose and React. Each platform keeps a local mirror of your state, so reads never cross the language boundary. A write crosses once per transaction, and the core answers with one compact binary change-set that patches every mirror.
+You write your domain in Rust and mark it with a handful of attributes. Undra generates idiomatic Swift, Kotlin and TypeScript from the schema those attributes produce, so the UI stays SwiftUI, Compose and React. Each platform keeps a local mirror of your state, so reads never cross the language boundary. A write crosses once per transaction, and the core answers with one compact binary change-set that patches every mirror.
 
-**Where these pages come from.** Everything here is digested from the repository: the README, the specification in `docs/SPEC.md`, the onboarding guide, the benchmark results and the playground app. When a page and the spec disagree, the spec wins; the [repository](https://github.com/shreypdev/keel) is the record.
+**Where these pages come from.** Everything here is digested from the repository: the README, the specification in `docs/SPEC.md`, the onboarding guide, the benchmark results and the playground app. When a page and the spec disagree, the spec wins; the [repository](https://github.com/shreypdev/undra) is the record.
 
 ## A note on numbers
 
-Performance figures on this site are host-measured (an Apple M5 Pro, release builds) and guarded by budgets in CI. They are not device numbers. The design's per-device targets (an iPhone, a mid-range Android phone, Chromium) are tracked in [bench/RESULTS.md](https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md), and nothing on this site claims them as measured.
+Performance figures on this site are host-measured (an Apple M5 Pro, release builds) and guarded by budgets in CI. They are not device numbers. The design's per-device targets (an iPhone, a mid-range Android phone, Chromium) are tracked in [bench/RESULTS.md](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md), and nothing on this site claims them as measured.
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/getting-started.html
+Source: https://shreypdev.github.io/undra/docs/getting-started.html
 
 # Getting started
 
@@ -38,18 +38,18 @@ Everything here was exercised end to end on an Apple-Silicon Mac, which is the r
 
 ## What you need
 
-Install only what your target platforms need. `keel doctor` checks all of it and prints the fix for each gap.
+Install only what your target platforms need. `undra doctor` checks all of it and prints the fix for each gap.
 
 | You want | You need |
 | --- | --- |
-| Any core (everything in `crates/`) | Rust stable, plus the cross targets Keel ships to |
+| Any core (everything in `crates/`) | Rust stable, plus the cross targets Undra ships to |
 | Web | Node 22+, and `binaryen` (for `wasm-opt`) |
 | Android | JDK 17, Kotlin, Gradle, the Android SDK and NDK r27, `cargo-ndk` |
 | iOS (macOS only) | Full Xcode from the App Store, plus an iOS simulator runtime |
 
 ## 1. Install the toolchain
 
-Rust comes first, with the targets Keel builds for.
+Rust comes first, with the targets Undra builds for.
 
 bash
 
@@ -84,37 +84,37 @@ sudo xcodebuild -license accept
 xcodebuild -downloadPlatform iOS        # simulator runtime, one time, large
 ```
 
-The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the emulator and a system image). The [onboarding guide](https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md) has the exact `sdkmanager` line and an `avdmanager` line that creates the `keel` emulator used throughout the project.
+The Android SDK needs a few packages (platform 35, build-tools 35, NDK 27.2, the emulator and a system image). The [onboarding guide](https://github.com/shreypdev/undra/blob/main/docs/ONBOARDING.md) has the exact `sdkmanager` line and an `avdmanager` line that creates the `undra` emulator used throughout the project.
 
 ## 2. Install the CLI
 
-Pick one channel. Homebrew, the curl installer and npm put a prebuilt `keel` binary on your machine; cargo builds it from source with Rust 1.85 or newer. The prebuilt channels install the latest tagged release, so they work from v1.0.0 onwards; cargo builds from the repository at any time.
+Pick one channel. Homebrew, the curl installer and npm put a prebuilt `undra` binary on your machine; cargo builds it from source with Rust 1.85 or newer. The prebuilt channels install the latest tagged release, so they work from v1.0.0 onwards; cargo builds from the repository at any time.
 
 | Channel | Command |
 | --- | --- |
-| Homebrew | `brew install shreypdev/keel/keel` |
-| npm | `npm install -g @keel/cli` |
-| curl | `curl -fsSL https://shreypdev.github.io/keel/install.sh \| sh` |
-| cargo | `cargo install --git https://github.com/shreypdev/keel keel-cli` |
+| Homebrew | `brew install shreypdev/undra/undra` |
+| npm | `npm install -g @undra/cli` |
+| curl | `curl -fsSL https://shreypdev.github.io/undra/install.sh \| sh` |
+| cargo | `cargo install --git https://github.com/shreypdev/undra undra-cli` |
 
-The curl installer detects your OS and architecture, verifies the download against the release checksums, installs to `~/.keel/bin` and prints the line to add to your `PATH`. It never uses `sudo`.
+The curl installer detects your OS and architecture, verifies the download against the release checksums, installs to `~/.undra/bin` and prints the line to add to your `PATH`. It never uses `sudo`.
 
 bash
 
 ```bash
-keel --version
-keel doctor      # prints what is missing, with the fix
+undra --version
+undra doctor      # prints what is missing, with the fix
 ```
 
-`keel doctor` exits with status 1 when something the project needs is missing, so it works in CI too. Inside a project it only checks the platforms named in `keel.toml`.
+`undra doctor` exits with status 1 when something the project needs is missing, so it works in CI too. Inside a project it only checks the platforms named in `undra.toml`.
 
 ### From a checkout (contributors)
 
 bash
 
 ```bash
-git clone https://github.com/shreypdev/keel.git && cd keel
-cargo install --path crates/keel-cli    # the `keel` command
+git clone https://github.com/shreypdev/undra.git && cd undra
+cargo install --path crates/undra-cli    # the `undra` command
 source scripts/env.sh                   # PATH, JDK and Kotlin jars, Xcode fallback, per shell
 ```
 
@@ -123,32 +123,32 @@ source scripts/env.sh                   # PATH, JDK and Kotlin jars, Xcode fallb
 bash
 
 ```bash
-keel init myapp                        # core + SwiftUI + Compose + React shells
-keel init myapp --platforms ios,web    # only some of them
-keel init myapp --id dev.acme.myapp    # application id / bundle identifier
+undra init myapp                        # core + SwiftUI + Compose + React shells
+undra init myapp --platforms ios,web    # only some of them
+undra init myapp --id dev.acme.myapp    # application id / bundle identifier
 cd myapp
 ```
 
-Nothing is downloaded: the templates are part of the `keel` binary. The project you get is a directory with a `keel.toml` and:
+Nothing is downloaded: the templates are part of the `undra` binary. The project you get is a directory with an `undra.toml` and:
 
 | Path | What it is |
 | --- | --- |
-| `core/` | The Rust core: a working to-do store with `#[keel::store]` and `#[keel::api]` |
+| `core/` | The Rust core: a working to-do store with `#[undra::store]` and `#[undra::api]` |
 | `generated/` | Swift, Kotlin and TypeScript bindings for that core, already generated |
 | `ios/` `android/` `web/` | One minimal, real app per platform, using the generated bindings |
 
-Pass `--keel-path ~/src/keel` (or set `KEEL_PATH`) to use a local checkout's crates and runtimes instead of released versions.
+Pass `--undra-path ~/src/undra` (or set `UNDRA_PATH`) to use a local checkout's crates and runtimes instead of released versions.
 
 ## 4. Start the live loop
 
 bash
 
 ```bash
-keel dev                          # serves the core on ws://127.0.0.1:7443
-keel dev --addr 0.0.0.0:7443      # reachable from a phone on your network
+undra dev                          # serves the core on ws://127.0.0.1:7443
+undra dev --addr 0.0.0.0:7443      # reachable from a phone on your network
 ```
 
-`keel dev` runs your core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport of its runtime and uses this core instead of a built-in one. Edit Rust, save, and the core is rebuilt and restarted; reload the app to reconnect. Development log records (a line per transaction commit, port call and panic) print in the terminal.
+`undra dev` runs your core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport of its runtime and uses this core instead of a built-in one. Edit Rust, save, and the core is rebuilt and restarted; reload the app to reconnect. Development log records (a line per transaction commit, port call and panic) print in the terminal.
 
 **No authentication.** The server has none. Keep the default loopback address unless a device has to reach it, and never expose it beyond a network you trust.
 
@@ -164,50 +164,50 @@ bash
 cd web && npm install && npm run dev
 ```
 
-The page loads the core as a wasm module. To use the core that `keel dev` serves instead, load it in `remote` mode:
+The page loads the core as a wasm module. To use the core that `undra dev` serves instead, load it in `remote` mode:
 
 ts
 
 ```ts
-await KeelCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash: KeelIds.schemaHash });
+await UndraCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash: UndraIds.schemaHash });
 ```
 
 ### iOS
 
-Open `ios/` in Xcode and run on a simulator. In debug builds the generated app reads `KEEL_DEV_URL` (for example `ws://<your Mac>:7443`) and attaches to `keel dev` when it is set.
+Open `ios/` in Xcode and run on a simulator. In debug builds the generated app reads `UNDRA_DEV_URL` (for example `ws://<your Mac>:7443`) and attaches to `undra dev` when it is set.
 
 Debug builds of the core need the library linked with `-force_load`, or the linker drops the core's registrations and the schema looks empty; the generated Xcode project already does this. Release builds need no flag.
 
 ### Android
 
-Build the core with `keel build --platform android --release`, then build and install from `android/` with Gradle. Use `--release` for anything you run: a debug core is tens of megabytes per ABI. The Kotlin runtime has no remote transport on Android yet, so use the JVM or the web for the `keel dev` loop.
+Build the core with `undra build --platform android --release`, then build and install from `android/` with Gradle. Use `--release` for anything you run: a debug core is tens of megabytes per ABI. The Kotlin runtime has no remote transport on Android yet, so use the JVM or the web for the `undra dev` loop.
 
 ## 6. Build what you ship
 
 bash
 
 ```bash
-keel build --release        # every platform in keel.toml
-keel build --platform ios,android,web --release
+undra build --release        # every platform in undra.toml
+undra build --platform ios,android,web --release
 ```
 
 | Platform | Artifact, below `build/` |
 | --- | --- |
-| iOS | `ios/KeelCore.xcframework` (device and simulator slices) |
-| Android | `android/jniLibs/<abi>/libkeel_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
-| Web | `web/keel_core.wasm`, release profile then `wasm-opt -Oz` |
-| Host | `host/libkeel_core.{dylib,so}`, for JVM tests and `keel bindgen` |
+| iOS | `ios/UndraCore.xcframework` (device and simulator slices) |
+| Android | `android/jniLibs/<abi>/libundra_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
+| Web | `web/undra_core.wasm`, release profile then `wasm-opt -Oz` |
+| Host | `host/libundra_core.{dylib,so}`, for JVM tests and `undra bindgen` |
 
 Sizes are printed at the end next to the design's budgets. On the reference build the hello-world web core is 85 KB gzipped and an Android `.so` is 831 KB per ABI.
 
 ## Prefer to explore first?
 
-Try it in your browser first: the [live playground](https://shreypdev.github.io/keel/playground/) is the real Rust core running as WebAssembly. The [playground source](https://github.com/shreypdev/keel/tree/main/examples/playground) is the same thing, fully built: a to-do list, a counter, a 10,000-row keyed list and remote queries with an offline switch, on Chrome, an iPhone simulator and an Android emulator. It uses only public APIs, and proof screenshots are committed in its `.proof/` folder.
+Try it in your browser first: the [live playground](https://shreypdev.github.io/undra/playground/) is the real Rust core running as WebAssembly. The [playground source](https://github.com/shreypdev/undra/tree/main/examples/playground) is the same thing, fully built: a to-do list, a counter, a 10,000-row keyed list and remote queries with an offline switch, on Chrome, an iPhone simulator and an Android emulator. It uses only public APIs, and proof screenshots are committed in its `.proof/` folder.
 
 bash
 
 ```bash
-keel build -C examples/playground --platform web
+undra build -C examples/playground --platform web
 cd examples/playground/web && npm install && npm run dev
 ```
 
@@ -219,22 +219,22 @@ Every suite runs locally and nothing needs the network after install. The table 
 | --- | --- |
 | Rust workspace | `cargo test --workspace` |
 | Lints | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` |
-| TypeScript runtime | `cd runtimes/ts/@keel/runtime && npm ci && npm test` |
-| Kotlin runtime | `runtimes/kotlin/keel-runtime/scripts/test-local.sh` |
-| Swift runtime | `cd runtimes/swift/KeelRuntime && swift test` |
-| wasm ABI | `bash crates/keel-ffi/tests/wasm/run.sh` |
+| TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` |
+| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` |
+| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` |
+| wasm ABI | `bash crates/undra-ffi/tests/wasm/run.sh` |
 | Contract scenarios, three platforms | `bash contract-tests/run-all.sh` |
-| Benchmark budget gate | `cargo test -p keel-bench --test budgets --release` |
+| Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` |
 
-Read `CLAUDE.md` (the constitution) and `docs/SPEC.md` before you write code; the [architecture page](https://shreypdev.github.io/keel/docs/architecture.html#constitution) digests the rules. Changes land one piece per worktree, with an adversarial review before merge; `docs/AGENT_WORKFLOW.md` describes the loop for humans and agents alike.
+Read `CLAUDE.md` (the constitution) and `docs/SPEC.md` before you write code; the [architecture page](https://shreypdev.github.io/undra/docs/architecture.html#constitution) digests the rules. Changes land one piece per worktree, with an adversarial review before merge; `docs/AGENT_WORKFLOW.md` describes the loop for humans and agents alike.
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/concepts.html
+Source: https://shreypdev.github.io/undra/docs/concepts.html
 
 # Core concepts
 
-State in Keel lives in the Rust core as signals inside stores. Platforms hold a local mirror, reads never cross the boundary, and a write crosses once per transaction.
+State in Undra lives in the Rust core as signals inside stores. Platforms hold a local mirror, reads never cross the boundary, and a write crosses once per transaction.
 
 ## The building blocks
 
@@ -242,14 +242,14 @@ Everything a platform can see is one of eight kinds of thing, each declared with
 
 | Concept | Declared with | Crosses |
 | --- | --- | --- |
-| Record | `#[keel::api]` on a `struct` | by value |
-| Enum | `#[keel::api]` on an `enum`, unit or data variants | by value |
-| Error | `#[keel::error]` on an `enum`; adds `Display` and `std::error::Error` | by value |
-| Object | `#[keel::api]` on an `impl` block; methods are sync or async | by handle |
-| Store | an object whose struct has `#[keel::store]`; its signals are mirrored | by handle |
-| Port | `#[keel::port]` on a trait; implemented by the platform or by a Rust fake | the core calls out to it |
-| Query, mutation | `#[keel::query]`, `#[keel::mutation]` on an `async fn` | managed by the query client |
-| Function | `#[keel::api]` on a free `fn` | like a method with no receiver |
+| Record | `#[undra::api]` on a `struct` | by value |
+| Enum | `#[undra::api]` on an `enum`, unit or data variants | by value |
+| Error | `#[undra::error]` on an `enum`; adds `Display` and `std::error::Error` | by value |
+| Object | `#[undra::api]` on an `impl` block; methods are sync or async | by handle |
+| Store | an object whose struct has `#[undra::store]`; its signals are mirrored | by handle |
+| Port | `#[undra::port]` on a trait; implemented by the platform or by a Rust fake | the core calls out to it |
+| Query, mutation | `#[undra::query]`, `#[undra::mutation]` on an `async fn` | managed by the query client |
+| Function | `#[undra::api]` on a free `fn` | like a method with no receiver |
 
 The rest of this page is about stores, because that is where reactive state lives.
 
@@ -260,17 +260,17 @@ A store is a struct of signals with an `impl` block that says what the platforms
 core/src/todos.rs
 
 ```rust
-#[keel::store(restore = "Self::assemble")]
+#[undra::store(restore = "Self::assemble")]
 pub struct Todos {
     next: AtomicU64,                       // private state: not a signal
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     todos: Signal<Vec<Todo>>,              // signal 0
     filter: Signal<Filter>,                // signal 1
     visible: Computed<Vec<Todo>>,          // signal 2, derived
     remaining: Computed<u32>,              // signal 3, derived
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl Todos {
     pub fn new(ctx: Ctx) -> Self { /* … */ }
     pub async fn add(&self, title: String) -> Result<Todo, TodoError> { /* … */ }
@@ -284,7 +284,7 @@ A few rules worth knowing up front:
 - **Signals are the fields of type `Signal<T>` and `Computed<T>`**, numbered in declaration order (0, 1, 2, …). Other fields are private state: a `Ctx`, a counter, configuration.
 - **A store needs a constructor**, a `pub fn` returning `Self` or `Result<Self, E>`. Generated code calls it to create the object in the core and gets back a handle.
 - **Receivers are `&self`.** Objects are shared, so mutation goes through signals or a lock. `&mut self` is rejected with a teaching error (`E0020`).
-- **Method arguments and results are wire types**: numbers, strings, bytes, options, vectors, maps, your records and enums, and `Result<T, E>` where `E` is a `#[keel::error]` enum.
+- **Method arguments and results are wire types**: numbers, strings, bytes, options, vectors, maps, your records and enums, and `Result<T, E>` where `E` is a `#[undra::error]` enum.
 
 ## Signals
 
@@ -315,7 +315,7 @@ let remaining = Computed::new(&todos, |todos| todos.iter().filter(|t| !t.done).c
 
 Inputs are `&Signal<A>` or `&Computed<A>`, or a tuple of up to six of them, and the closure receives references. A computed is recomputed in the core, in dependency order, and **pushed in the same change-set as the write that caused it**. The UI never derives anything itself, so it cannot disagree with the core about, say, how many items are left.
 
-Because a store with computeds cannot be rebuilt from its plain signals automatically, you name a function that assembles it: `#[keel::store(restore = "Self::assemble")]`. The macro tells you when you forget (`E0013`).
+Because a store with computeds cannot be rebuilt from its plain signals automatically, you name a function that assembles it: `#[undra::store(restore = "Self::assemble")]`. The macro tells you when you forget (`E0013`).
 
 ## Transactions
 
@@ -341,13 +341,13 @@ A platform does not receive everything. It **observes** signals, and only observ
 - **Observing sends the current value right away**, before the call returns in-process, so a store's initial state arrives as an ordinary change-set. A signal written while unobserved is remembered as pending and sent when someone starts observing it.
 - **Only what changed is sent.** Writing `filter` in the to-do store ships `filter` and the recomputed `visible`, and nothing else, because `todos` did not change.
 
-A signal marked `#[keel(no_coalesce)]` is delivered on every commit instead of being folded into the latest value. A change-set is a compact binary structure, described on the [architecture page](https://shreypdev.github.io/keel/docs/architecture.html#the-wire).
+A signal marked `#[undra(no_coalesce)]` is delivered on every commit instead of being folded into the latest value. A change-set is a compact binary structure, described on the [architecture page](https://shreypdev.github.io/undra/docs/architecture.html#the-wire).
 
 For side effects that belong in the core, `Effect::new(deps, f)` runs `f` after each commit that dirtied one of its dependencies, and is cancelled when dropped.
 
 ## Keyed lists
 
-A `Signal<Vec<T>>` marked `#[keel(key = "field")]` is a **keyed list**. The key is the identity of a row, and the core sends changes to it as a patch of positional operations instead of the whole list.
+A `Signal<Vec<T>>` marked `#[undra(key = "field")]` is a **keyed list**. The key is the identity of a row, and the core sends changes to it as a patch of positional operations instead of the whole list.
 
 | Operation | Meaning |
 | --- | --- |
@@ -387,7 +387,7 @@ The difference is measured. On a 10,000-row observed list, median times from the
 | Update | 532.32 µs | **272.3 ns** |
 | Move | 702.95 µs | **9.74 µs** |
 
-What remains at 10,000 rows is the memory move of the vector's tail, which `Vec::insert` needs in the core and which is paid twice (the list and its baseline): about 0.6 ns per row. The same insert into 100 rows is 359 ns and into 1,000 rows is 770 ns. The decision record is [ADR-027](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md).
+What remains at 10,000 rows is the memory move of the vector's tail, which `Vec::insert` needs in the core and which is paid twice (the list and its baseline): about 0.6 ns per row. The same insert into 100 rows is 359 ns and into 1,000 rows is 770 ns. The decision record is [ADR-027](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md).
 
 **Rule of thumb.** Inside a store, reach for `push`, `insert`, `remove`, `update_at` and `move_item` when you change one row. Use `set` or `update` when you genuinely replace the list (a refresh from the server) or make an edit no recorded operation can express. A transaction that mixes both is diffed as a whole.
 
@@ -395,7 +395,7 @@ What remains at 10,000 rows is the memory move of the vector's tail, which `Vec:
 
 Each platform runtime holds a **mirror**: store handle, then signal id, then the decoded value. Generated code exposes the mirror in the platform's own idiom (an `@Observable` property, a `StateFlow`, a `Signal` with `useSignal`), so reading is a local memory read that never calls into the core.
 
-Every change-set is applied on the main thread, in one hop per transaction: Swift on the `MainActor`, Kotlin on `Dispatchers.Main.immediate`, and TypeScript in a queued flush on the page's main thread. A store is an object with a lifetime: release it explicitly with `close()` (Swift and Kotlin use `deinit` and a `Cleaner` as backstops, TypeScript a `FinalizationRegistry`), and `KeelCore.stats()` shows live handle counts.
+Every change-set is applied on the main thread, in one hop per transaction: Swift on the `MainActor`, Kotlin on `Dispatchers.Main.immediate`, and TypeScript in a queued flush on the page's main thread. A store is an object with a lifetime: release it explicitly with `close()` (Swift and Kotlin use `deinit` and a `Cleaner` as backstops, TypeScript a `FinalizationRegistry`), and `UndraCore.stats()` shows live handle counts.
 
 ## Snapshot and restore
 
@@ -403,11 +403,11 @@ The core can snapshot every store's plain signals (computeds are left out and re
 
 ## Determinism
 
-The core reads no clock and no random source and starts no thread of its own. Time comes from the `Clock` port, delays from `ctx.sleep` (which goes through the `Timer` port), randomness from `Rng`, the network from `Http`. That is rule R12, and it is why every scenario can be driven with deterministic fakes in Rust and with in-memory adapters on each platform. The to-do store's ids come from a counter for the same reason. See [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html).
+The core reads no clock and no random source and starts no thread of its own. Time comes from the `Clock` port, delays from `ctx.sleep` (which goes through the `Timer` port), randomness from `Rng`, the network from `Http`. That is rule R12, and it is why every scenario can be driven with deterministic fakes in Rust and with in-memory adapters on each platform. The to-do store's ids come from a counter for the same reason. See [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html).
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/queries.html
+Source: https://shreypdev.github.io/undra/docs/queries.html
 
 # Queries & mutations
 
@@ -415,17 +415,17 @@ Data fetching, caching and offline behaviour are not something each platform rei
 
 ## Why the data layer is in the core
 
-Fetching, caching, retrying, optimistic updates and offline queues are logic, and logic is what Keel writes once. The core never opens a socket: every request goes through the `Http` port, which is `URLSession`, OkHttp or `fetch` in an app and a scripted fake in a test. The query client keeps one cache that all platforms observe, so the to-do list on the iPhone and the one in a Chrome tab agree about what is fresh.
+Fetching, caching, retrying, optimistic updates and offline queues are logic, and logic is what Undra writes once. The core never opens a socket: every request goes through the `Http` port, which is `URLSession`, OkHttp or `fetch` in an app and a scripted fake in a test. The query client keeps one cache that all platforms observe, so the to-do list on the iPhone and the one in a Chrome tab agree about what is fresh.
 
 ## Defining a query
 
-A query is an `async fn` whose first parameter is the `Ctx`, marked with `#[keel::query]`. This is the playground's remote to-do list, a `GET` that is cached per list:
+A query is an `async fn` whose first parameter is the `Ctx`, marked with `#[undra::query]`. This is the playground's remote to-do list, a `GET` that is cached per list:
 
 core/src/remote.rs
 
 ```rust
 /// The items of the server's list `list`: `GET {base}/lists/{list}/todos`.
-#[keel::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
+#[undra::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
 pub async fn remote_todos(ctx: &Ctx, list: String) -> Result<Vec<RemoteTodo>, RemoteError> {
     let url = endpoint(ctx, &format!("/lists/{list}/todos"))?;
     parse(&send(ctx, HttpRequest::get(url)).await?)
@@ -482,7 +482,7 @@ A failed fetch is retried `retry` times (three by default) with exponential back
 
 ## Mutations
 
-A mutation is an `async fn` marked `#[keel::mutation]`. It shares its cache key with the query it affects. Call it through the context:
+A mutation is an `async fn` marked `#[undra::mutation]`. It shares its cache key with the query it affects. Call it through the context:
 
 rust
 
@@ -511,15 +511,15 @@ Stamps are compared, never contents, so two writes of equal data are still disti
 
 ## The offline queue
 
-A mutation marked `idempotent` that fails with a network error while the `Connectivity` port says the device is offline is not lost. It is appended to a persisted queue (the `Kv` key `keel.query.queue`) with its parameters and an idempotency key, and replayed in order when connectivity returns. The request carries an `Idempotency-Key` header that stays the same across retries and replays, so a server can tell a repeat from a second item.
+A mutation marked `idempotent` that fails with a network error while the `Connectivity` port says the device is offline is not lost. It is appended to a persisted queue (the `Kv` key `undra.query.queue`) with its parameters and an idempotency key, and replayed in order when connectivity returns. The request carries an `Idempotency-Key` header that stays the same across retries and replays, so a server can tell a repeat from a second item.
 
 rust
 
 ```rust
-#[keel::mutation(key = "remote-todos:{list}", idempotent)]
+#[undra::mutation(key = "remote-todos:{list}", idempotent)]
 pub async fn post_remote_todo(ctx: &Ctx, list: String, title: String) -> Result<RemoteTodo, RemoteError> {
     // …
-    if let Some(key) = keel::query::idempotency_key() {
+    if let Some(key) = undra::query::idempotency_key() {
         request = request.with_header("Idempotency-Key", key.to_string());
     }
     // …
@@ -545,15 +545,15 @@ http.respond_sequence("https://x.test/a", [Err(HttpError::Timeout), Err(HttpErro
 http.respond("https://x.test/a", HttpResponse::new(200, b"ok".to_vec()));
 ```
 
-Pair it with `FakeClock` to advance time and `ScriptedConnectivity` to go offline. [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html) lists them all.
+Pair it with `FakeClock` to advance time and `ScriptedConnectivity` to go offline. [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) lists them all.
 
 ## See it run
 
-The playground's **Remote** tab on every platform is this page in motion: a cached query, optimistic adds that roll back when the server refuses, and an **Offline** switch that queues writes and replays them on reconnect. Its source is [`examples/playground/core/src/remote.rs`](https://github.com/shreypdev/keel/blob/main/examples/playground/core/src/remote.rs).
+The playground's **Remote** tab on every platform is this page in motion: a cached query, optimistic adds that roll back when the server refuses, and an **Offline** switch that queues writes and replays them on reconnect. Its source is [`examples/playground/core/src/remote.rs`](https://github.com/shreypdev/undra/blob/main/examples/playground/core/src/remote.rs).
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/ports.html
+Source: https://shreypdev.github.io/undra/docs/ports.html
 
 # Ports & adapters
 
@@ -561,7 +561,7 @@ The core never touches the outside world directly. Time, randomness, the network
 
 ## What a port is
 
-A port is a Rust trait marked `#[keel::port]`. The platform implements it (an adapter), or a Rust fake does in a test. The core calls it through the context, for example `ctx.http().request(req).await`, and does not know or care what is behind it. That is what keeps the core deterministic (rule R12): it has no wall clock, no random source and no threads outside the `Clock`, `Rng` and `Timer` ports and the runtime.
+A port is a Rust trait marked `#[undra::port]`. The platform implements it (an adapter), or a Rust fake does in a test. The core calls it through the context, for example `ctx.http().request(req).await`, and does not know or care what is behind it. That is what keeps the core deterministic (rule R12): it has no wall clock, no random source and no threads outside the `Clock`, `Rng` and `Timer` ports and the runtime.
 
 There are three kinds, and the kind decides how a call travels:
 
@@ -588,7 +588,7 @@ There are three kinds, and the kind decides how a call travels:
 
 They exchange a small set of types: `HttpRequest` (method, url, headers, optional body, optional timeout), `HttpResponse` (status, headers, body), `HttpError` (`Network`, `Timeout`, `Cancelled`, `InvalidUrl`), `Header`, `FsError` (`NotFound`, `Denied`, `Io`), `NetKind` and `AppState`.
 
-These ports and types ship inside each platform runtime and are **not** generated into your app's bindings. Every core links `keel-ports`, so its schema contains them and the schema hash covers them, but the generator leaves them out and the generated code refers to the runtime's own types. That is why your app can have its own record called `Timer` or `Log`.
+These ports and types ship inside each platform runtime and are **not** generated into your app's bindings. Every core links `undra-ports`, so its schema contains them and the schema hash covers them, but the generator leaves them out and the generated code refers to the runtime's own types. That is why your app can have its own record called `Timer` or `Log`.
 
 ## Default adapters
 
@@ -610,34 +610,34 @@ On the JVM without Android, `Connectivity` and `Lifecycle` are stubs. On the web
 
 You replace a default when you load the core. The playground replaces `Http` with an in-memory server (so it needs no backend) and `Kv` with a map:
 
-web/src/keel.ts
+web/src/undra.ts
 
 ```ts
 const adapters = { http: server, kv: memoryKv() };
-await KeelCore.load({
+await UndraCore.load({
   mode: "wasm-main",
   wasm: new URL(wasmUrl, location.href),
-  expectedSchemaHash: KeelIds.schemaHash,
+  expectedSchemaHash: UndraIds.schemaHash,
   adapters,
 });
 ```
 
-ios/PlaygroundApp/KeelBootstrap.swift
+ios/PlaygroundApp/UndraBootstrap.swift
 
 ```swift
 let adapters = Adapters.platformDefault
     .removing(portId: fnv1a32("port.Connectivity"))
     .replacing(PlaygroundNetwork.shared)
     .replacing(KvAdapter(directory: store))
-try KeelCore.load(.inproc(adapters: adapters, expectedSchemaHash: KeelIds.schemaHash))
+try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
 ```
 
-android/.../KeelApp.kt
+android/.../UndraApp.kt
 
 ```kotlin
-KeelCore.load(
+UndraCore.load(
     LoadOptions(
-        expectedSchemaHash = KeelIds.SCHEMA_HASH,
+        expectedSchemaHash = UndraIds.SCHEMA_HASH,
         adapters = mapOf(
             StandardPorts.Http.PORT_ID to server.portImpl(),
             StandardPorts.Kv.PORT_ID to InMemoryKv().portImpl(),
@@ -657,12 +657,12 @@ An unavailable port is a normal outcome, not a bug. A port nobody registered beh
 
 ## Writing your own port
 
-Mark a trait with `#[keel::port]`. The macro registers it in the schema and generates a proxy type, so the core calls your trait like any other, and the platform gets a protocol or interface to implement. This one is made up, to show the shape:
+Mark a trait with `#[undra::port]`. The macro registers it in the schema and generates a proxy type, so the core calls your trait like any other, and the platform gets a protocol or interface to implement. This one is made up, to show the shape:
 
 rust
 
 ```rust
-#[keel::port(sync)]
+#[undra::port(sync)]
 pub trait Haptics {
     fn tap(&self, strength: u8);
 }
@@ -672,7 +672,7 @@ A port method's parameters must be wire types (`E0030`), and an `event` port's m
 
 ## Testing with fakes
 
-Every standard port has a deterministic Rust fake in `keel::ports::fakes`. They are all `Send + Sync`, keep state behind a lock, and never read the system clock, a random source or a thread.
+Every standard port has a deterministic Rust fake in `undra::ports::fakes`. They are all `Send + Sync`, keep state behind a lock, and never read the system clock, a random source or a thread.
 
 | Fake | Port | Behaviour |
 | --- | --- | --- |
@@ -689,9 +689,9 @@ Every standard port has a deterministic Rust fake in `keel::ports::fakes`. They 
 rust
 
 ```rust
-use keel_ports::{Http, HttpError, HttpRequest, HttpResponse};
-use keel_ports::fakes::FakeHttp;
-use keel_runtime::testing::TestRuntime;
+use undra_ports::{Http, HttpError, HttpRequest, HttpResponse};
+use undra_ports::fakes::FakeHttp;
+use undra_runtime::testing::TestRuntime;
 
 let http = FakeHttp::new();
 // A flaky endpoint: two timeouts, then success for ever after.
@@ -708,11 +708,11 @@ assert_eq!(http.call_count(), 3);
 
 Time works the same way. `FakeClock` is the single source of time for both `Clock` and `Timer`, so `ctx.sleep` asks for a timer and advancing the fake clock serves it: sleeps wake at exactly their deadline. On a runtime with the fakes installed, advance time with `Fakes::advance`, not `TestRuntime::advance`.
 
-The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
+The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/cli.html
+Source: https://shreypdev.github.io/undra/docs/cli.html
 
 # The CLI
 
@@ -723,51 +723,51 @@ One binary runs the whole loop: scaffold a project, generate bindings, build the
 text
 
 ```
-keel [-C <dir>] <command>
+undra [-C <dir>] <command>
 
   init      create a new project: a core crate and an app shell per platform
   bindgen   generate Swift, Kotlin and TypeScript bindings from the core's schema
   build     build the core for iOS, Android, the web or this machine
   dev       serve the core over a WebSocket to running apps, rebuilding on change
   doctor    check toolchains and SDKs against what the project needs
-  adopt     add a Keel core to an existing app, without touching its project files
+  adopt     add an Undra core to an existing app, without touching its project files
 ```
 
-A Keel project is a directory with a `keel.toml`. Commands find it from the current directory upwards, or you can point at it with the global `-C <dir>` (long form `--project-dir`). `keel <command> --help` prints what the command does, what it needs, what it writes, and examples.
+An Undra project is a directory with an `undra.toml`. Commands find it from the current directory upwards, or you can point at it with the global `-C <dir>` (long form `--project-dir`). `undra <command> --help` prints what the command does, what it needs, what it writes, and examples.
 
-Exit status is `0` on success, `1` for a failed command or a failed `keel doctor`, and `2` for a bad command line.
+Exit status is `0` on success, `1` for a failed command or a failed `undra doctor`, and `2` for a bad command line.
 
-## keel init
+## undra init
 
 bash
 
 ```bash
-keel init todo                              # all three platforms
-keel init todo --platforms ios,web          # only those shells
-keel init todo --id dev.acme.todo           # application id / bundle identifier
-keel init todo --keel-path ~/src/keel       # use a local checkout of Keel
+undra init todo                              # all three platforms
+undra init todo --platforms ios,web          # only those shells
+undra init todo --id dev.acme.todo           # application id / bundle identifier
+undra init todo --undra-path ~/src/undra       # use a local checkout of Undra
 ```
 
-Creates a project directory with `keel.toml`, `core/` (a working to-do store), `generated/` (bindings, already generated) and one minimal, real app per platform in `ios/`, `android/` and `web/`. Nothing is downloaded: the templates are part of the binary. Without `--keel-path` the project depends on released versions of the crates and runtimes.
+Creates a project directory with `undra.toml`, `core/` (a working to-do store), `generated/` (bindings, already generated) and one minimal, real app per platform in `ios/`, `android/` and `web/`. Nothing is downloaded: the templates are part of the binary. Without `--undra-path` the project depends on released versions of the crates and runtimes.
 
 | Flag | Meaning |
 | --- | --- |
 | `<name>` | project name: letters, digits, `-` and `_` |
 | `--platforms <list>` | `ios`, `android`, `web`, comma separated; default all three (alias `--targets`) |
 | `--id <id>` | application id and iOS bundle identifier; default `com.example.<name>` |
-| `--keel-path <dir>` | use the crates and runtimes of a Keel checkout (or set `KEEL_PATH`) |
+| `--undra-path <dir>` | use the crates and runtimes of an Undra checkout (or set `UNDRA_PATH`) |
 | `--dir <dir>` | create the project inside this directory instead of the current one |
 
-## keel bindgen
+## undra bindgen
 
 bash
 
 ```bash
-keel bindgen                          # build the core, extract the schema, write <project>/generated
-keel bindgen --out ../shared/bindings
-keel bindgen --schema schema.json     # no build: generate from a schema file
-keel bindgen --check                  # exit 1 if the generated files are stale (for CI)
-keel bindgen --docs                   # include the core's doc comments
+undra bindgen                          # build the core, extract the schema, write <project>/generated
+undra bindgen --out ../shared/bindings
+undra bindgen --schema schema.json     # no build: generate from a schema file
+undra bindgen --check                  # exit 1 if the generated files are stale (for CI)
+undra bindgen --docs                   # include the core's doc comments
 ```
 
 Reads the core's schema and writes the bindings the app shells import: a Swift package (`<out>/swift/`), a Gradle module (`<out>/kotlin/`) and an npm package (`<out>/ts/`). By default the schema comes from the core itself: the core is built as a host library, loaded, and asked for its schema. With `--schema` it is read from a file instead and nothing is built. Files an earlier run wrote and this one does not are removed; files you added next to them are never touched.
@@ -775,7 +775,7 @@ Reads the core's schema and writes the bindings the app shells import: a Swift p
 | Flag | Meaning |
 | --- | --- |
 | `--schema <file>` | generate from this schema JSON instead of building the core |
-| `--out <dir>` | write below this directory (default `[paths] generated` in `keel.toml`) |
+| `--out <dir>` | write below this directory (default `[paths] generated` in `undra.toml`) |
 | `--release` | extract the schema from a release build of the core |
 | `--platforms <list>` | only these platforms' bindings (`ios` is Swift, `android` is Kotlin, `web` is TypeScript) |
 | `--check` | write nothing; exit with an error if the generated files differ from what would be written |
@@ -784,38 +784,38 @@ Reads the core's schema and writes the bindings the app shells import: a Swift p
 
 The schema a library exports is the canonical form its hash is computed from, and that form has no doc comments. `--docs` runs the core once more to read the full schema so the generated code carries the same documentation as the Rust source.
 
-## keel build
+## undra build
 
 bash
 
 ```bash
-keel build                                   # every platform in keel.toml, debug
-keel build --release                         # optimized: what you ship
-keel build --platform web --release
-keel build --platform android,host
+undra build                                   # every platform in undra.toml, debug
+undra build --release                         # optimized: what you ship
+undra build --platform web --release
+undra build --platform android,host
 ```
 
 Builds the core for each platform and puts the result where the app shells look for it, below `build/`:
 
 | Target | Output |
 | --- | --- |
-| `ios` | `build/ios/KeelCore.xcframework`, device and simulator slices |
-| `android` | `build/android/jniLibs/<abi>/libkeel_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
-| `web` | `build/web/keel_core.wasm`, release profile, then `wasm-opt -Oz` if installed |
-| `host` | `build/host/libkeel_core.{dylib,so}`, for the JVM tests and `keel bindgen` |
+| `ios` | `build/ios/UndraCore.xcframework`, device and simulator slices |
+| `android` | `build/android/jniLibs/<abi>/libundra_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
+| `web` | `build/web/undra_core.wasm`, release profile, then `wasm-opt -Oz` if installed |
+| `host` | `build/host/libundra_core.{dylib,so}`, for the JVM tests and `undra bindgen` |
 
-`--release` turns on LTO and one codegen unit. The web build is always optimized. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Keel C ABI, built from a small crate generated under `target/keel/`; you never write that crate.
+`--release` turns on LTO and one codegen unit. The web build is always optimized. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
 
 **iOS debug builds.** Link the library with `-force_load` (the generated Xcode project already does), or the core's registrations are dropped by the linker and the schema is empty. Release builds need no flag.
 
-## keel dev
+## undra dev
 
 bash
 
 ```bash
-keel dev                          # listen on 127.0.0.1:7443
-keel dev --addr 0.0.0.0:7443      # reachable from a phone on your network
-keel dev --no-watch               # build once and serve
+undra dev                          # listen on 127.0.0.1:7443
+undra dev --addr 0.0.0.0:7443      # reachable from a phone on your network
+undra dev --no-watch               # build once and serve
 ```
 
 Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, the core is rebuilt and restarted, reload the app to reconnect. Logs, including the development records (a line per transaction commit, port call and panic), print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port.
@@ -830,42 +830,42 @@ How each platform connects:
 
 | Platform | How |
 | --- | --- |
-| Web | `KeelCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash })` |
-| iOS | set `KEEL_DEV_URL=ws://<your Mac>:7443`; the generated app reads it in debug builds |
+| Web | `UndraCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash })` |
+| iOS | set `UNDRA_DEV_URL=ws://<your Mac>:7443`; the generated app reads it in debug builds |
 | Android | the Kotlin runtime has no remote transport on Android yet; use the JVM or the web |
 
 **No authentication.** The server has none. Keep the loopback default unless a device has to reach it.
 
-## keel doctor
+## undra doctor
 
 bash
 
 ```bash
-keel doctor
-keel doctor --platform ios
+undra doctor
+undra doctor --platform ios
 ```
 
-Checks what the platforms need and prints one line per finding with the fix for each gap: Rust and its targets, Xcode (and whether `xcode-select` points at it), the Android SDK, NDK and `cargo-ndk`, Node, `wasm-opt` and a JDK. Inside a project only the platforms named in `keel.toml` are checked; elsewhere it checks all of them. It exits with status 1 when something the project needs is missing.
+Checks what the platforms need and prints one line per finding with the fix for each gap: Rust and its targets, Xcode (and whether `xcode-select` points at it), the Android SDK, NDK and `cargo-ndk`, Node, `wasm-opt` and a JDK. Inside a project only the platforms named in `undra.toml` are checked; elsewhere it checks all of them. It exits with status 1 when something the project needs is missing.
 
-## keel adopt
+## undra adopt
 
 bash
 
 ```bash
-keel adopt ../MyApp                          # detect platforms, write ../MyApp/keel/
-keel adopt . --platform ios                  # only the iOS steps
-keel adopt ../MyApp --keel-path ~/src/keel   # use a local checkout of Keel
+undra adopt ../MyApp                          # detect platforms, write ../MyApp/undra/
+undra adopt . --platform ios                  # only the iOS steps
+undra adopt ../MyApp --undra-path ~/src/undra   # use a local checkout of Undra
 ```
 
-Adds a Keel core to an app you already have, the conservative way. It writes one new `keel/` directory (a core crate, a `keel.toml` and a `KEEL_ADOPT.md`) and a list of the exact steps to wire it into the app, with the paths already filled in. The app's own project files are never modified; you make the few edits yourself.
+Adds an Undra core to an app you already have, the conservative way. It writes one new `undra/` directory (a core crate, an `undra.toml` and an `UNDRA_ADOPT.md`) and a list of the exact steps to wire it into the app, with the paths already filled in. The app's own project files are never modified; you make the few edits yourself.
 
-It detects iOS from `*.xcodeproj` or `Package.swift`, Android from `settings.gradle(.kts)` plus `AndroidManifest.xml`, and web from a `package.json` (Vite, webpack, Next and so on). Flags: `--platform <list>`, `--name <name>` (the core's name; default the directory's name) and `--keel-path <dir>`.
+It detects iOS from `*.xcodeproj` or `Package.swift`, Android from `settings.gradle(.kts)` plus `AndroidManifest.xml`, and web from a `package.json` (Vite, webpack, Next and so on). Flags: `--platform <list>`, `--name <name>` (the core's name; default the directory's name) and `--undra-path <dir>`.
 
-## keel.toml
+## undra.toml
 
-`keel init` writes every setting that matters, with comments.
+`undra init` writes every setting that matters, with comments.
 
-keel.toml
+undra.toml
 
 ```toml
 [project]
@@ -877,11 +877,11 @@ platforms = ["ios", "android", "web"]
 path = "core"                  # the crate bindgen, build and dev work on
 
 [paths]
-generated = "generated"        # written by `keel bindgen`; commit it or check it in CI
-build = "build"                # written by `keel build`; do not commit
+generated = "generated"        # written by `undra bindgen`; commit it or check it in CI
+build = "build"                # written by `undra build`; do not commit
 
-[keel]
-version = "0.1"                # path = "…" points at a checkout of the Keel repository
+[undra]
+version = "0.1"                # path = "…" points at a checkout of the Undra repository
 
 [bindings]
 # swift_module = "TodoCore"
@@ -891,15 +891,15 @@ version = "0.1"                # path = "…" points at a checkout of the Keel r
 # swift_typed_throws = true    # `throws(E)`; false emits plain `throws`
 ```
 
-Commit `generated/` or regenerate it in CI, and gate on `keel bindgen --check` so a stale binding cannot ship.
+Commit `generated/` or regenerate it in CI, and gate on `undra bindgen --check` so a stale binding cannot ship.
 
 ## Errors
 
-CLI errors print as `error[keel::C00NN]` with what happened, why, and what to do. Macro errors in your Rust use the same teaching shape with `E00NN` codes; the catalogue is on the [architecture page](https://shreypdev.github.io/keel/docs/architecture.html#diagnostics).
+CLI errors print as `error[undra::C00NN]` with what happened, why, and what to do. Macro errors in your Rust use the same teaching shape with `E00NN` codes; the catalogue is on the [architecture page](https://shreypdev.github.io/undra/docs/architecture.html#diagnostics).
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/architecture.html
+Source: https://shreypdev.github.io/undra/docs/architecture.html
 
 # Architecture
 
@@ -907,25 +907,25 @@ One schema feeds three generators. Three runtimes hold the mirrors. A small bina
 
 ## The shape of it
 
-Keel is a Rust core, a schema extracted from it, three code generators, and three platform runtimes. Your screens sit on generated bindings; the bindings sit on a runtime package; the runtime talks to the core through a transport that is an ABI, not a framework.
+Undra is a Rust core, a schema extracted from it, three code generators, and three platform runtimes. Your screens sit on generated bindings; the bindings sit on a runtime package; the runtime talks to the core through a transport that is an ABI, not a framework.
 
 *Figure: Each platform has the same four layers; only the bottom one is platform-specific machinery.*
 
-The core is one codebase. On each platform it is linked the way that platform expects: a static library in an XCFramework on iOS, `libkeel_core.so` over JNI on Android, a wasm module on the web. During development the same core can instead run on your machine behind a WebSocket (`keel dev`).
+The core is one codebase. On each platform it is linked the way that platform expects: a static library in an XCFramework on iOS, `libundra_core.so` over JNI on Android, a wasm module on the web. During development the same core can instead run on your machine behind a WebSocket (`undra dev`).
 
 ## From Rust to native code
 
 *Figure: Everything is derived from the schema. Bindgen emits three trees that depend only on the matching runtime package.*
 
-Everything starts with the macros. `#[keel::api]`, `#[keel::store]`, `#[keel::port]` and friends validate your code and register a description of each public type and function. Collected together, those descriptions are the **schema**: records, enums, objects, stores with their signals, functions, ports and queries. The CLI builds your core as a host library, loads it, asks for the schema, and hands it to `keel bindgen`, which writes a Swift package, a Gradle module and an npm package. Generated code depends only on the matching runtime package.
+Everything starts with the macros. `#[undra::api]`, `#[undra::store]`, `#[undra::port]` and friends validate your code and register a description of each public type and function. Collected together, those descriptions are the **schema**: records, enums, objects, stores with their signals, functions, ports and queries. The CLI builds your core as a host library, loads it, asks for the schema, and hands it to `undra bindgen`, which writes a Swift package, a Gradle module and an npm package. Generated code depends only on the matching runtime package.
 
 Three properties of this design are worth stating plainly:
 
 - **Names become ids at compile time.** A type id is a hash of its name, a method id a hash of `Type.method`, a port id a hash of `port.Trait`, and a signal id is its position among the store's signal fields. Every platform agrees without a registry lookup. The hash is FNV-1a.
 - **The schema has a hash.** It is the FNV-1a hash of a canonical form: lists sorted by name, no whitespace, doc comments excluded, so two cores with the same public surface hash the same. Each binding carries the hash it was generated from, and the runtime compares it with the core's when it attaches.
-- **Generated code is reviewed like hand-written code.** Golden files lock the output for all three languages, and the output is compiled and run in tests. A record becomes a Swift `struct`, a Kotlin `data class` and a TypeScript `interface`; an error becomes a typed-`throws` enum, a sealed class and an `Error` subclass. See the API overviews for [Swift](https://shreypdev.github.io/keel/docs/api-swift.html), [Kotlin](https://shreypdev.github.io/keel/docs/api-kotlin.html) and [TypeScript](https://shreypdev.github.io/keel/docs/api-typescript.html).
+- **Generated code is reviewed like hand-written code.** Golden files lock the output for all three languages, and the output is compiled and run in tests. A record becomes a Swift `struct`, a Kotlin `data class` and a TypeScript `interface`; an error becomes a typed-`throws` enum, a sealed class and an `Error` subclass. See the API overviews for [Swift](https://shreypdev.github.io/undra/docs/api-swift.html), [Kotlin](https://shreypdev.github.io/undra/docs/api-kotlin.html) and [TypeScript](https://shreypdev.github.io/undra/docs/api-typescript.html).
 
-The standard ports and their types are in every schema but are not generated into your bindings, because each runtime already implements them; see [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html).
+The standard ports and their types are in every schema but are not generated into your bindings, because each runtime already implements them; see [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html).
 
 ## The crates
 
@@ -933,20 +933,20 @@ Twelve Rust crates, and only one of them may contain `unsafe`.
 
 | Crate | Role |
 | --- | --- |
-| `keel-meta` | the schema model, canonical JSON, the hash, the FNV helpers and registration |
-| `keel-wire` | the binary codec, envelope and patches; no `unsafe`, proptested and byte-fuzzed |
-| `keel-macros` | the attribute macros and their teaching diagnostics |
-| `keel-signals` | `Signal`, `Computed`, `Effect`, transactions, change-set building, keyed patches |
-| `keel-runtime` | the executor, core lock, object table, ports, timers, snapshots and panic guard |
-| `keel-ports` | the ten standard ports, their records and the deterministic fakes |
-| `keel-query` | the query client, mutations, retry, persistence and the offline queue |
-| `keel-ffi` | the C ABI, the JNI shim and the wasm exports: **the only `unsafe`** |
-| `keel-transport` | the WebSocket server and framing behind `keel dev` |
-| `keel-bindgen` | the Swift, Kotlin and TypeScript generators |
-| `keel-cli` | the `keel` command |
-| `keel` | the facade you depend on: prelude, macros, runtime, ports, query |
+| `undra-meta` | the schema model, canonical JSON, the hash, the FNV helpers and registration |
+| `undra-wire` | the binary codec, envelope and patches; no `unsafe`, proptested and byte-fuzzed |
+| `undra-macros` | the attribute macros and their teaching diagnostics |
+| `undra-signals` | `Signal`, `Computed`, `Effect`, transactions, change-set building, keyed patches |
+| `undra-runtime` | the executor, core lock, object table, ports, timers, snapshots and panic guard |
+| `undra-ports` | the ten standard ports, their records and the deterministic fakes |
+| `undra-query` | the query client, mutations, retry, persistence and the offline queue |
+| `undra-ffi` | the C ABI, the JNI shim and the wasm exports: **the only `unsafe`** |
+| `undra-transport` | the WebSocket server and framing behind `undra dev` |
+| `undra-bindgen` | the Swift, Kotlin and TypeScript generators |
+| `undra-cli` | the `undra` command |
+| `undra` | the facade you depend on: prelude, macros, runtime, ports, query |
 
-The runtimes are `runtimes/swift/KeelRuntime`, `runtimes/kotlin/keel-runtime` and `runtimes/ts/@keel/runtime`. The Kotlin runtime depends on the standard library and kotlinx-coroutines only, and the TypeScript core package has no runtime dependencies.
+The runtimes are `runtimes/swift/UndraRuntime`, `runtimes/kotlin/undra-runtime` and `runtimes/ts/@undra/runtime`. The Kotlin runtime depends on the standard library and kotlinx-coroutines only, and the TypeScript core package has no runtime dependencies.
 
 ## The wire
 
@@ -982,7 +982,7 @@ The `kind` byte says what the payload is:
 | 8 | StreamItem | core to host |
 | 9, 10 | Observe, Release | host to core |
 | 11 | Event | host to core (connectivity, lifecycle) |
-| 12 | Hello | both: Keel version, schema hash, platform, mode |
+| 12 | Hello | both: Undra version, schema hash, platform, mode |
 | 13 | Log | core to host |
 | 14 | TimerFired | host to core |
 | 15, 16 | Snapshot, Restore | core to host, host to core |
@@ -993,7 +993,7 @@ A **change-set** is how state comes back. It carries a transaction id and one en
 
 *Figure: Entries are ordered by signal id. A keyed patch inside an entry is a count and a list of operations.*
 
-An entry's `op` is `0` for a full value, `1` for a keyed patch, and `2` for "lazy list invalidated". A keyed patch is a count and a list of operations (`Insert`, `Remove`, `Update`, `Move`, `Clear`) applied in order to the host's copy; see [Core concepts](https://shreypdev.github.io/keel/docs/concepts.html#keyed-lists). The `len` field lets a host skip an entry it cannot decode.
+An entry's `op` is `0` for a full value, `1` for a keyed patch, and `2` for "lazy list invalidated". A keyed patch is a count and a list of operations (`Insert`, `Remove`, `Update`, `Move`, `Clear`) applied in order to the host's copy; see [Core concepts](https://shreypdev.github.io/undra/docs/concepts.html#keyed-lists). The `len` field lets a host skip an entry it cannot decode.
 
 **Streams** use credit-based backpressure. A host grants credit and the core sends at most that many items beyond what has been credited; generated bindings grant 16 on subscribe and top up when consumption drops below 8. A cancel closes the stream.
 
@@ -1004,39 +1004,39 @@ The native boundary is a C ABI, exported with `#[unsafe(no_mangle)] extern "C"` 
 c
 
 ```c
-uint32_t keel_abi_version(void);
-uint64_t keel_schema_hash(void);
-KeelBuf  keel_schema_json(void);
-uint32_t keel_init(cfg, len, reply_cb, changeset_cb, stream_cb, user);
-void     keel_shutdown(void);
-uint32_t keel_call(ptr, len);          // async reply arrives on reply_cb
-KeelBuf  keel_call_sync(ptr, len);     // reply returned directly
-void     keel_cancel(call_id);
-void     keel_stream_credit(call_id, credit);
-void     keel_observe(handle, signal_id, on);
-void     keel_release(handle);
-void     keel_port_register(port_id, cb, user);
-void     keel_port_reply(ptr, len);
-void     keel_event(port_id, method_id, ptr, len);
-void     keel_timer_fired(timer_id);
-KeelBuf  keel_snapshot(void);
-uint32_t keel_restore(ptr, len);
-KeelBuf  keel_stats_json(void);
-void     keel_buf_free(KeelBuf buf);
+uint32_t undra_abi_version(void);
+uint64_t undra_schema_hash(void);
+UndraBuf  undra_schema_json(void);
+uint32_t undra_init(cfg, len, reply_cb, changeset_cb, stream_cb, user);
+void     undra_shutdown(void);
+uint32_t undra_call(ptr, len);          // async reply arrives on reply_cb
+UndraBuf  undra_call_sync(ptr, len);     // reply returned directly
+void     undra_cancel(call_id);
+void     undra_stream_credit(call_id, credit);
+void     undra_observe(handle, signal_id, on);
+void     undra_release(handle);
+void     undra_port_register(port_id, cb, user);
+void     undra_port_reply(ptr, len);
+void     undra_event(port_id, method_id, ptr, len);
+void     undra_timer_fired(timer_id);
+UndraBuf  undra_snapshot(void);
+uint32_t undra_restore(ptr, len);
+UndraBuf  undra_stats_json(void);
+void     undra_buf_free(UndraBuf buf);
 ```
 
-Android reaches the same functions through a JNI shim that registers its natives once at load, so there is no per-call lookup. The web has no wasm-bindgen: the module exports and imports use only `i32`, `i64` and `f64`, a 64-bit handle is passed as two halves, and `keel_poll()` drives the executor. `Clock`, `Rng` and `Log` are bound to wasm imports, so a web app needs no adapter code for them.
+Android reaches the same functions through a JNI shim that registers its natives once at load, so there is no per-call lookup. The web has no wasm-bindgen: the module exports and imports use only `i32`, `i64` and `f64`, a 64-bit handle is passed as two halves, and `undra_poll()` drives the executor. `Clock`, `Rng` and `Log` are bound to wasm imports, so a web app needs no adapter code for them.
 
 Callbacks are where hosts get hurt, so the contract is explicit and enforced. A callback runs on whichever thread produced the event, possibly with the core lock held, so it must be short, thread-safe and must not throw. It must not call back into the core except the few entries that never take the lock (freeing a buffer, replying to a port call, granting stream credit, firing a timer, reading stats). Every other re-entry is refused with `E_REENTRANT` instead of deadlocking, in every build.
 
-The synchronous call path is allocation-free once warm. A per-thread reply slot lets a synchronous method encode its whole reply into one reusable buffer, which is what moves a call through the C ABI to 49.8 ns ([ADR-028](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-028-synchronous-reply-slot.md)); a counting allocator in the tests holds the lending entry to zero allocations and a C ABI call to exactly one, the buffer it hands back.
+The synchronous call path is allocation-free once warm. A per-thread reply slot lets a synchronous method encode its whole reply into one reusable buffer, which is what moves a call through the C ABI to 49.8 ns ([ADR-028](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-028-synchronous-reply-slot.md)); a counting allocator in the tests holds the lending entry to zero allocations and a C ABI call to exactly one, the buffer it hands back.
 
 ## Threading
 
 - **One mutator.** The core has one lock. Whoever holds it *is* the core loop. A synchronous call from the host runs on the caller's thread holding that lock, so it costs a mutex acquire, not a thread hop.
 - **Async work.** Async calls are tasks on a small executor with no tokio, polled by the core thread, one task per in-flight call. Cancelling a call drops its future.
 - **A blocking pool** runs blocking work off the lock. It must not write signals, and debug builds refuse such writes.
-- **wasm is single threaded.** The host calls `keel_poll()` on the next microtask whenever the core asks to be scheduled.
+- **wasm is single threaded.** The host calls `undra_poll()` on the next microtask whenever the core asks to be scheduled.
 - **Shutdown is orderly.** Every call still in flight is answered as cancelled and every stream ends, each exactly once, before the threads are joined.
 
 ## Transports and modes
@@ -1046,13 +1046,13 @@ The synchronous call path is allocation-free once warm. A per-thread reply slot 
 | in-process | linked into the app (C ABI on iOS, JNI on Android) | shipping |
 | `wasm-main` | a wasm module on the page's main thread | simple web apps |
 | `wasm-worker` | the same module in a worker | web apps that want the main thread free |
-| `remote` | your machine, behind a WebSocket | `keel dev` |
+| `remote` | your machine, behind a WebSocket | `undra dev` |
 
 Platform runtimes do the same jobs everywhere: load the core, allocate call ids, map replies to continuations, hold the mirror and apply change-sets on the main thread, implement observe and release, provide default adapters, implement the codecs, and **refuse a mismatched core** with a clear error that names both hashes.
 
 ## Compatibility
 
-A UI and a core that were not built from the same schema must not talk. The schema hash is checked when the runtime attaches and surfaces as a typed mismatch error, and `keel bindgen --check` catches stale bindings at build time. Breaking the wire is a major version and needs an ADR; evolving a schema across a hash mismatch is deliberately not in v1.
+A UI and a core that were not built from the same schema must not talk. The schema hash is checked when the runtime attaches and surfaces as a typed mismatch error, and `undra bindgen --check` catches stale bindings at build time. Breaking the wire is a major version and needs an ADR; evolving a schema across a hash mismatch is deliberately not in v1.
 
 ## Diagnostics
 
@@ -1061,10 +1061,10 @@ Every macro mistake is an error with a stable code and a fixed shape: what happe
 text
 
 ```
-error[keel::E0012]: `Vec<Box<dyn Any>>` cannot cross the boundary
+error[undra::E0012]: `Vec<Box<dyn Any>>` cannot cross the boundary
   = note: trait objects have no wire representation
-  = help: make `items` a concrete `#[keel::api]` type, or an enum listing the cases you need
-  = docs: https://keel.dev/errors/E0012
+  = help: make `items` a concrete `#[undra::api]` type, or an enum listing the cases you need
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0012
 ```
 
 The catalogue, by family:
@@ -1088,7 +1088,7 @@ Twelve rules, enforced in review, not aspirational. They are the reason the proj
 | Rule | In short | Why it matters |
 | --- | --- | --- |
 | **R1** | The schema is the only truth. A public type or function exists only if the schema can describe it. | Three languages cannot drift from each other if all three are derived from one description. |
-| **R2** | `unsafe` lives in `keel-ffi` only, plus one schema loader in the CLI. Every block has a `// SAFETY:` comment; every other crate forbids it. | The audit surface is one crate, and it is the one reviewed under ASan and Miri. |
+| **R2** | `unsafe` lives in `undra-ffi` only, plus one schema loader in the CLI. Every block has a `// SAFETY:` comment; every other crate forbids it. | The audit surface is one crate, and it is the one reviewed under ASan and Miri. |
 | **R3** | Generated code must pass native review: a Swift, Kotlin or TypeScript engineer who has never seen Rust would write it that way. Golden files lock it. | Adoption depends on the output feeling native, not generated. |
 | **R4** | Every feature lands whole: unit tests, contract scenarios, a benchmark if the boundary is touched, docs on every `pub` item. | No half-features and no untested boundary. |
 | **R5** | Reads never cross the boundary; writes cross once per transaction. No generated getter calls into the core. | This is the performance model. Everything else serves it. |
@@ -1108,17 +1108,17 @@ The big decisions are written down as ADRs before the code. The ones in the tree
 
 | ADR | Decision |
 | --- | --- |
-| [018](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-018-query-handles-and-dispatch-layer.md) | Query handles and the dispatch layer |
-| [019](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-019-signals-transactional-delivery.md) | Signals: transactional delivery |
-| [020](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-020-signals-delivery-order-and-round-cap.md) | Signals: delivery order and the round cap |
-| [021](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-021-signals-contained-misuse.md) | Signals: contained misuse |
-| [022](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-022-handle-generations-and-the-snapshot-floor.md) | Handle generations and the snapshot floor |
-| [023](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-023-runtime-delivery-reentry-restore-and-shutdown.md) | Runtime delivery, re-entry, restore and shutdown |
-| [024](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-024-standard-library-not-generated.md) | The standard library is not generated |
-| [025](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-025-ports-typed-outcomes-and-schema-identity.md) | Ports: typed outcomes and schema identity |
-| [026](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-026-ffi-host-contract-lifetimes-and-ownership.md) | The FFI host contract: lifetimes and ownership |
-| [027](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md) | Keyed list operations are recorded, not diffed |
-| [028](https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-028-synchronous-reply-slot.md) | The synchronous reply slot |
+| [018](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-018-query-handles-and-dispatch-layer.md) | Query handles and the dispatch layer |
+| [019](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-019-signals-transactional-delivery.md) | Signals: transactional delivery |
+| [020](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-020-signals-delivery-order-and-round-cap.md) | Signals: delivery order and the round cap |
+| [021](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-021-signals-contained-misuse.md) | Signals: contained misuse |
+| [022](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-022-handle-generations-and-the-snapshot-floor.md) | Handle generations and the snapshot floor |
+| [023](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-023-runtime-delivery-reentry-restore-and-shutdown.md) | Runtime delivery, re-entry, restore and shutdown |
+| [024](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-024-standard-library-not-generated.md) | The standard library is not generated |
+| [025](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-025-ports-typed-outcomes-and-schema-identity.md) | Ports: typed outcomes and schema identity |
+| [026](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-026-ffi-host-contract-lifetimes-and-ownership.md) | The FFI host contract: lifetimes and ownership |
+| [027](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md) | Keyed list operations are recorded, not diffed |
+| [028](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-028-synchronous-reply-slot.md) | The synchronous reply slot |
 
 ## What v1 leaves out
 
@@ -1126,14 +1126,14 @@ By design, v1 has no sync engine, no hosted services and no shared UI of any kin
 
 ## Read the source of truth
 
-- [`docs/SPEC.md`](https://github.com/shreypdev/keel/blob/main/docs/SPEC.md): the binding specification for the wire, the ABI, the schema, the runtime model and the generated shapes. Code that disagrees with it is wrong.
-- [`bench/RESULTS.md`](https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md): every benchmark row, the machine, and what is still waiting for devices.
-- [`.10x/reviews/`](https://github.com/shreypdev/keel/tree/main/.10x/reviews): the four adversarial reviews of signals, runtime, macros and ffi.
-- [`contract-tests/scenarios.md`](https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md): the seventeen scenarios that define "the platforms agree".
+- [`docs/SPEC.md`](https://github.com/shreypdev/undra/blob/main/docs/SPEC.md): the binding specification for the wire, the ABI, the schema, the runtime model and the generated shapes. Code that disagrees with it is wrong.
+- [`bench/RESULTS.md`](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md): every benchmark row, the machine, and what is still waiting for devices.
+- [`.10x/reviews/`](https://github.com/shreypdev/undra/tree/main/.10x/reviews): the four adversarial reviews of signals, runtime, macros and ffi.
+- [`contract-tests/scenarios.md`](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md): the seventeen scenarios that define "the platforms agree".
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/errors.html
+Source: https://shreypdev.github.io/undra/docs/errors.html
 
 # Error codes
 
@@ -1146,69 +1146,69 @@ A diagnostic says what is wrong, why the rule exists and how to fix it. This one
 text
 
 ```
-error[keel::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
+error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
   = note: trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript
-  = help: use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`)
-  = docs: https://shreypdev.github.io/keel/docs/errors.html#E0004
+  = help: use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`)
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
 ```
 
 ## All codes
 
 | Code | Meaning |
 | --- | --- |
-| [`E0001`](https://shreypdev.github.io/keel/docs/errors.html#E0001) | unsupported type in a public position |
-| [`E0002`](https://shreypdev.github.io/keel/docs/errors.html#E0002) | generic parameter |
-| [`E0003`](https://shreypdev.github.io/keel/docs/errors.html#E0003) | lifetime in a public signature |
-| [`E0004`](https://shreypdev.github.io/keel/docs/errors.html#E0004) | trait object, `dyn`, `impl Trait` |
-| [`E0005`](https://shreypdev.github.io/keel/docs/errors.html#E0005) | `Result` / `Stream` outside return position |
-| [`E0006`](https://shreypdev.github.io/keel/docs/errors.html#E0006) | map key type not allowed |
-| [`E0007`](https://shreypdev.github.io/keel/docs/errors.html#E0007) | unsupported item shape |
-| [`E0008`](https://shreypdev.github.io/keel/docs/errors.html#E0008) | unknown or misplaced `#[keel(..)]` attribute or macro argument |
-| [`E0010`](https://shreypdev.github.io/keel/docs/errors.html#E0010) | invalid `#[keel::error]` variant |
-| [`E0011`](https://shreypdev.github.io/keel/docs/errors.html#E0011) | store and `#[keel::api(store)]` impl block disagree |
-| [`E0012`](https://shreypdev.github.io/keel/docs/errors.html#E0012) | trait object in a record field |
-| [`E0013`](https://shreypdev.github.io/keel/docs/errors.html#E0013) | store cannot be restored automatically |
-| [`E0020`](https://shreypdev.github.io/keel/docs/errors.html#E0020) | `&mut self` receiver |
-| [`E0021`](https://shreypdev.github.io/keel/docs/errors.html#E0021) | `self` by value |
-| [`E0022`](https://shreypdev.github.io/keel/docs/errors.html#E0022) | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry a Keel code) |
-| [`E0030`](https://shreypdev.github.io/keel/docs/errors.html#E0030) | port method with a non-wire parameter |
-| [`E0031`](https://shreypdev.github.io/keel/docs/errors.html#E0031) | event port method that is not a plain `fn(..)` returning `()` |
-| [`E0032`](https://shreypdev.github.io/keel/docs/errors.html#E0032) | invalid port trait shape |
-| [`E0033`](https://shreypdev.github.io/keel/docs/errors.html#E0033) | the error type of a port method has no `From<PortError>` |
-| [`E0040`](https://shreypdev.github.io/keel/docs/errors.html#E0040) | query without `key`, mutation with `stale`, or another invalid query argument |
-| [`E0041`](https://shreypdev.github.io/keel/docs/errors.html#E0041) | query or mutation function with an invalid signature |
-| [`E0042`](https://shreypdev.github.io/keel/docs/errors.html#E0042) | query whose success value is `()` or an `Option` |
-| [`E0050`](https://shreypdev.github.io/keel/docs/errors.html#E0050) | duplicate type name |
-| [`E0051`](https://shreypdev.github.io/keel/docs/errors.html#E0051) | a name that collides after case conversion |
-| [`E0052`](https://shreypdev.github.io/keel/docs/errors.html#E0052) | a record, enum, error, object or port named like a standard library item |
-| [`E0060`](https://shreypdev.github.io/keel/docs/errors.html#E0060) | a spelling that looks like a built-in Keel type is another type |
-| [`E0061`](https://shreypdev.github.io/keel/docs/errors.html#E0061) | the schema names a different type than the one spelled, or a type that is not a Keel type |
-| [`E0062`](https://shreypdev.github.io/keel/docs/errors.html#E0062) | a port call had no adapter |
-| [`E0063`](https://shreypdev.github.io/keel/docs/errors.html#E0063) | nested `Option<Option<T>>` |
-| [`E0064`](https://shreypdev.github.io/keel/docs/errors.html#E0064) | an object (`#[keel::api] impl`) used where a value is expected |
+| [`E0001`](https://shreypdev.github.io/undra/docs/errors.html#E0001) | unsupported type in a public position |
+| [`E0002`](https://shreypdev.github.io/undra/docs/errors.html#E0002) | generic parameter |
+| [`E0003`](https://shreypdev.github.io/undra/docs/errors.html#E0003) | lifetime in a public signature |
+| [`E0004`](https://shreypdev.github.io/undra/docs/errors.html#E0004) | trait object, `dyn`, `impl Trait` |
+| [`E0005`](https://shreypdev.github.io/undra/docs/errors.html#E0005) | `Result` / `Stream` outside return position |
+| [`E0006`](https://shreypdev.github.io/undra/docs/errors.html#E0006) | map key type not allowed |
+| [`E0007`](https://shreypdev.github.io/undra/docs/errors.html#E0007) | unsupported item shape |
+| [`E0008`](https://shreypdev.github.io/undra/docs/errors.html#E0008) | unknown or misplaced `#[undra(..)]` attribute or macro argument |
+| [`E0010`](https://shreypdev.github.io/undra/docs/errors.html#E0010) | invalid `#[undra::error]` variant |
+| [`E0011`](https://shreypdev.github.io/undra/docs/errors.html#E0011) | store and `#[undra::api(store)]` impl block disagree |
+| [`E0012`](https://shreypdev.github.io/undra/docs/errors.html#E0012) | trait object in a record field |
+| [`E0013`](https://shreypdev.github.io/undra/docs/errors.html#E0013) | store cannot be restored automatically |
+| [`E0020`](https://shreypdev.github.io/undra/docs/errors.html#E0020) | `&mut self` receiver |
+| [`E0021`](https://shreypdev.github.io/undra/docs/errors.html#E0021) | `self` by value |
+| [`E0022`](https://shreypdev.github.io/undra/docs/errors.html#E0022) | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry an Undra code) |
+| [`E0030`](https://shreypdev.github.io/undra/docs/errors.html#E0030) | port method with a non-wire parameter |
+| [`E0031`](https://shreypdev.github.io/undra/docs/errors.html#E0031) | event port method that is not a plain `fn(..)` returning `()` |
+| [`E0032`](https://shreypdev.github.io/undra/docs/errors.html#E0032) | invalid port trait shape |
+| [`E0033`](https://shreypdev.github.io/undra/docs/errors.html#E0033) | the error type of a port method has no `From<PortError>` |
+| [`E0040`](https://shreypdev.github.io/undra/docs/errors.html#E0040) | query without `key`, mutation with `stale`, or another invalid query argument |
+| [`E0041`](https://shreypdev.github.io/undra/docs/errors.html#E0041) | query or mutation function with an invalid signature |
+| [`E0042`](https://shreypdev.github.io/undra/docs/errors.html#E0042) | query whose success value is `()` or an `Option` |
+| [`E0050`](https://shreypdev.github.io/undra/docs/errors.html#E0050) | duplicate type name |
+| [`E0051`](https://shreypdev.github.io/undra/docs/errors.html#E0051) | a name that collides after case conversion |
+| [`E0052`](https://shreypdev.github.io/undra/docs/errors.html#E0052) | a record, enum, error, object or port named like a standard library item |
+| [`E0060`](https://shreypdev.github.io/undra/docs/errors.html#E0060) | a spelling that looks like a built-in Undra type is another type |
+| [`E0061`](https://shreypdev.github.io/undra/docs/errors.html#E0061) | the schema names a different type than the one spelled, or a type that is not an Undra type |
+| [`E0062`](https://shreypdev.github.io/undra/docs/errors.html#E0062) | a port call had no adapter |
+| [`E0063`](https://shreypdev.github.io/undra/docs/errors.html#E0063) | nested `Option<Option<T>>` |
+| [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected |
 
 ## Types and shapes
 
 ### `E0001` unsupported type in a public position
 
-unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[keel::error]` enum, and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met)
+unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[keel(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
+| `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
 | `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
 | `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
 | `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | store a `Ctx` in the object when it is constructed, or use `Ctx::current()` |
-| `Instant` cannot cross the boundary | monotonic instants are meaningless outside their process | use `Duration` for spans and `Timestamp` for points in time; if `Instant` is a type of your own, rename it: Keel recognises this name wherever it is written |
-| `Handle` cannot be used in a public signature | a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature | use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if `Handle` is a type of your own, rename it: Keel recognises this name wherever it is written |
+| `Instant` cannot cross the boundary | monotonic instants are meaningless outside their process | use `Duration` for spans and `Timestamp` for points in time; if `Instant` is a type of your own, rename it: Undra recognises this name wherever it is written |
+| `Handle` cannot be used in a public signature | a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature | use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if `Handle` is a type of your own, rename it: Undra recognises this name wherever it is written |
 
 ### `E0002` generic parameter
 
-generic parameter on a `#[keel::api]` item
+generic parameter on a `#[undra::api]` item
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[keel::api]` type per instantiation |
+| generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
 
 ### `E0003` lifetime in a public signature
 
@@ -1224,9 +1224,9 @@ trait object / `dyn` / `Box<dyn Fn>`
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| trait object `dyn Fn(u32)` cannot cross the boundary | trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript | use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`) |
+| trait object `dyn Fn(u32)` cannot cross the boundary | trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript | use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`) |
 | `impl std::fmt::Display` cannot cross the boundary | `impl Trait` has no wire representation; the only one the schema understands is `impl Stream<Item = T>` in a return type | use a concrete type, or `impl Stream<Item = T>` for a sequence of values over time |
-| boxed stream `Pin<Box<dyn keel::runtime::Stream<Item = u32> + Send>>` cannot cross the boundary | a stream is described to the platforms as `impl Stream<Item = T>` in a return type; a boxed or `dyn` stream has no schema representation | return `impl Stream<Item = T> + Send + 'static` (box it inside the function if the branches differ) |
+| boxed stream `Pin<Box<dyn undra::runtime::Stream<Item = u32> + Send>>` cannot cross the boundary | a stream is described to the platforms as `impl Stream<Item = T>` in a return type; a boxed or `dyn` stream has no schema representation | return `impl Stream<Item = T> + Send + 'static` (box it inside the function if the branches differ) |
 
 ### `E0005` `Result` / `Stream` outside return position
 
@@ -1246,46 +1246,46 @@ map key type not allowed
 
 ### `E0007` unsupported item shape
 
-unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__keel_cell`, `#[keel::port]` on an inherent impl, `#[keel::api]` on a method, `#[keel::query]` or `#[keel::mutation]` inside an `impl` block)
+unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | tuple struct `Meters` cannot be a record | the schema names every field so the other languages can generate properties; tuple fields have no names | use named fields: `struct Meters { value: f64 }` |
 | enum `Nothing` has no variants | an enum without variants has no values, so it can never be sent | add at least one variant |
 | constructor `new` is `async` | a constructor inserts the new object into the object table before it replies, so it must finish synchronously | construct synchronously and start asynchronous work with `ctx.spawn(..)` |
-| `helper` is neither a method nor a constructor | a `pub fn` in a `#[keel::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed | add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[keel::api] fn` |
+| `helper` is neither a method nor a constructor | a `pub fn` in a `#[undra::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed | add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[undra::api] fn` |
 | the receiver `self: &Arc<Self>` of method `by_arc` is not supported | the dispatcher resolves the object from its handle and calls the method with `&Type`; a receiver such as `Arc<Self>`, `Box<Self>` or `Pin<&Self>` needs a different call | write `&self`; clone an `Arc` of the object inside the method if you need one |
 | unit struct `Marker` cannot be a record | a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message | add a field, or use an enum with a unit variant if you need a marker |
 
-### `E0008` unknown or misplaced `#[keel(..)]` attribute or macro argument
+### `E0008` unknown or misplaced `#[undra(..)]` attribute or macro argument
 
-unknown or misplaced `#[keel(..)]` attribute or macro argument (an unknown key, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
+unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| unknown option `defualt` in `#[keel(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | remove or correct the option |
-| `#[keel(key)]` is not valid on a record or variant field | `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches | remove the option, or move it to where it applies |
-| unknown argument `colour` for `#[keel::api]` | `#[keel::api]` accepts: `crate = "path"`, and `store` on an impl block of a `#[keel::store]` struct | remove or correct the argument |
+| unknown option `defualt` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | remove or correct the option |
+| `#[undra(key)]` is not valid on a record or variant field | `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches | remove the option, or move it to where it applies |
+| unknown argument `colour` for `#[undra::api]` | `#[undra::api]` accepts: `crate = "path"`, and `store` on an impl block of a `#[undra::store]` struct | remove or correct the argument |
 | `default` takes no value | `default` switches a behaviour on by being present; there is nothing to set it to | write `default` alone |
 | `key` must be a string literal naming a field | `key` takes a string literal naming a field; anything else cannot be read at compile time | write `key = "id"` |
 | `no_coalesce` takes no value | `no_coalesce` switches a behaviour on by being present; there is nothing to set it to | write `no_coalesce` alone |
 
 ## Errors and stores
 
-### `E0010` invalid `#[keel::error]` variant
+### `E0010` invalid `#[undra::error]` variant
 
-`#[keel::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[keel::api]` enum
+`#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| variant `NotFound` has no `#[error(..)]` message | every variant of a `#[keel::error]` enum needs a message, because the platforms show it to users and logs | add `#[error("what went wrong")]`, or `#[error(transparent)]` to forward to the inner error |
+| variant `NotFound` has no `#[error(..)]` message | every variant of a `#[undra::error]` enum needs a message, because the platforms show it to users and logs | add `#[error("what went wrong")]`, or `#[error(transparent)]` to forward to the inner error |
 | invalid message for variant `Missing`: `{1}` refers to field 1, but the variant has 1 | the message is a template over the variant's fields | use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields |
 | `#[error(transparent)]` on variant `Both` needs exactly one field, found 2 | `transparent` forwards `Display` and `source()` to the variant's only field | give the variant a single field holding the inner error |
-| `#[error]` on the variant `A` belongs to `#[keel::error]`, not `#[keel::api]` | `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[keel::api]` enum has no messages, `Display` or `From` impls | change the enum's attribute to `#[keel::error]`, or remove the helper attribute |
+| `#[error]` on the variant `A` belongs to `#[undra::error]`, not `#[undra::api]` | `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[undra::api]` enum has no messages, `Display` or `From` impls | change the enum's attribute to `#[undra::error]`, or remove the helper attribute |
 
-### `E0011` store and `#[keel::api(store)]` impl block disagree
+### `E0011` store and `#[undra::api(store)]` impl block disagree
 
-`#[keel::store]` and its `#[keel::api(store)]` impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen)
+`#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen)
 
 No compile-fail example: this code comes from the generators or the runtime, not from the macros.
 
@@ -1295,15 +1295,15 @@ trait object in a record field (the blueprint example)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Vec<Box<dyn Any>>` cannot cross the boundary | trait objects have no wire representation | make `items` a concrete `#[keel::api]` type, or an enum listing the cases you need |
+| `Vec<Box<dyn Any>>` cannot cross the boundary | trait objects have no wire representation | make `items` a concrete `#[undra::api]` type, or an enum listing the cases you need |
 
 ### `E0013` store cannot be restored automatically
 
-store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[keel::store(restore = "..")]` hook
+store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| store `Todos` cannot be restored automatically: `count` is computed | restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them | add `#[keel::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
+| store `Todos` cannot be restored automatically: `count` is computed | restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them | add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
 
 ## Methods
 
@@ -1323,7 +1323,7 @@ store cannot be restored automatically: it has a `Computed` field, or a field th
 | --- | --- | --- |
 | `self` by value on method `finish` | an object is shared across calls; a method cannot consume it | take `&self` and clone whatever you need to keep |
 
-### `E0022` non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry a Keel code)
+### `E0022` non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry an Undra code)
 
 non-`Send` future in an async method
 
@@ -1338,7 +1338,7 @@ port method with a non-wire parameter
 | What you see | Why | Fix |
 | --- | --- | --- |
 | parameter `url` of port method `request` is not a wire type | `&str` cannot cross the boundary (references have no wire representation; every value crosses by copy) | use an owned `String` |
-| parameter `on_progress` of port method `request` is not a wire type | trait object `dyn Fn(u8)` cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript) | use a concrete `#[keel::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[keel::port]`) |
+| parameter `on_progress` of port method `request` is not a wire type | trait object `dyn Fn(u8)` cannot cross the boundary (trait objects have no wire representation and no equivalent in Swift, Kotlin or TypeScript) | use a concrete `#[undra::api]` type or an enum listing the cases you need; callbacks into the platform are ports (`#[undra::port]`) |
 
 ### `E0031` event port method that is not a plain `fn(..)` returning `()`
 
@@ -1346,7 +1346,7 @@ event port method with a return type
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| event port method `changed` returns a value | events are fire-and-forget notifications from the host; there is no reply to carry a value | remove the return type, or drop `event` from `#[keel::port(event)]` to make it a request/reply port |
+| event port method `changed` returns a value | events are fire-and-forget notifications from the host; there is no reply to carry a value | remove the return type, or drop `event` from `#[undra::port(event)]` to make it a request/reply port |
 | event port method `resumed` is `async` | events are fire-and-forget notifications from the host; nothing waits for them | make it a plain `fn` returning `()` |
 
 ### `E0032` invalid port trait shape
@@ -1355,7 +1355,7 @@ invalid port trait shape (an `async` method on a `sync` port, a parameter that i
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `#[keel::port(sync)]` port has the `async` method `now_ms` | `sync` promises that every method answers immediately, so the core can call it without yielding | remove `async`, or remove `sync` from the attribute |
+| `#[undra::port(sync)]` port has the `async` method `now_ms` | `sync` promises that every method answers immediately, so the core can call it without yielding | remove `async`, or remove `sync` from the attribute |
 | port trait `Kv` has an associated item that is not a method | a port is a list of methods the platform implements; associated types and constants have no wire representation | remove it, or move it to a separate trait |
 
 ### `E0033` the error type of a port method has no `From<PortError>`
@@ -1385,9 +1385,9 @@ query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `sync_query` must be `async` | `#[keel::query]` functions fetch or write through ports, which are asynchronous | write `async fn` |
+| `sync_query` must be `async` | `#[undra::query]` functions fetch or write through ports, which are asynchronous | write `async fn` |
 | `no_ctx` must take `ctx: &Ctx` as its first parameter | the runtime hands every query and mutation a context to reach ports and other queries | add `ctx: &Ctx` (or `ctx: Ctx`) before the other parameters |
-| `plain` must return `Result<T, E>` | the cache stores the success value and the error separately, and the platforms show both | return `Result<T, E>` where `E` is a `#[keel::error]` enum |
+| `plain` must return `Result<T, E>` | the cache stores the success value and the error separately, and the platforms show both | return `Result<T, E>` where `E` is a `#[undra::error]` enum |
 
 ### `E0042` query whose success value is `()` or an `Option`
 
@@ -1395,7 +1395,7 @@ query whose success value is `()` or an `Option` (a query caches a value; use a 
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| query `ping` returns `()` | a query caches the value it returns; a query with nothing to return has nothing to cache | use `#[keel::mutation]` for a call that only has effects, or return the data the platform needs |
+| query `ping` returns `()` | a query caches the value it returns; a query with nothing to return has nothing to cache | use `#[undra::mutation]` for a call that only has effects, or return the data the platform needs |
 | query `find` returns an `Option` | the handle's `data` signal is already optional (no result yet), so an optional result would be ambiguous: `None` could mean "not loaded" or "loaded, absent" | return a record or a list (an empty `Vec` says "nothing"), or an enum naming the cases |
 
 ## Names in the generators
@@ -1420,15 +1420,15 @@ No compile-fail example: this code comes from the generators or the runtime, not
 
 ## Type identity and the schema
 
-### `E0060` a spelling that looks like a built-in Keel type is another type
+### `E0060` a spelling that looks like a built-in Undra type is another type
 
-a spelling that looks like a built-in Keel type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit
+a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit
 
 No compile-fail example: this code comes from the generators or the runtime, not from the macros.
 
-### `E0061` the schema names a different type than the one spelled, or a type that is not a Keel type
+### `E0061` the schema names a different type than the one spelled, or a type that is not an Undra type
 
-the schema records a name that the type written there does not have: an alias (`type Todo = Item`), a renamed import (`use m::Item as Todo`) or a type that is not declared with `#[keel::api]`; reported by a const assertion comparing `KEEL_TYPE_ID`
+the schema records a name that the type written there does not have: an alias (`type Todo = Item`), a renamed import (`use m::Item as Todo`) or a type that is not declared with `#[undra::api]`; reported by a const assertion comparing `UNDRA_TYPE_ID`
 
 No compile-fail example: this code comes from the generators or the runtime, not from the macros.
 
@@ -1446,9 +1446,9 @@ No compile-fail example: this code comes from the generators or the runtime, not
 | --- | --- | --- |
 | nested option `Option<Option<i32>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 
-### `E0064` an object (`#[keel::api] impl`) used where a value is expected
+### `E0064` an object (`#[undra::api] impl`) used where a value is expected
 
-an object (`#[keel::api] impl`) used as a field, parameter or return value: objects cross by handle
+an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle
 
 No compile-fail example: this code comes from the generators or the runtime, not from the macros.
 
@@ -1456,33 +1456,33 @@ Generated by `site/scripts/build-errors.mjs` from `docs/SPEC.md` section 12 and 
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/api-swift.html
+Source: https://shreypdev.github.io/undra/docs/api-swift.html
 
 # API overview, Swift
 
 Generated Swift is written the way a Swift engineer would write it by hand: value types, typed throws, async/await, AsyncSequence and an @Observable store. Swift 6 language mode, strict concurrency, no Objective-C.
 
-`keel bindgen` writes a Swift package (`Sources/<Module>/Generated/*.swift` and a `Package.swift`) that depends only on `KeelRuntime`. The shapes below come from the playground's generated code and the specification (§10.1).
+`undra bindgen` writes a Swift package (`Sources/<Module>/Generated/*.swift` and a `Package.swift`) that depends only on `UndraRuntime`. The shapes below come from the playground's generated code and the specification (§10.1).
 
 ## Loading the core
 
 Attach the app to its core once, before any store is created. The runtime checks the core's schema hash against the one the bindings were generated from and throws a clear error if they differ.
 
-KeelBootstrap.swift
+UndraBootstrap.swift
 
 ```swift
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 
 @MainActor
 static func start() throws {
     let adapters = Adapters.platformDefault              // URLSession, Keychain, files, …
         .replacing(PlaygroundNetwork.shared)             // swap one port
-    try KeelCore.load(.inproc(adapters: adapters, expectedSchemaHash: KeelIds.schemaHash))
+    try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
 }
 ```
 
-In debug builds you can attach to the core that `keel dev` serves instead, with `KeelCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: KeelIds.schemaHash))`. After loading, every generated type defaults to the shared core: `try Todos()` is `try Todos(ctx: .shared)`.
+In debug builds you can attach to the core that `undra dev` serves instead, with `UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))`. After loading, every generated type defaults to the shared core: `try Todos()` is `try Todos(ctx: .shared)`.
 
 ## Type mapping
 
@@ -1506,7 +1506,7 @@ swift
 
 ```swift
 /// One item of the to-do list.
-public struct Todo: KeelRecord, Sendable, Hashable, Codable {
+public struct Todo: UndraRecord, Sendable, Hashable, Codable {
     public var id: UUID
     public var title: String
     public var done: Bool
@@ -1515,7 +1515,7 @@ public struct Todo: KeelRecord, Sendable, Hashable, Codable {
 }
 ```
 
-The wire codec (`keelEncode`, `keelDecode`) is generated beside it and is not something you call.
+The wire codec (`undraEncode`, `undraDecode`) is generated beside it and is not something you call.
 
 ## Enums
 
@@ -1524,11 +1524,11 @@ A unit enum is a `UInt16`-backed `enum` that is also `CaseIterable`, so it works
 swift
 
 ```swift
-public enum Filter: UInt16, KeelEnum, CaseIterable, Sendable, Codable {
+public enum Filter: UInt16, UndraEnum, CaseIterable, Sendable, Codable {
     case all = 0, active = 1, done = 2
 }
 
-public enum Figure: KeelEnum, Sendable, Hashable {
+public enum Figure: UndraEnum, Sendable, Hashable {
     case circle(radius: Double)
     case rect(width: Double, height: Double)
     case label(String)
@@ -1538,12 +1538,12 @@ public enum Figure: KeelEnum, Sendable, Hashable {
 
 ## Errors
 
-A Rust `#[keel::error]` becomes a Swift `enum` conforming to `Error` (and `LocalizedError`, with the message from `#[error("…")]`). Functions that can fail use **typed throws**.
+A Rust `#[undra::error]` becomes a Swift `enum` conforming to `Error` (and `LocalizedError`, with the message from `#[error("…")]`). Functions that can fail use **typed throws**.
 
 swift
 
 ```swift
-public enum TodoError: KeelError, Error, Sendable, Hashable {
+public enum TodoError: UndraError, Error, Sendable, Hashable {
     case emptyTitle            // "the title cannot be empty"
     // a variant that wraps another error carries it: case http(HttpError)
 }
@@ -1556,7 +1556,7 @@ do {
 }
 ```
 
-Typed throws needs Swift 6. `keel.toml` has `swift_typed_throws = false` for code that must still emit plain `throws`. A failure the shape of the API cannot express (a core panic, a malformed reply, schema drift) stops the process with a message, because it means the core and the bindings disagree.
+Typed throws needs Swift 6. `undra.toml` has `swift_typed_throws = false` for code that must still emit plain `throws`. A failure the shape of the API cannot express (a core panic, a malformed reply, schema drift) stops the process with a message, because it means the core and the bindings disagree.
 
 ## Objects and functions
 
@@ -1565,18 +1565,18 @@ An object is a `final class` holding a handle into the core. Sync methods are pl
 swift
 
 ```swift
-public final class Probe: KeelObject, @unchecked Sendable {
-    public init(ctx: KeelCore = .shared) throws            // the constructor `new`
+public final class Probe: UndraObject, @unchecked Sendable {
+    public init(ctx: UndraCore = .shared) throws            // the constructor `new`
     public func counters() -> ProbeCounters                // sync
     public func wait(ms: UInt32) async throws -> UInt32    // async
     public func ticks(count: UInt32) -> AsyncThrowingStream<UInt32, Error>   // stream
 }
 
-public func add(a: Int32, b: Int32, ctx: KeelCore = .shared) -> Int32
-public func area(_ figure: Figure, ctx: KeelCore = .shared) throws(LabError) -> Double
+public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) -> Int32
+public func area(_ figure: Figure, ctx: UndraCore = .shared) throws(LabError) -> Double
 ```
 
-Sync methods on an in-process core call straight into the core (`keel_call_sync`). Streams apply real backpressure: the generated code grants credit as your loop consumes items, and dropping the stream stops it in the core.
+Sync methods on an in-process core call straight into the core (`undra_call_sync`). Streams apply real backpressure: the generated code grants credit as your loop consumes items, and dropping the stream stops it in the core.
 
 Release an object with `close()`, which is idempotent. `deinit` is only a backstop for objects that go out of scope without it, so hold an object for as long as you need its state.
 
@@ -1588,13 +1588,13 @@ swift
 
 ```swift
 @MainActor @Observable
-public final class Todos: KeelStore {
+public final class Todos: UndraStore {
     public private(set) var todos: [Todo]
     public private(set) var filter: Filter
     public private(set) var visible: [Todo]        // computed by the core
     public private(set) var remaining: UInt32      // computed by the core
 
-    public init(ctx: KeelCore = .shared) throws
+    public init(ctx: UndraCore = .shared) throws
     public func setFilter(_ f: Filter)
     public func add(title: String) async throws(TodoError) -> Todo
 }
@@ -1618,7 +1618,7 @@ struct TodosScreen: View {
 
 ## Query handles
 
-A `#[keel::query]` becomes a store with five signals: `data`, `status`, `error`, `fetching` and `updatedAt`, plus `refetch()` and `invalidate()`. Construct one to observe the query; it fetches when the data is missing or stale.
+A `#[undra::query]` becomes a store with five signals: `data`, `status`, `error`, `fetching` and `updatedAt`, plus `refetch()` and `invalidate()`. Construct one to observe the query; it fetches when the data is missing or stale.
 
 swift
 
@@ -1627,51 +1627,51 @@ let inbox = try RemoteTodosQueryHandle(list: "inbox")
 // inbox.data: [RemoteTodo]?, inbox.status, inbox.fetching, inbox.error, inbox.updatedAt
 ```
 
-See [Queries & mutations](https://shreypdev.github.io/keel/docs/queries.html) for what the core does behind it.
+See [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html) for what the core does behind it.
 
 ## Ports
 
-The ten standard ports are implemented by `KeelRuntime` (`URLSession`, Keychain, `FileManager`, `NWPathMonitor` and so on) and are not generated into your module. A port you define yourself becomes a protocol your app implements and registers with the adapters:
+The ten standard ports are implemented by `UndraRuntime` (`URLSession`, Keychain, `FileManager`, `NWPathMonitor` and so on) and are not generated into your module. A port you define yourself becomes a protocol your app implements and registers with the adapters:
 
 swift
 
 ```swift
-public protocol Http: KeelPort {
+public protocol Http: UndraPort {
     func request(_ req: HttpRequest) async throws(HttpError) -> HttpResponse
 }
 ```
 
-See [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html) for the defaults and for swapping one.
+See [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) for the defaults and for swapping one.
 
 ## Threading and lifetime
 
 - Change-sets are applied on the `MainActor`, in one hop per transaction, so observable properties only ever change on the main thread.
-- Stores and objects release their handle on `close()`, with `deinit` as the backstop. `KeelCore.stats()` exposes live handle counts for tests.
+- Stores and objects release their handle on `close()`, with `deinit` as the backstop. `UndraCore.stats()` exposes live handle counts for tests.
 - Swift 6 strict concurrency is on. Generated stores are `@MainActor`; objects are `@unchecked Sendable` because the core serializes access behind its lock.
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/api-kotlin.html
+Source: https://shreypdev.github.io/undra/docs/api-kotlin.html
 
 # API overview, Kotlin
 
 Generated Kotlin is what a Kotlin engineer would write by hand: data classes, sealed hierarchies, suspend functions, Flow, and StateFlows you read with collectAsState(). The runtime needs only the standard library and kotlinx-coroutines.
 
-`keel bindgen` writes a Gradle module (`src/main/kotlin/<package>/*.kt`, a `build.gradle.kts` and a `.gitignore`) that depends only on `keel-runtime`. The shapes below come from the playground's generated code and the specification (§10.2).
+`undra bindgen` writes a Gradle module (`src/main/kotlin/<package>/*.kt`, a `build.gradle.kts` and a `.gitignore`) that depends only on `undra-runtime`. The shapes below come from the playground's generated code and the specification (§10.2).
 
 ## Loading the core
 
-Attach the app to its core once per process, before any store is created, typically in `Application.onCreate`. `KeelCore.load` checks that the native library was built from the same schema as the bindings.
+Attach the app to its core once per process, before any store is created, typically in `Application.onCreate`. `UndraCore.load` checks that the native library was built from the same schema as the bindings.
 
-KeelApp.kt
+UndraApp.kt
 
 ```kotlin
-class KeelApp : Application() {
+class UndraApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        KeelCore.load(
+        UndraCore.load(
             LoadOptions(
-                expectedSchemaHash = KeelIds.SCHEMA_HASH,
+                expectedSchemaHash = UndraIds.SCHEMA_HASH,
                 adapters = mapOf(StandardPorts.Http.PORT_ID to myHttp.portImpl()),
             ),
         )
@@ -1679,7 +1679,7 @@ class KeelApp : Application() {
 }
 ```
 
-The core is `libkeel_core.so`, which `keel build --platform android` writes to `build/android/jniLibs/<abi>/`. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: `Todos()` is `Todos(ctx = KeelCore.shared)`.
+The core is `libundra_core.so`, which `undra build --platform android` writes to `build/android/jniLibs/<abi>/`. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: `Todos()` is `Todos(ctx = UndraCore.shared)`.
 
 ## Type mapping
 
@@ -1694,7 +1694,7 @@ The core is `libkeel_core.so`, which `keel build --platform android` writes to `
 | `Map<K, V>` | `Map<K, V>` |
 | record, enum, error | `data class`, `enum class` or `sealed interface`, `sealed class` |
 
-Names follow the platform: Rust `snake_case` becomes `camelCase` for functions and properties and `PascalCase` for types. Unit enum variants become `UPPER_SNAKE` constants; data enum variants become `PascalCase` classes. Keel does not support `Option<Option<T>>` because Kotlin cannot express nested optionality (`E0063`).
+Names follow the platform: Rust `snake_case` becomes `camelCase` for functions and properties and `PascalCase` for types. Unit enum variants become `UPPER_SNAKE` constants; data enum variants become `PascalCase` classes. Undra does not support `Option<Option<T>>` because Kotlin cannot express nested optionality (`E0063`).
 
 ## Records
 
@@ -1706,7 +1706,7 @@ data class Todo(
     val id: UUID,
     val title: String,
     val done: Boolean,
-) : KeelRecord
+) : UndraRecord
 ```
 
 ## Enums
@@ -1716,11 +1716,11 @@ A unit enum is an `enum class` with its wire index. A data enum is a `sealed int
 kotlin
 
 ```kotlin
-enum class Filter(val index: UShort) : KeelEnum {
+enum class Filter(val index: UShort) : UndraEnum {
     ALL(0u), ACTIVE(1u), DONE(2u);
 }
 
-sealed interface Figure : KeelEnum {
+sealed interface Figure : UndraEnum {
     data class Circle(val radius: Double) : Figure
     data class Rect(val width: Double, val height: Double) : Figure
     data class Label(val value: String) : Figure
@@ -1732,12 +1732,12 @@ sealed interface Figure : KeelEnum {
 
 ## Errors
 
-A `#[keel::error]` becomes a `sealed class` extending `KeelException`, with the message from `#[error("…")]`. A failing `suspend` function throws the typed error, so `catch (e: TodoError)` and `when (e)` work.
+A `#[undra::error]` becomes a `sealed class` extending `UndraException`, with the message from `#[error("…")]`. A failing `suspend` function throws the typed error, so `catch (e: TodoError)` and `when (e)` work.
 
 kotlin
 
 ```kotlin
-sealed class TodoError(message: String) : KeelException(message) {
+sealed class TodoError(message: String) : UndraException(message) {
     data object EmptyTitle : TodoError("the title cannot be empty")
     // a variant wrapping another error carries it: data class Http(val cause: HttpError)
 }
@@ -1760,33 +1760,33 @@ An object is a class holding a handle into the core. Sync methods are plain func
 kotlin
 
 ```kotlin
-class Probe private constructor(core: KeelCore, handle: Long) : KeelObject(core, handle) {
+class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     fun counters(): ProbeCounters                       // sync
     suspend fun wait(ms: UInt): UInt                    // async, cancellable
     fun ticks(count: UInt): Flow<UInt>                  // stream
-    companion object { fun create(ctx: KeelCore = KeelCore.shared): Probe }
+    companion object { fun create(ctx: UndraCore = UndraCore.shared): Probe }
 }
 
-fun add(a: Int, b: Int, ctx: KeelCore = KeelCore.shared): Int
-suspend fun createRemoteTodo(list: String, title: String, ctx: KeelCore = KeelCore.shared): RemoteTodo
+fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
+suspend fun createRemoteTodo(list: String, title: String, ctx: UndraCore = UndraCore.shared): RemoteTodo
 ```
 
 Cancelling the coroutine cancels the call in the core, and a `Flow` applies backpressure: the runtime grants credit as your collector consumes items. The runtime contains core panics at the boundary, so a bug in the core is a typed failure, not a crash.
 
 ## Stores
 
-A store extends `KeelStore`. Every signal is a read-only `StateFlow`; computed signals are updated by the core. Read them in Compose with `collectAsState()`, no extra module needed.
+A store extends `UndraStore`. Every signal is a read-only `StateFlow`; computed signals are updated by the core. Read them in Compose with `collectAsState()`, no extra module needed.
 
 kotlin
 
 ```kotlin
-class Todos : KeelStore {
+class Todos : UndraStore {
     val todos: StateFlow<List<Todo>>
     val filter: StateFlow<Filter>
     val visible: StateFlow<List<Todo>>        // computed by the core
     val remaining: StateFlow<UInt>            // computed by the core
 
-    constructor(ctx: KeelCore = KeelCore.shared)
+    constructor(ctx: UndraCore = UndraCore.shared)
     fun setFilter(f: Filter)
     suspend fun add(title: String): Todo      // throws TodoError
 }
@@ -1811,7 +1811,7 @@ fun TodosScreen(vm: TodosViewModel = viewModel()) {
 
 ## Query handles
 
-A `#[keel::query]` becomes a store with five `StateFlow`s (`data`, `status`, `error`, `fetching`, `updatedAt`) plus `refetch()` and `invalidate()`. Constructing it observes the query and fetches when the data is missing or stale.
+A `#[undra::query]` becomes a store with five `StateFlow`s (`data`, `status`, `error`, `fetching`, `updatedAt`) plus `refetch()` and `invalidate()`. Constructing it observes the query and fetches when the data is missing or stale.
 
 kotlin
 
@@ -1821,64 +1821,64 @@ val items by inbox.data.collectAsState()        // List<RemoteTodo>?
 val busy by inbox.fetching.collectAsState()
 ```
 
-See [Queries & mutations](https://shreypdev.github.io/keel/docs/queries.html).
+See [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html).
 
 ## Ports
 
-The ten standard ports are implemented in `dev.keel.runtime.adapters` (`OkHttp` or `HttpURLConnection`, `SharedPreferences`-backed files, `EncryptedFile`, `ConnectivityManager`, `ProcessLifecycleOwner` and so on) and are not generated into your module. You replace one by passing an implementation in `LoadOptions.adapters`, keyed by its port id. A port you define yourself becomes an `interface`:
+The ten standard ports are implemented in `dev.undra.runtime.adapters` (`OkHttp` or `HttpURLConnection`, `SharedPreferences`-backed files, `EncryptedFile`, `ConnectivityManager`, `ProcessLifecycleOwner` and so on) and are not generated into your module. You replace one by passing an implementation in `LoadOptions.adapters`, keyed by its port id. A port you define yourself becomes an `interface`:
 
 kotlin
 
 ```kotlin
-interface Http : KeelPort {
+interface Http : UndraPort {
     suspend fun request(req: HttpRequest): HttpResponse     // throws HttpError
 }
 ```
 
-See [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html) for the defaults. Android-specific adapters live in the `android-adapters` module, not in the runtime.
+See [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html) for the defaults. Android-specific adapters live in the `android-adapters` module, not in the runtime.
 
 ## Threading and lifetime
 
 - Signals are updated on `Dispatchers.Main.immediate`, in one hop per transaction. On a JVM without Android the runtime falls back to a single-thread executor, which is what the JVM test suite uses.
-- `KeelStore` and `KeelObject` implement `AutoCloseable`. Call `close()` to release the handle (a `use { }` block works); a `Cleaner` releases leaked handles as a backstop. `KeelCore.stats()` exposes live handle counts.
+- `UndraStore` and `UndraObject` implement `AutoCloseable`. Call `close()` to release the handle (a `use { }` block works); a `Cleaner` releases leaked handles as a backstop. `UndraCore.stats()` exposes live handle counts.
 - Over JNI, callbacks arrive from core threads and are decoded immediately; you never see a raw buffer.
 
 ---
 
-Source: https://shreypdev.github.io/keel/docs/api-typescript.html
+Source: https://shreypdev.github.io/undra/docs/api-typescript.html
 
 # API overview, TypeScript
 
 Generated TypeScript is strict-mode ESM with no any in exported types: plain interfaces and unions for data, promises for calls, signals for state, and hooks for React. The core package has no runtime dependencies.
 
-`keel bindgen` writes an npm package (`src/*.ts`, `package.json`, `tsconfig.json`) that imports only from `@keel/runtime`. The shapes below come from the playground's generated code and the specification (§10.3).
+`undra bindgen` writes an npm package (`src/*.ts`, `package.json`, `tsconfig.json`) that imports only from `@undra/runtime`. The shapes below come from the playground's generated code and the specification (§10.3).
 
 ## Loading the core
 
-Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with `KeelSchemaMismatch`.
+Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with `UndraSchemaMismatch`.
 
-web/src/keel.ts
+web/src/undra.ts
 
 ```ts
-import { KeelCore } from "@keel/runtime";
-import { KeelIds, Todos } from "@playground/core";
-import wasmUrl from "../../build/web/keel_core.wasm?url";
+import { UndraCore } from "@undra/runtime";
+import { UndraIds, Todos } from "@playground/core";
+import wasmUrl from "../../build/web/undra_core.wasm?url";
 
-await KeelCore.load({
+await UndraCore.load({
   mode: "wasm-main",                       // the core runs in a wasm module on this thread
   wasm: new URL(wasmUrl, location.href),
-  expectedSchemaHash: KeelIds.schemaHash,
+  expectedSchemaHash: UndraIds.schemaHash,
   adapters: { http, kv },                  // optional: replace a default adapter
 });
 
-const todos = await Todos.create();        // uses KeelCore.shared
+const todos = await Todos.create();        // uses UndraCore.shared
 ```
 
 | `mode` | Where the core runs |
 | --- | --- |
 | `"wasm-main"` | a wasm module on the page's main thread |
 | `"wasm-worker"` | the same module in a worker, keeping the main thread free |
-| `"remote"` | the core that `keel dev` serves, over a WebSocket: `{ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash }` |
+| `"remote"` | the core that `undra dev` serves, over a WebSocket: `{ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash }` |
 
 ## Type mapping
 
@@ -1886,14 +1886,14 @@ const todos = await Todos.create();        // uses KeelCore.shared
 | --- | --- |
 | `bool` | `boolean` |
 | `i8` … `i32`, `u8` … `u32`, `f32`, `f64` | `number` |
-| `i64`, `u64` | `bigint` (or `number` with `#[keel(js_number)]` / `ts_js_number`) |
+| `i64`, `u64` | `bigint` (or `number` with `#[undra(js_number)]` / `ts_js_number`) |
 | `String`, `Bytes` | `string`, `Uint8Array` |
 | `Duration`, `Timestamp`, `Uuid` | `Duration`, `Timestamp`, `string` |
 | `Option<T>`, `Vec<T>` | `T \| null`, `T[]` |
 | `Map<K, V>` | `Map<K, V>` |
 | record | `interface` |
 | unit enum, data enum | string-literal union, discriminated union on `kind` |
-| error | a class extending `KeelError`, with subclasses per variant |
+| error | a class extending `UndraError`, with subclasses per variant |
 
 64-bit integers become `bigint` so no value is ever silently rounded; a 64-bit value outside the safe range is a decode error rather than a wrong number when you opt into `number`.
 
@@ -1918,12 +1918,12 @@ A `switch (figure.kind)` over the union is exhaustive under `strict`, so adding 
 
 ## Errors
 
-A `#[keel::error]` becomes an abstract class with a `kind` and one subclass per variant, so you can branch with `instanceof` or on `kind`. A rejected call carries the typed error, not a string to parse.
+A `#[undra::error]` becomes an abstract class with a `kind` and one subclass per variant, so you can branch with `instanceof` or on `kind`. A rejected call carries the typed error, not a string to parse.
 
 ts
 
 ```ts
-export abstract class TodoError extends KeelError {
+export abstract class TodoError extends UndraError {
   readonly kind: "emptyTitle";
 }
 export namespace TodoError {
@@ -1944,8 +1944,8 @@ An object is a class holding a handle. **Every method returns a `Promise`**, whi
 ts
 
 ```ts
-export class Probe extends KeelObject {
-  static create(core?: KeelCore): Promise<Probe>;
+export class Probe extends UndraObject {
+  static create(core?: UndraCore): Promise<Probe>;
   counters(): Promise<ProbeCounters>;
   wait(ms: number, signal?: AbortSignal): Promise<number>;
   ticks(count: number): AsyncIterable<number>;     // backpressure through stream credit
@@ -1958,18 +1958,18 @@ Release an object with `close()` (idempotent) or with `using` where `Symbol.disp
 
 ## Stores and signals
 
-A store extends `KeelStore`. Every signal is a read-only `Signal<T>`: `get()` returns the current value, `peek()` reads without subscribing, and `subscribe(fn)` calls you on change and returns an unsubscribe function. Computed signals are written by the core.
+A store extends `UndraStore`. Every signal is a read-only `Signal<T>`: `get()` returns the current value, `peek()` reads without subscribing, and `subscribe(fn)` calls you on change and returns an unsubscribe function. Computed signals are written by the core.
 
 ts
 
 ```ts
-export class Todos extends KeelStore {
+export class Todos extends UndraStore {
   readonly todos: Signal<Todo[]>;
   readonly filter: Signal<Filter>;
   readonly visible: Signal<Todo[]>;        // computed by the core
   readonly remaining: Signal<number>;      // computed by the core
 
-  static create(core?: KeelCore): Promise<Todos>;
+  static create(core?: UndraCore): Promise<Todos>;
   setFilter(f: Filter): Promise<void>;
   add(title: string, signal?: AbortSignal): Promise<Todo>;
 }
@@ -1979,15 +1979,15 @@ Change-sets are batched with `queueMicrotask` into one flush per macrotask, so s
 
 ## React and the other frameworks
 
-`@keel/runtime/react` exports two hooks. `useSignal` is `useSyncExternalStore` over a signal, with a server snapshot. `useKeel` creates a store when the component mounts and closes it when it unmounts; it returns `undefined` until the store exists, and `useSignal` accepts an undefined signal.
+`@undra/runtime/react` exports two hooks. `useSignal` is `useSyncExternalStore` over a signal, with a server snapshot. `useUndra` creates a store when the component mounts and closes it when it unmounts; it returns `undefined` until the store exists, and `useSignal` accepts an undefined signal.
 
 tsx
 
 ```tsx
-import { useKeel, useSignal } from "@keel/runtime/react";
+import { useUndra, useSignal } from "@undra/runtime/react";
 
 export function CounterView() {
-  const counter = useKeel(Counter);            // undefined until created
+  const counter = useUndra(Counter);            // undefined until created
   const count = useSignal(counter?.count);
   const parity = useSignal(counter?.parity);   // computed in the core, same change-set
   if (counter === undefined) return null;
@@ -1995,11 +1995,11 @@ export function CounterView() {
 }
 ```
 
-Adapters ship for the other frameworks as thin files, exported from `@keel/runtime/vue` (`useSignal` as a `shallowRef`, `useKeel`), `/svelte` (`signalStore`, a `Readable`) and `/solid` (`useSignal` as an `Accessor`, `useKeel`). The frameworks are optional peer dependencies; the core package imports none of them.
+Adapters ship for the other frameworks as thin files, exported from `@undra/runtime/vue` (`useSignal` as a `shallowRef`, `useUndra`), `/svelte` (`signalStore`, a `Readable`) and `/solid` (`useSignal` as an `Accessor`, `useUndra`). The frameworks are optional peer dependencies; the core package imports none of them.
 
 ## Query handles
 
-A `#[keel::query]` becomes a store with five signals (`data`, `status`, `error`, `fetching`, `updatedAt`) plus `refetch()` and `invalidate()`.
+A `#[undra::query]` becomes a store with five signals (`data`, `status`, `error`, `fetching`, `updatedAt`) plus `refetch()` and `invalidate()`.
 
 ts
 
@@ -2010,21 +2010,21 @@ const busy = useSignal(inbox.fetching);
 await inbox.refetch();
 ```
 
-See [Queries & mutations](https://shreypdev.github.io/keel/docs/queries.html).
+See [Queries & mutations](https://shreypdev.github.io/undra/docs/queries.html).
 
 ## Ports
 
-The ten standard ports and their types are exported from `@keel/runtime` and are not generated into your package. The browser defaults use `fetch`, IndexedDB, OPFS, `setTimeout`, `navigator.onLine` and `visibilitychange`; Node uses `fetch` and files. Replace one with `adapters` in `KeelCore.load`. A port you define yourself becomes an interface:
+The ten standard ports and their types are exported from `@undra/runtime` and are not generated into your package. The browser defaults use `fetch`, IndexedDB, OPFS, `setTimeout`, `navigator.onLine` and `visibilitychange`; Node uses `fetch` and files. Replace one with `adapters` in `UndraCore.load`. A port you define yourself becomes an interface:
 
 ts
 
 ```ts
-export interface Http extends KeelPort {
+export interface Http extends UndraPort {
   request(req: HttpRequest): Promise<HttpResponse>;
 }
 ```
 
-See [Ports & adapters](https://shreypdev.github.io/keel/docs/ports.html).
+See [Ports & adapters](https://shreypdev.github.io/undra/docs/ports.html).
 
 ## Testing
 
@@ -2032,13 +2032,13 @@ The runtime is testable without a browser: over the `remote` transport against a
 
 ---
 
-Source: https://shreypdev.github.io/keel/roadmap/
+Source: https://shreypdev.github.io/undra/roadmap/
 
 Roadmap
 
 # What is shipped, in flight and next.
 
-Keel v1.0 shipped on 30 September 2026. This page follows the project's working record, [.10x/handoff.md](https://github.com/shreypdev/keel/blob/main/.10x/handoff.md), and changes with it. Last updated 30 Sep 2026.
+Undra v1.0 shipped on 30 September 2026. This page follows the project's working record, [.10x/handoff.md](https://github.com/shreypdev/undra/blob/main/.10x/handoff.md), and changes with it. Last updated 30 Sep 2026.
 
 Shipped
 
@@ -2055,7 +2055,7 @@ The framework you can build on today.
 - Streams and cancellationStreams with backpressure; cancelling a call drops its future.
 - Snapshot and restoreStores snapshot for crash recovery.
 - Schema-hash gateChecked at load and at build; a mismatched UI and core refuse to talk.
-- keel devA live core over a WebSocket, rebuilt on save.
+- undra devA live core over a WebSocket, rebuilt on save.
 - Teaching diagnosticsEvery macro error says what, why and how to fix it.
 - 17 contract scenarios on 3 platformsThe same wire-level scenarios run against the real core on Swift, Kotlin and TypeScript: 51 of 51 pass.
 - Adversarial reviews of every core crateSignals, runtime, macros and ffi were each reviewed by someone who did not write them.
@@ -2072,12 +2072,12 @@ In flight for the v1.x releases.
 - Harsh-conditions benchmark suiteVery high-frequency data: firehose transactions, keyed-list churn, stream backpressure and a soak run, with CI budgets.
 - Device-measured benchmark rowsThe same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies.
 - A schema loader that survives dead-strippingSo the tooling sees the schema in debug and release builds without linker flags.
-- Android keel dev remote modeThe Kotlin runtime gains the WebSocket transport the web and iOS already have.
-- Dev-client auto-reconnectAfter a rebuild, a running app reconnects to keel dev on its own instead of needing a reload.
+- Android undra dev remote modeThe Kotlin runtime gains the WebSocket transport the web and iOS already have.
+- Dev-client auto-reconnectAfter a rebuild, a running app reconnects to undra dev on its own instead of needing a reload.
 - WeakCtxLong-lived tasks stop pinning a runtime that was dropped.
 - Macro diagnostic polishBetter wording for the query-in-impl and split-impl cases.
 - Swift Port types publicCustom ports in Swift without the bindgen fallback.
-- Full-JSON keel_schema_jsonSo the dlopen-based bindgen keeps doc comments.
+- Full-JSON undra_schema_jsonSo the dlopen-based bindgen keeps doc comments.
 
 Next
 
@@ -2090,8 +2090,8 @@ Planned for the releases after v1.0. The order may change with what the benchmar
 - crates.io publishingPublish the crates under a registry-safe prefix; needs its own ADR for the renames.
 - Frame-coalesced deliveryNot shipped, and a runtime-model change that needs an ADR first. Today every change-set is applied on its own, in one main-thread hop per transaction; the stress suite decides whether coalescing per frame is needed.
 - Maven Central for the Kotlin runtimeDepend on it from Gradle without a local build.
-- Windows CLIRelease binaries and docs for the keel command on Windows.
-- keel upgradeMove a project to a newer Keel version.
+- Windows CLIRelease binaries and docs for the undra command on Windows.
+- undra upgradeMove a project to a newer Undra version.
 - Migration guidesFrom Kotlin Multiplatform and from UniFFI.
 - A custom domainA home for the site and docs that is ours.
 
@@ -2106,17 +2106,17 @@ Directions under consideration, not scheduled.
 - Desktop targetsmacOS, Windows and Linux over the same C ABI.
 - A first-party inspectorTime-travel over change-sets; the wire makes it natural.
 - A sync engineA separate package, not part of the core.
-- Compose Multiplatform interopUse a Keel core under a Compose Multiplatform UI.
+- Compose Multiplatform interopUse an Undra core under a Compose Multiplatform UI.
 
 Not planned
 
 ## Not planned
 
-Shared UI of any kind, and hosted services. Keel owns everything under the pixels and leaves the screens to SwiftUI, Compose and React.
+Shared UI of any kind, and hosted services. Undra owns everything under the pixels and leaves the screens to SwiftUI, Compose and React.
 
 > ## How to influence the roadmap
 >
-> Open an issue on [GitHub](https://github.com/shreypdev/keel/issues) and describe the problem you have rather than the feature you want; real projects and real numbers move items up. Anything that touches the wire, the runtime model, the threading model or a generated public shape needs a decision record first, and those live in [.10x/adrs](https://github.com/shreypdev/keel/tree/main/.10x/adrs).
+> Open an issue on [GitHub](https://github.com/shreypdev/undra/issues) and describe the problem you have rather than the feature you want; real projects and real numbers move items up. Anything that touches the wire, the runtime model, the threading model or a generated public shape needs a decision record first, and those live in [.10x/adrs](https://github.com/shreypdev/undra/tree/main/.10x/adrs).
 >
-> [Open an issue](https://github.com/shreypdev/keel/issues)
+> [Open an issue](https://github.com/shreypdev/undra/issues)
 

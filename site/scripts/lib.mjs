@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 /** Absolute path of `site/`. */
 export const SITE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** The canonical origin of the published site, with the trailing slash. */
-export const ORIGIN = "https://shreypdev.github.io/keel/";
+export const ORIGIN = "https://shreypdev.github.io/undra/";
 
 /** Reads a UTF-8 file. */
 export const read = (path) => readFileSync(path, "utf8");
@@ -26,7 +26,7 @@ export function htmlFiles(dir = SITE) {
       if (name.startsWith(".") || name === "node_modules" || name === "_site") continue;
       const p = join(d, name);
       const st = lstatSync(p);
-      if (st.isSymbolicLink()) continue; // the local preview symlinks _site/keel -> .
+      if (st.isSymbolicLink()) continue; // the local preview symlinks _site/undra -> .
       if (st.isDirectory()) walk(p);
       else if (name.endsWith(".html")) out.push(p);
     }
