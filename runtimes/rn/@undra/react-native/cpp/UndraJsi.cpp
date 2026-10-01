@@ -208,7 +208,7 @@ std::shared_ptr<Host> Binding::host() const {
 }
 
 void Binding::detach() noexcept {
-  detached_.store(true);
+  alive_->store(false);
   std::shared_ptr<Host> host;
   std::unique_ptr<FrameSource> frames;
   {
@@ -221,14 +221,19 @@ void Binding::detach() noexcept {
   }
 }
 
-void Binding::postDrain() noexcept {
-  if (detached_.load()) {
+void Binding::postDrain(
+    const std::shared_ptr<facebook::react::CallInvoker> &invoker,
+    const std::shared_ptr<std::atomic<bool>> &alive,
+    const std::weak_ptr<Binding> &weak) noexcept {
+  if (!alive->load()) {
     return;
   }
-  std::weak_ptr<Binding> weak = weak_from_this();
-  invoker_->invokeAsync([weak](jsi::Runtime &rt) {
-    std::shared_ptr<Binding> self = weak.lock();
-    if (!self || self->detached_.load()) {
+  invoker->invokeAsync([weak, alive](jsi::Runtime &rt) {
+    if (!alive->load()) {
+      return;
+    }
+    std::shared_ptr<Binding> self = weak.lock(); // on the JS thread: never inside a core callback
+    if (!self) {
       return;
     }
     jsi::Value native = rt.global().getProperty(rt, "__undraNative");
@@ -238,14 +243,15 @@ void Binding::postDrain() noexcept {
   });
 }
 
-void Binding::postFrame() noexcept {
-  if (detached_.load()) {
+void Binding::postFrame(
+    const std::shared_ptr<facebook::react::CallInvoker> &invoker,
+    const std::shared_ptr<std::atomic<bool>> &alive,
+    const std::weak_ptr<Binding> &weak) noexcept {
+  if (!alive->load()) {
     return;
   }
-  std::weak_ptr<Binding> weak = weak_from_this();
-  invoker_->invokeAsync([weak](jsi::Runtime &rt) {
-    std::shared_ptr<Binding> self = weak.lock();
-    if (!self || self->detached_.load()) {
+  invoker->invokeAsync([weak, alive](jsi::Runtime &rt) {
+    if (!alive->load() || weak.expired()) {
       return;
     }
     try {
@@ -332,10 +338,8 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
     owner->detach();
   }
   std::weak_ptr<Binding> weak = weak_from_this();
-  auto host = std::make_shared<Host>(api, [weak] {
-    if (std::shared_ptr<Binding> self = weak.lock()) {
-      self->postDrain();
-    }
+  auto host = std::make_shared<Host>(api, [invoker = invoker_, alive = alive_, weak] {
+    postDrain(invoker, alive, weak); // runs on core threads: no strong reference to the binding
   });
   uint32_t code = 0;
   {
@@ -350,11 +354,7 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
     std::lock_guard<std::mutex> lock(mutex_);
     host_ = host;
     if (!frames_) {
-      frames_ = makeFrameSource([weak] {
-        if (std::shared_ptr<Binding> self = weak.lock()) {
-          self->postFrame();
-        }
-      });
+      frames_ = makeFrameSource([invoker = invoker_, alive = alive_, weak] { postFrame(invoker, alive, weak); });
     }
   }
   {

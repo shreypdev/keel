@@ -36,10 +36,18 @@ class Binding : public std::enable_shared_from_this<Binding> {
   /// binding started it, posts nothing more. Callable from any thread but a core callback.
   void detach() noexcept;
 
-  /// Posts a drain of the inbox to the JS thread (the host's wake function).
-  void postDrain() noexcept;
-  /// Posts the frame callback to the JS thread (the frame source's callback).
-  void postFrame() noexcept;
+  /// Posts a drain of the inbox to the JS thread (the host's wake function). Safe from any thread,
+  /// a core callback included: it holds no strong reference to the binding, so a callback thread is
+  /// never the one that destroys it (whose destructor shuts the core down).
+  static void postDrain(
+      const std::shared_ptr<facebook::react::CallInvoker> &invoker,
+      const std::shared_ptr<std::atomic<bool>> &alive,
+      const std::weak_ptr<Binding> &weak) noexcept;
+  /// Posts the frame callback to the JS thread (the frame source's callback); as `postDrain`.
+  static void postFrame(
+      const std::shared_ptr<facebook::react::CallInvoker> &invoker,
+      const std::shared_ptr<std::atomic<bool>> &alive,
+      const std::weak_ptr<Binding> &weak) noexcept;
   /// Delivers the inbox to `native.sink` until it is empty (at most 1000 rounds). Only the
   /// outermost drain on the thread delivers; one inside a sync port's JavaScript does nothing.
   void drain(facebook::jsi::Runtime &rt, const facebook::jsi::Object &native);
@@ -54,7 +62,8 @@ class Binding : public std::enable_shared_from_this<Binding> {
   void shutdownHost(facebook::jsi::Runtime &rt);
 
   std::shared_ptr<facebook::react::CallInvoker> invoker_;
-  std::atomic<bool> detached_{false};
+  /// False once the runtime is going away: nothing is posted to it any more.
+  std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
   mutable std::mutex mutex_;
   std::shared_ptr<Host> host_;
   std::unique_ptr<FrameSource> frames_;
