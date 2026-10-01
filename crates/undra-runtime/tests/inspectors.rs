@@ -57,7 +57,11 @@ fn a_panicking_inspector_is_contained_reported_once_and_not_asked_again() {
             "a panic is not an answer, and not a crash"
         );
     }
-    assert_eq!(asked.load(Ordering::SeqCst), 1, "a broken inspector is not asked again");
+    assert_eq!(
+        asked.load(Ordering::SeqCst),
+        1,
+        "a broken inspector is not asked again"
+    );
     let reports: Vec<_> = tr
         .host()
         .take_logs()
@@ -86,7 +90,11 @@ fn an_inspector_that_asks_the_runtime_for_a_snapshot_or_another_inspector_does_n
         "outer",
         Arc::new(move || {
             let rt = weak.upgrade().expect("the runtime is alive");
-            format!("{}:{}", rt.inspect("inner").unwrap_or_default(), rt.snapshot().len())
+            format!(
+                "{}:{}",
+                rt.inspect("inner").unwrap_or_default(),
+                rt.snapshot().len()
+            )
         }),
     );
     // From the thread of a test, from a thread that has the core, and from another thread.
@@ -98,11 +106,18 @@ fn an_inspector_that_asks_the_runtime_for_a_snapshot_or_another_inspector_does_n
             let _ = tx.send(rt2.inspect("outer"));
         });
         tr.run_pending();
-        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("no deadlock on the core")
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("no deadlock on the core")
     };
-    assert!(from_core.expect("an answer from the core").starts_with("i:"));
+    assert!(
+        from_core
+            .expect("an answer from the core")
+            .starts_with("i:")
+    );
     let rt3 = rt.clone();
-    let from_thread = std::thread::spawn(move || rt3.inspect("outer")).join().unwrap();
+    let from_thread = std::thread::spawn(move || rt3.inspect("outer"))
+        .join()
+        .unwrap();
     assert!(from_thread.unwrap().starts_with("i:"));
 }
 

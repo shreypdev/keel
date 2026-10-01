@@ -548,7 +548,10 @@ fn restoring_a_step_from_before_a_store_existed_says_the_store_is_dropped() {
         .filter(|log| log.target == "undra::dev")
         .map(|log| log.message.to_owned())
         .collect();
-    assert_eq!(notices, ["time travel: step 1 (1 store(s) built since are gone)"]);
+    assert_eq!(
+        notices,
+        ["time travel: step 1 (1 store(s) built since are gone)"]
+    );
 }
 
 #[test]
@@ -805,7 +808,10 @@ fn every_refusal_is_the_same_bytes_and_a_server_with_devtools_off_answers_the_sa
         "GET /devtools HTTP/1.1\r\nHost: x\r\n\r\n".to_owned(),
         format!("GET /devtools?token={wrong} HTTP/1.1\r\nHost: x\r\n\r\n"),
         format!("GET /devtools?token={TOKEN}x HTTP/1.1\r\nHost: x\r\n\r\n"),
-        format!("GET /devtools?token={} HTTP/1.1\r\nHost: x\r\n\r\n", &TOKEN[..8]),
+        format!(
+            "GET /devtools?token={} HTTP/1.1\r\nHost: x\r\n\r\n",
+            &TOKEN[..8]
+        ),
         format!("GET /devtools/missing.js?token={TOKEN} HTTP/1.1\r\nHost: x\r\n\r\n"),
         format!("GET /devtools/%2e%2e/x?token={TOKEN} HTTP/1.1\r\nHost: x\r\n\r\n"),
         format!("POST /devtools?token={TOKEN} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"),
@@ -814,12 +820,18 @@ fn every_refusal_is_the_same_bytes_and_a_server_with_devtools_off_answers_the_sa
         format!("GET /devtools/ws HTTP/1.1\r\nHost: x\r\n{UPGRADE}\r\n"),
         format!("GET /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\n{UPGRADE}\r\n"),
         format!("GET /devtools/ws?token= HTTP/1.1\r\nHost: x\r\n{UPGRADE}\r\n"),
-        format!("GET /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.example\r\n{UPGRADE}\r\n"),
+        format!(
+            "GET /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.example\r\n{UPGRADE}\r\n"
+        ),
         format!("POST /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"),
         "GET /devtools/ws/ HTTP/1.1\r\nHost: x\r\n\r\n".to_owned(),
     ];
     let reference = raw(&off, &requests[0]);
-    assert!(reference.starts_with(b"HTTP/1.1 404"), "{}", String::from_utf8_lossy(&reference));
+    assert!(
+        reference.starts_with(b"HTTP/1.1 404"),
+        "{}",
+        String::from_utf8_lossy(&reference)
+    );
     for request in &requests {
         for (name, fx) in [("devtools on", &on), ("devtools off", &off)] {
             assert_eq!(
@@ -839,7 +851,7 @@ fn closed_within(page: &mut Page, wait: Duration) -> bool {
     while Instant::now() < deadline {
         if page.next_within(Duration::from_millis(100)).is_none() {
             // A read timeout is not a close: ask again with a write.
-            if page.ws.send(Message::Ping(vec![1].into())).is_err() {
+            if page.ws.send(Message::Ping(vec![1])).is_err() {
                 return true;
             }
         }
@@ -897,7 +909,7 @@ fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
     let mut closed = 0;
     for shape in &shapes {
         let mut page = Page::connect(&fx);
-        page.ws.send(Message::Binary(shape.clone().into())).unwrap();
+        page.ws.send(Message::Binary(shape.clone())).unwrap();
         // A message that is a valid `Resync` (tag 2, no body) or a `Restore` of a step that is
         // not there keeps the page; every other one closes it. Neither may touch the core.
         let valid = matches!(shape.as_slice(), [2] | [1, 5, 0, 0, 0, 1, 0, 0, 0]);
@@ -916,7 +928,7 @@ fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
     page.ws.send(Message::Text("restore 1".into())).unwrap();
     assert!(closed_within(&mut page, Duration::from_secs(5)));
     let mut page = Page::connect(&fx);
-    let _ = page.ws.send(Message::Binary(vec![1; 200 * 1024].into()));
+    let _ = page.ws.send(Message::Binary(vec![1; 200 * 1024]));
     assert!(closed_within(&mut page, Duration::from_secs(5)));
 
     // The core and the app client did not notice: nothing was called, nothing was restored.
@@ -929,7 +941,7 @@ fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
     assert!(app.silent_for(Duration::from_millis(100)));
     // The hub is intact: a page still attaches and sees the state.
     let mut page = Page::connect(&fx);
-    assert_eq!(page.step().0 >= 1, true);
+    assert!(page.step().0 >= 1);
     assert!(
         fx.log_lines().iter().all(|l| !l.contains("panicked")),
         "{:?}",
@@ -1079,11 +1091,25 @@ fn an_app_that_reconnects_with_a_page_attached_is_sent_only_what_it_asks_for() {
     drop(app);
     fx.eventually("the slot is free", |fx| !fx.bridge.is_connected());
     page.until("the app to be gone", |m| {
-        matches!(m, ServerMsg::App { connected: false, .. }).then_some(())
+        matches!(
+            m,
+            ServerMsg::App {
+                connected: false,
+                ..
+            }
+        )
+        .then_some(())
     });
     let mut app = fx.session_client("tok-dt", true);
     page.until("the app to be back", |m| {
-        matches!(m, ServerMsg::App { connected: true, .. }).then_some(())
+        matches!(
+            m,
+            ServerMsg::App {
+                connected: true,
+                ..
+            }
+        )
+        .then_some(())
     });
     // Before it observes anything the app is sent nothing, though the hub observes every store.
     app.method(b, ADD, &enc(&1_i32));
@@ -1274,7 +1300,15 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
 
     let commits = got
         .iter()
-        .filter(|m| matches!(m, ServerMsg::ChangeSet { delivery: Delivery::Commit, .. }))
+        .filter(|m| {
+            matches!(
+                m,
+                ServerMsg::ChangeSet {
+                    delivery: Delivery::Commit,
+                    ..
+                }
+            )
+        })
         .count();
     let steps: Vec<_> = got
         .iter()
@@ -1298,7 +1332,11 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
         "{} steps in {window_ms} ms is more than one per 10 ms",
         steps.len()
     );
-    assert!(steps.len() < N / 10, "{} steps for {N} commits", steps.len());
+    assert!(
+        steps.len() < N / 10,
+        "{} steps for {N} commits",
+        steps.len()
+    );
     // The page is not left behind: the last step covers the last commit.
     let last_seq = got
         .iter()
@@ -1308,7 +1346,11 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
         })
         .max()
         .unwrap();
-    assert_eq!(steps.last().unwrap().through_seq, last_seq, "the newest step is the final state");
+    assert_eq!(
+        steps.last().unwrap().through_seq,
+        last_seq,
+        "the newest step is the final state"
+    );
     // The ring stays within its bounds and says what it dropped.
     let stats = got.iter().rev().find_map(|m| match m {
         ServerMsg::Stats(j) => Some(serde_json::from_str::<serde_json::Value>(j).unwrap()),
@@ -1325,7 +1367,10 @@ fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded()
         seen.sort_unstable();
         seen[seen.len().saturating_sub(150)]
     };
-    page.send(ClientMsg::Restore { request_id: 9, step: oldest });
+    page.send(ClientMsg::Restore {
+        request_id: 9,
+        step: oldest,
+    });
     let t = page.until("the answer", |m| match m {
         ServerMsg::Traveled(t) => Some(t.clone()),
         _ => None,
@@ -1365,7 +1410,10 @@ fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for
     assert_eq!(i32_of(&app.method(b, GET, &[]).1), 40_000);
     app.method(a, ADD, &enc(&1_i32));
     drain(&mut app);
-    assert_eq!(seen_by(&app).into_iter().collect::<Vec<_>>(), [(a, COUNT_SIGNAL)]);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
     // And a page that comes back is served normally.
     let mut again = Page::connect(&fx);
     again.step();

@@ -33,6 +33,15 @@ fn http_get(addr: &str, target: &str) -> (String, String, String) {
     (status, head.to_owned(), body.to_owned())
 }
 
+/// Every process's command line on this machine, as `ps` shows them to every user.
+fn all_command_lines() -> String {
+    let out = std::process::Command::new("ps")
+        .args(["-ww", "-ax", "-o", "args="])
+        .output()
+        .expect("ps runs");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// The page address `undra dev` printed: `http://127.0.0.1:PORT/devtools?token=...`.
 fn page_url(dev: &Dev) -> String {
     let line = dev.wait_line("devtools", Duration::from_secs(60));
@@ -319,6 +328,23 @@ fn the_page_is_served_behind_its_token_and_time_travel_restores_the_app() {
         );
     }
 
+    // The token is in the page's address and the runner's environment, and nowhere `ps` shows it to
+    // other users: not in any process's command line (the runner's included).
+    let command_lines = all_command_lines();
+    assert!(
+        !command_lines.contains(&token),
+        "the token is on a command line:\n{}",
+        command_lines
+            .lines()
+            .filter(|l| l.contains(&token))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        command_lines.contains("undra-dev-runner") || command_lines.contains("--devtools"),
+        "the probe saw the runner's command line"
+    );
+
     // The app: a counter at 7.
     let mut app = App::connect(&dev);
     let counter = app.counter();
@@ -401,6 +427,19 @@ fn the_page_is_served_behind_its_token_and_time_travel_restores_the_app() {
     // And the core really is there: the next change builds on 7.
     app.add(counter, 1);
     app.read_until("the count 8", |a| a.count(counter) == 8);
+
+    // Nothing `undra dev` or the runner printed afterwards carries the token: the banner's address is
+    // the only place it is written.
+    let printed: Vec<String> = dev.lines.try_iter().collect();
+    assert!(
+        printed.iter().all(|l| !l.contains(&token)),
+        "stdout leaked the token: {printed:?}"
+    );
+    assert!(
+        !dev.log.lock().unwrap().contains(&token),
+        "stderr leaked the token:\n{}",
+        dev.log.lock().unwrap()
+    );
 }
 
 #[test]

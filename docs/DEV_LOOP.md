@@ -236,10 +236,12 @@ The page keeps the dark and light themes of the site (it follows the system; the
 **What time travel is.** A restore replaces the core's stores with the snapshot of the step and re-issues their handles, so
 the app's references keep working and its mirrors converge through the change-sets the restore emits, like a reload
 (the rules of "What carries over" above apply: objects that are not stores and query handles go stale). Stores built
-*after* the step are dropped (the answer says how many; the app's references to them are stale). Calls running on a replaced
+*after* the step are dropped (the answer says how many, and so does the app's dev bar; the app's references to them are stale). Calls running on a replaced
 store are cancelled. The history is kept in the dev server (200 steps, 32 MiB, 4 MiB a step; a bigger state is listed but
 cannot be restored), records only while a page is open, and starts again after a reload (the page draws a divider). While a
-page is open the server observes every store, so a computed nobody shows is evaluated.
+page is open the server observes every store, so a computed nobody shows is evaluated. Snapshots are taken after a burst of
+commits, at most one every 10 ms (further apart when a snapshot is slow, so a big state cannot keep the core busy), and a page
+that stops reading is dropped rather than waited for.
 
 **Who can open it.** The page can read the core's state and restore it, so every request needs the per-run token in the
 address (`undra dev` makes one per run, 128 random bits, and passes it to the runner in its environment); a wrong or missing

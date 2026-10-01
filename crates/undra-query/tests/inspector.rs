@@ -65,13 +65,19 @@ fn sampling_a_cache_of_ten_thousand_entries_stays_within_a_budget() {
     }
     h.t.run_pending();
     let started = std::time::Instant::now();
-    let text = h.t.runtime().inspect("queries").expect("the inspector answers");
+    let text =
+        h.t.runtime()
+            .inspect("queries")
+            .expect("the inspector answers");
     let took = started.elapsed();
     let rows = serde_json::from_str::<serde_json::Value>(&text).unwrap()["entries"]
         .as_array()
         .unwrap()
         .len();
-    eprintln!("describe: {rows} entries, {} KiB of JSON in {took:?}", text.len() / 1024);
+    eprintln!(
+        "describe: {rows} entries, {} KiB of JSON in {took:?}",
+        text.len() / 1024
+    );
     assert_eq!(rows, 10_000);
     // A debug build on a loaded machine; the release figure is a tenth of this.
     assert!(took < std::time::Duration::from_millis(1500), "{took:?}");

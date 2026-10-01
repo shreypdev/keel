@@ -104,7 +104,13 @@ impl Row {
         let _ = write!(
             out,
             ",\"status\":\"{}\",\"fetching\":{},\"observers\":{},\"invalidated\":{},\"failed\":{},\"layers\":{},\"stamp\":{}",
-            self.status, self.fetching, self.observers, self.invalidated, self.failed, self.layers, self.stamp,
+            self.status,
+            self.fetching,
+            self.observers,
+            self.invalidated,
+            self.failed,
+            self.layers,
+            self.stamp,
         );
         match self.updated_at {
             Some(at) => {
