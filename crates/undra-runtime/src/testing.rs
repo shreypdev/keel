@@ -73,9 +73,11 @@ const BLOCKING_SETTLE_LIMIT: Duration = Duration::from_secs(10);
 /// still running, in this process.
 static LIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
 
-/// Counts a runtime thread in [`live_threads`] for as long as it lives.
+/// Counts a runtime thread in [`live_threads`] for as long as it lives. (wasm starts no thread.)
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 pub(crate) struct ThreadMark(());
 
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 impl ThreadMark {
     pub(crate) fn enter() -> ThreadMark {
         LIVE_THREADS.fetch_add(1, Ordering::SeqCst);
