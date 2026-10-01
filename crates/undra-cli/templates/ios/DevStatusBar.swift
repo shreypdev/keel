@@ -1,15 +1,40 @@
 import SwiftUI
 import UndraRuntime
 
+/// What `undra dev` said about its last reload ("Reloaded, state kept", ADR-053): `DevStatusBar` shows it for a few
+/// seconds. Feed it from `LoadOptions.onDevNotice` (see `UndraBootstrap`); the callback only ever fires for a core that
+/// `undra dev` serves.
+@MainActor @Observable
+final class DevNotice {
+    static let shared = DevNotice()
+
+    /// The message to show, or `nil` once its few seconds are over.
+    private(set) var message: String?
+    private var shown = 0
+
+    func show(_ text: String) {
+        message = text
+        shown += 1
+        let mine = shown
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            if mine == shown {
+                message = nil
+            }
+        }
+    }
+}
+
 /// The connection to `undra dev` as a thin bar above the screens: green while connected, orange while the runtime
-/// reconnects, red when the connection is over. Nothing at all for the in-process core.
+/// reconnects, red when the connection is over, and for a few seconds what the dev server says about a reload.
+/// Nothing at all for the in-process core.
 ///
 /// `core.connection` is `@Observable`, so reading its `state` here is all the code it takes.
 struct DevStatusBar: View {
     var body: some View {
         if let url = UndraBootstrap.devURL, let core = UndraBootstrap.core {
             let state = core.connection.state
-            Text(Self.describe(url, state))
+            Text(DevNotice.shared.message ?? Self.describe(url, state))
                 .font(.caption)
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -32,7 +57,7 @@ struct DevStatusBar: View {
         case .closed(.sessionLost):
             return "The core was rebuilt: loading the new one"
         case .closed(.schemaMismatch):
-            return "The schema changed: run undra bindgen and rebuild the app"
+            return "The schema changed, state reset: run undra bindgen and rebuild the app"
         case .closed(.requested):
             return "Disconnected"
         case .closed(.failed(let reason)):
