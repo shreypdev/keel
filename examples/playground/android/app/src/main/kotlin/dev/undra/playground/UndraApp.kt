@@ -1,6 +1,7 @@
 package dev.undra.playground
 
 import android.app.Application
+import dev.undra.android.ChoreographerFramePacer
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.RemoteConfig
 import dev.undra.playground.core.configureRemote
@@ -8,6 +9,7 @@ import dev.undra.playground.remote.DemoServer
 import dev.undra.playground.remote.InMemoryKv
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.LoadOptions
+import dev.undra.runtime.MirrorOptions
 import dev.undra.runtime.adapters.ConnectivityEvents
 import dev.undra.runtime.adapters.StandardPorts
 
@@ -23,6 +25,9 @@ import dev.undra.runtime.adapters.StandardPorts
  *    network and can be taken offline on demand. A real app would pass an OkHttp-backed port here.
  *  - `Kv`: a map in memory ([InMemoryKv]). The demo server forgets everything when the app restarts,
  *    so a cache that outlived it would only be wrong.
+ *
+ * The mirror applies what the core produces on its own (the 10k list's streamed updates) once per display
+ * frame, through the [ChoreographerFramePacer] of `android-adapters` (ADR-031).
  */
 class UndraApp : Application() {
     /** The server behind the `Http` port; the Remote tab switches it offline. */
@@ -40,6 +45,7 @@ class UndraApp : Application() {
                     StandardPorts.Http.PORT_ID to server.portImpl(),
                     StandardPorts.Kv.PORT_ID to InMemoryKv().portImpl(),
                 ),
+                mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
             ),
         )
         // Where the remote lists live: every request of the core goes to this address through the Http port.

@@ -2,6 +2,7 @@ package dev.undra.contract
 
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraDispatchers
+import dev.undra.runtime.UndraException
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ChangeOp
@@ -73,15 +74,43 @@ class RawStore(val core: UndraCore, typeId: UInt, constructorId: UInt, args: Byt
 
 /**
  * Waits until the main thread ([UndraDispatchers.main], where the mirror applies change-sets) has run
- * everything queued before this call. A change-set a synchronous call produced has reached the
- * mirror's queue by the time the call returns, so after this it has been applied.
+ * everything queued before this call and has drained the mirror there. A change-set a synchronous call
+ * produced has reached the mirror's queue by the time the call returns, so after this it has been
+ * applied. The drain is explicit because the mirror applies what the core sends on its own at the next
+ * frame (ADR-031), not as soon as it arrives.
  */
 fun flushMainThread() {
     val done = CompletableFuture<Unit>()
-    UndraDispatchers.main.dispatch(EmptyCoroutineContext, Runnable { done.complete(Unit) })
+    UndraDispatchers.main.dispatch(
+        EmptyCoroutineContext,
+        Runnable {
+            try {
+                UndraCore.shared.mirror.flush()
+                done.complete(Unit)
+            } catch (e: Throwable) {
+                done.completeExceptionally(e)
+            }
+        },
+    )
     try {
         done.get(WAIT_MS, TimeUnit.MILLISECONDS)
     } catch (e: java.util.concurrent.TimeoutException) {
         fail("the main thread did not run a queued task within $WAIT_MS ms")
     }
+}
+
+/**
+ * [flushMainThread] when a core is loaded, nothing before (S16 waits before it loads one). The waits of
+ * [awaitUntil] and [holdsFor] call it before each look at a store: the mirror applies what the core produces on
+ * its own at the next frame (ADR-031), so between two frames a store can lag behind the core, and a wait reads
+ * the store the way a UI does, at a frame.
+ */
+fun drainLoadedMirror() {
+    val loaded = try {
+        UndraCore.shared
+        true
+    } catch (e: UndraException) {
+        false
+    }
+    if (loaded) flushMainThread()
 }

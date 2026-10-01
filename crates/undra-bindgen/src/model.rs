@@ -451,6 +451,20 @@ impl Model {
     }
 }
 
+/// The ids of a store's `#[undra(no_coalesce)]` signals, in signal order: what the generated store
+/// passes to its mirror registration so the platform applies every entry of them (ADR-031).
+/// Empty for an object that is not a store or has none.
+#[must_use]
+pub fn no_coalesce_ids(object: &ObjectDef) -> Vec<u32> {
+    object
+        .store
+        .iter()
+        .flat_map(|store| store.signals.iter())
+        .filter(|signal| signal.no_coalesce)
+        .map(|signal| signal.signal_id)
+        .collect()
+}
+
 /// Whether an enum's variants all carry no fields.
 #[must_use]
 pub fn is_unit_enum(en: &EnumDef) -> bool {
@@ -598,6 +612,7 @@ fn query_handle(query: &QueryDef) -> ObjectDef {
         ty,
         computed: false,
         key: None,
+        no_coalesce: false,
     };
     let method = |name: &str, id: u32, docs: &str| MethodDef {
         name: name.to_owned(),

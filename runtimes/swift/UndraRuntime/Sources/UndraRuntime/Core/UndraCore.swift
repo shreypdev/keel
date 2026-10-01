@@ -53,7 +53,7 @@ public final class UndraCore: @unchecked Sendable {
     private static let unloadedWarning = Guarded<Bool>(false)
 
     /// The change-set mirror: stores register with it and it applies the core's updates on the
-    /// main actor. `register(handle) { signal, op, reader in ... }`.
+    /// main actor, merged, once per display frame. `register(handle) { signal, op, reader in ... }`.
     public let mirror: Mirror
 
     let transport: any UndraTransport
@@ -70,13 +70,19 @@ public final class UndraCore: @unchecked Sendable {
         transport: any UndraTransport,
         blockingCallTimeout: Double = 30,
         onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
-        isShutDown: Bool = false
+        isShutDown: Bool = false,
+        maxPendingEntries: Int = Mirror.defaultMaxPendingEntries,
+        maxPendingBytes: Int = Mirror.defaultMaxPendingBytes,
+        frameScheduler: (any FrameScheduler)? = nil
     ) {
         self.transport = transport
-        self.mirror = Mirror()
+        self.mirror = Mirror(maxPendingEntries: maxPendingEntries, maxPendingBytes: maxPendingBytes, scheduler: frameScheduler)
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
         self.state = Guarded<State>(State(isShutDown: isShutDown))
+        mirror.setResyncHandler { [weak self] handle, signal in
+            self?.resync(handle, signal: signal)
+        }
     }
 
     // MARK: Loading
@@ -145,12 +151,20 @@ public final class UndraCore: @unchecked Sendable {
     }
 
     /// Starts `transport` and completes the attachment. Tests call this with a scripted
-    /// transport; it does not touch `UndraCore.shared`.
-    static func connect(transport: any UndraTransport, options: LoadOptions) throws -> UndraCore {
+    /// transport (and, to drive frames by hand, a `frameScheduler`); it does not touch
+    /// `UndraCore.shared`.
+    static func connect(
+        transport: any UndraTransport,
+        options: LoadOptions,
+        frameScheduler: (any FrameScheduler)? = nil
+    ) throws -> UndraCore {
         let core = UndraCore(
             transport: transport,
             blockingCallTimeout: options.blockingCallTimeout,
-            onError: options.onError
+            onError: options.onError,
+            maxPendingEntries: options.maxPendingEntries,
+            maxPendingBytes: options.maxPendingBytes,
+            frameScheduler: frameScheduler
         )
         let startOptions = TransportStartOptions(
             platform: UndraCore.platformName,
@@ -237,6 +251,7 @@ public final class UndraCore: @unchecked Sendable {
         stats.hostOpenStreams = host.streams
         stats.hostRegisteredPorts = host.ports
         stats.hostMirroredStores = mirror.registeredCount
+        stats.mirror = mirror.stats()
         return stats
     }
 
@@ -248,27 +263,39 @@ public final class UndraCore: @unchecked Sendable {
     /// mutex-acquire cost. Over the remote transport there is no inline path, so it blocks the
     /// calling thread until the dev core answers (at most `LoadOptions.blockingCallTimeout`).
     ///
+    /// Called on the main thread, it applies the change-sets that arrived before the reply to
+    /// the stores before it returns or throws, so the code after it sees the call's effects
+    /// (read-your-writes, docs/SPEC.md section 11). From inside a store's `apply` the running
+    /// drain applies them instead, in its next round.
+    ///
     /// - Parameter method: repeats the method id carried by `target`; `target` is authoritative.
     /// - Throws: `UndraReplyError` for any status other than ok; `UndraProtocolError` for an
     ///   undecodable reply; `UndraTransportError` if the core is shut down or does not answer.
     ///   Generated methods map these with ``UndraCallError/mapped(_:)`` and never expose them.
     public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
-        let callId = try reserveCallId()
-        let payload = UndraCore.makeCallPayload(target, callId: callId, args: args)
-        if transport.supportsDirectSync {
-            defer {
-                removePending(callId)
+        // Read-your-writes: on the main thread the call's change-sets are applied before it returns.
+        return try mirror.withImmediateDrain {
+            let callId = try reserveCallId()
+            let payload = UndraCore.makeCallPayload(target, callId: callId, args: args)
+            if transport.supportsDirectSync {
+                defer {
+                    removePending(callId)
+                }
+                let replyBytes = try transport.callSync(payload)
+                let reply = try UndraCore.decodeReply(replyBytes)
+                return try UndraCore.unwrap(reply)
             }
-            let replyBytes = try transport.callSync(payload)
-            let reply = try UndraCore.decodeReply(replyBytes)
-            return try UndraCore.unwrap(reply)
+            return try blockingCall(callId, payload, operation: "callSync")
         }
-        return try blockingCall(callId, payload, operation: "callSync")
     }
 
     /// Runs a method that may take a while and returns the reply body. Cancelling the calling
     /// task cancels the call in the core (`undra_cancel`) and throws `CancellationError`.
+    ///
+    /// The change-sets that arrived before the reply are applied to the stores before a caller on
+    /// the main actor resumes, whether the call succeeded or failed (read-your-writes, docs/SPEC.md
+    /// section 11).
     ///
     /// - Throws: `UndraReplyError` for any status other than ok (a typed error `E` is a reply with
     ///   `status == .error` whose `body` is the encoded `E`); `UndraTransportError` if the core is
@@ -389,7 +416,9 @@ public final class UndraCore: @unchecked Sendable {
     }
 
     /// Runs a synchronous constructor and returns the new object's handle. The caller owns the
-    /// handle: wrap it in an `UndraObject` (or `UndraStore`), which releases it on `close()`.
+    /// handle: wrap it in an `UndraObject` (or `UndraStore`), which releases it on `close()`. Like
+    /// `callSync`, it applies the change-sets the constructor caused before it returns when called
+    /// on the main thread.
     ///
     /// Asynchronous constructors go through `call(.constructor(...))` and decode the handle from
     /// the reply themselves.
@@ -440,16 +469,17 @@ public final class UndraCore: @unchecked Sendable {
     /// them).
     ///
     /// In process the core delivers the current values before `undra_observe` returns, and this
-    /// method applies them to the mirror before it returns, so a store never exposes its
-    /// placeholder values. Over the remote transport the initial values arrive with the next
-    /// hop.
+    /// method applies them to the mirror before it returns (with anything else queued), so a
+    /// store never exposes its placeholder values. Over the remote transport the initial values
+    /// arrive with a later drain.
     @MainActor
     public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool) {
         if isShutDown {
             return
         }
-        transport.observe(handle: handle, signal: signal, on: on)
-        mirror.flush()
+        mirror.withImmediateDrain {
+            transport.observe(handle: handle, signal: signal, on: on)
+        }
     }
 
     /// Releases a handle. `UndraObject.close()` calls it; call it directly only for a handle that
@@ -507,12 +537,15 @@ public final class UndraCore: @unchecked Sendable {
     }
 
     /// Rebuilds the stores from `snapshot`; handles held by the host stay valid. A rejected
-    /// snapshot leaves the core unchanged.
+    /// snapshot leaves the core unchanged. Called on the main thread, it applies the restored
+    /// values to the stores before it returns, like any synchronous call (docs/SPEC.md section 11).
     ///
     /// - Throws: `UndraRestoreError` if the core rejects it; `UndraModeError` over the remote
     ///   transport.
     public func restore(_ snapshot: [UInt8]) throws {
-        try transport.restore(snapshot)
+        try mirror.withImmediateDrain {
+            try transport.restore(snapshot)
+        }
     }
 
     // MARK: Shutdown
@@ -538,6 +571,7 @@ public final class UndraCore: @unchecked Sendable {
         }
         failAllPending(UndraTransportError.closed)
         transport.shutdown()
+        mirror.invalidateScheduler()
         UndraCore.sharedSlot.withLock { (slot: inout UndraCore?) -> Void in
             if slot === self {
                 slot = nil
@@ -639,6 +673,17 @@ public final class UndraCore: @unchecked Sendable {
                 channel.finish(.failed(error))
             }
         }
+    }
+
+    /// Asks the core for the current value of a signal whose pending updates the mirror dropped
+    /// (a merged keyed patch past the backlog's bounds). Called by a drain on the main actor,
+    /// never from a core callback; the value arrives as a change-set.
+    @MainActor
+    private func resync(_ handle: UndraHandle, signal: UInt32) {
+        if isShutDown {
+            return
+        }
+        transport.observe(handle: handle, signal: signal, on: true)
     }
 
     /// Runs `work` on the deferred queue: the way a callback context asks for something that
@@ -743,6 +788,14 @@ extension UndraCore: UndraInbound {
         guard let entry = entry else {
             // A reply for a call that was cancelled or already failed.
             return
+        }
+        switch entry {
+        case .unary, .blocking:
+            // Read-your-writes: the change-sets that arrived before this reply are applied before
+            // a caller on the main actor resumes (the drain is queued on the main queue first).
+            mirror.drainBeforeResuming()
+        case .reserved, .stream:
+            break
         }
         switch entry {
         case .reserved:

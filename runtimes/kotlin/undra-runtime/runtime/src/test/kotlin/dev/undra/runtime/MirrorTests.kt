@@ -1,12 +1,15 @@
 package dev.undra.runtime
 
 import dev.undra.runtime.support.LogCapture
+import dev.undra.runtime.support.ManualFramePacer
 import dev.undra.runtime.support.ManualMainThread
 import dev.undra.runtime.support.NO_BYTES
 import dev.undra.runtime.support.changeSet
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.support.full
 import dev.undra.runtime.support.invalidated
+import dev.undra.runtime.support.flushOnThisThread
+import dev.undra.runtime.support.manualMirror
 import dev.undra.runtime.support.patch
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.testing.assertEq
@@ -42,33 +45,36 @@ private class Recorder(private val mirror: Mirror) {
 
 class MirrorTests : Suite() {
     init {
-        case("change-sets are applied on the main thread, never on the thread that submitted them") {
+        case("change-sets are applied on the main thread, at the next frame, never on the thread that submitted them") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val pacer = ManualFramePacer(main)
+            val mirror = manualMirror(main, pacer)
             val rec = Recorder(mirror)
             rec.register(1L)
             val submitter = Thread { mirror.submit(changeSet(1uL, full(1L, 0u, u32(5)))) }
             submitter.start()
             submitter.join()
-            assertEq(0, rec.applied.size, "nothing is applied until the main thread runs")
-            assertEq(1, main.pending)
-            main.runPending()
+            assertEq(0, rec.applied.size, "nothing is applied until the frame")
+            assertEq(1, pacer.pending)
+            assertEq(0, main.pending, "the frame pacer, not a main-thread post, schedules the drain")
+            pacer.frame()
             assertEq(listOf(Applied(1L, 0u, ChangeOp.FULL, 5)), rec.applied.toList())
             assertEq(listOf(Thread.currentThread().name), rec.threads.toList())
         }
 
-        case("change-sets that pile up while the main thread is busy are applied in one hop, in commit order") {
+        case("change-sets that arrive before a frame are applied in one drain, in commit order") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val pacer = ManualFramePacer(main)
+            val mirror = manualMirror(main, pacer)
             val rec = Recorder(mirror)
             rec.register(1L)
             rec.register(2L)
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(2L, 0u, u32(10))))
             mirror.submit(changeSet(2uL, full(1L, 1u, u32(2))))
             mirror.submit(changeSet(3uL, full(2L, 1u, u32(20)), full(1L, 2u, u32(3))))
-            assertEq(1, main.posted.get(), "only the first submission schedules a hop")
-            main.runPending()
-            assertEq(1L, mirror.hops)
+            assertEq(1, pacer.requests.get(), "only the first submission asks for a frame")
+            pacer.frame()
+            assertEq(1L, mirror.stats().drains)
             assertEq(
                 listOf(
                     Applied(1L, 0u, ChangeOp.FULL, 1),
@@ -81,96 +87,98 @@ class MirrorTests : Suite() {
             )
         }
 
-        case("a later full value of the same signal in the batch makes earlier entries for it obsolete") {
+        case("a later full value of the same signal before the frame makes earlier entries for it obsolete") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val pacer = ManualFramePacer(main)
+            val mirror = manualMirror(main, pacer)
             val rec = Recorder(mirror)
             rec.register(1L)
             for (i in 1..50) mirror.submit(changeSet(i.toULong(), full(1L, 0u, u32(i)), full(1L, 1u, u32(1000 + i))))
-            main.runPending()
+            pacer.frame()
             assertEq(listOf(Applied(1L, 0u, ChangeOp.FULL, 50), Applied(1L, 1u, ChangeOp.FULL, 1050)), rec.applied.toList())
         }
 
-        case("coalescing keeps patches in order around full values and never merges them") {
+        case("the patches after the last full value are merged into one patch applied after it") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(1L)
-            // FULL(1), PATCH(2), FULL(3), PATCH(4), PATCH(5): the first two are obsolete, the last three stay.
+            // FULL(1), PATCH, FULL(3), PATCH, PATCH: the first two are obsolete; the last two patches become one.
+            // (These patches carry an op count and no ops: the merged count is the sum, 4 + 5.)
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1))))
             mirror.submit(changeSet(2uL, patch(1L, 0u, u32(2))))
             mirror.submit(changeSet(3uL, full(1L, 0u, u32(3))))
             mirror.submit(changeSet(4uL, patch(1L, 0u, u32(4))))
             mirror.submit(changeSet(5uL, patch(1L, 0u, u32(5))))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(
                 listOf(
                     Applied(1L, 0u, ChangeOp.FULL, 3),
-                    Applied(1L, 0u, ChangeOp.PATCH, 4),
-                    Applied(1L, 0u, ChangeOp.PATCH, 5),
+                    Applied(1L, 0u, ChangeOp.PATCH, 9),
                 ),
                 rec.applied.toList(),
             )
         }
 
-        case("coalescing is per handle and per signal, and an invalidation is never dropped for a full value before it") {
+        case("merging is per handle and per signal, in the order of each signal's first entry; an invalidation is kept") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(1L)
             rec.register(2L)
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(2L, 0u, u32(2)), invalidated(1L, 3u)))
             mirror.submit(changeSet(2uL, full(1L, 0u, u32(3))))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(
                 listOf(
+                    Applied(1L, 0u, ChangeOp.FULL, 3),
                     Applied(2L, 0u, ChangeOp.FULL, 2),
                     Applied(1L, 3u, ChangeOp.INVALIDATED, -1),
-                    Applied(1L, 0u, ChangeOp.FULL, 3),
                 ),
                 rec.applied.toList(),
             )
         }
 
-        case("a single change-set is applied entry by entry without coalescing") {
+        case("two full values of one signal are merged even inside one change-set") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(1L)
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(1L, 0u, u32(2))))
-            main.runPending()
-            assertEq(2, rec.applied.size, "one change-set means one transaction; both entries are applied as sent")
+            mirror.flushOnThisThread(main)
+            assertEq(listOf(Applied(1L, 0u, ChangeOp.FULL, 2)), rec.applied.toList(), "the core never sends this, but the rule holds")
         }
 
         case("entries for handles that are not registered, or were unregistered meanwhile, are dropped") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(1L)
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(99L, 0u, u32(2))))
             mirror.unregister(1L)
             mirror.submit(changeSet(2uL, full(1L, 0u, u32(3))))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(0, rec.applied.size)
             assertEq(0, mirror.registeredCount)
+            assertEq(3L, mirror.stats().droppedEntries, "every dropped entry is counted, merged or not")
         }
 
         case("registering a handle again replaces the callback") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val first = CopyOnWriteArrayList<Int>()
             val second = CopyOnWriteArrayList<Int>()
             mirror.register(1L) { _, _, r -> first.add(Codecs.u32.decode(r).toInt()) }
             mirror.register(1L) { _, _, r -> second.add(Codecs.u32.decode(r).toInt()) }
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(7))))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(emptyList<Int>(), first.toList())
             assertEq(listOf(7), second.toList())
         }
 
         case("a callback that throws is logged and skipped; the rest of the batch is still applied") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(2L)
             mirror.register(1L) { _, _, _ -> throw IllegalStateException("store bug") }
@@ -178,7 +186,7 @@ class MirrorTests : Suite() {
             LogCapture("dev.undra.runtime").use { log ->
                 mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(3L, 0u, u32(1)), full(2L, 0u, u32(2))))
                 mirror.submit(changeSet(2uL, full(2L, 1u, u32(3))))
-                main.runPending()
+                mirror.flushOnThisThread(main)
                 assertEq(listOf(Applied(2L, 0u, ChangeOp.FULL, 2), Applied(2L, 1u, ChangeOp.FULL, 3)), rec.applied.toList())
                 assertEq(2, log.records.count { it.level == Level.WARNING })
                 assertTrue(log.records.any { it.thrown is IllegalStateException }, "the failure is logged with its exception")
@@ -187,7 +195,7 @@ class MirrorTests : Suite() {
 
         case("a malformed change-set is dropped as a whole; the ones around it still apply") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(1L)
             val good = changeSet(1uL, full(1L, 0u, u32(1)))
@@ -199,8 +207,8 @@ class MirrorTests : Suite() {
                 mirror.submit(changeSet(0uL, full(1L, 0u, u32(100))))
                 for (bad in listOf(truncated, trailing, badOp, hostileCount, NO_BYTES, byteArrayOf(1))) mirror.submit(bad)
                 mirror.submit(changeSet(2uL, full(1L, 0u, u32(200))))
-                main.runPending()
-                // The first and last are applied (coalesced into the last, since both are FULL of the same signal).
+                mirror.flushOnThisThread(main)
+                // The first and last are applied (merged into the last, since both are FULL of the same signal).
                 assertEq(listOf(Applied(1L, 0u, ChangeOp.FULL, 200)), rec.applied.toList())
                 assertEq(6, log.records.count { it.level == Level.WARNING && it.message.contains("malformed") })
             }
@@ -208,7 +216,7 @@ class MirrorTests : Suite() {
 
         case("the reader handed to a callback covers exactly the entry's value") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val seen = CopyOnWriteArrayList<Triple<Int, Int, Boolean>>()
             mirror.register(1L) { signal, _, reader ->
                 val remaining = reader.remaining
@@ -219,24 +227,25 @@ class MirrorTests : Suite() {
             val a = Codecs.string.encodeToByteArray("héllo")
             val b = Codecs.string.encodeToByteArray("")
             mirror.submit(changeSet(1uL, full(1L, 0u, a), full(1L, 1u, b), full(1L, 2u, a)))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(listOf(Triple(0, a.size, true), Triple(1, b.size, false), Triple(2, a.size, true)), seen.toList())
         }
 
         case("a callback may read the value after the batch's other entries were parsed (no shared reader state)") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val readers = ArrayList<UndraReader>()
             mirror.register(1L) { _, _, reader -> readers.add(reader) }
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(1L, 1u, u32(2))))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(1u, Codecs.u32.decode(readers[0]))
             assertEq(2u, Codecs.u32.decode(readers[1]))
         }
 
         case("awaitApplied on the main thread applies pending change-sets right away") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val pacer = ManualFramePacer(main)
+            val mirror = manualMirror(main, pacer)
             val rec = Recorder(mirror)
             rec.register(1L)
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1))))
@@ -244,13 +253,14 @@ class MirrorTests : Suite() {
             assertTrue(mirror.awaitApplied(1000))
             assertEq(1, rec.applied.size)
             main.mainThread = null
-            main.runPending() // the hop that was scheduled finds nothing left
+            pacer.frame() // the frame that was requested finds nothing left
             assertEq(1, rec.applied.size)
+            assertEq(1L, mirror.stats().drains, "a frame that finds nothing is not a drain")
         }
 
         case("awaitApplied off the main thread waits for the main thread, and gives up after its timeout") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val rec = Recorder(mirror)
             rec.register(1L)
             assertTrue(mirror.awaitApplied(10), "with nothing submitted there is nothing to wait for")
@@ -263,6 +273,7 @@ class MirrorTests : Suite() {
             waiter.start()
             Thread.sleep(50)
             assertEq(0, result.size, "still waiting")
+            assertTrue(main.pending > 0, "the waiter asked the main thread for an immediate drain, not a frame")
             main.runPending()
             waiter.join(10_000)
             assertEq(listOf(true), result.toList())
@@ -271,7 +282,7 @@ class MirrorTests : Suite() {
 
         case("awaitApplied called from inside a callback does not re-enter the batch, so order is kept") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val mirror = manualMirror(main)
             val order = CopyOnWriteArrayList<Int>()
             mirror.register(1L) { _, _, r ->
                 val v = Codecs.u32.decode(r).toInt()
@@ -285,26 +296,30 @@ class MirrorTests : Suite() {
                 }
             }
             mirror.submit(changeSet(1uL, full(1L, 0u, u32(1)), full(1L, 1u, u32(2)), full(1L, 2u, u32(3))))
-            main.runPending()
+            mirror.flushOnThisThread(main)
             assertEq(listOf(1, -1, 2, 3, 99), order.toList())
+            assertEq(1L, mirror.stats().drains, "the nested change-set is a further round of the same drain")
         }
 
-        case("a burst larger than one hop's budget is still applied completely, over several hops") {
+        case("a burst of distinct signals is applied completely, in arrival order, in one drain") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val pacer = ManualFramePacer(main)
+            val mirror = manualMirror(main, pacer)
             val rec = Recorder(mirror)
             rec.register(1L)
-            // Distinct signals, so nothing is coalesced away.
+            // Distinct signals, so nothing is merged away.
             val n = 5000
             for (i in 0 until n) mirror.submit(changeSet(i.toULong(), full(1L, i.toUInt(), u32(i))))
-            main.runPending()
+            pacer.frame()
             assertEq(n, rec.applied.size)
             assertEq((0 until n).toList(), rec.applied.map { it.value })
+            assertEq(1L, mirror.stats().drains)
         }
 
         case("submissions racing from many threads are all applied, each thread's in order") {
             val main = ManualMainThread()
-            val mirror = Mirror(main)
+            val pacer = ManualFramePacer(main)
+            val mirror = manualMirror(main, pacer)
             val perThread = 2000
             val threads = 4
             val seen = Array(threads) { CopyOnWriteArrayList<Int>() }
@@ -313,18 +328,20 @@ class MirrorTests : Suite() {
             val workers = List(threads) { t ->
                 Thread {
                     start.await()
-                    for (i in 0 until perThread) mirror.submit(changeSet(i.toULong(), patch(t.toLong() + 1, 0u, u32(i))))
+                    // A signal per change-set, so that merging keeps every one of them.
+                    for (i in 0 until perThread) mirror.submit(changeSet(i.toULong(), full(t.toLong() + 1, i.toUInt(), u32(i))))
                 }.also { it.start() }
             }
             start.countDown()
             workers.forEach { it.join(20_000) }
-            // Drain on a runner thread repeatedly until everything has arrived (hops are capped, so a few rounds are needed).
+            // Run frames until everything has arrived (a frame is requested whenever entries wait).
             var guard = 0
-            while (seen.sumOf { it.size } < perThread * threads && guard++ < 1000) main.runPending()
+            while (seen.sumOf { it.size } < perThread * threads && guard++ < 1000) pacer.frame()
+            assertEq(0, pacer.pending, "no frame is left outstanding once the queue is empty")
             for (t in 0 until threads) assertEq((0 until perThread).toList(), seen[t].toList(), "thread $t")
         }
 
-        case("the default mirror applies on the undra-main thread") {
+        case("the default mirror applies on the undra-main thread, paced by the undra-frame thread") {
             val mirror = Mirror()
             val names = CopyOnWriteArrayList<String>()
             mirror.register(1L) { _, _, r ->

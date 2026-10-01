@@ -13,7 +13,7 @@ import {
 } from "../wire/index.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
-import type { HostToWorker, WorkerFailure, WorkerToHost, WorkerWasm } from "./worker-protocol.js";
+import { type HostToWorker, WORKER_PROTOCOL_VERSION, type WorkerFailure, type WorkerToHost, type WorkerWasm } from "./worker-protocol.js";
 
 /**
  * The part of a `Worker` this transport uses; a real `Worker` fits, and so
@@ -73,8 +73,10 @@ function toWorkerWasm(source: WasmSource): { readonly wasm: WorkerWasm; readonly
 /**
  * The `wasm-worker` mode, main-thread half: the core runs in a Worker (see
  * `@undra/runtime/worker`), so heavy calls never block the UI thread. Envelopes
- * travel by `postMessage` with their buffers transferred; port calls of the
- * core execute here, on the main thread, and are answered with `PortReply`.
+ * travel by `postMessage` with their buffers transferred, the worker's in one
+ * message per worker task (so a burst of change-sets costs this thread one
+ * task, not one each); port calls of the core execute here, on the main
+ * thread, and are answered with `PortReply`.
  *
  * Everything is asynchronous: there is no `callSync`, and a port declared
  * `sync` cannot serve the core's synchronous calls (the core cannot block on
@@ -148,6 +150,17 @@ export class WasmWorkerTransport implements Transport {
           case "envelope":
             this.#receive(message.data);
             return;
+          case "envelopes":
+            // One task's worth of the worker's output (protocol 2), in order. A failure stops the rest.
+            if (!Array.isArray(message.data)) {
+              this.#fail(new UndraTransportError("protocol", "the worker sent an `envelopes` message without a list of envelopes"));
+              return;
+            }
+            for (const data of message.data) {
+              if (this.#handler === null) return;
+              this.#receive(data);
+            }
+            return;
           case "stats": {
             const waiting = this.#stats.get(message.id);
             this.#stats.delete(message.id);
@@ -197,6 +210,7 @@ export class WasmWorkerTransport implements Transport {
         platform: this.#options.platform ?? hostPlatform(),
         devtools: this.#options.devtools === true,
         logLevel: this.#options.logLevel ?? 2,
+        protocol: WORKER_PROTOCOL_VERSION,
       };
       try {
         worker.postMessage(init, transfer);

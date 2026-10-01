@@ -32,9 +32,14 @@ export function fakeCoreClass(rt) {
     replies = [];
     streams = [];
     mirrorFns = new Map();
+    /** The `no_coalesce` signal ids each store registered with (ADR-031). */
+    noCoalesce = new Map();
     nextHandle = 7n;
     mirror = {
-      register: (handle, fn) => this.mirrorFns.set(handle, fn),
+      register: (handle, fn, options) => {
+        this.mirrorFns.set(handle, fn);
+        this.noCoalesce.set(handle, [...(options?.noCoalesce ?? [])]);
+      },
       unregister: (handle) => this.mirrorFns.delete(handle),
     };
 

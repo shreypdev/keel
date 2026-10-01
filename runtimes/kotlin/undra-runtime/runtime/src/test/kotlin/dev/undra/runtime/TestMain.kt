@@ -37,6 +37,8 @@ fun main() {
         CoreCallTests(),
         StreamTests(),
         MirrorTests(),
+        CoalesceTests(),
+        CoalesceModelTests(),
         StoreTests(),
         PortTests(),
         InprocTransportTests(),

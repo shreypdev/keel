@@ -20,6 +20,8 @@ package dev.undra.runtime
  * @property hostPendingCalls calls this host sent and has no reply for yet (including open streams).
  * @property hostMirrorHandles stores registered with the mirror.
  * @property raw the core's statistics document exactly as received (`"{}"` when unavailable).
+ * @property mirror the mirror's delivery counters: change-sets and entries received, entries applied after
+ *   merging, drains, compactions, resyncs, the backlog (all zero when not reported).
  */
 public class UndraStats(
     public val liveHandles: Int,
@@ -34,11 +36,13 @@ public class UndraStats(
     public val hostPendingCalls: Int = 0,
     public val hostMirrorHandles: Int = 0,
     public val raw: String = "{}",
+    public val mirror: MirrorStats = NO_MIRROR_STATS,
 ) {
     override fun toString(): String =
         "UndraStats(liveHandles=$liveHandles, liveStores=$liveStores, tasks=$tasks, activeCalls=$activeCalls, " +
             "openStreams=$openStreams, pendingPortCalls=$pendingPortCalls, pendingTimers=$pendingTimers, " +
-            "transactions=$transactions, panics=$panics, hostPendingCalls=$hostPendingCalls, hostMirrorHandles=$hostMirrorHandles)"
+            "transactions=$transactions, panics=$panics, hostPendingCalls=$hostPendingCalls, hostMirrorHandles=$hostMirrorHandles, " +
+            "mirror=$mirror)"
 
     /** The marker for numbers that are not known. */
     public companion object {
@@ -49,12 +53,18 @@ public class UndraStats(
          * Reads the core's statistics document. Unknown fields are ignored and missing ones are
          * [UNKNOWN]; a document that is not a JSON object yields an all-unknown result carrying [json] as [raw].
          */
-        internal fun fromCoreJson(json: String, hostPendingCalls: Int, hostMirrorHandles: Int): UndraStats {
+        internal fun fromCoreJson(
+            json: String,
+            hostPendingCalls: Int,
+            hostMirrorHandles: Int,
+            mirror: MirrorStats = NO_MIRROR_STATS,
+        ): UndraStats {
             val doc = MiniJson.parseObject(json) ?: return UndraStats(
                 liveHandles = UNKNOWN,
                 hostPendingCalls = hostPendingCalls,
                 hostMirrorHandles = hostMirrorHandles,
                 raw = json,
+                mirror = mirror,
             )
             fun int(key: String): Int = (doc[key] as? Long)?.coerceIn(0L, Int.MAX_VALUE.toLong())?.toInt() ?: UNKNOWN
             fun long(key: String): Long = (doc[key] as? Long) ?: UNKNOWN.toLong()
@@ -71,6 +81,7 @@ public class UndraStats(
                 hostPendingCalls = hostPendingCalls,
                 hostMirrorHandles = hostMirrorHandles,
                 raw = json,
+                mirror = mirror,
             )
         }
     }

@@ -38,6 +38,10 @@ public struct UndraStats: Sendable, Equatable {
     public var hostOpenStreams: Int
     /// Ports registered.
     public var hostRegisteredPorts: Int
+    /// The mirror's delivery counters: change-sets and entries received, entries applied after
+    /// merging, drains, compactions, resyncs (docs/SPEC.md section 17). All zero unless the
+    /// snapshot comes from `UndraCore.stats()`.
+    public var mirror: MirrorStats
 
     /// Statistics with nothing known: all zero, no document.
     public init() {
@@ -61,6 +65,7 @@ public struct UndraStats: Sendable, Equatable {
         self.hostPendingCalls = 0
         self.hostOpenStreams = 0
         self.hostRegisteredPorts = 0
+        self.mirror = MirrorStats()
     }
 
     /// Extracts every integer value of a JSON document, keyed by its dotted path. Strings,

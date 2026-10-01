@@ -67,4 +67,8 @@ assert.deepEqual(core.constructed.at(-1), {
 core.deliver(clock.handle, 0, ChangeOp.FullValue, encodeValue(codecs.timestamp, 42));
 assert.equal(clock.now.get(), 42);
 
+// `no_coalesce` signals reach the mirror registration (ADR-031): `Clock.now` is one, `Todos` has none.
+assert.deepEqual(core.noCoalesce.get(clock.handle), [0]);
+assert.deepEqual(core.noCoalesce.get(todos.handle), []);
+
 console.log("ok");

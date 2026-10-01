@@ -1,7 +1,8 @@
 # ADR-031: the platform mirror applies change-sets once per frame, merged, with a bounded backlog
 
-Status: **proposed** (draft, 2026-09-30, from the harsh-conditions benchmark design,
-`.10x/specs/2026-09-30-stress-bench-design.md`). Not accepted, not implemented. Touches SPEC 11 (the
+Status: **Accepted (implemented by this piece)** (proposed 2026-09-30 from the harsh-conditions benchmark
+design, `.10x/specs/2026-09-30-stress-bench-design.md`; accepted by the integrator, D1, with the conditions
+at the end of this record). Touches SPEC 11 (the
 "per-frame coalescing" sentence becomes exact rules), SPEC 17.1-17.3 (mirror options and counters), the
 three platform runtimes' `Mirror` and reply paths, the TypeScript worker protocol (internal to the runtime
 package), and, for decision 6 only, `undra-meta` (`SignalDef.no_coalesce`) and `undra-bindgen` (one argument
@@ -152,6 +153,16 @@ coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never r
   mutates through `inout` (`generated/swift/.../Stores.swift:1666`); whether that copies the array depends on
   the `@Observable` accessors and on a view holding a reference, which the device phase measures; either way
   it saves the per-entry work. The out-of-bounds rule is unchanged.
+* **Measured on the implementation (TS mirror, before/after).** The design's probe method: Node 24.21 on the
+  Apple M5 Pro (shared, load average 8 to 13), the runtime's own `Mirror` and `applyPatch` built from the
+  commit before and after this piece, a store `_apply` shaped like the generated one, 1,667 change-sets per
+  frame (100 k/s at 60 Hz) enqueued and then drained, p50 over 240 frames after 60 warm-up frames, three runs
+  each. One-op keyed patches (an `Update` of a `{ id, title, version }` row at a random index) on 10,000 rows:
+  **3.7-4.4 ms per frame before, 0.33-0.45 ms after** (the drain alone 3.6-4.1 ms before, 0.18-0.26 ms
+  after). `u64` full values: 0.24-0.36 ms before, 0.21-0.29 ms after (the drain alone 0.10-0.14 ms before,
+  0.013-0.019 ms after). What remains per frame is mostly parsing each change-set's entry table on arrival
+  (about 120-200 ns each, which keeps a malformed change-set from being half-applied) and decoding the merged
+  patch's 1,667 items; the "about 5 us" above is the list work alone.
 * **Observe and restore (ADR-023).** Their change-sets go through the same queue; `observe` keeps its
   immediate drain; a restore's per-store change-sets may merge with nothing and apply in one drain.
 * **Latency.** A change the core makes on its own reaches the UI at the next frame (at most one frame
@@ -172,3 +183,15 @@ coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never r
 * **Docs.** SPEC 11's sentence becomes the rules above; SPEC 17 lists the options, counters and the drain
   listener; `docs/` gains a "high-frequency data" page (what coalescing does, when to use `no_coalesce`, how
   to batch in `ctx.txn`).
+
+## Acceptance conditions
+
+From the integrator's decision D1 (`.10x/decisions/architect/stress-bench.md`, 2026-09-30), verbatim:
+
+(a) Kotlin frame pacing is an interface in the runtime module implemented
+in `android-adapters` (Choreographer) — the runtime module stays stdlib + coroutines;
+(b) synchronous calls made from the main thread drain before they return on all three
+runtimes, so read-your-writes holds for sync calls as well as replies; (c) decision 6
+(`no_coalesce` through the schema) lands in the same piece as a separable commit with
+regenerated goldens; (d) contract scenario S18 is mandatory (R4); (e) SPEC §11/§17 and a
+"high-frequency data" docs page land with the code.

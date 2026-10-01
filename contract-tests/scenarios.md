@@ -1,6 +1,6 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): seventeen
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): eighteen
 scenarios, each run by every platform runtime against the **real playground core**
 (`examples/playground/core`, the same Rust crate the apps run), through the real boundary:
 
@@ -11,7 +11,7 @@ scenarios, each run by every platform runtime against the **real playground core
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI and the real static core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless all seventeen ids are `PASS` (a `SKIP` needs its reason here,
+`contract-tests/check.sh` fails unless all eighteen ids are `PASS` (a `SKIP` needs its reason here,
 in the platform notes of the scenario).
 
 ## The harness (the same on every platform)
@@ -358,6 +358,27 @@ the host survives and recovers:
 5. On the trapped core, calls through the generated bindings reject with `UndraTransportError`
    (`trap` or `closed`) and none hangs: an async call (`add_later`), a store command
    (`Counter.increment`) and a typed one (`parse_count`).
+
+### S18 coalesced burst
+
+The core commits one change-set per transaction; the platform mirror merges what arrived before it
+drains (ADR-031, SPEC section 11). `Stress.burst(mode, n)` commits `n` transactions in a tight loop,
+one write each, without `ctx.txn`. The calls are made **from the main thread** (Swift: the main
+actor; Kotlin: `UndraDispatchers.main`), where a synchronous call drains the mirror before it
+returns; TypeScript awaits them.
+
+1. Raw: `Stress` constructed and observed through a raw mirror callback (registered without
+   `no_coalesce` ids). Take a `transactions` reading. `burst(Firehose, 1000)`: when the call returns
+   (resolves), **with no further wait or flush**, the raw callback has run **exactly once**, with one
+   full value (`op = 0`) for signal `0 value` equal to `1000`; `transactions` grew by exactly
+   **1000**; the mirror's counters say `changeSetsReceived` grew by 1000 and `entriesApplied` by 1.
+2. Through the generated class: `Stress.create()` / `Stress()`, `burst(Firehose, 1000)`: `value ==
+   1000` as soon as the call returns (read-your-writes).
+3. Through the generated class, `no_coalesce`: `burst(Progress, 10)`: `progress == 10` as soon as the
+   call returns, and the mirror applied all 10 entries (`entriesApplied` grew by 10), because the
+   generated store registered `progress` as `no_coalesce`. (TypeScript also checks that a subscriber
+   heard `1, 2, ..., 10`; a Kotlin `StateFlow` conflates and SwiftUI renders once per frame, so they
+   check the mirror's counter only.)
 
 ## Platform notes
 

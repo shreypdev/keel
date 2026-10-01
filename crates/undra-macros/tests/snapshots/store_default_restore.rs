@@ -17,6 +17,7 @@ impl Counter {
                 ty: ::undra::meta::TypeRefMeta::I64,
                 computed: false,
                 key: ::core::option::Option::None,
+                no_coalesce: false,
             },
         ],
     };

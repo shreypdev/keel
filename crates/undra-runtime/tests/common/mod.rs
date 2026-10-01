@@ -459,6 +459,7 @@ static COUNTER_META: ObjectMeta = ObjectMeta {
                 ty: TypeRefMeta::I32,
                 computed: false,
                 key: None,
+                no_coalesce: false,
             },
             SignalMeta {
                 name: "label",
@@ -466,6 +467,7 @@ static COUNTER_META: ObjectMeta = ObjectMeta {
                 ty: TypeRefMeta::String,
                 computed: false,
                 key: None,
+                no_coalesce: false,
             },
         ],
     }),

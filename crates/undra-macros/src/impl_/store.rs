@@ -5,7 +5,8 @@
 //! Fields typed `Signal<T>` and `Computed<T>` are the store's signals, numbered `0..n` in
 //! declaration order (other fields are private state, `Ctx` included).
 //! `#[undra(key = "id")]` on a `Signal<Vec<T>>` makes it a keyed list that ships patches;
-//! `#[undra(no_coalesce)]` makes every commit of a signal reach the platforms. `Lazy<T>` fields
+//! `#[undra(no_coalesce)]` makes every commit of a signal reach the platforms, and is recorded in
+//! the signal's schema entry so their mirrors apply every one of them (ADR-031). `Lazy<T>` fields
 //! are rejected (E0001): lazily paged lists are not available in v1.
 //!
 //! # The hidden cell
@@ -330,8 +331,10 @@ pub(crate) fn expand_store(
             Some((key_name, _, _)) => quote!(::core::option::Option::Some(#key_name)),
             None => quote!(::core::option::Option::None),
         };
+        // Recorded in the schema so the platform mirrors apply every entry of the signal (ADR-031).
+        let no_coalesce = s.no_coalesce;
         quote! {
-            #meta::SignalMeta { name: #sname, signal_id: #id, ty: #ty, computed: #computed, key: #key }
+            #meta::SignalMeta { name: #sname, signal_id: #id, ty: #ty, computed: #computed, key: #key, no_coalesce: #no_coalesce }
         }
     });
 
@@ -880,6 +883,33 @@ mod tests {
             has(&out, "key: ::core::option::Option::Some(\"id\")"),
             "{out}"
         );
+        // The schema records it, so the platform mirrors apply every entry (ADR-031).
+        assert!(has(&out, "no_coalesce: true"), "{out}");
+    }
+
+    #[test]
+    fn a_coalesced_signal_says_so_in_the_schema() {
+        let out = expand("struct S { a: Signal<i32> }").unwrap();
+        assert!(has(&out, "no_coalesce: false"), "{out}");
+        assert!(!has(&out, "set_no_coalesce"), "{out}");
+    }
+
+    #[test]
+    fn no_coalesce_needs_a_signal_field() {
+        // ADR-031 puts the flag in the schema, so a misplaced one must teach (R8), not vanish.
+        let message = expand("struct S { a: Signal<i32>, #[undra(no_coalesce)] cache: Vec<u8> }")
+            .unwrap_err();
+        assert!(message.contains("error[undra::E0008]"), "{message}");
+        assert!(
+            message.contains("`#[undra(no_coalesce)]` is not valid on a non-signal store field"),
+            "{message}"
+        );
+        assert!(
+            message.contains("makes a store signal deliver every commit"),
+            "{message}"
+        );
+        assert!(message.contains("remove the option"), "{message}");
+        assert!(message.contains("= docs: "), "{message}");
     }
 
     #[test]

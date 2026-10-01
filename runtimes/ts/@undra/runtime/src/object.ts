@@ -73,6 +73,15 @@ export abstract class UndraObject {
   }
 }
 
+/** What a generated store tells its base class about itself. */
+export interface StoreOptions {
+  /**
+   * The ids of the signals declared `#[undra(no_coalesce)]`: the mirror applies and announces
+   * every value of these instead of the last one per frame (docs/SPEC.md section 11).
+   */
+  readonly noCoalesce?: readonly number[];
+}
+
 /**
  * A core store: an object whose signals the host mirrors. Generated stores
  * declare one `Signal` per core signal, list them in `_signals` (in signal-id
@@ -87,13 +96,20 @@ export abstract class UndraStore extends UndraObject {
   /** The store's signals in signal-id order; set by the generated constructor. */
   protected _signals: Signal<unknown>[] = [];
 
-  /** @param core The core that issued `handle`. @param handle The store's handle. */
-  protected constructor(core: UndraCore, handle: Handle) {
+  /**
+   * @param core The core that issued `handle`. @param handle The store's handle.
+   * @param options The store's `no_coalesce` signals, when it has any (generated code passes them).
+   */
+  protected constructor(core: UndraCore, handle: Handle, options: StoreOptions = {}) {
     super(core, handle);
     const ref = new WeakRef(this);
-    core.mirror.register(handle, (signalId, op, value) => {
-      ref.deref()?._apply(signalId, op, value);
-    });
+    core.mirror.register(
+      handle,
+      (signalId, op, value) => {
+        ref.deref()?._apply(signalId, op, value);
+      },
+      options.noCoalesce === undefined ? {} : { noCoalesce: options.noCoalesce },
+    );
   }
 
   /**

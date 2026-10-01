@@ -61,6 +61,9 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     var statsDocument: String?
     var snapshotBytes: [UInt8] = []
     var restoreCode: UInt32 = 0
+    /// Runs inside `restore`, on the calling thread: where an in-process core delivers the
+    /// restored values.
+    var onRestore: (@Sendable (FakeTransport) -> Void)?
 
     init(schemaHash: UInt64 = 0x1234, directSync: Bool = true) {
         self.schemaHash = schemaHash
@@ -164,6 +167,7 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         if restoreCode != 0 {
             throw UndraRestoreError(code: restoreCode)
         }
+        onRestore?(self)
     }
 
     func statsJSON() -> String? {
@@ -398,16 +402,80 @@ func captureError(_ body: @MainActor () async throws -> Void) async -> (any Erro
     }
 }
 
-/// A core over `transport` with no adapters, for tests.
+/// A core over `transport` with no adapters, for tests. `frames` replaces the platform's frame
+/// scheduler (the main actor's next turn on macOS).
 func makeCore(
     _ transport: FakeTransport,
     adapters: Adapters = Adapters.none,
     expectedSchemaHash: UInt64 = 0x1234,
-    blockingCallTimeout: Double = 30
+    blockingCallTimeout: Double = 30,
+    frames: (any FrameScheduler)? = nil,
+    maxPendingEntries: Int = 65_536,
+    maxPendingBytes: Int = 16 * 1024 * 1024
 ) throws -> UndraCore {
     var options = LoadOptions.inproc(adapters: adapters, expectedSchemaHash: expectedSchemaHash)
     options.blockingCallTimeout = blockingCallTimeout
-    return try UndraCore.connect(transport: transport, options: options)
+    options.maxPendingEntries = maxPendingEntries
+    options.maxPendingBytes = maxPendingBytes
+    return try UndraCore.connect(transport: transport, options: options, frameScheduler: frames)
+}
+
+/// A frame scheduler driven by hand: a frame comes only when the test calls `fire()`, so a
+/// change-set the core produced on its own stays queued until then.
+final class ManualFrameScheduler: FrameScheduler, @unchecked Sendable {
+    private struct State {
+        var ticks: [@MainActor @Sendable () -> Void] = []
+        var requests = 0
+        var invalidated = false
+    }
+
+    private let state = Guarded<State>(State())
+
+    func requestFrame(_ tick: @escaping @MainActor @Sendable () -> Void) {
+        state.withLock { (current: inout State) -> Void in
+            current.ticks.append(tick)
+            current.requests += 1
+        }
+    }
+
+    func invalidate() {
+        state.withLock { (current: inout State) -> Void in
+            current.invalidated = true
+        }
+    }
+
+    /// Frames requested so far.
+    var requests: Int {
+        return state.withLock { (current: inout State) -> Int in
+            return current.requests
+        }
+    }
+
+    /// Frames requested and not fired yet.
+    var pending: Int {
+        return state.withLock { (current: inout State) -> Int in
+            return current.ticks.count
+        }
+    }
+
+    var wasInvalidated: Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.invalidated
+        }
+    }
+
+    /// Runs the frames requested so far.
+    @MainActor
+    func fire() {
+        let due = state.withLock { (current: inout State) -> [@MainActor @Sendable () -> Void] in
+            let ticks = current.ticks
+            current.ticks = []
+            return ticks
+        }
+        for tick in due {
+            tick()
+        }
+    }
 }
 
 /// A change-set with the given `(handle, signal, value)` full-value entries.

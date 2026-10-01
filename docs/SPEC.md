@@ -124,7 +124,7 @@ pub struct MethodDef {
 pub struct ParamDef { pub name: String, pub ty: TypeRef }
 
 pub struct StoreDef { pub signals: Vec<SignalDef> }
-pub struct SignalDef { pub name: String, pub signal_id: u32, pub ty: TypeRef, pub computed: bool, pub key: Option<String> /* #[undra(key = "id")] */ }
+pub struct SignalDef { pub name: String, pub signal_id: u32, pub ty: TypeRef, pub computed: bool, pub key: Option<String> /* #[undra(key = "id")] */, pub no_coalesce: bool /* #[undra(no_coalesce)]; serialized only when true (ADR-031) */ }
 
 pub struct FunctionDef { pub name: String, pub method_id: u32, pub params: Vec<ParamDef>, pub returns: TypeRef, pub is_async: bool, pub takes_ctx: bool, pub docs: String }
 
@@ -135,7 +135,7 @@ pub struct QueryDef { pub name: String, pub query_id: u32, pub kind: QueryKind /
 
 ### 2.3 Canonical JSON and the hash
 
-Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**. `schema_hash = fnv1a64(canonical_bytes)`. `undra-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or source order of *unordered* things. Ordered (part of the wire layout, kept in declaration order): record fields, variant fields, params, signals (signal_id), variants (index). Unordered (sorted by name in canonical form): the six top-level lists, object methods and constructors, port methods. `crate_name` and `undra_version` are labels and are **excluded** from the canonical form (they do not change the wire).
+Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**, `SignalDef.no_coalesce` written only when `true` (so a schema without such a signal hashes as it did before the field existed, ADR-031). `schema_hash = fnv1a64(canonical_bytes)`. `undra-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or source order of *unordered* things. Ordered (part of the wire layout, kept in declaration order): record fields, variant fields, params, signals (signal_id), variants (index). Unordered (sorted by name in canonical form): the six top-level lists, object methods and constructors, port methods. `crate_name` and `undra_version` are labels and are **excluded** from the canonical form (they do not change the wire).
 
 ### 2.4 Registration (`inventory`)
 
@@ -318,7 +318,7 @@ On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{fie
 
 ### 4.3 `#[undra::store]`
 
-On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered. `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
+On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
 
 ### 4.4 `#[undra::port]`
 
@@ -683,9 +683,9 @@ The ten standard ports of section 8 and the eight types they exchange (`HttpMeth
 
 ## 11. Platform runtimes
 
-Shared responsibilities (each runtime): load/attach the core; own `call_id` allocation; map replies to continuations/promises; hold the **mirror** (store handle → signal id → decoded value) and apply change-sets on the main thread with per-frame coalescing; implement `Observe`/`Release`; provide default adapters; expose a `Transport` abstraction with `inproc` and `remote` (WebSocket) implementations (TS adds `worker`); implement the wire codecs; enforce the schema-hash check at attach with a clear error (`UndraSchemaMismatch { expected, got }`).
+Shared responsibilities (each runtime): load/attach the core; own `call_id` allocation; map replies to continuations/promises; hold the **mirror** (store handle → signal id → decoded value) and apply change-sets on the main thread under the delivery rules below; implement `Observe`/`Release`; provide default adapters; expose a `Transport` abstraction with `inproc` and `remote` (WebSocket) implementations (TS adds `worker`); implement the wire codecs; enforce the schema-hash check at attach with a clear error (`UndraSchemaMismatch { expected, got }`).
 
-Main-thread delivery: Swift `MainActor`; Kotlin `Dispatchers.Main.immediate` (falls back to a single-thread executor on JVM without Android); TS `queueMicrotask` batching into one `flush()` per macrotask.
+Main-thread delivery: Swift `MainActor`; Kotlin `UndraDispatchers.main` (`Dispatchers.Main.immediate` on Android, a single-thread executor named `undra-main` on a plain JVM); TS the thread that loaded the core (the page's main thread).
 
 Handle lifetime: explicit `close()`/`[Symbol.dispose]`; finalizers (`deinit`, `Cleaner`, `FinalizationRegistry`) as backstop; `UndraCore.stats()` exposes live handle counts.
 
@@ -698,6 +698,24 @@ Default adapters:
 | Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / Log | same | built-in (§7) | built-in |
 | Timer | DispatchQueue | Handler / ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
 | Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ProcessLifecycleOwner | stubs | navigator.onLine / visibilitychange | stubs |
+
+### 11.1 Delivery: merged per drain, frame-aligned, bounded (ADR-031)
+
+The core hands the host one change-set per transaction per store, in commit order, on the committing thread (§3.5, §5.5). The mirror decides when and how the main thread applies them; none of this changes the wire, the C ABI or the wasm ABI.
+
+* **Queue.** Each change-set's entry table is parsed once, on the thread that received it; a malformed change-set is dropped whole and reported. The queue holds the parsed entries in arrival order.
+* **Drain.** A *drain* applies the queue on the main thread. It folds the entries per key `(handle, signal_id)`, in arrival order, without decoding a value:
+  * a full value (`op 0`) or a lazy invalidation (`op 2`) supersedes everything queued earlier for the key;
+  * keyed patches (`op 1`) that follow each other for the key are concatenated into one patch: `count` = the sum of their counts, ops = each patch's op bytes in arrival order. §3.8 applies ops sequentially, each index relative to the list the previous op left, so the concatenation is the same change; a single patch is passed as it is. A patch too short to hold its count cannot be merged: the key is dropped and resynchronised as below.
+
+  Each key is applied **at most twice per drain** (its last full value, then its merged patch), keys in the order of their first entry in the drain, through the store's generated apply function, which is unchanged: a merged patch that goes out of bounds takes the resynchronisation path of §3.8. A drain's subscribers hear once (TS notifies at the end of the drain, `batch`; Swift `@Observable` and Kotlin `StateFlow` are read at the next frame). Entries for a handle no store registered (a store closed meanwhile) are dropped and counted. Entries queued while a drain runs (a subscriber that makes a synchronous call) are applied by further rounds of the same drain, at most 1000 rounds; the rest goes to the next drain.
+* **`no_coalesce`.** A generated store passes the ids of its `#[undra(no_coalesce)]` signals (`SignalDef.no_coalesce`) to its mirror registration. For those keys a drain applies every entry, in order, at its arrival position, and TS announces each one in a batch of its own. Whether the UI shows every value is up to the platform's reactive primitive (a Kotlin `StateFlow` conflates; SwiftUI renders once per frame).
+* **When.** What the core produced on its own (timers, streams, events, port completions, background tasks) is drained **at most once per display frame**: TS on `requestAnimationFrame` while the document is visible (with a 100 ms timer as a backstop for a frame that never comes), in a zero-delay task while it is not, in a microtask where there is no document (Node, workers); Swift from a `CADisplayLink` on iOS, tvOS and visionOS (paused while the queue is empty) and a main-actor hop elsewhere; Kotlin through its `FramePacer` (`Choreographer` on Android from `android-adapters`; otherwise a paced single thread on a 16.67 ms grid that posts to `UndraDispatchers.main`).
+* **Immediately, never delayed.** `observe(on)` drains before it returns in process; over a worker or a socket TS drains as soon as the initial change-set arrives (its `observe` promise waits for it), while Swift and Kotlin, whose `observe` does not wait over a socket, apply it at the next frame. A **reply** that arrives while entries are queued drains them before the caller resumes: TS from a microtask queued before the call's promise settles; Swift and Kotlin with an immediate main-thread drain enqueued before the continuation (or the blocking waiter) is resumed, so a caller on the main thread runs after it (FIFO). A **synchronous call made on the main thread** (`callSync`, and `construct` and `restore` on Swift and Kotlin) drains before it returns (made from inside a drain, by a subscriber or a store's apply, it leaves that to the drain's next round). Read-your-writes therefore holds for UI code after `await store.method()` and after a synchronous method alike.
+* **Bounded backlog.** The queue is bounded by `maxPendingEntries` (default 65,536) and `maxPendingBytes` (default 16 MiB; an entry counts 17 bytes plus its value). Past either bound the thread that enqueues folds the queue in place with the rules above, every key included (`no_coalesce` ones too: the bound wins over the opt-out), and the next fold waits until the queue has doubled (O(1) amortised per entry). A key whose merged patch then holds more than 4,096 operations **or** more than 1 MiB of operation bytes is dropped and marked *awaiting a full value*: its keyed patches are discarded until a full value arrives, and the next drain re-observes it once (`observe(handle, signal_id, on)` from the main thread; the core answers with the current value, §5.5). Memory is O(observed keys × (value size + 1 MiB)) however long the main thread is blocked or the app is suspended, and it catches up in one drain.
+* **Ordering.** Unchanged on the wire (ADR-019, ADR-020): the state after a drain equals the state after applying every queued change-set in commit order; intermediate states inside one drain are not observable. A transaction that touched several stores arrives as consecutive change-sets and may straddle two drains.
+* **Observable.** Every mirror counts `changeSetsReceived`, `entriesReceived`, `entriesApplied` (after merging), `drains`, `compactions` and `resyncs`, plus the pending entries and bytes and the dropped entries; `UndraCore.stats()` reports them, and drain listeners are called on the main thread after each drain with the change-sets and entries it consumed, the entries it applied and its duration (§17).
+* **TS worker.** In `wasm-worker` mode the worker posts the envelopes one of its tasks produced as one message (`{ t: "envelopes", data: ArrayBuffer[] }`, every buffer transferred, flushed from a microtask); the main thread reads that and the one-envelope shape. The worker protocol is internal to the package (version 2, announced in `init`).
 
 ---
 
@@ -1030,20 +1048,24 @@ Generated code calls only these names. Runtimes implement them; bindgen golden f
 
 ```ts
 export class UndraCore {
-  static load(opts: LoadOptions): Promise<UndraCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint }
+  static load(opts: LoadOptions): Promise<UndraCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint, mirror?: { schedule?, maxPendingEntries?, maxPendingBytes? } /* §11.1 */ }
   static get shared(): UndraCore;                               // set by the first load; throws if none
-  callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw UndraModeError
+  callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw UndraModeError; drains the mirror before it returns
   call(target: CallTarget, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;   // resolves with reply body (status ok) or rejects with UndraReplyError { status, body }
   stream(target: CallTarget, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;   // handles credit
   construct(typeId: number, methodId: number, args: Uint8Array): Promise<bigint>;     // returns handle
   observe(handle: bigint, signalId: number, on: boolean): void;
   release(handle: bigint): void;
-  mirror: Mirror;      // mirror.register(handle, applyFn: (signalId, op, value: Uint8Array) => void); mirror.unregister(handle)
+  mirror: Mirror;      // mirror.register(handle, applyFn: (signalId, op, value: Uint8Array) => void, options?: { noCoalesce?: Iterable<number> }); mirror.unregister(handle)
+                       // mirror.stats(): MirrorStats; mirror.addDrainListener(fn: (s: DrainStats) => void): () => void  (§11.1)
   registerPort(portId: number, impl: PortImpl): void;          // PortImpl = { methods: Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>, sync: boolean }
-  stats(): Promise<UndraStats>;
+  stats(): Promise<UndraStats>;                                // ..., mirror: MirrorStats
 }
 export abstract class UndraObject { protected constructor(core: UndraCore, handle: bigint); readonly core; readonly handle; close(): void; [Symbol.dispose](): void }
-export abstract class UndraStore extends UndraObject { protected _signals: Signal<unknown>[]; protected _apply(signalId: number, op: ChangeOp, value: Uint8Array): void /* implemented by generated code */; }
+export abstract class UndraStore extends UndraObject { protected constructor(core: UndraCore, handle: bigint, options?: { noCoalesce?: readonly number[] }); protected _signals: Signal<unknown>[]; protected _apply(signalId: number, op: ChangeOp, value: Uint8Array): void /* implemented by generated code */; }
+export interface MirrorStats { changeSetsReceived; entriesReceived; entriesApplied; drains; compactions; resyncs; pendingEntries; pendingBytes; droppedEntries }   // numbers
+export interface DrainStats { changeSets: number; entries: number; appliedEntries: number; durationMs: number }
+export function scheduleFrame(fn: () => void): void;          // the default schedule (§11.1)
 export class Signal<T> { get(): T; peek(): T; subscribe(fn: (v: T) => void): () => void; /* internal */ _set(v: T): void }
 export class UndraError extends Error { readonly kind: string }
 export class UndraReplyError extends UndraError { status: ReplyStatus; body: Uint8Array }
@@ -1051,48 +1073,58 @@ export interface UndraPort {}
 ```
 Ports: generated port interfaces are plain TS interfaces; `core.registerPort(id, generatedAdapter(impl))` wraps an implementation with codecs (bindgen emits the adapter).
 
+Generated stores call `super(core, handle)`, or `super(core, handle, { noCoalesce: [ids] })` when the store has `no_coalesce` signals.
+
 ### 17.2 Kotlin (`dev.undra.runtime`)
 
 ```kotlin
 class UndraCore private constructor(...) {
-  companion object { fun load(options: LoadOptions): UndraCore; val shared: UndraCore }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong)
-  fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray            // reply body or throws UndraReplyException
+  companion object { fun load(options: LoadOptions): UndraCore; val shared: UndraCore }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong, mirror = MirrorOptions(...))
+  fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray            // reply body or throws UndraReplyException; on the main thread, drains the mirror first
   suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray         // cancellable
   fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>
   fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long                        // sync in INPROC
   fun observe(handle: Long, signalId: UInt, on: Boolean); fun release(handle: Long)
-  val mirror: Mirror                                                                        // register(handle) { signalId, op, reader -> }
+  val mirror: Mirror                                                                        // register(handle) { signalId, op, reader -> }; register(handle, noCoalesce: Set<UInt>) { ... }
+                                                                                            // stats(): MirrorStats; addDrainListener { s: DrainStats -> }: AutoCloseable; flush()  (§11.1)
   fun registerPort(portId: UInt, impl: PortImpl)
-  fun stats(): UndraStats
+  fun stats(): UndraStats                                                                   // ..., mirror: MirrorStats
 }
+class MirrorOptions(framePacer: FramePacer? = null /* the paced default */, maxPendingEntries: Int = 65_536, maxPendingBytes: Long = 16 MiB)
+fun interface FramePacer { fun requestFrame(frame: Runnable) }                              // dev.undra.android.ChoreographerFramePacer (module android-adapters) on Android
+class MirrorStats(changeSetsReceived: Long, entriesReceived: Long, entriesApplied: Long, drains: Long, compactions: Long, resyncs: Long, pendingEntries: Int, pendingBytes: Long, droppedEntries: Long)
+class DrainStats(changeSets: Int, entries: Int, appliedEntries: Int, duration: Duration)
 abstract class UndraObject(val core: UndraCore, val handle: Long) : AutoCloseable
-abstract class UndraStore(core: UndraCore, handle: Long) : UndraObject(core, handle) { protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader); protected fun <T> signal(initial: T): MutableStateFlow<T> }
+abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<UInt> = emptySet()) : UndraObject(core, handle) { protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader); protected fun <T> signal(initial: T): MutableStateFlow<T> }
 open class UndraException(message: String) : RuntimeException(message)
 class UndraReplyException(val status: ReplyStatus, val body: ByteArray) : UndraException(..)
 interface UndraPort
 ```
-Main-thread delivery through `UndraDispatchers.main` (Android: `Dispatchers.Main.immediate`; JVM: a single-thread executor).
+Main-thread delivery through `UndraDispatchers.main` (Android: `Dispatchers.Main.immediate`; JVM: a single-thread executor), at the frames of `MirrorOptions.framePacer` (§11.1). Generated stores extend `UndraStore(core, handle)`, or `UndraStore(core, handle, noCoalesce = setOf(ids))` when the store has `no_coalesce` signals.
 
 ### 17.3 Swift (`UndraRuntime`)
 
 ```swift
 public final class UndraCore: @unchecked Sendable {
-  public static func load(_ options: LoadOptions) throws -> UndraCore     // .inproc(adapters:) | .remote(url:adapters:), expectedSchemaHash
+  public static func load(_ options: LoadOptions) throws -> UndraCore     // .inproc(adapters:) | .remote(url:adapters:), expectedSchemaHash; LoadOptions.maxPendingEntries / maxPendingBytes (§11.1)
   public static var shared: UndraCore { get }   // the loaded core, or a shut-down placeholder (calls on it fail with `UndraCallError.unavailable(.closed)`); `current` stays nil then
-  public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]
+  public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]   // on the main thread, drains the mirror before it returns
   public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8]   // cancellation-aware
   public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], Error>
   public func stream<Item: Sendable>(_ target: CallTarget, method: UInt32, args: [UInt8], decode: @escaping @Sendable ([UInt8]) throws -> Item,
                                      mapError: @escaping @Sendable (Error) -> Error = { $0 }) -> AsyncThrowingStream<Item, Error>   // what generated stream methods return; decodes on demand so credit follows the consumer (§3.7)
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> UndraHandle
   public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool); public func release(_ handle: UndraHandle)
-  public let mirror: Mirror        // register(handle) { @MainActor (signalId, op, reader) in … }
+  public let mirror: Mirror        // register(handle, noCoalesce: Set<UInt32> = []) { @MainActor (signalId, op, reader) in … }; stats() -> MirrorStats;
+                                   // addDrainListener { @MainActor (DrainStats) in … } -> DrainListenerRegistration (remove()); @MainActor flush()  (§11.1)
   public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning
-  public func stats() -> UndraStats
+  public func stats() -> UndraStats   // ..., mirror: MirrorStats
   public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it
 }
+public struct MirrorStats: Sendable, Equatable { changeSetsReceived, entriesReceived, entriesApplied, drains, compactions, resyncs, pendingEntries, pendingBytes, droppedEntries: Int }
+public struct DrainStats: Sendable, Equatable { changeSets: Int; entries: Int; appliedEntries: Int; duration: Duration }
 open class UndraObject: @unchecked Sendable { public init(core: UndraCore, handle: UndraHandle); public func close() }
-@MainActor open class UndraStore: UndraObject { open func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) }   // generated subclass is @Observable
+@MainActor open class UndraStore: UndraObject { public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []); open func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) }   // generated subclass is @Observable
 public struct UndraReplyError: Error { public let status: ReplyStatus; public let body: [UInt8] }   // what the raw entry points throw
 public struct LoadOptions: Sendable { …; public var onError: (@Sendable (UndraUnhandledError) -> Void)? }   // runs synchronously on the calling thread (the main actor for a store); must not call into Undra
 /// What a generated method throws when the call itself fails: not its own `E`, not `CancellationError` (ADR-032).
@@ -1110,4 +1142,4 @@ public enum UndraCallError: Error, Sendable, Equatable, CustomStringConvertible,
 public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError { public let operation: String; public let error: UndraCallError }   // what `onError` receives
 public protocol UndraRecord: UndraCodec, Sendable, Hashable {}; public protocol UndraEnum: UndraCodec, Sendable, Hashable {}; public protocol UndraError: UndraCodec, Error, Sendable, Hashable {}; public protocol UndraPort {}
 ```
-Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, …) to avoid clashing with generated port protocols.
+Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, …) to avoid clashing with generated port protocols. Generated stores call `super.init(core: core, handle: handle)`, or `super.init(core: core, handle: handle, noCoalesce: [ids])` when the store has `no_coalesce` signals. Drains run from a `CADisplayLink` on iOS, tvOS and visionOS and on the main actor's next turn elsewhere (§11.1).

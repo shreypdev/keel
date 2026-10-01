@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S17 of contract-tests/scenarios.md on the JVM over
-# JNI against the real libundra_core of the playground core, then checks all seventeen passed.
+# The Kotlin column of the contract tests: runs S01..S18 of contract-tests/scenarios.md on the JVM over
+# JNI against the real libundra_core of the playground core, then checks all eighteen passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -70,7 +70,7 @@ if [ ! -f "$STAMP" ] || [ "$OUT/runtime/main.stamp" -nt "$STAMP" ] \
 fi
 
 # --- 4. run, then check the verdicts ------------------------------------------------------------------------
-echo "==> running S01..S17 against ${LIB#"$REPO"/}"
+echo "==> running S01..S18 against ${LIB#"$REPO"/}"
 mkdir -p "$OUT"
 status=0
 java -Xmx1g -Djava.library.path="$LIB_DIR" \

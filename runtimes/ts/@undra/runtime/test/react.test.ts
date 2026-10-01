@@ -214,6 +214,8 @@ describe("useUndra", () => {
     await act(async () => {
       fake.setSignal(handle, 0, u32(42));
       await fake.settle();
+      // A change the core makes on its own is applied at the next animation frame (ADR-031).
+      await new Promise((resolve) => requestAnimationFrame(resolve));
     });
     expect(view.container.textContent).toBe("count 42");
   });

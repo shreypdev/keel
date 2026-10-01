@@ -12,7 +12,7 @@ import {
   UndraTransportError,
 } from "./errors.js";
 import { nextCallId } from "./callid.js";
-import { Mirror } from "./mirror.js";
+import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { StreamCall } from "./stream.js";
@@ -69,6 +69,8 @@ export interface UndraStats {
   readonly mirroredStores: number;
   /** Change-set entries dropped because their store was gone. */
   readonly droppedEntries: number;
+  /** The mirror's delivery counters: change-sets and entries received, entries applied after merging, drains, compactions, resyncs (docs/SPEC.md section 17.1). */
+  readonly mirror: MirrorStats;
   /** The core's own statistics (`undra_stats_json`, parsed) when the transport can ask for them: wasm modes. `null` over a socket. */
   readonly core: Readonly<Record<string, unknown>> | null;
 }
@@ -95,6 +97,12 @@ export interface AttachOptions {
   readonly onError?: (error: unknown) => void;
   /** Make this core `UndraCore.shared` when none is set yet. Default `true`. */
   readonly shared?: boolean;
+  /**
+   * How the mirror delivers change-sets (docs/SPEC.md section 11): `schedule` replaces the frame
+   * scheduler (`scheduleFrame`) that drains what the core produced on its own, and
+   * `maxPendingEntries` (default 65,536) / `maxPendingBytes` (default 16 MiB) bound the backlog.
+   */
+  readonly mirror?: Pick<MirrorOptions, "schedule" | "maxPendingEntries" | "maxPendingBytes">;
 }
 
 /** Options of `UndraCore.load`. */
@@ -309,8 +317,12 @@ export class UndraCore {
     this.#adapters = adapters;
     this.#observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
+      ...options.mirror,
       onError: (error) => {
         this.#reportError("mirror", error);
+      },
+      resync: (handle, signalId) => {
+        this.#resync(handle, signalId);
       },
     });
     for (const [portId, impl] of standardPorts(adapters)) this.#ports.set(portId, impl);
@@ -335,13 +347,18 @@ export class UndraCore {
    * Calls a synchronous method and returns its result directly. Available in
    * `wasm-main` only; every other mode throws {@link UndraModeError}. Rejects
    * asynchronous methods (the core answers status 5). Throws
-   * {@link UndraReplyError} when the call does not succeed.
+   * {@link UndraReplyError} when the call does not succeed. The change-sets
+   * the call produced are applied to the stores before it returns, except
+   * when it is made from inside a drain (a signal subscriber): the running
+   * drain applies them in its next round, after the subscriber returns.
    */
   callSync(target: CallTargetArg, methodId: number, args: Uint8Array): Uint8Array {
     const transport = this.#transport;
     if (transport.callSync === undefined) throw new UndraModeError("callSync", transport.mode);
     this.#assertOpen();
     const reply = transport.callSync(encodeTarget(target, methodId, this.#allocCallId(), args));
+    // Read-your-writes (docs/SPEC.md section 11): the call's change-sets are queued by now.
+    this.mirror.flush();
     if (reply.length < 5) throw new UndraTransportError("protocol", "the core returned a truncated reply");
     const status = reply[4] as number;
     const body = reply.subarray(5);
@@ -354,7 +371,9 @@ export class UndraCore {
    * {@link UndraReplyError} (status 1 typed error, 2 panic, 3 cancelled, 5 bad
    * request) or {@link UndraTransportError}. When `signal` aborts, the call is
    * cancelled in the core (`Cancel`) and the promise rejects at once with the
-   * signal's reason; an already aborted signal never sends anything.
+   * signal's reason; an already aborted signal never sends anything. The
+   * change-sets that arrived before the reply are applied before the promise
+   * settles, so the code after `await` sees them.
    */
   call(target: CallTargetArg, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
     if (signal?.aborted === true) return Promise.reject(abortReason(signal));
@@ -469,6 +488,7 @@ export class UndraCore {
       openStreams: streams,
       mirroredStores: this.mirror.size,
       droppedEntries: this.mirror.dropped,
+      mirror: this.mirror.stats(),
       core,
     };
   }
@@ -542,6 +562,16 @@ export class UndraCore {
       this.#options.onClose?.(error);
     } catch (thrown) {
       this.#reportError("onClose", thrown);
+    }
+  }
+
+  /** Asks the core for the current value of a signal the mirror lost (a dropped merged patch); the entries arrive as a change-set. */
+  #resync(handle: Handle, signalId: number): void {
+    if (this.#closed) return;
+    try {
+      this.#transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
+    } catch (error) {
+      this.#reportError("resync", error);
     }
   }
 
@@ -687,6 +717,9 @@ export class UndraCore {
     }
     this.#pending.delete(callId);
     entry.cleanup?.();
+    // Read-your-writes: the change-sets that arrived before this reply are applied before the
+    // caller's continuation runs (a microtask queued now runs before the one `resolve` queues).
+    this.mirror.queueFlush();
     if (status === ReplyStatus.Ok) entry.resolve(body);
     else entry.reject(new UndraReplyError(status as ReplyStatus, body));
   }

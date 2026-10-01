@@ -55,10 +55,15 @@ inline fun <reified E : Throwable> expectFails(what: String, body: () -> Unit): 
 inline fun <reified E : Throwable> expectFailsAsync(what: String, crossinline body: suspend () -> Unit): E =
     expectFails(what) { runBlocking { body() } }
 
-/** Polls [condition] every 10 ms until it holds; fails after [timeoutMs] naming [what]. */
+/**
+ * Polls [condition] every 10 ms until it holds; fails after [timeoutMs] naming [what]. Each look first applies
+ * what the core has delivered so far ([drainLoadedMirror]): the stores lag the core by up to a frame otherwise.
+ */
 fun awaitUntil(what: String, timeoutMs: Long = WAIT_MS, condition: () -> Boolean) {
     val deadline = System.nanoTime() + timeoutMs * 1_000_000L
-    while (!condition()) {
+    while (true) {
+        drainLoadedMirror()
+        if (condition()) return
         if (System.nanoTime() > deadline) throw Mismatch("timed out after $timeoutMs ms waiting for $what")
         Thread.sleep(POLL_MS)
     }
@@ -87,12 +92,14 @@ fun <T> awaitEq(what: String, expected: T, timeoutMs: Long = WAIT_MS, read: () -
     }
 }
 
-/** "For [millis] ms nothing happens": fails as soon as [condition] stops holding during that time. */
+/** "For [millis] ms nothing happens": fails as soon as [condition] stops holding during that time (each look drains the mirror first). */
 fun holdsFor(what: String, millis: Long = 200L, condition: () -> Boolean) {
     val deadline = System.nanoTime() + millis * 1_000_000L
     while (System.nanoTime() < deadline) {
+        drainLoadedMirror()
         if (!condition()) throw Mismatch("$what: changed within $millis ms")
         Thread.sleep(POLL_MS)
     }
+    drainLoadedMirror()
     if (!condition()) throw Mismatch("$what: changed within $millis ms")
 }

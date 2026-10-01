@@ -42,12 +42,16 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  *    runs on other threads (see [resumeSafely] and [UndraDispatchers.delivery]);
  *  - a call is in [pending] before it is sent, because an in-process core may reply on the sending thread
  *    before the send returns;
- *  - whoever removes a call from [pending] owns completing it.
+ *  - whoever removes a call from [pending] owns completing it;
+ *  - read-your-writes (ADR-031): the change-sets that arrived before a reply are applied before a caller on
+ *    the main thread continues, whether it suspended ([call]) or blocked ([callSync], [construct]).
  */
 internal class ConnectedCore(
     private val transport: Transport,
     private val blockingTimeout: Duration,
     initialCallId: Int = 0,
+    mirrorOptions: MirrorOptions = MirrorOptions(),
+    main: MainThread = UndraDispatchers.mainThread(),
 ) : UndraCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -84,7 +88,7 @@ internal class ConnectedCore(
             }
         }
     }
-    private val liveMirror = Mirror()
+    private val liveMirror = Mirror(main, mirrorOptions, ::resync)
 
     override val mode: Mode get() = transport.mode
 
@@ -113,13 +117,15 @@ internal class ConnectedCore(
         val payload = encodeCall(target, methodId, callId, args)
         val reply = if (transport.isSynchronous) {
             val bytes = transport.callSync(payload)
+            // The call's change-sets are queued by now: on the main thread they are applied before it returns.
+            liveMirror.drainIfOnMainThread()
             try {
                 Payloads.Reply.decode(bytes)
             } catch (e: WireException) {
                 throw UndraException("the core sent a malformed reply: ${e.message}", e)
             }
         } else {
-            blockingCall(callId, payload)
+            blockingCall(callId, payload).also { liveMirror.drainIfOnMainThread() }
         }
         if (reply.callId != callId) throw UndraException("protocol error: the reply is for call ${reply.callId}, not $callId")
         return replyBody(reply.status, reply.body)
@@ -129,17 +135,23 @@ internal class ConnectedCore(
         ensureOpen()
         val callId = nextCallId()
         val payload = encodeCall(target, methodId, callId, args)
-        return suspendCancellableCoroutine { continuation ->
-            val entry = Pending.Suspended(continuation)
-            pending[callId.toInt()] = entry
-            continuation.invokeOnCancellation {
-                if (pending.remove(callId.toInt(), entry)) cancelQuietly(callId)
+        try {
+            return suspendCancellableCoroutine { continuation ->
+                val entry = Pending.Suspended(continuation)
+                pending[callId.toInt()] = entry
+                continuation.invokeOnCancellation {
+                    if (pending.remove(callId.toInt(), entry)) cancelQuietly(callId)
+                }
+                try {
+                    submit(callId, payload)
+                } catch (e: Throwable) {
+                    if (pending.remove(callId.toInt(), entry)) continuation.resumeWith(Result.failure(e))
+                }
             }
-            try {
-                submit(callId, payload)
-            } catch (e: Throwable) {
-                if (pending.remove(callId.toInt(), entry)) continuation.resumeWith(Result.failure(e))
-            }
+        } finally {
+            // The reply posted a drain ahead of this continuation (onReply); a dispatcher that does not
+            // run in posting order on the main thread (Compose's frame-driven one) is covered here.
+            liveMirror.drainIfOnMainThread()
         }
     }
 
@@ -274,11 +286,26 @@ internal class ConnectedCore(
     override fun stats(): UndraStats {
         val hostPending = pending.size
         val mirrored = liveMirror.registeredCount
+        val mirrorStats = liveMirror.stats()
         val json = if (closed.get()) null else transport.statsJson()
         return if (json == null) {
-            UndraStats(liveHandles = UndraStats.UNKNOWN, hostPendingCalls = hostPending, hostMirrorHandles = mirrored)
+            UndraStats(liveHandles = UndraStats.UNKNOWN, hostPendingCalls = hostPending, hostMirrorHandles = mirrored, mirror = mirrorStats)
         } else {
-            UndraStats.fromCoreJson(json, hostPending, mirrored)
+            UndraStats.fromCoreJson(json, hostPending, mirrored, mirrorStats)
+        }
+    }
+
+    /**
+     * Asks the core for the current value of a signal whose merged patch the mirror dropped (ADR-031): the
+     * value arrives as a change-set (in process, before this returns). Called by the mirror on the main
+     * thread, never from a core callback.
+     */
+    private fun resync(handle: Long, signalId: UInt) {
+        if (closed.get()) return
+        try {
+            transport.observe(handle, signalId, true)
+        } catch (e: Exception) {
+            UndraLog.warn("re-observing signal $signalId of ${Handle(handle)} failed", e)
         }
     }
 
@@ -290,6 +317,8 @@ internal class ConnectedCore(
     override fun restore(snapshot: ByteArray) {
         ensureOpen()
         val code = transport.restore(snapshot)
+        // Like any synchronous call made on the main thread, the restored values are applied before it returns.
+        liveMirror.drainIfOnMainThread()
         if (code != 0) throw UndraException("the core rejected the snapshot (code $code)")
     }
 
@@ -380,6 +409,8 @@ internal class ConnectedCore(
         if (entry is Pending.Streaming) {
             replyToStream(callId, entry.stream, status, body)
         } else if (pending.remove(callId.toInt(), entry)) {
+            // Read-your-writes (ADR-031): a drain posted now runs on the main thread before a caller there resumes.
+            liveMirror.drainSoon()
             complete(entry, status, body, callId)
         }
     }

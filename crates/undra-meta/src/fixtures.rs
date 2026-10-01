@@ -308,6 +308,7 @@ pub(crate) fn representative_schema() -> Schema {
                 ty: TypeRef::vec(TypeRef::named("Todo")),
                 computed: false,
                 key: Some("id".into()),
+                no_coalesce: false,
             },
             SignalDef {
                 name: "filter".into(),
@@ -315,6 +316,7 @@ pub(crate) fn representative_schema() -> Schema {
                 ty: TypeRef::named("Priority"),
                 computed: false,
                 key: None,
+                no_coalesce: false,
             },
             SignalDef {
                 name: "remaining".into(),
@@ -322,6 +324,7 @@ pub(crate) fn representative_schema() -> Schema {
                 ty: TypeRef::U32,
                 computed: true,
                 key: None,
+                no_coalesce: false,
             },
             SignalDef {
                 name: "archive".into(),
@@ -329,6 +332,7 @@ pub(crate) fn representative_schema() -> Schema {
                 ty: TypeRef::lazy(TypeRef::named("Todo")),
                 computed: false,
                 key: None,
+                no_coalesce: false,
             },
             SignalDef {
                 name: "selected".into(),
@@ -336,6 +340,7 @@ pub(crate) fn representative_schema() -> Schema {
                 ty: TypeRef::option(TypeRef::named("Todo")),
                 computed: false,
                 key: None,
+                no_coalesce: false,
             },
         ],
     });

@@ -19,7 +19,9 @@ import kotlinx.coroutines.flow.Flow
  *
  *  - [callSync] and [construct] run on the calling thread and return when the core is done.
  *  - [call] suspends; the reply resumes the caller on its own dispatcher, never on a core thread.
- *  - Change-sets are applied to stores on the main thread ([UndraDispatchers.main]) through [mirror].
+ *  - Change-sets are applied to stores on the main thread ([UndraDispatchers.main]) through [mirror],
+ *    merged and once per display frame ([LoadOptions.mirror]); a reply, a [callSync] on the main thread and
+ *    [observe] apply what is queued at once, so code on the main thread reads its own writes.
  *  - Port implementations run off the core's threads (see [PortImpl]).
  *  - The runtime never calls into the core from one of the core's own callbacks.
  *
@@ -68,7 +70,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * schema hash and compares it with [LoadOptions.expectedSchemaHash].
          */
         internal fun attach(transport: Transport, options: LoadOptions, makeShared: Boolean): UndraCore {
-            val core = ConnectedCore(transport, options.remoteTimeout)
+            val core = ConnectedCore(transport, options.remoteTimeout, mirrorOptions = options.mirror)
             try {
                 core.installPorts(options)
                 val got = transport.connect(core, options.expectedSchemaHash)
@@ -124,7 +126,9 @@ public open class UndraCore protected constructor() : AutoCloseable {
     /**
      * Calls a synchronous method or function and returns the reply body. In [Mode.INPROC] this is a
      * direct call into the core. In [Mode.REMOTE] it blocks the calling thread for a network round
-     * trip (up to [LoadOptions.remoteTimeout]); that is acceptable for development only.
+     * trip (up to [LoadOptions.remoteTimeout]); that is acceptable for development only. Called on the
+     * main thread, it returns after the change-sets the call produced have been applied to the stores
+     * (from inside a store's `apply`, the running drain applies them in its next round instead).
      *
      * [methodId] must equal the id inside [target] (a [CallTarget.LazyListPage] carries none).
      *
@@ -137,7 +141,8 @@ public open class UndraCore protected constructor() : AutoCloseable {
     /**
      * Calls a method or function and suspends for the reply body. Cancelling the coroutine cancels the
      * call in the core (the caller sees [kotlinx.coroutines.CancellationException] at once; the core is
-     * told to drop the task). The caller resumes on its own dispatcher.
+     * told to drop the task). The caller resumes on its own dispatcher; on the main thread, after the
+     * change-sets that arrived before the reply have been applied to the stores.
      *
      * @throws UndraReplyException if the core answers with anything but success.
      * @throws UndraException if the core is closed or unreachable.
@@ -205,7 +210,8 @@ public open class UndraCore protected constructor() : AutoCloseable {
     public open fun snapshot(): ByteArray = throw unsupported("snapshot")
 
     /**
-     * Rebuilds the stores from [snapshot]; the handles the app holds stay valid.
+     * Rebuilds the stores from [snapshot]; the handles the app holds stay valid. Called on the main thread, it
+     * applies the restored values to the stores before it returns, like any synchronous call.
      *
      * @throws UndraModeException over a remote transport.
      * @throws UndraException if the core rejects the snapshot.

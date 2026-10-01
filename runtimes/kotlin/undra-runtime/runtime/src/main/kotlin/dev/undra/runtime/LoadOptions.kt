@@ -32,6 +32,7 @@ public enum class Mode {
  *   installed; Http, Kv, SecureStore and Fs come from the `android-adapters` module.
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
+ * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
  */
 public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
@@ -40,8 +41,41 @@ public class LoadOptions(
     public val expectedSchemaHash: ULong,
     public val defaultAdapters: Boolean = true,
     public val remoteTimeout: Duration = 30.seconds,
+    public val mirror: MirrorOptions = MirrorOptions(),
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
-            "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout)"
+            "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
+            "mirror=$mirror)"
+}
+
+/**
+ * How the [Mirror] of a loaded core delivers change-sets (ADR-031, SPEC section 11).
+ *
+ * ```kotlin
+ * // Android: drain at the display's own frames (module android-adapters).
+ * LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, mirror = MirrorOptions(framePacer = ChoreographerFramePacer()))
+ * ```
+ *
+ * @property framePacer when the change-sets the core produced on its own are applied. `null` (the default)
+ *   uses the runtime's own pacer: a daemon thread named `undra-frame` that posts a drain to the main thread
+ *   on a 60 Hz grid. Replies, `callSync` on the main thread and `observe` never wait for a frame.
+ * @property maxPendingEntries when more entries than this wait for a drain, the backlog is folded in place.
+ * @property maxPendingBytes when the waiting entries hold more bytes than this (values plus 17 bytes per
+ *   entry), the backlog is folded in place.
+ * @throws IllegalArgumentException if a bound is not positive.
+ */
+public class MirrorOptions(
+    public val framePacer: FramePacer? = null,
+    public val maxPendingEntries: Int = 65_536,
+    public val maxPendingBytes: Long = 16L * 1024 * 1024,
+) {
+    init {
+        require(maxPendingEntries > 0) { "maxPendingEntries must be positive, got $maxPendingEntries" }
+        require(maxPendingBytes > 0) { "maxPendingBytes must be positive, got $maxPendingBytes" }
+    }
+
+    override fun toString(): String =
+        "MirrorOptions(framePacer=${framePacer?.javaClass?.name ?: "default"}, maxPendingEntries=$maxPendingEntries, " +
+            "maxPendingBytes=$maxPendingBytes)"
 }

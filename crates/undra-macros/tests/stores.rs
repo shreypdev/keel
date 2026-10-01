@@ -221,18 +221,27 @@ fn store_meta_lists_signals_with_ids_types_and_flags() {
     let schema = collect_schema("stores-test");
     let object = schema.objects.iter().find(|o| o.name == "Todos").unwrap();
     let store = object.store.as_ref().expect("Todos is a store");
-    let signals: Vec<(&str, u32, bool, Option<&str>)> = store
+    let signals: Vec<(&str, u32, bool, Option<&str>, bool)> = store
         .signals
         .iter()
-        .map(|s| (s.name.as_str(), s.signal_id, s.computed, s.key.as_deref()))
+        .map(|s| {
+            (
+                s.name.as_str(),
+                s.signal_id,
+                s.computed,
+                s.key.as_deref(),
+                s.no_coalesce,
+            )
+        })
         .collect();
     assert_eq!(
         signals,
         [
-            ("rows", 0, false, Some("id")),
-            ("filter", 1, false, None),
-            ("ticks", 2, false, None),
-            ("visible", 3, true, None),
+            ("rows", 0, false, Some("id"), false),
+            ("filter", 1, false, None, false),
+            // `#[undra(no_coalesce)]` reaches the schema, so the platforms can honour it (ADR-031).
+            ("ticks", 2, false, None, true),
+            ("visible", 3, true, None, false),
         ]
     );
     assert_eq!(store.signals[0].ty, TypeRef::vec(TypeRef::named("Row")));

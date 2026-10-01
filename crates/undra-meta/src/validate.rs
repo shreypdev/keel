@@ -542,6 +542,7 @@ mod tests {
                     ty,
                     computed: false,
                     key: None,
+                    no_coalesce: false,
                 }],
             });
             s.objects.push(store);
@@ -705,6 +706,7 @@ mod tests {
                     ty: ghost(),
                     computed: false,
                     key: None,
+                    no_coalesce: false,
                 }],
             });
             s.objects.push(obj);

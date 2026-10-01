@@ -21,6 +21,7 @@ impl Todos {
                 ),
                 computed: false,
                 key: ::core::option::Option::Some("id"),
+                no_coalesce: false,
             },
             ::undra::meta::SignalMeta {
                 name: "ticks",
@@ -28,6 +29,7 @@ impl Todos {
                 ty: ::undra::meta::TypeRefMeta::U32,
                 computed: false,
                 key: ::core::option::Option::None,
+                no_coalesce: true,
             },
             ::undra::meta::SignalMeta {
                 name: "visible",
@@ -37,6 +39,7 @@ impl Todos {
                 ),
                 computed: true,
                 key: ::core::option::Option::None,
+                no_coalesce: false,
             },
         ],
     };

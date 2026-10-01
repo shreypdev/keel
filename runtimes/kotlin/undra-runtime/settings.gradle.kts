@@ -1,12 +1,15 @@
 // Undra Kotlin runtime (SPEC §11). Kotlin stdlib + kotlinx-coroutines only.
 //
 //   :runtime           pure-JVM runtime: wire layer, transports, mirror, codecs. No Android APIs.
-//   :android-adapters  (future, not created yet) Android-specific code: Dispatchers.Main wiring, the
-//                      Application-context Kv / SecureStore / Http / Connectivity / Lifecycle port
-//                      adapters, and the JNI loader for libundra. Depends on :runtime, never the reverse.
+//   :android-adapters  Android-specific code (an Android library depending on :runtime, never the reverse):
+//                      today the Choreographer frame pacer of ADR-031; later the Application-context port
+//                      adapters and the JNI loader (see android-adapters/README.md). Included only when an
+//                      Android SDK is found (ANDROID_HOME, ANDROID_SDK_ROOT, or sdk.dir in local.properties of
+//                      this build or of the build that includes it), so a JVM-only checkout builds :runtime.
 
 pluginManagement {
     repositories {
+        google()
         gradlePluginPortal()
         mavenCentral()
     }
@@ -15,6 +18,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        google()
         mavenCentral()
     }
 }
@@ -22,3 +26,19 @@ dependencyResolutionManagement {
 rootProject.name = "undra-runtime"
 
 include(":runtime")
+
+/** The Android SDK directory, if this machine has one Gradle can be pointed at. */
+fun androidSdk(): File? {
+    val fromEnv = listOf("ANDROID_HOME", "ANDROID_SDK_ROOT").mapNotNull { System.getenv(it) }.map(::File)
+    // `local.properties` of this build, and of the build that includes this one (Android Studio writes sdk.dir
+    // only into the project it opened, for example examples/playground/android).
+    val propertyFiles = listOfNotNull(settingsDir, gradle.parent?.startParameter?.currentDir).map { File(it, "local.properties") }
+    val fromProperties = propertyFiles.filter { it.isFile }.mapNotNull { file ->
+        java.util.Properties().apply { file.inputStream().use { load(it) } }.getProperty("sdk.dir")?.let(::File)
+    }
+    return (fromEnv + fromProperties).firstOrNull { it.isDirectory }
+}
+
+if (androidSdk() != null) {
+    include(":android-adapters")
+}

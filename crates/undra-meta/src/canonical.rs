@@ -394,6 +394,38 @@ mod tests {
     }
 
     #[test]
+    fn no_coalesce_is_written_only_when_set() {
+        // ADR-031 decision 6: a schema without a `no_coalesce` signal serializes, and so hashes,
+        // exactly as it did before the field existed (the representative schema's hash is the
+        // golden above); a signal with it carries `"no_coalesce":true` after `key`.
+        let base = representative_schema();
+        assert!(!base.canonical_json().contains("no_coalesce"));
+        assert!(!base.to_json_pretty().contains("no_coalesce"));
+
+        let mut flagged = base.clone();
+        let store = flagged
+            .objects
+            .iter_mut()
+            .find_map(|o| o.store.as_mut())
+            .unwrap();
+        store.signals[1].no_coalesce = true;
+        let canonical = flagged.canonical_json();
+        assert!(
+            canonical.contains(r#""key":null,"no_coalesce":true}"#),
+            "{canonical}"
+        );
+        assert_eq!(canonical.matches("no_coalesce").count(), 1);
+        assert_ne!(flagged.hash(), base.hash());
+
+        // Both forms read back; a missing key means `false`.
+        assert_eq!(
+            Schema::from_json(&flagged.to_json_pretty()).unwrap(),
+            flagged
+        );
+        assert_eq!(Schema::from_json(&base.to_json_pretty()).unwrap(), base);
+    }
+
+    #[test]
     fn hash_ignores_docs() {
         assert_eq!(
             representative_schema().hash(),
@@ -560,6 +592,13 @@ mod tests {
                 Box::new(|s| {
                     let store = s.objects.iter_mut().find_map(|o| o.store.as_mut()).unwrap();
                     store.signals[0].key = None;
+                }),
+            ),
+            (
+                "signal no_coalesce flag",
+                Box::new(|s| {
+                    let store = s.objects.iter_mut().find_map(|o| o.store.as_mut()).unwrap();
+                    store.signals[0].no_coalesce = true;
                 }),
             ),
             (

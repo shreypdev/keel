@@ -353,6 +353,8 @@ pub struct SignalMeta {
     pub computed: bool,
     /// The `#[undra(key = "..")]` field, if any.
     pub key: Option<&'static str>,
+    /// `#[undra(no_coalesce)]`.
+    pub no_coalesce: bool,
 }
 
 impl From<&SignalMeta> for SignalDef {
@@ -363,6 +365,7 @@ impl From<&SignalMeta> for SignalDef {
             ty: (&m.ty).into(),
             computed: m.computed,
             key: m.key.map(str::to_owned),
+            no_coalesce: m.no_coalesce,
         }
     }
 }
@@ -528,6 +531,7 @@ mod tests {
                     ty: TypeRefMeta::I64,
                     computed: false,
                     key: None,
+                    no_coalesce: false,
                 },
                 SignalMeta {
                     name: "rows",
@@ -535,6 +539,7 @@ mod tests {
                     ty: TypeRefMeta::Vec(&TypeRefMeta::Named("Row")),
                     computed: false,
                     key: Some("id"),
+                    no_coalesce: false,
                 },
             ],
         }),
