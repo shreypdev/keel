@@ -50,6 +50,10 @@ pub mod restore_code {
     /// There is no running runtime, it is shut down, or `undra_restore` was called from inside a
     /// host callback.
     pub const UNAVAILABLE: u32 = 6;
+    /// A store's persisted values cannot become this build's types: they neither migrate
+    /// structurally nor through a `#[undra::migrate]` hook (ADR-037, `RestoreError::Incompatible`).
+    /// The reason is in the ERROR record the host's Log port received.
+    pub const INCOMPATIBLE: u32 = 7;
 }
 
 /// Decodes a `RuntimeConfig`, strictly (trailing bytes are an error).
@@ -283,9 +287,20 @@ pub(crate) fn poll() {
 /// between a shutdown and the next init keeps ADR-022's guarantee that a generation it may still
 /// hold is never issued again in this process.
 fn empty_snapshot() -> Vec<u8> {
-    let mut w = Writer::with_capacity(8);
+    // Layout 2 (ADR-037): no stores, the floor, this core's schema hash, no types, and the
+    // description of no store types.
+    let description = undra_runtime::undra_meta::StoresClosure {
+        stores: Vec::new(),
+        records: Vec::new(),
+        enums: Vec::new(),
+    }
+    .canonical_json();
+    let mut w = Writer::with_capacity(24 + description.len());
     w.write_u32(0);
     w.write_u32(undra_runtime::object_table::process_generation_floor());
+    w.write_u64(schema_hash());
+    w.write_u32(0);
+    w.write_str(&description);
     w.into_vec()
 }
 
@@ -308,6 +323,7 @@ pub(crate) fn restore_code(result: &Result<(), RestoreError>) -> u32 {
         Ok(()) => restore_code::OK,
         Err(RestoreError::Panicked { .. }) => restore_code::PANICKED,
         Err(RestoreError::ShutDown | RestoreError::Reentrant) => restore_code::UNAVAILABLE,
+        Err(RestoreError::Incompatible { .. }) => restore_code::INCOMPATIBLE,
         Err(
             RestoreError::Decode(_)
             | RestoreError::UnknownStoreType { .. }
@@ -370,9 +386,15 @@ mod tests {
     fn the_empty_snapshot_is_count_zero_then_the_process_floor() {
         let floor = undra_runtime::object_table::process_generation_floor();
         let bytes = empty_snapshot();
-        assert_eq!(bytes.len(), 8);
         assert_eq!(bytes[..4], [0; 4]);
-        let carried = u32::from_le_bytes(bytes[4..].try_into().unwrap());
+        let carried = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        // Layout 2 (ADR-037): it decodes, with this core's hash and no types.
+        let snapshot = undra_runtime::undra_wire::payload::Snapshot::decode(
+            &mut undra_runtime::undra_wire::Reader::new(&bytes),
+        )
+        .unwrap();
+        assert_eq!(snapshot.schema_hash, schema_hash());
+        assert!(snapshot.types.is_empty() && snapshot.stores.is_empty());
         assert!(
             carried >= floor,
             "{carried} < {floor}: the floor never goes down"
@@ -407,6 +429,15 @@ mod tests {
         assert_eq!(
             restore_code(&Err(RestoreError::Reentrant)),
             restore_code::UNAVAILABLE
+        );
+        assert_eq!(
+            restore_code(&Err(RestoreError::Incompatible {
+                type_id: 1,
+                store: "Profile".into(),
+                signal: "age".into(),
+                reason: "i32 cannot become f32".into(),
+            })),
+            restore_code::INCOMPATIBLE
         );
         for e in [
             RestoreError::Decode(WireError::BadMagic),

@@ -113,6 +113,10 @@ pub enum RestoreError {
     /// The snapshot payload is malformed.
     Decode(WireError),
     /// The snapshot names a store type that no `#[undra::store]` registered a restorer for.
+    ///
+    /// Since ADR-037 a restore does not fail for this: a store type the current build no longer
+    /// has is left out and reported ([`RestoreReport::dropped`]). The variant stays for code that
+    /// matches on it and maps to the same `undra_restore` code.
     UnknownStoreType {
         /// The type id from the snapshot.
         type_id: u32,
@@ -143,10 +147,49 @@ pub enum RestoreError {
         /// The floor from the snapshot.
         floor: u32,
     },
+    /// A store's persisted values cannot become today's types (ADR-037): the store type's
+    /// fingerprint differs, and a signal neither converts structurally nor has a migration hook
+    /// that accepts it (or a signal was added without `#[undra(default)]`). The runtime is
+    /// unchanged; the reason is also logged at ERROR.
+    Incompatible {
+        /// The store type.
+        type_id: u32,
+        /// The store type's name.
+        store: String,
+        /// The signal that does not convert (empty when the store as a whole cannot be read:
+        /// a damaged description).
+        signal: String,
+        /// Why, as the migration reported it.
+        reason: String,
+    },
     /// The runtime has been shut down.
     ShutDown,
     /// Called from inside a host callback on the thread that holds the core lock.
     Reentrant,
+}
+
+/// What a successful restore did ([`Runtime::restore_with_report`](crate::Runtime::restore_with_report)).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RestoreReport {
+    /// How many stores were rebuilt.
+    pub restored: usize,
+    /// The store types whose values were migrated (their fingerprint differed), by name.
+    pub migrated: Vec<String>,
+    /// Store types the snapshot has and this build no longer has: left out (ADR-037 decision 7).
+    pub dropped: Vec<DroppedStore>,
+    /// Whether the snapshot was written by a core with another schema hash.
+    pub schema_changed: bool,
+}
+
+/// A store type a restore left out because the current build no longer has it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DroppedStore {
+    /// The store type's id.
+    pub type_id: u32,
+    /// Its name, from the snapshot's description (or the id in hex).
+    pub name: String,
+    /// The handles of the stores left out; each answers `stale_handle`.
+    pub handles: Vec<u64>,
 }
 
 impl fmt::Display for RestoreError {
@@ -172,6 +215,24 @@ impl fmt::Display for RestoreError {
                 f,
                 "snapshot generation floor {floor:#010x} leaves no generation to issue"
             ),
+            RestoreError::Incompatible {
+                type_id,
+                store,
+                signal,
+                reason,
+            } => {
+                if signal.is_empty() {
+                    write!(
+                        f,
+                        "store `{store}` ({type_id:#010x}) cannot be restored: {reason}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "store `{store}` ({type_id:#010x}) cannot be restored: signal `{signal}`: {reason}"
+                    )
+                }
+            }
             RestoreError::ShutDown => f.write_str("the runtime is shut down"),
             RestoreError::Reentrant => {
                 f.write_str("E_REENTRANT: restore called from inside a host callback")

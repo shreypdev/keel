@@ -460,6 +460,7 @@ static COUNTER_META: ObjectMeta = ObjectMeta {
                 computed: false,
                 key: None,
                 no_coalesce: false,
+                default: false,
             },
             SignalMeta {
                 name: "label",
@@ -468,6 +469,7 @@ static COUNTER_META: ObjectMeta = ObjectMeta {
                 computed: false,
                 key: None,
                 no_coalesce: false,
+                default: false,
             },
         ],
     }),
@@ -784,4 +786,37 @@ pub fn wait_until(limit: std::time::Duration, mut cond: impl FnMut() -> bool) ->
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     cond()
+}
+
+/// A layout-2 snapshot (ADR-037) of `stores`, written as `rt` would: its schema hash, each store
+/// type once with today's fingerprint (`0` for a type the schema does not describe), and the
+/// description of those types.
+#[allow(dead_code)]
+pub fn snapshot_v2(
+    rt: &undra_runtime::Runtime,
+    generation_floor: u32,
+    stores: Vec<undra_wire::payload::StoreSnapshot>,
+) -> Vec<u8> {
+    let mut type_ids: Vec<u32> = Vec::new();
+    for s in &stores {
+        if !type_ids.contains(&s.type_id) {
+            type_ids.push(s.type_id);
+        }
+    }
+    let snapshot = undra_wire::payload::Snapshot {
+        generation_floor,
+        schema_hash: rt.schema_hash(),
+        types: type_ids
+            .iter()
+            .map(|&type_id| undra_wire::payload::SnapshotType {
+                type_id,
+                fingerprint: rt.schema().store_fingerprint(type_id).unwrap_or(0),
+            })
+            .collect(),
+        description: rt.schema().stores_closure(&type_ids).canonical_json(),
+        stores,
+    };
+    let mut w = undra_wire::Writer::new();
+    snapshot.encode(&mut w);
+    w.into_vec()
 }

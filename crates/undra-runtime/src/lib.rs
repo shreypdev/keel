@@ -71,6 +71,7 @@ mod lazy;
 pub mod log;
 mod object;
 pub mod object_table;
+pub mod persist;
 mod ports;
 mod runtime;
 mod stats;
@@ -78,7 +79,9 @@ mod sync_out;
 pub mod testing;
 mod timer;
 
-pub use config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
+pub use config::{
+    DroppedStore, InitError, MODE_DEV, MODE_INPROC, RestoreError, RestoreReport, RuntimeConfig,
+};
 pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::InitHook;

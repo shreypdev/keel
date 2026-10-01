@@ -21,7 +21,7 @@ fn empty_snapshot_with_floor(generation_floor: u32) -> Vec<u8> {
     let mut w = Writer::new();
     Snapshot {
         generation_floor,
-        stores: Vec::new(),
+        ..Snapshot::default()
     }
     .encode(&mut w);
     w.into_vec()
