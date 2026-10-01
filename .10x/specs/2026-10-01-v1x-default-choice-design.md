@@ -215,3 +215,26 @@ drafted and needed. Integrator decisions:
 
 Ownership: `runtime-lifecycle` (ADR-034/035/036 + ADR-019 amendment; opus), then
 `persistence-v2` (ADR-037 + A6; opus); `parity` (C4b, C4c, PO-4, TY recursive bug; sonnet, opus review).
+
+## Amendment D — boundary, compatibility and production ADRs accepted in direction (2026-10-01)
+
+ADR-040…046 and ADR-049 (`.10x/specs/2026-10-01-boundary-surface-plan.md` has the waves and
+sizes) are accepted in direction with the drafters' recommendations on every open decision,
+with these notes: ADR-046's `backtrace` dependency must pass the wasm32/iOS/Android build check
+before it is added (CLAUDE.md), else a lighter path; ADR-044's drop of the `Java_*` exports
+changes the dead-strip guard of ADR-029 (`symbols_present` then checks the table symbol and
+`JNI_OnLoad`'s `RegisterNatives`). Bundling as proposed: **one wire revision** (ADR-036 typed
+stream items, ADR-037 migrations, ADR-040's handle split and `u64` floor, ADR-043's lazy
+encodings), **one standard-surface revision** (`stdlib-v2`: ADR-049 storage errors, ADR-046's
+standard items), **one ABI version** (ADR-044's function table, C ABI v2).
+
+Consequences for pieces in flight: the React Native host (ADR-038) is written against the v1
+global symbols with every reference isolated in one shim file, and migrates to the ADR-044
+table when `abi-table` lands; `android-adapters` adopts `StorageError` when `stdlib-v2` lands.
+Also from device-bench: **E4 — the binding call path** (web 3.2–3.9 µs through the generated
+binding vs 80 ns target; iOS ~300 ns vs 60 ns; the core itself 44 ns) is a new piece after its
+review's cause analysis; the `undra init` template wasm at 135 KB gzipped vs its 120 KB budget
+is a size piece (E5) once the schema review attributes the growth.
+
+Wave 0 starts as the first wave of pieces merges: `abi-table` (ADR-044 enabling half, opus),
+`ios-floor` (ADR-045, sonnet), `newtypes` (ADR-042 half, sonnet).
