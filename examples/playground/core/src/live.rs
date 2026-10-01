@@ -90,6 +90,9 @@ pub async fn sse_follow(
 
 #[derive(Default)]
 struct Line {
+    /// Which connection this is: a `read` that started on an older one does not put its stream
+    /// back over a newer one's.
+    generation: u64,
     conn: Option<WsConnection>,
     inbound: Option<WsMessages>,
 }
@@ -120,7 +123,17 @@ impl Live {
         protocols: Vec<String>,
         headers: Vec<Header>,
     ) -> Result<String, WsError> {
-        let previous = core::mem::take(&mut *lock(&self.line));
+        let previous = {
+            let mut line = lock(&self.line);
+            let generation = line.generation + 1;
+            core::mem::replace(
+                &mut *line,
+                Line {
+                    generation,
+                    ..Line::default()
+                },
+            )
+        };
         if let Some(conn) = previous.conn {
             drop(previous.inbound);
             let _ = conn.close(1000, "replaced").await;
@@ -131,10 +144,10 @@ impl Live {
         let conn = WsConnection::connect(&ctx, &url, WsOptions { protocols, headers }).await?;
         let protocol = conn.protocol().to_owned();
         let inbound = conn.messages();
-        *lock(&self.line) = Line {
-            conn: Some(conn),
-            inbound: Some(inbound),
-        };
+        let mut line = lock(&self.line);
+        line.generation += 1;
+        line.conn = Some(conn);
+        line.inbound = Some(inbound);
         Ok(protocol)
     }
 
@@ -148,7 +161,11 @@ impl Live {
     /// close code, a network failure); a stream that ended cleanly (after [`disconnect`](Live::disconnect))
     /// returns the messages it had.
     pub async fn read(&self, count: u32) -> Result<Vec<WsMessage>, WsError> {
-        let mut inbound = lock(&self.line).inbound.take().ok_or_else(not_connected)?;
+        let (generation, mut inbound) = {
+            let mut line = lock(&self.line);
+            let inbound = line.inbound.take().ok_or_else(not_connected)?;
+            (line.generation, inbound)
+        };
         let mut read = Vec::with_capacity(count as usize);
         let mut outcome = Ok(());
         while read.len() < count as usize {
@@ -161,7 +178,11 @@ impl Live {
                 None => break,
             }
         }
-        lock(&self.line).inbound = Some(inbound);
+        let mut line = lock(&self.line);
+        if line.generation == generation {
+            line.inbound = Some(inbound);
+        }
+        drop(line);
         outcome.map(|()| read)
     }
 
@@ -266,6 +287,35 @@ mod tests {
             fakes.web_socket.connections()[0].closed_by_core,
             Some((1001, String::new()))
         );
+    }
+
+    #[test]
+    fn a_read_on_an_old_connection_does_not_replace_the_new_one() {
+        let t = TestRuntime::new();
+        let fakes = fakes::install(&t);
+        let live = std::sync::Arc::new(Live::new(t.ctx()));
+        let l = live.clone();
+        t.run_until(async move { l.connect("ws://a.test".into(), vec![], vec![]).await })
+            .unwrap();
+        let first = fakes.web_socket.last_conn().unwrap();
+        // A read waits on the first connection while the platform connects again.
+        let l = live.clone();
+        let reading = t.ctx().spawn(async move {
+            let _ = l.read(1).await;
+        });
+        t.run_pending();
+        let l = live.clone();
+        t.run_until(async move { l.connect("ws://b.test".into(), vec![], vec![]).await })
+            .unwrap();
+        let second = fakes.web_socket.last_conn().unwrap();
+        assert_ne!(first, second);
+        fakes.web_socket.push(first, "late");
+        t.run_pending();
+        let _ = reading;
+        fakes.web_socket.push(second, "fresh");
+        let l = live.clone();
+        let read = t.run_until(async move { l.read(1).await });
+        assert_eq!(read, Ok(vec![WsMessage::Text("fresh".into())]));
     }
 
     #[test]
