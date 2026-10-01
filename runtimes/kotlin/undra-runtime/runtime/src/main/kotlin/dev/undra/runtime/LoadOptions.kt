@@ -33,6 +33,11 @@ public enum class Mode {
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
+ * @property reconnect how a [Mode.REMOTE] core reconnects by itself when its connection drops (ADR-034):
+ *   `null` turns it off, and a drop then closes the core. The default is on, with [ReconnectPolicy]'s defaults.
+ * @property onConnectionChange called with every change of [UndraCore.connectionState], starting with
+ *   [ConnectionState.Connecting], on the thread that changed it (a thread of the runtime's own for a reconnect). It
+ *   must return quickly and must not call into the core.
  */
 public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
@@ -42,11 +47,13 @@ public class LoadOptions(
     public val defaultAdapters: Boolean = true,
     public val remoteTimeout: Duration = 30.seconds,
     public val mirror: MirrorOptions = MirrorOptions(),
+    public val reconnect: ReconnectPolicy? = ReconnectPolicy(),
+    public val onConnectionChange: ((ConnectionState) -> Unit)? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
             "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
-            "mirror=$mirror)"
+            "mirror=$mirror, reconnect=$reconnect)"
 }
 
 /**
