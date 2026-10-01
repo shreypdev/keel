@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S18 of contract-tests/scenarios.md on the JVM over
-# JNI against the real libundra_core of the playground core, then checks all eighteen passed.
+# The Kotlin column of the contract tests: runs S01..S18 and S26 of contract-tests/scenarios.md on the JVM
+# over JNI against the real libplayground_core of the playground core (and, for S26, libplayground_a and
+# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks all nineteen passed.
 #
 #   contract-tests/kotlin/run.sh
 #
 # What it does, each step only when something changed:
-#   1. builds the host core with the undra CLI (`undra build -C examples/playground --platform host`) when
-#      build/host/libundra_core.* is missing or older than the core's sources
+#   1. builds the host cores with the undra CLI (`undra build -C <project> --platform host`) when
+#      build/host/lib<namespace>.* is missing or older than the core's sources
 #   2. compiles the Kotlin runtime's main sources (runtimes/kotlin/undra-runtime/scripts/test-local.sh main)
-#   3. compiles the generated bindings (examples/playground/generated/kotlin) together with the runner (src/)
+#   3. compiles the generated bindings (examples/playground/generated/kotlin and examples/two-cores/{a,b}/generated/kotlin)
+#      together with the runner (src/)
 #   4. runs the runner on the JVM with -Djava.library.path pointing at the core, and pipes its output
 #      through contract-tests/check.sh kotlin
 #

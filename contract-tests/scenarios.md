@@ -382,11 +382,11 @@ List `s14`; the server serves `[]`. A handle observes it.
    step 6's shutdown a timer-paced core task is running (`Stress.start`); for 200 ms after the shutdown
    no port call reaches the runner's adapters (the runner counts the calls its Clock, Log, Http and Kv
    adapters receive). Then `UndraCore.load` with the same options succeeds again in the same process
-   (Kotlin: `close()` reached the JNI `UndraNative.shutdown`; Swift: `undra_shutdown`), `stats()` of the
+   (Kotlin: `close()` reached the JNI `shutdown` of the bindings' `UndraCoreNative`; Swift: the table's `shutdown`), `stats()` of the
    new core reports no live handles, the generated `add(1, 2) == 3` runs on it, for 200 ms its Clock
    adapter receives no call (the new core runs no timer-paced task), and it closes cleanly. After each
    close, the native core reports no thread of its own still running: with no core loaded,
-   `undra_stats_json` (Kotlin `UndraNative.statsJson()`) says `runtime_threads == 0`. That is the check
+   the core's `stats_json` (Kotlin `UndraCoreNative.statsJson()`) says `runtime_threads == 0`. That is the check
    that sees a task which survived the shutdown: its port calls never reach the runner's adapters (Kotlin
    detaches the transport first; the native shutdown retires the port registrations and the Swift
    adapters are detached), so the windows alone cannot.
