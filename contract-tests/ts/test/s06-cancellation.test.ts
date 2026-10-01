@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
-import { Probe } from "@playground/core";
+import { Probe, add, failLater } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
-import { step, waitFor } from "../src/wait.js";
+import { sleep, step, waitFor } from "../src/wait.js";
 
 // S06 cancellation: an AbortSignal cancels a call in the core, and the core drops the future
 // (which the Probe's drop guard counts); other calls are unaffected; cancelling after completion
@@ -76,6 +76,25 @@ test("S06 cancellation", async () => {
     expect(seen.completed).toBe(2);
     const after = await counters(core);
     expect(after.cancelled - before.cancelled).toBe(0);
+  });
+
+  await step("6. a cancelled call of a method with a typed error ends as cancelled too", async () => {
+    const beforeTyped = await counters(core);
+    const typed = new AbortController();
+    const failing = failLater(5_000, 1, core, typed.signal);
+    failing.catch(() => {});
+    await sleep(100);
+    const abortedAt = Date.now();
+    typed.abort();
+    const error = await failing.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error, "the call rejects with the signal's reason, not with a LabError").toBe(typed.signal.reason);
+    expect((error as Error).name).toBe("AbortError");
+    expect(Date.now() - abortedAt, "the cancelled call ends within a second").toBeLessThan(1_000);
+    await waitFor("the cancellation of the typed call to be counted", async () => (await counters(core)).cancelled - beforeTyped.cancelled === 1);
+    expect(await add(1, 1, core)).toBe(2);
   });
 
   probe.close();

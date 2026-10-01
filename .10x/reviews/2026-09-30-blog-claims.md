@@ -166,6 +166,14 @@ These are not claims about other tools, but the comparison posts lean on them.
 | `Computed<Vec<T>>` crosses as a full value (only a keyed `Signal<Vec<T>>` gets patches) | `docs/SPEC.md` section 4.3 and E0008; generated `visible` handles only `.fullValue` | CONFIRMED. docs/SPEC.md:708 (`key` only on `Signal<Vec<T>>`), :883-884; generated Stores.swift `apply` case 2 handles only `.fullValue` |
 | Platform runtimes apply change-sets in one main-thread hop per batch | `runtimes/swift/.../Mirror.swift`, SPEC section 11 (the docs page says "per-frame coalescing"; the code batches per hop, and the posts say "in one hop") | CONFIRMED. runtimes/swift/.../Core/Mirror.swift:101-121 (enqueue, one `Task { @MainActor }` hop, flush); runtimes/kotlin/.../KeelDispatchers.kt:22 (`Dispatchers.Main.immediate`); runtimes/ts/@keel/runtime/src/mirror.ts:12,33 ("one flush per macrotask"). site/docs/concepts.html:115 and docs/SPEC.md:677 say "per-frame coalescing": not what the code does (product finding P2) |
 
+**Note on the row "Generated Swift wrappers stop the process" (product finding P1), 2026-09-30:** superseded by
+ADR-032 (`wt/swift-errors`). Generated Swift no longer traps: a call throws its own `E`, `CancellationError` or
+`UndraCallError` (`.panicked` for a core panic), and a command reports through `LoadOptions.onError`. Post 4's
+"Typed errors and panic containment" paragraph now says so, its Swift `apply` excerpt is the regenerated code (decode,
+`finish()`, then store), and its `add(title:)` comment reads `async throws`. Post 1's Swift excerpt and its "typed
+`throws(TodoError)`" sentence were brought in line the same day. Evidence: `contract-tests/swift/Tests/ContractTests/S15_S17_Lifecycle.swift`
+(S17.1 through the generated `explode`), `.10x/reviews/2026-09-30-swift-error-channel-review.md`.
+
 ## Discrepancies found in our own material (not in the posts)
 
 * `docs/blueprint.html` section 02 describes Crux as "UniFFI underneath" and as re-emitting the whole view model on every event. Crux's README (read 2026-09-30) names BoltFFI, and the view is pulled with `view()` after a render request. The posts follow the README.

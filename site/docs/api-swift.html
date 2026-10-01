@@ -60,7 +60,7 @@
   <main id="main" class="prose">
     <p class="crumb">API overview</p>
     <h1>API overview, Swift</h1>
-    <p class="lede">Generated Swift is written the way a Swift engineer would write it by hand: value types, typed throws, async/await, AsyncSequence and an @Observable store. Swift 6 language mode, strict concurrency, no Objective-C.</p>
+    <p class="lede">Generated Swift is written the way a Swift engineer would write it by hand: value types, error enums you catch by case, async/await, AsyncSequence and an @Observable store. Swift 6 language mode, strict concurrency, no Objective-C.</p>
 <p><code>undra bindgen</code> writes a Swift package (<code>Sources/&lt;Module&gt;/Generated/*.swift</code> and a <code>Package.swift</code>) that depends only on <code>UndraRuntime</code>. The shapes below come from the playground's generated code and the specification (§10.1).</p>
 <h2 id="loading-the-core">Loading the core<a class="anchor" href="#loading-the-core" aria-label="Link to this section">#</a></h2>
 <p>Attach the app to its core once, before any store is created. The runtime checks the core's schema hash against the one the bindings were generated from and throws a clear error if they differ.</p>
@@ -73,7 +73,7 @@ static func start() throws {
         .replacing(PlaygroundNetwork.shared)             // swap one port
     try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
 }</code></pre></div>
-<p>In debug builds you can attach to the core that <code>undra dev</code> serves instead, with <code class="cw">UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))</code>. After loading, every generated type defaults to the shared core: <code>try Todos()</code> is <code>try Todos(ctx: .shared)</code>.</p>
+<p>In debug builds you can attach to the core that <code>undra dev</code> serves instead, with <code class="cw">UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))</code>. After loading, every generated type defaults to the shared core: <code>try Todos()</code> is <code>try Todos(ctx: .shared)</code>. Before a core is loaded, or after <code>shutdown()</code>, <code>UndraCore.shared</code> is a shut-down placeholder: constructors throw <code>UndraCallError.unavailable(.closed)</code> instead of stopping the app, and the first use logs what to do.</p>
 <h2 id="type-mapping">Type mapping<a class="anchor" href="#type-mapping" aria-label="Link to this section">#</a></h2>
 <div class="table-wrap"><table><thead><tr><th>Rust</th><th>Swift</th></tr></thead><tbody><tr><td><code>bool</code>, <code>f32</code>, <code>f64</code></td><td><code>Bool</code>, <code>Float</code>, <code>Double</code></td></tr><tr><td><code>i8</code> … <code>i64</code>, <code>u8</code> … <code>u64</code></td><td><code>Int8</code> … <code>Int64</code>, <code>UInt8</code> … <code>UInt64</code></td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>String</code>, <code>[UInt8]</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Date</code>, <code>UUID</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T?</code>, <code>[T]</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>[K: V]</code></td></tr><tr><td>record, enum, error</td><td><code>struct</code>, <code>enum</code>, <code>enum</code> conforming to <code>Error</code></td></tr></tbody></table></div>
 <p>Names follow the platform: Rust <code>snake_case</code> becomes <code>camelCase</code> for methods and fields and <code>PascalCase</code> for types, and enum variants become <code>lowerCamel</code> cases.</p>
@@ -101,30 +101,45 @@ public enum Figure: UndraEnum, Sendable, Hashable {
     case empty
 }</code></pre></div>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
-<p>A Rust <code>#[undra::error]</code> becomes a Swift <code>enum</code> conforming to <code>Error</code> (and <code>LocalizedError</code>, with the message from <code>#[error("…")]</code>). Functions that can fail use <strong>typed throws</strong>.</p>
+<p>A Rust <code>#[undra::error]</code> becomes a Swift <code>enum</code> conforming to <code>Error</code> (and <code>LocalizedError</code>, with the message from <code>#[error("…")]</code>). A generated call that can fail is <code>throws</code> (or <code>async throws</code>) and fails with exactly one of three things: its own error, thrown as the enum itself; <code>CancellationError</code>, when the calling task was cancelled; or <code>UndraCallError</code>, for anything else that went wrong with the call. The method's <code>- Throws:</code> documentation names its error.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">public enum TodoError: UndraError, Error, Sendable, Hashable {
     case emptyTitle            // "the title cannot be empty"
     // a variant that wraps another error carries it: case http(HttpError)
 }
 
 do {
-    let todo = try await todos.add(title: draft)
+    _ = try await todos.add(title: draft)
+} catch TodoError.emptyTitle {
+    problem = "Enter a title"
+} catch is CancellationError {
+    // the view went away; nothing to do
 } catch {
-    // `error` is a TodoError, not a string to parse
-    print(error.localizedDescription)
+    problem = error.localizedDescription   // an UndraCallError: panicked, refused, …
 }</code></pre></div>
-<p>Typed throws needs Swift 6. <code>undra.toml</code> has <code>swift_typed_throws = false</code> for code that must still emit plain <code>throws</code>. A failure the shape of the API cannot express (a core panic, a malformed reply, schema drift) stops the process with a message, because it means the core and the bindings disagree.</p>
+<p><code>UndraCallError</code> is <code>Sendable</code>, <code>Equatable</code> and <code>LocalizedError</code>, so <code>localizedDescription</code> reads well in an alert. Generated Swift never stops the app: no reply, cancellation, lost connection or undecodable byte reaches <code>fatalError</code>, in debug or release.</p>
+<div class="table-wrap"><table><thead><tr><th>Case</th><th>When</th></tr></thead><tbody><tr><td><code>.cancelledByCore</code></td><td>The core cancelled the call: a restore replaced the object it ran on, or the core shut down. Not a <code>CancellationError</code>, because your task was not cancelled and the write did not land.</td></tr><tr><td><code>.panicked(message:backtrace:)</code></td><td>The core panicked while running the call. It caught the panic and keeps working.</td></tr><tr><td><code>.refused(reason:)</code></td><td>The core would not run the call: the object was closed or replaced by a restore, the call came from inside one of the core's callbacks (<code>E_REENTRANT</code>), or its arguments did not decode.</td></tr><tr><td><code>.unavailable(UndraTransportError)</code></td><td>The core cannot be reached: it was shut down or never loaded, or the remote connection closed or timed out.</td></tr><tr><td><code>.malformed(String)</code></td><td>The core answered with something the bindings cannot read. After a successful schema check this is a bug in Undra; report it with the text.</td></tr></tbody></table></div>
+<p><strong>Commands report instead of throwing.</strong> A synchronous method that returns nothing and has no error type, such as <code>todos.toggle(id:)</code>, stays non-throwing, so a <code>Button</code> action or a <code>Binding</code> setter calls it directly. If it fails, the runtime logs the failure at error level, passes an <code>UndraUnhandledError</code> to <code>LoadOptions.onError</code> and returns. A store's properties change only from the core's change-sets, so a refused command leaves the screen showing exactly what the core holds. A store that cannot decode a change from the core skips it and reports it the same way.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">try UndraCore.load(.inproc(
+    expectedSchemaHash: UndraIds.schemaHash,
+    onError: { unhandled in
+        // "Todos.toggle failed: the Undra core refused the call: …"
+        logger.error("\(unhandled.description, privacy: .public)")
+    }
+))</code></pre></div>
+<p>The handler runs on the thread that made the call (the main actor for a store), so keep it short, and it must not call into Undra. To stop at the failing line in debug builds, install <code>onError: { assertionFailure("\($0)") }</code>.</p>
+<p><strong>Typed throws are for ports.</strong> A port requirement keeps <code>throws(E)</code>, because your app implements it and <code>E</code> tells it which errors the core understands; <code>swift_typed_throws = false</code> in <code>undra.toml</code> emits plain <code>throws</code> there. Calls never use typed throws: Swift's own cancellation (<code>Task.checkCancellation()</code>, <code>Task.sleep</code>) throws an untyped <code>CancellationError</code>, which a <code>throws(E)</code> function cannot pass on.</p>
 <h2 id="objects-and-functions">Objects and functions<a class="anchor" href="#objects-and-functions" aria-label="Link to this section">#</a></h2>
-<p>An object is a <code>final class</code> holding a handle into the core. Sync methods are plain functions, async methods are <code>async</code>, and stream methods return an <code>AsyncThrowingStream</code>. A free Rust function is a free Swift function that takes the core last.</p>
+<p>An object is a <code>final class</code> holding a handle into the core. Sync methods that return a value are <code>throws</code>, async methods are <code>async throws</code>, a sync method that returns nothing is a command (it reports instead of throwing, see <a href="#errors">Errors</a>), and stream methods return an <code>AsyncThrowingStream</code> that ends with the same three failures. A free Rust function is a free Swift function that takes the core last.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">public final class Probe: UndraObject, @unchecked Sendable {
     public init(ctx: UndraCore = .shared) throws            // the constructor `new`
-    public func counters() -&gt; ProbeCounters                // sync
+    public func counters() throws -&gt; ProbeCounters         // sync
     public func wait(ms: UInt32) async throws -&gt; UInt32    // async
     public func ticks(count: UInt32) -&gt; AsyncThrowingStream&lt;UInt32, Error&gt;   // stream
+    public func reset()                                     // a command
 }
 
-public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) -&gt; Int32
-public func area(_ figure: Figure, ctx: UndraCore = .shared) throws(LabError) -&gt; Double</code></pre></div>
+public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -&gt; Int32
+public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -&gt; Double   // throws LabError</code></pre></div>
 <p>Sync methods on an in-process core call straight into the core (<code>undra_call_sync</code>). Streams apply real backpressure: the generated code grants credit as your loop consumes items, and dropping the stream stops it in the core.</p>
 <p>Release an object with <code>close()</code>, which is idempotent. <code>deinit</code> is only a backstop for objects that go out of scope without it, so hold an object for as long as you need its state.</p>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
@@ -137,10 +152,10 @@ public final class Todos: UndraStore {
     public private(set) var remaining: UInt32      // computed by the core
 
     public init(ctx: UndraCore = .shared) throws
-    public func setFilter(_ f: Filter)
-    public func add(title: String) async throws(TodoError) -&gt; Todo
+    public func setFilter(_ f: Filter)                       // a command
+    public func add(title: String) async throws -&gt; Todo     // throws TodoError
 }</code></pre></div>
-<p>Reading <code>todos.visible</code> is a plain property read: it never calls into the core. The initial values are decoded from the change-set the core emits when the store starts observing during <code>init</code>.</p>
+<p>Reading <code>todos.visible</code> is a plain property read: it never calls into the core. The initial values are decoded from the change-set the core emits when the store starts observing during <code>init</code>. Commands such as <code>toggle(id:)</code> do not throw, so a <code>Button</code> calls them without <code>try</code>:</p>
 <div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">struct TodosScreen: View {
     let todos: Todos
     var body: some View {

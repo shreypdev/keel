@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CallTarget, UndraReplyError, ReplyStatus } from "@undra/runtime";
-import { BigList, UndraIds, LabError, ListError, TodoError, Todos, add, failLater, parseCount } from "@playground/core";
+import { BigList, Counter, UndraIds, LabError, ListError, TodoError, Todos, add, failLater, parseCount } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step } from "../src/wait.js";
@@ -101,5 +101,19 @@ test("S05 error propagation", async () => {
     expect(await add(1, 2, core)).toBe(3);
     const end = await counters(core);
     expect(end.badRequests - start.badRequests).toBe(3);
+  });
+
+  await step("6. through the generated bindings, closed objects refuse as bad requests", async () => {
+    // TypeScript rejects from every shape (Swift's command `Counter.increment()` reports to `onError`, ADR-032).
+    const beforeClosed = await counters(core);
+    const list = await BigList.create(core);
+    list.close();
+    expectBadRequest(await failure(() => list.removeAt(0)));
+    const counter = await Counter.create(core);
+    counter.close();
+    expectBadRequest(await failure(() => counter.increment()));
+    const afterClosed = await counters(core);
+    expect(afterClosed.badRequests - beforeClosed.badRequests, "the two closed calls were counted as bad requests").toBe(2);
+    expect(await add(1, 2, core)).toBe(3);
   });
 });

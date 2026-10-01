@@ -5,6 +5,7 @@ import dev.undra.playground.core.Counter
 import dev.undra.playground.core.Filter
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.Parity
+import dev.undra.playground.core.Probe
 import dev.undra.playground.core.Todos
 import dev.undra.runtime.UndraException
 import dev.undra.runtime.UndraReplyException
@@ -12,6 +13,11 @@ import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ReplyStatus
 import java.util.Random
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 
 /** S15: a snapshot of every store restores them in place: the handles the app holds stay valid. */
@@ -83,6 +89,30 @@ fun s15Snapshot(w: World) {
 
     // 8. The restore made no handles of its own: what is alive is the three stores that survive.
     expectEq("live_handles after the restore", handlesAtStart + 3, w.stats().liveHandles)
+
+    // 9. A call in flight across a restore ends as cancelled by the core (not as a platform cancellation), and
+    // the invalidated object then refuses calls through the bindings.
+    val probe = Probe.create()
+    val hangEnded = CompletableFuture<Throwable?>()
+    CoroutineScope(Dispatchers.Default).async {
+        try {
+            probe.hang()
+            hangEnded.complete(null)
+        } catch (e: Throwable) {
+            hangEnded.complete(e)
+            throw e
+        }
+    }
+    awaitEq("probe.counters().started", 1u) { probe.counters().started }
+    core.restore(core.snapshot())
+    val hangOutcome = hangEnded.get(WAIT_MS, TimeUnit.MILLISECONDS)
+    check(hangOutcome is UndraReplyException && hangOutcome.status == ReplyStatus.CANCELLED) {
+        "hang() across a restore ended with $hangOutcome, not UndraReplyException(CANCELLED)"
+    }
+    expectBadRequest("probe.counters() after the restore", expectFails("probe.counters() after the restore") { probe.counters() })
+    expectBadRequest("probe.reset() after the restore", expectFails("probe.reset() after the restore") { probe.reset() })
+    probe.close()
+
     todos.close()
     counter.close()
     list.close()

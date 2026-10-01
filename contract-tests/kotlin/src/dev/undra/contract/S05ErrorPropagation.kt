@@ -1,6 +1,7 @@
 package dev.undra.contract
 
 import dev.undra.playground.core.BigList
+import dev.undra.playground.core.Counter
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.LabError
 import dev.undra.playground.core.ListError
@@ -62,10 +63,22 @@ fun s05ErrorPropagation(w: World) {
     // 5. The core is unharmed, and exactly those three requests were counted as bad.
     expectEq("add(1, 2) afterwards", 3, add(1, 2))
     expectEq("bad_requests grown by the three bad requests", 3L, w.stats().badRequests - badRequestsAtStart)
+
+    // 6. Through the generated bindings, on closed objects: both calls throw a bad request (Kotlin throws from
+    // every shape; Swift's command `Counter.increment()` reports to `onError` instead, ADR-032).
+    val badRequestsBeforeClosed = w.stats().badRequests
+    val closedList = BigList.create()
+    closedList.close()
+    expectBadRequest("BigList.remove_at(0) on a closed list", expectFails("BigList.remove_at(0) on a closed list") { closedList.removeAt(0u) })
+    val closedCounter = Counter.create()
+    closedCounter.close()
+    expectBadRequest("Counter.increment() on a closed counter", expectFails("Counter.increment() on a closed counter") { closedCounter.increment() })
+    expectEq("bad_requests grown by the two closed calls", 2L, w.stats().badRequests - badRequestsBeforeClosed)
+    expectEq("add(1, 2) after the closed calls", 3, add(1, 2))
 }
 
 /** Checks that [e] is a bad-request reply that says why. */
-private fun expectBadRequest(what: String, e: UndraReplyException) {
+internal fun expectBadRequest(what: String, e: UndraReplyException) {
     expectEq("$what: the reply status", ReplyStatus.BAD_REQUEST, e.status)
     check(!e.badRequestReason.isNullOrBlank()) { "$what: the bad request carries no reason" }
 }

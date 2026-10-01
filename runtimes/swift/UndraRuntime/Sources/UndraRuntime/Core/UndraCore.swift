@@ -45,19 +45,38 @@ public final class UndraCore: @unchecked Sendable {
 
     private static let sharedSlot = Guarded<UndraCore?>(nil)
 
+    /// What `shared` returns when no core is loaded: shut down from the start, over a transport
+    /// that reaches nothing.
+    private static let unloaded = UndraCore(transport: UnloadedTransport(), isShutDown: true)
+
+    /// Whether the placeholder's "load a core" message has been logged.
+    private static let unloadedWarning = Guarded<Bool>(false)
+
     /// The change-set mirror: stores register with it and it applies the core's updates on the
     /// main actor. `register(handle) { signal, op, reader in ... }`.
     public let mirror: Mirror
 
     let transport: any UndraTransport
-    private let state = Guarded<State>(State())
+    private let state: Guarded<State>
     private let blockingTimeout: Double
+    private let onError: (@Sendable (UndraUnhandledError) -> Void)?
     private let deferredQueue = DispatchQueue(label: "dev.undra.runtime.deferred")
 
-    init(transport: any UndraTransport, blockingCallTimeout: Double = 30) {
+    /// True while `onError` runs on this task or thread, so a handler that makes a failing call
+    /// is only logged, never reported again.
+    @TaskLocal private static var isReporting = false
+
+    init(
+        transport: any UndraTransport,
+        blockingCallTimeout: Double = 30,
+        onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
+        isShutDown: Bool = false
+    ) {
         self.transport = transport
         self.mirror = Mirror()
         self.blockingTimeout = blockingCallTimeout
+        self.onError = onError
+        self.state = Guarded<State>(State(isShutDown: isShutDown))
     }
 
     // MARK: Loading
@@ -89,18 +108,36 @@ public final class UndraCore: @unchecked Sendable {
         return core
     }
 
-    /// The core that `UndraCore.load(_:)` attached first, and which is not shut down.
+    /// The core that `UndraCore.load(_:)` attached first and which is not shut down, or, when there
+    /// is none, a permanently shut-down placeholder.
     ///
-    /// Generated code uses it as the default `ctx`. Using it before a successful `load` is a
-    /// programming error and stops the process with a message that says so.
+    /// Generated code uses it as the default `ctx`. Using it before a successful `load`, or after
+    /// `shutdown()`, is a programming error but not a crash: calls on the placeholder fail with
+    /// ``UndraCallError/unavailable(_:)`` (`.closed`), constructors throw it, commands only log
+    /// (the placeholder has no `LoadOptions.onError`), and the first use logs what to do.
+    /// ``current`` still returns `nil` in that state, and the placeholder never becomes the shared
+    /// core.
     public static var shared: UndraCore {
         if let core = current {
             return core
         }
-        fatalError("UndraCore.shared was used before UndraCore.load(_:) succeeded. Load a core at app startup, before creating any Undra object.")
+        let first = unloadedWarning.withLock { (warned: inout Bool) -> Bool in
+            if warned {
+                return false
+            }
+            warned = true
+            return true
+        }
+        if first {
+            UndraLog.error(
+                "UndraCore.shared was used while no core is loaded (before UndraCore.load(_:) succeeds, or after shutdown()); calls on it fail with UndraCallError.unavailable(.closed). Load a core at app startup, before creating any Undra object."
+            )
+        }
+        return unloaded
     }
 
-    /// The shared core, or `nil` if none is loaded.
+    /// The shared core, or `nil` if none is loaded. While it is `nil`, ``shared`` returns the
+    /// shut-down placeholder, so check `current` (not `shared`) to learn whether a core is loaded.
     public static var current: UndraCore? {
         return sharedSlot.withLock { (slot: inout UndraCore?) -> UndraCore? in
             return slot
@@ -110,7 +147,11 @@ public final class UndraCore: @unchecked Sendable {
     /// Starts `transport` and completes the attachment. Tests call this with a scripted
     /// transport; it does not touch `UndraCore.shared`.
     static func connect(transport: any UndraTransport, options: LoadOptions) throws -> UndraCore {
-        let core = UndraCore(transport: transport, blockingCallTimeout: options.blockingCallTimeout)
+        let core = UndraCore(
+            transport: transport,
+            blockingCallTimeout: options.blockingCallTimeout,
+            onError: options.onError
+        )
         let startOptions = TransportStartOptions(
             platform: UndraCore.platformName,
             logLevel: options.logLevel,
@@ -210,6 +251,7 @@ public final class UndraCore: @unchecked Sendable {
     /// - Parameter method: repeats the method id carried by `target`; `target` is authoritative.
     /// - Throws: `UndraReplyError` for any status other than ok; `UndraProtocolError` for an
     ///   undecodable reply; `UndraTransportError` if the core is shut down or does not answer.
+    ///   Generated methods map these with ``UndraCallError/mapped(_:)`` and never expose them.
     public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
         let callId = try reserveCallId()
@@ -230,7 +272,8 @@ public final class UndraCore: @unchecked Sendable {
     ///
     /// - Throws: `UndraReplyError` for any status other than ok (a typed error `E` is a reply with
     ///   `status == .error` whose `body` is the encoded `E`); `UndraTransportError` if the core is
-    ///   shut down or disconnected before it answers.
+    ///   shut down or disconnected before it answers. Generated methods map these with
+    ///   ``UndraCallError/mapped(_:domain:)`` and never expose them.
     public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8] {
         UndraCore.checkMethod(target, method)
         try Task.checkCancellation()
@@ -248,7 +291,7 @@ public final class UndraCore: @unchecked Sendable {
                     }
                     if !self.transport.send(call: payload) {
                         self.removePending(callId)
-                        slot.complete(.failure(UndraCore.rejection()))
+                        slot.complete(.failure(self.notSent()))
                     }
                 }
             },
@@ -340,7 +383,7 @@ public final class UndraCore: @unchecked Sendable {
             transport.streamCredit(callId: callId, credit: StreamChannel.initialCredit)
         } else {
             removePending(callId)
-            channel.finish(.failed(UndraCore.rejection()))
+            channel.finish(.failed(notSent()))
         }
         return StreamConsumer(channel)
     }
@@ -362,6 +405,33 @@ public final class UndraCore: @unchecked Sendable {
             throw UndraProtocolError.nullHandle
         }
         return handle
+    }
+
+    // MARK: Reporting
+
+    /// Reports a failure that no caller can see (ADR-032): logs it at error level and passes it to
+    /// `LoadOptions.onError`. Generated commands and store `apply` call it; it never throws and never
+    /// stops the process.
+    ///
+    /// `error` is mapped the way a throwing call's error is (``UndraCallError/mapped(_:)``), so the
+    /// handler always receives an ``UndraCallError``. The handler runs synchronously on the calling
+    /// thread. A report made while the handler is running (a handler that calls a failing command) is
+    /// only logged.
+    ///
+    /// - Parameters:
+    ///   - error: What the call threw.
+    ///   - operation: What failed, as Swift spells it, for example `"Todos.toggle"`.
+    public func report(_ error: any Error, operation: String) {
+        let mapped = (UndraCallError.mapped(error) as? UndraCallError)
+            ?? UndraCallError.malformed(String(describing: error))
+        let unhandled = UndraUnhandledError(operation: operation, error: mapped)
+        UndraLog.error(unhandled.description)
+        guard let handler = onError, !UndraCore.isReporting else {
+            return
+        }
+        UndraCore.$isReporting.withValue(true) {
+            handler(unhandled)
+        }
     }
 
     // MARK: Observation and handles
@@ -413,8 +483,14 @@ public final class UndraCore: @unchecked Sendable {
     /// Registers the host implementation of port `id`, replacing any earlier one.
     ///
     /// `impl` usually comes from a generated `<name>PortImpl(_:)` function. The standard ports
-    /// have default adapters (`LoadOptions.adapters`); registering one afterwards overrides it.
+    /// have default adapters (`LoadOptions.adapters`); registering one afterwards overrides it. A
+    /// shut-down core (or the placeholder `shared` returns before a core is loaded) ignores the
+    /// call and logs a warning: register ports on the core `load(_:)` returned.
     public func registerPort(_ id: UInt32, _ impl: PortImpl) {
+        if isShutDown {
+            UndraLog.warning("registerPort(\(id)) on a shut-down UndraCore is ignored; register ports on the core UndraCore.load(_:) returned")
+            return
+        }
         state.withLock { (current: inout State) -> Void in
             current.ports[id] = impl
         }
@@ -534,7 +610,7 @@ public final class UndraCore: @unchecked Sendable {
         setPending(callId, .blocking(box))
         if !transport.send(call: payload) {
             removePending(callId)
-            throw UndraCore.rejection()
+            throw notSent()
         }
         guard let result = box.wait(timeoutSeconds: blockingTimeout) else {
             removePending(callId)
@@ -619,6 +695,17 @@ public final class UndraCore: @unchecked Sendable {
         } catch {
             return .failure(error)
         }
+    }
+
+    /// The error for a call the transport did not send. The remote transport refuses to send only
+    /// once its connection is closed, and a call that raced with `shutdown()` found the transport
+    /// already shut: both are `UndraTransportError.closed`, as for a call in flight when the
+    /// connection went. Otherwise the in-process core refused it (`rejection()`).
+    private func notSent() -> any Error {
+        if transport.mode == .remote || isShutDown {
+            return UndraTransportError.closed
+        }
+        return UndraCore.rejection()
     }
 
     /// The error for a call the core refused without replying (`undra_call` returned 5).

@@ -16,3 +16,7 @@ takeover; treat these notes as [DISCOVERED] context, confirmed by reading the co
 - [stress-bench](stress-bench.md) (2026-09-30): harsh-conditions benchmark design; the core is
   not the bottleneck, platform delivery does not bound work or memory; ADR-031 (frame-coalesced
   delivery) proposed.
+||||||| 7b10e0e
+- 2026-09-30 [swift-error-channel.md](swift-error-channel.md): ADR-032 (proposed). Generated
+  Swift never traps; calls throw `E` / `CancellationError` / `UndraCallError`, sync `()` commands
+  report to `LoadOptions.onError`; typed throws only on port requirements.

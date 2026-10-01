@@ -100,7 +100,8 @@ pub struct BindingsConfig {
     pub ts_package: Option<String>,
     /// Map `i64`/`u64` to `number` instead of `bigint` in TypeScript.
     pub ts_js_number: bool,
-    /// Emit `throws(E)` in Swift; `true` unless turned off.
+    /// Emit `throws(E)` on Swift port requirements (calls always use plain
+    /// `throws`, ADR-032); `true` unless turned off.
     pub swift_typed_throws: Option<bool>,
 }
 
@@ -470,7 +471,7 @@ impl ProjectConfig {
              # kotlin_package = \"com.example.todo.core\"\n\
              # ts_scope = \"app\"\n\
              # ts_js_number = false        # i64/u64 as `number` instead of `bigint`\n\
-             # swift_typed_throws = true   # `throws(E)`; false emits plain `throws`"
+             # swift_typed_throws = true   # port requirements: `throws(E)`; false emits plain `throws`"
         );
         if let Some(v) = &self.bindings.swift_module {
             let _ = writeln!(out, "swift_module = {}", quote(v));

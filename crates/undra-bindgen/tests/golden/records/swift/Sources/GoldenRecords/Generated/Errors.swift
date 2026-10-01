@@ -2,10 +2,3 @@
 
 import Foundation
 import UndraRuntime
-
-/// Stops the process for a failure that the shape of the API cannot express: a core panic,
-/// a malformed reply, or schema drift. Such a failure means the core and the bindings disagree,
-/// so it is reported loudly instead of masquerading as a domain error.
-func undraUnexpected(_ error: any Error, file: StaticString = #fileID, line: UInt = #line) -> Never {
-    fatalError("Undra: unexpected failure of a core call: \(error)", file: file, line: line)
-}

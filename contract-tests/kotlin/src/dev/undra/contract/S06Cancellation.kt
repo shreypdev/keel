@@ -1,6 +1,8 @@
 package dev.undra.contract
 
 import dev.undra.playground.core.Probe
+import dev.undra.playground.core.add
+import dev.undra.playground.core.failLater
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -55,5 +57,27 @@ fun s06Cancellation(w: World) {
     runBlocking { done.await() }
     runBlocking { done.cancelAndJoin() }
     holdsFor("probe.counters().cancelled after cancelling a finished call", 100) { probe.counters().cancelled == 2u }
+
+    // 6. A cancelled call of a method with a typed error ends as cancelled too, not as its LabError.
+    val cancelledBeforeTyped = w.stats().cancelled
+    val typedEnded = CompletableFuture<Throwable?>()
+    val typed = scope.async {
+        try {
+            failLater(5_000u, 1)
+            typedEnded.complete(null)
+        } catch (e: Throwable) {
+            typedEnded.complete(e)
+            throw e
+        }
+    }
+    Thread.sleep(100)
+    val cancelRequested = System.nanoTime()
+    runBlocking { typed.cancelAndJoin() }
+    val typedOutcome = typedEnded.get(WAIT_MS, TimeUnit.MILLISECONDS)
+    check(typedOutcome is CancellationException) { "the cancelled fail_later ended with $typedOutcome, not a CancellationException" }
+    val tookMs = (System.nanoTime() - cancelRequested) / 1_000_000L
+    check(tookMs < 1_000L) { "the cancelled fail_later took $tookMs ms to end" }
+    awaitEq("crossings.cancelled grown by the cancelled typed call", 1L) { w.stats().cancelled - cancelledBeforeTyped }
+    expectEq("add(1, 1) after the cancelled typed call", 2, add(1, 1))
     probe.close()
 }

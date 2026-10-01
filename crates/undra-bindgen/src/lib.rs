@@ -69,13 +69,12 @@ pub struct Generator {
     /// Name of the SwiftPM module the Swift files belong to; also the
     /// directory below `Sources/`.
     pub swift_module: String,
-    /// Emit `throws(E)` for methods that return `Result<T, E>` (Swift 6).
-    /// When `false` they emit plain `throws`.
+    /// Swift port requirements use `throws(E)` (`true`) or plain `throws`
+    /// (`false`). Calls never use typed throws (ADR-032): a call fails with its
+    /// `E`, `CancellationError` or `UndraCallError`, which one `throws` carries.
     ///
-    /// Typed throws cannot express task cancellation or a broken core
-    /// contract: in typed mode a cancelled `Task` awaiting such a method, or a
-    /// core panic, stops the process with a diagnostic instead of throwing.
-    /// Turn it off for code that relies on structured cancellation.
+    /// A port is implemented by the host, so `throws(E)` there tells the
+    /// implementer exactly which errors the core understands.
     pub swift_typed_throws: bool,
     /// Kotlin package of every generated file; the files are written below
     /// `src/main/kotlin/<package path>/`.

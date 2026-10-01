@@ -33,8 +33,9 @@ extension ContractScenarios {
             low.double = .infinity
             low.text = ""
             low.blob = []
-            try self.checkSame(echoPrimitives(low, ctx: core), low, "the low extremes")
-            try check(echoPrimitives(low, ctx: core).single.sign == .minus, "-0.0 keeps its sign")
+            let echoedLow = try echoPrimitives(low, ctx: core)
+            try self.checkSame(echoedLow, low, "the low extremes")
+            try check(echoedLow.single.sign == .minus, "-0.0 keeps its sign")
 
             var high = typical
             high.long = 9_223_372_036_854_775_807
@@ -44,7 +45,7 @@ extension ContractScenarios {
             high.double = .nan
             high.text = String(repeating: "ü", count: 10_000)
             high.blob = (0 ..< 65_536).map { UInt8($0 % 251) }
-            let echoedHigh = echoPrimitives(high, ctx: core)
+            let echoedHigh = try echoPrimitives(high, ctx: core)
             try check(echoedHigh.double.isNaN, "NaN comes back as NaN")
             try self.checkSame(echoedHigh, high, "the high extremes")
             try checkEqual(echoedHigh.text.utf8.count, 20_000, "10,000 characters of ü are 20,000 bytes")
@@ -54,7 +55,7 @@ extension ContractScenarios {
 
             // 4. Nothing is aliased: what the core returns is the caller's own copy.
             let sent = typical
-            var returned = echoPrimitives(sent, ctx: core)
+            var returned = try echoPrimitives(sent, ctx: core)
             returned.blob[0] = 99
             returned.text += "!"
             returned.id = UUID()
@@ -120,16 +121,16 @@ extension ContractScenarios {
             try check(abs(circle - Double.pi) < 1e-12, "area of the unit circle is pi, got \(circle)")
 
             // 4. Errors arrive as the typed error of the binding.
-            try checkFailure(outcome { () throws(LabError) -> Double in try area(.label("hat"), ctx: core) },
-                             .rejected(code: 1, reason: "`hat` has no area"), "area(Label)")
-            try checkFailure(outcome { () throws(LabError) -> Double in try area(.empty, ctx: core) },
-                             .empty, "area(Empty)")
-            try checkFailure(outcome { () throws(LabError) -> UInt32 in try parseCount(text: "", ctx: core) },
-                             .empty, "parse_count(\"\")")
-            try checkFailure(outcome { () throws(LabError) -> UInt32 in try parseCount(text: "1234567890", ctx: core) },
-                             .tooLong(max: 9), "parse_count of ten digits")
-            try checkFailure(outcome { () throws(LabError) -> UInt32 in try parseCount(text: "4x2", ctx: core) },
-                             .notANumber("4x2"), "parse_count(\"4x2\")")
+            try checkThrows({ try area(.label("hat"), ctx: core) },
+                            LabError.rejected(code: 1, reason: "`hat` has no area"), "area(Label)")
+            try checkThrows({ try area(.empty, ctx: core) },
+                            LabError.empty, "area(Empty)")
+            try checkThrows({ try parseCount(text: "", ctx: core) },
+                            LabError.empty, "parse_count(\"\")")
+            try checkThrows({ try parseCount(text: "1234567890", ctx: core) },
+                            LabError.tooLong(max: 9), "parse_count of ten digits")
+            try checkThrows({ try parseCount(text: "4x2", ctx: core) },
+                            LabError.notANumber("4x2"), "parse_count(\"4x2\")")
             try checkEqual(try parseCount(text: " 42 ", ctx: core), 42, "parse_count of \" 42 \"")
 
             // 5. The message is the core's `Display`.
@@ -144,7 +145,7 @@ extension ContractScenarios {
             let core = try self.core
 
             // 1 and 2. The sync path is a plain function call: `plainSyncCalls` is not `async`.
-            let (forty, wrapped, greeting) = ContractScenarios.plainSyncCalls(core)
+            let (forty, wrapped, greeting) = try ContractScenarios.plainSyncCalls(core)
             try checkEqual(forty, 42, "add(40, 2)")
             try checkEqual(wrapped, -2_147_483_648, "add(2147483647, 1) wraps")
             try checkEqual(greeting, "Hello, Ada, from the playground core", "greet(\"Ada\")")
@@ -154,7 +155,7 @@ extension ContractScenarios {
             let started = ContinuousClock.now
             var wrong = 0
             for n in 0 ..< 10_000 {
-                if PlaygroundCore.add(a: Int32(n), b: 1, ctx: core) != Int32(n) + 1 {
+                if try PlaygroundCore.add(a: Int32(n), b: 1, ctx: core) != Int32(n) + 1 {
                     wrong += 1
                 }
             }
@@ -179,16 +180,16 @@ extension ContractScenarios {
             } catch let error as UndraReplyError {
                 try checkEqual(error.status, .badRequest, "status of a sync call of an async method")
             }
-            try checkEqual(PlaygroundCore.add(a: 1, b: 1, ctx: core), 2, "add(1, 1) after the refusal")
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 1, ctx: core), 2, "add(1, 1) after the refusal")
         }
     }
 
     /// The sync path from a plain, non-async function: it compiles only because `add`, `greet` do not suspend.
-    nonisolated static func plainSyncCalls(_ core: UndraCore) -> (Int32, Int32, String) {
+    nonisolated static func plainSyncCalls(_ core: UndraCore) throws -> (Int32, Int32, String) {
         return (
-            PlaygroundCore.add(a: 40, b: 2, ctx: core),
-            PlaygroundCore.add(a: 2_147_483_647, b: 1, ctx: core),
-            greet(name: "Ada", ctx: core)
+            try PlaygroundCore.add(a: 40, b: 2, ctx: core),
+            try PlaygroundCore.add(a: 2_147_483_647, b: 1, ctx: core),
+            try greet(name: "Ada", ctx: core)
         )
     }
 }

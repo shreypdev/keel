@@ -86,33 +86,35 @@ struct BigListScreen: View {
 
     private func insert(at index: Int) {
         edits += 1
-        run { () throws(ListError) in
+        run {
             _ = try list.insertAt(index: UInt32(index), label: "Inserted \(edits)")
         }
     }
 
     private func update(at index: Int) {
         edits += 1
-        run { () throws(ListError) in
+        run {
             try list.updateAt(index: UInt32(index), label: "Updated \(edits)")
         }
     }
 
     /// Moves the top row five places down.
     private func move() {
-        run { () throws(ListError) in
+        run {
             try list.moveItem(from: UInt32(anchor), to: UInt32(anchor + 5))
         }
     }
 
     private func remove() {
-        run { () throws(ListError) in
+        run {
             try list.removeAt(index: UInt32(anchor))
         }
     }
 
-    /// Runs one call into the core; a position the core refuses is a typed `ListError`.
-    private func run(_ action: () throws(ListError) -> Void) {
+    /// Runs one call into the core. A position the core refuses is a `ListError`; anything else that
+    /// can go wrong with the call (a panic in the core, a closed list) arrives as an `UndraCallError`.
+    /// Both read well as `localizedDescription`.
+    private func run(_ action: () throws -> Void) {
         do {
             try action()
             problem = nil

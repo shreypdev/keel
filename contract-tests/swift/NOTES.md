@@ -9,6 +9,7 @@ pipes the `SCENARIO` lines through `../check.sh swift`.
 | Path | What |
 |---|---|
 | `Tests/ContractTests/Harness/` | the fakes of scenarios.md: `ManualClock`, `FakeServer` (the `Http` port), `MemoryKv`, `CapturingLog`, and `Fixture` (the one core of the process and its adapters) |
+| `Tests/ContractTests/ApplyReportTests.swift` | not a scenario: a generated store skips a change it cannot decode and reports it through `onError` (ADR-032, decision 6); it runs before the scenarios, on the core they share |
 | `Tests/ContractTests/ContractScenarios.swift` and `S*.swift` | one XCTest per scenario, `testS07_streamWithBackpressure` and so on, in one class so that XCTest's alphabetical order is the order of the ids |
 | `Packages/PlaygroundCore` | a symlink to `examples/playground/generated/swift`, see below |
 
@@ -42,9 +43,19 @@ identities, "will be escalated to an error").
   initialised, and `undra_init` is once per process) and loads a fresh one at the end, so it is ordered
   before S17 and it is the only scenario that does this. S16.4, which scenarios.md lists for
   TypeScript and Kotlin, is also checked here, through `undra_schema_json`.
-* **S17.1 uses the raw `UndraCore.callSync` for `explode`.** The generated sync binding treats a panic
-  reply as "the core and the bindings disagree" and stops the process on purpose (`undraUnexpected`).
-  The async `explodeLater` is called through the binding and throws `UndraReplyError`.
+* **S17.5 is triggered from the Log adapter.** The core logs the panic of `explode("reenter")` through the
+  harness's `CapturingLog`, a synchronous port, on the thread that runs the call and holds the core's
+  lock; `CapturingLog.onNextRecord(where:run:)` runs the generated `add(1, 1)` from there, once. The call
+  fails as `UndraCallError.refused` naming `E_REENTRANT`, which is also the proof that the hook runs on that
+  thread (a thread that did not hold the lock would have been answered normally). No `ManualClock` fallback
+  was needed.
+* **S17.6 ends the core.** It shuts the shared core down and is the last step of the last scenario XCTest
+  runs; nothing after it uses the core. It is the only scenario step that leaves the process without a core.
+* **Commands are asserted through `onError`.** A generated command (a synchronous method that returns
+  nothing and has no error type: `Counter.increment()`, `Probe.reset()`) does not throw; it reports to
+  `LoadOptions.onError` (ADR-032). `Fixture` installs a handler that records every `UndraUnhandledError`
+  in `Fixture.shared.unhandled`, and S05.6, S15.9 and S17.6 compare counts before and after, the way the
+  scenarios compare statistics.
 * **S03.2** ("no suspension") is shown by compilation: the sync calls are made from a plain, non-async
   function (`plainSyncCalls`).
 * **S06 cancels with `Task.cancel()`** and expects `CancellationError`.

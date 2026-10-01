@@ -444,7 +444,7 @@ struct TodosScreen: View {
     private func add() {
         Task {
             do { _ = try await todos.add(title: draft); draft = "" }
-            catch { problem = error.localizedDescription }   // TodoError.emptyTitle
+            catch { problem = error.localizedDescription }   // TodoError, CancellationError or UndraCallError
         }
     }
 }</code></pre></div>

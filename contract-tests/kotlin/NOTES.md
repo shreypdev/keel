@@ -39,6 +39,15 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   by 50 ms so that the state in between can be seen.
 * S13: `data` is recorded with a `StateFlow` collector on `Dispatchers.Unconfined` (`Recorder`), so every value
   the store sets is seen; the scenario spaces its changes by the 50 ms network delay.
+* S05.6, S06.6, S15.9, S17.5 and S17.6 (ADR-032) are new coverage of Kotlin behaviour that did not change: every generated
+  shape throws, so closed objects (S05.6) and stale handles (S15.9) are `UndraReplyException(BAD_REQUEST)`, a call in flight
+  across a restore is `UndraReplyException(CANCELLED)` and a cancelled typed call is a `CancellationException`.
+* S17.5: a call made from inside the `Log` port is refused by the Kotlin runtime itself (`InprocTransport` knows it is inside
+  a callback and throws an `UndraException` "called from inside a core callback"), before the core can answer it with
+  `E_REENTRANT`; the Swift column sees the core's bad request. The scenario accepts either refusal.
+* S17.6 ends the core (`core.close()`), and S17 is the last entry of `SCENARIOS`, so nothing runs after it. The generated
+  `add(1, 2)` passes the closed core explicitly, because `UndraCore.shared` is forgotten on close and would fail with
+  "no UndraCore has been loaded" instead of "closed".
 * S16: the order (S16 first) is described above. Step 2 ("a subsequent load succeeds") is the load every other
   scenario uses.
 

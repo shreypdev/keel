@@ -92,6 +92,34 @@ extension ContractScenarios {
 
             // 8. The restore created no handles of its own: exactly the three stores are alive.
             try checkEqual(core.stat("live_handles"), liveBefore + 3, "live_handles after the restore")
+
+            // 9. A call in flight across a restore ends as cancelled by the core (not as a platform
+            // cancellation), and the invalidated object then refuses calls through the bindings.
+            let probe = try Probe(ctx: core)
+            defer { probe.close() }
+            let hanging = Task { try await probe.hang() }
+            try await waitUntil("the hanging call to start") { try probe.counters().started == 1 }
+            let reportsBefore = Fixture.shared.unhandled.snapshot.count
+            try core.restore(try core.snapshot())
+            switch await hanging.result {
+            case .success(let value):
+                throw ScenarioFailure(description: "hang() returned \(value) across a restore")
+            case .failure(let error):
+                try check(!(error is CancellationError), "a call cancelled by the core failed as a CancellationError")
+                try checkEqual(error as? UndraCallError, .cancelledByCore, "the error of hang() across a restore")
+            }
+            let stale = try callError("probe.counters() after the restore") { try probe.counters() }
+            guard case .refused = stale else {
+                throw ScenarioFailure(description: "probe.counters() after the restore failed with \(stale), not .refused")
+            }
+            probe.reset()
+            let reports = Array(Fixture.shared.unhandled.snapshot.dropFirst(reportsBefore))
+            try checkEqual(reports.count, 1, "reports to onError for Probe.reset after the restore")
+            let report = try require(reports.first, "the report of Probe.reset")
+            try checkEqual(report.operation, "Probe.reset", "the operation of the report")
+            guard case .refused = report.error else {
+                throw ScenarioFailure(description: "Probe.reset after the restore reported \(report.error), not .refused")
+            }
         }
     }
 
@@ -137,7 +165,7 @@ extension ContractScenarios {
 
             // 2. The failed attempt did not leave the process half-initialised: a load with the right hash works.
             let core = try Fixture.shared.core()
-            try checkEqual(PlaygroundCore.add(a: 20, b: 22, ctx: core), 42, "a call on the core loaded after the failed attempt")
+            try checkEqual(try PlaygroundCore.add(a: 20, b: 22, ctx: core), 42, "a call on the core loaded after the failed attempt")
 
             // 3. The hash of the bindings, of the statistics and of the exported schema agree.
             try checkEqual(core.schemaHash, generated, "UndraCore.schemaHash")
@@ -202,36 +230,25 @@ extension ContractScenarios {
             let panicsBefore = core.stat("panics")
             let recordsBefore = log.all.count
 
-            // 1. A panic in a sync call is a reply with status panic, not a crash. (The generated
-            // `explode(reason:)` treats a panic as an unexpected failure and stops the process on
-            // purpose, so the raw call is used.)
-            do {
-                _ = try core.callSync(
-                    .freeFunction(methodId: UndraIds.Functions.explode),
-                    method: UndraIds.Functions.explode,
-                    args: encoded { (w: inout UndraWriter) in w.writeString("kaboom") }
-                )
-                throw ScenarioFailure(description: "explode(\"kaboom\") returned")
-            } catch let error as UndraReplyError {
-                try checkEqual(error.status, .panic, "status of explode")
-                try check((error.message ?? "").contains("kaboom"), "the panic message names the reason: \(error.message ?? "<none>")")
-                var reader = UndraReader(error.body)
-                _ = try reader.readString()
-                _ = try reader.readString()
-                try reader.finish()
+            // 1. A panic in a sync call is a reply with status panic, not a crash: the generated
+            // `explode(reason:)` throws `UndraCallError.panicked` and the process lives (ADR-032).
+            let exploded = try callError("explode(\"kaboom\")") { try explode(reason: "kaboom", ctx: core) }
+            guard case .panicked(let kaboom, _) = exploded else {
+                throw ScenarioFailure(description: "explode(\"kaboom\") failed with \(exploded), not .panicked")
             }
+            try check(kaboom.contains("kaboom"), "the panic message names the reason: \(kaboom)")
 
             // 2. So is a panic in an async call.
-            do {
-                _ = try await explodeLater(delayMs: 10, reason: "later", ctx: core)
-                throw ScenarioFailure(description: "explode_later returned")
-            } catch let error as UndraReplyError {
-                try checkEqual(error.status, .panic, "status of explode_later")
-                try check((error.message ?? "").contains("later"), "the panic message names the reason: \(error.message ?? "<none>")")
+            let explodedLater = try await callError("explode_later(10, \"later\")") {
+                try await explodeLater(delayMs: 10, reason: "later", ctx: core)
             }
+            guard case .panicked(let later, _) = explodedLater else {
+                throw ScenarioFailure(description: "explode_later failed with \(explodedLater), not .panicked")
+            }
+            try check(later.contains("later"), "the panic message names the reason: \(later)")
 
             // 3. The core keeps working, a store built before still updates, two panics were counted.
-            try checkEqual(PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) after the panics")
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) after the panics")
             store.add(amount: 1)
             try await waitUntil("the store built before the panics to update") { store.count == 1 }
             try checkEqual(core.stat("panics") - panicsBefore, 2, "panics delta")
@@ -243,6 +260,55 @@ extension ContractScenarios {
             let records = log.all.dropFirst(recordsBefore).filter { $0.level >= 4 && $0.target == "undra::panic" }
             try check(records.contains { $0.message.contains("kaboom") }, "no panic record names kaboom: \(records)")
             try check(records.contains { $0.message.contains("later") }, "no panic record names later: \(records)")
+
+            // 5. Re-entry is refused, not deadlocked or aborted. The core logs the panic of
+            // `explode("reenter")` through the runner's Log adapter, a synchronous port that runs
+            // on the thread that holds the core's lock; the adapter calls the generated `add(1, 1)`
+            // once from there.
+            let reentered = Locked<Result<Int32, any Error>?>(nil)
+            log.onNextRecord(
+                where: { level, target, message in level >= 4 && target == "undra::panic" && message.contains("reenter") },
+                run: {
+                    let result = Result { try PlaygroundCore.add(a: 1, b: 1, ctx: core) }
+                    reentered.withLock { (current: inout Result<Int32, any Error>?) -> Void in current = result }
+                }
+            )
+            let reenter = try callError("explode(\"reenter\")") { try explode(reason: "reenter", ctx: core) }
+            guard case .panicked(let reenterMessage, _) = reenter, reenterMessage.contains("reenter") else {
+                throw ScenarioFailure(description: "explode(\"reenter\") failed with \(reenter), not .panicked")
+            }
+            switch try require(reentered.snapshot, "the Log adapter ran while the core logged the panic") {
+            case .success(let value):
+                throw ScenarioFailure(description: "add(1, 1) from inside the Log port returned \(value)")
+            case .failure(let error):
+                guard case .refused(let reason)? = error as? UndraCallError else {
+                    throw ScenarioFailure(description: "add(1, 1) from inside the Log port failed with \(error), not .refused")
+                }
+                try check(reason.contains("E_REENTRANT"), "the refusal names E_REENTRANT: \(reason)")
+            }
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) after the re-entrant call")
+
+            // 6. Shutdown with a typed call in flight. This step ends the core, so it is the last of
+            // the run (S17 is the last scenario XCTest runs, and no later step uses the core).
+            let inFlight = Task { try await failLater(delayMs: 5_000, code: 1, ctx: core) }
+            try await quietFor(milliseconds: 100)
+            let reportsBefore = Fixture.shared.unhandled.snapshot.count
+            let shutdownAt = ContinuousClock.now
+            core.shutdown()
+            switch await inFlight.result {
+            case .success(let value):
+                throw ScenarioFailure(description: "fail_later returned \(value) across a shutdown")
+            case .failure(let error):
+                try checkEqual(error as? UndraCallError, .unavailable(.closed), "the error of fail_later across a shutdown")
+            }
+            try check(ContinuousClock.now - shutdownAt < .seconds(1), "the call in flight took \(ContinuousClock.now - shutdownAt) to fail")
+            try checkThrows({ try PlaygroundCore.add(a: 1, b: 2, ctx: core) }, UndraCallError.unavailable(.closed), "add(1, 2) on the shut-down core")
+            store.increment()
+            let reports = Array(Fixture.shared.unhandled.snapshot.dropFirst(reportsBefore))
+            try checkEqual(reports.count, 1, "reports to onError for Counter.increment on the shut-down core")
+            let report = try require(reports.first, "the report of Counter.increment")
+            try checkEqual(report.operation, "Counter.increment", "the operation of the report")
+            try checkEqual(report.error, UndraCallError.unavailable(.closed), "the reason of the report")
         }
     }
 }

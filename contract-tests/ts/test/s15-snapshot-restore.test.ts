@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CallTarget, UndraReplyError, UndraTransportError, ReplyStatus } from "@undra/runtime";
-import { BigList, Counter, UndraIds, Todos, add } from "@playground/core";
+import { BigList, Counter, Probe, UndraIds, Todos, add } from "@playground/core";
 import { bootRaw } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step, waitFor } from "../src/wait.js";
@@ -131,6 +131,30 @@ test("S15 snapshot and restore", async () => {
 
   await step("8. the restore created no handles: live_handles is the number of surviving stores", async () => {
     expect((await counters(core)).liveHandles - liveBefore).toBe(3);
+  });
+
+  await step("9. a call in flight across a restore ends as cancelled by the core, and the invalidated object refuses", async () => {
+    const probe = await Probe.create(core);
+    const hanging = probe.hang();
+    hanging.catch(() => {}); // awaited below
+    await waitFor("the hang call to start in the core", async () => (await probe.counters()).started === 1);
+    restore(transport, snapshot(transport));
+    const error = await hanging.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error, "the call fails as a reply, not as an abort").toBeInstanceOf(UndraReplyError);
+    expect((error as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
+    // The probe is not a store, so the restore invalidated its handle: calls on it are bad requests.
+    for (const call of [() => probe.counters(), () => probe.reset()]) {
+      const refused = await call().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(refused).toBeInstanceOf(UndraReplyError);
+      expect((refused as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
+    }
+    probe.close();
   });
 
   todos.close();

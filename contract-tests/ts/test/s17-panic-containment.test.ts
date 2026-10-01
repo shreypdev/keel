@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ALL_SIGNALS, type UndraCore, UndraError, UndraTransportError } from "@undra/runtime";
-import { Todos, add, explode } from "@playground/core";
+import { Counter, Todos, add, addLater, explode, parseCount } from "@playground/core";
 import { boot, bootRaw } from "../src/harness.js";
 import { step, waitFor } from "../src/wait.js";
 import { restore, snapshot } from "../src/wasm-exports.js";
@@ -28,6 +28,7 @@ test("S17 panic containment", async () => {
   await bystanderTodos.add("untouched");
 
   const victim = await bootRaw();
+  const victimCounter = await Counter.create(victim.core);
   const todos = await Todos.create(victim.core);
   await todos.add("a");
   const b = await todos.add("b");
@@ -91,5 +92,28 @@ test("S17 panic containment", async () => {
     await bystanderTodos.add("still working");
     expect(bystanderTodos.todos.peek().map((t) => t.title)).toEqual(["untouched", "still working"]);
     expect(await add(20, 22, bystander.core)).toBe(42);
+  });
+
+  await step("5. on the trapped core, calls through the generated bindings reject and none hangs", async () => {
+    // An async call, a store command and a typed one: each rejects with a transport error ("trap" or "closed").
+    const within = (what: string, call: Promise<unknown>): Promise<unknown> =>
+      Promise.race([
+        call,
+        new Promise<unknown>((_, reject) => {
+          setTimeout(() => reject(new Error(`${what} did not settle within a second`)), 1_000);
+        }),
+      ]);
+    for (const [what, call] of [
+      ["add_later", () => addLater(1, 1, 10, victim.core)],
+      ["Counter.increment", () => victimCounter.increment()],
+      ["parse_count", () => parseCount("1", victim.core)],
+    ] as const) {
+      const failure = await within(what, call()).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(failure, `${what} on the trapped core rejects with a transport error`).toBeInstanceOf(UndraTransportError);
+      expect(["trap", "closed"], `${what}: ${String(failure)}`).toContain((failure as UndraTransportError).reason);
+    }
   });
 });

@@ -90,29 +90,29 @@ extension ContractScenarios {
             let badRequestsBefore = core.stat("crossings.bad_requests")
 
             // 1. A sync typed error is thrown, on the same path as a success would have returned.
-            try checkFailure(outcome { () throws(LabError) -> UInt32 in try parseCount(text: "x", ctx: core) },
-                             .notANumber("x"), "parse_count(\"x\")")
+            try checkThrows({ try parseCount(text: "x", ctx: core) },
+                            LabError.notANumber("x"), "parse_count(\"x\")")
 
             // 2. An async typed error.
-            try checkFailure(await outcome { () async throws(LabError) -> UInt32 in try await failLater(delayMs: 10, code: 7, ctx: core) },
-                             .rejected(code: 7, reason: "on purpose"), "fail_later(10, 7)")
+            try await checkThrows({ try await failLater(delayMs: 10, code: 7, ctx: core) },
+                                  LabError.rejected(code: 7, reason: "on purpose"), "fail_later(10, 7)")
 
             // 3. Store errors. A refused add changes nothing: no change-set.
             let todos = try Todos(ctx: core)
             defer { todos.close() }
             let transactionsBefore = core.stat("transactions")
-            try checkFailure(await outcome { () async throws(TodoError) -> Todo in try await todos.add(title: "   ") },
-                             .emptyTitle, "Todos.add of blanks")
+            try await checkThrows({ try await todos.add(title: "   ") },
+                                  TodoError.emptyTitle, "Todos.add of blanks")
             try await quietFor(milliseconds: 100)
             try checkEqual(core.stat("transactions") - transactionsBefore, 0, "change-sets after a refused add")
             try checkEqual(todos.todos.count, 0, "todos after a refused add")
 
             let list = try BigList(ctx: core)
             defer { list.close() }
-            try checkFailure(outcome { () throws(ListError) in try list.removeAt(index: 10_000) },
-                             .outOfRange(index: 10_000, len: 10_000), "BigList.remove_at(10000)")
-            try checkFailure(outcome { () throws(ListError) -> UInt32 in try list.insertAt(index: 10_001, label: "x") },
-                             .outOfRange(index: 10_001, len: 10_000), "BigList.insert_at(10001, ..)")
+            try checkThrows({ try list.removeAt(index: 10_000) },
+                            ListError.outOfRange(index: 10_000, len: 10_000), "BigList.remove_at(10000)")
+            try checkThrows({ try list.insertAt(index: 10_001, label: "x") },
+                            ListError.outOfRange(index: 10_001, len: 10_000), "BigList.insert_at(10001, ..)")
             // The refused insert did not consume an identity.
             try checkEqual(try list.insertAt(index: 0, label: "y"), 10_001, "the id of the next insert")
 
@@ -138,8 +138,32 @@ extension ContractScenarios {
             }
 
             // 5. The core still works, and exactly those three were bad requests.
-            try checkEqual(PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) afterwards")
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) afterwards")
             try checkEqual(core.stat("crossings.bad_requests") - badRequestsBefore, 3, "bad_requests delta")
+
+            // 6. Through the generated bindings, on closed objects (ADR-032): a call that can throw
+            // fails as bad request (`UndraCallError.refused`); a command returns and `onError` hears of it.
+            let badRequestsBeforeClosed = core.stat("crossings.bad_requests")
+            let reportsBefore = Fixture.shared.unhandled.snapshot.count
+            let closedList = try BigList(ctx: core)
+            closedList.close()
+            let refusal = try callError("BigList.remove_at(0) on a closed list") { try closedList.removeAt(index: 0) }
+            guard case .refused(let reason) = refusal else {
+                throw ScenarioFailure(description: "BigList.remove_at on a closed list failed with \(refusal), not .refused")
+            }
+            try check(!reason.isEmpty, "the refusal carries no reason")
+            let closedCounter = try Counter(ctx: core)
+            closedCounter.close()
+            closedCounter.increment()
+            let reports = Array(Fixture.shared.unhandled.snapshot.dropFirst(reportsBefore))
+            try checkEqual(reports.count, 1, "reports to onError for Counter.increment on a closed counter")
+            let report = try require(reports.first, "the report of the closed counter's increment()")
+            try checkEqual(report.operation, "Counter.increment", "the operation of the report")
+            guard case .refused(let why) = report.error, !why.isEmpty else {
+                throw ScenarioFailure(description: "Counter.increment on a closed counter reported \(report.error), not .refused")
+            }
+            try checkEqual(core.stat("crossings.bad_requests") - badRequestsBeforeClosed, 2, "bad_requests delta of the two closed calls")
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) after the closed calls")
         }
     }
 
@@ -166,7 +190,7 @@ extension ContractScenarios {
             let activeBefore = core.stat("active_calls")
             let cancelledBefore = core.stat("crossings.cancelled")
             let hanging = Task { try await probe.hang() }
-            try await waitUntil("the hanging call to start") { probe.counters().started == 1 }
+            try await waitUntil("the hanging call to start") { try probe.counters().started == 1 }
 
             // 2. Cancelling the task ends the platform call as cancelled.
             hanging.cancel()
@@ -178,28 +202,47 @@ extension ContractScenarios {
             }
 
             // 3. The core dropped the future.
-            try await waitUntil("the core to drop the hanging future") { probe.counters().cancelled == 1 }
-            try checkEqual(probe.counters().completed, 0, "completed after the cancel")
+            try await waitUntil("the core to drop the hanging future") { try probe.counters().cancelled == 1 }
+            try checkEqual(try probe.counters().completed, 0, "completed after the cancel")
             try await waitUntil("active_calls to settle") { core.stat("active_calls") == activeBefore }
             try checkEqual(core.stat("crossings.cancelled") - cancelledBefore, 1, "crossings.cancelled delta")
 
             // 4. Independence: only the cancelled call is cancelled.
             let waiting = Task { try await probe.wait(ms: 100) }
             let second = Task { try await probe.hang() }
-            try await waitUntil("both calls to start") { probe.counters().started == 3 }
+            try await waitUntil("both calls to start") { try probe.counters().started == 3 }
             second.cancel()
             let hundred = try await waiting.value
             try checkEqual(hundred, 100, "the call that was not cancelled")
             _ = await second.result
-            try await waitUntil("the second drop") { probe.counters().cancelled == 2 }
-            try checkEqual(probe.counters().completed, 1, "completed after the independent pair")
+            try await waitUntil("the second drop") { try probe.counters().cancelled == 2 }
+            try checkEqual(try probe.counters().completed, 1, "completed after the independent pair")
 
             // 5. Cancelling after completion is a no-op.
             let finished = Task { try await probe.wait(ms: 1) }
             _ = try await finished.value
             finished.cancel()
             try await quietFor(milliseconds: 100)
-            try checkEqual(probe.counters().cancelled, 2, "cancelled after a late cancel")
+            try checkEqual(try probe.counters().cancelled, 2, "cancelled after a late cancel")
+
+            // 6. A cancelled call of a method with a typed error ends as cancelled too: not as the
+            // method's `LabError`, and not as a stopped process (ADR-032).
+            let cancelledBeforeTyped = core.stat("crossings.cancelled")
+            let typed = Task { try await failLater(delayMs: 5_000, code: 1, ctx: core) }
+            try await quietFor(milliseconds: 100)
+            let cancelRequested = ContinuousClock.now
+            typed.cancel()
+            switch await typed.result {
+            case .success(let value):
+                throw ScenarioFailure(description: "a cancelled fail_later returned \(value)")
+            case .failure(let error):
+                try check(error is CancellationError, "a cancelled fail_later failed with \(error), not CancellationError")
+            }
+            try check(ContinuousClock.now - cancelRequested < .seconds(1), "the cancelled fail_later took \(ContinuousClock.now - cancelRequested) to end")
+            try await waitUntil("crossings.cancelled to grow by the typed call") {
+                core.stat("crossings.cancelled") - cancelledBeforeTyped == 1
+            }
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 1, ctx: core), 2, "add(1, 1) after the cancelled typed call")
         }
     }
 }
