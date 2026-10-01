@@ -98,12 +98,21 @@ public final class UndraCore: @unchecked Sendable {
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
         self.onConnectionChange = onConnectionChange
-        self.connection = UndraConnection()
         var initial = State(isShutDown: isShutDown)
         if isShutDown {
             initial.connection = .closed(.requested)
         }
+        let observable = UndraConnection()
+        self.connection = observable
         self.state = Guarded<State>(initial)
+        if isShutDown {
+            // The placeholder `shared` returns: its observable says so too, not `.connecting`.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    observable.state = .closed(.requested)
+                }
+            }
+        }
         mirror.setResyncHandler { [weak self] handle, signal in
             self?.resync(handle, signal: signal)
         }

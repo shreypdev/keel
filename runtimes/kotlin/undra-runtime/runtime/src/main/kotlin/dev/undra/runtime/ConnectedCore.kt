@@ -574,7 +574,7 @@ internal class ConnectedCore(
             for ((handle, signals) in again) for (signal in signals) transport.observe(handle, signal, true)
         } catch (e: UndraException) {
             // The connection dropped again already: the transport reports it, and the next reconnect replays.
-            UndraLog.warn("observing again after a reconnect failed", e)
+            UndraLog.debug("observing again after a reconnect failed (the connection dropped again; the next reconnect replays)")
         }
         if (!closed.get() && lossEpoch.get() == epoch) setConnection(ConnectionState.Connected)
     }

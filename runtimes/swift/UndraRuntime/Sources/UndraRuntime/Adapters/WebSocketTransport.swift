@@ -36,21 +36,61 @@ protocol SocketConnector: Sendable {
 }
 
 /// The real thing: `URLSessionWebSocketTask`.
-final class URLSessionSocketConnector: SocketConnector, @unchecked Sendable {
-    private let session = URLSession(configuration: .default)
+///
+/// Its session has a delegate for one reason: the close code and reason of the server's Close frame are reported
+/// there (`didCloseWith`), reliably, while the task's own `closeCode` is only a placeholder (1005) until Foundation has
+/// read the frame, which can be after the failed `receive` that tells the app the connection is over.
+final class URLSessionSocketConnector: NSObject, SocketConnector, URLSessionWebSocketDelegate, @unchecked Sendable {
+    private var session: URLSession!
+    private let connections = Guarded<[Int: TaskConnection]>([:])
+
+    override init() {
+        super.init()
+        session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    }
 
     func makeConnection(url: URL) -> any SocketConnection {
-        return TaskConnection(task: session.webSocketTask(with: url))
+        let task = session.webSocketTask(with: url)
+        let connection = TaskConnection(task: task)
+        connections.withLock { (list: inout [Int: TaskConnection]) -> Void in
+            list[task.taskIdentifier] = connection
+        }
+        return connection
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
+        reason: Data?
+    ) {
+        let connection = connections.withLock { (list: inout [Int: TaskConnection]) -> TaskConnection? in
+            return list[webSocketTask.taskIdentifier]
+        }
+        connection?.recordClose(code: closeCode.rawValue, reason: reason.flatMap { String(data: $0, encoding: .utf8) } ?? "")
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        connections.withLock { (list: inout [Int: TaskConnection]) -> Void in
+            list[task.taskIdentifier] = nil
+        }
     }
 }
 
 private final class TaskConnection: SocketConnection, @unchecked Sendable {
     private let task: URLSessionWebSocketTask
+    private let reported = Guarded<(code: Int, reason: String)?>(nil)
 
     init(task: URLSessionWebSocketTask) {
         self.task = task
         // The default is 1 MiB; a change-set can be larger.
         task.maximumMessageSize = 64 * 1024 * 1024
+    }
+
+    func recordClose(code: Int, reason: String) {
+        reported.withLock { (value: inout (code: Int, reason: String)?) -> Void in
+            value = (code, reason)
+        }
     }
 
     func resume() {
@@ -81,6 +121,9 @@ private final class TaskConnection: SocketConnection, @unchecked Sendable {
     }
 
     var peerClose: (code: Int, reason: String)? {
+        if let delegated = reported.withLock({ (value: inout (code: Int, reason: String)?) -> (code: Int, reason: String)? in return value }) {
+            return delegated
+        }
         let code = task.closeCode.rawValue
         guard code != 0 else {
             return nil
@@ -162,6 +205,9 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
     /// The close code with which the dev server says it no longer holds this client's session.
     private static let sessionLostCode = 4001
 
+    /// RFC 6455's "no status received": what Foundation reports for a close it has not read the code of yet.
+    private static let noStatusCode = 1005
+
     /// A reconnect attempt (connect and `Hello`) takes at most this long, whatever the blocking timeout is.
     private static let attemptCap: Double = 5
 
@@ -174,6 +220,8 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
     private let state = Guarded<State>(State())
     /// Delivers what the core is told about reconnecting in order, whichever thread noticed it.
     private let events = DispatchQueue(label: "dev.undra.runtime.reconnect-events")
+    /// Where a lost connection is looked at again for its close code.
+    private let lookAgain = DispatchQueue(label: "dev.undra.runtime.close-code")
 
     /// Creates a transport for a `ws://` or `wss://` URL.
     ///
@@ -586,9 +634,19 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
     }
 
     /// The connection `generation` ended: the socket failed, or the server closed it.
-    private func connectionLost(_ error: any Error, generation: Int) {
-        let peer = state.withLock { (current: inout State) -> (code: Int, reason: String)? in
-            return current.generation == generation ? current.connection?.peerClose : nil
+    ///
+    /// Foundation fails the receive first and records the close code of the server's Close frame a moment later, on the
+    /// session's own delegate queue (which this callback runs on, so it must not wait here). A connection that ended
+    /// without a code is looked at again every 20 ms, up to ten times, before it is judged: a session the server lost
+    /// (4001) is final and must not be mistaken for a drop and retried.
+    private func connectionLost(_ error: any Error, generation: Int, looks: Int = 0) {
+        let peer = peerClose(of: generation)
+        // 1005 ("no status received") is what Foundation reports until the real code arrives.
+        if peer == nil || peer?.code == WebSocketTransport.noStatusCode, looks < 10, isLive(generation: generation) {
+            lookAgain.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+                self?.connectionLost(error, generation: generation, looks: looks + 1)
+            }
+            return
         }
         let context = state.withLock { (current: inout State) -> (waiter: OneShot<Result<TransportInfo, any Error>>?, wasUp: Bool, live: Bool) in
             guard current.generation == generation, !current.isShutDown, current.connection != nil else {
@@ -606,6 +664,7 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
         }
         let reason = WebSocketTransport.describe(error, peer: peer)
         let lostSession = WebSocketTransport.isSessionLost(peer)
+        UndraLog.warning("remote transport: the connection ended (\(reason)); close code \(peer.map { String($0.code) } ?? "none")")
         if let waiter = context.waiter {
             // Before the handshake finished: the attempt that waits for it fails.
             waiter.fulfill(.failure(lostSession ? UndraSessionLostError(reason: peer?.reason ?? "") : UndraLoadError.connectionFailed(reason)))
@@ -620,6 +679,18 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
         }
     }
 
+    private func peerClose(of generation: Int) -> (code: Int, reason: String)? {
+        return state.withLock { (current: inout State) -> (code: Int, reason: String)? in
+            return current.generation == generation ? current.connection?.peerClose : nil
+        }
+    }
+
+    private func isLive(generation: Int) -> Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.generation == generation && current.connection != nil && !current.isShutDown
+        }
+    }
+
     private static func isSessionLost(_ peer: (code: Int, reason: String)?) -> Bool {
         guard let peer = peer else {
             return false
@@ -629,7 +700,7 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
     }
 
     private static func describe(_ error: any Error, peer: (code: Int, reason: String)?) -> String {
-        if let peer = peer, peer.code != 1005 {
+        if let peer = peer, peer.code != noStatusCode {
             return "the dev server closed the connection (\(peer.code)\(peer.reason.isEmpty ? "" : ": \(peer.reason)"))"
         }
         return String(describing: error)
