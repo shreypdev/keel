@@ -96,7 +96,9 @@ rejections are `WsError` instances. Db likewise (`suspend fun execute(sql: Strin
   `WsError` (any other error → `Network`), or, if it finished without error and the core did not close,
   `Network("the connection ended")`.
 * `receive(conn, max)`: unknown id → `Network("no WebSocket connection <id>")`; closed by the core → `[]`;
-  buffered messages → up to `max` of them at once; else the terminal error (sticky); else wait. At most one
+  `max` or more buffered → `max` at once; fewer → wait until `max` are there, 2 ms pass with no new
+  one, or 8 ms after the first (a burst is one reply; the Swift and TypeScript bindings measured 6 pulls in S23.3
+  without it); else the terminal error (sticky); else wait. At most one
   `receive` pending per connection (a second → `Protocol("a receive is already pending on connection <id>")`).
 * `send(conn, m)`: unknown → `Network(..)`; after the core's close → `Closed { code, reason }` of that close; after
   the terminal → the terminal; else `await connection.send(m)`.

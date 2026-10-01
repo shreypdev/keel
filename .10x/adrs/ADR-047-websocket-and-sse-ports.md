@@ -43,7 +43,8 @@ a per-connection inbound stream with backpressure: events have no credit and fan
    ```
    Connection and stream ids are chosen by the adapter, unique per adapter instance, never reused.
 3. **Inbound is pulled, and the pull is the credit (§3.7's numbers).** `receive(conn, max)` / `next(stream, max)`
-   answers as soon as at least one item is buffered, with at most `max`; `Ok([])` means the stream ended because
+   answers with at most `max` items once it has `max`, or once it has at least one and 2 ms passed without a new
+   one, or 8 ms after its first (a burst is one reply, not one per frame; a lone message waits 2 ms); `Ok([])` means the stream ended because
    *the core* closed it; an `Err` ends it otherwise. At most one pull is outstanding per connection. The adapter
    reads ahead at most `max` items of the latest pull (16 before the first) beyond what the core has received:
    where the platform can pause reading (URLSession `receive()`, the Kotlin client's reader, an SSE byte stream)
