@@ -475,15 +475,17 @@ fn jdk(cx: &Context<'_>) -> Finding {
         "/usr/local/opt/openjdk",
     ] {
         if cx.sys.is_file(&Path::new(candidate).join("bin/java")) {
-            return JDK.warn(
-                State::Missing,
-                Some(candidate.to_owned()),
-                format!("a JDK is installed at {candidate} but `java` is not on PATH"),
-                &[
-                    &format!("export JAVA_HOME={candidate}/libexec/openjdk.jdk/Contents/Home"),
-                    "export PATH=\"$JAVA_HOME/bin:$PATH\"",
-                ],
-            );
+            let fix = [
+                &format!("export JAVA_HOME={candidate}/libexec/openjdk.jdk/Contents/Home") as &str,
+                "export PATH=\"$JAVA_HOME/bin:$PATH\"",
+            ];
+            let message = format!("a JDK is installed at {candidate} but `java` is not on PATH");
+            // `./gradlew` cannot start without `java` on PATH or JAVA_HOME: in a project, a failure.
+            return if in_project {
+                JDK.fail(State::Missing, Some(candidate.to_owned()), message, &fix)
+            } else {
+                JDK.warn(State::Missing, Some(candidate.to_owned()), message, &fix)
+            };
         }
     }
     let message =
@@ -819,6 +821,14 @@ mod tests {
             f.fix[0].contains("JAVA_HOME=/opt/homebrew/opt/openjdk@17"),
             "{f:?}"
         );
+        // Inside a project with an Android app `./gradlew` cannot start without it: a failure there,
+        // as for a JDK that is missing (review, 2026-10-01).
+        let f = by_id(
+            &run_in_project(&keg, &["android"], &["arm64"]),
+            "android.jdk",
+        )
+        .clone();
+        assert_eq!((f.status, f.state), (Status::Fail, State::Missing));
 
         // Not installed.
         let f = by_id(&scan(&bare_machine(), &["android"]), "android.jdk").clone();
