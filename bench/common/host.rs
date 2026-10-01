@@ -270,6 +270,8 @@ pub struct ListMirror {
     /// Fault injection: every n-th keyed patch is dropped (0 never), so a scenario's equality
     /// invariant can be shown to fail.
     skip_every: u64,
+    /// Fault injection: only the n-th keyed patch (counting from 1) is dropped (0 never).
+    skip_nth: u64,
     patches_seen: u64,
 }
 
@@ -284,6 +286,7 @@ impl ListMirror {
             fulls: 0,
             errors: 0,
             skip_every: 0,
+            skip_nth: 0,
             patches_seen: 0,
         }
     }
@@ -291,6 +294,12 @@ impl ListMirror {
     /// Drops every `n`-th keyed patch (fault injection; `0` turns it off).
     pub fn skip_every(&mut self, n: u64) {
         self.skip_every = n;
+    }
+
+    /// Drops the `n`-th keyed patch, counting from 1, and no other (fault injection; `0` turns
+    /// it off).
+    pub fn skip_nth(&mut self, n: u64) {
+        self.skip_nth = n;
     }
 
     /// Applies one entry if it is for this list.
@@ -308,7 +317,9 @@ impl ListMirror {
             },
             ChangeOp::KeyedPatch => {
                 self.patches_seen += 1;
-                if self.patches_seen.checked_rem(self.skip_every) == Some(0) {
+                if self.patches_seen.checked_rem(self.skip_every) == Some(0)
+                    || self.patches_seen == self.skip_nth
+                {
                     return;
                 }
                 let patch = KeyedPatch::<Item>::decode(&mut Reader::new(entry.value));

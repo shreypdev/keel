@@ -70,24 +70,34 @@ Numbers below are from `UNDRA_STRESS_SECONDS=10` (best of three runs for the gat
 medians) and a 60 s soak, on the machine above. **The machine was shared**: other builds ran throughout (load
 average 3 to 8), the cache-bound tails moved by up to 4x between runs (fan-out p99 82 to 295 us), and one
 gated run of three needed a second and third attempt for a tail. The gates are 5x to 10x the best run for that
-reason; no number was tuned to pass.
+reason; no number was tuned to pass. Two consequences to keep in mind: the baselines come from that loaded machine,
+not the quiet one the design asked for, so a quiet run measures better than the `measured_*` values in
+`budgets.toml`; and the gates catch an operation that became several times slower, not a 2x one (in review, a
+commit path made 1.8x slower on purpose passed every layer A row and every sustained gate here).
 
 | # | Scenario | What it proves | Measured (10 s run) | CI gate | Verdict |
 |---|---|---|---|---|---|
 | a | **Firehose**: one observed `Signal<u64>`, one transaction per update, a host calling `call_sync` | each transaction is O(1) in the core at 100x any UI rate: one change-set of exactly 37 bytes | **5.8 M transactions/s**; p50 167 ns, p99 211 ns, p999 295 ns per call (commit + delivery + the copy every FFI callback makes); a core-side burst commits at 79 ns each, 12.7 M/s | at least 1.1 M/s, p99 at most 1.1 us, p999 at most 3 us, 37 bytes; layer A: 1,000-burst 400 us, call 630 ns | within, 5x margin |
 | g | **Event firehose**: `Runtime::event` on an event port whose subscriber writes the signal | the path a WebSocket or sensor feed takes into the core | **6.5 M events/s**; p50 125 ns, p99 167 ns, p999 295 ns; 37 bytes | at least 1.4 M/s, p99 840 ns, p999 2.6 us; layer A 580 ns | within |
-| b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **170 k operations/s**; p50 4.1 us, p99 17.9 us, p999 26.6 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
+| b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **170 k operations/s**; p50 4.1 us, p99 17.9 us, p999 26.6 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list field for field, every operation applied as exactly one patch | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
 | c | **Fan-out**: 1,000 of 100,000 observed signals written per transaction, then the same 1,000 over 10,000 observed (signal-table layer, no runtime) | commit time and bytes follow the dirty count, not the observed count | **22 k transactions/s**; p50 42 us, p99 98 us; one change-set of **21,012 bytes** either way; the 10,000-observed run has p50 27 us (ratio 1.5, gated at 4) | at least 4.6 k/s, p99 410 us, p999 1.3 ms, 21,012 bytes; layer A 190 us and 130 us | within |
 | c' | **Fan-out across stores**: 1,000 stores of 100 signals, one written in each, one transaction | the per-store overhead when one transaction touches many stores: 1,000 change-sets sharing a transaction | **7.5 k transactions/s** (7.5 M change-sets/s); p50 100 us, p99 377 us; 33,000 bytes | at least 1.6 k/s, p99 1.3 ms, 33,000 bytes; layer A 580 us | within |
 | d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Undra buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **29 M items/s** with credit; produced minus delivered never above **1** in 7.4 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
-| e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
-| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, no drift | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
+| e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | port calls completed from 8 threads at once are never lost: each wakes its task, commits once and is delivered once, and the drain sees the store's change-sets in transaction order (the commits themselves run on the one `undra-core` thread, so this does not contend the per-store delivery lock) | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
+| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, and no second whose tail is far off the others' | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
 
 Allocations: one observed single-signal commit allocates **exactly 3 times** (the two vectors of
 `group_by_store` and the `claimed` vector), an unobserved one **0**; `crates/undra-ffi/tests/commit_alloc.rs`
 holds the first at "at most 3" and the second at 0 with a counting allocator (only that crate may count,
 R2). At 100,000 commits a second those 3 are 300,000 `malloc`/`free` pairs a second, which is the next thing
 to remove (a roadmap line, not a budget here).
+
+Keyed churn is 170 k operations/s here against the design's 280 k probe (`.10x/specs/2026-09-30-stress-bench-design.md`,
+section 3) because the scenario does more per operation, not because the mix is harder: the probe's random
+20/20/20/40 mix has the same proportions as the fixed cycle, but the probe used a host that only counted, while
+the scenario's host decodes every patch and applies it to its own 10,000-row list inside the timed step. Measured
+side by side in review on the same build (load average about 9): 243 k operations/s with the counting host,
+151 k/s with the applying one.
 
 ### The soak, 60 s
 
@@ -102,11 +112,12 @@ to remove (a roadmap line, not a budget here).
 were delivered; the drain thread (60 Hz) found at most 4,280 change-sets in one frame. Every invariant held:
 nothing out of order, no completion lost, the store's total equals the number of completions and is the last
 value the main thread applied, the host's 10,000-row list equals the core's after 1.2 M patches, the stream
-never more than one item ahead of its credit, no warning logged. **RSS** (`ps`, sampled once a second): 10.39 MB
+at most one item ahead of its credit at the end (scenario d checks it after every round), no warning logged. **RSS** (`ps`, sampled once a second): 10.39 MB
 at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s to the end, so +0.00% after the half-run warm-up. The firehose's own
 p99 inside the mix is 59 us (median over the seconds, worst 76 us), not the 211 ns it has alone: it is the
 wait for the core lock behind a 20-operation churn call or a completion burst, which is what mixed load costs;
-the drift gate compares each second with the others, so the number is not itself gated.
+the soak's latency gate compares each post-warm-up second with the others, so the number is not itself gated,
+and it catches a bad second, not a slow climb (a p99 that doubles steadily over the run passes it).
 
 RSS on macOS climbs in page-sized steps early under this load (allocator magazines and thread stacks
 settling): 10.39 MB at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s on in the run above, and in two of the four
@@ -122,15 +133,22 @@ is repeated, a broken invariant is not.
 * **Sustained throughput** is operations divided by the wall time of the whole run, not the sum of
   per-operation samples. **Latencies** time every operation with one `Instant` pair into a fixed log-linear
   histogram (1/32 relative error, no allocation per sample), so p999 is of millions of samples; a percentile is
-  the upper bound of its bucket. `Instant` ticks at 41.67 ns on this host, so a 167 ns p50 is four ticks.
+  the upper bound of its bucket. `Instant` ticks at 41.67 ns on this host, so a 167 ns p50 is four ticks, and
+  the sub-microsecond percentiles are whole ticks (a 211 ns p99 is five, give or take one). Timing every
+  operation costs about 35 ns of wall time per sample here (an empty timed step runs at 28 M/s), which the
+  throughput includes: the firehose's 5.8 M/s is the rate with that clock (and the host's copy) in the loop,
+  against 8 M/s for the same call timed in batches with a host that only counts (layer A, 125 ns).
 * **Bytes** are what the host's callback was handed (`payload.len()`), deterministic, so gated exactly.
 * **Memory** is resident set size (`/proc/self/status` on Linux, `ps -o rss=` on macOS, nothing else), sampled
   outside the timed region and page-granular (16 KiB here), so the gate is "at most 1% **or** 64 KiB" from the
   first sample after the warm-up to the last. A platform that cannot be sampled reports the gate as skipped, never
   as passed.
 * **Invariants** are asserted in code and are not scaled or retried: a fast core that loses or reorders a
-  change-set fails. They have teeth: tests make the host drop a patch and make the main-thread model swap two
-  change-sets, and require the equality and order invariants to fail.
+  change-set fails. They have teeth: tests make the host drop every 101st patch, drop one single patch (an
+  update that a later write of the same row repairs, so only the count of applied patches sees it), and make
+  the main-thread model swap two change-sets, and require the equality, patch-count and order invariants to
+  fail. The one timing comparison a scenario makes about itself (fan-out over 100,000 observed at most 4x the
+  10,000 case) is a gate, retried like the others, not an invariant.
 * **Host stand-ins**: a copy of every change-set (what each FFI callback does), a host list that decodes and
   applies each keyed patch, and a "main thread" that drains once a frame and checks per-store order. They stand
   in for the platform's mailbox and list state; they cost far less than the platform's own work does.

@@ -181,12 +181,12 @@ fn churn_runtime() -> (Arc<Core>, Arc<ApplyingHost>, Handle) {
     (rt, host, churn)
 }
 
-/// The host's list must be the core's list, row for row.
+/// The host's list must be the core's list, row for row and field for field.
 fn assert_churn_in_sync(rt: &Core, host: &ApplyingHost, churn: Handle) {
-    let core = rt.object::<Churn>(churn.0).expect("the store").ids();
+    let core = rt.object::<Churn>(churn.0).expect("the store").rows_now();
     host.with_mirror(|m| {
         assert_eq!(m.errors, 0, "a patch failed to apply");
-        assert_eq!(m.ids(), core, "the host list must equal the core list");
+        assert!(m.list == core, "the host list must equal the core list");
     });
     assert_eq!(
         core.len(),
@@ -390,6 +390,10 @@ pub enum Fault {
     /// The keyed-churn host drops every 101st patch: the host list must stop equalling the
     /// core list.
     SkipPatches,
+    /// The keyed-churn host drops one patch only, the first: an `Update` (the cycle starts with
+    /// one), which leaves the row ids intact and which a later update of the same row repairs.
+    /// The scenario must still fail.
+    DropOneUpdate,
     /// The "main thread" swaps the first two change-sets of its first frame: delivery order
     /// must be reported as broken.
     SwapChangeSets,
@@ -425,6 +429,10 @@ pub struct Invariant {
     pub what: String,
     /// Whether it held.
     pub holds: bool,
+    /// A comparison of timings rather than a correctness property: a noisy machine can break
+    /// it, so it is gated like a budget (retried, and skipped by the debug smoke run), never
+    /// treated as an invariant.
+    pub timing: bool,
 }
 
 impl Invariant {
@@ -432,6 +440,14 @@ impl Invariant {
         Invariant {
             what: what.into(),
             holds,
+            timing: false,
+        }
+    }
+
+    fn timing(what: impl Into<String>, holds: bool) -> Invariant {
+        Invariant {
+            timing: true,
+            ..Invariant::new(what, holds)
         }
     }
 }
@@ -472,9 +488,21 @@ impl StressReport {
         }
     }
 
-    /// The invariants that did not hold.
+    /// The invariants that did not hold (timing comparisons excluded: see
+    /// [`timing_failures`](StressReport::timing_failures)).
     pub fn broken(&self) -> Vec<&Invariant> {
-        self.invariants.iter().filter(|i| !i.holds).collect()
+        self.invariants
+            .iter()
+            .filter(|i| !i.holds && !i.timing)
+            .collect()
+    }
+
+    /// The timing comparisons that did not hold: gate failures, retried on a noisy run.
+    pub fn timing_failures(&self) -> Vec<&Invariant> {
+        self.invariants
+            .iter()
+            .filter(|i| !i.holds && i.timing)
+            .collect()
     }
 
     /// A latency percentile in nanoseconds, if the scenario times operations.
@@ -657,8 +685,10 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
         &method_call(churn, "Churn", "seed", 2, &enc(&CHURN_ROWS)),
     );
     let mut mirror = ListMirror::new(churn, 0);
-    if cfg.fault == Fault::SkipPatches {
-        mirror.skip_every(101);
+    match cfg.fault {
+        Fault::SkipPatches => mirror.skip_every(101),
+        Fault::DropOneUpdate => mirror.skip_nth(1),
+        Fault::None | Fault::SwapChangeSets => {}
     }
     host.watch(mirror);
     rt.observe(churn.0, ALL_SIGNALS, true);
@@ -674,8 +704,9 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
 
     let delivered = host.counts.change_sets() - sets;
     let shipped = host.counts.change_set_bytes() - bytes;
-    let core = rt.object::<Churn>(churn.0).expect("the store").ids();
-    let (host_ids, errors) = host.with_mirror(|m| (m.ids(), m.errors));
+    let core = rt.object::<Churn>(churn.0).expect("the store").rows_now();
+    let (equal, host_rows, errors, patches, fulls) =
+        host.with_mirror(|m| (m.list == core, m.list.len(), m.errors, m.patches, m.fulls));
     StressReport {
         name: "keyed_churn_10k/sustained",
         ops,
@@ -684,13 +715,24 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
         bytes: shipped,
         rss: None,
         invariants: vec![
+            // Rows, not ids: an `Update` never changes an id, so an id comparison cannot see one
+            // that went missing.
             Invariant::new(
                 format!(
-                    "the host list equals the core list ({} and {} rows)",
-                    host_ids.len(),
+                    "the host list equals the core list, field for field ({host_rows} and {} rows)",
                     core.len()
                 ),
-                host_ids == core,
+                equal,
+            ),
+            // A lost patch can be repaired by a later write of the same row, so the end state
+            // alone is not enough: every operation must have been applied as exactly one patch
+            // (and nothing resynchronised the list with a full value after the first).
+            Invariant::new(
+                format!(
+                    "every operation was applied on the host as one keyed patch ({patches} patches \
+                     for {ops} operations; {fulls} full values, 1 expected)"
+                ),
+                patches == ops && fulls == 1,
             ),
             Invariant::new(
                 format!(
@@ -773,7 +815,7 @@ pub fn fanout(cfg: &StressConfig) -> StressReport {
                 ),
                 big_bytes == ops * expected && small_bytes == small_ops * expected,
             ),
-            Invariant::new(
+            Invariant::timing(
                 format!(
                     "cost follows the dirty count: p50 over 100k observed {p50_big} ns <= 4 x p50 over 10k {p50_small} ns"
                 ),

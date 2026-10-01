@@ -20,9 +20,12 @@
 //!   of the run: under this load the allocator and the threads' stacks settle in page-sized steps
 //!   for the first 30 s or so (RSS climbs 1-3% on the reference host, then is flat), and that is
 //!   warm-up, not growth;
-//! * the worst post-warm-up second's p99 is more than 3x the median second's p99 (drift);
+//! * the worst post-warm-up second's p99 is more than 3x the median second's p99 (a spike
+//!   gate: the seconds after the warm-up are compared with each other, so one bad second fails
+//!   it and a slow, steady climb does not);
 //! * an invariant broke: a change-set out of order, a lost completion, the host's copy of the
-//!   list different from the core's, a stream more than one item ahead of its credit;
+//!   list different from the core's (field for field, one applied patch per operation), the
+//!   stream more than one item ahead of its credit at the end of the run;
 //! * a second's achieved rate was under half its target (the host could not carry the load);
 //!   under 95% only warns.
 //!
@@ -635,10 +638,11 @@ fn run(args: &Args) -> Result<Outcome, String> {
     let walked = stats.change_sets.load(Ordering::Relaxed);
     let out_of_order = stats.out_of_order.load(Ordering::Relaxed);
     let replies = host.counts.replies() - base_replies;
-    let core_ids = rt
+    let core_rows = rt
         .object::<Churn>(churn.0)
         .map_err(|e| format!("{e:?}"))?
-        .ids();
+        .rows_now();
+    let churn_ops = totals.churn_calls * u64::from(CHURN_PER_CALL);
     let total = rt
         .object::<Fetcher>(fetcher.0)
         .map_err(|e| format!("{e:?}"))?
@@ -694,18 +698,24 @@ fn run(args: &Args) -> Result<Outcome, String> {
                 && tracked(ticker.0) == Some(totals.firehose_last_value),
         ),
         (
+            // Rows, not ids (an `Update` never changes an id), and one applied patch per
+            // operation (a lost patch can be repaired by a later write of the same row).
             format!(
-                "the host list equals the core list ({} and {} rows; {} patches applied, {} errors)",
+                "the host list equals the core list, field for field ({} and {} rows; {} patches \
+                 applied for {churn_ops} operations, {} full values, {} errors)",
                 mirror.map_or(0, |m| m.list.len()),
-                core_ids.len(),
+                core_rows.len(),
                 mirror.map_or(0, |m| m.patches),
+                mirror.map_or(0, |m| m.fulls),
                 mirror.map_or(0, |m| m.errors)
             ),
-            mirror.is_some_and(|m| m.errors == 0 && m.ids() == core_ids),
+            mirror.is_some_and(|m| {
+                m.errors == 0 && m.list == core_rows && m.patches == churn_ops && m.fulls == 1
+            }),
         ),
         (
             format!(
-                "the stream is never more than one item ahead of its credit ({ahead} ahead after {delivered_items} of {} credited)",
+                "at the end, the stream is at most one item ahead of its credit and every credit was used ({ahead} ahead after {delivered_items} of {} credited; checked once, after the run: the every-round check is scenario d's)",
                 totals.credit
             ),
             ahead <= 1 && delivered_items == totals.credit,
@@ -734,7 +744,7 @@ fn run(args: &Args) -> Result<Outcome, String> {
     eprintln!(
         "totals: {} firehose writes, {} churn operations, {} completions, {} stream items; {delivered} change-sets delivered; largest drain {} change-sets",
         totals.firehose_ops,
-        totals.churn_calls * u64::from(CHURN_PER_CALL),
+        churn_ops,
         totals.issued,
         delivered_items,
         windows.iter().map(|w| w.largest_batch).max().unwrap_or(0),
@@ -828,7 +838,16 @@ fn main() -> ExitCode {
             eprintln!("soak: attempt {attempt} of {}", args.attempts);
         }
         match run(&args) {
-            Ok(outcome) if outcome.passed => return ExitCode::SUCCESS,
+            Ok(outcome) if outcome.passed => {
+                if attempt > 1 {
+                    eprintln!(
+                        "soak: passed on attempt {attempt} of {}; the attempts before it failed a \
+                         noisy gate (see above)",
+                        args.attempts
+                    );
+                }
+                return ExitCode::SUCCESS;
+            }
             Ok(outcome) if outcome.invariant_broken || attempt == args.attempts => {
                 return ExitCode::from(1);
             }

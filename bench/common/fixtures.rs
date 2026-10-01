@@ -427,6 +427,13 @@ impl Churn {
         self.rows
             .with(|rows| rows.iter().map(|row| row.id).collect())
     }
+
+    /// The rows themselves, in order: what a host mirror must equal field for field (an
+    /// `Update` changes a row's content and never its id, so comparing ids alone cannot see a
+    /// lost one).
+    pub fn rows_now(&self) -> Vec<Item> {
+        self.rows.get()
+    }
 }
 
 /// An object whose stream is always ready: its rate is whatever the core polls, far above any

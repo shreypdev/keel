@@ -219,6 +219,7 @@ fn stress() {
     let scale = scale();
     let cfg = StressConfig::new(Duration::from_secs_f64(seconds()));
     let mut failures = Vec::new();
+    let mut retried: Vec<String> = Vec::new();
     let mut final_reports = Vec::new();
     eprintln!(
         "{} s per scenario, scale {scale}; RSS is sampled {}",
@@ -248,7 +249,14 @@ fn stress() {
                 }
                 break;
             }
-            let verdict = budget.check(&observed(&report), scale);
+            let mut verdict = budget.check(&observed(&report), scale);
+            // Timing comparisons a scenario makes about itself are gates, not invariants.
+            verdict.failures.extend(
+                report
+                    .timing_failures()
+                    .iter()
+                    .map(|check| check.what.clone()),
+            );
             for notice in &verdict.notices {
                 eprintln!("    notice: {notice}");
             }
@@ -256,6 +264,7 @@ fn stress() {
                 let tag = if attempt == 1 {
                     "ok".to_owned()
                 } else {
+                    retried.push(format!("{name} (attempt {attempt} of {ATTEMPTS})"));
                     format!("ok (attempt {attempt})")
                 };
                 row(&report, &tag);
@@ -275,6 +284,12 @@ fn stress() {
                 }
             }
         }
+    }
+    if !retried.is_empty() {
+        eprintln!(
+            "passed only on a retry (a noisy gate failed first; see the rows above): {}",
+            retried.join(", ")
+        );
     }
     if let Some(path) = std::env::var_os("UNDRA_STRESS_JSON") {
         write_json(&PathBuf::from(path), &final_reports, &budgets);
@@ -302,6 +317,26 @@ fn a_skipped_patch_fails_the_equality_invariant() {
             .iter()
             .any(|what| what.contains("the host list equals the core list")),
         "a host that drops a patch must fail the equality invariant: {broken:?}"
+    );
+}
+
+#[test]
+fn a_single_dropped_update_fails_the_mirror_invariants() {
+    // One lost `Update` keeps every id in place, and a later update of the same row repairs
+    // the content: only counting the patches applied sees it for certain.
+    let _serial = serial();
+    let cfg = StressConfig {
+        duration: Duration::from_millis(200),
+        rss: false,
+        fault: Fault::DropOneUpdate,
+    };
+    let report = common::stress::keyed_churn(&cfg);
+    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    assert!(
+        broken
+            .iter()
+            .any(|what| what.contains("every operation was applied on the host as one keyed patch")),
+        "a host that drops one patch must fail the patch-count invariant: {broken:?}"
     );
 }
 
@@ -443,6 +478,9 @@ fn stress_baseline() {
         }
         for invariant in report.broken() {
             println!("# INVARIANT BROKEN: {}", invariant.what);
+        }
+        for check in report.timing_failures() {
+            println!("# TIMING CHECK FAILED: {}", check.what);
         }
         println!();
     }
