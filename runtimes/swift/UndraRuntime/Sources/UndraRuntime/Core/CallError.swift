@@ -93,6 +93,10 @@ extension UndraCallError {
             // connection is closed and every call in flight fails with this.
             return UndraCallError.unavailable(.connectionLost(reason: mismatch.description))
         }
+        if let lost = error as? UndraSessionLostError {
+            // The dev server restarted without this core's objects (ADR-034): every call on it fails.
+            return UndraCallError.unavailable(.connectionLost(reason: lost.description))
+        }
         if let protocolError = error as? UndraProtocolError {
             return UndraCallError.malformed(protocolError.description)
         }
