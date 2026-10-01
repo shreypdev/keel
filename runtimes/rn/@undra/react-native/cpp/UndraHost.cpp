@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <stdlib.h>
@@ -23,8 +24,30 @@ namespace {
 /// The JS thread's innermost scope.
 thread_local CallScope *t_scope = nullptr;
 
-/// The running host of the process (one core per process).
-std::atomic<Host *> g_running{nullptr};
+/// The process's one core slot (one core per process): the host that holds it, and whether that
+/// host is inside `undra_shutdown` right now. Both under `g_slotMutex`; `g_slotFreed` is notified
+/// when the slot is released.
+std::mutex g_slotMutex;
+std::condition_variable g_slotFreed;
+Host *g_slot = nullptr;
+bool g_slotStopping = false;
+
+/// How long `start` waits for a host that is shutting down on another thread (a reloaded
+/// runtime's old module going away on the old JS thread) to release the slot.
+constexpr auto kSlotWait = std::chrono::seconds(5);
+
+/// Releases the slot if `host` holds it.
+void releaseSlot(const Host *host) noexcept {
+  {
+    std::lock_guard<std::mutex> lock(g_slotMutex);
+    if (g_slot != host) {
+      return;
+    }
+    g_slot = nullptr;
+    g_slotStopping = false;
+  }
+  g_slotFreed.notify_all();
+}
 
 /// The most bytes one `Rng.fill` may ask for (the limit of the other runtimes).
 constexpr uint32_t kMaxRngBytes = 1u << 24;
@@ -112,20 +135,30 @@ Host::~Host() {
 }
 
 Host *Host::runningHost() noexcept {
-  return g_running.load(std::memory_order_acquire);
+  std::lock_guard<std::mutex> lock(g_slotMutex);
+  return g_slot;
 }
 
 uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<PortSpec> &specs) {
   if (started_.exchange(true)) {
     return start_code::kAlreadyStarted;
   }
-  Host *none = nullptr;
-  if (!g_running.compare_exchange_strong(none, this)) {
-    started_.store(false);
-    return start_code::kBusy;
+  {
+    std::unique_lock<std::mutex> lock(g_slotMutex);
+    // A host that is already inside `undra_shutdown` on another thread frees the slot when that
+    // returns (a dev reload: the old runtime's module goes away on the old JS thread while the new
+    // runtime starts): wait for it, bounded, rather than refusing. A running host is refused.
+    if (g_slot != nullptr && g_slotStopping) {
+      g_slotFreed.wait_for(lock, kSlotWait, [] { return g_slot == nullptr; });
+    }
+    if (g_slot != nullptr) {
+      started_.store(false);
+      return start_code::kBusy;
+    }
+    g_slot = this;
   }
   if (api_.abi_version != kAbiVersion) {
-    g_running.store(nullptr);
+    releaseSlot(this);
     started_.store(false);
     return start_code::kAbiMismatch;
   }
@@ -160,23 +193,30 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
     }
     registered_.clear();
     syncMethods_.clear();
-    g_running.store(nullptr);
+    releaseSlot(this);
     started_.store(false);
   }
   return code;
 }
 
 void Host::shutdown() noexcept {
-  if (!running_.exchange(false, std::memory_order_acq_rel)) {
-    return;
+  {
+    // Under the slot's lock, so a `start` on another thread sees "running" or "stopping", never a
+    // held slot that is neither.
+    std::lock_guard<std::mutex> lock(g_slotMutex);
+    if (!running_.exchange(false, std::memory_order_acq_rel)) {
+      return;
+    }
+    if (g_slot == this) {
+      g_slotStopping = true;
+    }
   }
   // Waits for the callbacks still running (host contract 5): when it returns, `this` is never
   // read by the core again. What the core says meanwhile (status 3 for calls in flight) is
   // dropped: whoever closed the core has failed those calls already.
   api_.shutdown();
   registered_.clear();
-  Host *self = this;
-  g_running.compare_exchange_strong(self, nullptr);
+  releaseSlot(this);
 }
 
 std::vector<uint8_t> Host::takeInbox() {

@@ -67,7 +67,8 @@ inline constexpr std::size_t kRecordHeader = 5;
 
 /// Start codes of `Host::start` beyond those of `undra_init` (0 ok, 1..5 its `init_code`s).
 namespace start_code {
-/// Another `Host` of this process is running (one core per process).
+/// Another `Host` of this process is running (one core per process). One that is shutting down
+/// on another thread is waited for (at most 5 s) instead.
 inline constexpr uint32_t kBusy = 0x100;
 /// The linked core speaks another C ABI version.
 inline constexpr uint32_t kAbiMismatch = 0x101;

@@ -123,6 +123,33 @@ describe("start", () => {
   });
 });
 
+describe("one module, several transports", () => {
+  test("a second start that fails leaves the running core's sink and sync port in place", async () => {
+    const { core, native } = await attach();
+    const sink = native.sink;
+    const portSync = native.portSync;
+    native.startCode = NativeStartCode.AlreadyStarted;
+    const second = new NativeTransport({ native, expectedSchemaHash: native.hash });
+    await expect(second.start({} as never)).rejects.toThrow(/already started/);
+    second.close();
+    expect(native.sink).toBe(sink);
+    expect(native.portSync).toBe(portSync);
+    expect(native.shutdowns).toBe(0);
+    // The running core still hears what its core says.
+    const applied = fakeStore(core, 9n);
+    native.queue(RecordKind.ChangeSet, changeSet(1n, 9n, 0, 7), "core");
+    await tick(10);
+    expect(applied).toEqual([[0, 7]]);
+  });
+
+  test("a sync call or a snapshot after this runtime's core was stopped under it is a typed 'closed' error", async () => {
+    const { native, transport } = await attach();
+    native.coreGone = true;
+    expect(() => transport.callSync(new Uint8Array(17))).toThrow(expect.objectContaining({ reason: "closed" }));
+    expect(() => transport.snapshot()).toThrow(UndraTransportError);
+  });
+});
+
 describe("calls", () => {
   test("a reply queued on the JS thread settles the call, after the call's change-sets are applied", async () => {
     const { core, native } = await attach();

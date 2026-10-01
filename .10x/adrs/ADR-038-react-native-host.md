@@ -166,7 +166,14 @@ with `undra_buf_free`.
     A JS reload in development destroys the JS runtime while the process lives on: the TurboModule's
     destructor shuts the core down (so nothing is posted to a dead runtime; pending `invokeAsync`
     closures hold a weak reference and do nothing), and the next `install()` starts a fresh one; a core
-    left by a runtime whose module was not destroyed yet is stopped by the next `start`.
+    left by a runtime whose module was not destroyed yet is stopped by the next `start`, and one whose
+    module is inside `undra_shutdown` on the old JS thread is waited for (at most 5 s) rather than
+    reported busy. *Review (2026-10-01):* a runtime whose core was stopped that way never reaches the C
+    ABI again: its host functions answer as the ABI does with no core (status 5, ignored, unavailable;
+    `callSync` and `snapshot` become `UndraTransportError("closed")`), because the process's core is
+    now another runtime's, with its own call ids and port call ids. The module cannot tell a reload
+    from a second React Native instance in the process, so a second instance's `loadNative` stops the
+    first's core: two instances are unsupported until ADR-044 (`docs/REACT_NATIVE.md`, limits).
     *Transitional (ADR-044):* with the table, the limit becomes one `UndraCore` per core namespace, and
     two cores (or two Undra versions) share a process.
 
@@ -225,11 +232,13 @@ with `undra_buf_free`.
   columns do); the TypeScript column is still 18/18.
 * **What is tested where.** Node cannot load the module, so three layers are tested three ways:
   * the C++ host (`cpp/UndraHost`, both shims) against the real playground core on the Mac, under
-    AddressSanitizer and UndefinedBehaviorSanitizer (`cpp/test/run.sh`, 13 checks per shim): the inbox,
+    AddressSanitizer and UndefinedBehaviorSanitizer (`cpp/test/run.sh`, 14 checks per shim): the inbox,
     the wake rule, commit order across threads, the ports, `malloc`ed replies, every `UndraBuf` freed
-    once, shutdown with a call in flight, a second core refused, start after shutdown;
+    once, shutdown with a call in flight, a second core refused, start after shutdown, a start while
+    another host is shutting down on another thread (a reload); `UndraJsi.cpp` is compiled against
+    React Native's headers there too (it runs only on a device);
   * the JavaScript (`NativeTransport`, the scheduler, the polyfills, `loadNative`) with a fake module
-    (36 tests), and **the contract scenarios S01 to S18 through `NativeTransport`** over `WasmNative`,
+    (39 tests), and **the contract scenarios S01 to S18 through `NativeTransport`** over `WasmNative`,
     a stand-in of the module with its inbox, drain and port rules over the playground's wasm core:
     17 pass; S17 is app-tested, because native cores contain panics and a wasm stand-in traps;
   * what only a device can show (JSI, Hermes, `invokeAsync`, the vsync sources, both builds, native
@@ -238,7 +247,9 @@ with `undra_buf_free`.
     read-your-writes, a keyed patch on 10,000 rows, the native Clock and Timer, the schema gate) pass on
     the iPhone 17 Pro simulator and on the Android emulator; on Android, a JavaScript reload in the
     middle of the benchmarks (a debug build on Metro) tore the core down with the runtime and the next
-    `loadNative` started a fresh one in the same process (10/10 again).
+    `loadNative` started a fresh one in the same process (10/10 again). On iOS (review, 2026-10-01: a
+    debug build on Metro, reloads through Metro's `/reload`) three reloads, one in the middle of the
+    benchmarks, gave four runtimes in the same process (one pid), 10/10 each.
 * **Measurements** (release core, release app with Hermes bytecode; Apple M-series Mac, iPhone 17 Pro
   simulator on iOS 26.5 and an arm64 Android 15 emulator with 2 GB and a software GPU, on a machine
   shared with other agents' builds and emulators; medians, the range over three runs each, the Android

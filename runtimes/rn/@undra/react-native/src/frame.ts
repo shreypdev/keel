@@ -8,6 +8,38 @@ const FRAME_BACKSTOP_MS = 100;
 /** Without a native vsync source, a frame is approximated by a timer of this length. */
 const FALLBACK_FRAME_MS = 16;
 
+/** One module's frame callback, shared by every scheduler that uses the module. */
+interface FrameFanOut {
+  /** The `run` of each scheduler waiting for the next frame. */
+  readonly waiters: Set<() => void>;
+  /** What the module calls at the frame (`native.frame`): runs every waiter once. */
+  readonly dispatch: () => void;
+}
+
+/**
+ * The module has one `frame` callback and a process may create more than one scheduler for it (a
+ * core closed and loaded again, a second `loadNative` that failed to start): each frame reaches every
+ * waiting scheduler, so a newer one never takes the vsync from the core that is running.
+ */
+const fanOuts = new WeakMap<UndraNativeModule, FrameFanOut>();
+
+function fanOutOf(native: UndraNativeModule): FrameFanOut {
+  let fanOut = fanOuts.get(native);
+  if (fanOut === undefined) {
+    const waiters = new Set<() => void>();
+    fanOut = {
+      waiters,
+      dispatch: () => {
+        const due = [...waiters];
+        waiters.clear();
+        for (const run of due) run();
+      },
+    };
+    fanOuts.set(native, fanOut);
+  }
+  return fanOut;
+}
+
 /** What {@link nativeFrameScheduler} needs to know about the app. */
 export interface FrameSchedulerOptions {
   /** Whether the app is in the foreground (React Native's `AppState.currentState === "active"`). */
@@ -37,7 +69,9 @@ export function nativeFrameScheduler(native: UndraNativeModule, options: FrameSc
       }, 0);
     });
 
+  const fanOut = fanOutOf(native);
   const run = (): void => {
+    fanOut.waiters.delete(run);
     if (!armed) return;
     armed = false;
     if (backstop !== undefined) {
@@ -54,7 +88,7 @@ export function nativeFrameScheduler(native: UndraNativeModule, options: FrameSc
       }
     }
   };
-  native.frame = run;
+  native.frame = fanOut.dispatch;
 
   return (fn) => {
     if (!options.isActive()) {
@@ -64,6 +98,8 @@ export function nativeFrameScheduler(native: UndraNativeModule, options: FrameSc
     waiting.push(fn);
     if (armed) return;
     armed = true;
+    fanOut.waiters.add(run);
+    if (native.frame !== fanOut.dispatch) native.frame = fanOut.dispatch;
     let hasFrames = false;
     try {
       hasFrames = native.requestFrame();

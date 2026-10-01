@@ -22,6 +22,8 @@ export class FakeNative implements UndraNativeModule {
   };
   startCode = 0;
   frames = true;
+  /** As the module answers when this runtime's core was stopped under it (a reload's takeover). */
+  coreGone = false;
 
   /** What the scripted core does with a `Call` payload; returns the `undra_call` code. */
   onCall: (payload: Uint8Array) => number = () => 0;
@@ -121,7 +123,8 @@ export class FakeNative implements UndraNativeModule {
   call(buffer: ArrayBuffer, byteOffset: number, byteLength: number): number {
     return this.#enter(() => this.onCall(new Uint8Array(buffer, byteOffset, byteLength)));
   }
-  callSync(buffer: ArrayBuffer, byteOffset: number, byteLength: number): ArrayBuffer {
+  callSync(buffer: ArrayBuffer, byteOffset: number, byteLength: number): ArrayBuffer | undefined {
+    if (this.coreGone) return undefined;
     return this.#enter(() => this.onCallSync(new Uint8Array(buffer, byteOffset, byteLength)).slice().buffer);
   }
   cancel(callId: number): void {
@@ -149,7 +152,8 @@ export class FakeNative implements UndraNativeModule {
   timerFired(timerId: number): void {
     this.#enter(() => this.log.push(`timer ${timerId}`));
   }
-  snapshot(): ArrayBuffer {
+  snapshot(): ArrayBuffer | undefined {
+    if (this.coreGone) return undefined;
     return new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0]).buffer;
   }
   restore(_buffer: ArrayBuffer, _byteOffset: number, _byteLength: number): number {

@@ -24,7 +24,9 @@ its own once per display frame (ADR-031), exactly as on the web.
 
 ## Requirements
 
-* React Native 0.82 or newer (New Architecture, bridgeless, Hermes). The playground uses 0.87.
+* React Native with the New Architecture, bridgeless, on Hermes. **0.87 is the version it is built and
+  proven on** (the playground); the package's peer range starts at 0.82, which has the APIs it uses
+  (pure C++ TurboModules on both platforms), but nothing below 0.87 has been run.
 * iOS: CocoaPods (`brew install cocoapods`), and the deployment target of your core (`[ios]
   deployment_target` in `undra.toml`, 17.0 by default) as the app's `platform :ios`.
 * Android: the NDK the app builds with (React Native 0.87's template asks for r27), and the ABIs of
@@ -143,7 +145,8 @@ make its methods `async`.
 ## Development
 
 * **Fast refresh and reloads** keep working: a reload tears the JS runtime down, the module shuts the
-  core down with it, and your app's `loadNative` starts a fresh core.
+  core down with it, and your app's `loadNative` starts a fresh core (proven on the iOS simulator and
+  the Android emulator, reloading in the middle of work too).
 * **`undra dev`**: in development the app can reach a core served by `undra dev` over the WebSocket
   remote transport instead of the linked one, `UndraCore.load({ mode: 'remote', url })` (Hermes has
   `WebSocket`; from the Android emulator the host is `10.0.2.2`, or `adb reverse tcp:7443 tcp:7443`).
@@ -153,14 +156,24 @@ make its methods `async`.
 
 ## Limits
 
+* **High-rate updates do not fit a frame on React Native today.** At 100,000 keyed-patch updates a
+  second (1,667 per 60 Hz frame) the mirror needs 13 to 16 ms of every 16.7 ms frame on the iPhone 17
+  Pro simulator (parsing the change-sets as they arrive, 7.8 to 9.4 ms, plus the frame's drain, 5.3 to
+  6.4 ms; more on the Android emulator), against 0.3 to 0.5 ms on V8: nothing is left for React. At
+  10,000 a second the work scales down to roughly a tenth (scaled from those rows, not measured on
+  its own; the 10,000-a-second firehose was measured to drain once per frame). The cost is `@undra/runtime`'s JavaScript under Hermes,
+  not the boundary; it is open work for that package (Amendment D, E4), and until it lands, keep
+  core-driven update rates near 10,000 a second or below on React Native (ADR-038, "Measurements").
+* Per-call cost is the same JavaScript: a synchronous call is about 0.2 us through JSI and the core,
+  about 6 us through `UndraCore.callSync` (4 us of it building the payload), and 15 to 20 us as an
+  awaited generated method on the iOS simulator.
 * One Undra core per process (also across languages: not a Swift or Kotlin Undra host next to it)
-  until ADR-044's per-core function table lands.
+  until ADR-044's per-core function table lands. That includes two React Native instances in one
+  process (a brownfield app with two `ReactHost`s): the module cannot tell a second instance from a
+  reloaded one, so the second `loadNative` stops the first instance's core, whose calls then fail
+  with `UndraTransportError("closed")`; they never reach the other instance's core.
 * JavaScript-implemented synchronous ports: see "Adapters".
 * `Clock`, `Rng` and `Timer` are native and cannot be replaced from JavaScript.
-* Per-call cost is the TypeScript runtime's JavaScript under Hermes, which interprets bytecode: a
-  synchronous call is about 0.2 us through JSI and the core, about 6 us through `UndraCore.callSync`,
-  and 15 to 20 us as an awaited generated method on the iOS simulator; a 100,000-updates-a-second
-  stream of keyed patches costs more than a frame to merge and apply (ADR-038, "Measurements").
 
 ## What is tested where
 
@@ -180,5 +193,7 @@ make its methods `async`.
 | `the UndraNative TurboModule is not linked into this app` | the package is not a dependency of the app, or `pod install` / the Gradle sync did not run after adding it |
 | `cannot load the Undra core libundra_core.so` (Android) | the core's `jniLibs` are not packaged (step 5), or not built for the device's ABI |
 | Undefined `_undra_*` symbols when linking (iOS) | the `UndraCore` pod is missing from the Podfile (step 4) |
+| `found architecture 'arm64', required architecture 'x86_64'` for `libundra_core.a`, then undefined `_undra_*` symbols, in a Release build for the simulator | the Release configuration builds every simulator architecture and the core's simulator slice has only `[ios] simulator_archs` (`arm64` by default): build for the active architecture (`ONLY_ACTIVE_ARCH=YES ARCHS=arm64`, as Xcode's Run does) or add `x86_64` to `simulator_archs` |
 | `UndraSchemaMismatchError` | the linked core and the generated bindings come from different schemas: run `undra bindgen` and `undra build --platform rn` again |
-| `another Undra core is running in this process` | `loadNative` (or `NativeTransport.start`) was called while a core is open; use `UndraCore.shared` |
+| `another Undra core is running in this process` | `loadNative` (or `NativeTransport.start`) was called while a core is open; use `UndraCore.shared`. The running core is not disturbed. (After a reload, a core whose old runtime is still shutting it down is waited for, up to 5 s, before this is reported.) |
+| `UndraTransportError("closed")` in a runtime that did not close its core | another React Native instance of the process (or the reloaded runtime) started a core, which stops this one (Limits) |

@@ -38,11 +38,12 @@ class Binding : public std::enable_shared_from_this<Binding> {
 
   /// Posts a drain of the inbox to the JS thread (the host's wake function). Safe from any thread,
   /// a core callback included: it holds no strong reference to the binding, so a callback thread is
-  /// never the one that destroys it (whose destructor shuts the core down).
+  /// never the one that destroys it (whose destructor shuts the core down). Throws only what
+  /// posting throws (out of memory), which `Host::requestDrain` catches.
   static void postDrain(
       const std::shared_ptr<facebook::react::CallInvoker> &invoker,
       const std::shared_ptr<std::atomic<bool>> &alive,
-      const std::weak_ptr<Binding> &weak) noexcept;
+      const std::weak_ptr<Binding> &weak);
   /// Posts the frame callback to the JS thread (the frame source's callback); as `postDrain`.
   static void postFrame(
       const std::shared_ptr<facebook::react::CallInvoker> &invoker,

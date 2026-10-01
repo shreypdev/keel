@@ -22,10 +22,14 @@ export interface UndraNativeModule {
   start(config: ArrayBuffer, byteOffset: number, byteLength: number, ports: readonly number[], syncMethods: readonly number[]): number;
   /** `undra_shutdown()`; throws when called from inside a JavaScript sync port. */
   shutdown(): void;
-  /** `undra_call`: 0 accepted (the reply arrives in the inbox), 5 refused. */
+  /**
+   * `undra_call`: 0 accepted (the reply arrives in the inbox), 5 refused. Every entry that reaches
+   * the core answers as the C ABI does with no core (5, ignored, `undefined`, 6) without calling it
+   * when this runtime's core is not running: the process's core may be another runtime's.
+   */
   call(buffer: ArrayBuffer, byteOffset: number, byteLength: number): number;
-  /** `undra_call_sync`: the `Reply` payload. */
-  callSync(buffer: ArrayBuffer, byteOffset: number, byteLength: number): ArrayBuffer;
+  /** `undra_call_sync`: the `Reply` payload; `undefined` when this runtime's core is not running. */
+  callSync(buffer: ArrayBuffer, byteOffset: number, byteLength: number): ArrayBuffer | undefined;
   /** `undra_cancel`. */
   cancel(callId: number): void;
   /** `undra_stream_credit`. */
@@ -40,9 +44,9 @@ export interface UndraNativeModule {
   event(portId: number, methodId: number, buffer: ArrayBuffer, byteOffset: number, byteLength: number): void;
   /** `undra_timer_fired`. */
   timerFired(timerId: number): void;
-  /** `undra_snapshot`: a `Snapshot` payload. */
-  snapshot(): ArrayBuffer;
-  /** `undra_restore`: 0 or a `restore_code`. */
+  /** `undra_snapshot`: a `Snapshot` payload; `undefined` when this runtime's core is not running. */
+  snapshot(): ArrayBuffer | undefined;
+  /** `undra_restore`: 0 or a `restore_code` (6, unavailable, when this runtime's core is not running). */
   restore(buffer: ArrayBuffer, byteOffset: number, byteLength: number): number;
   /** `undra_stats_json`. */
   statsJson(): string;

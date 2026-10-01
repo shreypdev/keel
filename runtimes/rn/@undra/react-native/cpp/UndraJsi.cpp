@@ -64,6 +64,19 @@ jsi::Value arrayBuffer(jsi::Runtime &rt, std::shared_ptr<jsi::MutableBuffer> buf
   return jsi::Value(rt, jsi::ArrayBuffer(rt, std::move(buffer)));
 }
 
+/// `buf` as an `ArrayBuffer` that owns it. If that cannot be built (out of memory) `buf` is freed
+/// here before the error reaches JavaScript, so it is freed exactly once either way.
+jsi::Value coreArrayBuffer(jsi::Runtime &rt, const Api &api, UndraBuf buf) {
+  std::shared_ptr<CoreBuffer> owned;
+  try {
+    owned = std::make_shared<CoreBuffer>(api, buf);
+  } catch (...) {
+    api.buf_free(buf);
+    throw;
+  }
+  return arrayBuffer(rt, std::move(owned)); // a throw from here destroys `owned`, which frees `buf`
+}
+
 [[noreturn]] void raise(jsi::Runtime &rt, const std::string &message) {
   throw jsi::JSError(rt, "@undra/react-native: " + message);
 }
@@ -224,10 +237,11 @@ void Binding::detach() noexcept {
 void Binding::postDrain(
     const std::shared_ptr<facebook::react::CallInvoker> &invoker,
     const std::shared_ptr<std::atomic<bool>> &alive,
-    const std::weak_ptr<Binding> &weak) noexcept {
+    const std::weak_ptr<Binding> &weak) {
   if (!alive->load()) {
     return;
   }
+  // May throw (out of memory posting the task): `Host::requestDrain` catches it and re-arms.
   invoker->invokeAsync([weak, alive](jsi::Runtime &rt) {
     if (!alive->load()) {
       return;
@@ -236,9 +250,14 @@ void Binding::postDrain(
     if (!self) {
       return;
     }
-    jsi::Value native = rt.global().getProperty(rt, "__undraNative");
-    if (native.isObject()) {
-      self->drain(rt, native.getObject(rt));
+    try {
+      jsi::Value native = rt.global().getProperty(rt, "__undraNative");
+      if (native.isObject()) {
+        self->drain(rt, native.getObject(rt));
+      }
+    } catch (...) {
+      // Nothing may escape into React Native's scheduler (a fatal JS error in a release build); a
+      // record that arrives later wakes the JS thread again.
     }
   });
 }
@@ -250,23 +269,28 @@ void Binding::postFrame(
   if (!alive->load()) {
     return;
   }
-  invoker->invokeAsync([weak, alive](jsi::Runtime &rt) {
-    if (!alive->load() || weak.expired()) {
-      return;
-    }
-    try {
-      jsi::Value native = rt.global().getProperty(rt, "__undraNative");
-      if (!native.isObject()) {
+  try {
+    invoker->invokeAsync([weak, alive](jsi::Runtime &rt) {
+      if (!alive->load() || weak.expired()) {
         return;
       }
-      jsi::Value frame = native.getObject(rt).getProperty(rt, "frame");
-      if (frame.isObject() && frame.getObject(rt).isFunction(rt)) {
-        frame.getObject(rt).getFunction(rt).call(rt);
+      try {
+        jsi::Value native = rt.global().getProperty(rt, "__undraNative");
+        if (!native.isObject()) {
+          return;
+        }
+        jsi::Value frame = native.getObject(rt).getProperty(rt, "frame");
+        if (frame.isObject() && frame.getObject(rt).isFunction(rt)) {
+          frame.getObject(rt).getFunction(rt).call(rt);
+        }
+      } catch (...) {
+        // The frame callback reports its own failures; nothing may escape into the scheduler.
       }
-    } catch (...) {
-      // The frame callback reports its own failures; nothing may escape into the scheduler.
-    }
-  });
+    });
+  } catch (...) {
+    // Out of memory posting the task (on the display link's or the choreographer's thread, where
+    // nothing may unwind): the JavaScript scheduler's 100 ms backstop runs the drains instead.
+  }
 }
 
 void Binding::drain(jsi::Runtime &rt, const jsi::Object &native) {
@@ -393,22 +417,32 @@ void Binding::install(jsi::Runtime &rt) {
   };
 
   // Runs `body` (which enters the core) inside a CallScope, then drains what it queued on this
-  // thread before returning to JavaScript (ADR-038, decision 4a).
-  auto enter = [self](jsi::Runtime &rt, const jsi::Value &thisVal, auto &&body) -> jsi::Value {
+  // thread before returning to JavaScript (ADR-038, decision 4a). Without a running core of its
+  // own (not started, closed, or stopped because a reloaded runtime of this process started a new
+  // one) the binding never reaches the C ABI: the process's core may then belong to another
+  // runtime, whose calls, call ids, port call ids and state this one must not touch. `refused`
+  // is the answer then, the one the C ABI gives with no core (status 5, ignored, unavailable).
+  auto enter = [self](jsi::Runtime &rt, const jsi::Value &thisVal, auto &&body, auto &&refused) -> jsi::Value {
     std::shared_ptr<Host> host = self->host();
-    if (!host) {
-      return body(); // not started or closed: the C ABI answers softly (status 5, ignored)
+    if (!host || !host->running()) {
+      return refused();
     }
     jsi::Object native = nativeOf(rt, thisVal);
     jsi::Value result;
-    {
+    try {
       JsAnswerer answerer(rt, native);
       CallScope scope(*host, &answerer);
       result = body();
+    } catch (...) {
+      // What the core queued on this thread meanwhile woke nobody (the drain below would have
+      // delivered it): post a drain for it, then let the error reach JavaScript.
+      host->requestDrain();
+      throw;
     }
     self->drain(rt, native);
     return result;
   };
+  const auto none = [] { return jsi::Value::undefined(); };
 
   define("abiVersion", 0, [self](jsi::Runtime &, const jsi::Value &, const jsi::Value *, size_t) {
     return jsi::Value(static_cast<double>(self->api.abi_version));
@@ -426,79 +460,121 @@ void Binding::install(jsi::Runtime &rt) {
     self->shutdownHost(rt);
     return jsi::Value::undefined();
   });
+  // `undra_call` with no core: 5, refused.
   define("call", 3, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const Bytes payload = bytesArg(rt, args, count, 0);
-    return enter(rt, thisVal, [&] { return jsi::Value(static_cast<double>(self->api.call(payload.ptr, payload.len))); });
+    return enter(
+        rt,
+        thisVal,
+        [&] { return jsi::Value(static_cast<double>(self->api.call(payload.ptr, payload.len))); },
+        [] { return jsi::Value(5); });
   });
-  define("callSync", 3, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  // `undefined` with no core of this runtime (NativeTransport throws UndraTransportError("closed")).
+  define("callSync", 3, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const Bytes payload = bytesArg(rt, args, count, 0);
-    return enter(rt, thisVal, [&] {
-      UndraBuf reply = self->api.call_sync(payload.ptr, payload.len);
-      return arrayBuffer(rt, std::make_shared<CoreBuffer>(self->api, reply));
-    });
+    return enter(rt, thisVal, [&] { return coreArrayBuffer(rt, self->api, self->api.call_sync(payload.ptr, payload.len)); }, none);
   });
-  define("cancel", 1, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("cancel", 1, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const uint32_t callId = u32Arg(rt, args, count, 0, "callId");
-    return enter(rt, thisVal, [&] {
-      self->api.cancel(callId);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.cancel(callId);
+          return jsi::Value::undefined();
+        },
+        none);
   });
-  define("streamCredit", 2, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("streamCredit", 2, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const uint32_t callId = u32Arg(rt, args, count, 0, "callId");
     const uint32_t credit = u32Arg(rt, args, count, 1, "credit");
-    return enter(rt, thisVal, [&] {
-      self->api.stream_credit(callId, credit);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.stream_credit(callId, credit);
+          return jsi::Value::undefined();
+        },
+        none);
   });
-  define("observe", 4, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("observe", 4, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const uint64_t handle = static_cast<uint64_t>(u32Arg(rt, args, count, 0, "handleLo")) |
         (static_cast<uint64_t>(u32Arg(rt, args, count, 1, "handleHi")) << 32);
     const uint32_t signalId = u32Arg(rt, args, count, 2, "signalId");
     const bool on = count > 3 && args[3].isBool() && args[3].getBool();
-    return enter(rt, thisVal, [&] {
-      self->api.observe(handle, signalId, on ? 1 : 0);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.observe(handle, signalId, on ? 1 : 0);
+          return jsi::Value::undefined();
+        },
+        none);
   });
-  define("release", 2, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("release", 2, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const uint64_t handle = static_cast<uint64_t>(u32Arg(rt, args, count, 0, "handleLo")) |
         (static_cast<uint64_t>(u32Arg(rt, args, count, 1, "handleHi")) << 32);
-    return enter(rt, thisVal, [&] {
-      self->api.release(handle);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.release(handle);
+          return jsi::Value::undefined();
+        },
+        none);
   });
-  define("portReply", 3, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("portReply", 3, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const Bytes payload = bytesArg(rt, args, count, 0);
-    return enter(rt, thisVal, [&] {
-      self->api.port_reply(payload.ptr, payload.len);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.port_reply(payload.ptr, payload.len);
+          return jsi::Value::undefined();
+        },
+        none);
   });
-  define("event", 5, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("event", 5, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const uint32_t portId = u32Arg(rt, args, count, 0, "portId");
     const uint32_t methodId = u32Arg(rt, args, count, 1, "methodId");
     const Bytes payload = bytesArg(rt, args, count, 2);
-    return enter(rt, thisVal, [&] {
-      self->api.event(portId, methodId, payload.ptr, payload.len);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.event(portId, methodId, payload.ptr, payload.len);
+          return jsi::Value::undefined();
+        },
+        none);
   });
-  define("timerFired", 1, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("timerFired", 1, [self, enter, none](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const uint32_t timerId = u32Arg(rt, args, count, 0, "timerId");
-    return enter(rt, thisVal, [&] {
-      self->api.timer_fired(timerId);
-      return jsi::Value::undefined();
-    });
+    return enter(
+        rt,
+        thisVal,
+        [&] {
+          self->api.timer_fired(timerId);
+          return jsi::Value::undefined();
+        },
+        none);
   });
+  // Every store of this runtime's core; `undefined` without one (the process's core may be
+  // another runtime's).
   define("snapshot", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
-    return arrayBuffer(rt, std::make_shared<CoreBuffer>(self->api, self->api.snapshot()));
+    std::shared_ptr<Host> host = self->host();
+    if (!host || !host->running()) {
+      return jsi::Value::undefined();
+    }
+    return coreArrayBuffer(rt, self->api, self->api.snapshot());
   });
+  // `undra_restore` with no core: 6, unavailable.
   define("restore", 3, [self, enter](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     const Bytes payload = bytesArg(rt, args, count, 0);
-    return enter(rt, thisVal, [&] { return jsi::Value(static_cast<double>(self->api.restore(payload.ptr, payload.len))); });
+    return enter(
+        rt,
+        thisVal,
+        [&] { return jsi::Value(static_cast<double>(self->api.restore(payload.ptr, payload.len))); },
+        [] { return jsi::Value(6); });
   });
   define("statsJson", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
     return jsi::Value(rt, jsi::String::createFromUtf8(rt, takeString(self->api, self->api.stats_json())));

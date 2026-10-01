@@ -60,6 +60,23 @@ describe("nativeFrameScheduler", () => {
     expect(ran).toEqual(["a"]);
   });
 
+  test("every scheduler of a module gets the frame: a newer one never takes it from a running one", () => {
+    const native = new FakeNative();
+    const first = nativeFrameScheduler(native, { isActive: () => true });
+    const ran: string[] = [];
+    first(() => ran.push("first"));
+    // A second scheduler on the same module (a core loaded again, a second loadNative that failed).
+    const second = nativeFrameScheduler(native, { isActive: () => true });
+    second(() => ran.push("second"));
+    native.frame!();
+    expect(ran).toEqual(["first", "second"]);
+    vi.advanceTimersByTime(500); // both backstops were cleared
+    expect(ran).toEqual(["first", "second"]);
+    first(() => ran.push("first again"));
+    native.frame!();
+    expect(ran).toEqual(["first", "second", "first again"]);
+  });
+
   test("a function that throws is reported and the others still run", () => {
     const native = new FakeNative();
     const errors: unknown[] = [];

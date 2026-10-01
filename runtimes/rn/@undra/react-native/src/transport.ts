@@ -50,6 +50,17 @@ function bufferOf(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer as ArrayBuffer;
 }
 
+/**
+ * The module answered as if there were no core: this runtime's core was stopped under the transport
+ * (a reloaded runtime of the same process started its own, ADR-038 decision 11).
+ */
+function notRunning(): UndraTransportError {
+  return new UndraTransportError(
+    "closed",
+    "the native core of this JavaScript runtime is not running (another runtime of this process started one)",
+  );
+}
+
 /** `bytes` as an `ArrayBuffer` of exactly its length (no copy when the view is the whole buffer). */
 function exactBuffer(bytes: Uint8Array): ArrayBuffer {
   if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) return bytes.buffer as ArrayBuffer;
@@ -81,6 +92,12 @@ export class NativeTransport implements Transport {
   #handler: TransportHandler | null = null;
   #started = false;
   #closed = false;
+  /** The `sink` and `portSync` this transport installed on the module, to remove only its own. */
+  readonly #sink = (batch: ArrayBuffer): void => {
+    this.#deliver(batch);
+  };
+  readonly #portSyncFn = (portId: number, methodId: number, portCallId: number, args: ArrayBuffer): ArrayBuffer | number =>
+    this.#portSync(portId, methodId, portCallId, args);
 
   /** @param options See {@link NativeTransportOptions}. */
   constructor(options: NativeTransportOptions) {
@@ -120,13 +137,21 @@ export class NativeTransport implements Transport {
     config.writeU8(this.#options.logLevel ?? 2);
     const bytes = config.finish();
     this.#handler = handler;
-    native.sink = (batch) => {
-      this.#deliver(batch);
-    };
-    native.portSync = (portId, methodId, portCallId, args) => this.#portSync(portId, methodId, portCallId, args);
-    const code = native.start(bufferOf(bytes), bytes.byteOffset, bytes.byteLength, plan.ports, plan.syncMethods);
+    // Installed before `start`, which delivers what `undra_init` produced. A start that fails
+    // (another core of this process is running) puts back what was there: the running core's
+    // transport keeps its sink, or every batch of that core would be dropped from now on.
+    const previous = { sink: native.sink, portSync: native.portSync };
+    native.sink = this.#sink;
+    native.portSync = this.#portSyncFn;
+    let code: number;
+    try {
+      code = native.start(bufferOf(bytes), bytes.byteOffset, bytes.byteLength, plan.ports, plan.syncMethods);
+    } catch (error) {
+      this.#detach(previous);
+      throw error;
+    }
     if (code !== 0) {
-      this.#detach();
+      this.#detach(previous);
       throw new UndraTransportError("handshake", `the native core did not start: ${startFailure(code)}`);
     }
     this.#started = true;
@@ -187,7 +212,9 @@ export class NativeTransport implements Transport {
   }
 
   callSync(payload: Uint8Array): Uint8Array {
-    return new Uint8Array(this.#live().callSync(bufferOf(payload), payload.byteOffset, payload.byteLength));
+    const reply = this.#live().callSync(bufferOf(payload), payload.byteOffset, payload.byteLength);
+    if (reply === undefined) throw notRunning();
+    return new Uint8Array(reply);
   }
 
   stats(): Promise<string | null> {
@@ -201,7 +228,9 @@ export class NativeTransport implements Transport {
 
   /** Every store as a `Snapshot` payload (docs/SPEC.md section 5.9), to hand back with `Kind.Restore`. */
   snapshot(): Uint8Array {
-    return new Uint8Array(this.#live().snapshot());
+    const snapshot = this.#live().snapshot();
+    if (snapshot === undefined) throw notRunning();
+    return new Uint8Array(snapshot);
   }
 
   /** The native host's counters: inbox records and bytes, wakes, native and JavaScript port calls. */
@@ -231,10 +260,16 @@ export class NativeTransport implements Transport {
     return this.#native;
   }
 
-  #detach(): void {
+  /**
+   * Stops receiving from the module. Only this transport's own `sink` and `portSync` are removed
+   * (a transport that failed to start, or one closed late, must not take a running core's), and
+   * `restore` is what goes back in their place.
+   */
+  #detach(restore: { sink?: UndraNativeModule["sink"]; portSync?: UndraNativeModule["portSync"] } = {}): void {
     this.#handler = null;
-    if (this.#native.sink !== undefined) this.#native.sink = undefined;
-    if (this.#native.portSync !== undefined) this.#native.portSync = undefined;
+    const native = this.#native;
+    if (native.sink === this.#sink) native.sink = restore.sink;
+    if (native.portSync === this.#portSyncFn) native.portSync = restore.portSync;
   }
 
   #report(error: unknown): void {

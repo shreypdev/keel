@@ -112,6 +112,15 @@ android {
     }
 }
 
+// Metro bundles the runtime, @undra/react-native and the bindings from their sources outside this
+// app (metro.config.js), which the React Native plugin's bundle task does not track: without these
+// inputs an edit there leaves the release bundle "up to date" and the APK ships the old JavaScript.
+tasks.matching { it.name.startsWith("createBundle") && it.name.endsWith("JsAndAssets") }.configureEach {
+    inputs.dir("../../../../../runtimes/ts/@undra/runtime/src")
+    inputs.dir("../../../../../runtimes/rn/@undra/react-native/src")
+    inputs.dir("../../../generated/ts/src")
+}
+
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")

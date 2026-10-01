@@ -543,6 +543,44 @@ void testsWithSyncPorts(const Api *api) {
   ok("destroying a running host shuts its core down");
 }
 
+void testsWithAReloadRace(const Api *api) {
+  // A dev reload on iOS: the old runtime's module shuts its core down on the old JS thread while
+  // the new runtime, on a JS thread of its own, starts one. The new start waits for that shutdown
+  // instead of failing "busy" (the old binding is already gone, so nothing can stop it first).
+  const std::vector<uint8_t> cfg = config();
+  for (int round = 0; round < 20; ++round) {
+    Fixture old(api);
+    {
+      CallScope scope(*old.host, nullptr);
+      check(old.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), {}) == 0, "the old core starts");
+    }
+    old.drain();
+    Fixture fresh(api);
+    std::thread oldJsThread([&] { old.host->shutdown(); });
+    while (old.host->running()) {
+      std::this_thread::yield();
+    }
+    uint32_t code = 0;
+    {
+      CallScope scope(*fresh.host, nullptr);
+      code = fresh.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), {});
+    }
+    oldJsThread.join();
+    check(code == 0, "a start during another host's shutdown waits for it (round " + std::to_string(round) + "), got " +
+              std::to_string(code));
+    check(Host::runningHost() == fresh.host.get(), "the new host holds the process's slot");
+    {
+      Writer args;
+      args.i32(4).i32(5);
+      std::vector<uint8_t> reply = fresh.callSync(freeCall(kAdd, fresh.nextCall++, args.bytes));
+      check(reply.size() == 9 && static_cast<int32_t>(getU32(&reply[5])) == 9, "the new core answers");
+    }
+    fresh.host->shutdown();
+  }
+  check(Host::runningHost() == nullptr, "no host holds the slot afterwards");
+  ok("a start while another host is shutting down waits for it (a reload on two JS threads)");
+}
+
 } // namespace
 
 int main() {
@@ -554,6 +592,7 @@ int main() {
   check(api->abi_version == kAbiVersion, "the core speaks C ABI 1");
   testsWithOneCore(api);
   testsWithSyncPorts(api);
+  testsWithAReloadRace(api);
   std::printf("# %d checks passed\n", g_checks);
   return 0;
 }

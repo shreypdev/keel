@@ -44,3 +44,15 @@ echo "# dlopen'ed core (the Android shim)"
   "$pkg/cpp/UndraApiAndroid.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp" \
   -o "$out/host_test_dlopen"
 "$out/host_test_dlopen"
+
+# 3. The JSI layer (UndraJsi.cpp) runs only on a device, but it must compile against the React
+#    Native headers: checked when the playground app's dependencies are installed.
+rn="$root/examples/playground/rn/node_modules/react-native/ReactCommon"
+if [ -f "$rn/jsi/jsi/jsi.h" ]; then
+  echo "# the JSI layer against React Native's headers"
+  "${CXX:-clang++}" -std=c++20 -fsyntax-only -Wall -Wextra -Werror -I "$rn/jsi" -I "$rn/callinvoker" -I "$rn" -I "$pkg/cpp" \
+    "$pkg/cpp/UndraJsi.cpp"
+  echo "ok - UndraJsi.cpp compiles"
+else
+  echo "# skipped the JSI compile check: npm install in examples/playground/rn first"
+fi
