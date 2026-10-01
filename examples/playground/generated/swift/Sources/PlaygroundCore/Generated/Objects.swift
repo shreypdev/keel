@@ -9,17 +9,24 @@ public final class Probe: UndraObject, @unchecked Sendable {
     }
 
     /// A probe with every counter at zero.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Probe.typeId,
-            method: UndraIds.Objects.Probe.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Probe.typeId,
+                method: UndraIds.Objects.Probe.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// What the probe has seen so far.
-    public func counters() -> ProbeCounters {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func counters() throws -> ProbeCounters {
         do {
             let body = try self.core.callSync(
                 .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Probe.counters),
@@ -28,21 +35,27 @@ public final class Probe: UndraObject, @unchecked Sendable {
             )
             return try ProbeCounters.undraDecoded(from: body)
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
     /// Waits forever. The only way it ends is cancellation, which the `cancelled` counter shows.
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func hang() async throws -> UInt32 {
-        let body = try await self.core.call(
-            .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Probe.hang),
-            method: UndraIds.Objects.Probe.hang,
-            args: []
-        )
-        return try UInt32.undraDecoded(from: body)
+        do {
+            let body = try await self.core.call(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Probe.hang),
+                method: UndraIds.Objects.Probe.hang,
+                args: []
+            )
+            return try UInt32.undraDecoded(from: body)
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
     }
 
     /// Sets every counter back to zero.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func reset() {
         do {
             _ = try self.core.callSync(
@@ -51,13 +64,14 @@ public final class Probe: UndraObject, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Probe.reset")
         }
     }
 
     /// A stream of the numbers `0..count`, produced one per poll. The runtime sends an item only
     /// against credit the platform granted and polls at most one item ahead of it, so `produced`
     /// stays within one of what the platform has asked for, however large `count` is.
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func ticks(count: UInt32) -> AsyncThrowingStream<UInt32, Error> {
         var w = UndraWriter()
         count.undraEncode(&w)
@@ -65,25 +79,32 @@ public final class Probe: UndraObject, @unchecked Sendable {
             .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Probe.ticks),
             method: UndraIds.Objects.Probe.ticks,
             args: w.finish(),
-            decode: { try UInt32.undraDecoded(from: $0) }
+            decode: { try UInt32.undraDecoded(from: $0) },
+            mapError: { UndraCallError.mapped(streamFailure: $0) }
         )
     }
 
     /// Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func wait(ms: UInt32) async throws -> UInt32 {
         var w = UndraWriter()
         ms.undraEncode(&w)
-        let body = try await self.core.call(
-            .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Probe.wait),
-            method: UndraIds.Objects.Probe.wait,
-            args: w.finish()
-        )
-        return try UInt32.undraDecoded(from: body)
+        do {
+            let body = try await self.core.call(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Probe.wait),
+                method: UndraIds.Objects.Probe.wait,
+                args: w.finish()
+            )
+            return try UInt32.undraDecoded(from: body)
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
     }
 }
 
 /// Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
-public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) -> Int32 {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -> Int32 {
     var w = UndraWriter()
     a.undraEncode(&w)
     b.undraEncode(&w)
@@ -95,12 +116,13 @@ public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) -> Int32 {
         )
         return try Int32.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
 /// Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
 /// port.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func addLater(
     a: Int32,
     b: Int32,
@@ -111,17 +133,21 @@ public func addLater(
     a.undraEncode(&w)
     b.undraEncode(&w)
     delayMs.undraEncode(&w)
-    let body = try await ctx.call(
-        .freeFunction(methodId: UndraIds.Functions.addLater),
-        method: UndraIds.Functions.addLater,
-        args: w.finish()
-    )
-    return try Int32.undraDecoded(from: body)
+    do {
+        let body = try await ctx.call(
+            .freeFunction(methodId: UndraIds.Functions.addLater),
+            method: UndraIds.Functions.addLater,
+            args: w.finish()
+        )
+        return try Int32.undraDecoded(from: body)
+    } catch {
+        throw UndraCallError.mapped(error)
+    }
 }
 
 /// The area of a circle or a rectangle. A label and an empty figure have none.
-/// - Throws: ``LabError``.
-public func area(_ figure: Figure, ctx: UndraCore = .shared) throws(LabError) -> Double {
+/// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double {
     var w = UndraWriter()
     figure.undraEncode(&w)
     do {
@@ -132,14 +158,14 @@ public func area(_ figure: Figure, ctx: UndraCore = .shared) throws(LabError) ->
         )
         return try Double.undraDecoded(from: body)
     } catch {
-        guard let typed = LabError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: LabError.self)
     }
 }
 
 /// Tells the core where the server is. Call it once at start-up, before anything observes
 /// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
+/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
 public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
     var w = UndraWriter()
     config.undraEncode(&w)
@@ -150,7 +176,7 @@ public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
             args: w.finish()
         )
     } catch {
-        undraUnexpected(error)
+        ctx.report(error, operation: "configureRemote")
     }
 }
 
@@ -161,12 +187,12 @@ public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
 /// While the device is offline the request is queued (the mutation is idempotent) and the call
 /// keeps waiting; the placeholder stays visible until the network returns and the request is
 /// replayed.
-/// - Throws: ``RemoteError``.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func createRemoteTodo(
     list: String,
     title: String,
     ctx: UndraCore = .shared
-) async throws(RemoteError) -> RemoteTodo {
+) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
     title.undraEncode(&w)
@@ -178,13 +204,13 @@ public func createRemoteTodo(
         )
         return try RemoteTodo.undraDecoded(from: body)
     } catch {
-        guard let typed = RemoteError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: RemoteError.self)
     }
 }
 
 /// Returns `value` unchanged.
-public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) -> Composite {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -> Composite {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -195,12 +221,13 @@ public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) -> Compo
         )
         return try Composite.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
 /// Returns `value` unchanged.
-public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) -> Figure {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -> Figure {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -211,12 +238,13 @@ public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) -> Figure {
         )
         return try Figure.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
 /// Returns `value` unchanged.
-public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) -> Primitives {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws -> Primitives {
     var w = UndraWriter()
     value.undraEncode(&w)
     do {
@@ -227,13 +255,14 @@ public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) -> Pri
         )
         return try Primitives.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
 /// Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
 /// crash, on the platforms that can unwind (R6).
-public func explode(reason: String, ctx: UndraCore = .shared) -> UInt32 {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func explode(reason: String, ctx: UndraCore = .shared) throws -> UInt32 {
     var w = UndraWriter()
     reason.undraEncode(&w)
     do {
@@ -244,11 +273,12 @@ public func explode(reason: String, ctx: UndraCore = .shared) -> UInt32 {
         )
         return try UInt32.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
 /// Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func explodeLater(
     delayMs: UInt32,
     reason: String,
@@ -257,22 +287,26 @@ public func explodeLater(
     var w = UndraWriter()
     delayMs.undraEncode(&w)
     reason.undraEncode(&w)
-    let body = try await ctx.call(
-        .freeFunction(methodId: UndraIds.Functions.explodeLater),
-        method: UndraIds.Functions.explodeLater,
-        args: w.finish()
-    )
-    return try UInt32.undraDecoded(from: body)
+    do {
+        let body = try await ctx.call(
+            .freeFunction(methodId: UndraIds.Functions.explodeLater),
+            method: UndraIds.Functions.explodeLater,
+            args: w.finish()
+        )
+        return try UInt32.undraDecoded(from: body)
+    } catch {
+        throw UndraCallError.mapped(error)
+    }
 }
 
 /// Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
 /// call with a typed error.
-/// - Throws: ``LabError``.
+/// - Throws: ``LabError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func failLater(
     delayMs: UInt32,
     code: Int32,
     ctx: UndraCore = .shared
-) async throws(LabError) -> UInt32 {
+) async throws -> UInt32 {
     var w = UndraWriter()
     delayMs.undraEncode(&w)
     code.undraEncode(&w)
@@ -284,13 +318,13 @@ public func failLater(
         )
         return try UInt32.undraDecoded(from: body)
     } catch {
-        guard let typed = LabError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: LabError.self)
     }
 }
 
 /// A greeting.
-public func greet(name: String, ctx: UndraCore = .shared) -> String {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -301,13 +335,13 @@ public func greet(name: String, ctx: UndraCore = .shared) -> String {
         )
         return try String.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
 /// Reads an unsigned number of at most nine digits.
-/// - Throws: ``LabError``.
-public func parseCount(text: String, ctx: UndraCore = .shared) throws(LabError) -> UInt32 {
+/// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func parseCount(text: String, ctx: UndraCore = .shared) throws -> UInt32 {
     var w = UndraWriter()
     text.undraEncode(&w)
     do {
@@ -318,12 +352,12 @@ public func parseCount(text: String, ctx: UndraCore = .shared) throws(LabError) 
         )
         return try UInt32.undraDecoded(from: body)
     } catch {
-        guard let typed = LabError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: LabError.self)
     }
 }
 
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
+/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
 public func ping(ctx: UndraCore = .shared) {
     do {
         _ = try ctx.callSync(
@@ -332,19 +366,19 @@ public func ping(ctx: UndraCore = .shared) {
             args: []
         )
     } catch {
-        undraUnexpected(error)
+        ctx.report(error, operation: "ping")
     }
 }
 
 /// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
 /// refuses.
-/// - Throws: ``RemoteError``.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func setRemoteDone(
     list: String,
     id: UInt32,
     done: Bool,
     ctx: UndraCore = .shared
-) async throws(RemoteError) -> RemoteTodo {
+) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
     id.undraEncode(&w)
@@ -357,13 +391,13 @@ public func setRemoteDone(
         )
         return try RemoteTodo.undraDecoded(from: body)
     } catch {
-        guard let typed = RemoteError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: RemoteError.self)
     }
 }
 
 /// The name and version of the core.
-public func version(ctx: UndraCore = .shared) -> String {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func version(ctx: UndraCore = .shared) throws -> String {
     do {
         let body = try ctx.callSync(
             .freeFunction(methodId: UndraIds.Functions.version),
@@ -372,6 +406,6 @@ public func version(ctx: UndraCore = .shared) -> String {
         )
         return try String.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }

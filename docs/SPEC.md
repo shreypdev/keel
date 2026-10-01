@@ -189,7 +189,7 @@ Records with `#[undra(default)]` fields: the wire layout still contains the fiel
 Used on WebSocket and Worker transports. In-process calls pass `kind` implicitly through the function they call and carry only the payload.
 
 ```
-magic      4 bytes  4B 45 45 4C  (fixed tag; it stays as it was when the product was renamed)
+magic      4 bytes  55 4E 44 52  (fixed tag, the ASCII of "UNDR"; ADR-033)
 version    u16      1
 schema     u64      schema_hash of the core that produced/expects this message
 kind       u8       see table
@@ -597,21 +597,30 @@ public enum TodoError: UndraError, Error, Sendable, Hashable { case emptyTitle; 
 // object
 public final class Calculator: UndraObject, @unchecked Sendable {
     public init(ctx: UndraCore = .shared) throws           // constructor `new`
-    public func add(a: Int32, b: Int32) -> Int32           // sync
-    public func fetch(url: String) async throws(HttpError) -> String   // async Result
+    public func add(a: Int32, b: Int32) throws -> Int32    // sync
+    public func fetch(url: String) async throws -> String  // async Result; throws HttpError
     public func ticks() -> AsyncThrowingStream<UInt32, Error>          // stream
+    public func reset()                                    // `fn reset(&self)`: a command, it reports instead of throwing
 }
 // store
 @MainActor @Observable public final class Todos: UndraStore {
     public private(set) var todos: [Todo]; public private(set) var filter: Filter; public private(set) var visible: [Todo]
     public init(ctx: UndraCore = .shared) throws
-    public func setFilter(_ f: Filter)
-    public func add(title: String) async throws(TodoError) -> Todo
+    public func setFilter(_ f: Filter)                       // a command
+    public func add(title: String) async throws -> Todo     // throws TodoError
 }
 // port
 public protocol Http: UndraPort { func request(_ req: HttpRequest) async throws(HttpError) -> HttpResponse }
 ```
-Sync methods in `inproc` mode call `undra_call_sync`. Store initial values are decoded from the change-set emitted by `undra_observe` during `init`. Typed throws require Swift 6; the generator also has a `--swift-typed-throws=false` flag that emits plain `throws`.
+Sync methods in `inproc` mode call `undra_call_sync`. Store initial values are decoded from the change-set emitted by `undra_observe` during `init`.
+
+**Failures (ADR-032; `docs/SWIFT_ERRORS.md` is the short guide).** Generated Swift never stops the process on the outcome of a call: no reply status, transport failure, cancellation or undecodable byte reaches `fatalError`, `precondition` or `assertionFailure`, in any build configuration.
+
+* A generated **call** fails with exactly one of three things: its own error `E` (reply status 1; a `Result<T, E>` in Rust), thrown as `E` itself so `catch TodoError.emptyTitle` works; `CancellationError`, when the calling task was cancelled (async calls); or `UndraCallError` (§17.3) for every failure of the call itself: a panic in the core (status 2), a cancellation by the core (status 3: a restore replaced the receiver, or the core shut down), a refusal (status 5: a closed or stale handle, `E_REENTRANT`, undecodable arguments), an unreachable core (shut down, not loaded, remote connection lost) and a reply the bindings cannot read. A cancellation by the core is not a `CancellationError`: the caller's task was not cancelled, and a write that never landed must not hide behind the quiet-exit idiom.
+* Calls use untyped `throws`; the domain error is named in the `- Throws:` documentation. A synchronous method that returns a value throws (`throws -> Int32`); an `async` method is `async throws`; a constructor is `throws` or `async throws` whether or not it has an `E`; a stream is `AsyncThrowingStream<T, Error>` and ends with the same three outcomes (a stream's consumer being cancelled still ends the iteration quietly).
+* A synchronous method that returns `()` and has no error type is a **command** and stays non-throwing, because SwiftUI calls store methods from `Button` actions and `Binding` setters that cannot throw. When a command fails, the generated code calls `UndraCore.report(_:operation:)`, which logs at error level and calls `LoadOptions.onError` with an `UndraUnhandledError`, and returns. A command never writes a store property: the stores change only from the mirror's change-sets, so a refused command leaves the UI showing exactly the core's state.
+* Every generated call is one `do`/`catch` that hands the error to `UndraCallError.mapped(_:)` (`mapped(_:domain:)` with an `E`, `mapped(streamFailure:)` for streams); the mapping lives in the runtime, once. A store's `apply` skips a change it cannot decode and reports it the same way (operation `"<Store>.apply(signal: N)"`).
+* Typed throws (`throws(E)`) remain on **port requirements** only, where the host is the implementer and `E` tells it exactly which errors the core understands (`Generator::swift_typed_throws`, default on, emits plain `throws` when off). The raw entry points of `UndraCore` (`callSync`, `call`, `stream`, `construct`) keep throwing `UndraReplyError` and the transport errors.
 
 ### 10.2 Kotlin
 
@@ -1098,7 +1107,7 @@ Main-thread delivery through `UndraDispatchers.main` (Android: `Dispatchers.Main
 ```swift
 public final class UndraCore: @unchecked Sendable {
   public static func load(_ options: LoadOptions) throws -> UndraCore     // .inproc(adapters:) | .remote(url:adapters:), expectedSchemaHash; LoadOptions.maxPendingEntries / maxPendingBytes (§11.1)
-  public static var shared: UndraCore { get }
+  public static var shared: UndraCore { get }   // the loaded core, or a shut-down placeholder (calls on it fail with `UndraCallError.unavailable(.closed)`); `current` stays nil then
   public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]   // on the main thread, drains the mirror before it returns
   public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8]   // cancellation-aware
   public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], Error>
@@ -1108,14 +1117,29 @@ public final class UndraCore: @unchecked Sendable {
   public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool); public func release(_ handle: UndraHandle)
   public let mirror: Mirror        // register(handle, noCoalesce: Set<UInt32> = []) { @MainActor (signalId, op, reader) in … }; stats() -> MirrorStats;
                                    // addDrainListener { @MainActor (DrainStats) in … } -> DrainListenerRegistration (remove()); @MainActor flush()  (§11.1)
-  public func registerPort(_ id: UInt32, _ impl: PortImpl)
+  public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning
   public func stats() -> UndraStats   // ..., mirror: MirrorStats
+  public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it
 }
 public struct MirrorStats: Sendable, Equatable { changeSetsReceived, entriesReceived, entriesApplied, drains, compactions, resyncs, pendingEntries, pendingBytes, droppedEntries: Int }
 public struct DrainStats: Sendable, Equatable { changeSets: Int; entries: Int; appliedEntries: Int; duration: Duration }
 open class UndraObject: @unchecked Sendable { public init(core: UndraCore, handle: UndraHandle); public func close() }
 @MainActor open class UndraStore: UndraObject { public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []); open func apply(signal: UInt32, op: ChangeOp, reader: inout UndraReader) }   // generated subclass is @Observable
-public struct UndraReplyError: Error { public let status: ReplyStatus; public let body: [UInt8] }
+public struct UndraReplyError: Error { public let status: ReplyStatus; public let body: [UInt8] }   // what the raw entry points throw
+public struct LoadOptions: Sendable { …; public var onError: (@Sendable (UndraUnhandledError) -> Void)? }   // runs synchronously on the calling thread (the main actor for a store); must not call into Undra
+/// What a generated method throws when the call itself fails: not its own `E`, not `CancellationError` (ADR-032).
+public enum UndraCallError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError {
+  case cancelledByCore                                  // status 3
+  case panicked(message: String, backtrace: String)     // status 2 (a stream panic has an empty backtrace)
+  case refused(reason: String)                          // status 5 and the `undra_call` rejection
+  case unavailable(UndraTransportError)                 // this UndraCore is shut down, not loaded, or its connection closed or timed out (a remote core that changed schema included)
+  case malformed(String)                                // a reply, a result or an `E` that does not decode (a bug in Undra after a successful schema check)
+  public static func mapped(_ error: any Error) -> any Error                                        // generated methods without an `E`
+  public static func mapped<E: UndraError>(_ error: any Error, domain: E.Type) -> any Error         // with an `E`: status 1 becomes `E`
+  public static func mapped(streamFailure error: any Error) -> any Error                            // generated stream methods
+  public static func mapped<E: UndraError>(streamFailure error: any Error, domain: E.Type) -> any Error
+}   // `mapped` returns `E`, `CancellationError` or an `UndraCallError`
+public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError { public let operation: String; public let error: UndraCallError }   // what `onError` receives
 public protocol UndraRecord: UndraCodec, Sendable, Hashable {}; public protocol UndraEnum: UndraCodec, Sendable, Hashable {}; public protocol UndraError: UndraCodec, Error, Sendable, Hashable {}; public protocol UndraPort {}
 ```
 Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, …) to avoid clashing with generated port protocols. Generated stores call `super.init(core: core, handle: handle)`, or `super.init(core: core, handle: handle, noCoalesce: [ids])` when the store has `no_coalesce` signals. Drains run from a `CADisplayLink` on iOS, tvOS and visionOS and on the main actor's next turn elsewhere (§11.1).

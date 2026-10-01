@@ -59,7 +59,11 @@ A constructor called `new` becomes `init` (Swift), `create` plus a convenience c
 
 ### Failures
 
-A `Result<T, E>` becomes `throws(E)` (Swift, unless `Generator::swift_typed_throws` is off), a thrown `E` (Kotlin) and a rejection with `E` (TypeScript). Typed throws cannot express anything but `E`: in typed mode a core panic, a malformed reply or a cancelled `Task` awaiting such a method stops the process through `undraUnexpected`. Turn the option off (`throws`, the original error rethrown) for code that relies on structured cancellation. Asynchronous Swift methods without a `Result` use plain `throws`, so cancellation propagates there in both modes.
+A `Result<T, E>` becomes a thrown `E` in every language (Swift `throws`, Kotlin an exception, TypeScript a rejection). Swift (ADR-032) adds a rule the other two get from their exception model: a generated call fails with exactly one of three things, its own `E`, `CancellationError` (the calling task was cancelled) or `UndraCallError` (a core panic, a cancellation by the core, a refused call, an unreachable core, a reply that does not decode). Calls use plain `throws`; the generated code is one `do`/`catch` per call that hands the error to `UndraCallError.mapped(_:domain:)`, so the mapping lives once, in the runtime.
+
+A synchronous Swift method that returns nothing and has no error type is a **command** (`todos.toggle(id:)`). It cannot throw, because it is called from `Button` actions and binding setters, so it logs a failure, passes it to `LoadOptions.onError` and returns. Nothing generated traps.
+
+Typed throws remain on **port requirements** only (`Generator::swift_typed_throws`): the host implements them, and `throws(HttpError)` tells the implementer exactly which errors the core can understand. With the option off they emit plain `throws`.
 
 ### The standard library
 

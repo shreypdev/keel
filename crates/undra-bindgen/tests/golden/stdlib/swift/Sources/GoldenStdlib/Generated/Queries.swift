@@ -24,16 +24,23 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.LatestResponseQueryHandle.typeId,
-            method: UndraIds.Objects.LatestResponseQueryHandle.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.LatestResponseQueryHandle.typeId,
+                method: UndraIds.Objects.LatestResponseQueryHandle.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func refetch() {
         do {
             _ = try self.core.callSync(
@@ -42,11 +49,12 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "LatestResponseQueryHandle.refetch")
         }
     }
 
     /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func invalidate() {
         do {
             _ = try self.core.callSync(
@@ -55,7 +63,7 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "LatestResponseQueryHandle.invalidate")
         }
     }
 
@@ -65,8 +73,9 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.data = try Optional<HttpResponse>.undraDecode(&reader)
+                    let value = try Optional<HttpResponse>.undraDecode(&reader)
                     try reader.finish()
+                    self.data = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -75,8 +84,9 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.status = try QueryStatus.undraDecode(&reader)
+                    let value = try QueryStatus.undraDecode(&reader)
                     try reader.finish()
+                    self.status = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -85,8 +95,9 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.error = try Optional<HttpError>.undraDecode(&reader)
+                    let value = try Optional<HttpError>.undraDecode(&reader)
                     try reader.finish()
+                    self.error = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -95,8 +106,9 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.fetching = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.fetching = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -105,8 +117,9 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.updatedAt = try Optional<Date>.undraDecode(&reader)
+                    let value = try Optional<Date>.undraDecode(&reader)
                     try reader.finish()
+                    self.updatedAt = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -120,17 +133,14 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of LatestResponseQueryHandle: \(error)")
+            self.core.report(error, operation: "LatestResponseQueryHandle.apply(signal: \(signal))")
         }
     }
 }
 
 /// Runs the `retry` mutation.
-/// - Throws: ``HttpError``.
-public func retry(
-    _ request: HttpRequest,
-    ctx: UndraCore = .shared
-) async throws(HttpError) -> HttpResponse {
+/// - Throws: ``HttpError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func retry(_ request: HttpRequest, ctx: UndraCore = .shared) async throws -> HttpResponse {
     var w = UndraWriter()
     request.undraEncode(&w)
     do {
@@ -141,7 +151,6 @@ public func retry(
         )
         return try HttpResponse.undraDecoded(from: body)
     } catch {
-        guard let typed = HttpError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: HttpError.self)
     }
 }

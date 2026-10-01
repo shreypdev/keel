@@ -89,33 +89,53 @@ impl Runtimes {
     }
 }
 
+/// What a checkout of the Undra repository has: the crates the core links and the runtimes the
+/// shells use.
+pub(crate) const CHECKOUT_FILES: [&str; 6] = [
+    "crates/undra/Cargo.toml",
+    "crates/undra-ffi/Cargo.toml",
+    "crates/undra-transport/Cargo.toml",
+    "runtimes/swift/UndraRuntime/Package.swift",
+    "runtimes/kotlin/undra-runtime/settings.gradle.kts",
+    "runtimes/ts/@undra/runtime/package.json",
+];
+
+/// The first file `repo` lacks to be a checkout of the Undra repository, if any.
+fn missing_from_checkout(repo: &Path) -> Option<&'static str> {
+    CHECKOUT_FILES
+        .into_iter()
+        .find(|needed| !repo.join(needed).is_file())
+}
+
 /// Checks that `repo` is a checkout of the Undra repository: it has the crates and the runtimes.
 ///
 /// # Errors
 ///
 /// `C0009` naming what is missing.
 pub fn require_checkout(repo: &Path) -> Result<()> {
-    for needed in [
-        "crates/undra/Cargo.toml",
-        "crates/undra-ffi/Cargo.toml",
-        "crates/undra-transport/Cargo.toml",
-        "runtimes/swift/UndraRuntime/Package.swift",
-        "runtimes/kotlin/undra-runtime/settings.gradle.kts",
-        "runtimes/ts/@undra/runtime/package.json",
-    ] {
-        if !repo.join(needed).is_file() {
-            return Err(CliError::new(
-                Code::BadArgument,
-                format!(
-                    "{} does not look like a checkout of the Undra repository: {needed} is missing",
-                    repo.display()
-                ),
-                "with `--undra-path` the crates and the platform runtimes are used straight from the checkout, so all of them have to be there",
-                "point `--undra-path` at the repository root (the directory that holds `crates/` and `runtimes/`)",
-            ));
-        }
+    match missing_from_checkout(repo) {
+        None => Ok(()),
+        Some(needed) => Err(CliError::new(
+            Code::BadArgument,
+            format!(
+                "{} does not look like a checkout of the Undra repository: {needed} is missing",
+                repo.display()
+            ),
+            "with `--undra-path` the crates and the platform runtimes are used straight from the checkout, so all of them have to be there",
+            "point `--undra-path` at the repository root (the directory that holds `crates/` and `runtimes/`)",
+        )),
     }
-    Ok(())
+}
+
+/// The checkout of the Undra repository that `dir` is inside (or is), when there is one: the
+/// nearest directory at or above `dir` that has the crates and the runtimes. A project created
+/// there depends on the checkout by path, as with `--undra-path`, because the release it would
+/// otherwise pin is not the code being worked on.
+#[must_use]
+pub fn enclosing_checkout(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors()
+        .find(|candidate| missing_from_checkout(candidate).is_none())
+        .map(Path::to_path_buf)
 }
 
 #[cfg(test)]
@@ -135,7 +155,7 @@ mod tests {
     #[test]
     fn registry_when_there_is_no_checkout() {
         let r = Runtimes::for_project(&project("/p", None));
-        assert_eq!(r, Runtimes::from_registries("0.1"));
+        assert_eq!(r, Runtimes::from_registries(crate::config::UNDRA_VERSION));
     }
 
     #[test]
@@ -167,5 +187,37 @@ mod tests {
         let e = require_checkout(Path::new("/definitely/not/undra")).unwrap_err();
         assert_eq!(e.code, Code::BadArgument);
         assert!(e.what.contains("crates/undra/Cargo.toml"), "{e}");
+    }
+
+    /// A directory tree with the files of a checkout.
+    fn fake_checkout(root: &Path) {
+        for file in CHECKOUT_FILES {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+    }
+
+    #[test]
+    fn a_directory_inside_a_checkout_finds_it() {
+        let root = crate::fsutil::unique_temp_dir("enclosing");
+        fake_checkout(&root);
+        let inside = root.join("examples/app/core");
+        std::fs::create_dir_all(&inside).unwrap();
+        assert_eq!(enclosing_checkout(&inside), Some(root.clone()));
+        assert_eq!(enclosing_checkout(&root), Some(root.clone()));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_directory_outside_any_checkout_finds_none() {
+        let dir = crate::fsutil::unique_temp_dir("not-enclosed");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(enclosing_checkout(&dir), None);
+        // Half a checkout is not one: the runtimes are missing.
+        std::fs::create_dir_all(dir.join("crates/undra")).unwrap();
+        std::fs::write(dir.join("crates/undra/Cargo.toml"), "").unwrap();
+        assert_eq!(enclosing_checkout(&dir), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

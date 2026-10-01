@@ -1,0 +1,41 @@
+{
+  "name": "@undra/cli",
+  "version": "0.1.0",
+  "description": "The undra command: one Rust core, native SwiftUI, Jetpack Compose and React apps.",
+  "keywords": [
+    "undra",
+    "rust",
+    "ios",
+    "android",
+    "swiftui",
+    "jetpack-compose",
+    "react",
+    "cross-platform",
+    "cli"
+  ],
+  "homepage": "https://shreypdev.github.io/undra/",
+  "bugs": {
+    "url": "https://github.com/shreypdev/undra/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shreypdev/undra.git",
+    "directory": "packaging/npm"
+  },
+  "license": "MIT OR Apache-2.0",
+  "author": "Shrey <shreypdev@gmail.com>",
+  "bin": {
+    "undra": "bin/undra.js"
+  },
+  "files": [
+    "bin/undra.js",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

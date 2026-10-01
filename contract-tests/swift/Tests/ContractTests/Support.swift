@@ -33,25 +33,6 @@ func checkEqual<Value: Equatable>(
     }
 }
 
-/// Fails the scenario unless `body` throws an error equal to `expected`.
-func checkThrows<Failure: Error & Equatable>(
-    _ expected: Failure,
-    _ what: @autoclosure () -> String,
-    file: StaticString = #fileID,
-    line: UInt = #line,
-    _ body: () async throws -> Void
-) async throws {
-    do {
-        try await body()
-    } catch let error as Failure {
-        try checkEqual(error, expected, what(), file: file, line: line)
-        return
-    } catch {
-        throw ScenarioFailure(description: "\(what()): expected \(expected), got another error: \(error) (\(file):\(line))")
-    }
-    throw ScenarioFailure(description: "\(what()): expected \(expected), but nothing was thrown (\(file):\(line))")
-}
-
 /// How long anything asynchronous may take (scenarios.md, "Waiting").
 let waitLimit: Duration = .seconds(5)
 
@@ -141,6 +122,101 @@ func checkFailure<Value, Failure: Error & Equatable>(
         try checkEqual(error, expected, what(), file: file, line: line)
     case .success(let value):
         throw ScenarioFailure(description: "\(what()): expected the typed error \(expected), got the value \(value) (\(file):\(line))")
+    }
+}
+
+/// Fails the scenario unless `body` throws an error that is an `Expected` equal to `expected`.
+///
+/// A generated call throws untyped (ADR-032): its own error, `CancellationError` or `UndraCallError`
+/// all arrive as `any Error`, so the check is on the dynamic type and the value together.
+func checkThrows<Value, Expected: Error & Equatable>(
+    _ body: () throws -> Value,
+    _ expected: Expected,
+    _ what: @autoclosure () -> String,
+    file: StaticString = #fileID,
+    line: UInt = #line
+) throws {
+    try checkThrown(Result { try body() }, expected, what(), file: file, line: line)
+}
+
+/// The asynchronous form of `checkThrows`; it runs on the main actor, like the scenarios.
+@MainActor
+func checkThrows<Value, Expected: Error & Equatable>(
+    _ body: @MainActor () async throws -> Value,
+    _ expected: Expected,
+    _ what: @autoclosure () -> String,
+    file: StaticString = #fileID,
+    line: UInt = #line
+) async throws {
+    let result: Result<Value, any Error>
+    do {
+        result = .success(try await body())
+    } catch {
+        result = .failure(error)
+    }
+    try checkThrown(result, expected, what(), file: file, line: line)
+}
+
+private func checkThrown<Value, Expected: Error & Equatable>(
+    _ result: Result<Value, any Error>,
+    _ expected: Expected,
+    _ what: String,
+    file: StaticString,
+    line: UInt
+) throws {
+    switch result {
+    case .success(let value):
+        throw ScenarioFailure(description: "\(what): expected the error \(expected), got the value \(value) (\(file):\(line))")
+    case .failure(let error):
+        guard let typed = error as? Expected else {
+            throw ScenarioFailure(description: "\(what): expected \(Expected.self) \(expected), got \(type(of: error)): \(error) (\(file):\(line))")
+        }
+        try checkEqual(typed, expected, what, file: file, line: line)
+    }
+}
+
+/// The `UndraCallError` that `body` throws, or a scenario failure if it returns or throws anything else
+/// (a `CancellationError`, or the method's own error, would be a different outcome).
+func callError<Value>(
+    _ what: @autoclosure () -> String,
+    file: StaticString = #fileID,
+    line: UInt = #line,
+    _ body: () throws -> Value
+) throws -> UndraCallError {
+    return try unwrapCallError(Result { try body() }, what(), file: file, line: line)
+}
+
+/// The asynchronous form of `callError`; it runs on the main actor, like the scenarios.
+@MainActor
+func callError<Value>(
+    _ what: @autoclosure () -> String,
+    file: StaticString = #fileID,
+    line: UInt = #line,
+    _ body: @MainActor () async throws -> Value
+) async throws -> UndraCallError {
+    let result: Result<Value, any Error>
+    do {
+        result = .success(try await body())
+    } catch {
+        result = .failure(error)
+    }
+    return try unwrapCallError(result, what(), file: file, line: line)
+}
+
+private func unwrapCallError<Value>(
+    _ result: Result<Value, any Error>,
+    _ what: String,
+    file: StaticString,
+    line: UInt
+) throws -> UndraCallError {
+    switch result {
+    case .success(let value):
+        throw ScenarioFailure(description: "\(what): expected an UndraCallError, got the value \(value) (\(file):\(line))")
+    case .failure(let error):
+        guard let call = error as? UndraCallError else {
+            throw ScenarioFailure(description: "\(what): expected an UndraCallError, got \(type(of: error)): \(error) (\(file):\(line))")
+        }
+        return call
     }
 }
 

@@ -100,7 +100,8 @@ pub struct BindingsConfig {
     pub ts_package: Option<String>,
     /// Map `i64`/`u64` to `number` instead of `bigint` in TypeScript.
     pub ts_js_number: bool,
-    /// Emit `throws(E)` in Swift; `true` unless turned off.
+    /// Emit `throws(E)` on Swift port requirements (calls always use plain
+    /// `throws`, ADR-032); `true` unless turned off.
     pub swift_typed_throws: Option<bool>,
 }
 
@@ -200,8 +201,21 @@ pub struct ProjectConfig {
     pub runtimes: RuntimesConfig,
 }
 
-/// The Undra version `undra init` pins registry dependencies to.
-pub const UNDRA_VERSION: &str = "0.1";
+/// The Undra release line (`<major>.<minor>`) this CLI belongs to: what `undra init` asks the
+/// package registries for (`@undra/runtime`, `dev.undra:runtime`, the Swift package). It follows
+/// the workspace version, so a release never leaves a scaffold asking for the previous line.
+pub const UNDRA_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION_MAJOR"),
+    ".",
+    env!("CARGO_PKG_VERSION_MINOR")
+);
+
+/// Where the Undra crates are fetched from (until they are on crates.io): this repository.
+pub const UNDRA_REPO_URL: &str = "https://github.com/shreypdev/undra";
+
+/// The git tag of this CLI's release, `v<version>`: what `undra init` pins the core's `undra`
+/// dependency to, so the project uses the crates the CLI was released with.
+pub const UNDRA_RELEASE_TAG: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 impl ProjectConfig {
     /// A configuration with every default, for a project called `name`.
@@ -441,7 +455,8 @@ impl ProjectConfig {
             out,
             "\n[undra]\n\
              # Where Undra comes from. `path` is a checkout of the Undra repository (crates and\n\
-             # runtimes are used from there); without it, released versions are used.\n\
+             # runtimes are used from there); without it, the release `version` names is used: the\n\
+             # crates by git tag (see core/Cargo.toml), the runtimes from their package registries.\n\
              version = {}",
             quote(&self.undra_version)
         );
@@ -456,7 +471,7 @@ impl ProjectConfig {
              # kotlin_package = \"com.example.todo.core\"\n\
              # ts_scope = \"app\"\n\
              # ts_js_number = false        # i64/u64 as `number` instead of `bigint`\n\
-             # swift_typed_throws = true   # `throws(E)`; false emits plain `throws`"
+             # swift_typed_throws = true   # port requirements: `throws(E)`; false emits plain `throws`"
         );
         if let Some(v) = &self.bindings.swift_module {
             let _ = writeln!(out, "swift_module = {}", quote(v));

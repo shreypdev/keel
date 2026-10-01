@@ -1,0 +1,31 @@
+{
+  "name": "@undra/cli-@@PLATFORM@@",
+  "version": "0.1.0",
+  "description": "The undra binary for @@LABEL@@. Install @undra/cli, not this package.",
+  "homepage": "https://shreypdev.github.io/undra/",
+  "bugs": {
+    "url": "https://github.com/shreypdev/undra/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shreypdev/undra.git",
+    "directory": "packaging/npm"
+  },
+  "license": "MIT OR Apache-2.0",
+  "author": "Shrey <shreypdev@gmail.com>",
+  "os": [
+    "@@OS@@"
+  ],
+  "cpu": [
+    "@@CPU@@"
+  ],
+  "files": [
+    "undra",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "preferUnplugged": true,
+  "publishConfig": {
+    "access": "public"
+  }
+}

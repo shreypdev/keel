@@ -256,4 +256,18 @@ Spec: `.10x/specs/2026-09-30-launch-v2-design.md` (+ Amendment A). Decisions und
 In flight (worktrees under `/Users/shrey/Desktop/src/.work/`): `stress` (harsh-conditions harness,
 S1a), `dist` (release pipeline, npm/brew/curl), `magic` (ADR-033 envelope magic `UNDR`),
 `coalesce` (ADR-031 frame-coalesced delivery), `swift-errors` (ADR-032 Swift error channel).
-Matrix at this checkpoint: Rust 2,110 · TS 897 · Kotlin 454 · Swift 328 · wasm 29 · contracts 51/51.
+Matrix at checkpoint 1: Rust 2,110 · TS 897 · Kotlin 454 · Swift 328 · wasm 29 · contracts 51/51.
+Matrix at checkpoint 2: Rust 2,156 · TS 897 · Kotlin 454 · Swift 384 · wasm 29 · contracts 51/51 (S18 lands with ADR-031).
+
+### Checkpoint 2 (2026-10-01, early morning)
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| ADR-033 envelope magic `UNDR` + `sync-vectors --check` in CI | `88082b8`, `7b10e0e` | all suites; CI/Site/Bench green |
+| distribution: `release.yml`, npm packages (`@undra/cli*`, `undra`), Homebrew template, `site/install.sh`, `bump-version.sh`, `docs/RELEASING.md`, `undra --version`, `undra init` pins by tag | `11feefd`, `2f3e1c6` | fable security review `.10x/reviews/2026-09-30-dist-review.md` (0 High, 2 Medium fixed); **release dry run green end to end** (verify, 4 builds, package); first dry run caught a pipefail false negative in the tarball check |
+| harsh-conditions benchmark harness (S1a) + 7 landing-page cards | `2e0d1c5`, `74ddb44` | opus review `.10x/reviews/2026-09-30-stress-bench-review.md` (H1 churn invariant fixed); the `[stress]` gates and the 10 s soak **pass on the GitHub runner** (Bench job) |
+| ADR-032 Swift error channel (generated Swift never traps) | `1e50f96` | opus review `.10x/reviews/2026-09-30-swift-error-channel-review.md`: R6 holds for Swift; Rust 2,156 · Swift 384 · contracts 51/51 |
+
+Review follow-ups recorded, not yet done: stress M1 (gates would not catch a 2× regression —
+ratio gates or runner baselines), M3 (a contended-writes scenario), M4 (a real drift gate), L4–L8;
+dist: the `release` environment + `v*` tag ruleset are founder steps.

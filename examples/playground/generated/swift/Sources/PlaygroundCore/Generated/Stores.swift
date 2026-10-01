@@ -144,17 +144,24 @@ public final class Bench: UndraStore, @unchecked Sendable {
     }
 
     /// A store with every counter at zero and [`ROWS`] rows numbered from 1.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Bench.typeId,
-            method: UndraIds.Objects.Bench.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Bench.typeId,
+                method: UndraIds.Objects.Bench.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Adds two numbers: the cheapest call there is, for the handle-call row.
-    public func benchAdd(a: UInt32, b: UInt32) -> UInt32 {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func benchAdd(a: UInt32, b: UInt32) throws -> UInt32 {
         var w = UndraWriter()
         a.undraEncode(&w)
         b.undraEncode(&w)
@@ -166,13 +173,14 @@ public final class Bench: UndraStore, @unchecked Sendable {
             )
             return try UInt32.undraDecoded(from: body)
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
     /// Returns `data` unchanged: a payload of `data.len()` bytes crosses the boundary
     /// twice.
-    public func benchEchoBytes(data: [UInt8]) -> [UInt8] {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func benchEchoBytes(data: [UInt8]) throws -> [UInt8] {
         var w = UndraWriter()
         w.writeBytes(data)
         do {
@@ -183,13 +191,14 @@ public final class Bench: UndraStore, @unchecked Sendable {
             )
             return try UndraBytes.undraDecoded(from: body).bytes
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
     /// Inserts one new row so that it ends at position `i` (a position past the end
     /// appends): one keyed `Insert` on a list of about 10,000 rows. The list grows by
     /// one row per call; `bench_list_reset` starts over.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func benchListInsert(i: UInt32) {
         var w = UndraWriter()
         i.undraEncode(&w)
@@ -200,12 +209,13 @@ public final class Bench: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Bench.benchListInsert")
         }
     }
 
     /// Puts the list back to its [`ROWS`] starting rows and writes zero to every counter,
     /// in one transaction: one change-set with the list and all [`SIGNALS`] counters.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func benchListReset() {
         do {
             _ = try self.core.callSync(
@@ -214,12 +224,13 @@ public final class Bench: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Bench.benchListReset")
         }
     }
 
     /// Adds one to the first `k` counters (at most [`SIGNALS`]) inside one transaction:
     /// `k` dirty signals, one change-set.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func benchTouchSignals(k: UInt32) {
         var w = UndraWriter()
         k.undraEncode(&w)
@@ -230,7 +241,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Bench.benchTouchSignals")
         }
     }
 
@@ -240,8 +251,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.rows = try [Item].undraDecode(&reader)
+                    let value = try [Item].undraDecode(&reader)
                     try reader.finish()
+                    self.rows = value
                 case .keyedPatch:
                     let ops: [PatchOp<Item>] = try decodePatch(&reader)
                     try reader.finish()
@@ -252,8 +264,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.s000 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s000 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -262,8 +275,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.s001 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s001 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -272,8 +286,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.s002 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s002 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -282,8 +297,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.s003 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s003 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -292,8 +308,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 5:
                 switch op {
                 case .fullValue:
-                    self.s004 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s004 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -302,8 +319,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 6:
                 switch op {
                 case .fullValue:
-                    self.s005 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s005 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -312,8 +330,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 7:
                 switch op {
                 case .fullValue:
-                    self.s006 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s006 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -322,8 +341,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 8:
                 switch op {
                 case .fullValue:
-                    self.s007 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s007 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -332,8 +352,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 9:
                 switch op {
                 case .fullValue:
-                    self.s008 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s008 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -342,8 +363,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 10:
                 switch op {
                 case .fullValue:
-                    self.s009 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s009 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -352,8 +374,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 11:
                 switch op {
                 case .fullValue:
-                    self.s010 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s010 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -362,8 +385,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 12:
                 switch op {
                 case .fullValue:
-                    self.s011 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s011 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -372,8 +396,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 13:
                 switch op {
                 case .fullValue:
-                    self.s012 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s012 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -382,8 +407,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 14:
                 switch op {
                 case .fullValue:
-                    self.s013 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s013 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -392,8 +418,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 15:
                 switch op {
                 case .fullValue:
-                    self.s014 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s014 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -402,8 +429,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 16:
                 switch op {
                 case .fullValue:
-                    self.s015 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s015 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -412,8 +440,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 17:
                 switch op {
                 case .fullValue:
-                    self.s016 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s016 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -422,8 +451,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 18:
                 switch op {
                 case .fullValue:
-                    self.s017 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s017 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -432,8 +462,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 19:
                 switch op {
                 case .fullValue:
-                    self.s018 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s018 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -442,8 +473,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 20:
                 switch op {
                 case .fullValue:
-                    self.s019 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s019 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -452,8 +484,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 21:
                 switch op {
                 case .fullValue:
-                    self.s020 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s020 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -462,8 +495,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 22:
                 switch op {
                 case .fullValue:
-                    self.s021 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s021 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -472,8 +506,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 23:
                 switch op {
                 case .fullValue:
-                    self.s022 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s022 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -482,8 +517,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 24:
                 switch op {
                 case .fullValue:
-                    self.s023 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s023 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -492,8 +528,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 25:
                 switch op {
                 case .fullValue:
-                    self.s024 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s024 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -502,8 +539,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 26:
                 switch op {
                 case .fullValue:
-                    self.s025 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s025 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -512,8 +550,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 27:
                 switch op {
                 case .fullValue:
-                    self.s026 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s026 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -522,8 +561,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 28:
                 switch op {
                 case .fullValue:
-                    self.s027 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s027 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -532,8 +572,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 29:
                 switch op {
                 case .fullValue:
-                    self.s028 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s028 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -542,8 +583,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 30:
                 switch op {
                 case .fullValue:
-                    self.s029 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s029 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -552,8 +594,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 31:
                 switch op {
                 case .fullValue:
-                    self.s030 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s030 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -562,8 +605,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 32:
                 switch op {
                 case .fullValue:
-                    self.s031 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s031 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -572,8 +616,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 33:
                 switch op {
                 case .fullValue:
-                    self.s032 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s032 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -582,8 +627,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 34:
                 switch op {
                 case .fullValue:
-                    self.s033 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s033 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -592,8 +638,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 35:
                 switch op {
                 case .fullValue:
-                    self.s034 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s034 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -602,8 +649,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 36:
                 switch op {
                 case .fullValue:
-                    self.s035 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s035 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -612,8 +660,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 37:
                 switch op {
                 case .fullValue:
-                    self.s036 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s036 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -622,8 +671,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 38:
                 switch op {
                 case .fullValue:
-                    self.s037 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s037 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -632,8 +682,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 39:
                 switch op {
                 case .fullValue:
-                    self.s038 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s038 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -642,8 +693,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 40:
                 switch op {
                 case .fullValue:
-                    self.s039 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s039 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -652,8 +704,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 41:
                 switch op {
                 case .fullValue:
-                    self.s040 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s040 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -662,8 +715,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 42:
                 switch op {
                 case .fullValue:
-                    self.s041 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s041 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -672,8 +726,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 43:
                 switch op {
                 case .fullValue:
-                    self.s042 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s042 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -682,8 +737,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 44:
                 switch op {
                 case .fullValue:
-                    self.s043 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s043 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -692,8 +748,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 45:
                 switch op {
                 case .fullValue:
-                    self.s044 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s044 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -702,8 +759,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 46:
                 switch op {
                 case .fullValue:
-                    self.s045 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s045 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -712,8 +770,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 47:
                 switch op {
                 case .fullValue:
-                    self.s046 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s046 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -722,8 +781,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 48:
                 switch op {
                 case .fullValue:
-                    self.s047 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s047 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -732,8 +792,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 49:
                 switch op {
                 case .fullValue:
-                    self.s048 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s048 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -742,8 +803,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 50:
                 switch op {
                 case .fullValue:
-                    self.s049 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s049 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -752,8 +814,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 51:
                 switch op {
                 case .fullValue:
-                    self.s050 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s050 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -762,8 +825,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 52:
                 switch op {
                 case .fullValue:
-                    self.s051 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s051 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -772,8 +836,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 53:
                 switch op {
                 case .fullValue:
-                    self.s052 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s052 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -782,8 +847,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 54:
                 switch op {
                 case .fullValue:
-                    self.s053 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s053 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -792,8 +858,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 55:
                 switch op {
                 case .fullValue:
-                    self.s054 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s054 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -802,8 +869,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 56:
                 switch op {
                 case .fullValue:
-                    self.s055 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s055 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -812,8 +880,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 57:
                 switch op {
                 case .fullValue:
-                    self.s056 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s056 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -822,8 +891,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 58:
                 switch op {
                 case .fullValue:
-                    self.s057 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s057 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -832,8 +902,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 59:
                 switch op {
                 case .fullValue:
-                    self.s058 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s058 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -842,8 +913,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 60:
                 switch op {
                 case .fullValue:
-                    self.s059 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s059 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -852,8 +924,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 61:
                 switch op {
                 case .fullValue:
-                    self.s060 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s060 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -862,8 +935,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 62:
                 switch op {
                 case .fullValue:
-                    self.s061 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s061 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -872,8 +946,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 63:
                 switch op {
                 case .fullValue:
-                    self.s062 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s062 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -882,8 +957,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 64:
                 switch op {
                 case .fullValue:
-                    self.s063 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s063 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -892,8 +968,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 65:
                 switch op {
                 case .fullValue:
-                    self.s064 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s064 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -902,8 +979,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 66:
                 switch op {
                 case .fullValue:
-                    self.s065 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s065 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -912,8 +990,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 67:
                 switch op {
                 case .fullValue:
-                    self.s066 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s066 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -922,8 +1001,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 68:
                 switch op {
                 case .fullValue:
-                    self.s067 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s067 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -932,8 +1012,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 69:
                 switch op {
                 case .fullValue:
-                    self.s068 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s068 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -942,8 +1023,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 70:
                 switch op {
                 case .fullValue:
-                    self.s069 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s069 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -952,8 +1034,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 71:
                 switch op {
                 case .fullValue:
-                    self.s070 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s070 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -962,8 +1045,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 72:
                 switch op {
                 case .fullValue:
-                    self.s071 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s071 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -972,8 +1056,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 73:
                 switch op {
                 case .fullValue:
-                    self.s072 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s072 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -982,8 +1067,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 74:
                 switch op {
                 case .fullValue:
-                    self.s073 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s073 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -992,8 +1078,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 75:
                 switch op {
                 case .fullValue:
-                    self.s074 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s074 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1002,8 +1089,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 76:
                 switch op {
                 case .fullValue:
-                    self.s075 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s075 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1012,8 +1100,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 77:
                 switch op {
                 case .fullValue:
-                    self.s076 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s076 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1022,8 +1111,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 78:
                 switch op {
                 case .fullValue:
-                    self.s077 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s077 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1032,8 +1122,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 79:
                 switch op {
                 case .fullValue:
-                    self.s078 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s078 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1042,8 +1133,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 80:
                 switch op {
                 case .fullValue:
-                    self.s079 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s079 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1052,8 +1144,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 81:
                 switch op {
                 case .fullValue:
-                    self.s080 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s080 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1062,8 +1155,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 82:
                 switch op {
                 case .fullValue:
-                    self.s081 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s081 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1072,8 +1166,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 83:
                 switch op {
                 case .fullValue:
-                    self.s082 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s082 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1082,8 +1177,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 84:
                 switch op {
                 case .fullValue:
-                    self.s083 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s083 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1092,8 +1188,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 85:
                 switch op {
                 case .fullValue:
-                    self.s084 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s084 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1102,8 +1199,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 86:
                 switch op {
                 case .fullValue:
-                    self.s085 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s085 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1112,8 +1210,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 87:
                 switch op {
                 case .fullValue:
-                    self.s086 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s086 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1122,8 +1221,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 88:
                 switch op {
                 case .fullValue:
-                    self.s087 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s087 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1132,8 +1232,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 89:
                 switch op {
                 case .fullValue:
-                    self.s088 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s088 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1142,8 +1243,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 90:
                 switch op {
                 case .fullValue:
-                    self.s089 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s089 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1152,8 +1254,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 91:
                 switch op {
                 case .fullValue:
-                    self.s090 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s090 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1162,8 +1265,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 92:
                 switch op {
                 case .fullValue:
-                    self.s091 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s091 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1172,8 +1276,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 93:
                 switch op {
                 case .fullValue:
-                    self.s092 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s092 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1182,8 +1287,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 94:
                 switch op {
                 case .fullValue:
-                    self.s093 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s093 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1192,8 +1298,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 95:
                 switch op {
                 case .fullValue:
-                    self.s094 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s094 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1202,8 +1309,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 96:
                 switch op {
                 case .fullValue:
-                    self.s095 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s095 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1212,8 +1320,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 97:
                 switch op {
                 case .fullValue:
-                    self.s096 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s096 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1222,8 +1331,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 98:
                 switch op {
                 case .fullValue:
-                    self.s097 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s097 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1232,8 +1342,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 99:
                 switch op {
                 case .fullValue:
-                    self.s098 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s098 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1242,8 +1353,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 100:
                 switch op {
                 case .fullValue:
-                    self.s099 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s099 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1252,8 +1364,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 101:
                 switch op {
                 case .fullValue:
-                    self.s100 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s100 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1262,8 +1375,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 102:
                 switch op {
                 case .fullValue:
-                    self.s101 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s101 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1272,8 +1386,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 103:
                 switch op {
                 case .fullValue:
-                    self.s102 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s102 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1282,8 +1397,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 104:
                 switch op {
                 case .fullValue:
-                    self.s103 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s103 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1292,8 +1408,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 105:
                 switch op {
                 case .fullValue:
-                    self.s104 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s104 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1302,8 +1419,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 106:
                 switch op {
                 case .fullValue:
-                    self.s105 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s105 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1312,8 +1430,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 107:
                 switch op {
                 case .fullValue:
-                    self.s106 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s106 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1322,8 +1441,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 108:
                 switch op {
                 case .fullValue:
-                    self.s107 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s107 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1332,8 +1452,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 109:
                 switch op {
                 case .fullValue:
-                    self.s108 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s108 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1342,8 +1463,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 110:
                 switch op {
                 case .fullValue:
-                    self.s109 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s109 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1352,8 +1474,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 111:
                 switch op {
                 case .fullValue:
-                    self.s110 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s110 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1362,8 +1485,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 112:
                 switch op {
                 case .fullValue:
-                    self.s111 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s111 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1372,8 +1496,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 113:
                 switch op {
                 case .fullValue:
-                    self.s112 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s112 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1382,8 +1507,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 114:
                 switch op {
                 case .fullValue:
-                    self.s113 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s113 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1392,8 +1518,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 115:
                 switch op {
                 case .fullValue:
-                    self.s114 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s114 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1402,8 +1529,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 116:
                 switch op {
                 case .fullValue:
-                    self.s115 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s115 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1412,8 +1540,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 117:
                 switch op {
                 case .fullValue:
-                    self.s116 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s116 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1422,8 +1551,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 118:
                 switch op {
                 case .fullValue:
-                    self.s117 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s117 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1432,8 +1562,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 119:
                 switch op {
                 case .fullValue:
-                    self.s118 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s118 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1442,8 +1573,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 120:
                 switch op {
                 case .fullValue:
-                    self.s119 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s119 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1452,8 +1584,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 121:
                 switch op {
                 case .fullValue:
-                    self.s120 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s120 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1462,8 +1595,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 122:
                 switch op {
                 case .fullValue:
-                    self.s121 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s121 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1472,8 +1606,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 123:
                 switch op {
                 case .fullValue:
-                    self.s122 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s122 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1482,8 +1617,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 124:
                 switch op {
                 case .fullValue:
-                    self.s123 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s123 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1492,8 +1628,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 125:
                 switch op {
                 case .fullValue:
-                    self.s124 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s124 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1502,8 +1639,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 126:
                 switch op {
                 case .fullValue:
-                    self.s125 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s125 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1512,8 +1650,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 127:
                 switch op {
                 case .fullValue:
-                    self.s126 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s126 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1522,8 +1661,9 @@ public final class Bench: UndraStore, @unchecked Sendable {
             case 128:
                 switch op {
                 case .fullValue:
-                    self.s127 = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.s127 = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1537,7 +1677,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Bench: \(error)")
+            self.core.report(error, operation: "Bench.apply(signal: \(signal))")
         }
     }
 }
@@ -1555,19 +1695,25 @@ public final class BigList: UndraStore, @unchecked Sendable {
     }
 
     /// A list of [`LIST_LEN`] items numbered from 1.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.BigList.typeId,
-            method: UndraIds.Objects.BigList.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.BigList.typeId,
+                method: UndraIds.Objects.BigList.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
     /// returns its identity. One keyed `Insert`.
-    /// - Throws: ``ListError``.
-    public func insertAt(index: UInt32, label: String) throws(ListError) -> UInt32 {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func insertAt(index: UInt32, label: String) throws -> UInt32 {
         var w = UndraWriter()
         index.undraEncode(&w)
         label.undraEncode(&w)
@@ -1579,14 +1725,13 @@ public final class BigList: UndraStore, @unchecked Sendable {
             )
             return try UInt32.undraDecoded(from: body)
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
     /// Moves the row at `from` so that it ends at `to`. One keyed `Move`.
-    /// - Throws: ``ListError``.
-    public func moveItem(from: UInt32, to: UInt32) throws(ListError) {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func moveItem(from: UInt32, to: UInt32) throws {
         var w = UndraWriter()
         from.undraEncode(&w)
         to.undraEncode(&w)
@@ -1597,14 +1742,13 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
     /// Removes the row at `index`. One keyed `Remove`.
-    /// - Throws: ``ListError``.
-    public func removeAt(index: UInt32) throws(ListError) {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func removeAt(index: UInt32) throws {
         var w = UndraWriter()
         index.undraEncode(&w)
         do {
@@ -1614,14 +1758,14 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
     /// Replaces the list with a fresh one of [`LIST_LEN`] items. The platform receives the keyed
     /// patch that turns the old list into the new one (a full value if they have little in
     /// common).
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func reset() {
         do {
             _ = try self.core.callSync(
@@ -1630,13 +1774,13 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "BigList.reset")
         }
     }
 
     /// Changes the label of the row at `index` and bumps its version. One keyed `Update`.
-    /// - Throws: ``ListError``.
-    public func updateAt(index: UInt32, label: String) throws(ListError) {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func updateAt(index: UInt32, label: String) throws {
         var w = UndraWriter()
         index.undraEncode(&w)
         label.undraEncode(&w)
@@ -1647,8 +1791,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
@@ -1658,8 +1801,9 @@ public final class BigList: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.items = try [Item].undraDecode(&reader)
+                    let value = try [Item].undraDecode(&reader)
                     try reader.finish()
+                    self.items = value
                 case .keyedPatch:
                     let ops: [PatchOp<Item>] = try decodePatch(&reader)
                     try reader.finish()
@@ -1670,8 +1814,9 @@ public final class BigList: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.count = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.count = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1685,7 +1830,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of BigList: \(error)")
+            self.core.report(error, operation: "BigList.apply(signal: \(signal))")
         }
     }
 }
@@ -1704,18 +1849,25 @@ public final class Counter: UndraStore, @unchecked Sendable {
     }
 
     /// A counter at zero with no changes made.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Counter.typeId,
-            method: UndraIds.Objects.Counter.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Counter.typeId,
+                method: UndraIds.Objects.Counter.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Adds `amount` (which may be negative) and counts the change: one transaction, so one
     /// change-set for `count`, `changes` and `parity` together. The count saturates instead of
     /// overflowing.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func add(amount: Int32) {
         var w = UndraWriter()
         amount.undraEncode(&w)
@@ -1726,11 +1878,12 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.add")
         }
     }
 
     /// Subtracts one.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func decrement() {
         do {
             _ = try self.core.callSync(
@@ -1739,11 +1892,12 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.decrement")
         }
     }
 
     /// Adds one.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func increment() {
         do {
             _ = try self.core.callSync(
@@ -1752,11 +1906,12 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.increment")
         }
     }
 
     /// Sets the count back to zero and forgets the changes, in one transaction.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func reset() {
         do {
             _ = try self.core.callSync(
@@ -1765,7 +1920,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.reset")
         }
     }
 
@@ -1775,8 +1930,9 @@ public final class Counter: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.count = try Int32.undraDecode(&reader)
+                    let value = try Int32.undraDecode(&reader)
                     try reader.finish()
+                    self.count = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1785,8 +1941,9 @@ public final class Counter: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.changes = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.changes = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1795,8 +1952,9 @@ public final class Counter: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.parity = try Parity.undraDecode(&reader)
+                    let value = try Parity.undraDecode(&reader)
                     try reader.finish()
+                    self.parity = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1810,7 +1968,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Counter: \(error)")
+            self.core.report(error, operation: "Counter.apply(signal: \(signal))")
         }
     }
 }
@@ -1827,17 +1985,24 @@ public final class Stress: UndraStore, @unchecked Sendable {
     }
 
     /// A store with both signals at zero.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Stress.typeId,
-            method: UndraIds.Objects.Stress.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Stress.typeId,
+                method: UndraIds.Objects.Stress.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Commits `transactions` transactions now, each one write of the signal `mode` names: one
     /// change-set per transaction, the way data that arrives in the core on its own does.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func burst(mode: StressMode, transactions: UInt32) {
         var w = UndraWriter()
         mode.undraEncode(&w)
@@ -1849,7 +2014,7 @@ public final class Stress: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Stress.burst")
         }
     }
 
@@ -1859,8 +2024,9 @@ public final class Stress: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.value = try UInt64.undraDecode(&reader)
+                    let value = try UInt64.undraDecode(&reader)
                     try reader.finish()
+                    self.value = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1869,8 +2035,9 @@ public final class Stress: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.progress = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.progress = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -1884,7 +2051,7 @@ public final class Stress: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Stress: \(error)")
+            self.core.report(error, operation: "Stress.apply(signal: \(signal))")
         }
     }
 }
@@ -1905,18 +2072,24 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// An empty list showing every item.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Todos.typeId,
-            method: UndraIds.Objects.Todos.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Todos.typeId,
+                method: UndraIds.Objects.Todos.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Adds an item at the end of the list.
-    /// - Throws: ``TodoError``.
-    public func add(title: String) async throws(TodoError) -> Todo {
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func add(title: String) async throws -> Todo {
         var w = UndraWriter()
         title.undraEncode(&w)
         do {
@@ -1927,12 +2100,12 @@ public final class Todos: UndraStore, @unchecked Sendable {
             )
             return try Todo.undraDecoded(from: body)
         } catch {
-            guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
     }
 
     /// Removes every finished item.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func clearDone() {
         do {
             _ = try self.core.callSync(
@@ -1941,11 +2114,12 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.clearDone")
         }
     }
 
     /// Removes the item with `id`; unknown ids are ignored.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func remove(id: UUID) {
         var w = UndraWriter()
         id.undraEncode(&w)
@@ -1956,11 +2130,12 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.remove")
         }
     }
 
     /// Chooses which items `visible` holds.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setFilter(_ filter: Filter) {
         var w = UndraWriter()
         filter.undraEncode(&w)
@@ -1971,11 +2146,12 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.setFilter")
         }
     }
 
     /// Flips the `done` flag of the item with `id`; unknown ids are ignored.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func toggle(id: UUID) {
         var w = UndraWriter()
         id.undraEncode(&w)
@@ -1986,7 +2162,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.toggle")
         }
     }
 
@@ -1996,8 +2172,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.todos = try [Todo].undraDecode(&reader)
+                    let value = try [Todo].undraDecode(&reader)
                     try reader.finish()
+                    self.todos = value
                 case .keyedPatch:
                     let ops: [PatchOp<Todo>] = try decodePatch(&reader)
                     try reader.finish()
@@ -2008,8 +2185,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.filter = try Filter.undraDecode(&reader)
+                    let value = try Filter.undraDecode(&reader)
                     try reader.finish()
+                    self.filter = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -2018,8 +2196,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.visible = try [Todo].undraDecode(&reader)
+                    let value = try [Todo].undraDecode(&reader)
                     try reader.finish()
+                    self.visible = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -2028,8 +2207,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.remaining = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.remaining = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -2043,7 +2223,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Todos: \(error)")
+            self.core.report(error, operation: "Todos.apply(signal: \(signal))")
         }
     }
 }

@@ -120,14 +120,39 @@ updates `todos`, `visible` and `remaining` on every observer in a single main-th
 apply. Data fetching, caching, optimistic mutations with precise rollback, offline queues
 and persistence are built in (`#[undra::query]` / `#[undra::mutation]`).
 
+## Install
+
+Four ways to get the same `undra` binary (macOS and Linux, x86_64 and arm64):
+
+```bash
+brew install shreypdev/undra/undra                                   # Homebrew
+npm install -g @undra/cli                                            # npm (Node 20+)
+curl -fsSL https://shreypdev.github.io/undra/install.sh | sh         # checks the sha256, installs to ~/.undra/bin, no sudo
+cargo install --git https://github.com/shreypdev/undra undra-cli     # from source (Rust 1.85+)
+```
+
+Homebrew, npm and the installer script download the prebuilt binary of a GitHub Release, so
+they work from the first tagged release (`v1.0.0`) on; the `cargo` line builds the default
+branch today. Not supported yet: Windows, and Alpine (musl) for the prebuilt binaries.
+`undra --version` prints `undra <version> (<commit>)` (`unknown` for a build from source). Maintainers: [docs/RELEASING.md](docs/RELEASING.md).
+
 ## Quick start
 
 ```bash
-git clone https://github.com/shreypdev/undra.git && cd undra
-cargo install --path crates/undra-cli    # the `undra` command
 undra init myapp                          # core + SwiftUI + Compose + React shells
 cd myapp
 undra dev                                 # live core over WebSocket, rebuild on save
+```
+
+A new project depends on the Undra crates at the git tag of the `undra` that created it
+(`undra = { git = "https://github.com/shreypdev/undra", tag = "v<version>" }`), which
+exists from the first tagged release on. Before that, or to work on Undra itself, use a
+checkout: its crates and runtimes are then used by path.
+
+```bash
+git clone https://github.com/shreypdev/undra.git && cd undra
+cargo install --path crates/undra-cli
+undra init myapp --dir .. --undra-path .  # the project next to the checkout, using it
 ```
 
 Then open `web/` (`npm install && npm run dev`), `ios/` (Xcode) or `android/` (Gradle) —

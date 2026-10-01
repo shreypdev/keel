@@ -18,13 +18,17 @@ before the rename merged; the post-rename and post-site runs are being watched.
 5. Docs truth pass from the fact-check.
 
 ## In flight (one worktree each; see status.md)
-`stress` → `magic` → `dist` → `swift-errors` → `coalesce` is the intended merge order. Each:
-adversarial review, full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
+Merged since checkpoint 1: `magic` (ADR-033), `dist`, `stress` (S1a + landing cards), `swift-errors`
+(ADR-032). Still open: `coalesce` (ADR-031, all three runtimes + S18 + `no_coalesce` through the
+schema; TS done, Kotlin/Swift in progress) and `flake` (deterministic transport tests). Each: adversarial
+review, full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
 
 ## Next after those
 * Playground stress screen (S1b) and the harsh-conditions rows in `site/data/bench.json`.
-* Founder steps (docs/RELEASING.md once `dist` lands): npm org `undra`, `shreypdev/homebrew-undra`,
-  `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN`, optionally `undra.rs` and a GitHub org, then `v1.0.0`.
+* Founder steps (`docs/RELEASING.md`; the dry run is green): npm org `undra` + automation token →
+  `NPM_TOKEN`; repository `shreypdev/homebrew-undra` with `Formula/` + fine-grained PAT →
+  `HOMEBREW_TAP_TOKEN`; the `release` environment with a `v*` tag restriction and a `v*` tag ruleset;
+  optionally `undra.rs` and a GitHub org; then `scripts/bump-version.sh 1.0.0` → tag `v1.0.0`.
 * An AVD named `undra` on the dev machine (docs say `undra`; the machine still has `keel`).
 * v1.x queue, unchanged: device-measured bench rows; Android `undra dev` remote mode; dev-client
   auto-reconnect; `WeakCtx`; macro diagnostic polish; Swift `Port*` public; full-JSON

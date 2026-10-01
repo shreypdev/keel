@@ -6,18 +6,23 @@
 //   node site/scripts/build-numbers.mjs
 //
 // bench.json: { machine, method, source, stressScreen, rows: [Row], harsh: [Row] } where a Row is
-// { id, operation, value, unit, budget, budgetUnit, gate|null, source }. Units: ns, µs, ms, KB, MB.
+// { id, operation, value, unit, budget, budgetUnit, gate|null, source, floor? }. Units: ns, µs, ms, KB, MB, % for ceilings; /s, k/s, M/s for floor rows (throughput gates, `floor: true`).
 import { join } from "node:path";
 import { SITE, read, writeIfChanged, replaceRegion, esc } from "./lib.mjs";
 
-const FACTOR = { ns: 1, "µs": 1e3, ms: 1e6, KB: 1, MB: 1e3 };
+const FACTOR = { ns: 1, "µs": 1e3, ms: 1e6, KB: 1, MB: 1e3, "%": 1 };
+// Throughput gates are floors: the measured rate must stay above them.
+const RATE = { "/s": 1, "k/s": 1e3, "M/s": 1e6 };
 const fmtNum = (n) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const pct = (r) => (r >= 0.1 ? Math.round(r * 100) + "%" : (r * 100).toFixed(1) + "%");
 
 function ratio(row) {
-  const a = FACTOR[row.unit], b = FACTOR[row.budgetUnit];
+  const table = row.floor ? RATE : FACTOR;
+  const a = table[row.unit], b = table[row.budgetUnit];
   if (!a || !b || !(row.budget > 0)) throw new Error(`bench row ${row.id}: unknown unit or budget`);
-  return (row.value * a) / (row.budget * b);
+  // A ceiling row reports how much of its budget it uses; a floor row (a throughput gate) how much
+  // of the measured rate the gate is, so the meter fills as the margin shrinks in both cases.
+  return row.floor ? (row.budget * b) / (row.value * a) : (row.value * a) / (row.budget * b);
 }
 
 /** Column spans (of 12) for n cards: rows of 3, then a last row of 4 (seven rows make 3 + 4). */
@@ -35,7 +40,7 @@ function card(row, span) {
     `<article class="stat${span === 4 ? " w4" : ""} reveal" data-bar>`,
     `<a class="lbl" href="${esc(row.source)}" rel="noopener">${esc(row.operation)}</a>`,
     `<div class="val"><span data-count="${row.value}" data-dec="${count}" data-final="${esc(fmtNum(row.value))}">${esc(fmtNum(row.value))}</span><small>${esc(row.unit)}</small></div>`,
-    `<div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:${Math.min(100, r * 100).toFixed(1)}%"></span></div><div class="meter-cap"><span><b>${pct(r)}</b> of budget</span><span>budget ≤ ${esc(fmtNum(row.budget))} ${esc(row.budgetUnit)}</span></div></div>`,
+    `<div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:${Math.min(100, r * 100).toFixed(1)}%"></span></div><div class="meter-cap">${row.floor ? `<span><b>${fmtNum((row.value * RATE[row.unit]) / (row.budget * RATE[row.budgetUnit]))}×</b> the gate</span><span>gate ≥ ${esc(fmtNum(row.budget))} ${esc(row.budgetUnit)}</span>` : `<span><b>${pct(r)}</b> of budget</span><span>budget ≤ ${esc(fmtNum(row.budget))} ${esc(row.budgetUnit)}</span>`}</div></div>`,
     "</article>",
   ].join("");
 }

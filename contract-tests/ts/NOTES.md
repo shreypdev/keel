@@ -28,6 +28,11 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   nanoseconds it is on the wire. The fields scenarios.md does not name in the extremes step take their own
   extremes (`byte` 0, `dword` 4294967295, `at` the `Date` minimum, ...). S01.4 also checks that a returned blob
   is not a view into wasm memory (a later call must not reach back into it).
+* S05.6, S06.6, S15.9 and the wasm S17.5 (ADR-032) are new coverage of TypeScript behaviour that did not change: every
+  generated method is `async`, so closed objects and stale handles reject with `UndraReplyError` status 5, a call in flight
+  across a restore rejects with status 3, a cancelled typed call rejects with the signal's reason, and on a trapped core
+  `add_later`, `Counter.increment` and `parse_count` reject with `UndraTransportError` (`trap` or `closed`). The native
+  S17.5 (re-entry) and S17.6 (shutdown) have no wasm counterpart: see the platform notes of scenarios.md.
 * S07.4: "`produced` stays below 200" is read as the growth since the stream was opened: the counter is
   cumulative (1000 after step 3) and `reset()` is not part of the step.
 * S12.1: scenarios.md's `loading` is the core's `QueryStatus.fetching`; the status history is exactly

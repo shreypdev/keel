@@ -15,7 +15,7 @@
 //! blocking the core or exhausting memory.
 
 use std::net::{Shutdown, TcpStream};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
@@ -30,6 +30,36 @@ use crate::tracker::{Leftovers, Tracker};
 
 /// The target of the runtime's development-mode records (SPEC 5.10).
 const DEVTOOLS_TARGET: &str = "undra::devtools";
+
+/// A source of monotonic time: how long since some fixed origin. The keepalive reads time only
+/// through this, so that a test can hold it still and move it by exact steps.
+pub(crate) type Clock = Arc<dyn Fn() -> Duration + Send + Sync>;
+
+/// The real clock: time since this call.
+pub(crate) fn real_clock() -> Clock {
+    let origin = Instant::now();
+    Arc::new(move || origin.elapsed())
+}
+
+/// A [`Clock`] a test moves by hand: it stands still until [`advance`](ManualClock::advance).
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct ManualClock(Arc<AtomicU64>);
+
+#[cfg(test)]
+impl ManualClock {
+    /// A clock reading what this one reads, now and after every `advance`.
+    pub(crate) fn clock(&self) -> Clock {
+        let millis = self.0.clone();
+        Arc::new(move || Duration::from_millis(millis.load(Ordering::SeqCst)))
+    }
+
+    /// Moves time forward by `by` (whole milliseconds).
+    pub(crate) fn advance(&self, by: Duration) {
+        let by = u64::try_from(by.as_millis()).expect("a step that fits a u64");
+        self.0.fetch_add(by, Ordering::SeqCst);
+    }
+}
 
 /// What the writer thread is asked to do, in queue order.
 #[derive(Debug)]
@@ -67,9 +97,10 @@ pub(crate) struct Conn {
     /// A handle on the socket used only to abort it.
     tcp: Option<TcpStream>,
     client: OnceLock<ClientInfo>,
-    /// When the connection was accepted; [`last_rx`](Conn::last_rx) counts from here.
-    epoch: Instant,
-    /// Milliseconds after `epoch` at which bytes last arrived from the peer.
+    /// Where the keepalive reads the time.
+    clock: Clock,
+    /// Milliseconds on `clock` at which bytes last arrived from the peer; until then, when the
+    /// connection was accepted.
     last_rx: AtomicU64,
 }
 
@@ -81,6 +112,17 @@ impl Conn {
         schema: u64,
         max_queued: usize,
         tcp: Option<TcpStream>,
+    ) -> (Conn, Receiver<Item>) {
+        Conn::with_clock(id, schema, max_queued, tcp, real_clock())
+    }
+
+    /// [`Conn::new`] with the keepalive reading `clock` instead of the real one.
+    pub(crate) fn with_clock(
+        id: u64,
+        schema: u64,
+        max_queued: usize,
+        tcp: Option<TcpStream>,
+        clock: Clock,
     ) -> (Conn, Receiver<Item>) {
         let (tx, rx) = channel();
         let conn = Conn {
@@ -98,8 +140,8 @@ impl Conn {
             }),
             tcp,
             client: OnceLock::new(),
-            epoch: Instant::now(),
-            last_rx: AtomicU64::new(0),
+            last_rx: AtomicU64::new(clock().as_millis().try_into().unwrap_or(u64::MAX)),
+            clock,
         };
         (conn, rx)
     }
@@ -119,16 +161,23 @@ impl Conn {
         self.client.get()
     }
 
+    /// The keepalive's clock, now.
+    pub(crate) fn now(&self) -> Duration {
+        (self.clock)()
+    }
+
     /// Bytes just arrived from the peer: it is alive.
     pub(crate) fn touch(&self) {
-        let now = u64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let now = u64::try_from(self.now().as_millis()).unwrap_or(u64::MAX);
         self.last_rx.store(now, Ordering::Relaxed);
     }
 
-    /// How long the peer has been silent (nothing at all, not even a pong).
-    pub(crate) fn silent_for(&self) -> Duration {
-        let last = Duration::from_millis(self.last_rx.load(Ordering::Relaxed));
-        self.epoch.elapsed().saturating_sub(last)
+    /// How long the peer had been silent (nothing at all, not even a pong) at `now`, a reading
+    /// of [`Conn::now`] taken before this call. Judging every silence against one reading keeps
+    /// the answer exact when a thread is descheduled between reading the clock and the
+    /// timestamp.
+    pub(crate) fn silent_at(&self, now: Duration) -> Duration {
+        now.saturating_sub(Duration::from_millis(self.last_rx.load(Ordering::Relaxed)))
     }
 
     /// Whether frames are no longer accepted.
@@ -534,11 +583,18 @@ mod tests {
 
     #[test]
     fn silence_is_measured_from_the_last_bytes_received() {
-        let (conn, _rx) = Conn::new(1, 1, 1 << 20, None);
-        std::thread::sleep(Duration::from_millis(40));
-        assert!(conn.silent_for() >= Duration::from_millis(40));
+        let time = ManualClock::default();
+        time.advance(Duration::from_millis(7)); // the connection is accepted mid-run
+        let (conn, _rx) = Conn::with_clock(1, 1, 1 << 20, None, time.clock());
+        assert_eq!(conn.silent_at(conn.now()), Duration::ZERO);
+        time.advance(Duration::from_millis(40));
+        assert_eq!(conn.silent_at(conn.now()), Duration::from_millis(40));
         conn.touch();
-        assert!(conn.silent_for() < Duration::from_millis(30));
+        assert_eq!(conn.silent_at(conn.now()), Duration::ZERO);
+        time.advance(Duration::from_millis(25));
+        assert_eq!(conn.silent_at(conn.now()), Duration::from_millis(25));
+        // A reading taken before the touch cannot make the peer look silent for longer.
+        assert_eq!(conn.silent_at(Duration::from_millis(1)), Duration::ZERO);
     }
 
     #[test]

@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { SITE, ORIGIN, read, writeIfChanged, replaceRegion, esc } from "./lib.mjs";
 
 const REPO = resolve(SITE, "..");
-const macros = readdirSync(join(REPO, "crates")).find((d) => d.endsWith("-macros"));
+const macros = readdirSync(join(REPO, "crates")).find((d) => d.endsWith("-macros") && existsSync(join(REPO, "crates", d, "Cargo.toml")));
 if (!macros) throw new Error("no crates/*-macros directory");
 const MAX_ROWS = 6;
 

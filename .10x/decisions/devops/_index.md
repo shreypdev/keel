@@ -6,3 +6,8 @@ aarch64-apple-ios(-sim), aarch64/x86_64-linux-android, wasm32-unknown-unknown; J
 1.6.4 at ../.tools/lib. Full Xcode.app present; xcode-select needs sudo so env.sh routes
 via DEVELOPER_DIR. Missing until the playground step: Android commandlinetools + NDK r27
 + AVD, cargo-ndk. CI workflows: none yet (piece 7).
+
+* [dist.md](dist.md) (2026-09-30): the release workflow, the npm / Homebrew / curl / cargo
+  channels, `scripts/bump-version.sh`, the `undra --version` and `undra init` pinning changes;
+  what is verified locally and what only the first dry run can show. Runbook:
+  `docs/RELEASING.md`.

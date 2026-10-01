@@ -1,6 +1,8 @@
 // The runtime's typed errors (docs/SPEC.md sections 11 and 17.3).
 //
-// * `UndraReplyError`            a core call finished with a status other than ok
+// * `UndraReplyError`            a core call finished with a status other than ok (what the raw entry points throw)
+// * `UndraCallError`             what a generated method throws when the call itself fails (CallError.swift)
+// * `UndraUnhandledError`        a failure of a generated command or a store's change, given to `LoadOptions.onError`
 // * `UndraPortError`             thrown by a port implementation to answer with a typed error
 // * `UndraModeError`             an operation the current transport mode cannot perform
 // * `UndraSchemaMismatchError`   the core and the bindings were built from different schemas
@@ -13,10 +15,11 @@
 
 /// A call that did not finish with status `ok`.
 ///
-/// Generated code turns the ones it expects into typed errors: a reply with `status == .error`
-/// carries the encoded `E` of a `Result<T, E>` in `body`. Everything else (`panic`, `cancelled`,
-/// `badRequest`, a stream that opened where a plain reply was expected) is not part of a method's
-/// signature and reaches the caller as this error.
+/// This is what the raw entry points (`UndraCore.callSync`, `call`, `stream`, `construct`) throw. A
+/// reply with `status == .error` carries the encoded `E` of a `Result<T, E>` in `body`; the other
+/// statuses (`panic`, `cancelled`, `badRequest`, a stream that opened where a plain reply was
+/// expected) are not part of a method's signature. Generated methods do not expose it: they throw
+/// their own `E`, `CancellationError`, or ``UndraCallError`` (ADR-032).
 public struct UndraReplyError: Error, Sendable, Equatable {
     /// The reply status.
     public let status: ReplyStatus

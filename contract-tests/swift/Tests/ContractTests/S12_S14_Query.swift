@@ -107,9 +107,9 @@ extension ContractScenarios {
 
             // 1. The server refuses the creation: the placeholder shows during the 50 ms, then is rolled back.
             server.respond("POST", path, status: 500, body: "boom", delayMs: 50)
-            try checkFailure(await outcome { () async throws(RemoteError) -> RemoteTodo in
+            try await checkThrows({
                 try await createRemoteTodo(list: "s13", title: "Walk", ctx: core)
-            }, .status(code: 500), "create_remote_todo against a 500")
+            }, RemoteError.status(code: 500), "create_remote_todo against a 500")
             try await waitUntil("the rollback") { handle.data == [milk] && handle.status == .success && !handle.fetching }
             let placeholder = RemoteTodo(id: UInt32.max, title: "Walk", done: false)
             try checkEqual(recorder.values, [[milk], [milk, placeholder], [milk]], "data while creating against a 500")
@@ -118,9 +118,7 @@ extension ContractScenarios {
             let walk = RemoteTodo(id: 2, title: "Walk", done: false)
             server.respond("POST", path, status: 201, json: ServerTodo(id: 2, title: "Walk", done: false), delayMs: 50)
             server.respond("GET", path, json: [ContractScenarios.milk, ServerTodo(id: 2, title: "Walk", done: false)])
-            let created = try success(await outcome { () async throws(RemoteError) -> RemoteTodo in
-                try await createRemoteTodo(list: "s13", title: "Walk", ctx: core)
-            }, "create_remote_todo against a 201")
+            let created = try await createRemoteTodo(list: "s13", title: "Walk", ctx: core)
             try checkEqual(created, walk, "the created item")
             try await waitUntil("the refetch after the creation") { handle.data == [milk, walk] && !handle.fetching }
             let shown = recorder.values
@@ -136,9 +134,9 @@ extension ContractScenarios {
             recorder.stop()
             let flips = ChangeRecorder { handle.data?.first?.done }
             server.respond("PATCH", "\(path)/1", status: 500, body: "boom", delayMs: 50)
-            try checkFailure(await outcome { () async throws(RemoteError) -> RemoteTodo in
+            try await checkThrows({
                 try await setRemoteDone(list: "s13", id: 1, done: true, ctx: core)
-            }, .status(code: 500), "set_remote_done against a 500")
+            }, RemoteError.status(code: 500), "set_remote_done against a 500")
             try await waitUntil("the rollback of the flag") { handle.data?.first?.done == false && !handle.fetching }
             flips.stop()
             try checkEqual(flips.values, [false, true, false], "milk's done flag while the PATCH fails")
@@ -146,9 +144,7 @@ extension ContractScenarios {
             // 4. An accepted completion sticks, after the refetch.
             server.respond("PATCH", "\(path)/1", status: 200, json: ServerTodo(id: 1, title: "Buy milk", done: true), delayMs: 50)
             server.respond("GET", path, json: [ServerTodo(id: 1, title: "Buy milk", done: true), ServerTodo(id: 2, title: "Walk", done: false)])
-            let done = try success(await outcome { () async throws(RemoteError) -> RemoteTodo in
-                try await setRemoteDone(list: "s13", id: 1, done: true, ctx: core)
-            }, "set_remote_done against a 200")
+            let done = try await setRemoteDone(list: "s13", id: 1, done: true, ctx: core)
             try checkEqual(done.done, true, "the item the PATCH returned")
             try await waitUntil("the refetch after the PATCH") { handle.data?.first?.done == true && !handle.fetching }
             try checkEqual(handle.status, .success, "status at the end")
@@ -174,12 +170,15 @@ extension ContractScenarios {
 
             // 2. A creation fails on the network and is queued: it stays pending, with its placeholder on screen.
             server.failNetwork("POST", path)
-            let finished = Locked<Result<RemoteTodo, RemoteError>?>(nil)
+            let finished = Locked<Result<RemoteTodo, any Error>?>(nil)
             Task {
-                let result = await outcome { () async throws(RemoteError) -> RemoteTodo in
-                    try await createRemoteTodo(list: "s14", title: "Offline item", ctx: core)
+                let result: Result<RemoteTodo, any Error>
+                do {
+                    result = .success(try await createRemoteTodo(list: "s14", title: "Offline item", ctx: core))
+                } catch {
+                    result = .failure(error)
                 }
-                finished.withLock { (current: inout Result<RemoteTodo, RemoteError>?) -> Void in current = result }
+                finished.withLock { (current: inout Result<RemoteTodo, any Error>?) -> Void in current = result }
             }
             try await waitUntil("the first POST attempt") { server.requests("POST", path).count == 1 }
             try await quietFor(milliseconds: 200)
@@ -190,9 +189,9 @@ extension ContractScenarios {
             // 3. A mutation that is not idempotent does not queue: it fails at once.
             server.failNetwork("PATCH", "\(path)/1")
             let patchStarted = ContinuousClock.now
-            try checkFailure(await outcome { () async throws(RemoteError) -> RemoteTodo in
+            try await checkThrows({
                 try await setRemoteDone(list: "s14", id: 1, done: true, ctx: core)
-            }, .http(.network("offline")), "set_remote_done while offline")
+            }, RemoteError.http(.network("offline")), "set_remote_done while offline")
             try check(ContinuousClock.now - patchStarted < waitLimit, "set_remote_done while offline did not fail at once (bounded by waitLimit for loaded CI runners)")
 
             // 4. The network returns: the queued POST is replayed.

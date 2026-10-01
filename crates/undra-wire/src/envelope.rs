@@ -5,9 +5,9 @@ use crate::macros::wire_u8_enum;
 use crate::writer::len_u32;
 use crate::{Reader, WireError, Writer};
 
-/// The four magic bytes every envelope starts with: `4B 45 45 4C`. They are fixed by the wire
-/// format (SPEC 3.2) and were not renamed with the product.
-pub const MAGIC: [u8; 4] = [0x4B, 0x45, 0x45, 0x4C];
+/// The four magic bytes every envelope starts with: `55 4E 44 52`, the ASCII of `UNDR`. They are
+/// fixed by the wire format (SPEC 3.2, ADR-033).
+pub const MAGIC: [u8; 4] = [0x55, 0x4E, 0x44, 0x52];
 
 /// The envelope protocol version this crate reads and writes.
 pub const VERSION: u16 = 1;
@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(
             f,
             [
-                b'K', b'E', b'E', b'L', 1, 0, 8, 7, 6, 5, 4, 3, 2, 1, 1, 7, 0, 0, 0, 3, 0, 0, 0,
+                b'U', b'N', b'D', b'R', 1, 0, 8, 7, 6, 5, 4, 3, 2, 1, 1, 7, 0, 0, 0, 3, 0, 0, 0,
                 0xaa, 0xbb, 0xcc
             ]
         );
@@ -284,10 +284,10 @@ mod tests {
         assert_eq!(Envelope::parse(&f), Err(WireError::BadMagic));
         // A prefix that contradicts the magic is BadMagic even when the frame is tiny.
         assert_eq!(Envelope::parse(b"X"), Err(WireError::BadMagic));
-        assert_eq!(Envelope::parse(b"KEEX"), Err(WireError::BadMagic));
+        assert_eq!(Envelope::parse(b"UNDX"), Err(WireError::BadMagic));
         // A prefix that is consistent with the magic is merely short.
         assert_eq!(
-            Envelope::parse(b"KE"),
+            Envelope::parse(b"UN"),
             Err(WireError::UnexpectedEof { needed: 4, at: 0 })
         );
         assert_eq!(

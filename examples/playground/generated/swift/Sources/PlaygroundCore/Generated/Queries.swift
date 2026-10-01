@@ -24,18 +24,25 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(list: String, ctx: UndraCore = .shared) throws {
         var w = UndraWriter()
         list.undraEncode(&w)
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.RemoteTodosQueryHandle.typeId,
-            method: UndraIds.Objects.RemoteTodosQueryHandle.new,
-            args: w.finish()
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.RemoteTodosQueryHandle.typeId,
+                method: UndraIds.Objects.RemoteTodosQueryHandle.new,
+                args: w.finish()
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func refetch() {
         do {
             _ = try self.core.callSync(
@@ -44,11 +51,12 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "RemoteTodosQueryHandle.refetch")
         }
     }
 
     /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func invalidate() {
         do {
             _ = try self.core.callSync(
@@ -57,7 +65,7 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "RemoteTodosQueryHandle.invalidate")
         }
     }
 
@@ -67,8 +75,9 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.data = try Optional<[RemoteTodo]>.undraDecode(&reader)
+                    let value = try Optional<[RemoteTodo]>.undraDecode(&reader)
                     try reader.finish()
+                    self.data = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -77,8 +86,9 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.status = try QueryStatus.undraDecode(&reader)
+                    let value = try QueryStatus.undraDecode(&reader)
                     try reader.finish()
+                    self.status = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -87,8 +97,9 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.error = try Optional<RemoteError>.undraDecode(&reader)
+                    let value = try Optional<RemoteError>.undraDecode(&reader)
                     try reader.finish()
+                    self.error = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -97,8 +108,9 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.fetching = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.fetching = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -107,8 +119,9 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.updatedAt = try Optional<Date>.undraDecode(&reader)
+                    let value = try Optional<Date>.undraDecode(&reader)
                     try reader.finish()
+                    self.updatedAt = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -122,19 +135,19 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of RemoteTodosQueryHandle: \(error)")
+            self.core.report(error, operation: "RemoteTodosQueryHandle.apply(signal: \(signal))")
         }
     }
 }
 
 /// Runs the `patch_remote_todo` mutation.
-/// - Throws: ``RemoteError``.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func patchRemoteTodo(
     list: String,
     id: UInt32,
     done: Bool,
     ctx: UndraCore = .shared
-) async throws(RemoteError) -> RemoteTodo {
+) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
     id.undraEncode(&w)
@@ -147,18 +160,17 @@ public func patchRemoteTodo(
         )
         return try RemoteTodo.undraDecoded(from: body)
     } catch {
-        guard let typed = RemoteError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: RemoteError.self)
     }
 }
 
 /// Runs the `post_remote_todo` mutation.
-/// - Throws: ``RemoteError``.
+/// - Throws: ``RemoteError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func postRemoteTodo(
     list: String,
     title: String,
     ctx: UndraCore = .shared
-) async throws(RemoteError) -> RemoteTodo {
+) async throws -> RemoteTodo {
     var w = UndraWriter()
     list.undraEncode(&w)
     title.undraEncode(&w)
@@ -170,7 +182,6 @@ public func postRemoteTodo(
         )
         return try RemoteTodo.undraDecoded(from: body)
     } catch {
-        guard let typed = RemoteError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: RemoteError.self)
     }
 }

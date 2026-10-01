@@ -1,0 +1,38 @@
+# Generated from packaging/homebrew/undra.rb.tmpl by packaging/homebrew/generate.sh at release
+# time; the real hashes exist only once the release tarballs do. Edit the template, not the
+# formula in the tap.
+class Undra < Formula
+  desc "CLI for native iOS, Android and web apps on a shared Rust core"
+  homepage "https://shreypdev.github.io/undra/"
+  license any_of: ["MIT", "Apache-2.0"]
+
+  on_macos do
+    on_arm do
+      url "@@BASE_URL@@/undra-v@@VERSION@@-aarch64-apple-darwin.tar.gz"
+      sha256 "@@SHA_AARCH64_APPLE_DARWIN@@"
+    end
+    on_intel do
+      url "@@BASE_URL@@/undra-v@@VERSION@@-x86_64-apple-darwin.tar.gz"
+      sha256 "@@SHA_X86_64_APPLE_DARWIN@@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "@@BASE_URL@@/undra-v@@VERSION@@-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "@@SHA_AARCH64_UNKNOWN_LINUX_GNU@@"
+    end
+    on_intel do
+      url "@@BASE_URL@@/undra-v@@VERSION@@-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "@@SHA_X86_64_UNKNOWN_LINUX_GNU@@"
+    end
+  end
+
+  def install
+    bin.install "undra"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/undra --version")
+  end
+end

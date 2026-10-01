@@ -271,7 +271,7 @@ figcaption b{color:var(--t1);font-weight:700}
 <p class="lede">Blind trust is never given to a pitch. It is given to a tool that has been boring for long enough. Undra earns it with three product claims and five habits.</p>
 <div class="grid3">
 <div class="tile"><span class="kicker">claim 1</span><h4>State is the product</h4><p>Calling a Rust function from Swift was solved years ago. What no one has shipped is Rust state that SwiftUI, Compose and React observe natively, with one FFI crossing per change instead of one per value. Undra's reactive core is the moat; bindings are table stakes.</p></div>
-<div class="tile"><span class="kicker">claim 2</span><h4>Idiomatic or nothing</h4><p>Generated Swift must pass review by a Swift engineer who does not know Rust exists: typed throws, <code>async</code>, <code>@Observable</code>, <code>Sendable</code>. Same for Kotlin (sealed interfaces, <code>suspend</code>, <code>Flow</code>, Compose <code>State</code>) and TypeScript (discriminated unions, <code>Promise</code>, hooks). No <code>RustBuffer</code> in anyone's autocomplete.</p></div>
+<div class="tile"><span class="kicker">claim 2</span><h4>Idiomatic or nothing</h4><p>Generated Swift must pass review by a Swift engineer who does not know Rust exists: <code>throws</code> with the error enum you declared, <code>async</code>, <code>@Observable</code>, <code>Sendable</code>. Same for Kotlin (sealed interfaces, <code>suspend</code>, <code>Flow</code>, Compose <code>State</code>) and TypeScript (discriminated unions, <code>Promise</code>, hooks). No <code>RustBuffer</code> in anyone's autocomplete.</p></div>
 <div class="tile"><span class="kicker">claim 3</span><h4>The dev loop is the feature</h4><p>Change a Rust function and see it in the running iOS app in about a second without rebuilding the app. Time-travel any transaction in a devtools inspector on any platform. Test the whole core with <code>cargo test</code> and fake ports. This is what KMP cannot do and what makes engineers evangelize.</p></div>
 </div>
 <h3>Five habits that build trust</h3>
@@ -293,7 +293,7 @@ figcaption b{color:var(--t1);font-weight:700}
 <tbody>
 <tr><td><b>Language</b></td><td>Kotlin</td><td>Rust</td><td>Rust</td><td>Dart / JS</td><td>Rust</td></tr>
 <tr><td><b>What is shared</b></td><td>Logic; optionally UI via Compose Multiplatform</td><td>Functions, objects, records</td><td>Logic + state (Elm-style app), effects via capabilities</td><td>Everything including UI</td><td>Logic, reactive state, data layer, persistence, dev loop</td></tr>
-<tr><td><b>iOS story</b></td><td>Kotlin/Native compiles to a framework exposed through an Objective-C header; Swift export still maturing; GC and binary size costs</td><td>Generated Swift over a C ABI; solid, used in Firefox</td><td>Its own FFI layer (BoltFFI, formerly UniFFI)</td><td>Own renderer (Flutter) or host views driven from JS (RN)</td><td>Generated Swift package, <code>@Observable</code>, typed throws, <code>Sendable</code>, XCFramework</td></tr>
+<tr><td><b>iOS story</b></td><td>Kotlin/Native compiles to a framework exposed through an Objective-C header; Swift export still maturing; GC and binary size costs</td><td>Generated Swift over a C ABI; solid, used in Firefox</td><td>Its own FFI layer (BoltFFI, formerly UniFFI)</td><td>Own renderer (Flutter) or host views driven from JS (RN)</td><td>Generated Swift package, <code>@Observable</code>, <code>async throws</code> with your error enums, <code>Sendable</code>, XCFramework</td></tr>
 <tr><td><b>Android story</b></td><td>Native. This is why KMP wins Android teams</td><td>Kotlin over JNA; non-trivial values cross through a byte buffer</td><td>Its own FFI layer (BoltFFI, formerly UniFFI)</td><td>Own renderer (Flutter) or host views driven from JS (RN)</td><td>Kotlin over JNI with registered natives, Compose <code>State</code>, coroutines, <code>Flow</code></td></tr>
 <tr><td><b>Web story</b></td><td>Kotlin/JS or Kotlin/Wasm; still maturing, weak in frontend teams</td><td>No first-class web target</td><td>wasm-bindgen, hand-wired per app</td><td>Flutter web is canvas-based; RN web is a port</td><td>npm package with <code>.d.ts</code>, core in a Web Worker by default, React / Vue / Svelte / Solid bindings</td></tr>
 <tr><td><b>Reactive state</b></td><td>Bring your own (Flow, ViewModel)</td><td>None</td><td>The shell pulls the whole view model with <code>view()</code> after each update</td><td>Own UI state</td><td>Fine-grained signals mirrored to each platform's native observable; one crossing per transaction</td></tr>
@@ -333,7 +333,7 @@ $ undra doctor                                <span class="c"># toolchains, SDKs
 #[undra::api]
 <span class="k">pub enum</span> Filter { All, Active, Done }
 
-<span class="c">// Typed errors: Swift typed throws, Kotlin sealed exceptions, TS error classes.</span>
+<span class="c">// Typed errors: a Swift enum you catch, Kotlin sealed exceptions, TS error classes.</span>
 #[undra::error]
 <span class="k">pub enum</span> TodoError {
     #[error(<span class="s">"title cannot be empty"</span>)] EmptyTitle,
@@ -382,7 +382,7 @@ $ undra doctor                                <span class="c"># toolchains, SDKs
     <span class="k">var</span> body: <span class="k">some</span> View {
         List(todos.visible) { Text($0.title) }        <span class="c">// property read, zero FFI calls</span>
         TextField(<span class="s">"New todo"</span>, text: $draft).onSubmit {
-            Task { <span class="k">try await</span> todos.add(title: draft) } <span class="c">// async throws(TodoError)</span>
+            Task { <span class="k">try await</span> todos.add(title: draft) } <span class="c">// async throws: TodoError</span>
         }
     }
 }</code></pre>
@@ -520,7 +520,7 @@ $ undra doctor                                <span class="c"># toolchains, SDKs
 <rect class="box" x="120" y="84" width="240" height="56" rx="6"/>
 <text x="240" y="104" text-anchor="middle" class="head">AcmeCore · Swift package</text>
 <text x="240" y="120" text-anchor="middle" class="small">@Observable stores · async throws · structs, enums</text>
-<text x="240" y="133" text-anchor="middle" class="small muted">Sendable · typed throws · XCFramework inside</text>
+<text x="240" y="133" text-anchor="middle" class="small muted">Sendable · throws · XCFramework inside</text>
 <rect class="box" x="380" y="84" width="240" height="56" rx="6"/>
 <text x="500" y="104" text-anchor="middle" class="head">acme-core · AAR + Kotlin</text>
 <text x="500" y="120" text-anchor="middle" class="small">Compose State · suspend · Flow · sealed</text>
@@ -619,7 +619,7 @@ $ undra doctor                                <span class="c"># toolchains, SDKs
 <tr><td><code>struct</code> (record)</td><td><code>struct: Sendable, Hashable, Codable</code></td><td><code>data class</code></td><td><code>readonly</code> interface</td><td>fields in declaration order</td></tr>
 <tr><td><code>enum</code>, unit variants</td><td><code>enum: CaseIterable</code></td><td><code>enum class</code></td><td>string union</td><td>u16 tag</td></tr>
 <tr><td><code>enum</code>, data variants</td><td><code>enum</code> with associated values</td><td><code>sealed interface</code></td><td>discriminated union on <code>kind</code></td><td>u16 tag + payload</td></tr>
-<tr><td><code>Result&lt;T, E&gt;</code></td><td><code>throws(E)</code> typed throws</td><td><code>throws E</code>, sealed exception hierarchy</td><td><code>Promise</code> rejects with an <code>E</code> class, <code>instanceof</code>-able</td><td>tag + payload</td></tr>
+<tr><td><code>Result&lt;T, E&gt;</code></td><td><code>throws</code>; an <code>E</code> is thrown as itself</td><td><code>throws E</code>, sealed exception hierarchy</td><td><code>Promise</code> rejects with an <code>E</code> class, <code>instanceof</code>-able</td><td>tag + payload</td></tr>
 <tr><td>object (<code>impl</code> block)</td><td><code>final class: Sendable</code></td><td><code>class: AutoCloseable</code></td><td><code>class</code> with <code>[Symbol.dispose]</code></td><td>8-byte handle; refcounted</td></tr>
 <tr><td><code>#[undra::port] trait</code></td><td><code>protocol</code></td><td><code>interface</code></td><td><code>interface</code></td><td>vtable of callbacks</td></tr>
 <tr><td><code>Signal&lt;T&gt;</code></td><td><code>@Observable</code> stored property</td><td>Compose <code>State&lt;T&gt;</code>, plus <code>StateFlow&lt;T&gt;</code></td><td><code>Signal&lt;T&gt;</code> with framework hooks</td><td>mirrored: read is free; updates ride the change-set</td></tr>
@@ -962,7 +962,7 @@ ctx.mutate(SaveTodo(todo.clone()))
 <h2><span class="sn">§12</span>Errors, panics and crash recovery</h2>
 <p class="lede">The host app must never die because the core did. A panic in Rust becomes a typed error on the platform, the state stays consistent, and on the web the core can restart itself from a snapshot faster than a user can notice.</p>
 <div class="grid2">
-<div class="tile"><h4>Errors are values</h4><p><code>Result&lt;T, E&gt;</code> with <code>#[undra::error]</code> enums becomes typed throws in Swift, a sealed exception hierarchy in Kotlin, and error classes in TypeScript. No stringly-typed errors, ever. Error enums may carry data, and <code>#[from]</code> conversions keep the Rust ergonomic.</p></div>
+<div class="tile"><h4>Errors are values</h4><p><code>Result&lt;T, E&gt;</code> with <code>#[undra::error]</code> enums becomes a thrown enum in Swift, a sealed exception hierarchy in Kotlin, and error classes in TypeScript. No stringly-typed errors, ever. Error enums may carry data, and <code>#[from]</code> conversions keep the Rust ergonomic.</p></div>
 <div class="tile"><h4>Panics are contained</h4><p>On native the core builds with <code>panic = "unwind"</code> and every boundary entry is wrapped in <code>catch_unwind</code>. A panic becomes <code>UndraPanic { message, backtrace }</code>, delivered as an error to the caller and as an event to the Telemetry port. The app keeps running.</p></div>
 <div class="tile"><h4>Transactions are atomic</h4><p>Signal writes inside a transaction go to a copy-on-write overlay and are committed at the end. A panic mid-transaction discards the overlay, so a half-applied state is impossible even when code is wrong.</p></div>
 <div class="tile"><h4>Web restarts from snapshot</h4><p>wasm has no unwinding, so a panic traps. The runtime catches the <code>RuntimeError</code>, re-instantiates the module, restores the last snapshot and replays the transaction log since then, typically in well under 100 ms. The UI sees a <code>recovering</code> signal flip and nothing else.</p></div>

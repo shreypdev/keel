@@ -28,6 +28,8 @@ jobs:
         run: npm ci
       - name: Format
         run: cargo fmt --check
+      - name: Shared wire vectors (the Swift copy matches contract-tests/wire-vectors.json)
+        run: bash runtimes/swift/scripts/sync-vectors.sh --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test

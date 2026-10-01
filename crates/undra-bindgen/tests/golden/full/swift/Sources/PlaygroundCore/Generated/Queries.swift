@@ -24,18 +24,25 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(page: UInt32, ctx: UndraCore = .shared) throws {
         var w = UndraWriter()
         page.undraEncode(&w)
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.TodosQueryHandle.typeId,
-            method: UndraIds.Objects.TodosQueryHandle.new,
-            args: w.finish()
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.TodosQueryHandle.typeId,
+                method: UndraIds.Objects.TodosQueryHandle.new,
+                args: w.finish()
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func refetch() {
         do {
             _ = try self.core.callSync(
@@ -44,11 +51,12 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "TodosQueryHandle.refetch")
         }
     }
 
     /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func invalidate() {
         do {
             _ = try self.core.callSync(
@@ -57,7 +65,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "TodosQueryHandle.invalidate")
         }
     }
 
@@ -67,8 +75,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.data = try Optional<Page>.undraDecode(&reader)
+                    let value = try Optional<Page>.undraDecode(&reader)
                     try reader.finish()
+                    self.data = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -77,8 +86,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.status = try QueryStatus.undraDecode(&reader)
+                    let value = try QueryStatus.undraDecode(&reader)
                     try reader.finish()
+                    self.status = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -87,8 +97,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.error = try Optional<TodoError>.undraDecode(&reader)
+                    let value = try Optional<TodoError>.undraDecode(&reader)
                     try reader.finish()
+                    self.error = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -97,8 +108,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.fetching = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.fetching = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -107,8 +119,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.updatedAt = try Optional<Date>.undraDecode(&reader)
+                    let value = try Optional<Date>.undraDecode(&reader)
                     try reader.finish()
+                    self.updatedAt = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -122,14 +135,14 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of TodosQueryHandle: \(error)")
+            self.core.report(error, operation: "TodosQueryHandle.apply(signal: \(signal))")
         }
     }
 }
 
 /// Runs the `add_todo` mutation.
-/// - Throws: ``TodoError``.
-public func addTodo(title: String, ctx: UndraCore = .shared) async throws(TodoError) -> Todo {
+/// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func addTodo(title: String, ctx: UndraCore = .shared) async throws -> Todo {
     var w = UndraWriter()
     title.undraEncode(&w)
     do {
@@ -140,7 +153,6 @@ public func addTodo(title: String, ctx: UndraCore = .shared) async throws(TodoEr
         )
         return try Todo.undraDecoded(from: body)
     } catch {
-        guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: TodoError.self)
     }
 }

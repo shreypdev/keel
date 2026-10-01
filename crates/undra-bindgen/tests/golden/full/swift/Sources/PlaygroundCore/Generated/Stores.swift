@@ -20,20 +20,23 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.TodoStore.typeId,
-            method: UndraIds.Objects.TodoStore.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.TodoStore.typeId,
+                method: UndraIds.Objects.TodoStore.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
-    /// - Throws: ``TodoError``.
-    public static func `open`(
-        path: String,
-        ctx: UndraCore = .shared
-    ) async throws(TodoError) -> TodoStore {
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public static func `open`(path: String, ctx: UndraCore = .shared) async throws -> TodoStore {
         var w = UndraWriter()
         path.undraEncode(&w)
         let handle: UndraHandle
@@ -44,13 +47,16 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
             handle = try UndraHandle.undraDecoded(from: body)
+            if handle.isNull {
+                throw UndraProtocolError.nullHandle
+            }
         } catch {
-            guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
         return TodoStore(adopting: handle, core: ctx)
     }
 
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setFilter(_ f: Filter) {
         var w = UndraWriter()
         f.undraEncode(&w)
@@ -61,12 +67,12 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "TodoStore.setFilter")
         }
     }
 
-    /// - Throws: ``TodoError``.
-    public func add(title: String) async throws(TodoError) -> Todo {
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func add(title: String) async throws -> Todo {
         var w = UndraWriter()
         title.undraEncode(&w)
         do {
@@ -77,11 +83,11 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             )
             return try Todo.undraDecoded(from: body)
         } catch {
-            guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
     }
 
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func toggle(id: UUID) {
         var w = UndraWriter()
         id.undraEncode(&w)
@@ -92,7 +98,7 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "TodoStore.toggle")
         }
     }
 
@@ -102,8 +108,9 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.todos = try [Todo].undraDecode(&reader)
+                    let value = try [Todo].undraDecode(&reader)
                     try reader.finish()
+                    self.todos = value
                 case .keyedPatch:
                     let ops: [PatchOp<Todo>] = try decodePatch(&reader)
                     try reader.finish()
@@ -114,8 +121,9 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.filter = try Filter.undraDecode(&reader)
+                    let value = try Filter.undraDecode(&reader)
                     try reader.finish()
+                    self.filter = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -124,8 +132,9 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.visible = try [Todo].undraDecode(&reader)
+                    let value = try [Todo].undraDecode(&reader)
                     try reader.finish()
+                    self.visible = value
                 case .keyedPatch:
                     let ops: [PatchOp<Todo>] = try decodePatch(&reader)
                     try reader.finish()
@@ -136,8 +145,9 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.remaining = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.remaining = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -146,8 +156,9 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.selected = try Optional<Todo>.undraDecode(&reader)
+                    let value = try Optional<Todo>.undraDecode(&reader)
                     try reader.finish()
+                    self.selected = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -161,7 +172,7 @@ public final class TodoStore: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of TodoStore: \(error)")
+            self.core.report(error, operation: "TodoStore.apply(signal: \(signal))")
         }
     }
 }

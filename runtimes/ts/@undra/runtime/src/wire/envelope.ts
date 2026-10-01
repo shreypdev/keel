@@ -49,8 +49,8 @@ export const HEADER_LEN = 23;
 /** The wire version this runtime speaks. */
 export const WIRE_VERSION = 1;
 
-/** The magic bytes `4B 45 45 4C` read as a little-endian `u32`. */
-const MAGIC = 0x4c45454b;
+/** The magic bytes `55 4E 44 52` (ASCII `UNDR`) read as a little-endian `u32`. */
+const MAGIC = 0x52444e55;
 const U32_MAX = 0xffff_ffff;
 
 /** A decoded envelope. `payload` is a borrowed view into the decoded buffer. */

@@ -33,9 +33,26 @@ pub enum UndraSource {
     Git {
         /// The repository URL.
         url: String,
-        /// The revision the core resolved.
-        rev: Option<String>,
+        /// How the core's dependency names the commit (`tag`, `branch`, `rev`, or nothing). The
+        /// library Undra ships is asked for the same way, never by the commit the lock file
+        /// resolved: Cargo treats `tag = "v1"` and `rev = "<its commit>"` as two sources, so two
+        /// copies of `undra-runtime` would be linked, each with a registry of its own, and the
+        /// schema would come out empty.
+        reference: GitRef,
     },
+}
+
+/// How a git dependency names the commit it wants: the query Cargo records in the source id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GitRef {
+    /// Nothing: the repository's default branch.
+    DefaultBranch,
+    /// `branch = "..."`.
+    Branch(String),
+    /// `tag = "..."`.
+    Tag(String),
+    /// `rev = "..."`.
+    Rev(String),
 }
 
 impl UndraSource {
@@ -55,10 +72,16 @@ impl UndraSource {
                 )
             }
             UndraSource::Registry { version } => format!("version = \"={version}\""),
-            UndraSource::Git { url, rev } => {
+            UndraSource::Git { url, reference } => {
                 let mut s = format!("git = {}", crate::toml_lite::quote(url));
-                if let Some(rev) = rev {
-                    s.push_str(&format!(", rev = {}", crate::toml_lite::quote(rev)));
+                let (key, value) = match reference {
+                    GitRef::DefaultBranch => ("", ""),
+                    GitRef::Branch(branch) => ("branch", branch.as_str()),
+                    GitRef::Tag(tag) => ("tag", tag.as_str()),
+                    GitRef::Rev(rev) => ("rev", rev.as_str()),
+                };
+                if !key.is_empty() {
+                    s.push_str(&format!(", {key} = {}", crate::toml_lite::quote(value)));
                 }
                 s
             }
@@ -285,18 +308,15 @@ fn source_of(runtime: &Value, package: &str) -> Result<UndraSource> {
             })
         }
         Some(source) if source.starts_with("git+") => {
+            // `git+<url>[?<branch|tag|rev>=<name>]#<resolved commit>`
             let rest = &source["git+".len()..];
-            let (url_and_query, sha) = rest
-                .split_once('#')
-                .map_or((rest, None), |(a, b)| (a, Some(b)));
-            let url = url_and_query
-                .split('?')
-                .next()
-                .unwrap_or(url_and_query)
-                .to_owned();
+            let without_commit = rest.split_once('#').map_or(rest, |(before, _)| before);
+            let (url, query) = without_commit
+                .split_once('?')
+                .unwrap_or((without_commit, ""));
             Ok(UndraSource::Git {
-                url,
-                rev: sha.map(ToOwned::to_owned),
+                url: url.to_owned(),
+                reference: git_ref(query),
             })
         }
         Some(other) => Err(CliError::new(
@@ -306,6 +326,50 @@ fn source_of(runtime: &Value, package: &str) -> Result<UndraSource> {
             "use a path, a git or a registry dependency on `undra`",
         )),
     }
+}
+
+/// The reference in the query of a git source id (`tag=v1.0.0`, `branch=main`, `rev=abc123`).
+fn git_ref(query: &str) -> GitRef {
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let value = percent_decode(value);
+        match key {
+            "tag" => return GitRef::Tag(value),
+            "branch" => return GitRef::Branch(value),
+            "rev" => return GitRef::Rev(value),
+            _ => {}
+        }
+    }
+    GitRef::DefaultBranch
+}
+
+/// `text` with `%XX` escapes (how Cargo writes `/` in a branch name) turned back into bytes.
+fn percent_decode(text: &str) -> String {
+    fn hex(byte: u8) -> Option<u8> {
+        char::from(byte)
+            .to_digit(16)
+            .and_then(|digit| u8::try_from(digit).ok())
+    }
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let (Some(high), Some(low)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push(high * 16 + low);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Whether the normal-dependency graph of package `root` reaches a package called `name`.
@@ -752,10 +816,46 @@ mod tests {
         );
     }
 
+    /// The dependency the shim gets for `undra-ffi` when the core's `undra` source id is `source`.
+    fn shim_dependency(source: &str) -> String {
+        let m = meta(json!(source), "/g/undra-runtime/Cargo.toml", false);
+        parse_metadata(&m, Path::new("/proj/core/Cargo.toml"))
+            .unwrap()
+            .undra
+            .dependency("undra-ffi", &[])
+    }
+
     #[test]
-    fn git_sources_keep_the_revision() {
+    fn git_sources_are_asked_for_the_way_the_core_asked() {
+        // The same reference, not the commit it resolved to: `tag` and `rev` are different sources
+        // to Cargo, and the shim would then link a second undra-runtime (an empty schema).
+        let url = "https://github.com/shreypdev/undra";
+        assert_eq!(
+            shim_dependency(&format!("git+{url}?tag=v1.0.0#abc123")),
+            format!("{{ git = \"{url}\", tag = \"v1.0.0\" }}")
+        );
+        assert_eq!(
+            shim_dependency(&format!("git+{url}?branch=main#abc123")),
+            format!("{{ git = \"{url}\", branch = \"main\" }}")
+        );
+        assert_eq!(
+            shim_dependency(&format!("git+{url}?rev=abc123#abc123")),
+            format!("{{ git = \"{url}\", rev = \"abc123\" }}")
+        );
+        assert_eq!(
+            shim_dependency(&format!("git+{url}#abc123")),
+            format!("{{ git = \"{url}\" }}")
+        );
+        assert_eq!(
+            shim_dependency(&format!("git+{url}?branch=feature%2Fx#abc123")),
+            format!("{{ git = \"{url}\", branch = \"feature/x\" }}")
+        );
+    }
+
+    #[test]
+    fn a_git_source_is_parsed_into_url_and_reference() {
         let m = meta(
-            json!("git+https://github.com/shreypdev/undra?branch=main#abc123"),
+            json!("git+https://github.com/shreypdev/undra?tag=v1.0.0#abc123"),
             "/g/undra-runtime/Cargo.toml",
             false,
         );
@@ -764,12 +864,8 @@ mod tests {
             info.undra,
             UndraSource::Git {
                 url: "https://github.com/shreypdev/undra".into(),
-                rev: Some("abc123".into())
+                reference: GitRef::Tag("v1.0.0".into())
             }
-        );
-        assert_eq!(
-            info.undra.dependency("undra-ffi", &[]),
-            "{ git = \"https://github.com/shreypdev/undra\", rev = \"abc123\" }"
         );
     }
 

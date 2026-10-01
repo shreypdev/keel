@@ -16,6 +16,12 @@ final class Fixture {
     let kv = MemoryKv()
     let log = CapturingLog()
 
+    /// Every failure the generated commands and the stores reported through `LoadOptions.onError`
+    /// (ADR-032), oldest first, across reloads of the core. Scenarios compare counts before and
+    /// after, the way they do for statistics; this is the Swift column's `runtimeErrors` of the
+    /// TypeScript harness.
+    let unhandled = Locked<[UndraUnhandledError]>([])
+
     private var loaded: UndraCore?
 
     private init() {}
@@ -37,7 +43,14 @@ final class Fixture {
         if let core = loaded, !core.isShutDown {
             return core
         }
-        let core = try UndraCore.load(.inproc(adapters: makeAdapters(), expectedSchemaHash: UndraIds.schemaHash))
+        let sink = unhandled
+        let core = try UndraCore.load(.inproc(
+            adapters: makeAdapters(),
+            expectedSchemaHash: UndraIds.schemaHash,
+            onError: { (report: UndraUnhandledError) -> Void in
+                sink.withLock { (current: inout [UndraUnhandledError]) -> Void in current.append(report) }
+            }
+        ))
         configureRemote(RemoteConfig(baseUrl: FakeServer.baseURL), ctx: core)
         loaded = core
         return core

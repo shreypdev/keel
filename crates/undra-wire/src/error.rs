@@ -45,7 +45,7 @@ pub enum WireError {
         /// Number of unread bytes.
         count: usize,
     },
-    /// An envelope did not start with the envelope magic (`4B 45 45 4C`).
+    /// An envelope did not start with the envelope magic (`55 4E 44 52`).
     BadMagic,
     /// An envelope carried a protocol version this crate does not speak.
     UnsupportedVersion(u16),
@@ -94,7 +94,7 @@ impl fmt::Display for WireError {
             WireError::TrailingBytes { count } => {
                 write!(f, "{count} trailing byte(s) after the decoded value")
             }
-            WireError::BadMagic => f.write_str("envelope does not start with the 4b45454c magic"),
+            WireError::BadMagic => f.write_str("envelope does not start with the 554e4452 magic"),
             WireError::UnsupportedVersion(v) => {
                 write!(f, "unsupported wire protocol version {v}")
             }
