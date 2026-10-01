@@ -1,0 +1,4 @@
+error[undra::C0014]: undra.toml says Undra is at /somewhere/else, but the core's `undra` dependency is at <repo>
+  = note: the library Undra ships is built from the same Undra as the core, and the platform runtimes come from `[undra] path`; if they differ, the core and the apps would speak different wire formats
+  = help: make them agree: set `path` of the core's `undra` dependency and `[undra] path` in undra.toml to the same checkout (or remove `[undra] path` to use released runtimes)
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0014

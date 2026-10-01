@@ -1,0 +1,4 @@
+error[undra::C0010]: could not create <dir>/afile/demo: Not a directory (os error 20)
+  = note: the command needs to read or write this path and the operating system refused
+  = help: check that the path exists and that you may access it, then run the command again
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0010
