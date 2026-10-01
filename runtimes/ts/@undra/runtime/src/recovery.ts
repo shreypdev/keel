@@ -4,8 +4,8 @@ import { UndraRestoreError, UndraTransportError } from "./errors.js";
 import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
 import { type UndraPanicReport, isTrap } from "./panic.js";
 import { errorMessage } from "./platform.js";
-import type { Transport } from "./transport/transport.js";
-import { type Handle, type HelloPayload, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
+import type { Transport, TransportHandler } from "./transport/transport.js";
+import { type Handle, type HelloPayload, Kind, decodeRelease, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
 
 /*
  * Recovering a web core that trapped (ADR-049 decision 3): `crashRecovery(options)`, which `LoadOptions.recovery`
@@ -355,8 +355,6 @@ export async function restartHere(transport: Reinstantiable, keeper: SnapshotKee
 export interface RecoveryHost {
   /** The core. */
   readonly core: UndraCore;
-  /** Its transport. */
-  readonly transport: Transport;
   /** The handles constructed through the core. */
   readonly handles: Set<Handle>;
   /** The signals observed, per handle. */
@@ -365,8 +363,6 @@ export interface RecoveryHost {
   readonly releasedWhileDown: Set<Handle>;
   /** Fails every call, stream and `observe` in flight with `error`; returns how many calls and streams. */
   failInFlight(error: Error): number;
-  /** Refuses calls with "restarted" while on; turning it on starts a new epoch (late port replies are dropped). */
-  setRestarting(on: boolean): void;
   /** Ends the core: the channel is lost for good (`onClose`). */
   lose(error: Error): void;
   /** Hands `error` to `onError`, guarded as the core's own reports are. */
@@ -375,24 +371,6 @@ export interface RecoveryHost {
   panicked(trap: Error): UndraPanicReport;
   /** The core's log. */
   log(level: number, target: string, message: string): void;
-}
-
-/**
- * What crash recovery does for one core.
- *
- * @internal Driven by `UndraCore`.
- */
-export interface RecoveryDriver {
-  /** The core emitted a change-set: a snapshot is due. */
-  changed(): void;
-  /** A store to re-create after a restart instead of restoring it (a query handle), with its recorded constructor call. */
-  track(store: UndraStore, call: RecreateCall): void;
-  /** What a caller sees for `error`: a trap the core will recover from is "restarted". */
-  failureOf(error: unknown): unknown;
-  /** The core trapped (the panic report went to `onPanic`): whether the restart takes over. */
-  trapped(trap: UndraTransportError, report: UndraPanicReport): boolean;
-  /** The core closed. */
-  close(): void;
 }
 
 /**
@@ -407,11 +385,18 @@ export interface CrashRecovery {
   /** Takes and keeps a snapshot now (`wasm-main`), whatever the schedule says: returns its size, or `null` when none could be taken. For tests and benchmarks. */
   keepSnapshotNow(): number | null;
   /**
-   * Connects the recovery to the core that loads with it.
+   * Connects the recovery to the core that loads with it: returns the transport the core then uses, `transport` behind
+   * the layer that runs the restart sequence (it sees every trap, every call and every reply first).
    *
    * @internal Called by `UndraCore`; throws when this recovery already belongs to a core.
    */
-  attach(host: RecoveryHost, onCoreRestarted?: (event: UndraCoreRestarted) => void): RecoveryDriver;
+  attach(transport: Transport, host: RecoveryHost, onCoreRestarted?: (event: UndraCoreRestarted) => void): Transport;
+  /**
+   * A store to re-create after a restart instead of restoring it (a query handle), with its recorded constructor call.
+   *
+   * @internal Called by `UndraCore` for the `recreate` option that generated query handles pass.
+   */
+  track(store: UndraStore, call: RecreateCall): void;
 }
 
 /**
@@ -435,25 +420,39 @@ export interface CrashRecovery {
 export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
   const settings = resolveRecovery(options);
   let keeper: SnapshotKeeper | null = null;
-  let attached = false;
+  let attached: Recovering | null = null;
   return {
     options: settings,
     get lastSnapshot() {
       return keeper?.last ?? null;
     },
     keepSnapshotNow: () => keeper?.takeNow() ?? null,
-    attach(host, onCoreRestarted) {
-      if (attached) throw new UndraTransportError("unsupported", "this crashRecovery() already belongs to a core: make one per core");
-      attached = true;
-      const here = reinstantiable(host.transport) ? host.transport : null;
+    attach(transport, host, onCoreRestarted) {
+      if (attached !== null) throw new UndraTransportError("unsupported", "this crashRecovery() already belongs to a core: make one per core");
+      const here = reinstantiable(transport) ? transport : null;
       if (here !== null) keeper = keeperOf(settings, here, host.log);
-      return new Driver(settings, host, here, keeper, onCoreRestarted);
+      attached = new Recovering(transport, settings, host, here, keeper, onCoreRestarted);
+      return attached;
+    },
+    track(store, call) {
+      attached?.track(store, call);
     },
   };
 }
 
-/** One core's crash recovery: the restart budget and the restart sequence. */
-class Driver implements RecoveryDriver {
+/** What a call made while the core restarts fails with (ADR-049 decision 3.4.2). */
+function restarting(): UndraTransportError {
+  return new UndraTransportError("restarted", "the wasm core is restarting after a trap");
+}
+
+/**
+ * One core's crash recovery: the transport the core uses when it loads with `recovery`. It passes everything through to
+ * the core's own transport, and it is where the restart happens: it sees a trap before the core does (and restarts
+ * instead of letting the core close), refuses calls while the core restarts, holds back releases until it is back, drops
+ * the port replies that belong to the instance that trapped, and keeps the snapshots (`wasm-main`).
+ */
+class Recovering implements Transport {
+  readonly #inner: Transport;
   readonly #settings: ResolvedRecovery;
   readonly #host: RecoveryHost;
   readonly #here: Reinstantiable | null;
@@ -465,18 +464,108 @@ class Driver implements RecoveryDriver {
   #run = 0;
   /** The stores re-created after a restart (query handles), by handle. */
   readonly #recreatable = new Map<Handle, { readonly ref: WeakRef<UndraStore>; readonly call: RecreateCall }>();
+  /** While the trapped core is being instantiated again: calls fail with "restarted". */
   #restarting = false;
+  /** Bumped by every restart: a port reply that settles later belongs to the epoch of its call. */
+  #epoch = 0;
+  declare readonly callSync?: (payload: Uint8Array) => Uint8Array;
+  declare readonly stats?: () => Promise<string | null>;
+  declare readonly snapshot?: () => Promise<Uint8Array>;
+  declare readonly restore?: (bytes: Uint8Array) => Promise<void>;
+  declare readonly portsChanged?: (asyncPorts: readonly number[]) => void;
+  declare readonly answersSyncPorts?: boolean;
 
-  constructor(settings: ResolvedRecovery, host: RecoveryHost, here: Reinstantiable | null, keeper: SnapshotKeeper | null, onRestarted: ((event: UndraCoreRestarted) => void) | undefined) {
+  constructor(
+    inner: Transport,
+    settings: ResolvedRecovery,
+    host: RecoveryHost,
+    here: Reinstantiable | null,
+    keeper: SnapshotKeeper | null,
+    onRestarted: ((event: UndraCoreRestarted) => void) | undefined,
+  ) {
+    this.#inner = inner;
     this.#settings = settings;
     this.#host = host;
     this.#here = here;
     this.#keeper = keeper;
     this.#onRestarted = onRestarted;
+    // The optional members exactly as the transport has them: the core tells the modes apart by them.
+    const self = this as { -readonly [K in keyof Recovering]?: Recovering[K] };
+    const { callSync, stats, snapshot, restore, portsChanged, answersSyncPorts } = inner;
+    if (callSync !== undefined) {
+      self.callSync = (payload) => {
+        if (this.#restarting) throw restarting();
+        return this.#guard(() => callSync.call(inner, payload));
+      };
+    }
+    if (stats !== undefined) self.stats = () => (this.#restarting ? Promise.resolve(null) : stats.call(inner));
+    if (snapshot !== undefined) self.snapshot = () => (this.#restarting ? Promise.reject(restarting()) : snapshot.call(inner));
+    if (restore !== undefined) self.restore = (bytes) => (this.#restarting ? Promise.reject(restarting()) : restore.call(inner, bytes));
+    if (portsChanged !== undefined) self.portsChanged = (ids) => portsChanged.call(inner, ids);
+    if (answersSyncPorts !== undefined) self.answersSyncPorts = answersSyncPorts;
   }
 
-  changed(): void {
-    this.#keeper?.changed();
+  get mode(): string {
+    return this.#inner.mode;
+  }
+
+  get synchronous(): boolean {
+    return this.#inner.synchronous;
+  }
+
+  start(handler: TransportHandler): Promise<HelloPayload> {
+    const epoch = (): number => this.#epoch;
+    return this.#inner.start({
+      ...handler,
+      changeSet: (payload) => {
+        handler.changeSet(payload);
+        // A store changed: a snapshot is due (the worker keeps its own in `wasm-worker` mode).
+        this.#keeper?.changed();
+      },
+      portCall: (call) => {
+        // A reply that settles after a restart is for a call of the instance that trapped: it must never reach the new one.
+        // Its id reads 0 by then (no call the core waits for has id 0), and `send` drops it.
+        const of = epoch();
+        const { portId, methodId, portCallId, args } = call;
+        return handler.portCall({
+          portId,
+          methodId,
+          args,
+          get portCallId() {
+            return of === epoch() ? portCallId : 0;
+          },
+        });
+      },
+      closed: (error) => {
+        // A failure while a restart is under way is the restart's to handle (it failed, and says so).
+        if (this.#restarting) return;
+        if (isTrap(error) && this.#mayRestart()) {
+          void this.#recover(error, this.#host.panicked(error));
+          return;
+        }
+        handler.closed(error);
+      },
+    });
+  }
+
+  send(kind: Kind, payload: Uint8Array): void {
+    if (kind === Kind.PortReply) {
+      // The new instance's own port calls are answered during the restart too; a stale reply (id 0, above) never is.
+      if (payload.byteLength >= 4 && new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0, true) === 0) return;
+    } else if (this.#restarting) {
+      if (kind !== Kind.Release) throw restarting();
+      // The core keeps the object meanwhile; it is released once the core is back.
+      this.#host.releasedWhileDown.add(decodeRelease(payload).handle);
+      return;
+    }
+    this.#guard(() => {
+      this.#inner.send(kind, payload);
+    });
+  }
+
+  close(): void {
+    this.#keeper?.stop();
+    this.#inner.close();
   }
 
   track(store: UndraStore, call: RecreateCall): void {
@@ -487,25 +576,18 @@ class Driver implements RecoveryDriver {
     this.#recreatable.set(store.handle, { ref: new WeakRef(store), call });
   }
 
-  failureOf(error: unknown): unknown {
-    return isTrap(error) && (this.#restarting || this.#mayRestart()) ? restartedError(error) : error;
-  }
-
-  trapped(trap: UndraTransportError, report: UndraPanicReport): boolean {
-    if (this.#restarting) return true;
-    if (!this.#mayRestart()) return false;
-    void this.#recover(trap, report);
-    return true;
-  }
-
-  close(): void {
-    this.#keeper?.stop();
+  /** Runs `run`; a trap it throws is "restarted" when the core will recover from it, which the caller then sees. */
+  #guard<T>(run: () => T): T {
+    try {
+      return run();
+    } catch (error) {
+      throw isTrap(error) && (this.#restarting || this.#mayRestart()) ? restartedError(error) : error;
+    }
   }
 
   /** Whether a trap now would be recovered from: the transport can restart, and the budget allows one more. */
   #mayRestart(): boolean {
-    const transport = this.#host.transport as Transport & { restart?: unknown };
-    if ((this.#here === null && typeof transport.restart !== "function") || this.#host.core.closed) return false;
+    if ((this.#here === null && typeof this.#inner.restart !== "function") || this.#host.core.closed) return false;
     const since = Date.now() - this.#settings.perMs;
     this.#times = this.#times.filter((at) => at > since);
     return this.#times.length < this.#settings.maxRestarts;
@@ -524,7 +606,13 @@ class Driver implements RecoveryDriver {
   #restart(floor: number): Promise<RestartResult> {
     const here = this.#here;
     if (here !== null && this.#keeper !== null) return restartHere(here, this.#keeper, floor, this.#host.log);
-    return (this.#host.transport as Transport & { restart(floor: number): Promise<RestartResult> }).restart(floor);
+    return (this.#inner as Transport & { restart(floor: number): Promise<RestartResult> }).restart(floor);
+  }
+
+  /** Starts or ends the restart window: calls are refused meanwhile, and starting one begins a new epoch of port replies. */
+  #setRestarting(on: boolean): void {
+    this.#restarting = on;
+    if (on) this.#epoch++;
   }
 
   /**
@@ -537,8 +625,7 @@ class Driver implements RecoveryDriver {
     const run = ++this.#run;
     let trap = firstTrap;
     let report = firstReport;
-    this.#restarting = true;
-    host.setRestarting(true);
+    this.#setRestarting(true);
     const rejectedCalls = host.failInFlight(restartedError(trap));
     let result: RestartResult;
     for (;;) {
@@ -553,8 +640,7 @@ class Driver implements RecoveryDriver {
           report = host.panicked(error);
           if (this.#mayRestart()) continue;
         }
-        this.#restarting = false;
-        host.setRestarting(false);
+        this.#setRestarting(false);
         host.log(4, "undra::recovery", `the wasm core could not be restarted: ${errorMessage(error)}`);
         host.lose(isTrap(error) ? error : trap);
         return;
@@ -562,8 +648,7 @@ class Driver implements RecoveryDriver {
     }
     if (host.core.closed || run !== this.#run) return;
     host.core.hello = result.hello;
-    this.#restarting = false;
-    host.setRestarting(false);
+    this.#setRestarting(false);
     let staleObjects: number | null;
     try {
       staleObjects = await this.#reattach(result, run);

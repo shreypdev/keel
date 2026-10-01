@@ -28,28 +28,27 @@ export interface UndraPanicReport {
 
 /** The stack of a trap: the engine's, carried as the `cause` of the transport's error (or its own stack). */
 export function trapStack(error: unknown): string {
-  const cause = (error as { cause?: unknown } | null)?.cause;
-  const stack = (cause as { stack?: unknown } | null | undefined)?.stack ?? (error as { stack?: unknown } | null)?.stack;
+  const e = error as { cause?: { stack?: unknown } | null; stack?: unknown } | null;
+  const stack = e?.cause?.stack ?? e?.stack;
   return typeof stack === "string" ? stack : "";
 }
 
 /** The panic report of a trap, from the core's last FATAL `undra::panic` record (if any) and the trap. */
 export function panicReport(record: string | null, trap: Error, schemaHash: bigint, mode: string): UndraPanicReport {
-  const cause = (trap as { cause?: unknown }).cause;
-  const trapText = cause instanceof Error ? `${cause.name}: ${cause.message}` : trap.message;
+  const cause = trap.cause;
+  const text = cause instanceof Error ? `${cause.name}: ${cause.message}` : trap.message;
   // The record of a panic before `undra_init` ends with " at file:line"; on wasm a runtime record is the message alone.
-  const at = record === null ? null : /^(.*) at ([^\s]+:\d+(?::\d+)?)$/s.exec(record);
-  const frames = trapStack(trap)
-    .split("\n")
-    .filter((line) => line.includes("wasm-function[") || line.includes(".wasm"))
-    .map((line) => line.trim().replace(/^at /, ""));
+  const at = /^(.*) at (\S+:\d+(?::\d+)?)$/s.exec(record ?? "");
   return {
-    message: at?.[1] ?? record ?? trapText,
+    message: at?.[1] ?? record ?? text,
     location: at?.[2] ?? "",
-    operation: `${mode}: ${trapText}`,
-    frames,
+    operation: `${mode}: ${text}`,
+    frames: trapStack(trap)
+      .split("\n")
+      .filter((line) => /wasm-function\[|\.wasm/.test(line))
+      .map((line) => line.trim().replace(/^at /, "")),
     schemaHash,
-    trap: trapText,
+    trap: text,
   };
 }
 

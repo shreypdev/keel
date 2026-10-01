@@ -16,7 +16,7 @@ import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
 import type { RecreateCall, UndraStore } from "./object.js";
 import { type UndraPanicReport, isTrap, panicReport } from "./panic.js";
-import type { CrashRecovery, RecoveryDriver, UndraCoreRestarted } from "./recovery.js";
+import type { CrashRecovery, UndraCoreRestarted } from "./recovery.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation, syncPortRefusal } from "./port-dispatch.js";
@@ -217,11 +217,6 @@ export interface WorkerModeOptions {
   readonly ports?: URL | string;
 }
 
-/** Whether a `worker` option is a Worker (or a stand-in with `postMessage`) rather than {@link WorkerModeOptions}. */
-function isWorkerLike(option: object): option is WorkerLike {
-  return typeof (option as { postMessage?: unknown }).postMessage === "function";
-}
-
 /** Statistics counters exposed by `undra_stats_json` that this runtime reads. */
 type CoreStatsJson = Readonly<Record<string, unknown>>;
 
@@ -387,13 +382,14 @@ export class UndraCore {
         // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
         if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
         const { WasmWorkerTransport } = await import("./transport/wasm-worker.js");
+        // A Worker (anything with `postMessage`) or a function creating one is `{ create }` in short.
         const worker = options.worker;
-        const modeOptions: WorkerModeOptions = worker === undefined ? {} : typeof worker === "function" || isWorkerLike(worker) ? { create: worker } : worker;
+        const { create, ports } = (typeof worker === "object" && !("postMessage" in worker) ? worker : { create: worker }) as WorkerModeOptions;
         transport = new WasmWorkerTransport({
           wasm: options.wasm,
           expectedSchemaHash: options.expectedSchemaHash,
-          ...(modeOptions.create !== undefined && { worker: modeOptions.create }),
-          ...(modeOptions.ports !== undefined && { ports: modeOptions.ports }),
+          ...(create && { worker: create }),
+          ...(ports !== undefined && { ports }),
           ...(recovery && { recovery }),
           ...(options.platform !== undefined && { platform: options.platform }),
           ...(options.devtools !== undefined && { devtools: options.devtools }),
@@ -470,32 +466,22 @@ export class UndraCore {
   #stopEvents: (() => void) | null = null;
   /** Whether `start` succeeded (the transport is running). */
   #started = false;
-  /** Bumped by every restart (ADR-049): a port reply that settles later belongs to the epoch of its call. */
-  #epoch = 0;
-  /** `LoadOptions.recovery`, attached to this core; `null` when off. */
-  readonly #recovery: RecoveryDriver | null;
-  /** While a trapped core is being instantiated again: calls fail with "restarted" (ADR-049). */
-  #restarting = false;
   /** The message of the last FATAL `undra::panic` record: what a trap's panic report says (ADR-046). */
   #lastPanicRecord: string | null = null;
 
   private constructor(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>) {
-    this.#transport = transport;
     this.#options = options;
     this.#adapters = adapters;
-    this.#recovery =
+    // With `recovery`, the core runs over the layer that restarts it after a trap (ADR-049; `crashRecovery`).
+    this.#transport =
       options.recovery?.attach(
+        transport,
         {
           core: this,
-          transport,
           handles: this.#handles,
           observed: this.#observed,
           releasedWhileDown: this.#releasedWhileDown,
           failInFlight: (error) => this.#failInFlight(error),
-          setRestarting: (on) => {
-            this.#restarting = on;
-            if (on) this.#epoch++;
-          },
           lose: (error) => {
             this.#lostForGood(error);
           },
@@ -508,7 +494,7 @@ export class UndraCore {
           },
         },
         options.onCoreRestarted,
-      ) ?? null;
+      ) ?? transport;
     this.#notifyConnection(this.#connection.peek());
     this.#observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
@@ -566,12 +552,7 @@ export class UndraCore {
     const transport = this.#transport;
     if (transport.callSync === undefined) throw new UndraModeError("callSync", transport.mode);
     this.#assertOpen();
-    let reply: Uint8Array;
-    try {
-      reply = transport.callSync(encodeTarget(target, methodId, this.#allocCallId(), args));
-    } catch (error) {
-      throw this.#failureOf(error);
-    }
+    const reply = transport.callSync(encodeTarget(target, methodId, this.#allocCallId(), args));
     // Read-your-writes (docs/SPEC.md section 11): the call's change-sets are queued by now.
     this.mirror.flush();
     if (reply.length < 5) throw new UndraTransportError("protocol", "the core returned a truncated reply");
@@ -640,7 +621,7 @@ export class UndraCore {
       this.#assertOpen();
       this.#transport.send(Kind.Observe, encodeObserve({ handle, signalId, on }));
     } catch (error) {
-      return Promise.reject(this.#failureOf(error));
+      return Promise.reject(error);
     }
     this.#noteObserved(handle, signalId, on);
     if (this.#transport.synchronous) {
@@ -657,7 +638,7 @@ export class UndraCore {
     this.#handles.delete(handle);
     this.#observed.delete(handle);
     if (this.#closed) return;
-    if (this.#connection.peek().kind === "reconnecting" || this.#restarting) {
+    if (this.#connection.peek().kind === "reconnecting") {
       // The core keeps the object for us (ADR-051); it is released when the connection is back.
       this.#releasedWhileDown.add(handle);
       return;
@@ -776,7 +757,7 @@ export class UndraCore {
   /** Live counters of this core; see {@link UndraStats}. */
   async stats(): Promise<UndraStats> {
     let core: CoreStatsJson | null = null;
-    const json = this.#closed || this.#restarting ? null : await this.#transport.stats?.().catch(() => null);
+    const json = this.#closed ? null : await this.#transport.stats?.().catch(() => null);
     if (typeof json === "string") {
       try {
         const parsed: unknown = JSON.parse(json);
@@ -887,29 +868,20 @@ export class UndraCore {
       this.#log(
         3,
         "undra::worker",
-        `adapters.${given.join(", adapters.")} do not reach the core in wasm-worker mode: set them in LoadOptions.worker.ports`,
+        `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`,
       );
     }
   }
 
   #assertOpen(): void {
     if (this.#closed) throw new UndraTransportError("closed", this.#closedMessage);
-    if (this.#restarting) {
-      throw new UndraTransportError("restarted", "the wasm core is restarting after a trap");
-    }
   }
 
-  /** A transport failure as a caller sees it: a trap the core recovers from is "restarted" (ADR-049). */
-  #failureOf(error: unknown): unknown {
-    return this.#recovery === null ? error : this.#recovery.failureOf(error);
-  }
 
   /** Stops everything. `reason` is what pending work fails with; `null` when there is none (a failed start). */
   #dispose(reason: Error | null, why: ConnectionClosedReason = reason === null ? "failed" : "requested"): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#restarting = false;
-    this.#recovery?.close();
     if (UndraCore.#shared === this) UndraCore.#shared = null;
     this.#stopEvents?.();
     this.#stopEvents = null;
@@ -934,17 +906,14 @@ export class UndraCore {
     return pending.length;
   }
 
-  /** The channel to the core was lost: a trap the core recovers from (ADR-049), or for good. */
+  /** The channel to the core was lost; a trap's panic report goes to `onPanic` first. (A trap the core recovers from never gets here: `crashRecovery` restarts it.) */
   #lost(error: Error): void {
-    // A trap while a restart is under way is the restart's to handle (it failed, and says so).
-    if (this.#closed || this.#restarting) return;
-    if (isTrap(error)) {
-      const report = this.#panicReport(error);
-      if (this.#recovery?.trapped(error, report) === true) return;
-    }
+    if (this.#closed) return;
+    if (isTrap(error)) this.#panicReport(error);
     this.#lostForGood(error);
   }
 
+  /** The channel to the core is lost for good: the core closes and `onClose` hears why. */
   #lostForGood(error: Error): void {
     if (this.#closed) return;
     const why: ConnectionClosedReason =
@@ -966,20 +935,17 @@ export class UndraCore {
    * @internal Called by `UndraStore` for the `recreate` option that generated query handles pass.
    */
   _recreatable(store: UndraStore, call: RecreateCall): void {
-    this.#recovery?.track(store, call);
+    this.#options.recovery?.track(store, call);
   }
 
   /** The panic report of `trap` (ADR-046 decision 4.4), handed to `onPanic`. */
   #panicReport(trap: Error): UndraPanicReport {
     const report = panicReport(this.#lastPanicRecord, trap, this.hello.schemaHash, this.#transport.mode);
     this.#lastPanicRecord = null;
-    const handler = this.#options.onPanic;
-    if (handler !== undefined) {
-      try {
-        handler(report);
-      } catch (thrown) {
-        this.#log(4, "undra::runtime", `the onPanic handler threw: ${errorMessage(thrown)}`);
-      }
+    try {
+      this.#options.onPanic?.(report);
+    } catch (thrown) {
+      this.#reportError("onPanic", thrown);
     }
     return report;
   }
@@ -1102,14 +1068,14 @@ export class UndraCore {
         if (this.#pending.get(callId) === entry) {
           this.#pending.delete(callId);
           entry.cleanup?.();
-          reject(this.#failureOf(error));
+          reject(error);
         }
       }
     });
   }
 
   #openStream(target: CallTargetArg, methodId: number, args: Uint8Array): StreamCall {
-    const callId = this.#closed || this.#restarting ? 0 : this.#allocCallId();
+    const callId = this.#closed ? 0 : this.#allocCallId();
     const stream = new StreamCall(callId, {
       sendCredit: (id, credit) => {
         this.#assertOpen();
@@ -1121,12 +1087,8 @@ export class UndraCore {
         this.#transport.send(Kind.Cancel, encodeCancel({ callId: id }));
       },
     });
-    if (this.#closed || this.#restarting) {
-      try {
-        this.#assertOpen();
-      } catch (error) {
-        stream.fail(error);
-      }
+    if (this.#closed) {
+      stream.fail(new UndraTransportError("closed", this.#closedMessage));
       return stream;
     }
     this.#pending.set(callId, { kind: "stream", stream });
@@ -1134,7 +1096,7 @@ export class UndraCore {
       this.#transport.send(Kind.Call, encodeTarget(target, methodId, callId, args));
     } catch (error) {
       this.#pending.delete(callId);
-      stream.fail(this.#failureOf(error));
+      stream.fail(error);
     }
     return stream;
   }
@@ -1147,8 +1109,6 @@ export class UndraCore {
     },
     changeSet: (payload) => {
       this.mirror.enqueue(payload);
-      // A store changed: crash recovery's snapshot is due (ADR-049).
-      this.#recovery?.changed();
     },
     streamItem: (payload) => {
       this.#onStreamItem(payload);
@@ -1278,12 +1238,10 @@ export class UndraCore {
   }
 
   #onPortCall(call: PortCallPayload): PortOutcome {
-    // A reply that settles after a restart belongs to a call of the instance that trapped: never deliver it to the new one.
-    const epoch = this.#epoch;
     const impl = this.#ports.get(call.portId);
     return dispatchPortCall(impl, call, {
       later: (reply) => {
-        if (epoch === this.#epoch) this.#sendPortReply(reply);
+        this.#sendPortReply(reply);
       },
       untyped: (failed, error) => {
         this.#reportError(portOperation(failed, impl), error);

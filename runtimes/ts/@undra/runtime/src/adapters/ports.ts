@@ -1,15 +1,7 @@
 import { UndraPortError } from "../errors.js";
 import type { PortImpl } from "../port.js";
 import { UndraReader, UndraWriter, codecs, encodeValue } from "../wire/index.js";
-import {
-  AppStateCodec,
-  FsErrorCodec,
-  HttpErrorCodec,
-  HttpRequestCodec,
-  HttpResponseCodec,
-  NetKindCodec,
-  StorageErrorCodec,
-} from "./codecs.js";
+import { readHttpRequest, writeAppState, writeFsError, writeHttpError, writeHttpResponse, writeNetKind, writeStorageError } from "./codecs.js";
 import { PortIds } from "./ids.js";
 import {
   type AppState,
@@ -45,6 +37,13 @@ function readArgs<T>(args: Uint8Array, read: (r: UndraReader) => T): T {
   return value;
 }
 
+/** Encodes `value` with `write`: one half of a codec, so that a port ships only what it uses. */
+function encodeWith<T>(write: (w: UndraWriter, value: T) => void, value: T): Uint8Array {
+  const w = new UndraWriter();
+  write(w, value);
+  return w.finish();
+}
+
 /**
  * Runs `run`, turning a typed failure into `UndraPortError` with the encoded error (the core gets port status
  * 1). `recognize` says which failures are the port's typed error (`undefined`: not one); anything else is
@@ -61,7 +60,7 @@ async function typed<T, E>(run: () => Promise<T>, recognize: (error: unknown) =>
 }
 
 const isHttpError = (error: unknown): HttpError | undefined => (error instanceof HttpError ? error : undefined);
-const encodeStorageError = (error: StorageError): Uint8Array => encodeValue(StorageErrorCodec, error);
+const encodeStorageError = (error: StorageError): Uint8Array => encodeWith(writeStorageError, error);
 
 /** The `Http` port over an {@link HttpAdapter}. An {@link HttpError} becomes the typed error of `Http.request`. */
 export function httpPort(http: HttpAdapter): PortImpl {
@@ -70,11 +69,11 @@ export function httpPort(http: HttpAdapter): PortImpl {
     sync: false,
     methods: {
       [PortIds.Http.request]: (args) => {
-        const request = readArgs(args, (r) => HttpRequestCodec.decode(r));
+        const request = readArgs(args, readHttpRequest);
         return typed(
-          async () => encodeValue(HttpResponseCodec, await http.request(request)),
+          async () => encodeWith(writeHttpResponse, await http.request(request)),
           isHttpError,
-          (e) => encodeValue(HttpErrorCodec, e),
+          (e) => encodeWith(writeHttpError, e),
         );
       },
     },
@@ -131,7 +130,7 @@ export function secureStorePort(store: KvAdapter): PortImpl {
  * maps what a file API throws); any other failure is reported and answered as unavailable.
  */
 export function fsPort(fs: FsAdapter): PortImpl {
-  const run = <T>(work: () => Promise<T>) => typed(work, (e) => (e instanceof FsError ? e : undefined), (e: FsError) => encodeValue(FsErrorCodec, e));
+  const run = <T>(work: () => Promise<T>) => typed(work, (e) => (e instanceof FsError ? e : undefined), (e: FsError) => encodeWith(writeFsError, e));
   return {
     name: "Fs",
     sync: false,
@@ -251,13 +250,13 @@ export interface EventSink {
 export function emitConnectivity(core: EventSink, online: boolean, kind: NetKind): void {
   const w = new UndraWriter(4);
   w.writeBool(online);
-  NetKindCodec.encode(w, kind);
+  writeNetKind(w, kind);
   core.event(PortIds.Connectivity.portId, PortIds.Connectivity.changed, w.finish());
 }
 
 /** Sends `Lifecycle.changed(state)` to the core. */
 export function emitLifecycle(core: EventSink, state: AppState): void {
-  core.event(PortIds.Lifecycle.portId, PortIds.Lifecycle.changed, encodeValue(AppStateCodec, state));
+  core.event(PortIds.Lifecycle.portId, PortIds.Lifecycle.changed, encodeWith(writeAppState, state));
 }
 
 /**

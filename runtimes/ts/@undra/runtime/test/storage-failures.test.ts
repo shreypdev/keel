@@ -185,10 +185,10 @@ describe("every Kv and SecureStore method fails with each StorageError through t
         const reply = await fake.callPort(port.ids.portId, port.ids[method], argsOf(method));
         expect(encodePortReply(reply)).toEqual(encodePortReply({ portCallId: reply.portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
       }
-      expect(errors.map((e) => e.operation.split(" (")[0])).toEqual(METHODS.map(() => `${port.name} adapter`));
+      expect(errors.map((e) => e.operation.split(" 0x")[0])).toEqual(METHODS.map(() => `${port.name} port`));
       const records = log.records.filter((r) => r.level === 4);
       expect(records).toHaveLength(4);
-      expect(records[0]?.message).toContain(`${port.name} adapter (port 0x`);
+      expect(records[0]?.message).toContain(`${port.name} port 0x${port.ids.portId.toString(16)}`);
       expect(records[0]?.message).toContain(`method 0x${port.ids.get.toString(16)}`);
       expect(records[0]?.message).toContain("adapter bug");
     });
@@ -415,6 +415,6 @@ describe("FsError gains Full and Unavailable (ADR-049)", () => {
     expect((await fake.callPort(PortIds.Fs.portId, PortIds.Fs.read, encodeValue(codecs.string, "f"))).body).toEqual(expectedBytes(3));
     next = new Error("bug");
     expect((await fake.callPort(PortIds.Fs.portId, PortIds.Fs.read, encodeValue(codecs.string, "f"))).status).toBe(PortStatus.Unavailable);
-    expect(errors.map((e) => e.operation.split(" (")[0])).toEqual(["Fs adapter"]);
+    expect(errors.map((e) => e.operation.split(" 0x")[0])).toEqual(["Fs port"]);
   });
 });

@@ -425,7 +425,7 @@ describe("over a real channel, with UndraCore on the main thread", () => {
 
   it.each([
     ["an app's sync port without a name", STUB.PORT_ID, "port 0xc0dec0de", undefined],
-    ["a Clock (clockPort names it)", PortIds.Clock.portId, "the Clock port (0xcd99c48e)", "Clock"],
+    ["a Clock (clockPort names it)", PortIds.Clock.portId, "Clock port 0xcd99c48e", "Clock"],
   ] as const)("%s registered on the main thread is a load-time error that names it and the fix", async (_name, portId, named, portName) => {
     const module = await WebAssembly.compile((await compileStub({})) as Uint8Array<ArrayBuffer>);
     const worker = channelWorker();
@@ -452,7 +452,7 @@ describe("over a real channel, with UndraCore on the main thread", () => {
   it("the refusal uses the port's name when its adapter carries one (generated adapters do)", async () => {
     const w = await overChannel({}, {});
     expect(() => w.core.registerPort(STUB.PORT_ID, { name: "Locale", sync: true, methods: {} })).toThrow(
-      "the Locale port (0xc0dec0de) is synchronous",
+      "Locale port 0xc0dec0de is synchronous",
     );
     w.close();
   });

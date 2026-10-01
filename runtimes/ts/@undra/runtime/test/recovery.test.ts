@@ -590,9 +590,13 @@ describe("the wasm transports restart over the stub core", () => {
       // What the new instance heard back from the port call its `undra_init` made: PortReply { id, Ok, u32 42 }.
       let heard: Uint8Array = new Uint8Array(0);
       await until("the reply to reach the new instance", () => {
-        void core.call(FREE, STUB.INIT_PORT_REPLY, new Uint8Array(0)).then((body) => {
-          heard = body;
-        });
+        // The last of these calls may still be in flight when the core closes below: its rejection is expected.
+        core.call(FREE, STUB.INIT_PORT_REPLY, new Uint8Array(0)).then(
+          (body) => {
+            heard = body;
+          },
+          () => {},
+        );
         return heard.length > 0;
       });
       expect([...heard.subarray(4)]).toEqual([0, ...u32(42)]);

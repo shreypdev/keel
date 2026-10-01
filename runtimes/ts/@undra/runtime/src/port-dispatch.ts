@@ -62,20 +62,17 @@ export function portFailureReply(call: PortCallPayload, error: unknown, hooks: P
   return encodePortReply({ portCallId: call.portCallId, status: PortStatus.Unavailable, body: NO_BYTES });
 }
 
-/**
- * How the runtime names the implementation of a port in what it logs: `Kv adapter (port 0x... method 0x...)` for a
- * port whose implementation has a name (the standard ports, generated adapters), else the ids.
- */
-export function portOperation(call: Pick<PortCallPayload, "portId" | "methodId">, impl?: Pick<PortImpl, "name">): string {
-  const ids = `port 0x${call.portId.toString(16)} method 0x${call.methodId.toString(16)}`;
-  return impl?.name === undefined ? ids : `${impl.name} adapter (${ids})`;
+/** How the runtime names a port in what it says: `Kv port 0x...` when its implementation has a name (the standard ports, generated adapters), else `port 0x...`. */
+function portName(portId: number, impl?: Pick<PortImpl, "name">): string {
+  return `${impl?.name === undefined ? "" : `${impl.name} `}port 0x${portId.toString(16)}`;
 }
 
-/**
- * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049):
- * names the port (`impl.name`, else its id) and the fix.
- */
+/** The operation a failed port method is reported under: `Kv port 0x... method 0x...` (see `portName`). */
+export function portOperation(call: Pick<PortCallPayload, "portId" | "methodId">, impl?: Pick<PortImpl, "name">): string {
+  return `${portName(call.portId, impl)} method 0x${call.methodId.toString(16)}`;
+}
+
+/** The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049): the port and the fix. */
 export function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
-  const name = impl?.name === undefined ? `port 0x${portId.toString(16)}` : `the ${impl.name} port (0x${portId.toString(16)})`;
-  return `${name} is synchronous: in wasm-worker mode the core cannot wait for the main thread; register it in LoadOptions.worker.ports, or use mode "wasm-main"`;
+  return `${portName(portId, impl)} is synchronous, and a wasm-worker core cannot wait for this thread: register it in LoadOptions.worker.ports, or use mode "wasm-main"`;
 }
