@@ -8,6 +8,7 @@ import {
   UndraReplyError,
   UndraRestoreError,
   UndraSchemaMismatchError,
+  UndraSessionLostError,
   UndraTransportError,
   type TransportFailure,
 } from "../src/errors.js";
@@ -134,6 +135,15 @@ describe("UndraCallError.mapped", () => {
     expect(mapped.transport.reason).toBe("closed");
     expect(mapped.message).toContain("0x0000000000000001");
     expect(mapped.message).toContain("0x0000000000000002");
+  });
+
+  it("maps a session the dev server lost to Unavailable, with its own message", () => {
+    const lost = new UndraSessionLostError("the dev server restarted");
+    const mapped = UndraCallError.mapped(lost) as UndraCallError.Unavailable;
+    expect(mapped).toBeInstanceOf(UndraCallError.Unavailable);
+    expect(mapped.transport.reason).toBe("closed");
+    expect(mapped.transport.cause).toBe(lost);
+    expect(mapped.message).toContain("the dev server restarted");
   });
 
   it("maps wire, port, mode, restore and unclassified runtime errors", () => {

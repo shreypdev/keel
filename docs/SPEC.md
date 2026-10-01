@@ -1110,7 +1110,7 @@ export class UndraCore {
   static load(opts: LoadOptions): Promise<UndraCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint, mirror?: { schedule?, maxPendingEntries?, maxPendingBytes? } /* §11.1 */ }
   static get shared(): UndraCore;                               // set by the first load; with none (or after it closed) a closed placeholder: its calls reject UndraCallError.Unavailable, access never throws
   static get current(): UndraCore | null;                       // the loaded shared core, or null (then `shared` is the placeholder)
-  report(error: unknown, operation: string): void;              // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); only logs a failure reported while onError runs or of a call onError started
+  report(error: unknown, operation: string): void;              // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); a failure that is a remote core's connection being down (Unavailable while `connection` is reconnecting, or closed for a reason other than "requested") is logged at warning level and not delivered (ADR-051); only logs a failure reported while onError runs or of a call onError started
   callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw UndraModeError; drains the mirror before it returns
   call(target: CallTarget, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;   // resolves with reply body (status ok) or rejects with UndraReplyError { status, body }
   stream(target: CallTarget, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;   // handles credit
@@ -1163,7 +1163,7 @@ class UndraCore private constructor(...) {
   fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>
   fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long                        // sync in INPROC
   fun constructObject(typeId: UInt, methodId: UInt, args: ByteArray): Long                  // construct, its failures mapped onto UndraCallError (what generated secondary constructors call)
-  fun report(error: Throwable, operation: String)                                           // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A)
+  fun report(error: Throwable, operation: String)                                           // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); an Unavailable of reason CONNECTION_LOST (the remote connection is down, which connectionState reports) is only logged, at warning level (ADR-051)
   fun observe(handle: Long, signalId: UInt, on: Boolean); fun release(handle: Long)
   val connectionState: StateFlow<ConnectionState>                                           // ADR-051: Connecting | Connected | Reconnecting(attempt, cause) | Closed(reason: REQUESTED | SCHEMA_MISMATCH | SESSION_LOST | FAILED, cause); LoadOptions(reconnect = ReconnectPolicy(), onConnectionChange); UndraSessionLostException
   val mirror: Mirror                                                                        // register(handle) { signalId, op, reader -> }; register(handle, noCoalesce: Set<UInt>) { ... }
@@ -1179,7 +1179,7 @@ abstract class UndraObject(val core: UndraCore, val handle: Long) : AutoCloseabl
 abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<UInt> = emptySet()) : UndraObject(core, handle) { protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader); protected fun <T> signal(initial: T): MutableStateFlow<T>; protected fun observeAll() /* closes the store and throws UndraCallError when the core is gone */ }
 open class UndraException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)   // the root of everything the runtime throws on purpose; WireException is one
 class UndraReplyException(val status: ReplyStatus, val body: ByteArray) : UndraException(..)   // the raw reply failure of callSync/call/stream/construct; generated code maps it
-class UndraTransportException(val reason: Reason /* CLOSED, TIMEOUT, CONNECTION_LOST, INTERRUPTED */, message: String, cause: Throwable? = null) : UndraException(..)
+class UndraTransportException(val reason: Reason /* CLOSED, TIMEOUT, CONNECTION_LOST, INTERRUPTED */, message: String, cause: Throwable? = null) : UndraException(..)   // what every transport throws, RemoteTransport included (a connection that is down, failed or reconnecting is CONNECTION_LOST; ADR-051); mapped to UndraCallError.Unavailable
 class UndraProtocolException(message: String, cause: Throwable? = null) : UndraException(..)   // a malformed reply, a reply for another call, the null handle
 class UndraRestoreException(val code: Int) : UndraException(..)                                  // restore refused; the core is unchanged
 /** What a generated call throws when the failure is neither its own `E` nor the caller's cancellation (ADR-032, amendment A). */
@@ -1219,7 +1219,7 @@ public final class UndraCore: @unchecked Sendable {
                                    // addDrainListener { @MainActor (DrainStats) in … } -> DrainListenerRegistration (remove()); @MainActor flush()  (§11.1)
   public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning
   public func stats() -> UndraStats   // ..., mirror: MirrorStats
-  public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it
+  public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it; a failure that is a remote core's connection being down (.unavailable while connectionState is .reconnecting, or .closed for a reason other than .requested) is only logged, at warning level (ADR-051)
 }
 public struct MirrorStats: Sendable, Equatable { changeSetsReceived, entriesReceived, entriesApplied, drains, compactions, resyncs, pendingEntries, pendingBytes, droppedEntries: Int }
 public struct DrainStats: Sendable, Equatable { changeSets: Int; entries: Int; appliedEntries: Int; duration: Duration }

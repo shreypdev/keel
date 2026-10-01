@@ -627,3 +627,20 @@ TypeScript (SPEC 10.3):
 * **Remaining differences after this amendment** (recorded, not hidden): a failed port implementation and a malformed
   change-set are reported to `onError` on Kotlin and TypeScript but only logged on Swift; `UndraCore.stats()` shapes and Kotlin's missing
   `isClosed` (PA-8) are untouched; close semantics (PA-6) and connection state (PA-7) belong to ADR-034 and B2.
+
+### Addendum (2026-10-01): reconnecting remote cores (ADR-051)
+
+ADR-051 added a connection state and automatic reconnecting to the remote transports after this amendment was written.
+Two things follow, with no change to a generated shape or the wire:
+
+1. **The failures of a down connection are `Unavailable`, by type.** What is in flight when a remote connection drops,
+   and every call made while it reconnects, fails with the transport's typed failure (Swift `UndraTransportError.connectionLost`,
+   Kotlin `UndraTransportException` with reason `CONNECTION_LOST`, TypeScript `UndraTransportError("closed")`), which the one
+   mapping function turns into `UndraCallError.Unavailable`. Kotlin's `RemoteTransport` throws the typed exception everywhere
+   (it threw a bare `UndraException`); a bare `UndraException` still maps to `Unavailable`, as a fallback for a foreign
+   transport only. A lost session (`UndraSessionLostException` / `UndraSessionLostError`) maps to `Unavailable` on all three.
+2. **`onError` does not hear a lost connection.** `report` logs a failure that is a remote core's connection being down
+   (`Unavailable` while the state is `reconnecting`, or `closed` for a reason other than the app's own close) at warning
+   level and does not call the handler: the connection state reports it, once, and a command tapped while the laptop
+   sleeps is not a crash report. Other `Unavailable` failures (a core the app closed, a timeout, a wasm trap) are still
+   reported. Same rule on the three platforms; `docs/ERRORS.md` states it.

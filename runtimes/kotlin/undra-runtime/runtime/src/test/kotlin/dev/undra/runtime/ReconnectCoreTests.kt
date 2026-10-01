@@ -16,6 +16,7 @@ import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.encodeToByteArray
+import java.util.logging.Level
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -29,7 +30,10 @@ private const val STORE = 0x100000002L
 private const val OTHER = 0x100000003L
 
 /** A remote-mode core over a fake transport that can be dropped and brought back, and the states it went through. */
-private class Rig(val t: FakeTransport = FakeTransport(isSynchronous = false)) : AutoCloseable {
+private class Rig(
+    val t: FakeTransport = FakeTransport(isSynchronous = false),
+    onError: ((UndraUnhandledError) -> Unit)? = null,
+) : AutoCloseable {
     val states = CopyOnWriteArrayList<ConnectionState>()
     val core: UndraCore = UndraCore.attach(
         t,
@@ -39,6 +43,7 @@ private class Rig(val t: FakeTransport = FakeTransport(isSynchronous = false)) :
             expectedSchemaHash = HASH,
             defaultAdapters = false,
             onConnectionChange = { states.add(it) },
+            onError = onError,
         ),
         makeShared = false,
     )
@@ -76,7 +81,7 @@ class ReconnectCoreTests : Suite() {
             }
         }
 
-        case("a drop fails what is in flight with an UndraException at once, and the core stays open") {
+        case("a drop fails what is in flight with an UndraTransportException (CONNECTION_LOST) at once, and the core stays open") {
             Rig().use { rig ->
                 val outcomes = CopyOnWriteArrayList<Throwable>()
                 val blocked = Thread {
@@ -105,24 +110,77 @@ class ReconnectCoreTests : Suite() {
                 rig.t.drop(UndraException("socket reset"))
                 listOf(blocked, suspended, streaming).forEach { it.join(10_000) }
                 assertEq(3, outcomes.size, "nothing hangs: $outcomes")
-                for (e in outcomes) {
-                    assertTrue(e is UndraException, "typed: $e")
+                for (outcome in outcomes) {
+                    assertTrue(outcome is UndraTransportException, "typed: $outcome")
+                    val e = outcome as UndraTransportException
+                    assertEq(UndraTransportException.Reason.CONNECTION_LOST, e.reason)
                     assertTrue(e.message!!.contains("reconnecting") && e.message!!.contains("socket reset"), e.message!!)
+                    // What a generated call throws for it (ADR-032 amendment A): the closed set's Unavailable.
+                    val mapped = UndraCallError.mapped(e) as UndraCallError.Unavailable
+                    assertTrue(mapped.transport === e)
                 }
                 assertEq(0, rig.core.stats().hostPendingCalls)
                 assertTrue(rig.core.connectionState.value is ConnectionState.Reconnecting)
             }
         }
 
-        case("calls, constructors and observations made while reconnecting fail at once with the same type") {
+        case("calls, constructors and observations made while reconnecting fail at once with the same type, Unavailable once mapped") {
             Rig().use { rig ->
                 rig.t.drop()
-                val e = assertThrows<UndraException> { rig.core.callSync(TARGET, METHOD, NO_BYTES) }
+                val e = assertThrows<UndraTransportException> { rig.core.callSync(TARGET, METHOD, NO_BYTES) }
                 assertTrue(e.message!!.contains("reconnecting"), e.message!!)
-                assertThrows<UndraException> { runBlocking { rig.core.call(TARGET, METHOD, NO_BYTES) } }
-                assertThrows<UndraException> { rig.core.construct(1u, 2u, NO_BYTES) }
-                assertThrows<UndraException> { rig.core.observe(STORE, UInt.MAX_VALUE, true) }
+                val failures = listOf(
+                    e,
+                    assertThrows<UndraTransportException> { runBlocking { rig.core.call(TARGET, METHOD, NO_BYTES) } },
+                    assertThrows<UndraTransportException> { rig.core.construct(1u, 2u, NO_BYTES) },
+                    assertThrows<UndraTransportException> { rig.core.observe(STORE, UInt.MAX_VALUE, true) },
+                    assertThrows<UndraCallError.Unavailable> { rig.core.constructObject(1u, 2u, NO_BYTES) }.transport,
+                )
+                for (failure in failures) {
+                    assertEq(UndraTransportException.Reason.CONNECTION_LOST, failure.reason)
+                    assertTrue(UndraCallError.mapped(failure) is UndraCallError.Unavailable)
+                }
                 assertEq(0, rig.t.observes.size, "nothing reached the transport")
+            }
+        }
+
+        case("a command that fails because the connection is down is not handed to onError, but is logged; a core the app closed still is") {
+            val reports = CopyOnWriteArrayList<UndraUnhandledError>()
+            LogCapture("dev.undra.runtime").use { log ->
+                Rig(onError = { reports.add(it) }).use { rig ->
+                    // Connected: a failure that is not the connection reaches the handler.
+                    rig.core.report(UndraReplyException(ReplyStatus.CANCELLED, NO_BYTES), "Todos.toggle")
+                    assertEq(listOf("Todos.toggle"), reports.map { it.operation })
+
+                    // Reconnecting: a command tapped meanwhile fails with Unavailable(CONNECTION_LOST); the state already says so.
+                    rig.t.drop()
+                    val tapped = assertThrows<UndraTransportException> { rig.core.callSync(TARGET, METHOD, NO_BYTES) }
+                    rig.core.report(tapped, "Todos.toggle")
+                    assertEq(1, reports.size, "not reported while reconnecting")
+                    assertTrue(
+                        log.records.any { it.level == Level.WARNING && it.message.contains("Todos.toggle") && it.message.contains("connectionState") },
+                        "logged at warning level: ${log.messages()}",
+                    )
+                    assertTrue(log.records.none { it.level == Level.SEVERE && it.message.contains("the connection to the core was lost") })
+
+                    // The way back: failures reach the handler again.
+                    rig.t.reconnect()
+                    eventually("connected") { rig.core.connectionState.value == ConnectionState.Connected }
+                    rig.core.report(UndraReplyException(ReplyStatus.CANCELLED, NO_BYTES), "Todos.toggle")
+                    assertEq(2, reports.size)
+                }
+                // A core the app closed: a use after close is a programming error, reported.
+                val closed = Rig(onError = { reports.add(it) })
+                closed.core.close()
+                val e = assertThrows<UndraTransportException> { closed.core.callSync(TARGET, METHOD, NO_BYTES) }
+                assertEq(UndraTransportException.Reason.CLOSED, e.reason)
+                closed.core.report(e, "Todos.toggle")
+                assertEq(3, reports.size, "a call on a core the app closed is reported")
+                // A timeout is not the connection state's news either.
+                val live = Rig(onError = { reports.add(it) })
+                live.core.report(UndraTransportException(UndraTransportException.Reason.TIMEOUT, "no answer"), "Todos.toggle")
+                assertEq(4, reports.size)
+                live.close()
             }
         }
 
@@ -215,8 +273,10 @@ class ReconnectCoreTests : Suite() {
                 assertEq(listOf("connecting", "connected", "reconnecting 1", "closed:SCHEMA_MISMATCH"), rig.log())
                 val state = rig.core.connectionState.value as ConnectionState.Closed
                 assertTrue(state.cause === mismatch)
-                val e = assertThrows<UndraException> { rig.core.callSync(TARGET, METHOD, NO_BYTES) }
+                val e = assertThrows<UndraTransportException> { rig.core.callSync(TARGET, METHOD, NO_BYTES) }
                 assertTrue(e.cause === mismatch, "the cause is the mismatch: ${e.cause}")
+                assertEq(UndraTransportException.Reason.CONNECTION_LOST, e.reason)
+                assertTrue(UndraCallError.mapped(e) is UndraCallError.Unavailable)
             }
         }
 
@@ -227,6 +287,11 @@ class ReconnectCoreTests : Suite() {
                 val state = rig.core.connectionState.value as ConnectionState.Closed
                 assertEq(ClosedReason.SESSION_LOST, state.reason)
                 assertTrue(state.cause is UndraSessionLostException)
+                // After it every call is Unavailable, and the lost session maps there on its own as well.
+                val e = assertThrows<UndraTransportException> { rig.core.callSync(TARGET, METHOD, NO_BYTES) }
+                assertTrue(e.cause === state.cause)
+                assertTrue(UndraCallError.mapped(e) is UndraCallError.Unavailable)
+                assertTrue(UndraCallError.mapped(UndraSessionLostException()) is UndraCallError.Unavailable)
             }
         }
 

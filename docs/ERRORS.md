@@ -25,7 +25,7 @@ A generated method that can fail does exactly this, on every platform:
 | `cancelledByCore` / `CancelledByCore` | the core cancelled the call: a restore replaced or invalidated the object it ran on, or the core shut down while it ran. **Not** a platform cancellation: your task was not cancelled, and a write that never landed must not look like a quiet exit |
 | `panicked` / `Panicked` (message, backtrace) | the core panicked while running the call. The core caught the panic and keeps working (a wasm core traps instead: see `unavailable`) |
 | `refused` / `Refused` (reason) | the core would not run the call: the object was closed or replaced by a restore, the call was made from inside one of the core's own callbacks (`E_REENTRANT`), or its arguments could not be decoded |
-| `unavailable` / `Unavailable` (transport) | the core cannot be reached: it was shut down or never loaded, a wasm core trapped, or the remote connection closed or timed out (including an `undra dev` core that came back with another schema) |
+| `unavailable` / `Unavailable` (transport) | the core cannot be reached: it was shut down or never loaded, a wasm core trapped, or the remote connection closed or timed out (including an `undra dev` core that came back with another schema, or one that restarted without this core's objects: a lost session). While a remote core is reconnecting (ADR-051) every call, and every call in flight when the connection dropped, fails with `Unavailable` at once: Swift `.unavailable(.connectionLost)`, Kotlin `Unavailable` over an `UndraTransportException` of reason `CONNECTION_LOST`, TypeScript `Unavailable` over an `UndraTransportError("closed")` |
 | `malformed` / `Malformed` (detail) | the core answered with something the bindings cannot read. After a successful schema check this is a bug in Undra: please report it with the text |
 
 All three read well as text: Swift `error.localizedDescription`, Kotlin `error.message`, TypeScript `error.message`.
@@ -145,6 +145,15 @@ exception the handler throws is logged and dropped (Kotlin: an `Error` propagate
 purpose). The default, no handler, logs and returns. To stop at the failing line in a debug build: Swift `onError: {
 assertionFailure("\($0)") }`, Kotlin `onError = { throw AssertionError(it) }`.
 
+**A lost connection is not an `onError` event.** Over `undra dev` a command tapped while the dev server is away fails
+with `Unavailable` too, and the connection state (`connectionState`, `connection`, `onConnectionChange`; ADR-051) already
+says so, once. A failure that is the connection being down (`Unavailable` while a remote core is `reconnecting`, or
+`closed` for a reason other than your own `close()` / `shutdown()`) is therefore logged at warning level and **not** handed
+to `onError`: a crash reporter would otherwise get one event per tap for as long as the laptop sleeps. Everything else
+`Unavailable` is still reported: a command on a core you closed yourself (a programming error), a timeout, and a wasm core
+that trapped. The same rule on all three platforms (Kotlin keys on the transport reason `CONNECTION_LOST`, Swift and
+TypeScript on the reason and the connection state).
+
 ## Before a core is loaded
 
 `UndraCore.shared`, the default `ctx` / `core` of every generated constructor and free function, is a closed placeholder
@@ -160,7 +169,12 @@ logs "Load a core at app startup, before creating any Undra object", and `regist
 The raw entry points of every runtime (`callSync`, `call`, `stream`, `construct`, `snapshot`, `restore`) throw the runtime's
 own errors: Swift `UndraReplyError`, `UndraTransportError`, `UndraProtocolError`, `UndraRestoreError`; Kotlin
 `UndraReplyException`, `UndraTransportException`, `UndraProtocolException`, `UndraRestoreException`; TypeScript
-`UndraReplyError`, `UndraTransportError`, `UndraRestoreError`. They are the API for what bindings do not expose, and the
+`UndraReplyError`, `UndraTransportError`, `UndraRestoreError`. The remote transport's failures are among them: Kotlin's
+`RemoteTransport` throws `UndraTransportException` (reason `CONNECTION_LOST` for a connection that is down, failed or could
+not be made, `CLOSED` for one the app closed, `TIMEOUT`, `INTERRUPTED`), never a bare `UndraException`, so the mapping
+makes it `Unavailable` by its type. What ends a remote core for good (`UndraSchemaMismatchException`,
+`UndraSessionLostException`; TypeScript `UndraSchemaMismatchError`, `UndraSessionLostError`) is the `cause` of the
+transport error that fails the calls after it, and maps to `Unavailable` on its own where it reaches a call unwrapped. They are the API for what bindings do not expose, and the
 contract suite relies on their statuses. Everything the runtime throws on purpose, including the wire layer's errors
 (`WireError`, `WireException`), is an `UndraError` / `UndraException` (Swift: the types are separate structs and enums).
 

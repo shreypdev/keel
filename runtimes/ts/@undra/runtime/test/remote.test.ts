@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type ConnectionState,
+  UndraCallError,
   UndraCore,
+  UndraReplyError,
   UndraSchemaMismatchError,
   UndraSessionLostError,
   UndraTransportError,
+  type UndraUnhandledError,
 } from "../src/index.js";
 import { RemoteTransport, reconnectDelayMs } from "../src/transport/remote.js";
 import type { TransportHandler } from "../src/transport/transport.js";
@@ -424,6 +427,73 @@ describe("UndraCore over a reconnecting remote transport", () => {
     expect(closes, "onClose is for a core that is gone for good").toEqual([]);
     expect(kinds(states)).toEqual(["connecting", "connected", "reconnecting 1"]);
     expect((await core.stats()).pendingCalls).toBe(0);
+  });
+
+  it("every failure of the connection is Unavailable once a generated call maps it: in flight, while down, and after the core is gone", async () => {
+    const server = new FakeServer();
+    const { core } = await loaded(server);
+    const inFlight = core.call(FREE, 1, u32(1)).catch((e: unknown) => e);
+    server.current.serverClose(1006);
+    const failures = [await inFlight, await core.call(FREE, 1, u32(1)).catch((e: unknown) => e)];
+    server.current.serverClose(4001, "session lost");
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+    server.current.serverClose(4001, "session lost");
+    await settle();
+    failures.push(await core.call(FREE, 1, u32(1)).catch((e: unknown) => e));
+    for (const failure of failures) {
+      expect(failure).toBeInstanceOf(UndraTransportError);
+      const mapped = UndraCallError.mapped(failure);
+      expect(mapped).toBeInstanceOf(UndraCallError.Unavailable);
+      expect((mapped as UndraCallError.Unavailable).transport).toBe(failure);
+    }
+  });
+
+  it("a command that fails because the connection is down is logged, not handed to onError; a core the app closed still is", async () => {
+    const server = new FakeServer();
+    const log = captureLog();
+    const { core, errors } = await loaded(server, { adapters: { log, http: null, timer: null } });
+    const failure = async (): Promise<unknown> => core.call(FREE, 1, u32(1)).catch((e: unknown) => e);
+
+    // Connected: a failure that is not the connection reaches the handler.
+    core.report(new UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0)), "Todos.toggle");
+    expect(errors).toHaveLength(1);
+
+    // Reconnecting: the connection state already says so.
+    server.current.serverClose(1006);
+    core.report(await failure(), "Todos.toggle");
+    expect(errors, "not reported while reconnecting").toHaveLength(1);
+    const warned = log.records.filter((r) => r.level === 3 && r.message.includes("Todos.toggle"));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]?.message).toContain("UndraCore.connection");
+    expect(log.records.some((r) => r.level === 4 && r.message.includes("Todos.toggle failed: the Undra core is unavailable")), "not logged as an error").toBe(false);
+
+    // The way back: reported again.
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+    expect(core.connection.peek().kind).toBe("connected");
+    core.report(new UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0)), "Todos.toggle");
+    expect(errors).toHaveLength(2);
+
+    // Lost for good (the dev server restarted): still the connection's news.
+    server.current.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+    server.current.serverClose(4001, "session lost");
+    await settle();
+    expect(core.connection.peek()).toMatchObject({ kind: "closed", reason: "sessionLost" });
+    core.report(await failure(), "Todos.toggle");
+    expect(errors, "not reported after the session was lost").toHaveLength(2);
+  });
+
+  it("a call on a core the app closed is a programming error and is reported", async () => {
+    const server = new FakeServer();
+    const { core, errors } = await loaded(server);
+    core.close();
+    const failure = await core.call(FREE, 1, u32(1)).catch((e: unknown) => e);
+    core.report(failure, "Todos.toggle");
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as UndraUnhandledError).error).toBeInstanceOf(UndraCallError.Unavailable);
   });
 
   it("calls made while reconnecting fail at once instead of waiting", async () => {

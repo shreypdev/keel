@@ -187,6 +187,52 @@ class RemoteReconnectTests : Suite() {
             }
         }
 
+        case("a call in flight when the connection drops fails with UndraTransportException (CONNECTION_LOST), Unavailable once mapped; so does every call until it is back, and a command is not reported") {
+            WsTestServer().use { server ->
+                serve(server)
+                val sleeper = RecordingSleeper().also { it.hold = CountDownLatch(1) }
+                val reports = CopyOnWriteArrayList<UndraUnhandledError>()
+                val states = CopyOnWriteArrayList<ConnectionState>()
+                val core = UndraCore.attach(
+                    RemoteTransport(URI(server.url), 5.seconds, policy(), session = "tok-test", sleeper = sleeper),
+                    LoadOptions(
+                        mode = Mode.REMOTE,
+                        remoteUrl = server.url,
+                        expectedSchemaHash = HASH,
+                        defaultAdapters = false,
+                        onConnectionChange = { states.add(it) },
+                        onError = { reports.add(it) },
+                    ),
+                    makeShared = false,
+                )
+                core.use {
+                    val inFlight = CopyOnWriteArrayList<Throwable>()
+                    val caller = Thread {
+                        try {
+                            runBlocking { core.call(TARGET, METHOD, NO_BYTES) }
+                        } catch (e: Throwable) {
+                            inFlight.add(e)
+                        }
+                    }.also { it.isDaemon = true; it.start() }
+                    server.awaitConnection().awaitEnvelope(Envelope.Kind.CALL)
+                    server.connections.first().drop()
+                    caller.join(10_000)
+                    val failure = inFlight.single() as UndraTransportException
+                    assertEq(UndraTransportException.Reason.CONNECTION_LOST, failure.reason)
+                    assertTrue(UndraCallError.mapped(failure) is UndraCallError.Unavailable)
+                    eventually("reconnecting") { states.lastOrNull() is ConnectionState.Reconnecting }
+
+                    // While it is down: the same type at once, and a command that fails with it is only logged.
+                    val tapped = assertThrows<UndraTransportException> { core.callSync(TARGET, METHOD, NO_BYTES) }
+                    assertEq(UndraTransportException.Reason.CONNECTION_LOST, tapped.reason)
+                    core.report(tapped, "Todos.toggle")
+                    assertEq(emptyList<UndraUnhandledError>(), reports.toList(), "the connection state already says it")
+                    sleeper.hold?.countDown()
+                    eventually("connected again") { states.lastOrNull() == ConnectionState.Connected }
+                }
+            }
+        }
+
         case("the policy gives up after maxAttempts and closes the core as failed") {
             val probe = WsTestServer()
             serve(probe)
@@ -195,6 +241,9 @@ class RemoteReconnectTests : Suite() {
                 probe.close()
                 eventually("the core is closed") { loaded.states.last() is ConnectionState.Closed }
                 assertEq(ClosedReason.FAILED, (loaded.states.last() as ConnectionState.Closed).reason)
+                // A core that was lost for good answers every call as unreachable, not as one the app closed.
+                val afterwards = assertThrows<UndraTransportException> { loaded.core.callSync(TARGET, METHOD, NO_BYTES) }
+                assertEq(UndraTransportException.Reason.CONNECTION_LOST, afterwards.reason)
                 assertEq(listOf(250L, 500L, 1000L), sleeper.waits.toList())
                 assertEq(listOf("connecting", "connected", "reconnecting 1", "reconnecting 2", "reconnecting 3", "closed:FAILED"), loaded.states.map(::short))
             }
@@ -216,7 +265,9 @@ class RemoteReconnectTests : Suite() {
                     assertEq(1, loaded.states.count { it is ConnectionState.Closed }, "reported once")
                     assertEq(1, sleeper.waits.size, "one attempt, not a loop")
                     assertEq(2, server.connections.size)
-                    assertThrows<UndraException> { loaded.core.callSync(TARGET, METHOD, NO_BYTES) }
+                    val e = assertThrows<UndraTransportException> { loaded.core.callSync(TARGET, METHOD, NO_BYTES) }
+                    assertEq(UndraTransportException.Reason.CONNECTION_LOST, e.reason)
+                    assertTrue(UndraCallError.mapped(e) is UndraCallError.Unavailable)
                 }
             }
         }
@@ -323,7 +374,8 @@ class RemoteReconnectTests : Suite() {
         case("an initial connection that fails is still an exception from load, not a retry") {
             val port = java.net.ServerSocket(0).use { it.localPort }
             val sleeper = RecordingSleeper()
-            val e = assertThrows<UndraException> { load("ws://127.0.0.1:$port", sleeper, timeout = 2.seconds) }
+            val e = assertThrows<UndraTransportException> { load("ws://127.0.0.1:$port", sleeper, timeout = 2.seconds) }
+            assertEq(UndraTransportException.Reason.CONNECTION_LOST, e.reason)
             assertTrue(e.message!!.contains("ws://127.0.0.1:$port"), e.message!!)
             assertEq(0, sleeper.waits.size)
         }

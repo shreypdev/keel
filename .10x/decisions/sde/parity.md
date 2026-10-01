@@ -220,3 +220,54 @@ constructor and of every TypeScript constructor is `Malformed`; a malformed JNI 
 (`TransportEvents.onMalformed`) instead of a fake status 5 or flag-2 String; the worker's sync-port warning says what it can
 know; `errorMessage` never throws. Follow-ups: ADR-049 field and protocol names, Swift `onError` for ports and change-sets,
 PA-6/7/8, and a validation error for a type with no finite value.
+
+## Landing after dev-loop, schema-json, diagnostics and device-bench (2026-10-01)
+
+The branch was merged with `main` (52 commits: schema-json, diagnostics, device-bench, dev-loop) so that it lands by
+fast-forward. Conflicts, and what each side contributed:
+
+| File | Resolution |
+|---|---|
+| `.10x/decisions/sde/_index.md` | all lines kept (dev-loop, schema-json, device-bench, diagnostics, parity) |
+| `crates/undra-bindgen/README.md`, `docs/SPEC.md` (standard types) | main's Swift text (all eight standard types public, `UndraAppState` the one spelling that differs) plus this branch's `UndraCallError.mapped(...)` sentence, for the three languages |
+| `crates/undra-bindgen/tests/typecheck_swift.rs` (add/add) | this branch's (one package, every case, plus the execution checks of `tests/fixtures/swift-run`); main's ADR-024 paragraph about the stdlib case kept in its header. Main's version was a strict subset |
+| `docs/SWIFT_ERRORS.md` (deleted here, edited there) | stays deleted; main's one-row edit (`.unavailable(.connectionLost)` while reconnecting, `UndraSessionLostError`) is folded into `docs/ERRORS.md` |
+| `core.ts` | both kept: dev-loop's `connection` signal, `onConnectionChange`, reconnect and re-observe, next to the `onError` guard, `report`, and the closed placeholder |
+| `errors.ts` / `base-error.ts` | `UndraError` stays in `base-error.ts`; main's `"sessionLost"` kind is documented there, `UndraSessionLostError` stays in `errors.ts` |
+| Kotlin `UndraCore.kt`, `LoadOptions.kt`, `ConnectedCore.kt` | both kept: `connectionState`, `onConnectionChange`, `reconnect`, `constructed`/`observeAgain` next to `onError`, `report`, `constructObject`, the placeholder |
+| playground `UndraApp.kt`, `web/src/undra.ts` | dev-loop's start/retry/epoch and `showDevConnection` with this branch's `onError` (Log.w / console.warn) |
+| goldens | not merged by hand: regenerated with `UPDATE_GOLDEN=1 cargo test --workspace`; the regeneration changed nothing (the two generators' output was already consistent) |
+
+### Decision: the transport's exceptions and the closed set
+
+dev-loop's runtime throws and fails calls with a bare `UndraException` (message only) wherever a connection is down,
+and its in-flight failure on a drop was `UndraException("... reconnecting")`. This branch's closed set maps a bare
+`UndraException` to `Unavailable` as a fallback only (for a foreign `Transport`), which is fragile: it depends on the
+exact class. Decided, per runtime:
+
+* **Kotlin.** Every failure of a transport is an `UndraTransportException` (a subclass of `UndraException`, so every
+  `catch (e: UndraException)` in dev-loop's code and tests still works). `RemoteTransport` throws it, with reason
+  `CONNECTION_LOST` for a connection that is down, failed, closed by the server or reconnecting, `CLOSED` when the app
+  closed the transport, `TIMEOUT` for a handshake that did not answer, `INTERRUPTED`. `ConnectedCore.onReconnecting`
+  fails what is in flight with `UndraTransportException(CONNECTION_LOST, ...)` and `shutDown` fails with
+  `closedException(cause)` (the same type; `CONNECTION_LOST` when a cause ended it, `CLOSED` when the app did).
+  `UndraCallError.mapped` makes all of them `Unavailable` by type. `UndraSessionLostException` joins
+  `UndraSchemaMismatchException` as a case that maps to `Unavailable(CONNECTION_LOST)` on its own (it reaches a call
+  wrapped, as the `cause`, in practice). The bare-`UndraException` arm stays, documented as the foreign-transport
+  fallback; `FakeTransport` now throws the typed one, as the real transport does.
+* **TypeScript.** Already typed (`UndraTransportError("closed")` from the transport and for in-flight calls on a drop).
+  Added: `UndraSessionLostError` maps to `Unavailable` (an in-flight call at the final loss rejected with it raw).
+* **Swift.** Already typed (`UndraTransportError.connectionLost`, `UndraSessionLostError` mapped). Unchanged.
+
+### Decision: `onError` and a lost connection
+
+A command tapped while `undra dev` is away fails with `Unavailable`, and the connection state (and `onConnectionChange`)
+reports the drop once. Handing every such tap to `onError` would send a crash reporter one event per tap for as long as
+the laptop sleeps. So `report` does not call the handler for a failure that is the connection being down: it logs it at
+warning level (not error) with a pointer to `connectionState`. The rule, per runtime: Kotlin keys on `Unavailable` with
+transport reason `CONNECTION_LOST` (thread-safe: a command that fails while the drop is still being announced is covered,
+and `closedException(cause)` gives the same reason after the core was lost for good); TypeScript and Swift key on
+`Unavailable` while the state is `reconnecting` or `closed` for a reason other than the app's own close (Swift also on
+`.connectionLost`, which a call that raced the state change carries). Still reported: a call on a core the app closed
+(reason `CLOSED`), a timeout, and a wasm core that trapped (not a connection). Tests: Kotlin `ReconnectCoreTests` and
+`RemoteReconnectTests` (over real sockets), TypeScript `remote.test.ts`, Swift `ReconnectCoreTests`.
