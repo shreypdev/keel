@@ -87,6 +87,18 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
             text: "Kotlin and TypeScript have the same closed set (ADR-032 amendment A, docs/ERRORS.md): a generated call fails with the method's own error, a cancellation, or `UndraCallError` (`CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; Kotlin `sealed class UndraCallError : UndraException`, TypeScript `UndraCallError extends UndraError`), never with the runtime's raw `UndraReplyException` / `UndraTransportException` / `UndraReplyError` / `UndraTransportError`. Catch `UndraCallError` where you caught those around a generated call (a `catch (e: UndraException)` or `instanceof UndraError` still matches). A command (a method that returns nothing and has no error type) no longer throws or rejects: its failure goes to the `onError` of `UndraCore.load` and to the log.",
         },
         Note {
+            kind: Kind::Action,
+            text: "Core code: a write to a store's signal from a thread that does not hold that store's runtime (a `spawn_blocking` worker, a host thread, another runtime) is refused in every build now, release included (ADR-035, error E0065): it panics with the teaching message, or `Signal::try_set` / `try_update` return `WriteError::OffCore`. Send the value to the core instead (return it from `spawn_blocking`, `ctx.spawn`, a call), or write under `ctx.with_core(|| ..)` from a host thread.",
+        },
+        Note {
+            kind: Kind::Changed,
+            text: "Core code: a store, task or subscriber that keeps a `Ctx` keeps its runtime alive; keep a `WeakCtx` (`ctx.downgrade()`, `upgrade()` per use) for anything that outlives a call, as the E0001 help says (ADR-034). An event subscriber receives the `Ctx` as its first argument. A computed that panics no longer fails its whole store: it alone is held back and reported once, and the write that made it fail succeeds (the ADR-019 amendment).",
+        },
+        Note {
+            kind: Kind::New,
+            text: "A stream can end with its typed error part-way: return `impl Stream<Item = Result<T, E>>` and the platforms deliver the items, then `E` as the generated error type (ADR-036). A stream the core ends itself (a restore, a shutdown, a panicking producer) ends with `UndraCallError` (`CancelledByCore`, `Panicked`), never with the stream's own error.",
+        },
+        Note {
             kind: Kind::New,
             text: "Apps reconnect to `undra dev` by themselves on all three platforms (ADR-051): backoff with jitter, every observed store observed again after the handshake, `core.connection` (TypeScript), `connectionState` (Kotlin, Swift) for a status bar, and the server keeps a dropped client's objects for ten minutes. A rebuild of the core still starts the app over on the new core; carrying state across a rebuild is planned. The Kotlin runtime has the WebSocket transport now, so Android runs against `undra dev` too (`./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug`, `undra dev --android`).",
         },
