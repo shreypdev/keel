@@ -35,7 +35,24 @@
 //!
 //! `UNDRA_BENCH_SCALE` divides `min_per_sec` and multiplies the two latency ceilings; it never
 //! touches `bytes_per_op`, `rss_growth_pct` or a scenario's own invariants (nothing lost,
-//! nothing reordered), which are not negotiable on a slower machine.
+//! nothing reordered), which are not negotiable on a slower machine. `bytes_per_op` is a
+//! **ceiling**: a run that ships fewer bytes passes (what each scenario asserts about its own
+//! exact byte count is in its invariants, in code).
+//!
+//! A third kind of table gates a **ratio between two layer A rows measured in the same run**,
+//! so the speed of the machine cancels:
+//!
+//! ```toml
+//! [ratio."commit_vs_call"]            # a name for the relationship, quoted
+//! num = "stress/firehose/call_set"    # required: the [bench."..."] row on top
+//! den = "dispatch/call_sync/add"      # required: the [bench."..."] row below
+//! num_div = 1                         # optional: operations per iteration of `num` (1)
+//! den_div = 1                         # optional: operations per iteration of `den` (1)
+//! max = 3.4                           # required: (num p50 / num_div) / (den p50 / den_div) at most
+//! measured = 2.9                      # the ratio when the gate was set, kept for humans
+//! ```
+//!
+//! `UNDRA_BENCH_SCALE` does not touch a ratio: a slower machine slows both rows.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -56,6 +73,57 @@ pub struct Budget {
     pub blueprint: Option<String>,
 }
 
+/// A ratio between two layer A rows measured in the same run (a `[ratio."name"]` table): the
+/// machine's speed cancels, so the gate holds on any hardware as long as the relationship does.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RatioBudget {
+    /// The row on top: a `[bench."..."]` name.
+    pub num: String,
+    /// The row below: a `[bench."..."]` name.
+    pub den: String,
+    /// Operations per iteration of `num` (a row timed as a batch of 1,000 says 1000).
+    pub num_div: f64,
+    /// Operations per iteration of `den`.
+    pub den_div: f64,
+    /// The ratio of the per-operation p50s must be at most this.
+    pub max: f64,
+    /// The ratio measured when the gate was set, if recorded.
+    pub measured: Option<f64>,
+}
+
+impl RatioBudget {
+    /// The ratio of two p50s (nanoseconds per iteration), per operation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use undra_bench::budget::Budgets;
+    ///
+    /// let b = Budgets::parse(
+    ///     "[ratio.\"r\"]\nnum = \"a\"\nden = \"b\"\nnum_div = 1000\nmax = 2\n",
+    /// )
+    /// .unwrap();
+    /// // 80 us per 1,000 operations against 40 ns per operation: a ratio of 2.
+    /// assert_eq!(b.ratios["r"].value(80_000.0, 40.0), 2.0);
+    /// ```
+    pub fn value(&self, num_p50_ns: f64, den_p50_ns: f64) -> f64 {
+        (num_p50_ns / self.num_div) / (den_p50_ns / self.den_div)
+    }
+
+    /// Whether `value` (a ratio from [`value`](RatioBudget::value)) is within the gate.
+    pub fn holds(&self, value: f64) -> bool {
+        value <= self.max
+    }
+
+    /// Problems with the table itself: a recorded measurement already over its own gate.
+    pub fn self_check(&self) -> Vec<String> {
+        match self.measured {
+            Some(m) if m > self.max => vec![format!("measured {m} is over max {}", self.max)],
+            _ => Vec::new(),
+        }
+    }
+}
+
 /// One sustained scenario's gates (a `[stress."name"]` table). A gate that is `None` is not
 /// checked.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -66,8 +134,10 @@ pub struct StressBudget {
     pub p99_ns: Option<f64>,
     /// The 99.9th percentile latency, in nanoseconds, must be at most this (before scaling).
     pub p999_ns: Option<f64>,
-    /// Bytes per operation must be at most this: the deterministic measured value for an exact
-    /// gate, 1.1x of it where the load is seeded but not identical run to run.
+    /// Bytes per operation must be at most this. It is a **ceiling**: fewer bytes pass, so the
+    /// gate alone cannot say a scenario shipped exactly what it should. Where the load is a
+    /// fixed cycle at fixed widths the ceiling is the measured value, and the scenario asserts
+    /// the exact count in code (an invariant), which is what makes it exact.
     pub bytes_per_op: Option<f64>,
     /// RSS growth from after the warm-up to the end, in percent (see [`RssGrowth::within`]).
     pub rss_growth_pct: Option<f64>,
@@ -154,7 +224,7 @@ impl StressBudget {
                 Some(got) if got <= limit * (1.0 + 1e-9) => {}
                 Some(got) => fail(
                     &mut verdict,
-                    format!("{got:.2} bytes per operation is over the limit of {limit}"),
+                    format!("{got:.2} bytes per operation is over the ceiling of {limit}"),
                 ),
                 None => fail(
                     &mut verdict,
@@ -248,6 +318,8 @@ pub struct Budgets {
     pub benches: BTreeMap<String, Budget>,
     /// The sustained-scenario budgets, by scenario name (`[stress."name"]`).
     pub stress: BTreeMap<String, StressBudget>,
+    /// The ratio gates between two layer A rows, by name (`[ratio."name"]`).
+    pub ratios: BTreeMap<String, RatioBudget>,
 }
 
 /// Why `budgets.toml` could not be read.
@@ -283,6 +355,18 @@ pub enum BudgetError {
         /// The scenario named twice.
         name: String,
     },
+    /// A `[ratio."name"]` table lacks `num`, `den` or `max`.
+    IncompleteRatio {
+        /// The ratio the table names.
+        name: String,
+        /// The key that is missing.
+        missing: &'static str,
+    },
+    /// Two `[ratio."name"]` tables have the same name.
+    DuplicateRatio {
+        /// The ratio named twice.
+        name: String,
+    },
 }
 
 impl fmt::Display for BudgetError {
@@ -306,6 +390,12 @@ impl fmt::Display for BudgetError {
             BudgetError::DuplicateStress { name } => {
                 write!(f, "budgets file: [stress.\"{name}\"] appears twice")
             }
+            BudgetError::IncompleteRatio { name, missing } => {
+                write!(f, "budgets file: [ratio.\"{name}\"] has no {missing}")
+            }
+            BudgetError::DuplicateRatio { name } => {
+                write!(f, "budgets file: [ratio.\"{name}\"] appears twice")
+            }
         }
     }
 }
@@ -313,7 +403,7 @@ impl fmt::Display for BudgetError {
 impl std::error::Error for BudgetError {}
 
 /// A scalar value on the right of `key = value`.
-enum Value {
+pub(crate) enum Value {
     Number(f64),
     Text(String),
 }
@@ -323,6 +413,7 @@ enum Section {
     Meta,
     Bench(String),
     Stress(String),
+    Ratio(String),
 }
 
 impl Budgets {
@@ -339,6 +430,8 @@ impl Budgets {
         let mut pending: BTreeMap<String, PartialBudget> = BTreeMap::new();
         let mut order: Vec<String> = Vec::new();
         let mut stress_order: Vec<String> = Vec::new();
+        let mut ratios: BTreeMap<String, PartialRatio> = BTreeMap::new();
+        let mut ratio_order: Vec<String> = Vec::new();
         for (index, raw) in text.lines().enumerate() {
             let line = index + 1;
             let syntax = |message: &str| BudgetError::Syntax {
@@ -373,9 +466,19 @@ impl Budgets {
                     budgets.stress.insert(name.clone(), StressBudget::default());
                     stress_order.push(name.clone());
                     Section::Stress(name)
+                } else if let Some(name) = header.strip_prefix("ratio.") {
+                    let name = parse_string(name.trim())
+                        .ok_or_else(|| syntax("a ratio table is written [ratio.\"name\"]"))?;
+                    if ratios.contains_key(&name) {
+                        return Err(BudgetError::DuplicateRatio { name });
+                    }
+                    ratios.insert(name.clone(), PartialRatio::default());
+                    ratio_order.push(name.clone());
+                    Section::Ratio(name)
                 } else {
                     return Err(syntax(
-                        "the only tables are [meta], [bench.\"name\"] and [stress.\"name\"]",
+                        "the only tables are [meta], [bench.\"name\"], [stress.\"name\"] and \
+                         [ratio.\"name\"]",
                     ));
                 };
                 continue;
@@ -419,6 +522,23 @@ impl Budgets {
                         }
                     }
                 }
+                Section::Ratio(name) => {
+                    let entry = ratios.entry(name.clone()).or_default();
+                    match (key, value) {
+                        ("num", Value::Text(t)) => entry.num = Some(t),
+                        ("den", Value::Text(t)) => entry.den = Some(t),
+                        ("num_div", Value::Number(n)) if n > 0.0 => entry.num_div = Some(n),
+                        ("den_div", Value::Number(n)) if n > 0.0 => entry.den_div = Some(n),
+                        ("max", Value::Number(n)) if n > 0.0 => entry.max = Some(n),
+                        ("measured", Value::Number(n)) => entry.measured = Some(n),
+                        _ => {
+                            return Err(syntax(
+                                "a ratio table takes num and den (strings), num_div, den_div and \
+                                 max (positive numbers) and measured (a number)",
+                            ));
+                        }
+                    }
+                }
                 Section::Bench(name) => {
                     let entry = pending.entry(name.clone()).or_default();
                     match (key, value) {
@@ -445,6 +565,22 @@ impl Budgets {
                 return Err(BudgetError::MissingGate { name });
             }
         }
+        for name in ratio_order {
+            let partial = ratios.remove(&name).unwrap_or_default();
+            let missing = |key: &'static str| BudgetError::IncompleteRatio {
+                name: name.clone(),
+                missing: key,
+            };
+            let ratio = RatioBudget {
+                num: partial.num.clone().ok_or_else(|| missing("num"))?,
+                den: partial.den.clone().ok_or_else(|| missing("den"))?,
+                num_div: partial.num_div.unwrap_or(1.0),
+                den_div: partial.den_div.unwrap_or(1.0),
+                max: partial.max.ok_or_else(|| missing("max"))?,
+                measured: partial.measured,
+            };
+            budgets.ratios.insert(name, ratio);
+        }
         for name in order {
             let partial = pending.remove(&name).unwrap_or_default();
             let Some(budget_ns) = partial.budget_ns else {
@@ -465,6 +601,16 @@ impl Budgets {
 }
 
 #[derive(Default)]
+struct PartialRatio {
+    num: Option<String>,
+    den: Option<String>,
+    num_div: Option<f64>,
+    den_div: Option<f64>,
+    max: Option<f64>,
+    measured: Option<f64>,
+}
+
+#[derive(Default)]
 struct PartialBudget {
     budget_ns: Option<f64>,
     measured_ns: Option<f64>,
@@ -473,7 +619,7 @@ struct PartialBudget {
 }
 
 /// Removes a `#` comment, unless the `#` is inside a double-quoted string.
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     let mut in_string = false;
     let mut escaped = false;
     for (i, c) in line.char_indices() {
@@ -488,7 +634,7 @@ fn strip_comment(line: &str) -> &str {
 }
 
 /// `"text"` with `\"` and `\\` escapes, nothing after the closing quote.
-fn parse_string(text: &str) -> Option<String> {
+pub(crate) fn parse_string(text: &str) -> Option<String> {
     let inner = text.strip_prefix('"')?.strip_suffix('"')?;
     let mut out = String::with_capacity(inner.len());
     let mut chars = inner.chars();
@@ -506,7 +652,7 @@ fn parse_string(text: &str) -> Option<String> {
     Some(out)
 }
 
-fn parse_value(text: &str) -> Option<Value> {
+pub(crate) fn parse_value(text: &str) -> Option<Value> {
     if text.starts_with('"') {
         return parse_string(text).map(Value::Text);
     }
@@ -599,7 +745,92 @@ budget_ns = 7
                     table.self_check()
                 );
             }
+            for (name, ratio) in &budgets.ratios {
+                assert!(
+                    ratio.self_check().is_empty(),
+                    "{name}: {:?}",
+                    ratio.self_check()
+                );
+                assert!(
+                    budgets.benches.contains_key(&ratio.num)
+                        && budgets.benches.contains_key(&ratio.den),
+                    "{name}: names a row that has no [bench] table"
+                );
+            }
         }
+    }
+
+    const RATIOS: &str = r#"
+[bench."a"]
+budget_ns = 10
+[bench."b"]
+budget_ns = 10
+
+[ratio."a_vs_b"]
+num = "a"
+den = "b"
+num_div = 1000
+max = 2.5
+measured = 1.8
+"#;
+
+    #[test]
+    fn parses_ratio_tables_and_computes_per_operation_ratios() {
+        let b = Budgets::parse(RATIOS).expect("parses");
+        let r = &b.ratios["a_vs_b"];
+        assert_eq!((r.num.as_str(), r.den.as_str()), ("a", "b"));
+        assert_eq!((r.num_div, r.den_div, r.max), (1000.0, 1.0, 2.5));
+        assert_eq!(r.measured, Some(1.8));
+        // 100 us per 1,000 operations (100 ns each) over a 50 ns row is 2.
+        assert_eq!(r.value(100_000.0, 50.0), 2.0);
+        assert!(r.holds(2.5), "the gate is inclusive");
+        assert!(!r.holds(2.51));
+        assert!(r.self_check().is_empty());
+    }
+
+    #[test]
+    fn a_ratio_needs_both_rows_and_a_maximum_and_rejects_typos() {
+        for (text, missing) in [
+            ("[ratio.\"r\"]\nden = \"b\"\nmax = 2\n", "num"),
+            ("[ratio.\"r\"]\nnum = \"a\"\nmax = 2\n", "den"),
+            ("[ratio.\"r\"]\nnum = \"a\"\nden = \"b\"\n", "max"),
+        ] {
+            let err = Budgets::parse(text).unwrap_err();
+            assert_eq!(
+                err,
+                BudgetError::IncompleteRatio {
+                    name: "r".into(),
+                    missing
+                },
+                "{text}"
+            );
+            assert!(err.to_string().contains(missing), "{err}");
+        }
+        let err = Budgets::parse(
+            "[ratio.\"r\"]\nnum = \"a\"\nden = \"b\"\nmax = 2\n[ratio.\"r\"]\nmax = 3\n",
+        )
+        .unwrap_err();
+        assert_eq!(err, BudgetError::DuplicateRatio { name: "r".into() });
+        assert!(err.to_string().contains("appears twice"));
+        // A zero divisor or maximum, a number where a string goes, an unknown key: line numbers.
+        for text in [
+            "[ratio.\"r\"]\nmax = 0\n",
+            "[ratio.\"r\"]\nnum_div = 0\n",
+            "[ratio.\"r\"]\nnum = 3\n",
+            "[ratio.\"r\"]\nbudget_ns = 3\n",
+            "[ratio.r]\n",
+        ] {
+            let err = Budgets::parse(text).unwrap_err();
+            assert!(matches!(err, BudgetError::Syntax { .. }), "{text}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_ratio_measured_over_its_own_maximum_is_flagged() {
+        let b =
+            Budgets::parse("[ratio.\"r\"]\nnum = \"a\"\nden = \"b\"\nmax = 2\nmeasured = 2.5\n")
+                .unwrap();
+        assert_eq!(b.ratios["r"].self_check().len(), 1);
     }
 
     const STRESS: &str = r#"

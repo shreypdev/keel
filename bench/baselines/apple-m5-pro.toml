@@ -1,0 +1,209 @@
+[meta]
+cores = "18"
+cpu = "Apple M5 Pro"
+date = "2026-09-30"
+git = "0aa441229f18-dirty"
+load_layer_a = "5.04 before, 3.92 after (one-minute load average)"
+load_layer_b = "3.92 before, 3.50 after (one-minute load average)"
+os = "macOS 26.5"
+recorded_by = "budgets test, best p50 of 3 attempts per row"
+rustc = "rustc 1.98.1 (48a229cea 2026-09-01)"
+stress_seconds = "2"
+
+[bench."dispatch/call_async/ready_add"]
+p50_ns = 210.0
+
+[bench."dispatch/call_sync/add"]
+p50_ns = 42.8
+
+[bench."dispatch/call_sync/echo_record1k"]
+p50_ns = 139.1
+
+[bench."dispatch/call_sync/function"]
+p50_ns = 36.6
+
+[bench."dispatch/call_sync_with/add"]
+p50_ns = 31.2
+
+[bench."signals/changeset_100/cell"]
+p50_ns = 714.5
+
+[bench."signals/changeset_100/decode"]
+p50_ns = 175.7
+
+[bench."signals/changeset_100/runtime"]
+p50_ns = 2260.1
+
+[bench."signals/computed/recompute_1"]
+p50_ns = 43.6
+
+[bench."signals/computed/recompute_chain_10"]
+p50_ns = 365.8
+
+[bench."signals/keyed_100/insert"]
+p50_ns = 292.0
+
+[bench."signals/keyed_10k/insert"]
+p50_ns = 6083.0
+
+[bench."signals/keyed_10k/move"]
+p50_ns = 9473.6
+
+[bench."signals/keyed_10k/raw_update_diff"]
+p50_ns = 537958.0
+
+[bench."signals/keyed_10k/update"]
+p50_ns = 258.2
+
+[bench."signals/keyed_1k/insert"]
+p50_ns = 625.0
+
+[bench."signals/observe_100_initial"]
+p50_ns = 2542.0
+
+[bench."snapshot/cold_start_restore_100kb"]
+p50_ns = 73125.0
+
+[bench."snapshot/cold_start_restore_100kb_core_thread"]
+p50_ns = 87541.0
+
+[bench."snapshot/encode_100kb"]
+p50_ns = 12441.7
+
+[bench."snapshot/restore_100kb"]
+p50_ns = 25899.6
+
+[bench."snapshot/restore_1mb"]
+p50_ns = 262069.3
+
+[bench."stress/fanout/100k_observed_1k_dirty"]
+p50_ns = 33947.9
+
+[bench."stress/fanout/10k_observed_1k_dirty"]
+p50_ns = 25345.7
+
+[bench."stress/fanout/1k_stores_1k_dirty"]
+p50_ns = 99958.3
+
+[bench."stress/firehose/call_set"]
+p50_ns = 138.1
+
+[bench."stress/firehose/event"]
+p50_ns = 124.7
+
+[bench."stress/firehose/txn_x1000"]
+p50_ns = 83059.0
+
+[bench."stress/keyed_churn_10k/ops_x1000"]
+p50_ns = 5602208.0
+
+[bench."stress/stream/items_x1000"]
+p50_ns = 33919.4
+
+[bench."wire/bool/roundtrip"]
+p50_ns = 14.4
+
+[bench."wire/bytes_1kb/roundtrip"]
+p50_ns = 55.6
+
+[bench."wire/duration/roundtrip"]
+p50_ns = 14.1
+
+[bench."wire/enum_label/roundtrip"]
+p50_ns = 51.4
+
+[bench."wire/enum_rect/roundtrip"]
+p50_ns = 55.3
+
+[bench."wire/f64/roundtrip"]
+p50_ns = 17.0
+
+[bench."wire/i64/roundtrip"]
+p50_ns = 16.7
+
+[bench."wire/keyed_patch_10k/apply"]
+p50_ns = 2333.0
+
+[bench."wire/keyed_patch_10k/diff"]
+p50_ns = 437729.0
+
+[bench."wire/keyed_patch_10k/roundtrip"]
+p50_ns = 127.8
+
+[bench."wire/map100_string_u32/roundtrip"]
+p50_ns = 6247.1
+
+[bench."wire/map100_u32_u32/roundtrip"]
+p50_ns = 3081.9
+
+[bench."wire/option_none/roundtrip"]
+p50_ns = 17.0
+
+[bench."wire/option_some/roundtrip"]
+p50_ns = 17.3
+
+[bench."wire/record1k/roundtrip"]
+p50_ns = 198.4
+
+[bench."wire/record5/roundtrip"]
+p50_ns = 90.8
+
+[bench."wire/result_err/roundtrip"]
+p50_ns = 67.9
+
+[bench."wire/result_ok/roundtrip"]
+p50_ns = 17.7
+
+[bench."wire/string_1kb/roundtrip"]
+p50_ns = 77.4
+
+[bench."wire/string_short/roundtrip"]
+p50_ns = 40.2
+
+[bench."wire/timestamp/roundtrip"]
+p50_ns = 15.7
+
+[bench."wire/u32/roundtrip"]
+p50_ns = 15.4
+
+[bench."wire/u8/roundtrip"]
+p50_ns = 17.2
+
+[bench."wire/uuid/roundtrip"]
+p50_ns = 16.3
+
+[bench."wire/vec_u32_1k/roundtrip"]
+p50_ns = 1089.0
+
+[stress."completions/8_threads"]
+per_sec = 354057
+p99_ns = 671743
+p999_ns = 851967
+
+[stress."event/sustained"]
+per_sec = 7558365
+p99_ns = 125
+p999_ns = 251
+
+[stress."fanout/sustained"]
+per_sec = 27348
+p99_ns = 63487
+p999_ns = 75775
+
+[stress."fanout_stores/sustained"]
+per_sec = 9480
+p99_ns = 155647
+p999_ns = 184319
+
+[stress."firehose/sustained"]
+per_sec = 6249379
+p99_ns = 167
+p999_ns = 295
+
+[stress."keyed_churn_10k/sustained"]
+per_sec = 176234
+p99_ns = 17919
+p999_ns = 21503
+
+[stress."stream/backpressure"]
+per_sec = 29524903

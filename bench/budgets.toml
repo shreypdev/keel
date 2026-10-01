@@ -36,8 +36,10 @@
 #   min_per_sec     measured throughput / 5, rounded DOWN to two significant figures
 #   p99_ns          5x the measured p99, rounded up to two significant figures
 #   p999_ns         10x the measured p999, rounded up (tails on a shared runner are noisier)
-#   bytes_per_op    change-set bytes per operation, at most this: the exact measured value, because
-#                   every load is a fixed cycle at fixed widths and so ships the same bytes each run
+#   bytes_per_op    change-set bytes per operation, AT MOST this (a ceiling: fewer bytes pass). It is
+#                   set to the exact measured value because every load is a fixed cycle at fixed
+#                   widths and so ships the same bytes each run, and each scenario asserts that exact
+#                   count in code as an invariant, which is what makes the pair exact
 #   rss_growth_pct  resident memory may grow by this percent (or 64 KiB) from the first sample after
 #                   the warm-up to the last
 # UNDRA_BENCH_SCALE divides the floors and multiplies the ceilings; it never touches bytes, RSS or
@@ -45,6 +47,29 @@
 # change-set afterwards is measured on the platform (bench/RESULTS.md, "Harsh conditions").
 # To set or re-base: `UNDRA_STRESS_SECONDS=10 cargo test -p undra-bench --test stress --release --
 # --ignored --nocapture stress_baseline`, best of three runs, then apply the rules above.
+#
+# RATIOS AND BASELINES (what 5x does not catch). A 5x budget lets a commit path made 1.8x slower pass
+# every row (bench review M1: layer A margins stayed 2.2x-4.6x, the sustained floors 3.5x). Two
+# mechanisms close that without depending on how fast the machine is:
+#   [ratio."name"]  at the end of this file: the ratio of two layer A rows measured in the SAME run
+#                   must stay under `max`. Speed cancels. The rule: `max` is 1.15x the largest ratio
+#                   seen on any healthy sample (the reference host's quiet and loaded runs, and the six
+#                   GitHub-runner runs of Oct 2026, runs 36798191863 .. 36800063172, whose rows are the
+#                   fixture of `ratios_hold_on_every_recorded_sample` in tests/budgets.rs), rounded up
+#                   to 0.1 (a whole number from 10 up). The limit of a ratio is the SPREAD OF THAT
+#                   RATIO ACROSS HARDWARE, which the runner data puts at 1.2x-1.5x for rows of one
+#                   family and 2x-3x for rows of different families (a memmove-bound list operation
+#                   against an atomics-bound call): a ratio gate catches a relative shift bigger than
+#                   its spread, so only the commit-versus-call ratios are tight enough to see a 2x
+#                   commit regression, and none of them can tell "the commit got 2x slower" from
+#                   "this runner is 2x slower at atomics" below that.
+#   baselines       bench/baselines/<name>.toml, selected with UNDRA_BENCH_BASELINE: what one machine
+#                   class measured for every row, and a gate at 1.5x of it (p50 and throughput; 2.5x
+#                   for p99). It catches a 1.8x regression on the class it was recorded on. The CI
+#                   runner pool is NOT one class (the same row measured 1.1x-3.3x apart across the six
+#                   runs), so CI records the baseline from the merge base in the same job, on the same
+#                   VM (scripts/bench-vs-base.sh). UNDRA_BENCH_SCALE does not apply to a baseline.
+# The absolute budgets and `UNDRA_BENCH_SCALE` stay the outer guard on a class with no baseline.
 
 [meta]
 machine = "Apple M5 Pro, 18 cores, macOS 26.5"
@@ -410,3 +435,58 @@ measured_bytes_per_op = 37
 # The soak binary (`cargo run -p undra-bench --release --bin soak`): only the RSS gate lives here.
 [stress."soak/mixed"]
 rss_growth_pct = 1
+
+# ---------------------------------------------------------------------------------------------
+# Ratios between two layer A rows of the same run (bench review M1). Rule in the header. The
+# healthy samples behind each `max` are the reference host (budgets.toml's measured_ns, and a quiet
+# run) and the six runner runs; `measured` is the quiet host. An operation that is `*_x1000` runs
+# 1,000 operations per iteration, hence the `_div`.
+# ---------------------------------------------------------------------------------------------
+
+# What a transaction commit (an update, the change-set, delivery to a counting host) costs against
+# a bare method call that writes nothing: `Calculator.add` through `call_sync`. The tightest gate
+# here: healthy 1.26-1.94 on every sample, 3.1 on the reference host with the commit path made 1.8x
+# slower on purpose (bench/RESULTS.md, "Gates that catch a 2x regression"), 2.3 maximum.
+[ratio."commit_vs_bare_call"]
+num = "stress/firehose/txn_x1000"
+num_div = 1000
+den = "dispatch/call_sync/add"
+max = 2.3
+measured = 1.75
+
+# The same relationship through the host-facing path: `Ticker.set` through `call_sync` (decode,
+# dispatch, write, commit, delivery, reply) against the bare call. Healthy 2.30-3.05; 5.1 with the
+# commit 1.8x slower on the reference host.
+[ratio."set_vs_bare_call"]
+num = "stress/firehose/call_set"
+den = "dispatch/call_sync/add"
+max = 3.6
+measured = 3.05
+
+# An event through `Runtime::event` costs about what a call does: both end in the same commit.
+# Healthy 0.76-0.93. Catches the event path alone getting costlier.
+[ratio."event_vs_set"]
+num = "stress/firehose/event"
+den = "stress/firehose/call_set"
+max = 1.1
+measured = 0.85
+
+# Commit cost follows the dirty count, not the observed count (the layer B scenario asserts the same
+# on its sustained run, at 4x). Healthy 0.99-1.92 (cache-size dependent), 2.3 maximum.
+[ratio."fanout_100k_vs_10k_observed"]
+num = "stress/fanout/100k_observed_1k_dirty"
+den = "stress/fanout/10k_observed_1k_dirty"
+max = 2.3
+measured = 1.22
+
+# One recorded list operation on 10,000 rows (commit, delivery, host apply) against a scalar write
+# through a call: how much a keyed-list patch costs relative to a signal. Healthy 15-47: this is the
+# widest ratio (a memmove-bound operation against an atomics-bound one: the runner runs the list
+# 1.2x slower than the host and the call 3x slower), so it guards the host and catches an
+# order-of-magnitude shift (an O(list) path coming back) on a runner, not a 2x one.
+[ratio."keyed_churn_vs_set"]
+num = "stress/keyed_churn_10k/ops_x1000"
+num_div = 1000
+den = "stress/firehose/call_set"
+max = 54
+measured = 39.5

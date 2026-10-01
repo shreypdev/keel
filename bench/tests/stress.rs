@@ -15,11 +15,15 @@
 //!   under `cargo test --workspace`, and the timing gates are left to `--release`.
 //! * A noisy run gets three attempts: a scenario passes if any attempt meets every gate. An
 //!   invariant that breaks is never retried; it is not noise.
+//! * `UNDRA_BENCH_BASELINE=<name or path>` adds a gate against what one machine class measured
+//!   (`bench/baselines/<name>.toml`, or a file recorded earlier in the same CI job): throughput
+//!   under 1/1.5 of the baseline's, or a p99 over 2.5x it, fails. `UNDRA_BENCH_RECORD=path` runs
+//!   every scenario all three times and records the best of each metric as a baseline.
 //! * Knobs: `UNDRA_STRESS_SECONDS=10` sets the wall time per scenario (default 2; the numbers in
 //!   `RESULTS.md` use 10), `UNDRA_BENCH_SCALE=2.5` divides every floor and multiplies every
-//!   ceiling (never bytes, RSS or invariants), `UNDRA_BENCH_FILTER=churn` runs only matching
-//!   scenarios, `UNDRA_BENCH_BUDGETS=path` reads another file, `UNDRA_STRESS_JSON=path` also
-//!   writes one JSON row per scenario for the site.
+//!   ceiling (never bytes, RSS, invariants or a baseline), `UNDRA_BENCH_FILTER=churn` runs only
+//!   matching scenarios, `UNDRA_BENCH_BUDGETS=path` reads another file, `UNDRA_STRESS_JSON=path`
+//!   also writes one JSON row per scenario for the site.
 //! * `cargo test -p undra-bench --test stress --release -- --ignored --nocapture stress_baseline`
 //!   prints fresh measurements as `[stress."name"]` tables, for setting or re-basing a gate.
 
@@ -30,7 +34,9 @@ use std::time::Duration;
 
 use undra::wire::payload::ChangeSetBuilder;
 use undra::wire::{Handle, Writer};
+use undra_bench::baseline::{Baseline, Selected, StressBaseline};
 use undra_bench::budget::{Budgets, StressBudget, StressObserved};
+use undra_bench::hostinfo;
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -217,10 +223,19 @@ fn stress() {
 
     let budgets = load_budgets();
     let scale = scale();
+    let baseline = match Selected::from_env() {
+        Ok(selected) => selected,
+        Err(e) => panic!("{e}"),
+    };
+    let recording = std::env::var_os("UNDRA_BENCH_RECORD")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    let load_before = hostinfo::load_average();
     let cfg = StressConfig::new(Duration::from_secs_f64(seconds()));
     let mut failures = Vec::new();
     let mut retried: Vec<String> = Vec::new();
     let mut final_reports = Vec::new();
+    let mut recorded = Baseline::default();
     eprintln!(
         "{} s per scenario, scale {scale}; RSS is sampled {}",
         seconds(),
@@ -230,6 +245,12 @@ fn stress() {
             "NOWHERE on this platform (the RSS gates are skipped)"
         }
     );
+    match &baseline {
+        Some(b) => eprintln!("{}", b.describe()),
+        None => eprintln!(
+            "no baseline selected (UNDRA_BENCH_BASELINE): only the absolute budgets gate this run"
+        ),
+    }
     header();
     for (name, run) in &scenarios {
         let Some(budget) = budgets.stress.get(*name) else {
@@ -238,6 +259,9 @@ fn stress() {
             ));
             continue;
         };
+        // What a recording keeps: the best of each metric over the attempts.
+        let mut best: Option<StressBaseline> = None;
+        let mut passed = false;
         for attempt in 1..=ATTEMPTS {
             let report = run(&cfg);
             let broken = report.broken();
@@ -249,7 +273,8 @@ fn stress() {
                 }
                 break;
             }
-            let mut verdict = budget.check(&observed(&report), scale);
+            let observed = observed(&report);
+            let mut verdict = budget.check(&observed, scale);
             // Timing comparisons a scenario makes about itself are gates, not invariants.
             verdict.failures.extend(
                 report
@@ -257,19 +282,57 @@ fn stress() {
                     .iter()
                     .map(|check| check.what.clone()),
             );
+            // What a machine class measured earlier: a regression on it fails whatever the budgets say.
+            match baseline
+                .as_ref()
+                .map(|b| (b, b.stress_failures(name, &observed)))
+            {
+                Some((b, Some(over))) => verdict.failures.extend(
+                    over.into_iter()
+                        .map(|f| format!("{f}, against the baseline in {}", b.path.display())),
+                ),
+                Some((b, None)) => verdict.notices.push(format!(
+                    "{name} has no table in {}: not gated against the baseline (record it again)",
+                    b.path.display()
+                )),
+                None => {}
+            }
             for notice in &verdict.notices {
                 eprintln!("    notice: {notice}");
             }
+            if recording.is_some() {
+                let mine = StressBaseline {
+                    per_sec: report.per_sec(),
+                    p99_ns: report.percentile(0.99).map(|n| n as f64),
+                    p999_ns: report.percentile(0.999).map(|n| n as f64),
+                    tolerance: None,
+                };
+                best = Some(match best.take() {
+                    None => mine,
+                    Some(b) => StressBaseline {
+                        per_sec: b.per_sec.max(mine.per_sec),
+                        p99_ns: b.p99_ns.zip(mine.p99_ns).map(|(a, c)| a.min(c)),
+                        p999_ns: b.p999_ns.zip(mine.p999_ns).map(|(a, c)| a.min(c)),
+                        tolerance: None,
+                    },
+                });
+            }
             if verdict.passed() {
-                let tag = if attempt == 1 {
+                let tag = if attempt == 1 || recording.is_some() {
                     "ok".to_owned()
                 } else {
                     retried.push(format!("{name} (attempt {attempt} of {ATTEMPTS})"));
                     format!("ok (attempt {attempt})")
                 };
                 row(&report, &tag);
-                final_reports.push(report);
-                break;
+                if !passed {
+                    final_reports.push(report);
+                }
+                passed = true;
+                if recording.is_none() {
+                    break;
+                }
+                continue;
             }
             row(
                 &report,
@@ -278,11 +341,14 @@ fn stress() {
             for problem in &verdict.failures {
                 eprintln!("    x {problem}");
             }
-            if attempt == ATTEMPTS {
+            if attempt == ATTEMPTS && !passed {
                 for problem in verdict.failures {
                     failures.push(format!("{name}: {problem}"));
                 }
             }
+        }
+        if let Some(best) = best {
+            recorded.stress.insert((*name).to_owned(), best);
         }
     }
     if !retried.is_empty() {
@@ -294,12 +360,44 @@ fn stress() {
     if let Some(path) = std::env::var_os("UNDRA_STRESS_JSON") {
         write_json(&PathBuf::from(path), &final_reports, &budgets);
     }
+    if let Some(path) = &recording {
+        record(path, recorded, load_before);
+    }
     assert!(
         failures.is_empty(),
         "{} stress gate(s) failed:\n  {}",
         failures.len(),
         failures.join("\n  ")
     );
+}
+
+/// Writes what this run measured as a baseline, next to the facts about the machine.
+fn record(path: &std::path::Path, mut baseline: Baseline, load_before: Option<f64>) {
+    let load = |l: Option<f64>| l.map_or_else(|| "?".to_owned(), |l| format!("{l:.2}"));
+    for (key, value) in [
+        ("cpu", hostinfo::cpu()),
+        ("cores", hostinfo::cores().to_string()),
+        ("os", hostinfo::os()),
+        ("rustc", hostinfo::rustc()),
+        ("date", hostinfo::date()),
+        ("git", hostinfo::git_revision()),
+        ("stress_seconds", seconds().to_string()),
+        (
+            "load_layer_b",
+            format!(
+                "{} before, {} after (one-minute load average)",
+                load(load_before),
+                load(hostinfo::load_average())
+            ),
+        ),
+    ] {
+        baseline.meta.entry(key.to_owned()).or_insert(value);
+    }
+    let rows = baseline.stress.len();
+    if let Err(e) = baseline.record_into(path, undra_bench::baseline::record_keeps_best()) {
+        panic!("cannot write UNDRA_BENCH_RECORD to {}: {e}", path.display());
+    }
+    eprintln!("recorded {rows} scenarios to {}", path.display());
 }
 
 #[test]
