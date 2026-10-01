@@ -147,6 +147,12 @@ impl<I: SignalValue> Signal<Vec<I>> {
     /// [Lists](Signal#lists) on O(change) versus O(list)). Transaction behaviour is the same as
     /// [`set`](Signal::set).
     ///
+    /// # Panics
+    ///
+    /// If the item's `Clone` panics: while the op for a keyed slot is built (before the change,
+    /// which then does not happen), or while the op for the derived lists of this list is built
+    /// (after the change: the item stays in the list, and those lists rebuild at their next read).
+    ///
     /// # Example
     ///
     /// ```
@@ -185,7 +191,8 @@ impl<I: SignalValue> Signal<Vec<I>> {
     ///
     /// # Panics
     ///
-    /// If `index > len`, as `Vec::insert` does; the list is left unchanged.
+    /// If `index > len`, as `Vec::insert` does; the list is left unchanged. If the item's `Clone`
+    /// panics, as for [`push`](Signal::push).
     ///
     /// # Example
     ///
@@ -262,7 +269,8 @@ impl<I: SignalValue> Signal<Vec<I>> {
     /// that depends on it (that is detected and panics instead of deadlocking).
     ///
     /// If `f` panics, the item keeps whatever `f` did to it and the commit that follows is
-    /// computed by diffing, so the host is not left with a stale item.
+    /// computed by diffing (and the derived lists of this list rebuild), so the host is not left
+    /// with a stale item. The same holds when the item's `Clone` panics while its op is built.
     ///
     /// # Panics
     ///

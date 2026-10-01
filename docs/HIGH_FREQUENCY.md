@@ -108,6 +108,17 @@ Two more rules for producers inside the core:
 * A transaction that touches several stores arrives as several change-sets; a frame can fall between
   them. Keep state that must change together in one store.
 
+A view over a churning list costs the change too. A `Computed<Vec<T>>` that filters or sorts the
+board is recomputed, re-sent and re-decoded whole on every write of any row (at 10,000 rows, 177 µs and
+353 KB per change in the core, 1.1 ms to apply in a browser); a `DerivedList<T>`
+(`board.derive().filter(..).sort_by_key(..).build()`, ADR-039) replays each recorded row operation on
+its own index and ships at most two patch ops for it, nothing when the row is outside the view: about
+0.3 µs and 158 bytes per change, and its patches merge per drain like any keyed list's. Write the
+board with the recorded operations (`update_at`, `insert`, `remove`, ..); a raw `set` or `update`
+rebuilds every view of it and sends them whole. `bench/RESULTS.md` (finding 5) has the measurements, and
+the `derived_churn_10k/sustained` scenario holds a sorted view of a 10,000-row list at 122,000
+operations a second with the host's copy equal to the core's.
+
 ## Measuring it
 
 Every runtime counts what its mirror did: change-sets and entries received, entries applied after

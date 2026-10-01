@@ -47,6 +47,11 @@ mod list;
 ///   O(list), and sends the full value when more than half of the items were removed or the keys
 ///   do not overlap (SPEC 3.8).
 ///
+/// The recorded operations also feed every [`DerivedList`](crate::DerivedList) built on the list
+/// with [`derive`](Signal::derive): a filtered, sorted or mapped view replays them at O(log n) each
+/// and ships at most two keyed-patch ops per operation, where a raw write rebuilds the view and
+/// sends it whole (ADR-039).
+///
 /// Prefer the recorded operations for edits of a few items, which is what nearly every list
 /// mutation is. Use `set` or `replace` to load or refresh a whole list, and `update` for an edit
 /// none of the operations can express. A transaction that mixes the two is sent by the raw path
