@@ -403,8 +403,17 @@ fn snapshot_is_a_wire_snapshot_of_the_stores_only() {
 #[test]
 fn snapshot_of_an_empty_runtime_is_an_empty_snapshot() {
     let t = TestRuntime::new();
-    // `count u32 = 0, generation_floor u32 = 0` (nothing was ever issued).
-    assert_eq!(t.runtime().snapshot(), [0; 8]);
+    // Layout 2 (ADR-037): `count u32 = 0, generation_floor u32 = 0` (nothing was ever issued),
+    // the schema hash, no types, and the description of no store types.
+    let snapshot = snapshot_of(&t);
+    assert_eq!(snapshot.generation_floor, 0);
+    assert_eq!(snapshot.schema_hash, t.runtime().schema_hash());
+    assert!(snapshot.types.is_empty() && snapshot.stores.is_empty());
+    assert_eq!(
+        snapshot.description,
+        r#"{"stores":[],"records":[],"enums":[]}"#
+    );
+    assert_eq!(t.runtime().snapshot()[..8], [0; 8]);
 }
 
 // ----- restore ----------------------------------------------------------------------------
@@ -689,7 +698,7 @@ fn restore_reentrancy_is_refused_not_deadlocked() {
     impl Host for Restoring {
         fn reply(&self, _: u32, _: &[u8]) {
             if let Some(rt) = self.rt.get().and_then(std::sync::Weak::upgrade) {
-                *self.result.lock() = Some(rt.restore(&[0; 8]));
+                *self.result.lock() = Some(rt.restore(&[0; 24]));
             }
         }
         fn change_set(&self, _: &[u8]) {}

@@ -11,7 +11,9 @@ use undra_meta::{PortKind, Schema, TypeRef, collect_schema, ids};
 use undra_ports::HttpMethod;
 
 /// `Schema::hash()` of the standard ports.
-const SCHEMA_HASH: u64 = 0x35fa_e635_f800_25f2;
+/// The standard surface's hash since ADR-049 (`StorageError`, the storage ports' signatures, two
+/// `FsError` variants); it was `0x35fa_e635_f800_25f2`.
+const SCHEMA_HASH: u64 = 0xbbf6_f70d_0c56_7f47;
 
 const GOLDEN: &str = "tests/golden/schema.json";
 
@@ -38,7 +40,7 @@ fn the_schema_has_exactly_the_standard_surface() {
     );
     assert_eq!(
         names(schema.enums.iter().map(|e| e.name.as_str()).collect()),
-        "AppState,FsError,HttpError,HttpMethod,NetKind"
+        "AppState,FsError,HttpError,HttpMethod,NetKind,StorageError"
     );
     assert_eq!(
         names(schema.ports.iter().map(|p| p.name.as_str()).collect()),
@@ -59,6 +61,7 @@ fn type_ids_are_hard_coded() {
         ("HttpMethod", 0x77bf_0650),
         ("HttpError", 0xee63_c1f1),
         ("FsError", 0xd15e_c208),
+        ("StorageError", 0x3d40_b010),
         ("NetKind", 0x0371_71aa),
         ("AppState", 0xcfb6_6091),
     ];
@@ -171,9 +174,21 @@ fn enum_and_error_variants_are_in_wire_order() {
             (0, "NotFound".to_owned(), vec![]),
             (1, "Denied".to_owned(), vec![]),
             (2, "Io".to_owned(), vec![TypeRef::String]),
+            (3, "Full".to_owned(), vec![]),
+            (4, "Unavailable".to_owned(), vec![TypeRef::String]),
         ]
     );
-    for name in ["HttpError", "FsError"] {
+    assert_eq!(
+        variants("StorageError"),
+        [
+            (0, "Unavailable".to_owned(), vec![TypeRef::String]),
+            (1, "Full".to_owned(), vec![]),
+            (2, "Locked".to_owned(), vec![]),
+            (3, "Corrupt".to_owned(), vec![TypeRef::String]),
+            (4, "Io".to_owned(), vec![TypeRef::String]),
+        ]
+    );
+    for name in ["HttpError", "FsError", "StorageError"] {
         assert!(
             schema
                 .enums
@@ -201,23 +216,29 @@ fn method_signatures_are_the_ones_of_spec_8() {
     let bytes_result = |err: &str| TypeRef::result(TypeRef::Bytes, t(err));
     let unit_result = |err: &str| TypeRef::result(TypeRef::Unit, t(err));
     let strings = TypeRef::vec(TypeRef::String);
+    // ADR-049: every storage method has the `StorageError` channel.
+    let storage = |ok: TypeRef| TypeRef::result(ok, t("StorageError"));
     let kv_methods = || {
         vec![
             (
                 "get",
                 vec![("key", TypeRef::String)],
-                TypeRef::option(TypeRef::Bytes),
+                storage(TypeRef::option(TypeRef::Bytes)),
             ),
             (
                 "set",
                 vec![("key", TypeRef::String), ("value", TypeRef::Bytes)],
-                TypeRef::Unit,
+                storage(TypeRef::Unit),
             ),
-            ("delete", vec![("key", TypeRef::String)], TypeRef::Unit),
+            (
+                "delete",
+                vec![("key", TypeRef::String)],
+                storage(TypeRef::Unit),
+            ),
             (
                 "list",
                 vec![("prefix", TypeRef::String)],
-                TypeRef::vec(TypeRef::String),
+                storage(TypeRef::vec(TypeRef::String)),
             ),
         ]
     };
