@@ -1200,6 +1200,7 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 | [`E0062`](https://shreypdev.github.io/undra/docs/errors.html#E0062) | a port call could not be answered and its method has no error channel: a runtime message |
 | [`E0063`](https://shreypdev.github.io/undra/docs/errors.html#E0063) | nested `Option<Option<T>>` |
 | [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected |
+| [`E0065`](https://shreypdev.github.io/undra/docs/errors.html#E0065) | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 
 ## Types and shapes
 
@@ -1215,7 +1216,7 @@ unsupported type in a public position (lists the type and the allowed set); incl
 | `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
 | `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
 | `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
-| `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | store a `Ctx` in the object when it is constructed, or use `Ctx::current()` |
+| `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | keep a `WeakCtx` (`ctx.downgrade()`) in the object when it is constructed and upgrade it in the method, or use `Ctx::current()` |
 | `Uuid` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Uuid` with `#[undra::api]`, or return a record with the data the platform needs |
 
 ### `E0002` generic parameter
@@ -1257,12 +1258,13 @@ trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Tra
 
 Raised by macros, schema validation.
 
-`Result` or `Stream` outside return position
+`Result` or `Stream` outside return position; a `Result<impl Stream<Item = Result<T, E1>>, E2>` whose two error types differ (ADR-036)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `Result<u32, String>` cannot be used as a field | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
 | `Result<u32, String>` cannot be used as a parameter | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
+| the items of the stream in `Result<impl Stream<Item = Result<u32, ItemError>>, OpenError>` fail with `ItemError` but its opening fails with `OpenError` | a stream method has one error type: the platforms throw it whether the stream fails to open or ends with an error part-way | use the same `#[undra::error]` enum for both (`OpenError`), or one enum with a variant for each case |
 | `Result<u32, String>` cannot be nested inside another type | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
 | `result<u8,named:Oops>` at record Todo, field outcome: Result is only allowed as the outermost type of a return | `Result<T, E>` is how a method reports a typed error, so it has no meaning inside a field, a parameter or another type | return the `Result` from the method and keep plain values in fields, parameters and nested types |
 
@@ -1352,12 +1354,12 @@ trait object in a record field (the blueprint example)
 
 Raised by macros.
 
-store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook
+store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx`, a `WeakCtx` nor `Default`, and no `#[undra::store(restore = "..")]` hook
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | store `Todos` cannot be restored automatically: `count` is computed | restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them | add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
-| store `Sync` cannot be restored automatically: its field of type `Config` has no `Default` | restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument) | implement `Default` for the type, or add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
+| store `Sync` cannot be restored automatically: its field of type `Config` has no `Default` | restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument, a `WeakCtx` downgraded from it) | implement `Default` for the type, or add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
 
 ## Methods
 
@@ -1595,6 +1597,16 @@ an object (`#[undra::api] impl`) used as a field, parameter or return value: obj
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `Child` is an object and cannot be used as a value | an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value | return a record with the data the platform needs, or construct the object from the platform with one of its constructors |
+
+### `E0065` a signal of a store written off its owning runtime's core (ADR-035): a runtime message
+
+Raised by runtime (the write check of `undra-signals`).
+
+a signal of a store was written from a thread that does not hold the owning runtime's core lock: a blocking-pool worker, a host or embedder thread, a thread inside no runtime, or another runtime's core. A panic with this message, in every build; `Signal::try_set` / `try_update` return it as `WriteError::OffCore` (ADR-035)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| a signal of a store owned by runtime 5 was written from a thread that does not hold its core lock | signal writes belong on the core: the runtime delivers each change-set to its host in commit order under its core lock, so a write from any other thread (a blocking-pool worker, a host or embedder thread, another runtime's core) would be delivered unordered, to the wrong host, or not at all | return the value to the task or call that awaits it (`ctx.spawn`, a dispatched call, the result of `spawn_blocking`), or wrap the write in `ctx.with_core(\|\| ..)` on a host thread; `Signal::try_set` reports this as a `WriteError` instead of panicking |
 
 ## The command line
 
