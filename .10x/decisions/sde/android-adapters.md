@@ -76,7 +76,7 @@ without a device.
 | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 500 cases, 0 failed, 2 skipped (the JNI smoke needs a native library; unchanged) |
 | `bash contract-tests/run-all.sh` | 54/54 (18 scenarios x ts, kotlin, swift), unchanged: the Kotlin runner keeps its JVM Kv/Http |
 | `cargo test -p undra-cli`; `UNDRA_TEST_ANDROID=1 UNDRA_TEST_ANDROID_APP=1 cargo test -p undra-cli --test platforms android_builds` (template app builds with `android-adapters`, 11.9 MB debug APK) | pass |
-| `cargo test --workspace`, `cargo fmt --check` | RESULT_CARGO |
+| `cargo test --workspace`, `cargo fmt --check` | `cargo test --workspace`: 2236 passed, 0 failed, 10 ignored; `cargo fmt --check` clean; `cargo clippy -p undra-cli --all-targets -- -D warnings` clean (only the CLI changed: template and `adopt` text) |
 
 ### Evidence of the offline story (`examples/playground/.proof/android-adapters-smoke.log`, screenshots `android-adapters-*.png`)
 
