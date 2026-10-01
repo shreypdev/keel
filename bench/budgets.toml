@@ -552,5 +552,5 @@ measured = 39.5
 # alone: Undra's Rust runtime, the C/wasm ABI shim and the core. The blueprint's 120 KB.
 [size."web/hello-wasm"]
 budget_gzip_bytes = 120000
-measured_gzip_bytes = 95768
+measured_gzip_bytes = 95712
 tolerance = 0.05
