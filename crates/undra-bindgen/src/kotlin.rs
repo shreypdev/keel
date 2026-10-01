@@ -28,6 +28,29 @@ use crate::{GeneratedFile, Generator};
 /// The package of the standard types the Kotlin runtime provides (`StandardRecords.kt`).
 const RUNTIME_ADAPTERS: &str = "dev.undra.runtime.adapters";
 
+/// The `@throws` line every call that can fail carries (ADR-032, amendment A).
+const THROWS_CALL: &str =
+    "@throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.";
+
+/// The `@throws` line of a `suspend` call.
+const THROWS_CANCELLED: &str = "@throws CancellationException if the calling coroutine is cancelled.";
+
+/// The doc sentence of a command (a synchronous method that returns nothing and
+/// has no error type): it does not throw, so the reader learns where a failure goes.
+const COMMAND_DOC: &str =
+    "A failure is logged and passed to `LoadOptions.onError`; the method does not throw.";
+
+/// The doc sentence of a stream method: what collecting it throws.
+fn stream_doc(err: Option<&str>) -> String {
+    match err {
+        Some(err) => format!(
+            "Collecting throws {err} or UndraCallError; cancelling the collector ends it quietly."
+        ),
+        None => "Collecting throws UndraCallError; cancelling the collector ends it quietly."
+            .to_owned(),
+    }
+}
+
 const FILES: [&str; 7] = [
     "Types", "Errors", "Objects", "Stores", "Ports", "Queries", "Ids",
 ];
@@ -226,22 +249,21 @@ impl<'a> Ctx<'a> {
         self.named(err, &Shadow::new())
     }
 
-    /// The expression that turns the failed call `var` (an `UndraReplyException`) into the typed
-    /// error `err`: a generated error class knows how (`fromReply`); a standard error the
-    /// runtime provides does not, so its codec decodes the reply here.
-    fn typed_error(&mut self, err: &str, var: &str, checked: bool) -> String {
-        let name = self.err_name(err);
-        if self.model().external(err).is_none() {
-            return format!("{name}.fromReply({var})");
+    /// The expression that maps the failure `var` of a call onto the closed set of
+    /// ADR-032 (amendment A): the method's own error `err` when it has one (a generated
+    /// error class and a standard one the runtime provides are both an `UndraCodec` through
+    /// their companion), else `UndraCallError`. `stream` picks the mapping of a stream's
+    /// error item.
+    fn mapped(&mut self, err: Option<&str>, var: &str, stream: bool) -> String {
+        self.import("dev.undra.runtime.UndraCallError");
+        let function = if stream { "mappedStream" } else { "mapped" };
+        match err {
+            Some(err) => {
+                let name = self.err_name(err);
+                format!("UndraCallError.{function}({var}, {name})")
+            }
+            None => format!("UndraCallError.{function}({var})"),
         }
-        self.import("dev.undra.runtime.wire.Payloads.ReplyStatus");
-        self.import("dev.undra.runtime.wire.decodeAll");
-        let test = if checked {
-            format!("{var} is UndraReplyException && {var}.status == ReplyStatus.ERROR")
-        } else {
-            format!("{var}.status == ReplyStatus.ERROR")
-        };
-        format!("if ({test}) {name}.decodeAll({var}.body) else {var}")
     }
 
     // ----- types ------------------------------------------------------------
@@ -1065,8 +1087,8 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// The companion codec of a sealed type (data enum or error). Errors also
-    /// get `fromReply`.
+    /// The companion codec of a sealed type (data enum or error). A generated
+    /// call decodes a typed reply with it (`UndraCallError.mapped(e, TodoError)`).
     fn sealed_codec(&mut self, w: &mut CodeWriter, en: &EnumDef, shadow: &Shadow) {
         w.block(format!("companion object : UndraCodec<{}>", en.name), |w| {
             w.block(
@@ -1122,17 +1144,6 @@ impl<'a> Ctx<'a> {
                     ));
                 });
             });
-            if en.is_error {
-                w.blank();
-                kdoc(
-                    w,
-                    "The typed error a failed call carries; any other failure is returned unchanged.",
-                    &[],
-                );
-                w.block("fun fromReply(error: UndraReplyException): Throwable", |w| {
-                    w.line("return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error");
-                });
-            }
         });
     }
 
@@ -1174,13 +1185,10 @@ impl<'a> Ctx<'a> {
 
     fn error(&mut self, w: &mut CodeWriter, en: &EnumDef) {
         self.import("dev.undra.runtime.UndraException");
-        self.import("dev.undra.runtime.UndraReplyException");
         self.import("dev.undra.runtime.wire.UndraCodec");
         self.import("dev.undra.runtime.wire.UndraReader");
         self.import("dev.undra.runtime.wire.UndraWriter");
-        self.import("dev.undra.runtime.wire.Payloads.ReplyStatus");
         self.import("dev.undra.runtime.wire.WireException");
-        self.import("dev.undra.runtime.wire.decodeAll");
         let shadow = Self::shadow_of(en);
         kdoc(w, &en.docs, &[]);
         w.block(
@@ -1273,18 +1281,18 @@ impl<'a> Ctx<'a> {
                 if is_store {
                     w.blank();
                     w.block("init", |w| {
-                        w.line("core.observe(handle, UInt.MAX_VALUE, true)");
+                        w.line("observeAll()");
                     });
                 }
                 if let Some(c) = simple_new {
                     w.blank();
-                    kdoc(w, &c.docs, &[]);
+                    kdoc(w, &c.docs, &[THROWS_CALL.to_owned()]);
                     let ids = format!("UndraIds.Objects.{}", o.name);
                     w.call(
                         "constructor(ctx: UndraCore = UndraCore.shared) : this",
                         &[
                             "ctx".to_owned(),
-                            format!("ctx.construct({ids}.TYPE_ID, {ids}.NEW, ByteArray(0))"),
+                            format!("ctx.constructObject({ids}.TYPE_ID, {ids}.NEW, ByteArray(0))"),
                         ],
                         "",
                         true,
@@ -1298,12 +1306,13 @@ impl<'a> Ctx<'a> {
                         &Callable::from_method(m),
                         &Site::Method {
                             id: format!("{ids}.{}", naming::upper_snake(&m.name)),
+                            owner: o.name.clone(),
                         },
                     );
                 }
                 if is_store {
                     w.blank();
-                    self.store_apply(w, &signals);
+                    self.store_apply(w, &o.name, &signals);
                 }
                 w.blank();
                 w.block("companion object", |w| {
@@ -1351,11 +1360,16 @@ impl<'a> Ctx<'a> {
         let ctx = naming::avoid("ctx", &taken_refs);
         let writer = naming::avoid("w", &taken_refs);
         let handle = naming::avoid("handle", &taken_refs);
+        let failure = naming::avoid("e", &taken_refs);
         let mut params = self.param_list(&c.params);
         params.push(format!("{ctx}: UndraCore = UndraCore.shared"));
         let mut extra = Vec::new();
         if let Some(err) = &err {
             extra.push(format!("@throws {err}"));
+        }
+        extra.push(THROWS_CALL.to_owned());
+        if c.is_async {
+            extra.push(THROWS_CANCELLED.to_owned());
         }
         kdoc(w, &c.docs, &extra);
         let suspend = if c.is_async { "suspend " } else { "" };
@@ -1365,31 +1379,28 @@ impl<'a> Ctx<'a> {
         let member = naming::upper_snake(&c.name);
         w.call_block(prefix, &params, suffix, true, |w| {
             let args = self.encode_args(w, &c.params, &writer);
-            let call = if c.is_async {
-                self.import("dev.undra.runtime.wire.Payloads.CallTarget");
-                self.import("dev.undra.runtime.wire.Codecs");
-                format!("{ctx}.call(CallTarget.Constructor({ids}.TYPE_ID, {ids}.{member}), {ids}.{member}, {args})")
+            if !c.is_async && err.is_none() {
+                // `constructObject` maps what `construct` throws.
+                w.line(format!(
+                    "val {handle} = {ctx}.constructObject({ids}.TYPE_ID, {ids}.{member}, {args})"
+                ));
             } else {
-                format!("{ctx}.construct({ids}.TYPE_ID, {ids}.{member}, {args})")
-            };
-            let decode = |cx: &mut Ctx<'a>, expr: String| -> String {
-                if c.is_async {
-                    cx.import("dev.undra.runtime.wire.decodeAll");
-                    format!("Codecs.handle.decodeAll({expr})")
+                let call = if c.is_async {
+                    self.import("dev.undra.runtime.wire.Payloads.CallTarget");
+                    self.import("dev.undra.runtime.wire.Codecs");
+                    self.import("dev.undra.runtime.wire.decodeAll");
+                    format!(
+                        "Codecs.handle.decodeAll({ctx}.call(CallTarget.Constructor({ids}.TYPE_ID, {ids}.{member}), {ids}.{member}, {args}))"
+                    )
                 } else {
-                    expr
-                }
-            };
-            if let Some(err) = &err {
-                self.import("dev.undra.runtime.UndraReplyException");
+                    format!("{ctx}.construct({ids}.TYPE_ID, {ids}.{member}, {args})")
+                };
+                let mapped = self.mapped(err.as_deref(), &failure, false);
                 w.line(format!("val {handle} = try {{"));
-                w.indented(|w| w.line(decode(self, call.clone())));
-                w.line("} catch (e: UndraReplyException) {");
-                let typed = self.typed_error(err, "e", false);
-                w.indented(|w| w.line(format!("throw {typed}")));
+                w.indented(|w| w.line(call));
+                w.line(format!("}} catch ({failure}: Exception) {{"));
+                w.indented(|w| w.line(format!("throw {mapped}")));
                 w.line("}");
-            } else {
-                w.line(format!("val {handle} = {}", decode(self, call)));
             }
             w.line(format!("return {}({ctx}, {handle})", o.name));
         });
@@ -1401,6 +1412,11 @@ impl<'a> Ctx<'a> {
     }
 
     /// One method or free function.
+    ///
+    /// Every failure of the call leaves it as exactly one of the method's own error,
+    /// `CancellationException`, or `UndraCallError` (ADR-032, amendment A); a command (a
+    /// synchronous method that returns nothing and has no error type) never throws: it
+    /// reports to `LoadOptions.onError` and returns.
     fn callable(&mut self, w: &mut CodeWriter, c: &Callable<'_>, site: &Site) {
         let ret = Ret::classify(c.returns).unwrap_or(Ret::Plain(c.returns));
         let taken: Vec<String> = c.params.iter().map(|p| ident(&p.name)).collect();
@@ -1408,14 +1424,16 @@ impl<'a> Ctx<'a> {
         let writer = naming::avoid("w", &taken_refs);
         let body_var = naming::avoid("body", &taken_refs);
         let stream_var = naming::avoid("stream", &taken_refs);
-        let (core, target, id, is_function) = match site {
-            Site::Method { id } => {
+        let failure = naming::avoid("e", &taken_refs);
+        let (core, target, id, is_function, operation) = match site {
+            Site::Method { id, owner } => {
                 self.import("dev.undra.runtime.wire.Handle");
                 (
                     "this.core".to_owned(),
                     format!("CallTarget.ObjectMethod(Handle(this.handle), {id})"),
                     id.clone(),
                     false,
+                    format!("{owner}.{}", naming::camel(c.name)),
                 )
             }
             Site::Function { id } => (
@@ -1423,6 +1441,7 @@ impl<'a> Ctx<'a> {
                 format!("CallTarget.FreeFunction({id})"),
                 id.clone(),
                 true,
+                naming::camel(c.name),
             ),
         };
         self.import("dev.undra.runtime.wire.Payloads.CallTarget");
@@ -1432,9 +1451,21 @@ impl<'a> Ctx<'a> {
             params.push(format!("{core}: UndraCore = UndraCore.shared"));
         }
         let err = ret.error().map(str::to_owned);
+        let is_unit_ok = matches!(&ret, Ret::Plain(TypeRef::Unit) | Ret::Result { ok: TypeRef::Unit, .. });
+        let is_command = !c.is_async && err.is_none() && matches!(&ret, Ret::Plain(TypeRef::Unit));
         let mut extra = Vec::new();
-        if let Some(err) = &err {
-            extra.push(format!("@throws {err}"));
+        if is_command {
+            extra.push(COMMAND_DOC.to_owned());
+        } else if ret.is_stream() {
+            extra.push(stream_doc(err.as_deref()));
+        } else {
+            if let Some(err) = &err {
+                extra.push(format!("@throws {err}"));
+            }
+            extra.push(THROWS_CALL.to_owned());
+            if c.is_async {
+                extra.push(THROWS_CANCELLED.to_owned());
+            }
         }
         kdoc(w, c.docs, &extra);
         let name = ident(c.name);
@@ -1442,6 +1473,7 @@ impl<'a> Ctx<'a> {
         if let Ret::Stream(item) | Ret::ResultStream { item, .. } = &ret {
             self.import("kotlinx.coroutines.flow.Flow");
             self.import("kotlinx.coroutines.flow.map");
+            self.import("kotlinx.coroutines.flow.catch");
             let item_ty = self.ty(item, &Shadow::new());
             let prefix = format!("fun {name}");
             let suffix = format!(": Flow<{item_ty}>");
@@ -1454,27 +1486,14 @@ impl<'a> Ctx<'a> {
                     "",
                     true,
                 );
-                if let Some(err) = &err {
-                    self.import("dev.undra.runtime.UndraReplyException");
-                    self.import("kotlinx.coroutines.flow.catch");
-                    let typed = if self.model().external(err).is_some() {
-                        self.typed_error(err, "error", true)
-                    } else {
-                        let name = self.err_name(err);
-                        format!(
-                            "if (error is UndraReplyException) {name}.fromReply(error) else error"
-                        )
-                    };
-                    w.line(format!("return {stream_var}"));
-                    w.indented(|w| {
-                        w.line(format!(".map {{ bytes -> {decode} }}"));
-                        w.block_with(".catch { error ->", "}", |w| {
-                            w.line(format!("throw {typed}"));
-                        });
+                let mapped = self.mapped(err.as_deref(), "error", true);
+                w.line(format!("return {stream_var}"));
+                w.indented(|w| {
+                    w.line(format!(".map {{ bytes -> {decode} }}"));
+                    w.block_with(".catch { error ->", "}", |w| {
+                        w.line(format!("throw {mapped}"));
                     });
-                } else {
-                    w.line(format!("return {stream_var}.map {{ bytes -> {decode} }}"));
-                }
+                });
             });
             return;
         }
@@ -1485,6 +1504,7 @@ impl<'a> Ctx<'a> {
             }
             Ret::Stream(_) | Ret::ResultStream { .. } => ("Unit".to_owned(), true),
         };
+        debug_assert_eq!(is_unit, is_unit_ok);
         let suspend = if c.is_async { "suspend " } else { "" };
         let prefix = format!("{suspend}fun {name}");
         let suffix = if is_unit {
@@ -1497,40 +1517,44 @@ impl<'a> Ctx<'a> {
             let method = if c.is_async { "call" } else { "callSync" };
             let call_args = [target.clone(), id.clone(), args];
             let call = format!("{core}.{method}");
-            if let Some(err) = &err {
-                self.import("dev.undra.runtime.UndraReplyException");
-                let bind = if is_unit {
-                    String::new()
+            w.line("try {");
+            w.indented(|w| {
+                if is_unit {
+                    w.call(call.clone(), &call_args, "", true);
                 } else {
-                    format!("val {body_var} = ")
-                };
-                w.line(format!("{bind}try {{"));
-                w.indented(|w| w.call(call.clone(), &call_args, "", true));
-                w.line("} catch (e: UndraReplyException) {");
-                let typed = self.typed_error(err, "e", false);
-                w.indented(|w| w.line(format!("throw {typed}")));
-                w.line("}");
-            } else if is_unit {
-                w.call(call, &call_args, "", true);
-            } else {
-                w.call(format!("val {body_var} = {call}"), &call_args, "", true);
-            }
-            if !is_unit {
-                let ok = match &ret {
-                    Ret::Plain(t) | Ret::Result { ok: t, .. } => Some(*t),
-                    _ => None,
-                };
-                if let Some(ok) = ok {
-                    let expr = self.decode_all(ok, &body_var);
-                    w.line(format!("return {expr}"));
+                    w.call(format!("val {body_var} = {call}"), &call_args, "", true);
+                    let ok = match &ret {
+                        Ret::Plain(t) | Ret::Result { ok: t, .. } => Some(*t),
+                        _ => None,
+                    };
+                    if let Some(ok) = ok {
+                        let expr = self.decode_all(ok, &body_var);
+                        w.line(format!("return {expr}"));
+                    }
                 }
+            });
+            w.line(format!("}} catch ({failure}: Exception) {{"));
+            if is_command {
+                w.indented(|w| {
+                    w.line(format!(
+                        "{core}.report({failure}, {})",
+                        kt_string(&operation)
+                    ));
+                });
+            } else {
+                let mapped = self.mapped(err.as_deref(), &failure, false);
+                w.indented(|w| w.line(format!("throw {mapped}")));
             }
+            w.line("}");
         });
     }
 
     // ----- stores ----------------------------------------------------------------
 
-    fn store_apply(&mut self, w: &mut CodeWriter, signals: &[&SignalDef]) {
+    /// `apply`: decodes the change of one signal and assigns it, or, when it cannot,
+    /// reports and skips it (ADR-032, amendment A: never half-applied, never thrown into
+    /// the mirror). The value is decoded and checked complete before it is stored.
+    fn store_apply(&mut self, w: &mut CodeWriter, store: &str, signals: &[&SignalDef]) {
         self.import("dev.undra.runtime.wire.UndraReader");
         self.import("dev.undra.runtime.wire.Payloads.ChangeOp");
         let keyed = signals
@@ -1539,44 +1563,57 @@ impl<'a> Ctx<'a> {
         w.block(
             "override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader)",
             |w| {
-                w.block("when (signalId)", |w| {
-                    for g in signals {
-                        let backing = format!("_{}", naming::camel(&g.name));
-                        w.line(format!("{}u -> {{", g.signal_id));
-                        w.indented(|w| {
-                            let codec = self.codec(&g.ty, &Shadow::new());
-                            w.line("if (op == ChangeOp.FULL) {");
+                w.line("try {");
+                w.indented(|w| {
+                    w.block("when (signalId)", |w| {
+                        for g in signals {
+                            let backing = format!("_{}", naming::camel(&g.name));
+                            w.line(format!("{}u -> {{", g.signal_id));
                             w.indented(|w| {
-                                w.line(format!("{backing}.value = {codec}.decode(reader)"));
-                                w.line("reader.finish()");
-                            });
-                            if let (Some(_), TypeRef::Vec(item)) = (&g.key, &g.ty) {
-                                self.import("dev.undra.runtime.wire.KeyedPatch");
-                                self.import("dev.undra.runtime.wire.WireException");
-                                let item_codec = self.codec(item, &Shadow::new());
-                                w.line("} else if (op == ChangeOp.PATCH) {");
+                                let codec = self.codec(&g.ty, &Shadow::new());
+                                w.line("if (op == ChangeOp.FULL) {");
                                 w.indented(|w| {
-                                    w.line(format!(
-                                        "val ops = KeyedPatch.decodePatch(reader, {item_codec})"
-                                    ));
+                                    w.line(format!("val value = {codec}.decode(reader)"));
                                     w.line("reader.finish()");
-                                    w.line("try {");
+                                    w.line(format!("{backing}.value = value"));
+                                });
+                                if let (Some(_), TypeRef::Vec(item)) = (&g.key, &g.ty) {
+                                    self.import("dev.undra.runtime.wire.KeyedPatch");
+                                    self.import("dev.undra.runtime.wire.WireException");
+                                    let item_codec = self.codec(item, &Shadow::new());
+                                    w.line("} else if (op == ChangeOp.PATCH) {");
                                     w.indented(|w| {
                                         w.line(format!(
-                                            "{backing}.value = KeyedPatch.applyPatch({backing}.value, ops)"
+                                            "val ops = KeyedPatch.decodePatch(reader, {item_codec})"
                                         ));
+                                        w.line("reader.finish()");
+                                        w.line("try {");
+                                        w.indented(|w| {
+                                            w.line(format!(
+                                                "{backing}.value = KeyedPatch.applyPatch({backing}.value, ops)"
+                                            ));
+                                        });
+                                        w.line("} catch (e: WireException.PatchOutOfBounds) {");
+                                        w.indented(|w| {
+                                            w.line(format!("resync({}u)", g.signal_id));
+                                        });
+                                        w.line("}");
                                     });
-                                    w.line("} catch (e: WireException.PatchOutOfBounds) {");
-                                    w.indented(|w| w.line(format!("resync({}u)", g.signal_id)));
-                                    w.line("}");
-                                });
-                            }
+                                }
+                                w.line("}");
+                            });
                             w.line("}");
-                        });
-                        w.line("}");
-                    }
-                    w.line("else -> Unit");
+                        }
+                        w.line("else -> Unit");
+                    });
                 });
+                w.line("} catch (e: Exception) {");
+                w.indented(|w| {
+                    w.line(format!(
+                        "core.report(e, \"{store}.apply(signal: $signalId)\")"
+                    ));
+                });
+                w.line("}");
             },
         );
         if keyed {
@@ -1713,7 +1750,7 @@ impl<'a> Ctx<'a> {
         kdoc(
             w,
             &p.docs,
-            &["Sends the events of this port from the host to the core.".to_owned()],
+            &["Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `LoadOptions.onError`; the methods do not throw.".to_owned()],
         );
         w.block(
             format!(
@@ -1730,22 +1767,34 @@ impl<'a> Ctx<'a> {
                     let taken: Vec<String> = m.params.iter().map(|a| ident(&a.name)).collect();
                     let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
                     let writer = naming::avoid("w", &taken_refs);
+                    let failure = naming::avoid("e", &taken_refs);
                     w.call_block(format!("fun {}", ident(&m.name)), &params, "", true, |w| {
                         let args = self.encode_args(w, &m.params, &writer);
-                        w.call(
-                            "this.core.event",
-                            &[
-                                format!("UndraIds.Ports.{}.PORT_ID", p.name),
-                                format!(
-                                    "UndraIds.Ports.{}.{}",
-                                    p.name,
-                                    naming::upper_snake(&m.name)
-                                ),
-                                args,
-                            ],
-                            "",
-                            true,
-                        );
+                        w.line("try {");
+                        w.indented(|w| {
+                            w.call(
+                                "this.core.event",
+                                &[
+                                    format!("UndraIds.Ports.{}.PORT_ID", p.name),
+                                    format!(
+                                        "UndraIds.Ports.{}.{}",
+                                        p.name,
+                                        naming::upper_snake(&m.name)
+                                    ),
+                                    args,
+                                ],
+                                "",
+                                true,
+                            );
+                        });
+                        w.line(format!("}} catch ({failure}: Exception) {{"));
+                        w.indented(|w| {
+                            w.line(format!(
+                                "this.core.report({failure}, {})",
+                                kt_string(&format!("{}Events.{}", p.name, naming::camel(&m.name)))
+                            ));
+                        });
+                        w.line("}");
                     });
                 }
             },
@@ -1786,9 +1835,9 @@ impl<'a> Callable<'a> {
 
 /// Where a call is made from.
 enum Site {
-    /// A method of the generated class; `id` is the Kotlin expression of its
-    /// method id.
-    Method { id: String },
+    /// A method of the generated class `owner`; `id` is the Kotlin expression
+    /// of its method id.
+    Method { id: String, owner: String },
     /// A top-level function.
     Function { id: String },
 }
