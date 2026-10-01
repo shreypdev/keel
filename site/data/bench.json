@@ -1,6 +1,6 @@
 {
   "machine": "Apple M5 Pro, 18 cores, macOS 26.5",
-  "method": "Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median.",
+  "method": "Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median. Harsh-conditions cards: 10-second sustained runs on the host, core side, on a shared machine, measured before frame-coalesced delivery (ADR-031); their gates are floors at one fifth of the measured rate.",
   "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md",
   "stressScreen": false,
   "rows": [
@@ -75,5 +75,82 @@
       "source": "https://github.com/shreypdev/undra/blob/main/README.md#why-its-fast"
     }
   ],
-  "harsh": []
+  "harsh": [
+    {
+      "id": "harsh-firehose",
+      "operation": "Firehose — one transaction per update through the C ABI, sustained; p99 211 ns per call",
+      "value": 5.8,
+      "unit": "M/s",
+      "budget": 1.1,
+      "budgetUnit": "M/s",
+      "floor": true,
+      "gate": "stress/firehose ≥ 1.1 M/s; p99 ≤ 1.1 µs; 37 bytes",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    },
+    {
+      "id": "harsh-events",
+      "operation": "Event firehose — a feed entering through an event port; p99 167 ns",
+      "value": 6.5,
+      "unit": "M/s",
+      "budget": 1.4,
+      "budgetUnit": "M/s",
+      "floor": true,
+      "gate": "stress/event ≥ 1.4 M/s; p99 ≤ 840 ns",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    },
+    {
+      "id": "harsh-churn",
+      "operation": "Keyed churn — a 10,000-row list, one insert/update/move/remove per transaction, every patch applied by the host; p99 17.9 µs",
+      "value": 170,
+      "unit": "k/s",
+      "budget": 33,
+      "budgetUnit": "k/s",
+      "floor": true,
+      "gate": "stress/keyed_churn_10k ≥ 33 k ops/s; p99 ≤ 90 µs; host list equals the core's",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    },
+    {
+      "id": "harsh-fanout",
+      "operation": "Fan-out — 1,000 of 100,000 observed signals written per transaction; one 21,012-byte change-set; p99 98 µs",
+      "value": 22,
+      "unit": "k/s",
+      "budget": 4.6,
+      "budgetUnit": "k/s",
+      "floor": true,
+      "gate": "stress/fanout_100k ≥ 4.6 k/s; p99 ≤ 410 µs; bytes exact",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    },
+    {
+      "id": "harsh-stream",
+      "operation": "Stream backpressure — an always-ready producer, never more than one item ahead of the consumer's credit; RSS +0.00 %",
+      "value": 29,
+      "unit": "M/s",
+      "budget": 5.7,
+      "budgetUnit": "M/s",
+      "floor": true,
+      "gate": "stress/stream ≥ 5.7 M items/s; ahead ≤ 1; RSS ≤ 1 %",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    },
+    {
+      "id": "harsh-completions",
+      "operation": "Concurrent completions — 8 threads answering port calls at once, 256 in flight: 0 lost, 0 reordered; p99 803 µs call to reply",
+      "value": 339,
+      "unit": "k/s",
+      "budget": 69,
+      "budgetUnit": "k/s",
+      "floor": true,
+      "gate": "stress/completions ≥ 69 k/s; p99 ≤ 3.7 ms; 0 lost, 0 out of order",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    },
+    {
+      "id": "harsh-soak",
+      "operation": "60-second soak — firehose, churn, completions and a stream together at 100 % of target; RSS growth over the second half",
+      "value": 0,
+      "unit": "%",
+      "budget": 1,
+      "budgetUnit": "%",
+      "gate": "soak: RSS ≤ 1 %, worst second's p99 ≤ 3× the median, every invariant held (CI runs 10 s)",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#harsh-conditions"
+    }
+  ]
 }
