@@ -38,7 +38,7 @@ if [ "$WHICH" = all ] || [ "$WHICH" = kotlin ]; then
   # shellcheck disable=SC1091
   source scripts/env.sh
   command -v java >/dev/null 2>&1 && java -version >/dev/null 2>&1 || export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
-  kotlinc -nowarn -cp "$UNDRA_KOTLINX_COROUTINES" -d "$WORK/kt" \
+  kotlinc -nowarn -opt-in=dev.undra.runtime.UndraEmbeddingApi -cp "$UNDRA_KOTLINX_COROUTINES" -d "$WORK/kt" \
     $(find runtimes/kotlin/undra-runtime/runtime/src/main -name '*.kt') crates/undra-transport/interop/Interop.kt
   start_server                       # not in $(...): the server must outlive a subshell
   INFO="$(cat "$WORK/server.json")"
