@@ -47,6 +47,12 @@ export interface TransportHandler {
   reconnected?(hello: HelloPayload): void;
   /** Only for a transport that reconnects: whether the host holds objects it expects the core to still have (it asks the server to resume them). */
   holdsObjects?(): boolean;
+  /**
+   * The ids of the ports the host serves with asynchronous methods. A transport whose core runs elsewhere
+   * (`wasm-worker`) reads it when it starts and forwards those ports' calls to the host; every other port is
+   * answered where the core runs (ADR-049).
+   */
+  asyncPorts?(): readonly number[];
 }
 
 /**
@@ -98,4 +104,12 @@ export interface Transport {
   restore?(bytes: Uint8Array): Promise<void>;
   /** Releases the channel. Idempotent; the handler's `closed` is not called. */
   close(): void;
+  /**
+   * `false` when a port served on the host's thread cannot answer the core's synchronous calls, because the core
+   * runs elsewhere and cannot wait for it (`wasm-worker`): `UndraCore` then refuses to register a synchronous port
+   * (ADR-049). Absent means `true`.
+   */
+  readonly answersSyncPorts?: boolean;
+  /** The set of the host's asynchronous ports changed after `start` (a `registerPort`): the worker of `wasm-worker` is told. */
+  portsChanged?(asyncPorts: readonly number[]): void;
 }

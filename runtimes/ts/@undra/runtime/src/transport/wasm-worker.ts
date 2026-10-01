@@ -47,6 +47,12 @@ export interface WasmWorkerOptions {
   readonly logLevel?: number;
   /** How long the worker may take to load and initialise the core, in ms. Default 15000; 0 waits forever. */
   readonly startTimeoutMs?: number;
+  /**
+   * The module the worker imports before `undra_init` (ADR-049): its default export maps port ids to
+   * implementations that run in the worker, which is where a synchronous port (an app's
+   * `#[undra::port(sync)]` port, an override of Clock or Rng) must live; see `WorkerPortsModule`.
+   */
+  readonly ports?: URL | string;
 }
 
 /** What waits for the worker's answer to a `snapshot` or `restore` request. */
@@ -100,28 +106,26 @@ function controlFailure(failure: WorkerFailure): Error {
  * `@undra/runtime/worker`), so heavy calls never block the UI thread. Envelopes
  * travel by `postMessage` with their buffers transferred, the worker's in one
  * message per worker task (so a burst of change-sets costs this thread one
- * task, not one each); port calls of the core execute here, on the main
- * thread, and are answered with `PortReply`.
+ * task, not one each).
  *
- * Everything is asynchronous: there is no `callSync`, and a port declared
- * `sync` cannot serve the core's synchronous calls (the core cannot block on
- * this thread, so the reply would come too late and the call fails as
- * unavailable). Which ports the core calls synchronously and which are served
- * where:
+ * Everything this thread does is asynchronous: there is no `callSync`, and the
+ * core, which cannot wait for this thread, answers its ports where it runs
+ * (ADR-049, worker protocol 3):
  *
  * * `Clock`, `Rng` and `Log` are answered inside the worker by the core's
  *   built-in bindings (the worker's own `Date.now`, `crypto.getRandomValues` and
- *   `log` import). `adapters.clock`, `adapters.rng`, `adapters.timer` and a
- *   `registerPort` of one of these three do not cross to the worker. The core's
- *   log records still reach `adapters.log`: the worker relays them.
- * * Every other port is called on this thread, asynchronously, and works as in
- *   `wasm-main`. A custom port declared `sync` is the exception: it cannot be
- *   served here. When one answers a call, this transport logs a warning (once
- *   per port) through the handler's log, and the core's call has already failed
- *   as unavailable; use `wasm-main` for such a port. (The transport only sees
- *   that a port answered inline, so an asynchronous port whose implementation
- *   returned bytes directly is warned about too; its reply is delivered and
- *   used, and the warning says so.)
+ *   `log` import). The core's log records still reach `adapters.log`: the worker
+ *   relays them. To override Clock, Rng or the core's timers, export them from
+ *   the module of {@link WasmWorkerOptions.ports}; `adapters.clock`, `adapters.rng`
+ *   and `adapters.timer` of this thread do not reach the worker.
+ * * A synchronous port of the app (`#[undra::port(sync)]`) is implemented in the
+ *   worker, in that same module, and answered there synchronously. Registering a
+ *   synchronous port on this thread is refused (a load-time error, or a throw of
+ *   `registerPort` after load) with a message that names it.
+ * * Every port registered on this thread with asynchronous methods (Http, Kv,
+ *   SecureStore, Fs, an app's async port) is called here, as in `wasm-main`: the
+ *   worker knows their ids (`init`, then a `ports` message for each
+ *   `registerPort` after load) and forwards their calls.
  *
  * `snapshot()` and `restore()` travel as control messages and are answered in
  * the order the worker handles them, behind the messages sent before them; a
@@ -131,6 +135,8 @@ function controlFailure(failure: WorkerFailure): Error {
 export class WasmWorkerTransport implements Transport {
   readonly mode = "wasm-worker";
   readonly synchronous = false;
+  /** The core runs in the worker and cannot wait for this thread: a synchronous port cannot be served from here (ADR-049). */
+  readonly answersSyncPorts = false;
 
   readonly #options: WasmWorkerOptions;
   #worker: WorkerLike | null = null;
@@ -146,8 +152,6 @@ export class WasmWorkerTransport implements Transport {
   #canSnapshot = false;
   /** Fails a `start` that has not settled yet (a protocol failure before `ready` must not wait for the timeout). */
   #abortStart: ((error: Error) => void) | null = null;
-  /** The custom ports already warned about (see the class doc). */
-  readonly #warnedPorts = new Set<number>();
   #detach: (() => void) | null = null;
 
   /** @param options See {@link WasmWorkerOptions}. */
@@ -232,7 +236,7 @@ export class WasmWorkerTransport implements Transport {
             if (waiting?.kind !== "snapshot") return;
             this.#control.delete(message.id);
             if (message.failure !== undefined) waiting.reject(controlFailure(message.failure));
-            else if (isArrayBuffer(message.bytes)) waiting.resolve(new Uint8Array(message.bytes));
+            else if (isArrayBuffer(message.data)) waiting.resolve(new Uint8Array(message.data));
             else waiting.reject(new UndraTransportError("protocol", "the worker answered a snapshot request without bytes"));
             return;
           }
@@ -289,6 +293,8 @@ export class WasmWorkerTransport implements Transport {
         devtools: this.#options.devtools === true,
         logLevel: this.#options.logLevel ?? 2,
         protocol: WORKER_PROTOCOL_VERSION,
+        asyncPorts: [...(handler.asyncPorts?.() ?? [])],
+        ...(this.#options.ports !== undefined && { portsModule: String(this.#options.ports) }),
       };
       try {
         worker.postMessage(init, transfer);
@@ -309,6 +315,18 @@ export class WasmWorkerTransport implements Transport {
       throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
     }
     this.#post(kind, payload);
+  }
+
+  /** Tells the worker which ports of this thread it forwards calls to (a `registerPort` after load). */
+  portsChanged(asyncPorts: readonly number[]): void {
+    const worker = this.#worker;
+    if (!this.#open || worker === null) return;
+    const message: HostToWorker = { t: "ports", asyncPorts: [...asyncPorts] };
+    try {
+      worker.postMessage(message);
+    } catch {
+      // The worker is gone; its loss is reported on its own.
+    }
   }
 
   stats(): Promise<string | null> {
@@ -339,7 +357,7 @@ export class WasmWorkerTransport implements Transport {
       this.#control.set(id, { kind: "restore", resolve, reject });
       // A private copy is transferred: the caller keeps its bytes.
       const copy = bytes.slice().buffer as ArrayBuffer;
-      const message: HostToWorker = { t: "restore", id, bytes: copy };
+      const message: HostToWorker = { t: "restore", id, data: copy };
       this.#sendControl(id, worker, message, [copy]);
     });
   }
@@ -444,7 +462,7 @@ export class WasmWorkerTransport implements Transport {
         }
         case Kind.PortCall: {
           const call = decodePortCall(envelope.payload);
-          this.#answerPortCall(call.portId, call.portCallId, handler.portCall(call), handler);
+          this.#answerPortCall(call.portCallId, handler.portCall(call));
           return;
         }
         default:
@@ -462,28 +480,9 @@ export class WasmWorkerTransport implements Transport {
     }
   }
 
-  /**
-   * A port answered inline, which a port declared `sync` does. If the core called it
-   * synchronously the reply is too late and the call already failed as unavailable (the core
-   * cannot wait for this thread); say so once, because the core's own panic message only names
-   * the port. The transport cannot tell how the core called: an asynchronous port whose
-   * implementation answered inline (a hand-written `PortImpl` that returns bytes, or a failure
-   * thrown before its first `await`) gets the same warning, and its reply is still delivered and
-   * used. The warning says both; it is logged once per port, so the false alarm costs one line.
-   */
-  #warnSyncPort(portId: number, handler: TransportHandler): void {
-    if (this.#warnedPorts.has(portId)) return;
-    this.#warnedPorts.add(portId);
-    handler.log(
-      3,
-      "undra::worker",
-      `port 0x${portId.toString(16)} answered inline on the main thread, as a port declared #[undra::port(sync)] does, but in wasm-worker mode the core cannot wait for the main thread: if the core called it synchronously, that call has already failed as unavailable and this reply comes too late; load the core with mode "wasm-main" to use such a port (Clock, Rng and Log are answered inside the worker). If the port is not declared sync, the reply was delivered and this warning can be ignored`,
-    );
-  }
-
-  #answerPortCall(portId: number, portCallId: number, outcome: PortOutcome, handler: TransportHandler): void {
+  /** Sends the answer of a port of this thread: an inline reply now (an asynchronous port that answered without waiting), "unavailable" now, or later. */
+  #answerPortCall(portCallId: number, outcome: PortOutcome): void {
     if (outcome.kind === "sync") {
-      this.#warnSyncPort(portId, handler);
       this.#post(Kind.PortReply, outcome.reply);
     } else if (outcome.kind === "unavailable") {
       this.#post(Kind.PortReply, encodePortReply({ portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));

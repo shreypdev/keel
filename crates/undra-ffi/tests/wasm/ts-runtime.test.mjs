@@ -5,7 +5,8 @@
 // UNDRA_TS_DIST; by hand, `npm ci && npx tsc -p tsconfig.build.json` in runtimes/ts/@undra/runtime
 // (a dist/ older than its sources is refused, so this can never test a stale build).
 import assert from "node:assert/strict";
-import { readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,6 +41,7 @@ const {
   ALL_SIGNALS,
   CallTarget,
   UndraCore,
+  UndraError,
   UndraModeError,
   UndraReplyError,
   UndraRestoreError,
@@ -139,13 +141,13 @@ function workerLike(thread) {
   };
 }
 
-/** Loads the fixture core on a worker thread: `UndraCore.load({ mode: "wasm-worker" })`. */
-async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, drains } = {}) {
+/** Loads the fixture core on a worker thread: `UndraCore.load({ mode: "wasm-worker" })`; `workerPorts` is the URL of `worker.ports`. */
+async function bootWorker({ log = [], adapters = {}, ports, onClose, onError, drains, workerPorts } = {}) {
   const thread = new Worker(WORKER_SOURCE, { eval: true });
   threads.push(thread);
   const core = await UndraCore.load({
     mode: "wasm-worker",
-    worker: workerLike(thread),
+    worker: workerPorts === undefined ? workerLike(thread) : { create: workerLike(thread), ports: workerPorts },
     wasm: module,
     expectedSchemaHash: SCHEMA_HASH,
     platform: "test",
@@ -449,46 +451,85 @@ test("wasm-worker: an async host port still round-trips through the main thread"
   assert.deepEqual(askedOn, [true, true], "the port implementation ran on the main thread");
 });
 
-test("wasm-worker: a host Clock or Rng does not cross to the worker (the built-in bindings serve the core)", async () => {
-  let asked = 0;
-  const core = await bootWorker({
-    adapters: { clock: { nowMs: () => 1_234_567, monotonicNs: () => 9n }, rng: { fill: (out) => out.fill(0xab) } },
-    ports: {
-      [ids.port("Clock")]: clockPort({ nowMs: () => (asked++, 42), monotonicNs: () => 43n }),
-      [ids.port("Rng")]: rngPort({ fill: (out) => out.fill(1) }),
-    },
-  });
+test("wasm-worker: an explicit Clock or Rng adapter does not cross to the worker (the built-in bindings serve the core), and says so", async () => {
+  const log = [];
+  const core = await bootWorker({ log, adapters: { clock: { nowMs: () => 1_234_567, monotonicNs: () => 9n }, rng: { fill: (out) => out.fill(0xab) } } });
   const calc = await calculator(core);
   const now = Number(decodeValue(codecs.i64, await call(core, calc, "clock_now")));
   assert.ok(Math.abs(now - Date.now()) < 5_000, `the worker's own clock: ${now}`);
-  assert.equal(decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(4))).length, 4);
-  assert.notDeepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(8)))], new Array(8).fill(1));
-  assert.equal(asked, 0, "the main thread's Clock was never asked");
+  assert.notDeepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(8)))], new Array(8).fill(0xab));
+  assert.equal(log.filter((l) => l.target === "undra::worker" && l.level === 3 && /worker\.ports/.test(l.message)).length, 1, JSON.stringify(log));
 });
 
-test("wasm-worker: a custom sync port cannot be served; the core's call fails loudly and the reason is logged", async () => {
-  const log = [];
-  const closed = [];
-  const sum = { sync: true, methods: { [ids.portMethod("Sum", "add")]: (args) => {
+test("wasm-worker: a sync port registered on the main thread is a load-time error that names it and the fix (ADR-049)", async () => {
+  const sum = { sync: true, methods: { [ids.portMethod("Sum", "add")]: (args) => args } };
+  for (const [portId, impl] of [[ids.port("Sum"), sum], [ids.port("Clock"), clockPort({ nowMs: () => 42, monotonicNs: () => 43n })]]) {
+    const failure = await bootWorker({ ports: { [portId]: impl } }).then(() => undefined, (e) => e);
+    assert.ok(failure instanceof UndraError, String(failure));
+    assert.equal(failure.kind, "options");
+    assert.match(failure.message, /LoadOptions\.worker\.ports/);
+    assert.ok(failure.message.includes(`0x${(portId >>> 0).toString(16)}`), failure.message);
+  }
+});
+
+/** Writes a module for `worker.ports` (ADR-049) into a scratch directory and returns its URL. */
+function workerPortsModule(source) {
+  const dir = mkdtempSync(join(tmpdir(), "undra-worker-ports-"));
+  scratch_dirs.push(dir);
+  const file = join(dir, "ports.mjs");
+  writeFileSync(file, source);
+  return pathToFileURL(file).href;
+}
+const scratch_dirs = [];
+after(() => {
+  for (const dir of scratch_dirs) rmSync(dir, { recursive: true, force: true });
+});
+
+test("wasm-worker: worker.ports serves an app's sync port and overrides Clock and Rng inside the worker thread (ADR-049)", async () => {
+  const url = workerPortsModule(`
+import { isMainThread } from "node:worker_threads";
+import { clockPort, rngPort } from ${JSON.stringify(pathToFileURL(dist).href)};
+export default {
+  [${ids.port("Sum")}]: { sync: true, methods: { [${ids.portMethod("Sum", "add")}]: (args) => {
+    if (isMainThread) throw new Error("the Sum port ran on the main thread");
     const r = new DataView(args.buffer, args.byteOffset, args.byteLength);
-    return u32(r.getUint32(0, true) + r.getUint32(4, true));
-  } } };
-  const core = await bootWorker({ log, ports: { [ids.port("Sum")]: sum }, onClose: (error) => closed.push(error) });
+    const out = new Uint8Array(4);
+    new DataView(out.buffer).setUint32(0, r.getUint32(0, true) + r.getUint32(4, true), true);
+    return out;
+  } } },
+  [${ids.port("Clock")}]: clockPort({ nowMs: () => 42, monotonicNs: () => 43n }),
+  [${ids.port("Rng")}]: rngPort({ fill: (out) => out.fill(1) }),
+};
+`);
+  const closed = [];
+  const core = await bootWorker({ workerPorts: url, onClose: (e) => closed.push(e) });
   const calc = await calculator(core);
-  // `Sum.add` returns a plain u32 and the core calls it synchronously: the worker cannot wait for the main thread,
-  // the port is unavailable to it, and the infallible proxy panics (a trap on wasm). Typed, not silent.
-  const failure = await call(core, calc, "sum_on_host", concat(u32(20), u32(22))).then(() => undefined, (e) => e);
-  assert.ok(failure instanceof UndraTransportError, String(failure));
-  assert.equal(failure.reason, "trap");
-  assert.ok(log.some((l) => l.level === 5 && l.target === "undra::panic"), `the panic reached the Log adapter: ${JSON.stringify(log)}`);
-  await until("the core to close", () => core.closed);
-  assert.equal(closed.length, 1);
-  // The main thread said why, once.
-  await until("the warning", () => log.some((l) => l.target === "undra::worker" && l.level === 3));
-  const warnings = log.filter((l) => l.target === "undra::worker" && l.level === 3);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0].message, /wasm-worker/);
-  assert.match(warnings[0].message, /wasm-main/);
+  assert.equal(decodeValue(codecs.u32, await call(core, calc, "sum_on_host", concat(u32(20), u32(22)))), 42);
+  assert.equal(decodeValue(codecs.i64, await call(core, calc, "clock_now")), 42n);
+  assert.equal(decodeValue(codecs.u64, await call(core, calc, "clock_monotonic")), 43n);
+  assert.deepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(3)))], [1, 1, 1]);
+  // Async ports of the main thread still cross: registered after load, announced to the worker.
+  core.registerPort(ids.port("Echo"), { sync: false, methods: { [ids.portMethod("Echo", "ping")]: async (args) => u32(new DataView(args.buffer, args.byteOffset, args.byteLength).getUint32(0, true) + 1000) } });
+  assert.equal(decodeValue(codecs.u32, await call(core, calc, "ping_host", u32(7))), 1007);
+  assert.deepEqual(closed, []);
+});
+
+test("wasm-worker: the module's adapters back the worker's clock, random source and timers", async () => {
+  const url = workerPortsModule(`
+export default {};
+let timers = 0;
+export const adapters = {
+  clock: { nowMs: () => 1_000_000, monotonicNs: () => 5n },
+  rng: { fill: (out) => out.fill(9) },
+  timer: { set: (id, delay, fire) => { timers++; setTimeout(() => fire(id), 0); } },
+};
+`);
+  const core = await bootWorker({ workerPorts: url });
+  const calc = await calculator(core);
+  assert.equal(decodeValue(codecs.i64, await call(core, calc, "clock_now")), 1_000_000n);
+  assert.deepEqual([...decodeValue(codecs.bytes, await call(core, calc, "random_bytes", u32(2)))], [9, 9]);
+  // A 10-second sleep that the module's timer fires at once.
+  assert.equal(decodeValue(codecs.u32, await call(core, calc, "sleep_ms", u32(10_000))), 10_000);
 });
 
 // ----- snapshot and restore on UndraCore (gap PA-5), in both wasm modes -------------------------------
