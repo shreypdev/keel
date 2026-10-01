@@ -390,6 +390,9 @@ where
             ..
         } = st;
         let len = index.source_len();
+        // Ranks cost a walk up the trees; nothing needs them when nothing is emitted (an
+        // unobserved list, a `count()`, kept ops that overflowed).
+        let ranks = out.recording();
         match op {
             PatchOp::Insert { index: at, item } => {
                 let at = at as usize;
@@ -399,11 +402,11 @@ where
                 }
                 match self.evaluate(params, Cow::Owned(item)) {
                     None => {
-                        index.insert(at, None);
+                        index.insert(at, None, ranks);
                         0
                     }
                     Some((key, value)) => {
-                        let rank = index.insert(at, Some(key)).unwrap_or_default();
+                        let rank = index.insert(at, Some(key), ranks).unwrap_or_default();
                         emit_insert(out, rank, value);
                         1
                     }
@@ -415,7 +418,7 @@ where
                     *needs_rebuild = true;
                     return 0;
                 }
-                match index.remove(at) {
+                match index.remove(at, ranks) {
                     Some(rank) => {
                         emit(out, rank, |index| PatchOp::Remove { index });
                         1
@@ -430,7 +433,7 @@ where
                     return 0;
                 }
                 let (key, value) = split(self.evaluate(params, Cow::Owned(item)));
-                match index.update(at, key) {
+                match index.update(at, key, ranks) {
                     Step::None => 0,
                     Step::Insert(rank) => {
                         emit_insert(out, rank, value.expect("a row that enters has a value"));
@@ -457,12 +460,13 @@ where
                     *needs_rebuild = true;
                     return 0;
                 }
-                match index.move_row(from, to) {
+                match index.move_row(from, to, ranks) {
                     Some((before, after)) => {
                         emit_move(out, before, after);
                         1
                     }
-                    None => 0,
+                    // Without ranks a move of a passing row may still have changed the view.
+                    None => usize::from(!ranks),
                 }
             }
             PatchOp::Clear => {
@@ -478,8 +482,9 @@ where
 
     /// A parameter changed: re-evaluates every row with the new values (in `st.spare_params`) and
     /// applies the transition of each row whose membership or sort key changed. At most
-    /// [`PARAM_WALK_LIMIT`] ops are sent; beyond that the view goes as a full value. O(n)
-    /// evaluations plus O(k log n) for k changed rows.
+    /// [`PARAM_WALK_LIMIT`] ops are sent; beyond that the view goes as a full value, and the rest
+    /// of the walk only updates the index (no ranks). O(n) evaluations plus O(k log n) for k changed
+    /// rows.
     fn walk(&self, st: &mut State<U, K>, current: &Arc<Vec<S>>) {
         let State {
             index,
@@ -501,25 +506,31 @@ where
                 break;
             }
             let (key, value) = split(self.evaluate(params, Cow::Borrowed(item)));
-            let step = index.transition(row, key);
-            let ops = match step {
-                Step::None | Step::Stay(_) => 0,
-                // No stage maps with a parameter in v1, so a row that stays did not change.
-                Step::Insert(_) | Step::Remove(_) | Step::Move { .. } => 1,
-            };
-            if ops > 0 {
+            if !index.unchanged(row, &key) {
                 changed = true;
-                sent += ops;
-                if sent > PARAM_WALK_LIMIT {
-                    out.go_stale();
-                } else {
-                    match step {
-                        Step::Insert(rank) => {
-                            emit_insert(out, rank, value.expect("a row that enters has a value"));
+                let ranks = out.recording();
+                let step = index.transition(row, key, ranks);
+                // No stage maps with a parameter in v1, so a row that stays did not change.
+                let emits = !matches!(step, Step::None | Step::Stay(_));
+                if ranks && emits {
+                    sent += 1;
+                    if sent > PARAM_WALK_LIMIT {
+                        out.go_stale();
+                    } else {
+                        match step {
+                            Step::Insert(rank) => {
+                                emit_insert(
+                                    out,
+                                    rank,
+                                    value.expect("a row that enters has a value"),
+                                );
+                            }
+                            Step::Remove(rank) => {
+                                emit(out, rank, |index| PatchOp::Remove { index })
+                            }
+                            Step::Move { from, to } => emit_move(out, from, to),
+                            Step::None | Step::Stay(_) => {}
                         }
-                        Step::Remove(rank) => emit(out, rank, |index| PatchOp::Remove { index }),
-                        Step::Move { from, to } => emit_move(out, from, to),
-                        Step::None | Step::Stay(_) => {}
                     }
                 }
             }
@@ -605,18 +616,47 @@ where
         rows.into_iter().map(|(_, value)| value).collect()
     }
 
+    /// Writes the view as its full value (a `Vec<U>`, SPEC 3.1) into `w`, which holds nothing else:
+    /// from the cache when there is one, else straight from the source rows in view order, without
+    /// materialising (a pipeline without a `map` encodes the source's own rows, no clone).
+    fn encode_view(&self, st: &mut State<U, K>, current: &Arc<Vec<S>>, w: &mut Writer) {
+        if let Some(cache) = &st.cache {
+            cache.encode(w);
+            return;
+        }
+        let len = st.index.view_len();
+        w.write_len(u32::try_from(len).expect("a view has fewer than u32::MAX rows"));
+        let mut pure = true;
+        let State { index, params, .. } = &*st;
+        index.for_each_view_source(|at| {
+            if !pure {
+                return;
+            }
+            match self.evaluate(params, Cow::Borrowed(&current[at])) {
+                Some((_, value)) => value.encode(w),
+                None => pure = false,
+            }
+        });
+        if !pure {
+            debug_assert!(
+                pure,
+                "{}",
+                purity_message("gave a different answer for a row that did not change")
+            );
+            st.needs_rebuild = true;
+            st.out.go_stale();
+            w.clear();
+            self.reference(st, current).encode(w);
+        }
+    }
+
     /// Materialises with the snapshot a drain just took, or takes one.
     fn materialise_in(
         &self,
         st: &mut State<U, K>,
         current: Option<Arc<Vec<S>>>,
     ) -> (Arc<Vec<U>>, Arc<Vec<S>>) {
-        let current = match current {
-            Some(current) => current,
-            None => self
-                .drain(st, true)
-                .expect("a drain that needs a snapshot takes one"),
-        };
+        let current = self.snapshot_in(st, current);
         (self.materialise_from(st, &current), current)
     }
 
@@ -641,13 +681,25 @@ where
         }
     }
 
-    /// The host was just sent `view` in full.
+    /// The host was just sent the view in full. Debug builds check its keys and keep a copy to
+    /// check every later patch against.
     #[allow(unused_variables)]
-    fn sent_full(st: &mut State<U, K>, view: &Arc<Vec<U>>, key: fn(&U) -> u64) {
+    fn sent_full(&self, st: &mut State<U, K>, current: &Arc<Vec<S>>, key: fn(&U) -> u64) {
         #[cfg(debug_assertions)]
         {
-            Self::check_keys(view, key);
+            let view = self.materialise_from(st, current);
+            Self::check_keys(&view, key);
             st.shadow = Some(view.as_ref().clone());
+        }
+    }
+
+    /// The snapshot a drain just took, or a fresh one (a drain that needs it).
+    fn snapshot_in(&self, st: &mut State<U, K>, current: Option<Arc<Vec<S>>>) -> Arc<Vec<S>> {
+        match current {
+            Some(current) => current,
+            None => self
+                .drain(st, true)
+                .expect("a drain that needs a snapshot takes one"),
         }
     }
 }
@@ -742,16 +794,16 @@ where
         let need_snapshot = cfg!(debug_assertions) || !retain;
         self.drained(need_snapshot, |node, st, current| {
             if !retain {
-                let (view, _) = node.materialise_in(st, current);
-                view.encode(w);
+                let current = node.snapshot_in(st, current);
+                node.encode_view(st, &current, w);
                 Stats::bump(&node.stats.full_values, 1);
                 return Emitted::Full;
             }
             if !st.out.armed || st.out.stale {
-                let (view, _) = node.materialise_in(st, current);
-                view.encode(w);
+                let current = node.snapshot_in(st, current);
+                node.encode_view(st, &current, w);
                 st.out.arm();
-                Self::sent_full(st, &view, key);
+                node.sent_full(st, &current, key);
                 Stats::bump(&node.stats.full_values, 1);
                 return Emitted::Full;
             }
@@ -787,10 +839,10 @@ where
 
     fn resync(&self, w: &mut Writer, key: fn(&U) -> u64) {
         self.drained(true, |node, st, current| {
-            let (view, _) = node.materialise_in(st, current);
-            view.encode(w);
+            let current = node.snapshot_in(st, current);
+            node.encode_view(st, &current, w);
             st.out.arm();
-            Self::sent_full(st, &view, key);
+            node.sent_full(st, &current, key);
             Stats::bump(&node.stats.full_values, 1);
         });
     }

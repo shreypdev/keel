@@ -650,6 +650,12 @@ impl<K: Ord> DerivedIndex<K> {
 
     /// Puts passing `row` into the sorted tree with `key`; returns its rank.
     fn attach_sorted(&mut self, row: u32, key: K) -> usize {
+        let s = self.attach_sorted_quiet(row, key);
+        self.srt.rank(s)
+    }
+
+    /// Puts passing `row` into the sorted tree with `key`; returns its sorted node.
+    fn attach_sorted_quiet(&mut self, row: u32, key: K) -> u32 {
         let s = self.srt.alloc(());
         if s as usize == self.key_of.len() {
             self.key_of.push(Some(key));
@@ -660,7 +666,7 @@ impl<K: Ord> DerivedIndex<K> {
         }
         self.sorted_of[row as usize] = s;
         self.place_sorted(s);
-        self.srt.rank(s)
+        s
     }
 
     /// Links detached sorted node `s` by its key and its row's current source position.
@@ -700,34 +706,55 @@ impl<K: Ord> DerivedIndex<K> {
     }
 
     /// A row inserted at source index `at` (`<= source_len`), passing with `key` or not; its rank
-    /// in the view when it passes.
-    pub(crate) fn insert(&mut self, at: usize, key: Option<K>) -> Option<usize> {
+    /// in the view when it passes. With `ranks == false` (nothing will be emitted: the index is
+    /// all that changes) no rank is computed and a passing row reports rank 0.
+    pub(crate) fn insert(&mut self, at: usize, key: Option<K>, ranks: bool) -> Option<usize> {
         let row = self.alloc_row(key.is_some());
         self.pos.attach_at(row, at);
         let key = key?;
-        Some(if self.sorted_view {
-            self.attach_sorted(row, key)
-        } else {
-            self.rank_of(row)
+        Some(match (self.sorted_view, ranks) {
+            (true, true) => self.attach_sorted(row, key),
+            (true, false) => {
+                self.attach_sorted_quiet(row, key);
+                0
+            }
+            (false, true) => self.rank_of(row),
+            (false, false) => 0,
         })
     }
 
-    /// The row at source index `at` (`< source_len`) removed; its rank when it was in the view.
-    pub(crate) fn remove(&mut self, at: usize) -> Option<usize> {
+    /// The row at source index `at` (`< source_len`) removed; its rank when it was in the view
+    /// (0 when `ranks == false`).
+    pub(crate) fn remove(&mut self, at: usize, ranks: bool) -> Option<usize> {
         let row = self.pos.select(at);
-        let rank = self.pos.own(row).then(|| self.rank_of(row));
-        if rank.is_some() && self.sorted_view {
+        let passed = self.pos.own(row);
+        let rank = (passed && ranks).then(|| self.rank_of(row));
+        if passed && self.sorted_view {
             self.detach_sorted(row);
         }
         self.pos.detach(row);
         self.pos.free(row);
-        rank
+        passed.then(|| rank.unwrap_or(0))
     }
 
     /// The row at source index `at` re-evaluated to `now`.
-    pub(crate) fn update(&mut self, at: usize, now: Option<K>) -> Step {
+    pub(crate) fn update(&mut self, at: usize, now: Option<K>, ranks: bool) -> Step {
         let row = self.pos.select(at);
-        self.transition(row, now)
+        self.transition(row, now, ranks)
+    }
+
+    /// Whether evaluating `row` to `now` changes neither its membership nor its sort key: the
+    /// parameter walk skips such rows before touching the trees.
+    pub(crate) fn unchanged(&self, row: u32, now: &Option<K>) -> bool {
+        let passes = self.pos.own(row);
+        match now {
+            None => !passes,
+            Some(key) => {
+                passes
+                    && (!self.sorted_view
+                        || self.key_of[self.sorted_of[row as usize] as usize].as_ref() == Some(key))
+            }
+        }
     }
 
     /// The positional id of the row at source index `at` (tests).
@@ -753,13 +780,16 @@ impl<K: Ord> DerivedIndex<K> {
     }
 
     /// Row `row` re-evaluated: its membership and sort key are now `now`. The shared transition
-    /// of `Update` and of the parameter walk (ADR-039 section 2).
-    pub(crate) fn transition(&mut self, row: u32, now: Option<K>) -> Step {
+    /// of `Update` and of the parameter walk (ADR-039 section 2). With `ranks == false` the index
+    /// changes exactly as it would otherwise, but no rank is computed: the step's ranks are 0, and
+    /// a sort-key change is reported as `Move { from: 0, to: 0 }` whether or not the row moved.
+    pub(crate) fn transition(&mut self, row: u32, now: Option<K>, ranks: bool) -> Step {
         let was = self.pos.own(row);
+        let rank = |index: &Self| if ranks { index.rank_of(row) } else { 0 };
         match (was, now) {
             (false, None) => Step::None,
             (true, None) => {
-                let rank = self.rank_of(row);
+                let rank = rank(self);
                 if self.sorted_view {
                     self.detach_sorted(row);
                 }
@@ -768,24 +798,26 @@ impl<K: Ord> DerivedIndex<K> {
             }
             (false, Some(key)) => {
                 self.pos.set_own(row, true);
-                Step::Insert(if self.sorted_view {
-                    self.attach_sorted(row, key)
-                } else {
-                    self.rank_of(row)
-                })
+                if self.sorted_view {
+                    self.attach_sorted_quiet(row, key);
+                }
+                Step::Insert(rank(self))
             }
             (true, Some(key)) => {
                 if !self.sorted_view {
-                    return Step::Stay(self.rank_of(row));
+                    return Step::Stay(rank(self));
                 }
                 let s = self.sorted_of[row as usize];
                 if self.key_of[s as usize].as_ref() == Some(&key) {
-                    return Step::Stay(self.srt.rank(s));
+                    return Step::Stay(rank(self));
                 }
-                let from = self.srt.rank(s);
+                let from = rank(self);
                 self.srt.detach(s);
                 self.key_of[s as usize] = Some(key);
                 self.place_sorted(s);
+                if !ranks {
+                    return Step::Move { from: 0, to: 0 };
+                }
                 let to = self.srt.rank(s);
                 if from == to {
                     Step::Stay(to)
@@ -797,22 +829,58 @@ impl<K: Ord> DerivedIndex<K> {
     }
 
     /// The row at source index `from` moved so that it ends at `to` (SPEC 3.8 `Move`); its view
-    /// ranks before and after when it is in the view and they differ.
-    pub(crate) fn move_row(&mut self, from: usize, to: usize) -> Option<(usize, usize)> {
+    /// ranks before and after when it is in the view and they differ (never computed, `None`,
+    /// with `ranks == false`).
+    pub(crate) fn move_row(
+        &mut self,
+        from: usize,
+        to: usize,
+        ranks: bool,
+    ) -> Option<(usize, usize)> {
         let row = self.pos.select(from);
         let passes = self.pos.own(row);
-        let before = passes.then(|| self.rank_of(row));
+        let before = (passes && ranks).then(|| self.rank_of(row));
         self.pos.detach(row);
         self.pos.attach_at(row, to);
-        let before = before?;
-        if self.sorted_view {
+        if passes && self.sorted_view {
             // Its key did not change; only its place among equal keys can.
             let s = self.sorted_of[row as usize];
             self.srt.detach(s);
             self.place_sorted(s);
         }
+        let before = before?;
         let after = self.rank_of(row);
         (before != after).then_some((before, after))
+    }
+
+    /// Calls `f` with the source index of every row of the view, in view order, without
+    /// allocating for an unsorted view (a sorted one needs one pass to number the rows). O(n).
+    pub(crate) fn for_each_view_source(&self, mut f: impl FnMut(usize)) {
+        if !self.sorted_view {
+            let mut row = self.pos.first();
+            let mut at = 0;
+            while row != NIL {
+                if self.pos.own(row) {
+                    f(at);
+                }
+                at += 1;
+                row = self.pos.next(row);
+            }
+            return;
+        }
+        let mut at_of = vec![0_usize; self.pos.capacity_ids()];
+        let mut row = self.pos.first();
+        let mut at = 0;
+        while row != NIL {
+            at_of[row as usize] = at;
+            at += 1;
+            row = self.pos.next(row);
+        }
+        let mut s = self.srt.first();
+        while s != NIL {
+            f(at_of[self.row_of[s as usize] as usize]);
+            s = self.srt.next(s);
+        }
     }
 
     /// Every row removed; whether the view had any.
@@ -871,32 +939,7 @@ impl<K: Ord> DerivedIndex<K> {
     /// The source index of every row of the view, in view order. O(n).
     pub(crate) fn view_sources(&self) -> Vec<usize> {
         let mut out = Vec::with_capacity(self.view_len());
-        if !self.sorted_view {
-            let mut row = self.pos.first();
-            let mut at = 0;
-            while row != NIL {
-                if self.pos.own(row) {
-                    out.push(at);
-                }
-                at += 1;
-                row = self.pos.next(row);
-            }
-            return out;
-        }
-        // One pass gives every row its source index, a second walks the view.
-        let mut at_of = vec![0_usize; self.pos.capacity_ids()];
-        let mut row = self.pos.first();
-        let mut at = 0;
-        while row != NIL {
-            at_of[row as usize] = at;
-            at += 1;
-            row = self.pos.next(row);
-        }
-        let mut s = self.srt.first();
-        while s != NIL {
-            out.push(at_of[self.row_of[s as usize] as usize]);
-            s = self.srt.next(s);
-        }
+        self.for_each_view_source(|at| out.push(at));
         out
     }
 
@@ -1108,7 +1151,7 @@ mod tests {
         let keys: Vec<u8> = (0..10_000_u32).map(|i| (i * 7 % 4) as u8).collect();
         let mut index = DerivedIndex::<u8>::new(true);
         for (i, &k) in keys.iter().enumerate() {
-            index.insert(i, Some(k));
+            index.insert(i, Some(k), true);
         }
         index.validate();
         let mut expected: Vec<usize> = (0..keys.len()).collect();
@@ -1160,6 +1203,10 @@ mod tests {
     /// The host list: identities of source rows (a counter), in view order.
     fn run_index(ops: &[IOp], sorted: bool) {
         let mut index = DerivedIndex::<u8>::new(sorted);
+        // The same ops without ranks (what an unobserved list or a walk past its limit does): the
+        // index must end up identical.
+        let mut quiet = DerivedIndex::<u8>::new(sorted);
+        let ranks = true;
         // The model: per source row, (identity, membership/key).
         let mut rows: Vec<(u32, Row)> = Vec::new();
         let mut host: Vec<u32> = Vec::new();
@@ -1172,7 +1219,8 @@ mod tests {
                     let at = at % (len + 1);
                     next += 1;
                     rows.insert(at, (next, row));
-                    if let Some(r) = index.insert(at, row) {
+                    assert_eq!(quiet.insert(at, row, false).is_some(), row.is_some());
+                    if let Some(r) = index.insert(at, row, ranks) {
                         rank_ok(r, host.len());
                         host.insert(r, next);
                     }
@@ -1180,14 +1228,23 @@ mod tests {
                 IOp::Remove(at) if len > 0 => {
                     let at = at % len;
                     rows.remove(at);
-                    if let Some(r) = index.remove(at) {
+                    quiet.remove(at, false);
+                    if let Some(r) = index.remove(at, ranks) {
                         host.remove(r);
                     }
                 }
                 IOp::Update(at, row) if len > 0 => {
                     let at = at % len;
                     rows[at].1 = row;
-                    match index.update(at, row) {
+                    let row_id = quiet.row_at(at);
+                    let unchanged = quiet.unchanged(row_id, &row);
+                    let step = quiet.update(at, row, false);
+                    assert_eq!(
+                        unchanged,
+                        matches!(step, Step::None | Step::Stay(_)),
+                        "`unchanged` agrees with the transition"
+                    );
+                    match index.update(at, row, ranks) {
                         Step::None | Step::Stay(_) => {}
                         Step::Insert(r) => host.insert(r, rows[at].0),
                         Step::Remove(r) => {
@@ -1203,7 +1260,8 @@ mod tests {
                     let (from, to) = (a % len, b % len);
                     let row = rows.remove(from);
                     rows.insert(to, row);
-                    if let Some((f, t)) = index.move_row(from, to) {
+                    assert_eq!(quiet.move_row(from, to, false), None);
+                    if let Some((f, t)) = index.move_row(from, to, ranks) {
                         let id = host.remove(f);
                         host.insert(t, id);
                     }
@@ -1211,10 +1269,12 @@ mod tests {
                 IOp::Clear => {
                     rows.clear();
                     index.clear();
+                    quiet.clear();
                     host.clear();
                 }
                 IOp::Rebuild => {
                     index.rebuild(rows.iter().map(|(_, r)| *r).collect());
+                    quiet.rebuild(rows.iter().map(|(_, r)| *r).collect());
                     host = reference(&rows.iter().map(|(_, r)| *r).collect::<Vec<_>>(), sorted)
                         .into_iter()
                         .map(|i| rows[i].0)
@@ -1223,6 +1283,12 @@ mod tests {
                 _ => {}
             }
             index.validate();
+            quiet.validate();
+            assert_eq!(
+                quiet.view_sources(),
+                index.view_sources(),
+                "the quiet twin after {op:?}"
+            );
             let model: Vec<Row> = rows.iter().map(|(_, r)| *r).collect();
             let expected = reference(&model, sorted);
             assert_eq!(index.view_sources(), expected, "after {op:?}");
@@ -1278,23 +1344,23 @@ mod tests {
         for i in 0..3_000_u32 {
             let at = (i as usize * 31) % (len + 1);
             let pass = i % 5 != 0;
-            index.insert(at, pass.then_some(Chaos(i)));
+            index.insert(at, pass.then_some(Chaos(i)), true);
             len += 1;
             passing += usize::from(pass);
             if i % 3 == 0 && len > 1 {
                 let at = (i as usize * 17) % len;
                 let key = (i % 2 == 0).then_some(Chaos(i ^ 0xFF));
                 let was = index.passes(index.row_at(at));
-                index.update(at, key.clone());
+                index.update(at, key.clone(), true);
                 passing = passing - usize::from(was) + usize::from(key.is_some());
             }
             if i % 7 == 0 && len > 1 {
-                index.move_row((i as usize * 13) % len, (i as usize * 3) % len);
+                index.move_row((i as usize * 13) % len, (i as usize * 3) % len, true);
             }
             if i % 11 == 0 && len > 1 {
                 let at = (i as usize * 19) % len;
                 let was = index.passes(index.row_at(at));
-                index.remove(at);
+                index.remove(at, true);
                 len -= 1;
                 passing -= usize::from(was);
             }
