@@ -8,6 +8,7 @@
 //!
 //! [core]
 //! path = "core"
+//! namespace = "todo"   # optional: names the core's symbol and libraries (ADR-044)
 //! ```
 //!
 //! Every key but `project.name` and `project.id` has a default, and an unknown key is an error
@@ -180,6 +181,10 @@ pub struct ProjectConfig {
     pub core_path: String,
     /// The core's Cargo package name, when it cannot be found by looking at the directory.
     pub core_package: Option<String>,
+    /// The core's namespace (ADR-044): it names the core's one C export (`<namespace>_undra_api`),
+    /// its libraries (`lib<namespace>.so`, `<namespace>.wasm`, ...) and the generated entry point
+    /// (`Undra<Namespace>`). `None`: the core's package name in snake case.
+    pub core_namespace: Option<String>,
     /// Where `undra bindgen` writes, relative to the project.
     pub generated: String,
     /// Where `undra build` writes artifacts, relative to the project.
@@ -227,6 +232,7 @@ impl ProjectConfig {
             platforms,
             core_path: "core".to_owned(),
             core_package: None,
+            core_namespace: None,
             generated: "generated".to_owned(),
             build: "build".to_owned(),
             undra_path: None,
@@ -277,11 +283,31 @@ impl ProjectConfig {
 
         let mut cfg = ProjectConfig::new(&name, &id, platforms);
 
-        reader.check_keys("core", &["path", "package"])?;
+        reader.check_keys("core", &["path", "package", "namespace"])?;
         if let Some(v) = reader.opt_str("core", "path")? {
             cfg.core_path = v;
         }
         cfg.core_package = reader.opt_str("core", "package")?;
+        if let Some(entry) = reader.get("core", "namespace") {
+            let Value::Str(namespace) = &entry.value else {
+                return Err(CliError::bad_config(
+                    file,
+                    format!("line {}: namespace must be a string", entry.line),
+                    "write it in quotes: namespace = \"acme_pay\"",
+                ));
+            };
+            if let Err(why) = check_namespace(namespace) {
+                return Err(CliError::bad_config(
+                    file,
+                    format!(
+                        "line {}: `{namespace}` is not a core namespace: {why}",
+                        entry.line
+                    ),
+                    "use lowercase letters, digits and `_`, starting with a letter, at most 32 characters (for example \"acme_pay\")",
+                ));
+            }
+            cfg.core_namespace = Some(namespace.clone());
+        }
 
         reader.check_keys("paths", &["generated", "build"])?;
         if let Some(v) = reader.opt_str("paths", "generated")? {
@@ -440,6 +466,22 @@ impl ProjectConfig {
         if let Some(package) = &self.core_package {
             let _ = writeln!(out, "package = {}", quote(package));
         }
+        match &self.core_namespace {
+            Some(namespace) => {
+                let _ = writeln!(
+                    out,
+                    "# Names the core's symbol, libraries and generated entry point; unique per app.\n\
+                     namespace = {}",
+                    quote(namespace)
+                );
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "# namespace = \"todo\"   # names the core's symbol, libraries and entry point; default: the crate name"
+                );
+            }
+        }
         let _ = writeln!(
             out,
             "\n[paths]\n\
@@ -541,6 +583,40 @@ impl ProjectConfig {
         }
         out
     }
+}
+
+/// The longest core namespace (ADR-044): it is part of a C symbol and of file names.
+pub const MAX_NAMESPACE_LEN: usize = 32;
+
+/// Checks a core namespace (`[core] namespace`, ADR-044): a lowercase C identifier of 1 to 32
+/// bytes that starts with a letter. Lowercase only, so that `lib<namespace>.so` and
+/// `<namespace>.wasm` never differ by case alone on a case-insensitive file system.
+///
+/// # Errors
+///
+/// What is wrong with it, in words.
+pub fn check_namespace(namespace: &str) -> std::result::Result<(), String> {
+    if namespace.is_empty() {
+        return Err("it is empty".to_owned());
+    }
+    if namespace.len() > MAX_NAMESPACE_LEN {
+        return Err(format!(
+            "it is {} characters long, and a namespace has at most {MAX_NAMESPACE_LEN}",
+            namespace.len()
+        ));
+    }
+    if !namespace.starts_with(|c: char| c.is_ascii_lowercase()) {
+        return Err("it must start with a lowercase letter".to_owned());
+    }
+    if let Some(c) = namespace
+        .chars()
+        .find(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_'))
+    {
+        return Err(format!(
+            "`{c}` is not allowed (lowercase letters, digits and `_` only)"
+        ));
+    }
+    Ok(())
 }
 
 struct Reader<'a> {

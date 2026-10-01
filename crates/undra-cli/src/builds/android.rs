@@ -1,9 +1,10 @@
-//! The Android build: the shim as one `libundra_core.so` per ABI, through `cargo ndk`.
+//! The Android build: the shim as one `lib<namespace>.so` per ABI, through `cargo ndk`.
 //!
-//! The result is the `jniLibs/` layout Gradle packages (`<abi>/libundra_core.so`). The name
-//! matters: the Kotlin runtime loads `undra_core` by default (`System.loadLibrary`). The library
-//! is built with the `jni` feature, which registers the natives of `dev.undra.runtime.UndraNative`
-//! in `JNI_OnLoad`, and is checked for the 16 KB page alignment that Google Play requires of
+//! The result is the `jniLibs/` layout Gradle packages (`<abi>/lib<namespace>.so`). The name
+//! matters: the generated `UndraCoreNative` loads the core by its namespace (`System.loadLibrary`),
+//! so two cores (two namespaces) sit side by side in one APK (ADR-044). The library is built with
+//! the `jni` feature, whose `JNI_OnLoad` registers the natives on that generated class
+//! (`<kotlin package>.UndraCoreNative`), and is checked for the 16 KB page alignment that Google Play requires of
 //! 64-bit libraries (NDK r27 and `cargo-ndk` 4 do it by default; the check says so if a toolchain
 //! does not).
 
@@ -29,7 +30,7 @@ pub fn triple_of(abi: &str) -> &'static str {
     }
 }
 
-/// Builds `build/android/jniLibs/<abi>/libundra_core.so` for every ABI of `[android] abis`.
+/// Builds `build/android/jniLibs/<abi>/lib<namespace>.so` for every ABI of `[android] abis`.
 ///
 /// # Errors
 ///
@@ -76,6 +77,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
     }
 
     let manifest = session.shim_manifest()?;
+    let library = format!("lib{}.so", session.namespace()?);
     let target_dir = session.target_dir()?;
     let staging = crate::shim::android_stage_dir(&target_dir, &session.project.root);
     remove_dir_all(&staging)?;
@@ -132,7 +134,7 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
                 "update cargo-ndk (`cargo install cargo-ndk --force`) and try again",
             ));
         }
-        let dest = jni_libs.join(abi).join("libundra_core.so");
+        let dest = jni_libs.join(abi).join(&library);
         copy_file(&built, &dest)?;
         let mut note = None;
         if let Ok(bytes) = std::fs::read(&dest) {
@@ -155,18 +157,20 @@ pub fn build(session: &Session<'_>, release: bool) -> Result<Vec<Artifact>> {
         });
     }
     let root = &session.project.root;
-    if let Some(message) = gradle::reconcile(root, &jni_libs, &cfg.abis)?.message(root, &jni_libs) {
+    if let Some(message) =
+        gradle::reconcile(root, &jni_libs, &cfg.abis, &library)?.message(root, &jni_libs)
+    {
         session.ui.warn(&message);
     }
     Ok(artifacts)
 }
 
 /// The size of the release library an earlier `undra build --platform android --release` left in
-/// Cargo's target directory for `abi`, if there is one.
-fn earlier_release_size(target_dir: &Path, abi: &str) -> Option<u64> {
+/// Cargo's target directory for `abi`, if there is one (`shim` is the shim's library name).
+fn earlier_release_size(target_dir: &Path, abi: &str, shim: &str) -> Option<u64> {
     let library = target_dir
         .join(triple_of(abi))
-        .join("release/libundra_core.so");
+        .join(format!("release/lib{shim}.so"));
     std::fs::metadata(library).ok().map(|m| m.len())
 }
 
@@ -174,10 +178,10 @@ fn earlier_release_size(target_dir: &Path, abi: &str) -> Option<u64> {
 /// with `--release` would change.
 ///
 /// `debug` is the largest library of the build and `abi` its ABI; `target_dir` is where Cargo put
-/// an earlier release build, whose size makes the hint exact.
+/// an earlier release build of the shim `shim`, whose size makes the hint exact.
 #[must_use]
-pub fn debug_size_hint(target_dir: &Path, debug: u64, abi: &str) -> String {
-    let release = earlier_release_size(target_dir, abi).filter(|size| *size > 0);
+pub fn debug_size_hint(target_dir: &Path, shim: &str, debug: u64, abi: &str) -> String {
+    let release = earlier_release_size(target_dir, abi, shim).filter(|size| *size > 0);
     let how = "undra build --platform android --release";
     match release {
         Some(release) => format!(
@@ -202,6 +206,7 @@ pub(crate) fn hint(session: &Session<'_>, artifacts: &[Artifact]) -> Option<Stri
     let abi = largest.path.parent()?.file_name()?.to_str()?;
     Some(debug_size_hint(
         &session.target_dir().ok()?,
+        &crate::shim::shim_lib_name(&session.project.root),
         largest.size,
         abi,
     ))
@@ -214,7 +219,12 @@ mod tests {
     #[test]
     fn the_debug_hint_names_the_release_command_and_the_saving() {
         // No release build to measure: a rule of thumb.
-        let none = debug_size_hint(Path::new("/does/not/exist"), 42_400_000, "arm64-v8a");
+        let none = debug_size_hint(
+            Path::new("/does/not/exist"),
+            "shim",
+            42_400_000,
+            "arm64-v8a",
+        );
         assert!(
             none.contains("debug build")
                 && none.contains("42.4 MB per ABI")
@@ -228,14 +238,14 @@ mod tests {
         let target = crate::fsutil::unique_temp_dir("android-hint");
         let release = target.join("aarch64-linux-android/release");
         std::fs::create_dir_all(&release).unwrap();
-        std::fs::write(release.join("libundra_core.so"), vec![0_u8; 1_500_000]).unwrap();
-        let known = debug_size_hint(&target, 42_400_000, "arm64-v8a");
+        std::fs::write(release.join("libshim.so"), vec![0_u8; 1_500_000]).unwrap();
+        let known = debug_size_hint(&target, "shim", 42_400_000, "arm64-v8a");
         assert!(
             known.contains("a release build is 1.5 MB, 28x smaller"),
             "{known}"
         );
         // Another ABI has no release library of its own.
-        assert!(debug_size_hint(&target, 42_300_000, "x86_64").contains("typically"));
+        assert!(debug_size_hint(&target, "shim", 42_300_000, "x86_64").contains("typically"));
         let _ = std::fs::remove_dir_all(target);
     }
 

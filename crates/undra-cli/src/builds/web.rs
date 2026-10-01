@@ -29,7 +29,8 @@ const WASM_OPT_FEATURES: &[&str] = &[
     "--enable-reference-types",
 ];
 
-/// Builds `build/web/undra_core.wasm`.
+/// Builds `build/web/<namespace>.wasm` (ADR-044: a wasm module is its own namespace, so only the
+/// file is named after it; its exports keep their SPEC 7 names).
 ///
 /// # Errors
 ///
@@ -63,7 +64,7 @@ pub fn build(session: &Session<'_>) -> Result<Vec<Artifact>> {
 
     let out_dir = session.project.build_dir().join("web");
     create_dir_all(&out_dir)?;
-    let out = out_dir.join("undra_core.wasm");
+    let out = out_dir.join(format!("{}.wasm", session.namespace()?));
     let raw_size = size_of(&built);
 
     let mut note = None;
