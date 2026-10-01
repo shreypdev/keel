@@ -40,8 +40,25 @@ full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
 `bash contract-tests/run-all.sh` for the scenario grid.
 
 ## v1.1 / v1.2 program (2026-10-01)
-Spec: `.10x/specs/2026-10-01-v1x-default-choice-design.md` (tracks A–H; Amendment A: the founder
-approved all six v1.2 bets). Phase 1 in flight: `gaps` (audit + ADR drafts 034–037), `competitive`
-(sourced limitations matrix), `dev-loop` (B1 Android remote mode, B2 auto-reconnect), `schema-json`
-(C1, C2), `diagnostics` (D1), `device-bench` (E1), `react-native` (G1 with ADR-038),
-`derived-lists` (E2 ADR-039). Distribution stays parked until after v2.
+Spec: `.10x/specs/2026-10-01-v1x-default-choice-design.md` (tracks A–H; Amendments A–D: all six v1.2
+bets approved; gap-audit and boundary ADRs 034–051 accepted in direction). Distribution stays parked
+until after v2.
+
+**Merged (checkpoint 5 in status.md):** gaps + competitive + ADR-039 (design), schema-json (C1, C2),
+device-bench (E1; the honest web size is 135 KB gzipped, over budget — E5), diagnostics (D1), dev-loop
+(B1, B2, ADR-051). Main `a0d638f`.
+
+**Merge queue, in order (cross-merge main on the branch, full matrix, fast-forward):** `parity`
+(C3/C4; Kotlin/TS `UndraCallError` sets, non-throwing commands, TS snapshot/restore, recursive
+records, `docs/ERRORS.md`) → `android-adapters` (`AndroidPlatformDefaults.install` + six adapters,
+instrumented tests; hand-merge `UndraApp.kt` keeping dev-loop's start/load/retry skeleton and the
+frame pacer, the adapters replacing the fakes; M1 Maven publishing is an open item) →
+`runtime-lifecycle` (Track A; review `.10x/reviews/2026-10-01-runtime-lifecycle-review.md` when it
+lands) → `react-native` (G1; add the RN CI job, the iOS reload test, G1b standard ports → native
+adapters, ADR-044 migration later). In parallel: `tooling` (D2–D5) and `wasm-size` (E5, ADR-052).
+
+**Next:** wave 0 of `.10x/specs/2026-10-01-boundary-surface-plan.md` (`abi-table` ADR-044 — after
+Track A and RN merge, it rewrites the FFI they touch; `ios-floor` ADR-045 — after parity;
+`newtypes` ADR-042 — after parity and Track A), `persistence-v2` (ADR-037 + A6/A7 of ADR-049),
+`dev-reload` (B3), `testkit` (F1, F2), derived lists (ADR-039), E4 binding call path, then waves
+1–3 and the v1.2 bets (B4 devtools, G2/G3 ports, G4 Dart), H1–H4 as the APIs settle.
