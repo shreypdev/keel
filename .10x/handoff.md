@@ -38,3 +38,10 @@ full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
 ## How to run everything
 `source scripts/env.sh`, then the commands in status.md's matrix table and `docs/ONBOARDING.md`;
 `bash contract-tests/run-all.sh` for the scenario grid.
+
+## v1.1 / v1.2 program (2026-10-01)
+Spec: `.10x/specs/2026-10-01-v1x-default-choice-design.md` (tracks A–H; Amendment A: the founder
+approved all six v1.2 bets). Phase 1 in flight: `gaps` (audit + ADR drafts 034–037), `competitive`
+(sourced limitations matrix), `dev-loop` (B1 Android remote mode, B2 auto-reconnect), `schema-json`
+(C1, C2), `diagnostics` (D1), `device-bench` (E1), `react-native` (G1 with ADR-038),
+`derived-lists` (E2 ADR-039). Distribution stays parked until after v2.
