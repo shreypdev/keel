@@ -29,9 +29,26 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3). Main `a22b8ed`. C
 (1.99.0 broke it on 2026-10-01; the bump is a deliberate piece: four workflow pins, `rustup update`,
 `TRYBUILD=overwrite` goldens, bench re-baseline).
 
-**Merge queue (cross-merge main on the branch, full matrix, fast-forward):** `wasm-size` (E5, ADR-052,
-under review) → `tooling` (D2–D5, under review) → `dev-reload` (B3, ADR-053 accepted, implementing) →
-`rn-adapters` (G1b, ADR-038 Amendment B) → `abi-table` (ADR-044) → `persistence-v2` (ADR-037/049). In parallel: `tooling` (D2–D5) and `wasm-size` (E5, ADR-052).
+**Merge queue (cross-merge main on the branch, full matrix, fast-forward).** Every branch below lives in
+`/Users/shrey/Desktop/src/.work/<name>` with its record in `.10x/decisions/sde/<name>.md` there:
+1. `wasm-size` (E5, ADR-052 Accepted; opus review `.10x/reviews/2026-10-01-wasm-size-review.md`: merge after
+   fixes, all on the branch at `66954d1`, main is an ancestor). **One integrator decision is owed (D1):** after
+   merging main the JS runtime measures 24,841 B gzipped against the 24 KB budget set in ADR-052 decision 2.
+   Decision: restate the JS budget to **26 KB** in `bench/budgets.toml` + ADR-052 (dated note: parity's error
+   channel added ~900 lines; `ts-runtime-size` targets 16 KB), then `scripts/wasm-size.sh --record`,
+   `node site/scripts/build-all.mjs` (README/site move to 102.7 KB), commit, fast-forward, `wt.sh rm`.
+2. `tooling` (D2–D5; opus review running on the cross-merged tree; the record says what landed).
+3. `dev-reload` (B3; ADR-053 Accepted with four decisions; implementing).
+4. `rn-adapters` (G1b; ADR-038 Amendment B accepted: hybrid with a C++ Kv/Fs core; implementing; adds a
+   `platform` module to the playground core — regenerate bindings at the cross).
+5. `abi-table` (ADR-044; implementing; migrates the RN host to the table).
+6. `persistence-v2` (ADR-037 + ADR-049 A6/A7; implementing).
+7. `derived-lists` (ADR-039; implementing; S19, nine bench rows, the playground's `Todos` on recorded ops).
+Each still needs its adversarial review (opus) before merging, except 1 and 2 which have one.
+
+**Also owed:** the Rust 1.99.0 bump (ci.yml header says how; do it when no worktree is mid-build);
+`ts-runtime-size` (16 KB target); the Swift Fs adapter misses SPEC §8's symlink rule (rn-adapters' record has
+the case); a custom port in the playground for the reference's Ports section; `undra bindgen --declarations`.
 
 **Next:** wave 0 of `.10x/specs/2026-10-01-boundary-surface-plan.md` (`abi-table` ADR-044 — after
 Track A and RN merge, it rewrites the FFI they touch; `ios-floor` ADR-045 — after parity;
