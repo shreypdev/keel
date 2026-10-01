@@ -169,14 +169,12 @@ The page loads the core as a wasm module. To use the core that `undra dev` serve
 ts
 
 ```ts
-await UndraCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash: UndraIds.schemaHash });
+await UndraMyappCore.load({ mode: "remote", url: "ws://127.0.0.1:7443" });
 ```
 
 ### iOS
 
 Open `ios/` in Xcode and run on a simulator. There is no `undra build` to run first: the *Build the Undra core* Run Script phase of the Xcode project builds the core before the app compiles, a Debug build with a debug core and a Release build with a release one, and Xcode skips it while the core is unchanged. In debug builds the generated app reads `UNDRA_DEV_URL` (for example `ws://<your Mac>:7443`) and attaches to `undra dev` when it is set.
-
-Debug builds of the core need the library linked with `-force_load`, or the linker drops the core's registrations and the schema looks empty; the generated Xcode project already does this. Release builds need no flag.
 
 ### Android
 
@@ -193,12 +191,12 @@ undra build --release        # every platform in undra.toml
 undra build --platform ios,android,web --release
 ```
 
-| Platform | Artifact, below `build/` |
+| Platform | Artifact, below `build/`, named after the core's namespace |
 | --- | --- |
-| iOS | `ios/UndraCore.xcframework` (device and simulator slices) |
-| Android | `android/jniLibs/<abi>/libundra_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
-| Web | `web/undra_core.wasm`, release profile then `wasm-opt -Oz` |
-| Host | `host/libundra_core.{dylib,so}`, for JVM tests and `undra bindgen` |
+| iOS | `ios/MyappCore.xcframework` (device and simulator slices) |
+| Android | `android/jniLibs/<abi>/libmyapp_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
+| Web | `web/myapp_core.wasm`, release profile then `wasm-opt -Oz` |
+| Host | `host/libmyapp_core.{dylib,so}`, for JVM tests and `undra bindgen` |
 
 `undra init` also writes `.github/workflows/undra.yml`: a job for the core (format, clippy, tests, `undra bindgen --check`) and one per app, each installing `undra` at the version pinned once at the top of the file. When a newer Undra is out, `undra upgrade` moves every pin of the project (the core's dependency, the runtimes, the workflow) in step, regenerates the bindings and prints the migration notes of every release it crosses; `undra upgrade --dry-run` shows the lines first.
 
@@ -618,10 +616,9 @@ web/src/undra.ts
 
 ```ts
 const adapters = { http: server, kv: memoryKv() };
-await UndraCore.load({
+await UndraPlaygroundCore.load({
   mode: "wasm-main",
   wasm: new URL(wasmUrl, location.href),
-  expectedSchemaHash: UndraIds.schemaHash,
   adapters,
 });
 ```
@@ -633,17 +630,14 @@ let adapters = Adapters.platformDefault
     .removing(portId: fnv1a32("port.Connectivity"))
     .replacing(PlaygroundNetwork.shared)
     .replacing(KvAdapter(directory: store))
-try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
+try UndraPlaygroundCore.load(.inproc(adapters: adapters))
 ```
 
 android/.../UndraApp.kt
 
 ```kotlin
-val core = UndraCore.load(
-    LoadOptions(
-        expectedSchemaHash = UndraIds.SCHEMA_HASH,
-        mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
-    ),
+val core = UndraPlaygroundCore.load(
+    LoadOptions(mirror = MirrorOptions(framePacer = ChoreographerFramePacer())),
 )
 // Http, Kv, SecureStore, Fs, Connectivity and Lifecycle: the real adapters, nothing faked.
 AndroidPlatformDefaults.install(core, this)
@@ -714,6 +708,60 @@ assert_eq!(http.call_count(), 3);
 Time works the same way. `FakeClock` is the single source of time for both `Clock` and `Timer`, so `ctx.sleep` asks for a timer and advancing the fake clock serves it: sleeps wake at exactly their deadline. On a runtime with the fakes installed, advance time with `Fakes::advance`, not `TestRuntime::advance`.
 
 The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/several-cores.html
+
+# One core or several
+
+Most apps need one core. When a second one arrives, a vendor's SDK or a module another team ships, the two load into the same app side by side, each under its own namespace.
+
+## One core first
+
+Put the app's domain in one core and split it into crates inside it. Add a second core only for code that ships on its own.
+
+|  | One core, several crates | Several cores |
+| --- | --- | --- |
+| State and transactions | shared: one store graph, one order of writes | separate: each core has its own |
+| Releases | together | each on its own schedule |
+| Cost | one runtime | a runtime, its threads and a copy of Undra per core |
+
+## The namespace
+
+A core's namespace names everything it exports, so two cores never collide. By default it is the core's package name in snake case; set it in `undra.toml` (lowercase letters, digits and `_`, at most 32 characters).
+
+undra.toml
+
+```toml
+[core]
+path = "core"
+namespace = "acme_pay"
+```
+
+| What | Named |
+| --- | --- |
+| The C symbol, which returns the core's table | `acme_pay_undra_api` |
+| iOS | `AcmePayCore.xcframework`, one prelinked `libacme_pay.a` per slice |
+| Android | `libacme_pay.so` |
+| Web | `acme_pay.wasm` |
+| The bindings' entry, in Swift, Kotlin and TypeScript | `UndraAcmePay` |
+
+`undra build` refuses a namespace that a sibling project already uses, and every runtime refuses to load two cores with one.
+
+## Loading two cores
+
+Load each core once, through its own entry. Every generated type defaults to the core of its own package, so a call never reaches the wrong one.
+
+On iOS each slice exports one symbol, so the two libraries link next to each other with no `-force_load`. On Android each core registers its natives on its bindings' own class. In React Native, `loadNative(UndraAcmePay)` installs one module per namespace.
+
+## Good to know
+
+- **Pass values between cores, not objects.** An object belongs to the core that made it, and two cores can issue the same handle numbers.
+- **Each core closes on its own.** Shutting one down leaves the other running; a closed core can load again.
+- **Two local Swift packages need two directory names.** SwiftPM names a local package after its directory.
+
+The [two-core test apps](https://github.com/shreypdev/undra/tree/main/examples/two-cores) load one core under two namespaces on iOS, Android, the JVM and Node, and CI runs them on every change.
 
 ---
 
@@ -801,15 +849,15 @@ undra build --platform web --release
 undra build --platform android,host
 ```
 
-Builds the core for each platform and puts the result where the app shells look for it, below `build/`:
+Builds the core for each platform and puts the result where the app shells look for it, below `build/`, named after the core's namespace (`[core] namespace`, by default the core's package name; `hello_core` below):
 
 | Target | Output |
 | --- | --- |
-| `ios` | `build/ios/UndraCore.xcframework`, device and simulator slices |
-| `android` | `build/android/jniLibs/<abi>/libundra_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
-| `web` | `build/web/undra_core.wasm`, release profile, then `wasm-opt -Oz` if installed |
-| `host` | `build/host/libundra_core.{dylib,so}`, for the JVM tests and `undra bindgen` |
-| `rn` | the `ios` and `android` outputs, plus `build/ios/UndraCore.podspec` for a React Native app's Podfile ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)); the iOS half only on macOS |
+| `ios` | `build/ios/HelloCore.xcframework`, device and simulator slices, each one prelinked `libhello_core.a` |
+| `android` | `build/android/jniLibs/<abi>/libhello_core.so`, arm64-v8a and x86_64, 16 KB page aligned |
+| `web` | `build/web/hello_core.wasm`, release profile, then `wasm-opt -Oz` if installed |
+| `host` | `build/host/libhello_core.{dylib,so}`, for the JVM tests and `undra bindgen` |
+| `rn` | the `ios` and `android` outputs, plus `build/ios/HelloCore.podspec` for a React Native app's Podfile ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)); the iOS half only on macOS |
 
 | Flag | Meaning |
 | --- | --- |
@@ -821,7 +869,7 @@ Builds the core for each platform and puts the result where the app shells look 
 
 `--release` turns on LTO and one codegen unit. The web build is always optimized. Sizes are printed at the end next to the design's budgets. A debug Android core is tens of megabytes per ABI, so package with `--release`. The library is your core plus the Undra C ABI, built from a small crate generated under `target/undra/`; you never write that crate.
 
-**iOS debug builds.** Link the library with `-force_load` (the generated Xcode project already does), or the core's registrations are dropped by the linker and the schema is empty. Release builds need no flag.
+**No `-force_load`.** Each iOS slice is one prelinked object whose only global symbol is the core's entry, `hello_core_undra_api`, which the generated bindings call. It links like any other static library, in debug and release, and [another core](https://shreypdev.github.io/undra/docs/several-cores.html) can sit next to it.
 
 ## undra dev
 
@@ -847,7 +895,7 @@ How each platform connects (the banner prints these with the real port):
 
 | Platform | How |
 | --- | --- |
-| Web | `UndraCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash })`, or `?undra=ws://127.0.0.1:7443` in the page URL |
+| Web | `UndraHelloCore.load({ mode: "remote", url: "ws://127.0.0.1:7443" })`, or `?undra=ws://127.0.0.1:7443` in the page URL |
 | iOS | set `UNDRA_DEV_URL=ws://<your Mac>:7443`; the generated app reads it in debug builds |
 | Android | an emulator uses `ws://10.0.2.2:7443`; a USB device runs `adb reverse tcp:7443 tcp:7443` (or `--android`) and uses `ws://127.0.0.1:7443`. The generated app takes it from the `undra_dev_url` launch extra or `./gradlew -PundraDevUrl=...`, in debug builds only |
 
@@ -911,6 +959,7 @@ platforms = ["ios", "android", "web"]
 
 [core]
 path = "core"                  # the crate bindgen, build and dev work on
+# namespace = "todo_core"      # names the core's symbol, libraries and entry; default: its package name
 
 [paths]
 generated = "generated"        # written by `undra bindgen`; commit it or check it in CI
@@ -947,7 +996,7 @@ Undra is a Rust core, a schema extracted from it, three code generators, and thr
 
 *Figure: Each platform has the same four layers; only the bottom one is platform-specific machinery.*
 
-The core is one codebase. On each platform it is linked the way that platform expects: a static library in an XCFramework on iOS, `libundra_core.so` over JNI on Android, a wasm module on the web. During development the same core can instead run on your machine behind a WebSocket (`undra dev`).
+The core is one codebase. On each platform it is linked the way that platform expects: a prelinked static library in an XCFramework on iOS, a `.so` over JNI on Android, a wasm module on the web, each named after the core's namespace and reached through one table of entry points, so an app can carry [more than one core](https://shreypdev.github.io/undra/docs/several-cores.html). During development the same core can instead run on your machine behind a WebSocket (`undra dev`).
 
 ## From Rust to native code
 
@@ -1035,33 +1084,39 @@ An entry's `op` is `0` for a full value, `1` for a keyed patch, and `2` for "laz
 
 ## The boundary
 
-The native boundary is a C ABI, exported with `#[unsafe(no_mangle)] extern "C"` and nothing but C-compatible types. The whole surface is nineteen functions (parameter lists abridged here):
+The native boundary is a C ABI of C-compatible types only. Each core exports one symbol named after its namespace, `<namespace>_undra_api`, which returns a table: its version and size, the schema hash, the namespace, and seventeen entry points (parameter lists abridged here). Two cores in one process are two tables, and nothing of one can bind to the other ([ADR-044](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-044-per-core-symbol-namespacing.md)).
 
 c
 
 ```c
-uint32_t undra_abi_version(void);
-uint64_t undra_schema_hash(void);
-UndraBuf  undra_schema_json(void);
-uint32_t undra_init(cfg, len, reply_cb, changeset_cb, stream_cb, user);
-void     undra_shutdown(void);
-uint32_t undra_call(ptr, len);          // async reply arrives on reply_cb
-UndraBuf  undra_call_sync(ptr, len);     // reply returned directly
-void     undra_cancel(call_id);
-void     undra_stream_credit(call_id, credit);
-void     undra_observe(handle, signal_id, on);
-void     undra_release(handle);
-void     undra_port_register(port_id, cb, user);
-void     undra_port_reply(ptr, len);
-void     undra_event(port_id, method_id, ptr, len);
-void     undra_timer_fired(timer_id);
-UndraBuf  undra_snapshot(void);
-uint32_t undra_restore(ptr, len);
-UndraBuf  undra_stats_json(void);
-void     undra_buf_free(UndraBuf buf);
+const UndraApi *playground_core_undra_api(void);
+
+typedef struct UndraApi {
+    uint32_t    abi_version;                       // 2
+    uint32_t    size;                              // sizeof(UndraApi), for later additions
+    uint64_t    schema_hash;
+    const char *name_space;                        // "playground_core"
+    UndraBuf  (*schema_json)(void);
+    uint32_t  (*init)(cfg, len, reply_cb, changeset_cb, stream_cb, user);
+    void      (*shutdown)(void);
+    uint32_t  (*call)(ptr, len);                   // async reply arrives on reply_cb
+    UndraBuf  (*call_sync)(ptr, len);              // reply returned directly
+    void      (*cancel)(call_id);
+    void      (*stream_credit)(call_id, credit);
+    void      (*observe)(handle, signal_id, on);
+    void      (*release)(handle);
+    void      (*port_register)(port_id, cb, user);
+    void      (*port_reply)(ptr, len);
+    void      (*event)(port_id, method_id, ptr, len);
+    void      (*timer_fired)(timer_id);
+    UndraBuf  (*snapshot)(void);
+    uint32_t  (*restore)(ptr, len);
+    UndraBuf  (*stats_json)(void);
+    void      (*buf_free)(UndraBuf buf);
+} UndraApi;
 ```
 
-Android reaches the same functions through a JNI shim that registers its natives once at load, so there is no per-call lookup. The web has no wasm-bindgen: the module exports and imports use only `i32`, `i64` and `f64`, a 64-bit handle is passed as two halves, and `undra_poll()` drives the executor. `Clock`, `Rng` and `Log` are bound to wasm imports, so a web app needs no adapter code for them.
+Android reaches the same functions through a JNI shim that registers its natives once at load on the bindings' own class, so there is no per-call lookup and two cores never share one. The web has its own module per core, so it needs no table, and no wasm-bindgen: the module exports and imports use only `i32`, `i64` and `f64`, a 64-bit handle is passed as two halves, and `undra_poll()` drives the executor. `Clock`, `Rng` and `Log` are bound to wasm imports, so a web app needs no adapter code for them.
 
 Callbacks are where hosts get hurt, so the contract is explicit and enforced. A callback runs on whichever thread produced the event, possibly with the core lock held, so it must be short, thread-safe and must not throw. It must not call back into the core except the few entries that never take the lock (freeing a buffer, replying to a port call, granting stream credit, firing a timer, reading stats). Every other re-entry is refused with `E_REENTRANT` instead of deadlocking, in every build.
 
@@ -1797,7 +1852,7 @@ Generated Swift is written the way a Swift engineer would write it by hand: valu
 
 ## Loading the core
 
-Attach the app to its core once, before any store is created. The runtime checks the core's schema hash against the one the bindings were generated from and throws a clear error if they differ.
+Load the core once, before any store is created, through the entry generated for it: `Undra` and the core's namespace (`[core] namespace` in `undra.toml`, by default the core's package name), here `UndraPlaygroundCore`. It checks the core's schema hash against the one the bindings were generated from and throws a clear error if they differ.
 
 UndraBootstrap.swift
 
@@ -1809,11 +1864,11 @@ import PlaygroundCore
 static func start() throws {
     let adapters = Adapters.platformDefault              // URLSession, Keychain, files, …
         .replacing(PlaygroundNetwork.shared)             // swap one port
-    try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
+    try UndraPlaygroundCore.load(.inproc(adapters: adapters))
 }
 ```
 
-In debug builds you can attach to the core that `undra dev` serves instead, with `UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))`. After loading, every generated type defaults to the shared core: `try Todos()` is `try Todos(ctx: .shared)`. Before a core is loaded, or after `shutdown()`, `UndraCore.shared` is a shut-down placeholder: constructors throw `UndraCallError.unavailable(.closed)` instead of stopping the app, and the first use logs what to do. Check `UndraCore.current`, not `shared`, to learn whether a core is loaded.
+In debug builds you can attach to the core that `undra dev` serves instead, with `UndraPlaygroundCore.load(.remote(url: url, adapters: adapters))`. After loading, every generated type defaults to its entry's core: `try Todos()` is `try Todos(ctx: UndraPlaygroundCore.core)`. Before the core is loaded, or after `shutdown()`, that is a shut-down placeholder: constructors throw `UndraCallError.unavailable(.closed)` instead of stopping the app, and the first use logs what to do. The core links like any static library, with no `-force_load`, so an app can carry [more than one](https://shreypdev.github.io/undra/docs/several-cores.html).
 
 ## Type mapping
 
@@ -1905,8 +1960,7 @@ do {
 swift
 
 ```swift
-try UndraCore.load(.inproc(
-    expectedSchemaHash: UndraIds.schemaHash,
+try UndraPlaygroundCore.load(.inproc(
     onError: { unhandled in
         // "Todos.toggle failed: the Undra core refused the call: …"
         logger.error("\(unhandled.description, privacy: .public)")
@@ -1928,18 +1982,18 @@ swift
 
 ```swift
 public final class Probe: UndraObject, @unchecked Sendable {
-    public init(ctx: UndraCore = .shared) throws            // the constructor `new`
+    public init(ctx: UndraCore = UndraPlaygroundCore.core) throws   // the constructor `new`
     public func counters() throws -> ProbeCounters         // sync
     public func wait(ms: UInt32) async throws -> UInt32    // async
     public func ticks(count: UInt32) -> AsyncThrowingStream<UInt32, Error>   // stream
     public func reset()                                     // a command
 }
 
-public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -> Int32
-public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double   // throws LabError
+public func add(a: Int32, b: Int32, ctx: UndraCore = UndraPlaygroundCore.core) throws -> Int32
+public func area(_ figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core) throws -> Double   // throws LabError
 ```
 
-Sync methods on an in-process core call straight into the core (`undra_call_sync`). Streams apply real backpressure: the generated code grants credit as your loop consumes items, and dropping the stream stops it in the core.
+Sync methods on an in-process core call straight into the core (the `call_sync` entry of its table). Streams apply real backpressure: the generated code grants credit as your loop consumes items, and dropping the stream stops it in the core.
 
 Release an object with `close()`, which is idempotent. `deinit` is only a backstop for objects that go out of scope without it, so hold an object for as long as you need its state.
 
@@ -1957,7 +2011,7 @@ public final class Todos: UndraStore {
     public private(set) var visible: [Todo]        // computed by the core
     public private(set) var remaining: UInt32      // computed by the core
 
-    public init(ctx: UndraCore = .shared) throws
+    public init(ctx: UndraCore = UndraPlaygroundCore.core) throws
     public func setFilter(_ f: Filter)                       // a command
     public func add(title: String) async throws -> Todo     // throws TodoError
 }
@@ -2026,7 +2080,7 @@ Generated Kotlin is what a Kotlin engineer would write by hand: data classes, se
 
 ## Loading the core
 
-Attach the app to its core once per process, before any store is created, typically in `Application.onCreate`. `UndraCore.load` checks that the native library was built from the same schema as the bindings.
+Load the core once per process, before any store is created, typically in `Application.onCreate`, through the entry generated for it: `Undra` and the core's namespace (`[core] namespace` in `undra.toml`, by default the core's package name), here `UndraPlaygroundCore`. It checks that the native library was built from the same schema as the bindings.
 
 UndraApp.kt
 
@@ -2034,17 +2088,14 @@ UndraApp.kt
 class UndraApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        UndraCore.load(
-            LoadOptions(
-                expectedSchemaHash = UndraIds.SCHEMA_HASH,
-                adapters = mapOf(StandardPorts.Http.PORT_ID to myHttp.portImpl()),
-            ),
+        UndraPlaygroundCore.load(
+            LoadOptions(adapters = mapOf(StandardPorts.Http.PORT_ID to myHttp.portImpl())),
         )
     }
 }
 ```
 
-The core is `libundra_core.so`, which `undra build --platform android` writes to `build/android/jniLibs/<abi>/`. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: `Todos()` is `Todos(ctx = UndraCore.shared)`. Before a core is loaded, or after it was closed, `UndraCore.shared` is a closed placeholder: constructors and calls on it fail with `UndraCallError.Unavailable` instead of crashing, and the first use logs what to do. Check `UndraCore.current`, not `shared`, to learn whether a core is loaded.
+The core is `libplayground_core.so`, named after its namespace, which `undra build --platform android` writes to `build/android/jniLibs/<abi>/`; it registers its natives on the bindings' own `UndraCoreNative`, so [two cores](https://shreypdev.github.io/undra/docs/several-cores.html) load side by side. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to its entry's core: `Todos()` is `Todos(ctx = UndraPlaygroundCore.core)`. Before the core is loaded, or after it was closed, that is a closed placeholder: constructors and calls on it fail with `UndraCallError.Unavailable` instead of crashing, and the first use logs what to do.
 
 ## Type mapping
 
@@ -2135,9 +2186,8 @@ viewModelScope.launch {
 kotlin
 
 ```kotlin
-UndraCore.load(
+UndraPlaygroundCore.load(
     LoadOptions(
-        expectedSchemaHash = UndraIds.SCHEMA_HASH,
         onError = { unhandled ->
             // "Todos.toggle failed: the Undra core refused the call: …"
             Log.w("app", "${unhandled.operation} failed: ${unhandled.error.message}")
@@ -2162,11 +2212,11 @@ class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(cor
     suspend fun wait(ms: UInt): UInt                    // async, cancellable
     fun ticks(count: UInt): Flow<UInt>                  // stream
     fun reset()                                         // a command
-    companion object { fun create(ctx: UndraCore = UndraCore.shared): Probe }
+    companion object { fun create(ctx: UndraCore = UndraPlaygroundCore.core): Probe }
 }
 
-fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
-suspend fun createRemoteTodo(list: String, title: String, ctx: UndraCore = UndraCore.shared): RemoteTodo
+fun add(a: Int, b: Int, ctx: UndraCore = UndraPlaygroundCore.core): Int
+suspend fun createRemoteTodo(list: String, title: String, ctx: UndraCore = UndraPlaygroundCore.core): RemoteTodo
 ```
 
 Cancelling the coroutine cancels the call in the core, and a `Flow` applies backpressure: the runtime grants credit as your collector consumes items. The runtime contains core panics at the boundary: a bug in the core fails the call with `Panicked`, not a crash.
@@ -2184,7 +2234,7 @@ class Todos : UndraStore {
     val visible: StateFlow<List<Todo>>        // computed by the core
     val remaining: StateFlow<UInt>            // computed by the core
 
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
     fun setFilter(f: Filter)                  // a command
     suspend fun add(title: String): Todo      // throws TodoError
 }
@@ -2255,32 +2305,30 @@ Generated TypeScript is strict-mode ESM with no any in exported types: plain int
 
 ## Loading the core
 
-Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with `UndraSchemaMismatchError`.
+Load the core once, before you create a store, through the entry generated for it: `Undra` and the core's namespace (`[core] namespace` in `undra.toml`, by default the core's package name), here `UndraPlaygroundCore`. It compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with `UndraSchemaMismatchError`.
 
 web/src/undra.ts
 
 ```ts
-import { UndraCore } from "@undra/runtime";
-import { UndraIds, Todos } from "@playground/core";
-import wasmUrl from "../../build/web/undra_core.wasm?url";
+import { UndraPlaygroundCore, Todos } from "@playground/core";
+import wasmUrl from "../../build/web/playground_core.wasm?url";
 
-await UndraCore.load({
+await UndraPlaygroundCore.load({
   mode: "wasm-main",                       // the core runs in a wasm module on this thread
   wasm: new URL(wasmUrl, location.href),
-  expectedSchemaHash: UndraIds.schemaHash,
   adapters: { http, kv },                  // optional: replace a default adapter
 });
 
-const todos = await Todos.create();        // uses UndraCore.shared
+const todos = await Todos.create();        // uses UndraPlaygroundCore.core
 ```
 
 | `mode` | Where the core runs |
 | --- | --- |
 | `"wasm-main"` | a wasm module on the page's main thread |
 | `"wasm-worker"` | the same module in a worker, keeping the main thread free |
-| `"remote"` | the core that `undra dev` serves, over a WebSocket: `{ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash }` |
+| `"remote"` | the core that `undra dev` serves, over a WebSocket: `{ mode: "remote", url: "ws://127.0.0.1:7443" }` |
 
-Before a core is loaded, or after it was closed, `UndraCore.shared`, the default core of every generated constructor and function, is a closed placeholder: constructors and calls on it reject with `UndraCallError.Unavailable`, and the first use logs what to do. Check `UndraCore.current`, not `shared`, to learn whether a core is loaded.
+Before the core is loaded, or after it was closed, `UndraPlaygroundCore.core`, the default core of every generated constructor and function, is a closed placeholder: constructors and calls on it reject with `UndraCallError.Unavailable`. The module is named after the namespace too, so [two cores](https://shreypdev.github.io/undra/docs/several-cores.html) load side by side.
 
 ## Type mapping
 
@@ -2363,10 +2411,9 @@ try {
 ts
 
 ```ts
-await UndraCore.load({
+await UndraPlaygroundCore.load({
   mode: "wasm-main",
   wasm: new URL(wasmUrl, location.href),
-  expectedSchemaHash: UndraIds.schemaHash,
   onError: (unhandled) => {
     // unhandled.operation is "Todos.toggle", unhandled.error.kind is "refused"
     reportToSentry(unhandled);
@@ -2482,6 +2529,12 @@ Every declaration `undra bindgen` generates in Swift for the [playground](https:
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
+## The core
+
+The core's entry, named after its namespace: `load` starts the core and checks its schema hash, and `core` is the one every generated call uses unless it is given another.
+
+`UndraPlaygroundCore`
+
 ## Types
 
 A struct for each record, an enum for each enum, with the wire codec beside it.
@@ -2518,7 +2571,7 @@ A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
 ## Wire ids
 
-The stable identifiers of every call, and the schema hash to hand to `UndraCore.load`.
+The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.
 
 `UndraIds`
 
@@ -2533,6 +2586,12 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
+
+## The core
+
+The core's entry, named after its namespace: `load` starts the core and checks its schema hash, and `core` is the one every generated call uses unless it is given another. The internal `UndraCoreNative` holds the natives the core's library registers over JNI.
+
+`UndraPlaygroundCore`
 
 ## Types
 
@@ -2570,7 +2629,7 @@ A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
 ## Wire ids
 
-The stable identifiers of every call, and the schema hash to hand to `UndraCore.load`.
+The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.
 
 `UndraIds`
 
@@ -2589,6 +2648,12 @@ Bodies, initializers, private and override members are left out, and a run of de
 ## Entry point
 
 The package entry: it re-exports every file below.
+
+## The core
+
+The core's entry, named after its namespace: `load` starts the core and checks its schema hash, and `core` is the one every generated call uses unless it is given another.
+
+`UndraPlaygroundCore`
 
 ## Types
 
@@ -2626,7 +2691,7 @@ A handle for each `#[undra::query]`, a function for each `#[undra::mutation]`.
 
 ## Wire ids
 
-The stable identifiers of every call, and the schema hash to hand to `UndraCore.load`.
+The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.
 
 `UndraIds`
 

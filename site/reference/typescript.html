@@ -55,8 +55,8 @@
   </div>
 </header>
 <div class="wrap docs">
-  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
-  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
   <main id="main" class="prose">
 <!-- reference:start -->
 <p class="crumb">API reference</p>
@@ -65,7 +65,7 @@
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
-<details class="reveal-code ref"><summary>Show the declarations <span>7 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>8 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/index.ts" rel="noopener">index.ts</a></span></div><pre><code data-lang="ts">export * from "./types.js";
 export * from "./errors.js";
 export * from "./objects.js";
@@ -73,6 +73,55 @@ export * from "./stores.js";
 export * from "./ports.js";
 export * from "./queries.js";
 export * from "./ids.js";
+export * from "./core.js";
+</code></pre></div>
+</details>
+<h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another.</p>
+<p class="ref-names"><code>UndraPlaygroundCore</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>42 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/core.ts" rel="noopener">core.ts</a></span></div><pre><code data-lang="ts">/**
+ * The core these bindings belong to, `playground_core` (`[core] namespace` in undra.toml): `load` starts it,
+ * and `core` is the core every generated class and function of this package uses unless it is given
+ * another one.
+ *
+ * ```ts
+ * await UndraPlaygroundCore.load({ mode: "wasm-main", wasm: new URL("playground_core.wasm", import.meta.url) });
+ * ```
+ */
+export const UndraPlaygroundCore = {
+  /** The core's namespace: its wasm module is `playground_core.wasm`, its native library `libplayground_core`. */
+  namespace: "playground_core",
+  /** The schema hash these bindings were generated for. */
+  schemaHash: UndraIds.schemaHash,
+
+  /**
+   * Loads the core (`UndraCore.load` with this package's schema hash) and makes it `core`. Rejects with
+   * `UndraSchemaMismatchError` when the core was built from another schema, and with `UndraError` while
+   * this core is already loaded.
+   */
+  async load(options: Omit&lt;LoadOptions, "expectedSchemaHash"&gt;): Promise&lt;UndraCore&gt; {
+    claim();
+    return started(UndraCore.load({ ...options, expectedSchemaHash: UndraIds.schemaHash }));
+  },
+
+  /**
+   * Attaches the core over a transport you provide (React Native's `NativeTransport`, a test double),
+   * with this package's schema hash, and makes it `core`.
+   */
+  async attach(transport: Transport, options: Omit&lt;AttachOptions, "expectedSchemaHash"&gt; = {}): Promise&lt;UndraCore&gt; {
+    claim();
+    return started(UndraCore.attach(transport, { ...options, expectedSchemaHash: UndraIds.schemaHash }));
+  },
+
+  /**
+   * The loaded core, or, while none is loaded (or after it was closed), the closed placeholder
+   * `UndraCore.unloaded`, whose calls reject with `UndraCallError.Unavailable`.
+   */
+  get core(): UndraCore {
+    return loaded !== null &amp;&amp; !loaded.closed ? loaded : UndraCore.unloaded;
+  },
+};
 </code></pre></div>
 </details>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
@@ -398,13 +447,13 @@ export const TodoErrorCodec: Codec&lt;TodoError&gt;;
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and an async function for each free Rust function.</p>
 <p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>213 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>222 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/objects.ts" rel="noopener">objects.ts</a></span></div><pre><code data-lang="ts">export class Probe extends UndraObject {
   /**
    * A probe with every counter at zero.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static create(core: UndraCore = UndraCore.shared): Promise&lt;Probe&gt;;
+  static create(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;Probe&gt;;
 
   /**
    * What the probe has seen so far.
@@ -456,7 +505,7 @@ export const TodoErrorCodec: Codec&lt;TodoError&gt;;
 export function add(
   a: number,
   b: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise&lt;number&gt;;
 
 /**
@@ -469,7 +518,7 @@ export function addLater(
   a: number,
   b: number,
   delayMs: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;number&gt;;
 
@@ -478,7 +527,10 @@ export function addLater(
  * @throws {LabError}
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export function area(figure: Figure, core: UndraCore = UndraCore.shared): Promise&lt;number&gt;;
+export function area(
+  figure: Figure,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise&lt;number&gt;;
 
 /**
  * Tells the core where the server is. Call it once at start-up, before anything observes
@@ -488,7 +540,7 @@ export function area(figure: Figure, core: UndraCore = UndraCore.shared): Promis
  */
 export function configureRemote(
   config: RemoteConfig,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise&lt;void&gt;;
 
 /**
@@ -506,7 +558,7 @@ export function configureRemote(
 export function createRemoteTodo(
   list: string,
   title: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;RemoteTodo&gt;;
 
@@ -516,7 +568,7 @@ export function createRemoteTodo(
  */
 export function echoComposite(
   value: Composite,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise&lt;Composite&gt;;
 
 /**
@@ -525,7 +577,7 @@ export function echoComposite(
  */
 export function echoFigure(
   value: Figure,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise&lt;Figure&gt;;
 
 /**
@@ -534,7 +586,7 @@ export function echoFigure(
  */
 export function echoPrimitives(
   value: Primitives,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise&lt;Primitives&gt;;
 
 /**
@@ -542,7 +594,10 @@ export function echoPrimitives(
  * crash, on the platforms that can unwind (R6).
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export function explode(reason: string, core: UndraCore = UndraCore.shared): Promise&lt;number&gt;;
+export function explode(
+  reason: string,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise&lt;number&gt;;
 
 /**
  * Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
@@ -552,7 +607,7 @@ export function explode(reason: string, core: UndraCore = UndraCore.shared): Pro
 export function explodeLater(
   delayMs: number,
   reason: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;number&gt;;
 
@@ -566,7 +621,7 @@ export function explodeLater(
 export function failLater(
   delayMs: number,
   code: number,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;number&gt;;
 
@@ -574,7 +629,10 @@ export function failLater(
  * A greeting.
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export function greet(name: string, core: UndraCore = UndraCore.shared): Promise&lt;string&gt;;
+export function greet(
+  name: string,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise&lt;string&gt;;
 
 /**
  * Reads an unsigned number of at most nine digits.
@@ -583,14 +641,14 @@ export function greet(name: string, core: UndraCore = UndraCore.shared): Promise
  */
 export function parseCount(
   text: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
 ): Promise&lt;number&gt;;
 
 /**
  * Does nothing and returns nothing: a call with neither arguments nor a result.
  * A failure is logged and passed to `onError`; the returned promise never rejects.
  */
-export function ping(core: UndraCore = UndraCore.shared): Promise&lt;void&gt;;
+export function ping(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;void&gt;;
 
 /**
  * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
@@ -603,7 +661,7 @@ export function setRemoteDone(
   list: string,
   id: number,
   done: boolean,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;RemoteTodo&gt;;
 
@@ -611,7 +669,7 @@ export function setRemoteDone(
  * The name and version of the core.
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
-export function version(core: UndraCore = UndraCore.shared): Promise&lt;string&gt;;
+export function version(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;string&gt;;
 </code></pre></div>
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
@@ -632,7 +690,7 @@ export class Bench extends UndraStore {
    * A store with every counter at zero and [`ROWS`] rows numbered from 1.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static create(core: UndraCore = UndraCore.shared): Promise&lt;Bench&gt;;
+  static create(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;Bench&gt;;
 
   /**
    * Adds two numbers: the cheapest call there is, for the handle-call row.
@@ -691,7 +749,7 @@ export class BigList extends UndraStore {
    * A list of [`LIST_LEN`] items numbered from 1.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static create(core: UndraCore = UndraCore.shared): Promise&lt;BigList&gt;;
+  static create(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;BigList&gt;;
 
   /**
    * Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
@@ -742,7 +800,7 @@ export class Counter extends UndraStore {
    * A counter at zero with no changes made.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static create(core: UndraCore = UndraCore.shared): Promise&lt;Counter&gt;;
+  static create(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;Counter&gt;;
 
   /**
    * Adds `amount` (which may be negative) and counts the change: one transaction, so one
@@ -785,7 +843,7 @@ export class Stress extends UndraStore {
    * A store with every signal at its start: zeros, and no generator running.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static create(core: UndraCore = UndraCore.shared): Promise&lt;Stress&gt;;
+  static create(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;Stress&gt;;
 
   /**
    * Commits `transactions` transactions now, each one write of the signal `mode` names: one
@@ -825,7 +883,7 @@ export class Todos extends UndraStore {
    * An empty list showing every item.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static create(core: UndraCore = UndraCore.shared): Promise&lt;Todos&gt;;
+  static create(core: UndraCore = UndraPlaygroundCore.core): Promise&lt;Todos&gt;;
 
   /**
    * Adds an item at the end of the list.
@@ -886,7 +944,7 @@ export class RemoteTodosQueryHandle extends UndraStore {
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static create(
     list: string,
-    core: UndraCore = UndraCore.shared,
+    core: UndraCore = UndraPlaygroundCore.core,
   ): Promise&lt;RemoteTodosQueryHandle&gt;;
 
   /**
@@ -912,7 +970,7 @@ export function patchRemoteTodo(
   list: string,
   id: number,
   done: boolean,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;RemoteTodo&gt;;
 
@@ -925,21 +983,22 @@ export function patchRemoteTodo(
 export function postRemoteTodo(
   list: string,
   title: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise&lt;RemoteTodo&gt;;
 </code></pre></div>
 </details>
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
-<p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
+<p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>93 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>94 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
   schemaHash: 0xddcdea47fa95a8d4n,
+  namespace: "playground_core",
   Objects: {
     Probe: {
       typeId: 0x4fdd3051,
@@ -1034,7 +1093,7 @@ export const UndraIds = {
   </main>
   <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
 <!-- reference-toc:start -->
-<ul><li><a href="#entry">Entry point</a></li><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
+<ul><li><a href="#entry">Entry point</a></li><li><a href="#core">The core</a></li><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
 <!-- reference-toc:end -->
 </aside>
 </div>
