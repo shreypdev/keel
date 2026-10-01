@@ -1,13 +1,19 @@
 // Recorded list operations on `Signal<Vec<T>>` (ADR-027). The guidance on when to use them
 // instead of `set` / `update` lives in the `# Lists` section of the `Signal` docs, where rustdoc
-// shows it; the op log they append to is `crate::oplog`.
+// shows it; the op log they append to is `crate::oplog`, and the taps of the derived lists built
+// on the signal (ADR-039) are `crate::derived::tap`.
+//
+// The slot log gets its op exactly as ADR-027 built it (before the change for `push` / `insert`, so
+// a panicking `Clone` leaves the list untouched). The taps get theirs after the change, cloned from
+// the list itself, under a guard that marks every tap stale if a clone panics.
 
 use std::sync::Arc;
 
 use undra_wire::PatchOp;
 
 use super::{Signal, Updating};
-use crate::oplog::{KeyedLog, move_within};
+use crate::derived::tap::TapList;
+use crate::oplog::{KeyedLog, ListLog, move_within};
 use crate::value::SignalValue;
 
 /// One recorded operation in progress: samples once whether the log is recording, builds the op
@@ -80,6 +86,24 @@ fn wire_index(index: usize) -> Option<u32> {
     u32::try_from(index).ok()
 }
 
+/// While alive, marks every tap stale when dropped: for `update_at`, whose closure can panic
+/// after it has changed the item but before the taps' op is recorded.
+struct TapsStaleOnUnwind<'a, I>(Option<&'a TapList<I>>);
+
+impl<I> TapsStaleOnUnwind<'_, I> {
+    fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl<I> Drop for TapsStaleOnUnwind<'_, I> {
+    fn drop(&mut self) {
+        if let Some(taps) = self.0 {
+            taps.invalidate_taps();
+        }
+    }
+}
+
 impl<I: SignalValue> Signal<Vec<I>> {
     /// The typed op log, if this signal was attached as a keyed list.
     fn op_log(&self) -> Option<&KeyedLog<I>> {
@@ -87,6 +111,34 @@ impl<I: SignalValue> Signal<Vec<I>> {
             .log
             .get()
             .and_then(|log| log.as_any().downcast_ref::<KeyedLog<I>>())
+    }
+
+    /// The taps of the derived lists built on this signal, if any was ever built: `None` is the
+    /// whole cost of a recorded operation on a list without one.
+    fn taps(&self) -> Option<&TapList<I>> {
+        self.inner
+            .taps
+            .get()
+            .and_then(|taps| taps.as_any().downcast_ref::<TapList<I>>())
+    }
+
+    /// The tap list, created on first use (`derive().build()`).
+    pub(crate) fn tap_list(&self) -> &TapList<I> {
+        let taps = self.inner.taps.get_or_init(|| {
+            let taps: Arc<dyn ListLog> = Arc::new(TapList::<I>::new());
+            taps
+        });
+        taps.as_any()
+            .downcast_ref::<TapList<I>>()
+            .expect("undra-signals: a list signal's taps are a TapList of its item type")
+    }
+
+    /// Records one op on every tap that is recording, after the list was changed (value still
+    /// write-locked). `build` clones from the list as it now is.
+    fn record_taps(&self, build: impl Fn() -> Option<PatchOp<I>>) {
+        if let Some(taps) = self.taps() {
+            taps.record(build);
+        }
     }
 
     /// Appends `item` to the end of the list.
@@ -115,8 +167,15 @@ impl<I: SignalValue> Signal<Vec<I>> {
                     item: item.clone(),
                 })
             });
-            Arc::make_mut(slot).push(item);
+            let list = Arc::make_mut(slot);
+            list.push(item);
             recording.record(op);
+            self.record_taps(|| {
+                wire_index(index).map(|wire| PatchOp::Insert {
+                    index: wire,
+                    item: list[index].clone(),
+                })
+            });
         });
     }
 
@@ -151,8 +210,15 @@ impl<I: SignalValue> Signal<Vec<I>> {
                     item: item.clone(),
                 })
             });
-            Arc::make_mut(slot).insert(index, item);
+            let list = Arc::make_mut(slot);
+            list.insert(index, item);
             recording.record(op);
+            self.record_taps(|| {
+                wire_index(index).map(|wire| PatchOp::Insert {
+                    index: wire,
+                    item: list[index].clone(),
+                })
+            });
         });
     }
 
@@ -183,6 +249,7 @@ impl<I: SignalValue> Signal<Vec<I>> {
             let recording = Recording::begin(self.op_log());
             let removed = Arc::make_mut(slot).remove(index);
             recording.push_with(|| wire_index(index).map(|index| PatchOp::Remove { index }));
+            self.record_taps(|| wire_index(index).map(|index| PatchOp::Remove { index }));
             removed
         })
     }
@@ -219,9 +286,10 @@ impl<I: SignalValue> Signal<Vec<I>> {
                 "undra-signals: Signal::update_at at index {index}, but the list has {len} item(s)"
             );
             let recording = Recording::begin(self.op_log());
-            // Between `f` changing the item and the op being recorded the log describes a list
-            // that no longer is the list.
+            // Between `f` changing the item and the op being recorded the log (and the taps)
+            // describe a list that no longer is the list.
             let unwinding = recording.guard();
+            let taps_unwinding = TapsStaleOnUnwind(self.taps());
             let _updating = Updating::enter(me);
             let list = Arc::make_mut(slot);
             f(&mut list[index]);
@@ -232,6 +300,13 @@ impl<I: SignalValue> Signal<Vec<I>> {
                 })
             });
             unwinding.disarm();
+            self.record_taps(|| {
+                wire_index(index).map(|wire| PatchOp::Update {
+                    index: wire,
+                    item: list[index].clone(),
+                })
+            });
+            taps_unwinding.disarm();
         });
     }
 
@@ -266,12 +341,14 @@ impl<I: SignalValue> Signal<Vec<I>> {
             }
             let recording = Recording::begin(self.op_log());
             move_within(Arc::make_mut(slot).as_mut_slice(), from, to);
-            recording.push_with(|| {
+            let op = || {
                 Some(PatchOp::Move {
                     from: wire_index(from)?,
                     to: wire_index(to)?,
                 })
-            });
+            };
+            recording.push_with(op);
+            self.record_taps(op);
         });
     }
 
@@ -298,6 +375,7 @@ impl<I: SignalValue> Signal<Vec<I>> {
             let recording = Recording::begin(self.op_log());
             let removed = std::mem::replace(slot, Arc::new(Vec::new()));
             recording.push_with(|| Some(PatchOp::Clear));
+            self.record_taps(|| Some(PatchOp::Clear));
             Some(removed)
         });
     }

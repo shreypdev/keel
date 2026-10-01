@@ -105,6 +105,10 @@ pub(crate) struct SignalInner<T> {
     /// The op log of a list signal attached with [`StoreCell::attach_keyed`](crate::StoreCell):
     /// what the recorded list operations append to and every raw write invalidates.
     pub(crate) log: OnceLock<Arc<dyn ListLog>>,
+    /// The taps of the derived lists built on a list signal (ADR-039): created by the first
+    /// `derive()` that builds one; the recorded list operations append to every tap that is
+    /// recording, and every raw write invalidates them.
+    pub(crate) taps: OnceLock<Arc<dyn ListLog>>,
 }
 
 impl<T> Clone for Signal<T> {
@@ -125,6 +129,7 @@ impl<T: SignalValue> Signal<T> {
                 dependents: parking_lot::Mutex::new(Vec::new()),
                 has_dependents: AtomicBool::new(false),
                 log: OnceLock::new(),
+                taps: OnceLock::new(),
             }),
         }
     }
@@ -248,7 +253,9 @@ impl<T: SignalValue> Signal<T> {
 
     /// The current value, as a snapshot that stays valid (and unchanged) however long the caller
     /// keeps it.
-    fn snapshot(&self) -> Arc<T> {
+    pub(crate) fn snapshot(&self) -> Arc<T> {
+        // Debug builds: a derived list's closure must not read signals (ADR-039 section 6).
+        crate::derived::assert_not_deriving("read");
         // `read_recursive` never waits for a queued writer, so a thread that already holds a
         // read guard cannot deadlock against one.
         if let Some(value) = self.inner.value.try_read_recursive() {
@@ -263,6 +270,7 @@ impl<T: SignalValue> Signal<T> {
     /// Runs `f` with the value read-locked: no writer, recorded or raw, can change the value or
     /// its op log while `f` runs. Readers that take it with `snapshot` do not see the log.
     pub(crate) fn read_locked<R>(&self, f: impl FnOnce(&Arc<T>) -> R) -> R {
+        crate::derived::assert_not_deriving("read");
         if let Some(value) = self.inner.value.try_read_recursive() {
             return f(&value);
         }
@@ -270,11 +278,15 @@ impl<T: SignalValue> Signal<T> {
         f(&self.inner.value.read_recursive())
     }
 
-    /// Tells the op log of a keyed list (if any) that the list is about to be changed in a way
-    /// the recorded ops cannot describe. Called with the value write-locked.
+    /// Tells the op log of a keyed list and the taps of its derived lists (if any) that the list
+    /// is about to be changed in a way the recorded ops cannot describe. Called with the value
+    /// write-locked.
     fn invalidate_log(&self) {
         if let Some(log) = self.inner.log.get() {
             log.invalidate();
+        }
+        if let Some(taps) = self.inner.taps.get() {
+            taps.invalidate();
         }
     }
 
@@ -285,7 +297,7 @@ impl<T: SignalValue> Signal<T> {
 
     /// Panics if the calling thread is inside this signal's `update` closure: taking the lock
     /// again would deadlock.
-    fn assert_not_updating(&self, what: &str) {
+    pub(crate) fn assert_not_updating(&self, what: &str) {
         let me = self.id();
         let reentered = UPDATING
             .try_with(|list| list.borrow().contains(&me))
@@ -348,6 +360,8 @@ impl<T: SignalValue> Signal<T> {
 
     /// The write itself, once it has been allowed.
     fn write_unchecked<R>(&self, f: impl FnOnce(&mut Arc<T>) -> R) -> R {
+        // Debug builds: a derived list's closure must not write signals (ADR-039 section 6).
+        crate::derived::assert_not_deriving("wrote");
         // Drop order matters: the lock guard goes first, then the change is announced, then
         // the transaction ends (and commits if it was the outermost). Announcing from a guard
         // means a panicking `f` still marks whatever it managed to change.

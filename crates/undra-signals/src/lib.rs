@@ -48,6 +48,7 @@
 mod computed;
 mod context;
 mod deps;
+mod derived;
 mod effect;
 mod error;
 mod graph;
@@ -62,6 +63,7 @@ mod value;
 pub use computed::Computed;
 pub use context::{clear_write_checker, set_write_checker};
 pub use deps::{Dep, Deps};
+pub use derived::{Derive, DerivedList, DerivedStats, Order, Sorted, Unsorted};
 pub use effect::Effect;
 pub use error::{SignalsError, WriteError};
 pub use signal::Signal;
