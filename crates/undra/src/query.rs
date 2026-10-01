@@ -19,6 +19,12 @@ pub use undra_query::{
     backoff_ms, cache_key, idempotency_key,
 };
 
+/// What `#[undra::query]` and `#[undra::mutation]` submit besides their registration: the query
+/// runtime's init hook and dispatch layer, so a core links them only when it declares a query or
+/// a mutation (ADR-052). Generated code names it; it is not a stable API.
+#[doc(hidden)]
+pub use undra_query::__private;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -25,18 +25,12 @@ until after v2.
 device-bench (E1; the honest web size is 135 KB gzipped, over budget — E5), diagnostics (D1), dev-loop
 (B1, B2, ADR-051), parity (C3, C4: the Kotlin/TS error channel), react-native (G1, ADR-038; G1b default
 adapters, E4 Hermes cost and a site page are open), android-adapters (M1 Maven publishing open), runtime-lifecycle (Track A: ADR-034/035/036 + the
-ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5). Main `aa66ce9`. CI pins Rust 1.98.1
+ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5), wasm-size (E5, ADR-052; `ts-runtime-size` owed). Main `2b7534d`. CI pins Rust 1.98.1
 (1.99.0 broke it on 2026-10-01; the bump is a deliberate piece: four workflow pins, `rustup update`,
 `TRYBUILD=overwrite` goldens, bench re-baseline).
 
 **Merge queue (cross-merge main on the branch, full matrix, fast-forward).** Every branch below lives in
 `/Users/shrey/Desktop/src/.work/<name>` with its record in `.10x/decisions/sde/<name>.md` there:
-1. `wasm-size` (E5, ADR-052 Accepted; opus review `.10x/reviews/2026-10-01-wasm-size-review.md`: merge after
-   fixes, all on the branch at `66954d1`, main is an ancestor). **One integrator decision is owed (D1):** after
-   merging main the JS runtime measures 24,841 B gzipped against the 24 KB budget set in ADR-052 decision 2.
-   Decision: restate the JS budget to **26 KB** in `bench/budgets.toml` + ADR-052 (dated note: parity's error
-   channel added ~900 lines; `ts-runtime-size` targets 16 KB), then `scripts/wasm-size.sh --record`,
-   `node site/scripts/build-all.mjs` (README/site move to 102.7 KB), commit, fast-forward, `wt.sh rm`.
 3. `dev-reload` (B3; ADR-053 Accepted with four decisions; implementing).
 4. `rn-adapters` (G1b; ADR-038 Amendment B accepted: hybrid with a C++ Kv/Fs core; implementing; adds a
    `platform` module to the playground core — regenerate bindings at the cross).
