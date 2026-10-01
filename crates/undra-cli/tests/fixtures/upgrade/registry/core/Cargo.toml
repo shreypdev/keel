@@ -1,0 +1,11 @@
+[package]
+name = "demo-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+undra.workspace = true
+shared = { path = "../crates/shared" }
+
+[dev-dependencies]
+undra-wire = "^0.0.9"

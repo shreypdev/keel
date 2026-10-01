@@ -28,6 +28,9 @@ GETTING STARTED
 EXISTING APP
     undra adopt ../MyApp                           add an Undra core to an app you already have, step by step
 
+NEW VERSION
+    undra upgrade                                  move the project to this `undra`: every pin, the bindings, the migration notes
+
 CHECK THE MACHINE
     undra doctor                                   every prerequisite, with the exact fix for each gap (--fix, --json)
 
@@ -198,6 +201,31 @@ WHAT IT DETECTS
     web      package.json (vite, webpack, next, ...)"
     )]
     Adopt(AdoptArgs),
+    /// Move a project to the version of this `undra`: every pin in step, bindings regenerated, migration notes.
+    #[command(
+        long_about = "Reads the Undra version a project pins in every place `undra init` writes it: the core's \
+`undra` dependency in Cargo.toml (a git tag, or a registry version), `[undra] version` in undra.toml, \
+`@undra/runtime` in the web app's package.json, `dev.undra:runtime` and `dev.undra:android-adapters` in the Gradle \
+scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It moves them all to the \
+version of this `undra` in one step, shaped as `undra init` would write them (so an upgraded project and a new one \
+agree), regenerates the bindings (`undra bindgen`), and prints the migration notes of every release the project crosses.\n\n\
+Only the version text changes; comments and formatting stay. Your app's own project files (the Xcode build \
+phase, the Gradle task, vite.config.ts) are not edited: the notes say what a newer `undra init` adds. A project that \
+depends on a checkout of the Undra repository (`--undra-path`, a `path` dependency) is on whatever that checkout \
+is: the command says so and changes nothing. A project newer than this `undra` is refused (error C0014): update the CLI.",
+        after_long_help = "\
+EXAMPLES
+    undra upgrade                      move the project here, regenerate the bindings, print the notes
+    undra upgrade --dry-run            show the lines that would change and the notes; write nothing
+    undra upgrade --no-bindgen         move the pins only (run `undra bindgen` yourself)
+    undra upgrade --docs               keep the core's doc comments in the regenerated bindings
+
+AFTER
+    git diff                           review what moved
+    cd web && npm install              refresh package-lock.json when the web pin moved
+    Cargo.lock follows at the next build (it fetches the new tag, so it needs the network)"
+    )]
+    Upgrade(UpgradeArgs),
 }
 
 /// Arguments of `undra init`.
@@ -317,6 +345,22 @@ pub struct DoctorArgs {
     /// documentation anchor.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments of `undra upgrade`.
+#[derive(Args, Debug)]
+pub struct UpgradeArgs {
+    /// Show the lines that would change and the migration notes; write nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Move the pins but do not regenerate the bindings afterwards.
+    #[arg(long)]
+    pub no_bindgen: bool,
+
+    /// Keep the core's doc comments in the regenerated bindings (`undra bindgen --docs`).
+    #[arg(long)]
+    pub docs: bool,
 }
 
 /// Arguments of `undra adopt`.
