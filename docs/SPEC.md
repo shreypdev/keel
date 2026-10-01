@@ -744,14 +744,14 @@ Main-thread delivery: Swift `MainActor`; Kotlin `UndraDispatchers.main` (`Dispat
 Handle lifetime: explicit `close()`/`[Symbol.dispose]`; finalizers (`deinit`, `Cleaner`, `FinalizationRegistry`) as backstop; `UndraCore.stats()` exposes live handle counts.
 
 Default adapters:
-| Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) |
-|---|---|---|---|---|---|
-| Http | URLSession | HttpURLConnection | HttpURLConnection | fetch | fetch |
-| Kv / SecureStore | files in Application Support / Keychain | files in `filesDir` / AES-256-GCM under an Android Keystore key (files in `noBackupFilesDir`) | files | IndexedDB / IndexedDB + WebCrypto | files |
-| Fs | FileManager | `filesDir` | java.io | OPFS | fs |
-| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / `android.util.Log` | same | built-in (§7) | built-in |
-| Timer | DispatchQueue | ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
-| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ActivityLifecycleCallbacks | stubs | navigator.onLine / visibilitychange | stubs |
+| Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) | React Native (§11.2) |
+|---|---|---|---|---|---|---|
+| Http | URLSession | HttpURLConnection | HttpURLConnection | fetch | fetch | React Native's fetch |
+| Kv / SecureStore | files in Application Support / Keychain | files in `filesDir` / AES-256-GCM under an Android Keystore key (files in `noBackupFilesDir`) | files | IndexedDB / IndexedDB + WebCrypto | files | native: Swift's files and Keychain items on iOS, `android-adapters`' files and sealed values on Android |
+| Fs | FileManager | `filesDir` | java.io | OPFS | fs | native, Swift's and `android-adapters`' roots |
+| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / `android.util.Log` | same | built-in (§7) | built-in | native in the module |
+| Timer | DispatchQueue | ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout | the core's own |
+| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ActivityLifecycleCallbacks | stubs | navigator.onLine / visibilitychange | stubs | NWPathMonitor or ConnectivityManager, native / AppState |
 
 On Android all of it is installed by one call, `AndroidPlatformDefaults.install(core, context)` (module `android-adapters`; `android-adapters/README.md`); the runtime alone installs only Clock, Rng, Log and Timer.
 
@@ -787,6 +787,7 @@ The core hands the host one change-set per transaction per store, in commit orde
 * **One inbox.** Every callback appends one record (`kind u8, len u32, payload`; kinds are §3.2's: 2 Reply, 3 ChangeSet, 4 PortCall as `port_id u32, method_id u32, port_call_id u32, args`, 8 StreamItem, 13 Log as `level u8, target String, message String`) to one buffer and returns. The buffer is handed to JavaScript as one `ArrayBuffer` it owns, before a host function that entered the core returns (so a call's reply and change-sets, and `observe`'s initial change-set, are in the mirror when it returns) and through `CallInvoker::invokeAsync` when a record came from another thread. One FIFO keeps commit order across threads (§3.5). Only the outermost drain on the JS thread delivers.
 * **Bytes.** Payloads go in as `(ArrayBuffer, byteOffset, byteLength)`, borrowed by the core for the call; an `UndraBuf` comes back as an `ArrayBuffer` that frees it (`undra_buf_free`, once) when collected. Handles cross as two `u32` halves.
 * **Ports.** Registered before `undra_init` for every non-event port of the schema except `Timer` (the core's own). `Clock`, `Rng` and `Log` are answered natively on any thread (`Log` records are also delivered to JavaScript). Async methods are queued and answered by the registered `PortImpl` with `PortReply` (status 2 when none is registered). A synchronous method implemented in JavaScript is answered only when the core calls it from a host function on the JS thread; from another thread it is unavailable (§6.3), logged once per port.
+* **Default ports (ADR-038, amendment B).** Every standard port of §8 has a default. `Kv`, `SecureStore`, `Fs` and the `Connectivity` source are the module's own native code: each of the first three is registered with a native callback (before `undra_init`, like the others) that copies the call onto that port's serial worker thread and returns 1, and the worker does the I/O and answers with `undra_port_reply`, JavaScript never involved; `Connectivity` is reported with `undra_event` from the platform monitor's thread (`nw_path_monitor`, `ConnectivityManager`) once `undra_init` has returned, the current state first and identical consecutive reports once. Their directories, file layouts, Keychain items and Keystore key are the Swift runtime's on iOS and `android-adapters`' on Android (§8's table), so either shell of an app reads what the other wrote; `Kv` and `SecureStore` failures are "unavailable" and logged, `Fs` failures its typed `FsError` (any `..` or symbolic link on a path is `Denied`). `Http` is `reactNativeHttp()` over React Native's `fetch` (no connection is `HttpError::Network`) and `Lifecycle` is `AppState` (a state reported once until it changes). A value in `adapters` or `ports` replaces a default and `null` removes it; a JavaScript `registerPort` after the load does not reach a native default. Shutdown runs `undra_shutdown`, then stops the event source and joins the workers, and only then releases the process's core slot, so nothing a stopped core asked for reaches the next one.
 * **Gate and lifecycle.** `undra_abi_version` and `undra_schema_hash` are checked before `undra_init` (`UndraSchemaMismatchError`). One core per process (until ADR-044); a JS reload shuts the core down with the runtime, and the next `install()` starts a fresh one.
 * **Every core symbol** is referenced from one shim per platform (`cpp/UndraApiLinked.cpp`: the statically linked iOS core; `cpp/UndraApiAndroid.cpp`: `dlopen("libundra_core.so")`), which becomes the per-core table of ADR-044.
 * **Artefacts.** `undra build --platform rn` builds the iOS and Android cores (§13) and writes `build/ios/UndraCore.podspec`, a pod vendoring the XCFramework (force-loaded per SDK slice until ADR-044 prelinks the core); the app packages `build/android/jniLibs`. `docs/REACT_NATIVE.md` is the guide.
@@ -1352,13 +1353,17 @@ Generated code does not depend on this package: it is how a React Native app get
 export function loadNative(options: NativeLoadOptions): Promise<UndraCore>;  // AttachOptions + { devtools?, logLevel?, platform? }; installs the module, attaches NativeTransport; the first core becomes UndraCore.shared; again while open: the same core
 export function installNative(): UndraNativeModule;                         // UndraNative.install() once, then globalThis.__undraNative; UndraTransportError("unsupported") when the TurboModule is not linked
 export class NativeTransport implements Transport {                          // mode "native", synchronous, callSync; the gate of §11.2 in start()
-  constructor(options: { native: UndraNativeModule; expectedSchemaHash: bigint; platform?: string; devtools?: boolean; logLevel?: number; onError?: (e: unknown) => void });
+  constructor(options: { native: UndraNativeModule; expectedSchemaHash: bigint; platform?: string; devtools?: boolean; logLevel?: number; onError?: (e: unknown) => void; nativePorts?: readonly number[] /* the standard ports the module answers itself */ });
   snapshot(): Uint8Array;                                                    // undra_snapshot
   counters(): NativeHostCounters;                                            // records, bytes, wakes, dropped, nativePortCalls, jsSyncPortCalls, unavailableSyncPortCalls
 }
 export function nativeFrameScheduler(native: UndraNativeModule, options: { isActive(): boolean; onError?(e: unknown): void }): (fn: () => void) => void;  // the mirror schedule of §11.1 under React Native
-export function reactNativeAdapters(): AdapterOverrides;                     // { lifecycle: AppState }
+export function reactNativeAdapters(): AdapterOverrides;                     // { http: reactNativeHttp(), lifecycle: AppState }
+export function reactNativeHttp(options?: { fetch?: typeof fetch }): HttpAdapter;  // Http over React Native's fetch; any status is a response; HttpError Network / Timeout / Cancelled / InvalidUrl
+export function isHttpUrl(url: string): boolean;                             // http(s)://host[:port]...: what reactNativeHttp() accepts
+export function nativePlatformDefaults(): NativePlatformDefaults;             // { ports, kv?, fs?, secureStore?, error? }: the ports the module answers natively on this device
+export function nativeDefaultPorts(offered: { ports: readonly number[] }, options: { adapters?: AdapterOverrides; ports?: Record<number, PortImpl> }): number[];  // offered minus what the options override (a value or null)
 export function portPlan(schemaJson: string): { ports: number[]; syncMethods: number[] };
-export interface UndraNativeModule { /* the JSI object: abiVersion, schemaHash, schemaJson, start, shutdown, call, callSync, cancel, streamCredit, observe, release, portReply, event, timerFired, snapshot, restore, statsJson, hostCounters, requestFrame; set by the transport: sink, portSync, frame */ }
+export interface UndraNativeModule { /* the JSI object: abiVersion, schemaHash, schemaJson, start(config, offset, length, ports, syncMethods, nativePorts?), platformDefaults, shutdown, call, callSync, cancel, streamCredit, observe, release, portReply, event, timerFired, snapshot, restore, statsJson, hostCounters, requestFrame; set by the transport: sink, portSync, frame */ }
 ```
 Importing the package installs `TextDecoder` / `TextEncoder` where Hermes lacks them (import it before `@undra/runtime`); `@undra/react-native/babel-plugin` replaces `import.meta` for Hermes.

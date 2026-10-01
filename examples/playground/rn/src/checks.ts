@@ -1,5 +1,8 @@
 import {
   CallTarget,
+  FsError,
+  HttpError,
+  PortIds,
   UndraCallError,
   UndraSchemaMismatchError,
   UndraWriter,
@@ -7,7 +10,7 @@ import {
   decodeValue,
   type UndraCore,
 } from '@undra/runtime';
-import { NativeTransport } from '@undra/react-native';
+import { NativeTransport, nativePlatformDefaults } from '@undra/react-native';
 import {
   BigList,
   Counter,
@@ -18,10 +21,23 @@ import {
   add,
   addLater,
   explode,
+  fileDelete,
+  fileList,
+  fileRead,
+  fileWrite,
   greet,
+  httpGet,
+  kvGet,
+  kvKeys,
+  kvPut,
+  kvRemove,
   parseCount,
+  secretGet,
+  secretKeys,
+  secretPut,
+  secretRemove,
 } from '@playground/core';
-import { nativeCounters, type Log, type Playground } from './undra';
+import { PLAYGROUND_HEADER, nativeCounters, type Log, type Playground } from './undra';
 
 /** One self-check's outcome. */
 export interface CheckResult {
@@ -49,6 +65,27 @@ async function rejects(run: () => Promise<unknown>): Promise<unknown> {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+const fromUtf8 = (bytes: Uint8Array | null): string | null => (bytes === null ? null : new TextDecoder().decode(bytes));
+
+/** The loopback server `scripts/rn-device-checks.sh` runs (the simulator shares the Mac's loopback; Android reaches it through `adb reverse`). */
+const LOOPBACK = 'http://127.0.0.1:8737';
+
+/** Whether the module answers `portId` natively on this device (ADR-038 amendment B). */
+function native(portId: number): boolean {
+  return nativePlatformDefaults().ports.includes(portId);
+}
+
+/** Waits up to `ms` for `condition`. */
+async function eventually(condition: () => boolean, ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > until) return false;
+    await sleep(50);
+  }
+  return true;
+}
 
 /**
  * The boundary behaviours a Node host cannot show for @undra/react-native, checked in the app on the
@@ -198,6 +235,102 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       expect(error instanceof UndraSchemaMismatchError, `UndraSchemaMismatchError, got ${String(error)}`);
       expect((await add(3, 4, core)) === 7, 'the running core is untouched');
       return 'expected 0x1234, refused; the running core still answers';
+    },
+  ],
+  [
+    'RN11',
+    'Kv default: a round trip through the core, answered natively',
+    async (core, playground) => {
+      expect(native(PortIds.Kv.portId), 'the module answers Kv natively on this device');
+      const before = nativeCounters(core)?.nativePortCalls ?? 0;
+      const key = `rn.checks.kv.${playground.nonce}`;
+      await kvPut(key, utf8(`value ${playground.nonce}`), core);
+      expect(fromUtf8(await kvGet(key, core)) === `value ${playground.nonce}`, 'kv_get returns what kv_put stored');
+      const keys = await kvKeys('rn.checks.', core);
+      expect(keys.includes(key) && keys.includes('rn.checks.restart'), `kv_keys lists it, got ${keys.join(',')}`);
+      await kvRemove(key, core);
+      expect((await kvGet(key, core)) === null, 'kv_remove removed it');
+      const calls = (nativeCounters(core)?.nativePortCalls ?? 0) - before;
+      expect(calls >= 5, `the core's Kv calls were answered by the module (${calls})`);
+      // A plain-text marker next to the secret of RN12: the device script finds this one in the app's files.
+      await kvPut('rn.checks.kvmark', utf8(`UNDRA-KVMARK-${playground.nonce}`), core);
+      return `put, get, keys, remove through the core; ${calls} native port calls`;
+    },
+  ],
+  [
+    'RN12',
+    'SecureStore default: a round trip through the core (the Keychain, the Android Keystore)',
+    async (core, playground) => {
+      expect(native(PortIds.SecureStore.portId), 'the module answers SecureStore natively on this device');
+      const secret = `UNDRA-SECRET-${playground.nonce}`;
+      await secretPut('rn.checks.secret', utf8(secret), core);
+      expect(fromUtf8(await secretGet('rn.checks.secret', core)) === secret, 'secret_get returns what secret_put stored');
+      expect((await secretKeys('rn.checks.', core)).includes('rn.checks.secret'), 'secret_keys lists it');
+      expect((await kvGet('rn.checks.secret', core)) === null, 'a secret is not in Kv');
+      // A key is any string, U+0000 included: list returns it whole (the Keychain's account, the sealed file's key).
+      const nul = 'rn.checks.nul\u0000end';
+      await secretPut(nul, utf8('n'), core);
+      const listed = await secretKeys('rn.checks.nul', core);
+      expect(listed.length === 1 && listed[0] === nul, `secret_keys returns a key with U+0000 whole, got ${JSON.stringify(listed)}`);
+      await secretRemove(nul, core);
+      expect((await secretGet(nul, core)) === null, 'and secret_remove removes it');
+      // Kept: the device script checks that this value is not readable in the app's files.
+      return `stored and read back (marker nonce ${playground.nonce}); ${nativePlatformDefaults().secureStore ?? ''}`;
+    },
+  ],
+  [
+    'RN13',
+    'Fs default: write, read, list, delete inside the root; a path outside is Denied',
+    async (core, playground) => {
+      expect(native(PortIds.Fs.portId), 'the module answers Fs natively on this device');
+      const body = utf8(`hello ${playground.nonce}`);
+      await fileWrite('rn-checks/notes/hello.txt', body, core);
+      expect(fromUtf8(await fileRead('rn-checks/notes/hello.txt', core)) === `hello ${playground.nonce}`, 'file_read returns what file_write wrote');
+      const names = await fileList('rn-checks/notes', core);
+      expect(names.length === 1 && names[0] === 'hello.txt', `file_list, got ${names.join(',')}`);
+      const outside = await rejects(() => fileRead('../escape.txt', core));
+      expect(outside instanceof FsError.Denied, `reading ../ is FsError.Denied, got ${String(outside)}`);
+      const escape = await rejects(() => fileWrite('rn-checks/../../escape.txt', body, core));
+      expect(escape instanceof FsError.Denied, `writing outside is FsError.Denied, got ${String(escape)}`);
+      await fileDelete('rn-checks', core);
+      const gone = await rejects(() => fileRead('rn-checks/notes/hello.txt', core));
+      expect(gone instanceof FsError.NotFound, `deleted with its directory: FsError.NotFound, got ${String(gone)}`);
+      return `write/read/list/delete under ${nativePlatformDefaults().fs ?? '?'}; ../ Denied`;
+    },
+  ],
+  [
+    'RN14',
+    'Http default: a GET through the core to the loopback server; a refused port is HttpError.Network',
+    async core => {
+      const res = await httpGet(`${LOOPBACK}/undra-rn-check`, 5000, core);
+      expect(res.status === 200, `status ${res.status}`);
+      const answer = JSON.parse(new TextDecoder().decode(res.body)) as { ok?: boolean; headers?: Record<string, string> };
+      expect(answer.ok === true, 'the server answered');
+      expect(answer.headers?.[PLAYGROUND_HEADER] === 'rn', "the app's override added its header (the sample of overriding a default)");
+      const refused = await rejects(() => httpGet('http://127.0.0.1:1/', 5000, core));
+      expect(refused instanceof HttpError.Network, `a refused connection is HttpError.Network (never Unavailable), got ${String(refused)}`);
+      return `GET ${LOOPBACK}/undra-rn-check -> 200 with the override's header; 127.0.0.1:1 -> HttpError.Network`;
+    },
+  ],
+  [
+    'RN15',
+    'Connectivity default: the core received the native source\'s report',
+    async (_core, playground) => {
+      expect(native(PortIds.Connectivity.portId), 'the module reports Connectivity natively on this device');
+      const device = playground.device;
+      expect(await eventually(() => device.connectivityReports.get() >= 1, 5000), 'at least one report within 5 s');
+      expect(device.online.get(), 'online');
+      return `online=${String(device.online.get())} kind=${device.netKind.get()} after ${device.connectivityReports.get()} report(s)`;
+    },
+  ],
+  [
+    'RN16',
+    'Lifecycle default: the core received AppState',
+    async (_core, playground) => {
+      const device = playground.device;
+      expect(await eventually(() => device.lifecycleReports.get() >= 1, 5000), 'at least one report within 5 s');
+      expect(device.appState.get() === 'active', `active, got ${device.appState.get()}`);
+      return `state=${device.appState.get()} after ${device.lifecycleReports.get()} report(s)`;
     },
   ],
 ];

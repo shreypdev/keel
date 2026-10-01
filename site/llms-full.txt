@@ -632,6 +632,8 @@ Each runtime ships an adapter for every port, so a new app works without adapter
 
 On Android one call installs all ten, `AndroidPlatformDefaults.install(core, context)`; the runtime alone installs only `Clock`, `Rng`, `Log` and `Timer`. On the JVM without Android, `Connectivity` and `Lifecycle` are stubs. On the web, `Clock`, `Rng` and `Log` are bound to imports of the wasm module, so a web app needs no adapter code for them.
 
+Under React Native, `loadNative` installs all ten too: `Kv`, `SecureStore`, `Fs` and `Connectivity` are native code in `@undra/react-native` (files in the app's private storage, the Keychain or the Android Keystore, `NWPathMonitor` or `ConnectivityManager`, with the Swift and Android adapters' file layouts), `Http` is React Native's `fetch` and `Lifecycle` its `AppState` ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)).
+
 ## Supplying your own adapter
 
 You replace a default when you load the core. The playground replaces `Http` with an in-memory server (so it needs no backend) and `Kv` with a map:
@@ -2502,7 +2504,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x933d362fb48d39ac`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xc5f05c376fde398c`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2522,13 +2524,13 @@ An enum for each `#[undra::error]`, conforming to `Error`.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `greet` `parseCount` `ping` `setRemoteDone` `version`
+`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
 
 ## Ports
 
@@ -2554,7 +2556,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x933d362fb48d39ac`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xc5f05c376fde398c`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2574,13 +2576,13 @@ A sealed class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `greet` `parseCount` `ping` `setRemoteDone` `version`
+`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
 
 ## Ports
 
@@ -2606,7 +2608,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x933d362fb48d39ac`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xc5f05c376fde398c`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2630,13 +2632,13 @@ An abstract class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and an async function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `greet` `parseCount` `ping` `setRemoteDone` `version`
+`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
 
 ## Ports
 
@@ -2706,6 +2708,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - One error channel on every platform (ADR-032)Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event.
 - No manual build stepA Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix.
 - The web bundle under its budget (ADR-052)The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record.
+- State-preserving reload (ADR-053)undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not.
 
 Now
 
@@ -2720,7 +2723,6 @@ In flight for the v1.x releases.
 - Real Android adaptersKv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call.
 - React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
 - Persisted-state migrations (ADR-037)A schema that changes shape still loads what the last version stored.
-- State-preserving reloadundra dev snapshots before a rebuild and restores after, so editing Rust never loses the screen you were on.
 
 Next
 

@@ -290,3 +290,164 @@ with `undra_buf_free`.
   are native and not overridable from JavaScript; there is no default `Kv`/`SecureStore`/`Fs` adapter in
   React Native's core (the app supplies one, as the playground does) and no default `Connectivity`
   source; the app adds the package's Babel plugin and imports the package before the bindings.
+
+## Amendment B (2026-10-01): the standard ports come with the package (G1b, `wt/rn-adapters`)
+
+Status: proposed, written before the code (R11: it adds native port callbacks and threads to the host of decision 7
+and a Java half to the Android package of decision 13). **No wire, C ABI, wasm ABI, schema or generated-code
+change** for `@undra/react-native`'s users; the playground core gains a module (below), which changes the playground's
+schema and its checked-in bindings, not any public shape. This amendment removes the limit "there is no default
+`Kv`/`SecureStore`/`Fs` adapter in React Native's core (the app supplies one) and no default `Connectivity` source":
+`loadNative` now gives every standard port of SPEC 8 a platform implementation, as `Adapters.platformDefault` (Swift),
+`AndroidPlatformDefaults.install` (Kotlin) and `browserAdapters()` (web) do, and an app overrides any of them the way
+it already overrides `http` or `lifecycle`.
+
+### What React Native 0.87 offers, and what it does not
+
+Read from `react-native@0.87.1` (the playground's `node_modules`): JavaScript has `fetch` (`whatwg-fetch` over the
+`Networking` module: `NSURLSession` on iOS, OkHttp on Android; binary bodies cross as base64; `URL` is a lenient
+regex shim that never throws) and `AppState`. It has **no** file system, no key-value store, no keychain or keystore
+and no network state (`NetInfo` left core years ago): `react-native-fs`, MMKV, AsyncStorage, `react-native-keychain`
+and `@react-native-community/netinfo` are community modules, and `expo-secure-store` needs `expo-modules-core`. The
+package takes no runtime dependency (decision 13), so four ports cannot be written in TypeScript at all.
+
+### The options
+
+* **(a) Reuse the platform runtimes' adapters natively.** iOS: the Swift `UndraRuntime` adapters inside the pod.
+  Android: depend on `android-adapters` and call its `PortImpl`s. Rejected:
+  * neither is distributable to an npm package: the Swift runtime is a SwiftPM package with no podspec (a pod
+    cannot depend on it; React Native's `spm_dependency` helper is experimental and rewrites the app's Xcode
+    project), and `dev.undra:android-adapters` / `dev.undra:runtime` are on no Maven repository (Maven Central is
+    an open follow-up), while an npm package cannot reference a Gradle project outside itself;
+  * both are adapters *of their runtime*: Swift's take an `UndraCore` (`makePortImpl(core:)`), Kotlin's are
+    `suspend` `PortImpl`s over `kotlinx-coroutines` and the Kotlin `UndraCore`. Using them puts a second Undra
+    host's classes (the whole Swift runtime, or `:runtime` plus coroutines) into an app whose core is driven from
+    C++, for a few hundred lines that are actually needed;
+  * Swift in the pod costs a Swift target next to the C++ (module maps, an `@objc` facade, since Swift cannot be
+    called from C++ without turning on Swift/C++ interop for React Native's headers, and Swift 6 strict concurrency
+    across that facade), and a second language to review against ADR-026's ownership rules. The Swift `FsAdapter`
+    also does not refuse symbolic links (SPEC 8 says it must), which reuse would inherit.
+* **(b) Everything in TypeScript over React Native's APIs.** Rejected: impossible without community modules for
+  `Kv`, `SecureStore`, `Fs` and `Connectivity` (above).
+* **(c) Hybrid (chosen).** TypeScript where React Native has the API (`Http` over `fetch`, `Lifecycle` over
+  `AppState`); native where it has none, with **one portable C++ implementation of `Kv` and `Fs` for both
+  platforms**, and per platform only what C++ cannot reach: the Keychain and `NWPathMonitor` (Objective-C++ over
+  the C APIs of Security and Network.framework, no Swift), the Keystore and `ConnectivityManager` (a small Java
+  library, no Kotlin, no dependency). Sharing with the platform runtimes is by **format and test**, not by linking:
+  the same directories, entry layout, file names, Keychain items, Keystore alias and sealed layout as the Swift
+  adapters on iOS and `android-adapters` on Android, so a value one shell wrote is read by the other.
+
+### Decisions
+
+B1. **Which port is implemented where** (the tests are in B10):
+
+| Port | Implemented in | iOS | Android |
+|---|---|---|---|
+| `Kv` | C++ (`cpp/UndraStores.cpp`), shared | files in `<Application Support>/<bundle id>/Undra/kv`, named `<fnv1a64>-<fnv1a32>` of the key (the Swift `KvAdapter`'s directory and names) | files in `<filesDir>/undra/kv`, named by the SHA-256 of the key (`android-adapters`' `AndroidKvAdapter`) |
+| `SecureStore` | iOS: Objective-C++ (`ios/UndraPlatformApple.mm`); Android: the C++ store over values sealed in Java | Keychain generic passwords, service `dev.undra.securestore`, account = key, `AfterFirstUnlockThisDeviceOnly` (the Swift `SecureStoreAdapter`'s items) | AES-256-GCM under the `AndroidKeyStore` key `dev.undra.securestore`, `format, iv, ciphertext+tag` with `undra.secure:<key>` as AAD, files in `<noBackupFilesDir>/undra/secure` (`AndroidSecureStoreAdapter`'s alias, layout and directory) |
+| `Fs` | C++, shared | `<Application Support>/<bundle id>/Undra/fs` | `<filesDir>/undra/fs` |
+| `Connectivity` | native event source | `nw_path_monitor` (Network.framework's C API) on its own queue | `ConnectivityManager.registerDefaultNetworkCallback` on a handler thread (Java), into C++ over JNI |
+| `Http` | TypeScript (`reactNativeHttp()`) | React Native's `fetch` (`NSURLSession`) | React Native's `fetch` (OkHttp) |
+| `Lifecycle` | TypeScript (`appStateLifecycle()`, unchanged) | `AppState` | `AppState` (React Native reports no `inactive` on Android) |
+| `Clock`, `Rng`, `Log` | C++, unchanged (decision 7) | | |
+| `Timer` | the core's own timer thread, unchanged | | |
+
+B2. **Native defaults never cross into JavaScript.** For `Kv`, `SecureStore` and `Fs` the host registers a native
+`port_cb` (before `undra_init`, as decision 7 requires) that copies the arguments into a job, hands it to that
+port's own serial worker thread and returns 1; the worker does the I/O, encodes the reply and calls
+`undra_port_reply` (allowed from any thread, host contract 4). The JS thread is never involved: these ports work
+while JavaScript is busy, and a query's persistence costs no JSI crossing. One worker per port, serial: a slow
+Keystore call never holds up `Kv`, and two writes of one key from the core land in order. `Connectivity` reports
+are sent with `undra_event` from the monitor's own thread (a host thread, never a callback), deduplicated (an
+identical consecutive state is reported once), the current state first.
+
+B3. **Lifetime: nothing outlives its core.** `Host::shutdown` runs `undra_shutdown`, then stops the event source
+(`nw_path_monitor_cancel` followed by a barrier on its queue; Java's `unregisterNetworkCallback` and a joined
+handler thread), then stops and joins the workers (a job already running finishes, its `undra_port_reply` reaches
+no runtime and is ignored; queued jobs are dropped), and only then releases the process's core slot (decision 11).
+So a reply or an event of a stopped core can never reach the next one, whose port call ids restart from 1.
+
+B4. **`Fs` rules (SPEC 8), stricter where SPEC allows.** Paths are `/`-separated and relative to the root; a
+leading `/`, empty and `.` components are ignored; **any** `..` component is `Denied` (as Swift and the web do;
+Kotlin normalises first); a NUL byte is `Io`. Every component is opened with `openat(..., O_NOFOLLOW)` from the
+root's descriptor, so **any** symbolic link on the path is `Denied`, whether it points in or out (the core cannot
+create links; a link inside the root is not a supported layout); `delete` removes a link without following it, and
+a directory with everything in it (`unlinkat` walk, links never followed); the root itself is `Denied` for
+`delete` and `Io` for `read`/`write` (it is a directory). `write` creates missing parents and is atomic (a
+temporary file in the same directory, `fsync`, `renameat`); `list` returns the names of one directory sorted by
+byte order, without this adapter's temporary files. Errors: `ENOENT`/`ENOTDIR` are `NotFound`, `EACCES`/`EPERM`/`ELOOP`
+are `Denied`, anything else `Io` with `strerror`.
+
+B5. **`Kv` and `SecureStore` files.** One file per key holding `u32 key length, key, value` (both runtimes' layout);
+a write goes to a temporary file in the same directory, is `fsync`ed and renamed over the entry, mode `0600`, so a
+killed process leaves the old or the new value; `get` checks the stored key (a name collision is never another
+key's value); `list` reads only each file's key, skips temporary and dot files and anything that is not an entry,
+filters by prefix and sorts by byte order (code-point order; the runtimes sort UTF-16 or Swift strings, identical
+for keys in the Basic Multilingual Plane). SHA-256 and FNV-1a are implemented in the C++ (checked against published
+vectors) because neither platform offers one to C++ that both share.
+
+B6. **Errors (ADR-032, ADR-025).** `Fs` failures are its typed `FsError` (status 1). `Kv` and `SecureStore` have no
+error channel: a failing disk, Keychain or Keystore answers "unavailable" (status 2) and logs one record (target
+`undra::react-native`), never "missing" for a value that exists but cannot be read. `Http` failures are its typed
+`HttpError`: no connection, a refused connection or a DNS failure (`TypeError: Network request failed`) is
+`Network`, never `Unavailable`; the request's `timeoutMs` (covering the body) is `Timeout`; a cancellation is
+`Cancelled`; a URL that is not `http(s)://host...` is `InvalidUrl` (checked by the adapter, since React Native's
+`URL` accepts anything).
+
+B7. **Choosing native or JavaScript, per port.** `loadNative` asks the module which defaults the platform has
+(`native.platformDefaults()`) and passes the native ones to `start`: a port is native when the app did not override
+it (`adapters.kv === undefined` and no `ports[<id>]`); a value in `adapters` or `ports` is registered as a
+JavaScript port exactly as today; `null` removes it (unavailable). `adapters.connectivity` likewise replaces or
+removes the native source. `core.registerPort` after `loadNative` cannot replace a port the module answers
+natively (the registration is the module's, made before `undra_init`): an app that replaces a default passes it to
+`loadNative` (documented). `Http` and `Lifecycle` are ordinary JavaScript adapters and replaceable either way.
+
+B8. **Android packaging.** The package gains an Android library (`android/build.gradle`, Java, namespace
+`dev.undra.reactnative`): `UndraPlatform` (the app's directories, the Keystore seal, the default-network callback),
+the context captured by a `ContentProvider` (`UndraContextProvider`, the same start-up hook AndroidX Startup uses;
+an app that removes it calls `UndraPlatform.install(context)`), and an empty `UndraReactNativePackage`, because
+autolinking links a library with a Gradle project only when it has a `ReactPackage`. The C++ module stays the C++
+TurboModule of decision 1, still autolinked through `cxxModuleCMakeListsPath` (React Native's Gradle plugin
+registers C++ modules of libraries with a Gradle project too); the library applies `com.facebook.react` so the
+codegen of `codegenConfig` runs for it, as for any library. The C++ reaches Java through JNI only: the class is
+loaded through the JS thread's context class loader in `install()`, methods are looked up once, the native
+callback of the network monitor is bound with `RegisterNatives` (nothing depends on exported `Java_` symbols, which
+a static library inside `libappmodules.so` would drop), and the `SecureStore` worker attaches itself to the VM once.
+The manifest declares `ACCESS_NETWORK_STATE` (and `INTERNET`); consumer R8 rules keep the classes JNI names. iOS
+gains `ios/UndraPlatformApple.mm` and the `Security` and `Network` frameworks in the podspec; no Swift.
+
+B9. **One instance per process, paths per process.** The defaults belong to the process's one running host
+(decision 11). Two cores in one process (ADR-044) would share the directories and the Keychain service; when the
+`abi-table` piece lands, a core's namespace becomes a subdirectory and a service suffix, except for the default
+namespace, whose layout stays this one (the native shells' layout). *Transitional (ADR-044).*
+
+B10. **Tests, per layer** (the deterministic story of the other runtimes: Rust fakes for core logic, the real
+platform on the device):
+
+| Port | C++ host test (`cpp/test/run.sh`, real core, ASan + UBSan) | `npm test` (fake module, mocked React Native) | Device (`scripts/rn-device-checks.sh`, iPhone 17 Pro simulator and the `undra-rn` emulator) |
+|---|---|---|---|
+| `Kv` | entry format and both namings against fixed vectors; atomic write; collisions; list; through the core (`kv_put`/`kv_get` of the playground core) | native when not overridden, JavaScript when overridden, absent with `null` | a round trip through the core; a value written before the app was killed and read after the relaunch |
+| `SecureStore` | the store over a test sealer; unavailable on a sealer failure | as `Kv` | a round trip through the core; the value's marker is **not** found in the app's files while a `Kv` marker written next to it **is** (the scan works) |
+| `Fs` | `..`, symbolic links in and out, the root, NUL, recursive delete, atomic write, sorted list, typed errors; through the core | as `Kv` | write, read, list, delete inside the root; `../` refused with `FsError.Denied` through the core |
+| `Http` | (TypeScript) | `reactNativeHttp()` over a mocked `fetch`: status, headers, body, `InvalidUrl`, `Timeout`, `Cancelled`, `Network` | a GET through the core to a loopback server the script runs (`adb reverse` on Android), with an app override that adds a header (the sample of overriding); a refused port is `HttpError.Network` |
+| `Connectivity` | the event encoding, deduplication, stop before the slot is released (scripted source) | the source is native unless overridden | the core received a report; on Android the core sees `online = false` in airplane mode and `true` after it |
+| `Lifecycle` | (TypeScript) | `appStateLifecycle()` (unchanged tests) | the core sees `background` after Home (Android) or another app (iOS) and `active` after the relaunch |
+
+The Java's pure parts (the seal with a software key against a vector computed with Node's AES-GCM, the network
+classification) are unit-tested with `javac` and the JDK (`android/test/run.sh`). The core's side of every check
+is a new playground module, `platform` (`kv_*`, `secret_*`, `file_*`, `http_get`, and a `Device` store that shows
+the last `Connectivity` and `Lifecycle` reports the core received since it started, through an `InitHook`), tested
+with `undra::ports::fakes` like the rest of the playground core, and usable by the other playground apps.
+
+### Consequences
+
+* An app writes no adapter: `loadNative({ expectedSchemaHash })` gives the core all ten ports. The playground's React
+  Native app drops its in-memory `Kv` and keeps one override (an `Http` adapter that adds a header) as the sample.
+* `@undra/react-native` is no longer a pure C++ dependency on Android: it has a Gradle library (Java, no
+  dependencies) beside the C++ module. On iOS it stays one pod, now linking Security and Network.
+* The module grows by four threads per running core at most (three port workers, started on first use, and one
+  monitor queue or handler thread), all stopped before the core's slot is released.
+* Limits that remain (documented in `docs/REACT_NATIVE.md`): `registerPort` after `loadNative` does not replace a
+  native default; `Http` runs on the JS thread's `fetch` (bodies cross React Native's bridge as base64; a native
+  `Http` is a follow-up if a measurement asks for one); Android reports no `inactive`; the iOS simulator has no
+  airplane mode, so the `Connectivity` flip is checked on Android only.

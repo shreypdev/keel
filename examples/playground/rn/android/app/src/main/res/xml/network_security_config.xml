@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext http only to this device's own loopback (and the emulator's alias of the host): the loopback server of
+  scripts/rn-device-checks.sh, reached through `adb reverse`, which the Http check (RN14) calls through the core, and
+  Metro in a debug build. Everything else is https only, as Android's default.
+-->
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">127.0.0.1</domain>
+    <domain includeSubdomains="false">localhost</domain>
+    <domain includeSubdomains="false">10.0.2.2</domain>
+  </domain-config>
+</network-security-config>

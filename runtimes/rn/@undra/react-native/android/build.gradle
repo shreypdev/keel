@@ -1,0 +1,47 @@
+// The Android library of @undra/react-native (ADR-038 amendment B, B8): the Java half of the default
+// ports that C++ cannot reach on its own (the Android Keystore, ConnectivityManager, the app's
+// directories), called from the C++ module over JNI. Java with no dependency beyond React Native
+// itself: no Kotlin plugin to align with the app's, no kotlinx, no AndroidX.
+//
+// React Native's autolinking includes this project in the app's Gradle build and still adds the C++
+// TurboModule (CMakeLists.txt, `react-native.config.cjs`) to the app's libappmodules.so. Applying
+// `com.facebook.react` runs the package's codegen for it, as for any React Native library.
+apply plugin: "com.android.library"
+apply plugin: "com.facebook.react"
+
+def undraExt(name, fallback) {
+  return rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
+}
+
+android {
+  namespace "dev.undra.reactnative"
+  compileSdkVersion undraExt("compileSdkVersion", 35)
+
+  defaultConfig {
+    minSdkVersion undraExt("minSdkVersion", 24)
+    targetSdkVersion undraExt("targetSdkVersion", 35)
+    // The classes C++ finds by name must survive R8 in the app (proguard-rules.pro).
+    consumerProguardFiles "proguard-rules.pro"
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  sourceSets {
+    // The JVM tests of the pure parts run with javac (android/test/run.sh), not through Gradle.
+    main.java.srcDirs = ["src/main/java"]
+  }
+}
+
+react {
+  // The names of package.json's codegenConfig, so the autolinked codegen target is the one
+  // autolinking expects.
+  libraryName = "UndraReactNativeSpec"
+  codegenJavaPackageName = "dev.undra.reactnative"
+}
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+}

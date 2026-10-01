@@ -19,9 +19,12 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/shreypdev/undra.git", :tag => "v#{s.version}" }
 
   s.source_files = "cpp/*.{h,cpp}", "ios/*.{h,mm}"
-  # Android's halves: the dlopen shim and the AChoreographer frame source (ios/ has Apple's).
-  s.exclude_files = "cpp/UndraApiAndroid.cpp", "cpp/UndraFrameSource.cpp"
-  s.frameworks   = "QuartzCore"
+  # Android's halves: the dlopen shim, the AChoreographer frame source and the JNI platform of the
+  # default ports (ios/ has Apple's).
+  s.exclude_files = "cpp/UndraApiAndroid.cpp", "cpp/UndraFrameSource.cpp", "cpp/UndraPlatformAndroid.cpp"
+  # QuartzCore: the display link. Security and Network: the Keychain and nw_path_monitor of the
+  # default SecureStore and Connectivity ports (ios/UndraPlatformApple.mm, ADR-038 amendment B).
+  s.frameworks   = "QuartzCore", "Security", "Network"
   s.pod_target_xcconfig = {
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++20",
   }
