@@ -65,7 +65,8 @@ kotlin {
 dependencies {
     // The Undra runtime and the bindings generated from the core.
     implementation("dev.undra:runtime:@@KOTLIN_RUNTIME_VERSION@@")
-    // The Android half of the runtime: the Choreographer frame pacer `UndraApp` installs (ADR-031).
+    // The Android half of the runtime: the adapters of the standard ports (Http, Kv, SecureStore, Fs, Connectivity,
+    // Lifecycle) and the Choreographer frame pacer. Its manifest declares INTERNET and ACCESS_NETWORK_STATE.
     implementation("dev.undra:android-adapters:@@KOTLIN_RUNTIME_VERSION@@")
     implementation(project(":core-bindings"))
 

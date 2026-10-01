@@ -10,6 +10,7 @@ import {
   PortStatus,
   ReplyStatus,
   StreamFlag,
+  type StreamFailure,
   ALL_SIGNALS,
   decodeCall,
   decodeCancel,
@@ -46,9 +47,12 @@ export interface Responder {
 /** Handles a call to a scripted method. */
 export type CallHandler = (call: CallPayload, respond: Responder) => void;
 
-/** A scripted stream: `next` yields items; `fake` sends them as credit allows. */
+/**
+ * A scripted stream: `next` yields items; `fake` sends them as credit allows. A finished script
+ * ends the stream with flag 1, with its own `error` (flag 2) or with a `failure` (flag 3).
+ */
 export interface StreamScript {
-  next(): { done: true; error?: Uint8Array } | { done: false; value: Uint8Array };
+  next(): { done: true; error?: Uint8Array; failure?: StreamFailure } | { done: false; value: Uint8Array };
 }
 
 /** Options of {@link FakeCoreTransport}. */
@@ -173,13 +177,22 @@ export class FakeCoreTransport implements Transport {
     this.#send(() => this.#handler?.reply(payload));
   }
 
-  /** Delivers a `StreamItem`. */
-  emitStreamItem(callId: number, flag: StreamFlag, body: Uint8Array = new Uint8Array(0)): void {
+  /** Delivers a `StreamItem` with an item, the end or the stream's own error (see `emitStreamFailure` for flag 3). */
+  emitStreamItem(
+    callId: number,
+    flag: StreamFlag.Item | StreamFlag.End | StreamFlag.Error,
+    body: Uint8Array = new Uint8Array(0),
+  ): void {
     this.#send(() =>
       this.#handler?.streamItem(
         flag === StreamFlag.End ? encodeStreamItem({ callId, flag }) : encodeStreamItem({ callId, flag, body }),
       ),
     );
+  }
+
+  /** Delivers a `StreamItem` with flag 3: the core reports the stream panicked, was cancelled or was refused. */
+  emitStreamFailure(callId: number, failure: StreamFailure): void {
+    this.#send(() => this.#handler?.streamItem(encodeStreamItem({ callId, flag: StreamFlag.Failed, failure })));
   }
 
   /** Delivers a raw `StreamItem` payload (for malformed input). */
@@ -349,7 +362,7 @@ export class FakeCoreTransport implements Transport {
     this.#send(() => this.#handler?.reply(reply));
   }
 
-  /** Sends the items the stream has credit for, and its end or error as soon as it is reached (no credit needed). */
+  /** Sends the items the stream has credit for, and its end, error or failure as soon as it is reached (no credit needed). */
   #pumpStream(callId: number): void {
     this.#send(() => {
       const stream = this.#streams.get(callId);
@@ -360,9 +373,11 @@ export class FakeCoreTransport implements Transport {
         if (step.done) {
           this.#streams.delete(callId);
           const item =
-            step.error === undefined
-              ? encodeStreamItem({ callId, flag: StreamFlag.End })
-              : encodeStreamItem({ callId, flag: StreamFlag.Error, body: step.error });
+            step.failure !== undefined
+              ? encodeStreamItem({ callId, flag: StreamFlag.Failed, failure: step.failure })
+              : step.error !== undefined
+                ? encodeStreamItem({ callId, flag: StreamFlag.Error, body: step.error })
+                : encodeStreamItem({ callId, flag: StreamFlag.End });
           this.#handler?.streamItem(item);
           return;
         }

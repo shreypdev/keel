@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { codecs, decodeValue, encodeValue } from "../src/wire/codec.js";
 import { Kind, decodeEnvelope, encodeEnvelope } from "../src/wire/envelope.js";
 import { WireError, type WireErrorCode } from "../src/wire/errors.js";
-import { decodeCall, decodeChangeSet, decodeReply, decodeSnapshot } from "../src/wire/payloads.js";
+import { decodeCall, decodeChangeSet, decodeReply, decodeSnapshot, decodeStreamFailure, decodeStreamItem } from "../src/wire/payloads.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { durationFromNanos } from "../src/wire/types.js";
 import { UndraWriter } from "../src/wire/writer.js";
@@ -20,6 +20,7 @@ const triggers: Record<WireErrorCode, [string, () => unknown][]> = {
     ["truncated envelope header", () => decodeEnvelope(fromHex("554e44520100"))],
     ["truncated call", () => decodeCall(fromHex("01 0100000001000000"))],
     ["truncated uuid", () => decodeValue(codecs.uuid, new Uint8Array(15))],
+    ["flag-3 stream item without its failure", () => decodeStreamItem(fromHex("01000000 03"))],
   ],
   invalid_utf8: [
     ["lone continuation byte", () => decodeValue(codecs.string, fromHex("01000000 80"))],
@@ -27,6 +28,7 @@ const triggers: Record<WireErrorCode, [string, () => unknown][]> = {
     ["encoded surrogate", () => decodeValue(codecs.string, fromHex("03000000 eda080"))],
     ["truncated sequence at the end of the string", () => decodeValue(codecs.string, fromHex("02000000 e282"))],
     ["inside a panic reply", () => decodeReply(fromHex("01000000 02 01000000 ff 00000000"))],
+    ["inside a stream failure", () => decodeStreamFailure(fromHex("03 01000000 ff 00000000"))],
   ],
   invalid_tag: [
     ["bool 2", () => decodeValue(codecs.bool, fromHex("02"))],
@@ -37,6 +39,9 @@ const triggers: Record<WireErrorCode, [string, () => unknown][]> = {
     ["call target 9", () => decodeCall(fromHex("09"))],
     ["reply status 9", () => decodeReply(fromHex("0100000009"))],
     ["change-set op 9", () => decodeChangeSet(fromHex("0000000000000000 01000000 0000000000000000 00000000 09 00000000"))],
+    ["stream flag 4", () => decodeStreamItem(fromHex("01000000 04"))],
+    ["stream failure status 1 (a typed error is flag 2, not a failure)", () => decodeStreamItem(fromHex("01000000 03 01 00000000 00000000"))],
+    ["stream failure status 4", () => decodeStreamFailure(fromHex("04 00000000 00000000"))],
   ],
   length_too_large: [
     ["string length beyond input", () => decodeValue(codecs.string, fromHex("ffffffff 61"))],
@@ -53,6 +58,7 @@ const triggers: Record<WireErrorCode, [string, () => unknown][]> = {
     ["reader not fully consumed", () => new UndraReader(fromHex("01")).finish()],
     ["bytes after an envelope payload", () => decodeEnvelope(new Uint8Array([...validEnvelope(), 0]))],
     ["body on a cancelled reply", () => decodeReply(fromHex("01000000 03 00"))],
+    ["bytes after a stream failure", () => decodeStreamItem(fromHex("01000000 03 03 00000000 00000000 00"))],
   ],
   bad_magic: [
     ["wrong bytes", () => decodeEnvelope(fromHex("deadbeef"))],
@@ -142,6 +148,34 @@ describe("WireError codes", () => {
       const viewed = catchWireError(() => decodeEnvelope(embedded(bytes)));
       expect(viewed.code).toBe(plain.code);
       expect(viewed.detail).toEqual(plain.detail);
+    }
+  });
+});
+
+describe("stream item flags (ADR-036)", () => {
+  it("accepts flag 3 with a well-formed failure; flag 4 and up are invalid", () => {
+    expect(decodeStreamItem(fromHex("01000000 03 03 00000000 00000000"))).toMatchObject({ callId: 1, flag: 3 });
+    for (const flag of [4, 5, 0x7f, 0xff]) {
+      expect(catchWireError(() => decodeStreamItem(new Uint8Array([1, 0, 0, 0, flag]))).detail).toEqual({
+        code: "invalid_tag",
+        tag: flag,
+        at: 4,
+        ty: "StreamFlag",
+      });
+    }
+  });
+
+  it("names a bad failure status StreamFailure.status, at the status byte", () => {
+    for (const status of [0, 1, 4, 6, 0xff]) {
+      expect(catchWireError(() => decodeStreamItem(new Uint8Array([1, 0, 0, 0, 3, status, 0, 0, 0, 0, 0, 0, 0, 0]))).detail).toEqual({
+        code: "invalid_tag",
+        tag: status,
+        at: 5,
+        ty: "StreamFailure.status",
+      });
+      expect(catchWireError(() => decodeStreamFailure(new Uint8Array([status, 0, 0, 0, 0, 0, 0, 0, 0]))).message).toBe(
+        `wire: invalid StreamFailure.status tag ${status} at offset 0`,
+      );
     }
   });
 });

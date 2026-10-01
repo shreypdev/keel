@@ -467,17 +467,105 @@ extension Wire {
 
     // MARK: - StreamItem (kind 8, core to host)
 
-    /// What a `StreamItem` carries (docs/SPEC.md section 3.7).
+    /// What a `StreamItem` carries (docs/SPEC.md section 3.7, ADR-036).
     public enum StreamFlag: UInt8, Sendable, Hashable {
         /// The body is one item `T`.
         case item = 0
         /// The stream ended; the body is empty.
         case end = 1
-        /// The stream failed; the body is the error `E` (a `String` if the stream has no error type).
+        /// The stream ended with **its own** typed error; the body is the encoded `E`. Only a
+        /// method whose schema return is `Result<Stream<T>, E>` sends it, so a stream without an
+        /// error type that receives it has received something malformed.
         case error = 2
+        /// The call failed, in the reply-failure vocabulary; the body is a `StreamFailure`. The
+        /// core sends it for a stream it ended itself (a restore or a shutdown) or that panicked.
+        case failed = 3
     }
 
-    /// One element of a stream: `call_id u32, flag u8, body`.
+    /// The body of a `.failed` stream item (docs/SPEC.md section 3.7, ADR-036):
+    /// `status u8, message String, detail String`.
+    ///
+    /// The status is a reply status (docs/SPEC.md section 3.4), so a failed stream item means
+    /// exactly what a failed reply with that status means:
+    ///
+    /// | `status`      | `message`                | `detail`          |
+    /// |---------------|--------------------------|-------------------|
+    /// | `.panic`      | the panic message        | the backtrace     |
+    /// | `.cancelled`  | why the core cancelled   | empty             |
+    /// | `.badRequest` | why the core refused     | empty             |
+    ///
+    /// Decoding any other status throws `WireError.invalidTag` with the type name
+    /// `"StreamFailure.status"`.
+    ///
+    /// ```swift
+    /// let failure = Wire.StreamFailure(status: .cancelled, message: "the runtime shut down")
+    /// let item = Wire.StreamItem(callId: 7, flag: .failed, body: ArraySlice(failure.encode()))
+    /// let back = try item.failure()                       // == failure
+    /// ```
+    public struct StreamFailure: UndraPayload, Equatable {
+        /// How the call failed: `.panic`, `.cancelled` (by the core) or `.badRequest` (refused).
+        public var status: ReplyStatus
+        /// The panic message, the cancellation reason or the refusal reason.
+        public var message: String
+        /// The backtrace of a panic; empty otherwise.
+        public var detail: String
+
+        public init(status: ReplyStatus, message: String, detail: String = "") {
+            self.status = status
+            self.message = message
+            self.detail = detail
+        }
+
+        /// Whether `status` may appear in a stream failure: panicked, cancelled or refused.
+        public static func allows(_ status: ReplyStatus) -> Bool {
+            switch status {
+            case .panic, .cancelled, .badRequest:
+                return true
+            case .ok, .error, .streamOpened:
+                return false
+            }
+        }
+
+        /// The body a failed reply with this status carries (docs/SPEC.md section 3.4):
+        /// `String message, String backtrace` for `.panic`, the `String` reason for
+        /// `.badRequest`, and nothing for `.cancelled` (or any status a stream failure cannot
+        /// have).
+        public func replyBody() -> [UInt8] {
+            var writer = UndraWriter()
+            switch status {
+            case .panic:
+                writer.writeString(message)
+                writer.writeString(detail)
+            case .badRequest:
+                writer.writeString(message)
+            case .cancelled, .ok, .error, .streamOpened:
+                break
+            }
+            return writer.finish()
+        }
+
+        public static func undraDecode(_ r: inout UndraReader) throws -> StreamFailure {
+            let statusAt = r.position
+            let rawStatus = try r.readU8()
+            guard let status = ReplyStatus(rawValue: rawStatus), StreamFailure.allows(status) else {
+                throw WireError.invalidTag(tag: UInt32(rawStatus), at: statusAt, type: "StreamFailure.status")
+            }
+            let message = try r.readString()
+            let detail = try r.readString()
+            return StreamFailure(status: status, message: message, detail: detail)
+        }
+
+        public func undraEncode(_ w: inout UndraWriter) {
+            w.writeU8(status.rawValue)
+            w.writeString(message)
+            w.writeString(detail)
+        }
+    }
+
+    /// One element of a stream: `call_id u32, flag u8, body`, where the body is the item `T`
+    /// (flag 0), nothing (1), the stream's own error `E` (2) or a `StreamFailure` (3).
+    ///
+    /// Flags 1, 2 and 3 end the stream and need no credit.
     public struct StreamItem: UndraPayload, Equatable {
         public var callId: UInt32
         public var flag: StreamFlag
@@ -488,6 +576,12 @@ extension Wire {
             self.callId = callId
             self.flag = flag
             self.body = body
+        }
+
+        /// The failure carried by a `.failed` item: its body decoded as a `StreamFailure` that
+        /// spans all of it. Offsets in a thrown `WireError` count from the start of the body.
+        public func failure() throws -> StreamFailure {
+            return try StreamFailure.decode(slice: body)
         }
 
         public static func undraDecode(_ r: inout UndraReader) throws -> StreamItem {

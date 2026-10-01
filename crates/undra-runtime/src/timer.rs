@@ -194,7 +194,10 @@ impl Timers {
         let me = self.clone();
         let spawned = std::thread::Builder::new()
             .name("undra-timer".to_owned())
-            .spawn(move || me.serve());
+            .spawn(move || {
+                let _alive = crate::testing::ThreadMark::enter();
+                me.serve();
+            });
         if let Ok(handle) = spawned {
             *self.thread.lock() = Some(handle);
         } else {

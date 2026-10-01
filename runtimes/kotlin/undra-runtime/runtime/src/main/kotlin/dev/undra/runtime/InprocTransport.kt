@@ -31,6 +31,7 @@ internal interface NativeApi {
     fun snapshot(): ByteArray
     fun restore(snapshot: ByteArray): Int
     fun statsJson(): String
+    fun shutdown()
 }
 
 /** The real thing: straight calls to [UndraNative]. */
@@ -52,6 +53,7 @@ internal object JniNativeApi : NativeApi {
     override fun snapshot(): ByteArray = UndraNative.snapshot()
     override fun restore(snapshot: ByteArray): Int = UndraNative.restore(snapshot)
     override fun statsJson(): String = UndraNative.statsJson()
+    override fun shutdown() = UndraNative.shutdown()
 }
 
 /**
@@ -64,8 +66,10 @@ internal object JniNativeApi : NativeApi {
  * `E_REENTRANT` reason instead of a deadlock),
  * and it never lets an exception escape into native code.
  *
- * The native runtime is process-global and cannot be shut down through JNI, so the transport claims it
- * on the first successful [connect] and never gives it back: a second in-process core is refused.
+ * The native runtime is process-global, so the transport claims it on a successful [connect]: a second
+ * in-process core is refused while one is loaded. [close] ends the native core's work through
+ * [UndraNative.shutdown] (ADR-034: its tasks, timers and port traffic stop, in-flight calls end) and gives
+ * the claim back, so a later [UndraCore.load] in the same process starts a fresh core.
  */
 internal class InprocTransport(private val native: NativeApi = JniNativeApi) : Transport {
     override val mode: Mode get() = Mode.INPROC
@@ -74,6 +78,9 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
     @Volatile
     private var events: TransportEvents? = null
     private val closed = AtomicBoolean(false)
+    /** This transport started the native core (and so owns its shutdown and the claim). */
+    @Volatile
+    private var started = false
     private val syncReply = ThreadLocal<ByteArray?>()
     private val insideCallback = ThreadLocal.withInitial { false }
 
@@ -95,8 +102,8 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
         if (got != expectedSchemaHash) return got
         if (!claimed.add(native)) {
             throw UndraException(
-                "an in-process Undra core is already loaded in this process and cannot be unloaded; " +
-                    "use UndraCore.shared instead of loading it again",
+                "an in-process Undra core is already loaded in this process; " +
+                    "use UndraCore.shared instead of loading it again, or close it (UndraCore.close()) before loading another",
             )
         }
         this.events = events
@@ -112,6 +119,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
             claimed.remove(native)
             throw UndraException("undra_init failed with code $code")
         }
+        started = true
         return got
     }
 
@@ -172,8 +180,29 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
 
     override fun statsJson(): String? = native.statsJson()
 
+    override fun checkClose() {
+        checkNotInCallback("close")
+    }
+
+    /**
+     * Ends the native core and **waits for it**: [UndraNative.shutdown] returns after the core's threads are joined
+     * and the port callbacks running on other threads have returned (SPEC 6, host contract 5). Refused from a
+     * callback, where it would wait for its own thread.
+     */
     override fun close() {
-        if (closed.compareAndSet(false, true)) events = null
+        // Refused from a callback, like every native entry: the shutdown would wait for this very thread.
+        checkNotInCallback("close")
+        if (!closed.compareAndSet(false, true)) return
+        // Detached first: what the shutdown answers (status 3, cancelled streams) has nowhere to go; the
+        // UndraCore above has already failed its pending calls as closed.
+        events = null
+        // Only the transport that started the core ends it: a failed or refused connect owns nothing.
+        if (!started) return
+        try {
+            native.shutdown()
+        } finally {
+            claimed.remove(native)
+        }
     }
 
     private fun checkNotInCallback(what: String) {

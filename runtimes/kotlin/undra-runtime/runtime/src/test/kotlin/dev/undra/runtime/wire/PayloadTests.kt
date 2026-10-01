@@ -266,15 +266,76 @@ class PayloadTests : Suite() {
                 { Payloads.StreamItem.decode(it) }, { Payloads.StreamItem.decode(it) }, openEnded = true, headerLen = 5)
             check("07000000" + "02" + "0100000078", Payloads.StreamItem(7u, Payloads.StreamFlag.ERROR, unhex("0100000078")),
                 { Payloads.StreamItem.decode(it) }, { Payloads.StreamItem.decode(it) }, openEnded = true, headerLen = 5)
+            val failure = Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "x", "").toByteArray()
+            check("07000000" + "03" + "03" + "0100000078" + "00000000", Payloads.StreamItem(7u, Payloads.StreamFlag.FAILED, failure),
+                { Payloads.StreamItem.decode(it) }, { Payloads.StreamItem.decode(it) }, openEnded = true, headerLen = 5)
         }
 
-        case("StreamFlag has the three codes of the spec and rejects the rest") {
-            assertEq(listOf("ITEM" to 0, "END" to 1, "ERROR" to 2), Payloads.StreamFlag.entries.map { it.name to it.code.toInt() })
+        case("StreamFlag has the four codes of the spec and rejects the rest") {
+            assertEq(
+                listOf("ITEM" to 0, "END" to 1, "ERROR" to 2, "FAILED" to 3),
+                Payloads.StreamFlag.entries.map { it.name to it.code.toInt() },
+            )
             for (f in Payloads.StreamFlag.entries) assertEq(f, Payloads.StreamFlag.fromByte(f.code))
-            val e = assertWire<WireException.InvalidTag> { Payloads.StreamItem.decode(bytesOf(1, 0, 0, 0, 3)) }
-            assertEq(3u, e.tag)
-            assertEq(4, e.at)
-            assertEq("StreamFlag", e.type)
+            for (flag in listOf(4, 5, 128, 255)) {
+                val e = assertWire<WireException.InvalidTag>("flag $flag") { Payloads.StreamItem.decode(bytesOf(1, 0, 0, 0, flag)) }
+                assertEq(flag.toUInt(), e.tag)
+                assertEq(4, e.at)
+                assertEq("StreamFlag", e.type)
+            }
+        }
+
+        // ---- StreamFailure: the body of a flag-3 item (ADR-036) -------------------------------------------
+
+        case("StreamFailure is status, message and detail, for each of the three failure statuses") {
+            val decodeBytes = { b: ByteArray -> Payloads.StreamFailure.decode(b) }
+            val decodeReader = { r: UndraReader -> Payloads.StreamFailure.decode(r) }
+            check("02" + "04000000" + "626f6f6d" + "0c000000" + "617420636f72652e72733a31",
+                Payloads.StreamFailure(Payloads.ReplyStatus.PANIC, "boom", "at core.rs:1"), decodeBytes, decodeReader)
+            check("03" + "15000000" + "7468652072756e74696d65207368757420646f776e" + "00000000",
+                Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "the runtime shut down", ""), decodeBytes, decodeReader)
+            check("05" + "0c000000" + "7374616c652068616e646c65" + "00000000",
+                Payloads.StreamFailure(Payloads.ReplyStatus.BAD_REQUEST, "stale handle", ""), decodeBytes, decodeReader)
+            // Empty strings and non-ASCII text round-trip too.
+            check("03" + "00000000" + "00000000", Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "", ""), decodeBytes, decodeReader)
+            val unicode = Payloads.StreamFailure(Payloads.ReplyStatus.PANIC, "h" + cp(0xE9) + "llo " + cp(0x1F4A5), "frame 0\nframe 1")
+            check(hex(unicode.toByteArray()), unicode, decodeBytes, decodeReader)
+        }
+
+        case("StreamFailure rejects every status but panicked, cancelled and refused, at the status byte") {
+            for (s in listOf(0, 1, 4, 6, 7, 128, 255)) {
+                val e = assertWire<WireException.InvalidTag>("status $s") { Payloads.StreamFailure.decode(bytesOf(s, 0, 0, 0, 0, 0, 0, 0, 0)) }
+                assertEq(s.toUInt(), e.tag)
+                assertEq(0, e.at)
+                assertEq("StreamFailure.status", e.type)
+            }
+            // The offset is the status byte's, not the start of the reader's.
+            val r = UndraReader(bytesOf(9, 9, 1, 0, 0, 0, 0, 0, 0, 0, 0))
+            r.readU8()
+            r.readU8()
+            assertEq(2, assertWire<WireException.InvalidTag> { Payloads.StreamFailure.decode(r) }.at)
+            for (s in Payloads.ReplyStatus.entries) {
+                assertEq(s == Payloads.ReplyStatus.PANIC || s == Payloads.ReplyStatus.CANCELLED || s == Payloads.ReplyStatus.BAD_REQUEST,
+                    Payloads.StreamFailure.allows(s), "allows($s)")
+            }
+            for (s in listOf(Payloads.ReplyStatus.OK, Payloads.ReplyStatus.ERROR, Payloads.ReplyStatus.STREAM_OPENED)) {
+                assertThrows<IllegalArgumentException>("construct with $s") { Payloads.StreamFailure(s, "m", "") }
+            }
+        }
+
+        case("StreamFailure.replyBody is the SPEC 3.4 body of a failed reply with the same status") {
+            val panic = Payloads.StreamFailure(Payloads.ReplyStatus.PANIC, "boom", "at core.rs:1")
+            assertBytes("04000000" + "626f6f6d" + "0c000000" + "617420636f72652e72733a31", panic.replyBody(), "panic: String message + String backtrace")
+            assertEq(panic.toByteArray().drop(1), panic.replyBody().toList(), "panic: the failure without its status byte")
+            assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), Payloads.Reply(1u, Payloads.ReplyStatus.PANIC, panic.replyBody()).readPanic())
+            val cancelled = Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "the runtime shut down", "")
+            assertEq(0, cancelled.replyBody().size, "cancelled: empty")
+            val refused = Payloads.StreamFailure(Payloads.ReplyStatus.BAD_REQUEST, "stale handle", "")
+            assertBytes("0c000000" + "7374616c652068616e646c65", refused.replyBody(), "refused: String reason")
+            assertEq("stale handle", Payloads.Reply(1u, Payloads.ReplyStatus.BAD_REQUEST, refused.replyBody()).readBadRequestReason())
+            // A detail on a refusal is not part of the §3.4 body.
+            val withDetail = Payloads.StreamFailure(Payloads.ReplyStatus.BAD_REQUEST, "why", "extra")
+            assertEq("why", Payloads.Reply(1u, Payloads.ReplyStatus.BAD_REQUEST, withDetail.replyBody()).readBadRequestReason())
         }
 
         case("Observe is handle, signal id and an on flag") {
@@ -374,6 +435,7 @@ class PayloadTests : Suite() {
             assertWire<WireException.UnexpectedEof> { Payloads.Cancel.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.StreamCredit.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.StreamItem.decode(ByteArray(0)) }
+            assertWire<WireException.UnexpectedEof> { Payloads.StreamFailure.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.Observe.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.Release.decode(ByteArray(0)) }
             assertWire<WireException.UnexpectedEof> { Payloads.Event.decode(ByteArray(0)) }

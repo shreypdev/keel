@@ -1,7 +1,7 @@
 # ADR-034: anything that outlives a call holds a `WeakCtx`, and a runtime ends when its owner lets go
 
-Status: **Proposed** (2026-10-01, from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps LC-1…LC-3
-and PA-6; Track A, piece A1). Touches SPEC 5.1 (Shutdown), 5.3 and 16.2 (`Ctx`, the new `WeakCtx`, `Events`),
+Status: **Accepted** (2026-10-01; implemented on `wt/runtime-lifecycle`, Track A, piece A1. Proposed the same day
+from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps LC-1…LC-3 and PA-6). Touches SPEC 5.1 (Shutdown), 5.3 and 16.2 (`Ctx`, the new `WeakCtx`, `Events`),
 `undra-runtime` (`ctx.rs`, `runtime.rs`, `ports.rs`), `undra-query` (its tasks and subscribers), `undra-ports`
 (the event helpers), `undra-macros` (a `WeakCtx` store field restores like a `Ctx`), and the Kotlin runtime's
 `close()` with one JNI native added (`UndraNative.shutdown()`, SPEC 6.1). **No wire change, no C ABI or wasm
@@ -162,3 +162,35 @@ instance (the wasm ABI has no shutdown export, and dropping the instance ends ev
 
 Builds on ADR-023 (shutdown answers and releases everything) and ADR-022 (generations survive re-init). Does
 not depend on ADR-035/036/037; lands first in `wt/runtime-lifecycle` together with them.
+
+## Amendment A (2026-10-01) — what a call pins
+
+Decision 8 says "because a call no longer pins the runtime". That is precise only for **the task**. The runtime's
+own call and stream tasks hold a `WeakCtx` and upgrade per item (decision 4), so an idle stream between items and a
+call that has finished hold nothing, and a runtime whose app code keeps only `WeakCtx`s is freed when its owner lets
+go. It is not true of the method's **future**. A call whose future owns a `Ctx` keeps the runtime alive until that
+future completes or `shutdown` runs: an `async fn f(ctx: Ctx)` body awaiting a port, a generated port proxy
+(`ctx.kv()`, `HttpProxy(Ctx)`, each of which holds one), and `undra-query`'s `Kv` calls (hydration, persist, fetch hold a
+strong `Ctx` for the length of one port await, "a step" in the sense of decision 3). The adversarial review found it
+(M2): LC-1's regression test passed only because its fixture calls `rt.port_call` and holds no `Ctx`, which is not the
+shape the macros generate.
+
+The pin is bounded, and explicitly so. It lasts until the future completes (the port answers; an `Http` request
+carries its own `timeout_ms`) or until `shutdown` runs, whichever comes first. `shutdown` answers the call (status 3)
+and drops its future, which releases the `Ctx`. When the future completes after the owner has already let go, the
+`Ctx` it releases is the last strong reference, so `Drop` runs the same teardown (decision 8) and the runtime ends
+there. So dropping the last owner does end a runtime that has no call in flight, and ends one that has once its
+calls finish or the embedder calls `shutdown`; nothing is pinned by a call that finishes. What stays unbounded is the
+single combination of a port that never answers and an owner that never calls `shutdown` (the dev server calls it when a session ends), and `stats_json`'s `strong_refs` shows it (the residual bullet above).
+
+**Accepted for v1.1.** `Ctx` by value is the ergonomic signature of an async method, and the bound above is explicit.
+SPEC 5.1 ("Owners and `Drop`") states the residual in the same words, and
+`residual_an_async_call_that_keeps_its_ctx_across_a_port_await_pins_the_runtime_until_shutdown`
+(`crates/undra-runtime/tests/weak_ctx.rs`) asserts today's behaviour: the call pins a dropped runtime, nothing answers
+it, and `shutdown` answers it once and releases everything. The test is meant to **flip** if the residual is ever
+removed. The candidate is a port proxy that holds a `WeakCtx` and upgrades around the call, so a dropped runtime ends
+the await with a typed `PortError` instead of waiting on the port; that changes what `ctx.kv()` and its siblings are
+and would need its own ADR (R11) and a generated-shape review, and is not decided here.
+
+Decision 8's phrase is read as: *the runtime's own call task no longer pins the runtime*. Consequences above stand
+otherwise; the residual bullet is extended by the paragraph above.

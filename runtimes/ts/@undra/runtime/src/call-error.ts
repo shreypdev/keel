@@ -9,7 +9,7 @@ import {
   UndraTransportError,
 } from "./errors.js";
 import { errorMessage } from "./platform.js";
-import { type Codec, ReplyStatus, UndraReader, WireError, decodeValue } from "./wire/index.js";
+import { type Codec, ReplyStatus, WireError, decodeValue } from "./wire/index.js";
 
 /*
  * What a generated call fails with besides its own error type and the abort of its caller (ADR-032,
@@ -75,19 +75,18 @@ export abstract class UndraCallError extends UndraError {
   /**
    * The error a generated stream method ends with, for a failure of `UndraCore.stream`.
    *
-   * A stream's error item carries a `String` when the core ended the stream itself (a restore or a
-   * shutdown: `"cancelled: ..."`, or a panic: the message) and the encoded `E` for a typed error, so a
-   * stream without an error type reads the body as that `String`. With a `domain` the body is tried as
-   * `E` first, then as the core's `String`; the two encodings can overlap, and `E` wins (ADR-036
-   * removes the ambiguity with a distinct wire flag).
+   * A stream fails in the vocabulary of a failed reply (ADR-036): a stream the core ended itself (a restore or a
+   * shutdown) is `CancelledByCore`, one that panicked is `Panicked` with the message and backtrace, one the core
+   * refused is `Refused`, exactly as for a call. Only a stream with an error type can end with a typed error
+   * (reply status 1, the encoded `E`): with a `domain` (the generated `<E>Codec`) it is decoded and returned as
+   * `E`, and a body that does not decode is `Malformed`; without one it is `Malformed`.
    */
   static mappedStream(error: unknown, domain?: Codec<unknown>): unknown {
+    if (domain !== undefined) return UndraCallError.mapped(error, domain);
     if (error instanceof UndraReplyError && error.status === ReplyStatus.Error) {
-      if (domain !== undefined) {
-        const typed = decodeTyped(error.body, domain);
-        if (typed !== undefined) return typed;
-      }
-      return fromStreamItem(error.body, error);
+      return new UndraCallError.Malformed(`a stream without an error type ended with a typed error item (${error.body.length} bytes)`, {
+        cause: error,
+      });
     }
     return classify(error);
   }
@@ -268,17 +267,4 @@ function decodeTyped(body: Uint8Array, domain: Codec<unknown>): unknown {
   } catch {
     return undefined;
   }
-}
-
-/** A stream error item (flag 2) read as the `String` the core writes when it ends a stream itself. */
-function fromStreamItem(body: Uint8Array, cause: unknown): UndraCallError {
-  let text: string;
-  try {
-    const reader = new UndraReader(body);
-    text = reader.readStr();
-    reader.finish();
-  } catch {
-    return new UndraCallError.Malformed(`a stream error item that does not decode (${body.length} bytes)`, { cause });
-  }
-  return text.startsWith("cancelled: ") ? new UndraCallError.CancelledByCore({ cause }) : new UndraCallError.Panicked(text, "", { cause });
 }

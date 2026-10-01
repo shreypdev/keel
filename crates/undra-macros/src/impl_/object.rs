@@ -82,9 +82,29 @@ pub(crate) struct FnModel {
     pub(crate) params: Vec<ParamModel>,
     /// The schema return type (for constructors: `Named(Type)` or `Result<Named(Type), E>`).
     pub(crate) ret: KType,
-    /// The `T` of a returned `impl Stream<Item = T>` (also inside `Result<.., E>`).
+    /// The `T` of a returned `impl Stream<Item = T>` (also inside `Result<.., E>`). For a stream
+    /// that can fail part-way (ADR-036) it is the `Result<T, E>` as written.
     pub(crate) stream_item: Option<Type>,
+    /// The Rust return type wraps the stream in a `Result` (`Result<impl Stream<..>, E>`): the
+    /// opening can fail. Only meaningful when `stream_item` is set.
+    pub(crate) stream_in_result: bool,
     pub(crate) docs: String,
+}
+
+/// Whether a returned stream sits on the `Ok` side of a `Result` (its opening can fail).
+fn stream_in_result(output: &ReturnType) -> bool {
+    let ReturnType::Type(_, ty) = output else {
+        return false;
+    };
+    let mut ty: &Type = ty;
+    loop {
+        match ty {
+            Type::Paren(inner) => ty = &inner.elem,
+            Type::Group(inner) => ty = &inner.elem,
+            _ => break,
+        }
+    }
+    matches!(ty, Type::Path(_)) && super::types::result_parts(ty).is_some()
 }
 
 /// The `T` of `impl Stream<Item = T>` at the top of a return type or on the `Ok` side of a
@@ -287,7 +307,7 @@ pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
                         code::E0001,
                         format!("`Ctx` parameter on method `{fn_name}`"),
                         "methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations",
-                        "store a `Ctx` in the object when it is constructed, or use `Ctx::current()`",
+                        "keep a `WeakCtx` (`ctx.downgrade()`) in the object when it is constructed and upgrade it in the method, or use `Ctx::current()`",
                     )
                     .on(&pat_type.ty),
                 );
@@ -472,6 +492,10 @@ struct Needs {
     send_assert: bool,
     map_stream: bool,
     opening_stream: bool,
+    /// `impl Stream<Item = Result<T, E>>` (ADR-036): items and a final typed error.
+    try_stream: bool,
+    /// An opening future whose stream is already encoded (the fallible-items case).
+    opening_raw: bool,
 }
 
 /// The local that holds the decoded argument at `index`.
@@ -509,6 +533,15 @@ fn call_result(root: &Root, m: &FnModel, call: &TokenStream, needs: &mut Needs) 
         let bytes = enc(&wire, &value);
         quote!(::core::result::Result::<::std::vec::Vec<u8>, _>::Err(#bytes))
     };
+
+    // A stream whose items are `Result<T, E>` (ADR-036): an `Err(e)` item ends it with flag 2.
+    let fallible_items = m
+        .stream_item
+        .as_ref()
+        .is_some_and(|item| super::types::result_parts(item).is_some());
+    if fallible_items && is_stream_ok(&m.ret) {
+        return fallible_stream_result(root, m, call, needs);
+    }
 
     match (&m.ret, m.is_async) {
         // A stream.
@@ -788,6 +821,80 @@ fn arm_body(root: &Root, m: &FnModel, target: &Target<'_>, needs: &mut Needs) ->
     }
 }
 
+/// The outcome expression of a method that returns `impl Stream<Item = Result<T, E>>`, possibly
+/// inside `Result<.., E>` and possibly `async` (ADR-036). Its items are mapped by `__UndraTry`:
+/// `Ok(t)` is an item, `Err(e)` the stream's typed error (flag 2), after which it ends.
+fn fallible_stream_result(
+    root: &Root,
+    m: &FnModel,
+    call: &TokenStream,
+    needs: &mut Needs,
+) -> TokenStream {
+    let wire = root.wire();
+    let runtime = root.runtime();
+    let span = m.ident.span();
+    let send_fn = send_assertion(span);
+    let assert_send = |what: TokenStream| quote_spanned!(span=> #send_fn(&#what););
+    needs.try_stream = true;
+    needs.send_assert = true;
+    let check = assert_send(quote!(__stream));
+    let boxed = quote! {
+        ::std::boxed::Box::pin(__UndraTry::new(__s))
+            as ::core::pin::Pin<::std::boxed::Box<
+                dyn #runtime::Stream<
+                        Item = ::core::result::Result<::std::vec::Vec<u8>, ::std::vec::Vec<u8>>,
+                    > + ::core::marker::Send,
+            >>
+    };
+    match (m.is_async, m.stream_in_result) {
+        (false, false) => quote! {{
+            let __stream = __UndraTry::new(#call);
+            #check
+            __undra_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
+        }},
+        (false, true) => {
+            let err = quote!(__rt.sync_err(&__e, #wire::Encode::encode));
+            quote! {
+                match #call {
+                    ::core::result::Result::Ok(__s) => {
+                        let __stream = __UndraTry::new(__s);
+                        #check
+                        __undra_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
+                    }
+                    ::core::result::Result::Err(__e) => #err,
+                }
+            }
+        }
+        (true, in_result) => {
+            needs.opening_raw = true;
+            let check_inner = assert_send(quote!(__s));
+            let opened = if in_result {
+                let err = enc(&wire, &quote!(__e));
+                quote! {
+                    match #call.await {
+                        ::core::result::Result::Ok(__s) => {
+                            #check_inner
+                            ::core::result::Result::Ok(#boxed)
+                        }
+                        ::core::result::Result::Err(__e) => ::core::result::Result::Err(#err),
+                    }
+                }
+            } else {
+                quote! {
+                    let __s = #call.await;
+                    #check_inner
+                    ::core::result::Result::<_, ::std::vec::Vec<u8>>::Ok(#boxed)
+                }
+            };
+            quote! {{
+                let __stream = __UndraOpeningRaw::new(async move { #opened });
+                #check
+                __undra_out(#runtime::DispatchResult::Stream(::std::boxed::Box::pin(__stream)))
+            }}
+        }
+    }
+}
+
 /// The helper items every dispatcher carries.
 fn helpers(root: &Root, needs: &Needs) -> TokenStream {
     let meta = root.meta();
@@ -909,6 +1016,142 @@ fn helpers(root: &Root, needs: &Needs) -> TokenStream {
         TokenStream::new()
     };
 
+    let try_stream = if needs.try_stream {
+        quote! {
+            struct __UndraTry<S> {
+                stream: ::core::pin::Pin<::std::boxed::Box<S>>,
+                done: bool,
+            }
+            impl<S> __UndraTry<S> {
+                fn new(__stream: S) -> Self {
+                    Self {
+                        stream: ::std::boxed::Box::pin(__stream),
+                        done: false,
+                    }
+                }
+            }
+            impl<S, T, E> #runtime::Stream for __UndraTry<S>
+            where
+                S: #runtime::Stream<Item = ::core::result::Result<T, E>>,
+                T: #wire::Encode,
+                E: #wire::Encode,
+            {
+                type Item = ::core::result::Result<::std::vec::Vec<u8>, ::std::vec::Vec<u8>>;
+                fn poll_next(
+                    self: ::core::pin::Pin<&mut Self>,
+                    __cx: &mut ::core::task::Context<'_>,
+                ) -> ::core::task::Poll<::core::option::Option<Self::Item>> {
+                    let __this = self.get_mut();
+                    if __this.done {
+                        return ::core::task::Poll::Ready(::core::option::Option::None);
+                    }
+                    match #runtime::Stream::poll_next(__this.stream.as_mut(), __cx) {
+                        ::core::task::Poll::Ready(::core::option::Option::Some(
+                            ::core::result::Result::Ok(__item),
+                        )) => ::core::task::Poll::Ready(::core::option::Option::Some(
+                            ::core::result::Result::Ok(#wire::Encode::encode_to_vec(&__item)),
+                        )),
+                        // The stream's typed error ends it: the runtime sends it as flag 2.
+                        ::core::task::Poll::Ready(::core::option::Option::Some(
+                            ::core::result::Result::Err(__error),
+                        )) => {
+                            __this.done = true;
+                            ::core::task::Poll::Ready(::core::option::Option::Some(
+                                ::core::result::Result::Err(#wire::Encode::encode_to_vec(&__error)),
+                            ))
+                        }
+                        ::core::task::Poll::Ready(::core::option::Option::None) => {
+                            __this.done = true;
+                            ::core::task::Poll::Ready(::core::option::Option::None)
+                        }
+                        ::core::task::Poll::Pending => ::core::task::Poll::Pending,
+                    }
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
+
+    let opening_raw = if needs.opening_raw {
+        quote! {
+            enum __UndraOpeningRaw<F> {
+                Opening(::core::pin::Pin<::std::boxed::Box<F>>),
+                Open(
+                    ::core::pin::Pin<::std::boxed::Box<
+                        dyn #runtime::Stream<
+                                Item = ::core::result::Result<::std::vec::Vec<u8>, ::std::vec::Vec<u8>>,
+                            > + ::core::marker::Send,
+                    >>,
+                ),
+                Done,
+            }
+            impl<F> __UndraOpeningRaw<F> {
+                fn new(__fut: F) -> Self {
+                    Self::Opening(::std::boxed::Box::pin(__fut))
+                }
+            }
+            impl<F> #runtime::Stream for __UndraOpeningRaw<F>
+            where
+                F: ::core::future::Future<
+                    Output = ::core::result::Result<
+                        ::core::pin::Pin<::std::boxed::Box<
+                            dyn #runtime::Stream<
+                                    Item = ::core::result::Result<
+                                        ::std::vec::Vec<u8>,
+                                        ::std::vec::Vec<u8>,
+                                    >,
+                                > + ::core::marker::Send,
+                        >>,
+                        ::std::vec::Vec<u8>,
+                    >,
+                >,
+            {
+                type Item = ::core::result::Result<::std::vec::Vec<u8>, ::std::vec::Vec<u8>>;
+                fn poll_next(
+                    self: ::core::pin::Pin<&mut Self>,
+                    __cx: &mut ::core::task::Context<'_>,
+                ) -> ::core::task::Poll<::core::option::Option<Self::Item>> {
+                    let __this = self.get_mut();
+                    loop {
+                        match __this {
+                            Self::Opening(__fut) => {
+                                match ::core::future::Future::poll(__fut.as_mut(), __cx) {
+                                    ::core::task::Poll::Pending => {
+                                        return ::core::task::Poll::Pending;
+                                    }
+                                    ::core::task::Poll::Ready(::core::result::Result::Ok(__stream)) => {
+                                        *__this = Self::Open(__stream);
+                                    }
+                                    ::core::task::Poll::Ready(::core::result::Result::Err(__bytes)) => {
+                                        *__this = Self::Done;
+                                        return ::core::task::Poll::Ready(::core::option::Option::Some(
+                                            ::core::result::Result::Err(__bytes),
+                                        ));
+                                    }
+                                }
+                            }
+                            Self::Open(__stream) => {
+                                return match #runtime::Stream::poll_next(__stream.as_mut(), __cx) {
+                                    ::core::task::Poll::Ready(::core::option::Option::None) => {
+                                        *__this = Self::Done;
+                                        ::core::task::Poll::Ready(::core::option::Option::None)
+                                    }
+                                    __other => __other,
+                                };
+                            }
+                            Self::Done => {
+                                return ::core::task::Poll::Ready(::core::option::Option::None);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        TokenStream::new()
+    };
+
     quote! {
         fn __undra_out(__result: #runtime::DispatchResult) -> #meta::DispatchOutcome {
             #meta::DispatchOutcome::new(__result)
@@ -923,6 +1166,8 @@ fn helpers(root: &Root, needs: &Needs) -> TokenStream {
         #send_assert
         #map_stream
         #opening_stream
+        #try_stream
+        #opening_raw
     }
 }
 
@@ -1080,6 +1325,7 @@ pub(crate) fn expand_impl(
             };
             checks.ret(&func.sig.output, &ret);
             let stream_item = stream_item_type(&func.sig.output);
+            let stream_in_result = stream_in_result(&func.sig.output);
             ensure_static_streams_in(&mut func.sig.output);
             methods.push(FnModel {
                 ident: func.sig.ident.clone(),
@@ -1090,6 +1336,7 @@ pub(crate) fn expand_impl(
                 params: analysis.params,
                 ret,
                 stream_item,
+                stream_in_result,
                 docs: fn_docs,
             });
         } else if let Some(returns) = ctor_return(&func.sig.output, &type_name) {
@@ -1124,6 +1371,7 @@ pub(crate) fn expand_impl(
                 params: analysis.params,
                 ret,
                 stream_item: None,
+                stream_in_result: false,
                 docs: fn_docs,
             });
         } else {
@@ -1513,6 +1761,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
     }
     checks.ret(&item.sig.output, &ret);
     let stream_item = stream_item_type(&item.sig.output);
+    let stream_in_result = stream_in_result(&item.sig.output);
     ensure_static_streams_in(&mut item.sig.output);
     errors.finish()?;
     let checks = checks.emit(&root);
@@ -1527,6 +1776,7 @@ pub(crate) fn expand_fn(args_root: Option<Root>, mut item: ItemFn) -> syn::Resul
         params: analysis.params,
         ret,
         stream_item,
+        stream_in_result,
         docs: docs(&item.attrs),
     };
 

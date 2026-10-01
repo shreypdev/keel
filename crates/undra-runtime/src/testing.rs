@@ -9,7 +9,7 @@
 //!   time past its deadline, so timing tests are exact and instant;
 //! * `spawn_blocking` runs its closure on a **real pool thread**, like a native runtime, so a
 //!   closure that writes signals (forbidden: it does not hold the core lock) fails in a test
-//!   exactly as it does in a native debug build. [`run_pending`](TestRuntime::run_pending),
+//!   exactly as it does natively (E0065, in every build since ADR-035). [`run_pending`](TestRuntime::run_pending),
 //!   [`run_until`](TestRuntime::run_until) and [`advance`](TestRuntime::advance) wait for the
 //!   closures to finish and run the tasks they wake, so a test sees their results without
 //!   waiting by hand.
@@ -39,14 +39,13 @@
 //!
 //! # Writing signals from test code
 //!
-//! Change-sets are routed to the runtime that is current on the writing thread (see
-//! `docs/runtime-internals.md`, section 12). Writes made inside a dispatched call, a task, or
-//! [`Ctx::txn`] find the test runtime by themselves; a direct `signal.set(..)` in the test body
-//! needs `let _scope = t.ctx().enter();` first, or its change-set has nowhere to go. The thread
-//! that created the `TestRuntime` may write signals directly; any other thread (a
-//! `std::thread::spawn` in a test) trips the write-context check in debug builds, the way a host
-//! thread would in production. A test that has to prove what happens when such a write does
-//! reach the runtime (release-build behaviour) wraps it in [`unchecked_writes`].
+//! Change-sets go to the runtime that owns the store (ADR-035; see `docs/runtime-internals.md`,
+//! section 12), whichever thread commits, so a direct `signal.set(..)` in the test body reaches
+//! the test runtime's host without entering a scope. The thread that created the `TestRuntime`
+//! may write signals directly; any other thread (a `std::thread::spawn` in a test) is refused
+//! with E0065 in every build, the way a host thread is in production (it should use
+//! [`Ctx::with_core`]). A test that needs such a write to go through wraps it in
+//! [`unchecked_writes`].
 
 use core::future::Future;
 use core::task::{Context, Poll, Waker};
@@ -70,6 +69,38 @@ use crate::runtime::{BuildOptions, Runtime, UncheckedWrites};
 /// How long [`TestRuntime::run_pending`] waits for one blocking closure to finish.
 const BLOCKING_SETTLE_LIMIT: Duration = Duration::from_secs(10);
 
+/// Threads started by `undra-runtime` (`undra-core`, `undra-timer`, `undra-blocking-N`) that are
+/// still running, in this process.
+static LIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts a runtime thread in [`live_threads`] for as long as it lives. (wasm starts no thread.)
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub(crate) struct ThreadMark(());
+
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+impl ThreadMark {
+    pub(crate) fn enter() -> ThreadMark {
+        LIVE_THREADS.fetch_add(1, Ordering::SeqCst);
+        ThreadMark(())
+    }
+}
+
+impl Drop for ThreadMark {
+    fn drop(&mut self) {
+        LIVE_THREADS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How many threads started by `undra-runtime` (the `undra-core`, `undra-timer` and
+/// `undra-blocking-N` threads of every runtime in the process) are running right now.
+///
+/// For tests that prove a runtime let its threads go (ADR-034: a runtime dropped by its owner
+/// joins them). The count is process-wide, so such a test must not run alongside other tests that
+/// start runtimes.
+pub fn live_threads() -> usize {
+    LIVE_THREADS.load(Ordering::SeqCst)
+}
+
 /// Declares the calling thread a test driver: it plays the core, so its direct signal writes are
 /// allowed (see the [module documentation](self)). `TestRuntime::new` does this for the thread
 /// that creates it; call it yourself from a harness that builds a real `Runtime` without a core
@@ -79,14 +110,14 @@ pub fn drive_from_this_thread() {
     crate::runtime::mark_test_driver_thread();
 }
 
-/// Runs `f` on the calling thread with the debug write-context check lifted, so `f` can write
-/// signals the way a release-build embedder thread can.
+/// Runs `f` on the calling thread with the write-context check lifted, so `f` can write signals
+/// from a thread that does not hold the owning runtime's core lock.
 ///
-/// For tests that prove the runtime's lock-level guarantees hold without the checker: a signal
-/// write from a thread that does not hold the core lock panics in debug builds otherwise
-/// (see the [module documentation](self)). It lifts the check only; to have the write delivered
-/// to a particular runtime, enter its scope too (`let _scope = ctx.enter();`). Production code
-/// never needs this; it should move the write onto the core (a task or a dispatched call).
+/// For tests that prove the runtime's lock-level guarantees hold without the checker: such a
+/// write is refused with E0065 in every build otherwise (see the [module documentation](self)).
+/// It lifts the check only; the change-set still goes to the store's owning runtime. Production
+/// code never needs this; it moves the write onto the core (a task, a dispatched call, or
+/// [`Ctx::with_core`]).
 pub fn unchecked_writes<R>(f: impl FnOnce() -> R) -> R {
     let _unchecked = UncheckedWrites::enter();
     f()

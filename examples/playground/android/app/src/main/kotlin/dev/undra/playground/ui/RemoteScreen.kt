@@ -105,9 +105,10 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Takes the network away or gives it back. The demo server fails its requests, and the core is told
-     * through the `Connectivity` port, which is what makes it queue idempotent mutations and, when the network
-     * is back, replay them and refetch.
+     * Simulates losing the network, or getting it back. The demo server drops its connections, and the core is told
+     * through the `Connectivity` port, which is what makes it queue idempotent mutations and, when the network is back,
+     * replay them and refetch. (Real airplane mode needs no switch: the Connectivity adapter reports it, and the demo
+     * server, like any host on the internet, is unreachable then.)
      */
     fun setOfflineMode(on: Boolean) {
         offline = on
@@ -184,7 +185,8 @@ fun RemoteScreen(vm: RemoteViewModel = viewModel()) {
                 }
                 Text(
                     "Offline, every request fails and the core is told the network is gone. What you add is queued " +
-                        "and replayed when you switch back.",
+                        "and replayed when you switch back, or after a restart: the queue is kept in the app's files. " +
+                        "Airplane mode does the same through the real Connectivity adapter.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

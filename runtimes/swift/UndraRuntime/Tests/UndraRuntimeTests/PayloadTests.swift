@@ -287,9 +287,106 @@ final class PayloadTests: XCTestCase {
         assertCodec(Wire.StreamItem(callId: 9, flag: .item, body: body.finishSlice()), hex: "090000000005000000")
         assertCodec(Wire.StreamItem(callId: 9, flag: .end), hex: "0900000001")
         assertCodec(Wire.StreamItem(callId: 9, flag: .error, body: slice("00")), hex: "090000000200")
+        assertCodec(Wire.StreamItem(callId: 9, flag: .failed, body: slice("0300000000" + "00000000")), hex: "0900000003" + "0300000000" + "00000000")
         XCTAssertEqual(Wire.StreamFlag.item.rawValue, 0)
         XCTAssertEqual(Wire.StreamFlag.end.rawValue, 1)
         XCTAssertEqual(Wire.StreamFlag.error.rawValue, 2)
+        XCTAssertEqual(Wire.StreamFlag.failed.rawValue, 3)
+        XCTAssertNil(Wire.StreamFlag(rawValue: 4))
+    }
+
+    // MARK: StreamFailure (the body of a failed stream item, ADR-036)
+
+    func testStreamFailureLayout() {
+        // status u8, message String, detail String; the bytes match the contract vectors.
+        assertCodec(
+            Wire.StreamFailure(status: .panic, message: "boom", detail: "at core.rs:1"),
+            hex: "02" + "04000000" + "626f6f6d" + "0c000000" + "617420636f72652e72733a31"
+        )
+        assertCodec(
+            Wire.StreamFailure(status: .cancelled, message: "the runtime shut down"),
+            hex: "03" + "15000000" + "7468652072756e74696d65207368757420646f776e" + "00000000"
+        )
+        assertCodec(
+            Wire.StreamFailure(status: .badRequest, message: "stale handle"),
+            hex: "05" + "0c000000" + "7374616c652068616e646c65" + "00000000"
+        )
+        assertRoundTrip(Wire.StreamFailure(status: .cancelled, message: "", detail: ""))
+        assertRoundTrip(Wire.StreamFailure(status: .panic, message: "h\u{E9}llo \u{1F30A}", detail: "0: main\n1: start"))
+        XCTAssertEqual(Wire.StreamFailure(status: .cancelled, message: "x").detail, "", "detail defaults to empty")
+    }
+
+    func testStreamFailureInsideAStreamItem() throws {
+        let failure = Wire.StreamFailure(status: .panic, message: "boom", detail: "at core.rs:1")
+        let item = Wire.StreamItem(callId: 9, flag: .failed, body: ArraySlice(failure.encode()))
+        XCTAssertEqual(bytesToHex(item.encode()), "0900000003" + bytesToHex(failure.encode()))
+        let decoded = try Wire.StreamItem.decode(item.encode())
+        XCTAssertEqual(decoded.flag, .failed)
+        XCTAssertEqual(try decoded.failure(), failure)
+        // The body is a slice of the payload: offsets in an error count from the body's start.
+        var bad = item.encode()
+        bad[5] = 4
+        expectWireError(.invalidTag(tag: 4, at: 0, type: "StreamFailure.status")) {
+            _ = try Wire.StreamItem.decode(bad).failure()
+        }
+    }
+
+    func testStreamFailureStatusIsLimitedToPanickedCancelledAndRefused() {
+        XCTAssertTrue(Wire.StreamFailure.allows(.panic))
+        XCTAssertTrue(Wire.StreamFailure.allows(.cancelled))
+        XCTAssertTrue(Wire.StreamFailure.allows(.badRequest))
+        XCTAssertFalse(Wire.StreamFailure.allows(.ok))
+        XCTAssertFalse(Wire.StreamFailure.allows(.error))
+        XCTAssertFalse(Wire.StreamFailure.allows(.streamOpened))
+        let rest = hexToBytes("00000000" + "00000000")
+        for status: UInt8 in [0, 1, 4, 6, 7, 0x80, 0xFF] {
+            expectWireError(.invalidTag(tag: UInt32(status), at: 0, type: "StreamFailure.status")) {
+                _ = try Wire.StreamFailure.decode([status] + rest)
+            }
+        }
+    }
+
+    func testStreamFailureTruncationAndTrailingBytes() {
+        let body = Wire.StreamFailure(status: .panic, message: "boom", detail: "bt").encode()
+        XCTAssertEqual(body.count, 1 + 4 + 4 + 4 + 2)
+        for cut in 0 ..< body.count {
+            XCTAssertThrowsError(try Wire.StreamFailure.decode(Array(body[0 ..< cut])), "cut at \(cut)") { error in
+                XCTAssertTrue(error is WireError, "cut at \(cut): \(error)")
+            }
+        }
+        expectWireError(.unexpectedEOF(needed: 1, at: 0)) {
+            _ = try Wire.StreamFailure.decode([])
+        }
+        expectWireError(.unexpectedEOF(needed: 4, at: 1)) {
+            _ = try Wire.StreamFailure.decode([3])
+        }
+        expectWireError(.unexpectedEOF(needed: 4, at: 5)) {
+            _ = try Wire.StreamFailure.decode(hexToBytes("0300000000"))
+        }
+        expectWireError(.lengthTooLarge(len: 9, at: 1)) {
+            _ = try Wire.StreamFailure.decode(hexToBytes("0309000000626f6f6d"))
+        }
+        expectWireError(.trailingBytes(count: 1)) {
+            _ = try Wire.StreamFailure.decode(body + [0])
+        }
+    }
+
+    func testStreamFailureReplyBodyIsTheBodyOfAReplyWithThatStatus() throws {
+        // docs/SPEC.md section 3.4: a panic carries message + backtrace, a refusal its reason, a
+        // cancellation nothing.
+        let panic = Wire.StreamFailure(status: .panic, message: "boom", detail: "bt")
+        let asReply = Wire.Reply(callId: 1, status: .panic, body: ArraySlice(panic.replyBody()))
+        let details = try asReply.panicDetails()
+        XCTAssertEqual(details.message, "boom")
+        XCTAssertEqual(details.backtrace, "bt")
+        let refused = Wire.StreamFailure(status: .badRequest, message: "stale handle", detail: "dropped")
+        XCTAssertEqual(
+            try Wire.Reply(callId: 1, status: .badRequest, body: ArraySlice(refused.replyBody())).badRequestReason(),
+            "stale handle"
+        )
+        XCTAssertEqual(Wire.StreamFailure(status: .cancelled, message: "the runtime shut down").replyBody(), [])
+        // A status a stream failure cannot have has no body either (never decoded, only constructed).
+        XCTAssertEqual(Wire.StreamFailure(status: .error, message: "x").replyBody(), [])
     }
 
     // MARK: Observe, release, event
@@ -371,8 +468,13 @@ final class PayloadTests: XCTestCase {
         expectWireError(.invalidTag(tag: 3, at: 4, type: "PortStatus")) {
             _ = try Wire.PortReply.decode(hexToBytes("0300000003"))
         }
-        expectWireError(.invalidTag(tag: 3, at: 4, type: "StreamFlag")) {
-            _ = try Wire.StreamItem.decode(hexToBytes("0900000003"))
+        // Flag 3 is `failed` (ADR-036); 4 and above are unknown.
+        XCTAssertEqual(try? Wire.StreamItem.decode(hexToBytes("0900000003")).flag, .failed)
+        expectWireError(.invalidTag(tag: 4, at: 4, type: "StreamFlag")) {
+            _ = try Wire.StreamItem.decode(hexToBytes("0900000004"))
+        }
+        expectWireError(.invalidTag(tag: 255, at: 4, type: "StreamFlag")) {
+            _ = try Wire.StreamItem.decode(hexToBytes("09000000ff"))
         }
         expectWireError(.invalidTag(tag: 2, at: 12, type: "bool")) {
             _ = try Wire.Observe.decode(hexToBytes("01000000010000000300000002"))

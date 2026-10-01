@@ -75,6 +75,7 @@ class FuzzTests : Suite() {
         payloadTarget("Cancel") { Payloads.Cancel.decode(it) },
         payloadTarget("StreamCredit") { Payloads.StreamCredit.decode(it) },
         payloadTarget("StreamItem") { Payloads.StreamItem.decode(it) },
+        payloadTarget("StreamFailure") { Payloads.StreamFailure.decode(it) },
         payloadTarget("Observe") { Payloads.Observe.decode(it) },
         payloadTarget("Release") { Payloads.Release.decode(it) },
         payloadTarget("Event") { Payloads.Event.decode(it) },
@@ -193,6 +194,10 @@ class FuzzTests : Suite() {
         add(Payloads.PortCall(1u, 2u, 3u, bytesOf(4, 5)).toByteArray())
         add(Payloads.PortReply(3u, Payloads.PortStatus.ERROR, bytesOf(1)).toByteArray())
         add(Payloads.StreamItem(5u, Payloads.StreamFlag.ITEM, bytesOf(1, 2)).toByteArray())
+        val panic = Payloads.StreamFailure(Payloads.ReplyStatus.PANIC, "boom", "trace")
+        add(panic.toByteArray())
+        add(Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "the runtime shut down", "").toByteArray())
+        add(Payloads.StreamItem(5u, Payloads.StreamFlag.FAILED, panic.toByteArray()).toByteArray())
         add(Payloads.Observe(Handle.make(1u, 1u), 2u, true).toByteArray())
         add(Payloads.Hello("0.1.0", 42uL, "jvm", "dev").toByteArray())
         add(Payloads.Log(2u, "core", "hello").toByteArray())

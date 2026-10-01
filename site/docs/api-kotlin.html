@@ -176,7 +176,7 @@ val items by inbox.data.collectAsState()        // List&lt;RemoteTodo&gt;?
 val busy by inbox.fetching.collectAsState()</code></pre></div>
 <p>See <a href="queries.html">Queries &amp; mutations</a>.</p>
 <h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
-<p>The ten standard ports are implemented in <code>dev.undra.runtime.adapters</code> (<code>OkHttp</code> or <code>HttpURLConnection</code>, <code>SharedPreferences</code>-backed files, <code>EncryptedFile</code>, <code>ConnectivityManager</code>, <code>ProcessLifecycleOwner</code> and so on) and are not generated into your module. You replace one by passing an implementation in <code>LoadOptions.adapters</code>, keyed by its port id. A port you define yourself becomes an <code>interface</code>:</p>
+<p>The ten standard ports are implemented in <code>dev.undra.runtime.adapters</code> and, for Android, in the <code>android-adapters</code> module (<code>HttpURLConnection</code>, files, an Android Keystore key, <code>ConnectivityManager</code>, activity lifecycle callbacks and so on; <code>AndroidPlatformDefaults.install(core, context)</code> registers them all) and are not generated into your module. You replace one by passing an implementation in <code>LoadOptions.adapters</code>, keyed by its port id, or by registering it after the load with <code>core.registerPort</code>. A port you define yourself becomes an <code>interface</code>:</p>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">interface Http : UndraPort {
     suspend fun request(req: HttpRequest): HttpResponse     // throws HttpError
 }</code></pre></div>

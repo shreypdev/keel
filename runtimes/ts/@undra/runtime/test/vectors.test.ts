@@ -8,17 +8,22 @@ import {
   type ChangeEntry,
   type PatchOp,
   type ReplyPayload,
+  type StreamFailureStatus,
+  type StreamItemPayload,
   CallTarget,
   ChangeOp,
   ReplyStatus,
+  StreamFlag,
   decodeCall,
   decodeChangeSet,
   decodePatch,
   decodeReply,
+  decodeStreamItem,
   encodeCall,
   encodeChangeSet,
   encodePatch,
   encodeReply,
+  encodeStreamItem,
 } from "../src/wire/payloads.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { durationFromNanos, joinHandle, makeHandle, splitHandle, handleGeneration, handleIndex } from "../src/wire/types.js";
@@ -224,6 +229,38 @@ function replyCase(v: Vector): Case {
   };
 }
 
+/**
+ * Stream items (ADR-036): flag 2 gives the stream's own `E` as `body_hex`; flag 3 gives the failure
+ * as `status`, `message` and `detail`.
+ */
+function streamItemCase(v: Vector): Case {
+  const json = v.value as { call_id: number; flag: number; body_hex?: string; status?: number; message?: string; detail?: string };
+  let item: StreamItemPayload;
+  switch (json.flag) {
+    case StreamFlag.Item:
+    case StreamFlag.Error:
+      item = { callId: json.call_id, flag: json.flag, body: fromHex(json.body_hex as string) };
+      break;
+    case StreamFlag.End:
+      item = { callId: json.call_id, flag: json.flag };
+      break;
+    case StreamFlag.Failed:
+      item = {
+        callId: json.call_id,
+        flag: json.flag,
+        failure: { status: json.status as StreamFailureStatus, message: json.message as string, detail: json.detail as string },
+      };
+      break;
+    default:
+      throw new Error(`${v.name}: unknown stream flag ${json.flag}`);
+  }
+  return {
+    encode: () => encodeStreamItem(item),
+    check: (bytes) => expect(decodeStreamItem(bytes)).toEqual(item),
+    reencode: (bytes) => encodeStreamItem(decodeStreamItem(bytes)),
+  };
+}
+
 function changeSetCase(v: Vector): Case {
   const json = v.value as {
     txn_id: string;
@@ -330,6 +367,7 @@ function caseFor(v: Vector): Case | undefined {
   if (v.type === "envelope") return envelopeCase(v);
   if (v.type === "call payload") return callCase(v);
   if (v.type === "reply payload") return replyCase(v);
+  if (v.type === "stream item payload") return streamItemCase(v);
   if (v.type === "changeset payload") return changeSetCase(v);
   if (v.type === "keyed patch (item i32)") return patchCase(v);
   const fnv = /^fnv1a(32|64)\("(.*)"\)$/.exec(v.type);

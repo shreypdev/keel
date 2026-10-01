@@ -93,6 +93,42 @@ class FileAdapterTests : Suite() {
             }
         }
 
+        case("Kv list reads the key at the start of each file, never the value, and skips what is not an entry") {
+            TempDir().use { dir ->
+                val kv = FileKv(dir.path)
+                runBlocking {
+                    kv.set("small", bytes(1))
+                    kv.set("héllo wörld 🌊", bytes(2))
+                    kv.set("", bytes(3))
+                    kv.set("k".repeat(5000), bytes(4))
+                }
+                // Not entries: empty, too short for a length, a length that does not fit the file, a key that is not UTF-8.
+                Files.write(dir.path.resolve("empty"), NO_BYTES)
+                Files.write(dir.path.resolve("short"), bytes(1, 0))
+                Files.write(dir.path.resolve("overlong"), bytes(255, 255, 255, 255, 1, 2, 3))
+                Files.write(dir.path.resolve("fits-but-not-utf8"), bytes(2, 0, 0, 0, 0xC3, 0x28))
+                Files.write(dir.path.resolve("pending.0000.tmp"), UndraWriter().also { it.writeStr("half-written") }.toByteArray())
+                val expected = listOf("", "héllo wörld 🌊", "k".repeat(5000), "small").sorted()
+                assertEq(expected, runBlocking { kv.list("") })
+                assertEq(listOf("small"), runBlocking { kv.list("sm") })
+
+                // A value no read could hold: with the whole file read, this would be an OutOfMemoryError. A sparse file
+                // costs no disk where the file system has them (APFS, ext4, tmpfs, overlayfs); elsewhere the case is skipped.
+                val huge = dir.path.resolve("huge-value")
+                val sparse = try {
+                    java.io.RandomAccessFile(huge.toFile(), "rw").use { file ->
+                        file.write(UndraWriter().also { it.writeStr("huge") }.toByteArray())
+                        file.setLength(3L shl 30)
+                    }
+                    Files.getFileStore(huge).type() in setOf("apfs", "ext4", "tmpfs", "overlay", "xfs", "btrfs", "zfs")
+                } catch (e: java.io.IOException) {
+                    false
+                }
+                if (sparse) assertEq((expected + "huge").sorted(), runBlocking { kv.list("") })
+                Files.deleteIfExists(huge)
+            }
+        }
+
         case("Kv persists across instances, leaves no temporary files, and is owner-only where POSIX") {
             TempDir().use { dir ->
                 runBlocking { FileKv(dir.path).set("k", bytes(5)) }
@@ -184,9 +220,74 @@ class FileAdapterTests : Suite() {
                     assertEq(FsError.NotFound, assertThrows<FsError.NotFound>("delete missing") { fs.delete("nope") })
                     assertEq(FsError.NotFound, assertThrows<FsError.NotFound>("list missing") { fs.list("nope") })
                     assertThrows<FsError.Io>("read a directory") { fs.read("dir") }
-                    assertThrows<FsError.Io>("delete a non-empty directory") { fs.delete("dir") }
                     assertThrows<FsError.Io>("list a file") { fs.list("dir/file") }
                     assertThrows<FsError.Io>("write over a directory") { fs.write("dir", bytes(1)) }
+                }
+            }
+        }
+
+        case("Fs delete removes a file, or a directory with everything in it, and never the root") {
+            TempDir().use { dir ->
+                val root = dir.path.resolve("root")
+                val fs = FsAdapter(root)
+                runBlocking {
+                    fs.write("tree/a.txt", bytes(1))
+                    fs.write("tree/sub/b.txt", bytes(2))
+                    fs.write("tree/sub/deeper/c.txt", bytes(3))
+                    fs.write("keep.txt", bytes(4))
+                    fs.delete("tree") // populated: everything below goes with it
+                    assertEq(listOf("keep.txt"), fs.list(""))
+                    assertEq(FsError.NotFound, assertThrows<FsError.NotFound>("read what was deleted") { fs.read("tree/a.txt") })
+                    assertEq(FsError.NotFound, assertThrows<FsError.NotFound>("delete it again") { fs.delete("tree") })
+                    fs.write("empty/placeholder", bytes(0))
+                    fs.delete("empty/placeholder")
+                    fs.delete("empty") // an empty directory still goes
+                    assertEq(listOf("keep.txt"), fs.list(""))
+
+                    // The root cannot be deleted, in any spelling that resolves to it; its content stays.
+                    for (path in listOf("", ".", "/", "\\", "\\.", "/\\", "a/..")) {
+                        assertThrows<FsError.Denied>("delete '$path'") { fs.delete(path) }
+                    }
+                    assertTrue(Files.isDirectory(root), "the root is still there")
+                    assertEq(listOf<Byte>(4), fs.read("keep.txt").toList())
+                }
+            }
+        }
+
+        case("Fs delete removes a symbolic link and never follows it") {
+            TempDir().use { dir ->
+                val root = dir.path.resolve("root")
+                Files.createDirectories(root.resolve("inside"))
+                Files.write(root.resolve("inside/file"), bytes(7))
+                val outside = dir.path.resolve("outside")
+                Files.createDirectories(outside)
+                Files.write(outside.resolve("secret"), bytes(42))
+                val linked = try {
+                    Files.createSymbolicLink(root.resolve("to-inside"), root.resolve("inside"))
+                    Files.createSymbolicLink(root.resolve("to-outside"), outside)
+                    true
+                } catch (e: UnsupportedOperationException) {
+                    false
+                } catch (e: java.io.IOException) {
+                    false
+                }
+                if (linked) {
+                    val fs = FsAdapter(root)
+                    runBlocking {
+                        fs.delete("to-inside") // a link to a directory inside the root: the link goes, the directory stays
+                        assertTrue(!Files.exists(root.resolve("to-inside"), java.nio.file.LinkOption.NOFOLLOW_LINKS), "the link is gone")
+                        assertEq(listOf<Byte>(7), Files.readAllBytes(root.resolve("inside/file")).toList())
+                        // A link out of the root is refused like any other path through it, and nothing outside is touched.
+                        assertThrows<FsError.Denied>("delete a link that leads out") { fs.delete("to-outside") }
+                        assertThrows<FsError.Denied>("delete through a link that leads out") { fs.delete("to-outside/secret") }
+                    }
+                    assertEq(listOf<Byte>(42), Files.readAllBytes(outside.resolve("secret")).toList())
+                    // A directory that contains a link takes the link with it and leaves the target alone.
+                    Files.createDirectories(root.resolve("holder"))
+                    Files.createSymbolicLink(root.resolve("holder/link"), root.resolve("inside"))
+                    runBlocking { fs.delete("holder") }
+                    assertTrue(!Files.exists(root.resolve("holder")), "the directory is gone")
+                    assertEq(listOf<Byte>(7), Files.readAllBytes(root.resolve("inside/file")).toList())
                 }
             }
         }

@@ -315,13 +315,29 @@ extension ContractScenarios {
             }
             try checkEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: core), 3, "add(1, 2) after the re-entrant call")
 
-            // 6. Shutdown with a typed call in flight. This step ends the core, so it is the last of
-            // the run (S17 is the last scenario XCTest runs, and no later step uses the core).
+            // 7, first half: before the shutdown of step 6, a timer-paced task runs in the core. The
+            // generator `Stress.start` runs sleeps on the Timer port and reads the Clock port every
+            // tick (10 ms); once the manual clock moves on it also commits the updates the time
+            // earned. The clock moves only after the generator has read it, or its first reading
+            // would already include the second.
+            let portCalls = Fixture.shared.portCalls
+            let stress = try Stress(ctx: core)
+            defer { stress.close() }
+            let clockCallsBefore = portCalls.count(StandardPorts.Clock.portId)
+            try stress.start(mode: .firehose, perSecond: 1_000)
+            try await waitUntil("the generator to read the Clock port on its ticks") {
+                portCalls.count(StandardPorts.Clock.portId) >= clockCallsBefore + 3 && stress.running
+            }
+            Fixture.shared.clock.advance(seconds: 1)
+            try await waitUntil("the generator to commit the updates a second earned") { stress.generated > 0 }
+
+            // 6. Shutdown with a typed call in flight. This step ends the core.
             let inFlight = Task { try await failLater(delayMs: 5_000, code: 1, ctx: core) }
             try await quietFor(milliseconds: 100)
             let reportsBefore = Fixture.shared.unhandled.snapshot.count
             let shutdownAt = ContinuousClock.now
             core.shutdown()
+            let callsAtShutdown = portCalls.all
             switch await inFlight.result {
             case .success(let value):
                 throw ScenarioFailure(description: "fail_later returned \(value) across a shutdown")
@@ -339,6 +355,62 @@ extension ContractScenarios {
             // The shut-down core is no longer the shared one: a constructor with the default core fails as in S16.
             try check(UndraCore.current == nil, "the shut-down core is still UndraCore.current")
             try checkThrows({ try Counter() }, UndraCallError.unavailable(.closed), "Counter() after the shared core was shut down")
+
+            // 7. Closing ended the core's work (ADR-034): for 200 ms after the shutdown no port call
+            // reaches the harness's adapters (Clock, Log, Http, Kv, and Rng and Timer too), although
+            // the generator was running when it began.
+            let quietUntil = shutdownAt + .milliseconds(200)
+            if ContinuousClock.now < quietUntil {
+                try await Task.sleep(until: quietUntil, clock: .continuous)
+            }
+            let callsAfter = portCalls.all
+            let named: [(String, UInt32)] = [
+                ("Clock", StandardPorts.Clock.portId), ("Log", StandardPorts.Log.portId),
+                ("Http", StandardPorts.Http.portId), ("Kv", StandardPorts.Kv.portId),
+                ("Rng", StandardPorts.Rng.portId), ("Timer", StandardPorts.Timer.portId),
+            ]
+            let late = named.compactMap { (port: (String, UInt32)) -> String? in
+                let (name, portId) = port
+                let calls = (callsAfter[portId] ?? 0) - (callsAtShutdown[portId] ?? 0)
+                return calls == 0 ? nil : "\(name) \(calls)"
+            }
+            try check(late.isEmpty, "port calls reached the adapters in the 200 ms after the shutdown: \(late.joined(separator: ", "))")
+            try check(callsAfter == callsAtShutdown, "port calls reached the adapters after the shutdown: \(callsAtShutdown) then \(callsAfter)")
+            // The window above cannot show a task of the old core that kept running: the shutdown
+            // retires the port registrations and detaches the adapters first, so its calls would be
+            // answered "unavailable" and its host timers would never fire. The core says itself
+            // that its threads were joined (review of runtime-lifecycle: a shutdown that only
+            // released the global slot passed this window and the reload below).
+            try await waitUntil("the old core's threads to exit after the shutdown") { try runtimeThreadsLeft() == 0 }
+
+            // A new load in the same process starts a fresh core: no live handles, calls answered,
+            // and it closes cleanly. (S18 runs after this scenario and loads the core once more.)
+            try check(UndraCore.current == nil, "a core is still the shared one after the shutdown")
+            let fresh = try UndraCore.load(Fixture.shared.loadOptions())
+            try check(UndraCore.current === fresh, "the new core is not the shared one")
+            try checkEqual(fresh.stat("live_handles"), 0, "live_handles of the new core")
+            try checkEqual(fresh.stats().hostLiveHandles, 0, "handles the runtime holds for the new core")
+            try checkEqual(try PlaygroundCore.add(a: 1, b: 2, ctx: fresh), 3, "add(1, 2) on the new core")
+            // The new core runs no timer-paced task, so the Clock adapter stays quiet on it too.
+            let clockOnFresh = portCalls.count(StandardPorts.Clock.portId)
+            try await quietFor(milliseconds: 200)
+            try checkEqual(portCalls.count(StandardPorts.Clock.portId), clockOnFresh, "Clock calls the adapters received on the new core")
+            fresh.shutdown()
+            try check(fresh.isShutDown, "the new core is not shut down")
+            try await waitUntil("the new core's threads to exit after its shutdown") { try runtimeThreadsLeft() == 0 }
+            try check(UndraCore.current == nil, "the new core is still the shared one after its shutdown")
+            try checkThrows({ try PlaygroundCore.add(a: 1, b: 2, ctx: fresh) }, UndraCallError.unavailable(.closed), "add(1, 2) on the new core after its shutdown")
         }
     }
+}
+
+/// The threads `undra-runtime` started that still run in this process, as `undra_stats_json`
+/// reports them while no core is loaded (`runtime_threads`); throws if a core is loaded.
+private func runtimeThreadsLeft() throws -> Int {
+    let buffer = undra_stats_json()
+    defer { undra_buf_free(buffer) }
+    let bytes = Data(bytes: try require(buffer.ptr, "undra_stats_json output"), count: Int(buffer.len))
+    let doc = try require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any], "a stats object")
+    try check((doc["initialized"] as? Bool) == false, "a core is still loaded after the shutdown: \(doc)")
+    return try require((doc["runtime_threads"] as? NSNumber)?.intValue, "runtime_threads in \(doc)")
 }

@@ -12,7 +12,8 @@ use std::time::Duration;
 use common::{hex, unhex};
 use serde_json::Value;
 use undra_wire::payload::{
-    Call, CallOwned, CallTarget, ChangeEntry, ChangeOp, ChangeSet, ChangeSetRef, Reply, ReplyStatus,
+    Call, CallOwned, CallTarget, ChangeEntry, ChangeOp, ChangeSet, ChangeSetRef, Reply,
+    ReplyStatus, StreamFailure, StreamFlag, StreamItem,
 };
 use undra_wire::{
     Bytes, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp, Uuid,
@@ -133,6 +134,49 @@ fn check_reply(name: &str, value: &Value, expected: &[u8]) {
     let mut r = Reader::new(expected);
     assert_eq!(Reply::decode(&mut r), Ok(reply), "{name}: decoding differs");
     r.finish().unwrap();
+}
+
+/// A `StreamItem` payload (SPEC 3.7, ADR-036): flag 2 carries the stream's own `E` (`body_hex`),
+/// flag 3 a `StreamFailure` (`status`, `message`, `detail`).
+fn check_stream_item(name: &str, value: &Value, expected: &[u8]) {
+    let flag = StreamFlag::try_from(u8::try_from(int(&value["flag"])).unwrap()).unwrap();
+    let body = match flag {
+        StreamFlag::Failed => {
+            let failure = StreamFailure {
+                status: ReplyStatus::try_from(u8::try_from(int(&value["status"])).unwrap())
+                    .unwrap(),
+                message: value["message"].as_str().unwrap(),
+                detail: value["detail"].as_str().unwrap(),
+            };
+            let mut w = Writer::new();
+            failure.encode(&mut w);
+            w.into_vec()
+        }
+        _ => unhex(value["body_hex"].as_str().unwrap()),
+    };
+    let item = StreamItem {
+        call_id: u32_of(&value["call_id"]),
+        flag,
+        body: &body,
+    };
+    let mut w = Writer::new();
+    item.encode(&mut w);
+    assert_eq!(hex(w.as_slice()), hex(expected), "{name}: encoding differs");
+    let mut r = Reader::new(expected);
+    let back = StreamItem::decode(&mut r).unwrap();
+    r.finish().unwrap();
+    assert_eq!(back, item, "{name}: decoding differs");
+    if back.flag == StreamFlag::Failed {
+        let mut r = Reader::new(back.body);
+        let failure = StreamFailure::decode(&mut r).unwrap();
+        r.finish().unwrap();
+        assert_eq!(
+            failure.message,
+            value["message"].as_str().unwrap(),
+            "{name}"
+        );
+        assert_eq!(failure.detail, value["detail"].as_str().unwrap(), "{name}");
+    }
 }
 
 fn check_changeset(name: &str, value: &Value, expected: &[u8]) {
@@ -386,6 +430,7 @@ fn check(v: &Value) {
         "envelope" => check_envelope(name, value, &expected),
         "call payload" => check_call(name, value, &expected),
         "reply payload" => check_reply(name, value, &expected),
+        "stream item payload" => check_stream_item(name, value, &expected),
         "changeset payload" => check_changeset(name, value, &expected),
         "keyed patch (item i32)" => check_keyed_patch(name, value, &expected),
         _ if ty.starts_with("record ") || ty.starts_with("enum ") => {

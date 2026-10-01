@@ -87,6 +87,8 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
         "undra_schema_hash",
         "JNI_OnLoad",
         "Java_dev_undra_runtime_UndraNative_abiVersion",
+        // ADR-034: Kotlin's `UndraCore.close()` ends an in-process core through it.
+        "Java_dev_undra_runtime_UndraNative_shutdown",
     ];
     let present =
         undra_cli::schema::symbols_present(&lib, &wanted).expect("could not load the core");

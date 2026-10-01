@@ -31,8 +31,8 @@ android {
             buildConfigField("String", "UNDRA_DEV_URL", "\"${providers.gradleProperty("undraDevUrl").getOrElse("")}\"")
         }
         release {
-            // Release builds never talk to a dev server: no URL, no cleartext traffic, no INTERNET permission
-            // (those live in src/debug/AndroidManifest.xml).
+            // Release builds never talk to a dev server: no URL, and no cleartext traffic beyond the loopback demo server
+            // (src/debug/AndroidManifest.xml is not part of them). The INTERNET permission is in the main manifest.
             buildConfigField("String", "UNDRA_DEV_URL", "\"\"")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

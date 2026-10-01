@@ -154,7 +154,7 @@ assert.equal(rt.UndraCallError.mapped(plain, errors.TodoErrorCodec), plain, "a f
   assert.deepEqual(seen, [todo]);
   assert.equal(core.calls.at(-1).args, "0200");
 
-  // The core ending a stream itself: the String of SPEC 5.9, read as cancelled by the core or as a panic.
+  // The core ending a stream itself (ADR-036, SPEC 3.7): a flag-3 failure arrives as the failed reply with its status.
   const failing = async (iterate) => {
     try {
       for await (const _ of iterate()) void _;
@@ -163,14 +163,22 @@ assert.equal(rt.UndraCallError.mapped(plain, errors.TodoErrorCodec), plain, "a f
     }
     return undefined;
   };
-  const stringItem = (text) => new rt.UndraReplyError(ReplyStatus.Error, strings(text));
-  core.streams.push([stringItem("cancelled: a restore replaced the receiver")]);
+  core.streams.push([new rt.UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0))]);
   assert.ok((await failing(() => calc.watch("high"))) instanceof rt.UndraCallError.CancelledByCore, "a stream ended by a restore");
-  core.streams.push([stringItem("cancelled: the runtime shut down")]);
+  core.streams.push([new rt.UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0))]);
   assert.ok((await failing(() => calc.ticks())) instanceof rt.UndraCallError.CancelledByCore, "a stream without an error type ended by shutdown");
-  core.streams.push([stringItem("the stream panicked: boom")]);
+  core.streams.push([new rt.UndraReplyError(ReplyStatus.Panic, panicBody("the stream panicked: boom", "at core.rs:1"))]);
   const panicked = await failing(() => calc.ticks());
   assert.ok(panicked instanceof rt.UndraCallError.Panicked && panicked.panicMessage === "the stream panicked: boom");
+  assert.equal(panicked.backtrace, "at core.rs:1");
+  core.streams.push([new rt.UndraReplyError(ReplyStatus.BadRequest, strings("stale handle"))]);
+  const refused = await failing(() => calc.ticks());
+  assert.ok(refused instanceof rt.UndraCallError.Refused && refused.reason === "stale handle", "a refused stream");
+  core.streams.push([new rt.UndraReplyError(ReplyStatus.BadRequest, strings("stale handle"))]);
+  assert.ok((await failing(() => calc.watch("high"))) instanceof rt.UndraCallError.Refused, "a refused stream with an error type");
+  // A typed error item on a stream that has no error type is not the core's text: Malformed.
+  core.streams.push([new rt.UndraReplyError(ReplyStatus.Error, strings("the stream panicked: boom"))]);
+  assert.ok((await failing(() => calc.ticks())) instanceof rt.UndraCallError.Malformed, "a typed error item on a stream without an error type");
   core.streams.push([new rt.UndraTransportError("closed", "closed")]);
   assert.ok((await failing(() => calc.ticks())) instanceof rt.UndraCallError.Unavailable, "a stream on a closed core");
   core.streams.push([bytes("01")]);

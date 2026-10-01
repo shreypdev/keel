@@ -40,7 +40,6 @@ macro_rules! bench_store {
         /// exercise the boundary.
         #[undra::store(restore = "Self::assemble")]
         pub struct Bench {
-            ctx: Ctx,
             next_id: AtomicU32,
             #[undra(key = "id")]
             rows: Signal<Vec<Item>>,
@@ -62,10 +61,9 @@ macro_rules! bench_store {
             // the hook takes one signal per field, so it has as many parameters as the store has
             // signals.
             #[allow(clippy::too_many_arguments)]
-            fn assemble(ctx: Ctx, rows: Signal<Vec<Item>>, $($counter: Signal<u32>,)*) -> Self {
+            fn assemble(_ctx: Ctx, rows: Signal<Vec<Item>>, $($counter: Signal<u32>,)*) -> Self {
                 let next = rows.with(|list| list.iter().map(|item| item.id).max().unwrap_or(0));
                 Self {
-                    ctx,
                     next_id: AtomicU32::new(next.saturating_add(1)),
                     rows,
                     $($counter,)*
@@ -87,7 +85,7 @@ macro_rules! bench_store {
             /// `k` dirty signals, one change-set.
             pub fn bench_touch_signals(&self, k: u32) {
                 let counters: [&Signal<u32>; SIGNALS as usize] = [$(&self.$counter,)*];
-                self.ctx.txn(|| {
+                txn(|| {
                     for counter in counters.iter().take(k as usize) {
                         counter.update(|n| *n = n.wrapping_add(1));
                     }
@@ -129,7 +127,7 @@ macro_rules! bench_store {
             /// in one transaction: one change-set with the list and all [`SIGNALS`] counters.
             pub fn bench_list_reset(&self) {
                 let counters: [&Signal<u32>; SIGNALS as usize] = [$(&self.$counter,)*];
-                self.ctx.txn(|| {
+                txn(|| {
                     self.next_id.store(ROWS + 1, Ordering::Relaxed);
                     self.rows.set((1..=ROWS).map(Item::numbered).collect());
                     for counter in counters {

@@ -22,35 +22,45 @@ final class Fixture {
     /// TypeScript harness.
     let unhandled = Locked<[UndraUnhandledError]>([])
 
+    /// Every call the core made to one of the adapters below, per port, across reloads (S17.7).
+    let portCalls = PortCallCounter()
+
     private var loaded: UndraCore?
 
     private init() {}
 
     /// The adapters of the harness: the fakes above and the platform defaults for `Rng` and `Timer`
-    /// (a real `DispatchQueue` timer). `Connectivity` has no adapter: the scenarios emit its events.
+    /// (a real `DispatchQueue` timer), each counting its calls in `portCalls`. `Connectivity` has no
+    /// adapter: the scenarios emit its events.
     func makeAdapters() -> Adapters {
-        return Adapters.none
-            .replacing(clock)
-            .replacing(server)
-            .replacing(kv)
-            .replacing(log)
-            .replacing(RngAdapter())
-            .replacing(TimerAdapter())
+        let adapters: [any UndraAdapter] = [clock, server, kv, log, RngAdapter(), TimerAdapter()]
+        var all = Adapters.none
+        for adapter in adapters {
+            all = all.replacing(CountingAdapter(inner: adapter, counter: portCalls))
+        }
+        return all
     }
 
-    /// The loaded core, loading it (and pointing it at the fake server) on first use.
-    func core() throws -> UndraCore {
-        if let core = loaded, !core.isShutDown {
-            return core
-        }
+    /// The options every load of the harness uses: its adapters, the generated schema hash, and an
+    /// `onError` that records into `unhandled`.
+    func loadOptions() -> LoadOptions {
         let sink = unhandled
-        let core = try UndraCore.load(.inproc(
+        return .inproc(
             adapters: makeAdapters(),
             expectedSchemaHash: UndraIds.schemaHash,
             onError: { (report: UndraUnhandledError) -> Void in
                 sink.withLock { (current: inout [UndraUnhandledError]) -> Void in current.append(report) }
             }
-        ))
+        )
+    }
+
+    /// The loaded core, loading it (and pointing it at the fake server) on first use, and again
+    /// after it was shut down.
+    func core() throws -> UndraCore {
+        if let core = loaded, !core.isShutDown {
+            return core
+        }
+        let core = try UndraCore.load(loadOptions())
         configureRemote(RemoteConfig(baseUrl: FakeServer.baseURL), ctx: core)
         loaded = core
         return core

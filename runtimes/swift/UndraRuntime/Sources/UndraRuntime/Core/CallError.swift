@@ -121,37 +121,34 @@ extension UndraCallError {
         return mapped(error)
     }
 
-    /// The error a generated stream method ends with, for a failure of `UndraCore.stream`.
+    /// The error a generated stream method without an error type ends with, for a failure of
+    /// `UndraCore.stream`.
     ///
-    /// A stream's error item carries a `String` when the core ended the stream itself (a restore or
-    /// a shutdown: `"cancelled: ..."`, or a panic: the message) and the encoded `E` for a typed
-    /// error, so a stream without an error type reads the body as that `String`.
+    /// A stream fails in the vocabulary of a failed reply (ADR-036): a stream the core ended
+    /// itself (a restore or a shutdown) is `.cancelledByCore`, one that panicked is `.panicked`
+    /// with the message and backtrace, one the core refused is `.refused`, exactly as for a call.
+    /// Only a stream with an error type can end with a typed error, so one here is `.malformed`.
     public static func mapped(streamFailure error: any Error) -> any Error {
         if let reply = error as? UndraReplyError, reply.status == .error {
-            return fromStreamItem(reply)
+            return UndraCallError.malformed(
+                "a stream without an error type ended with a typed error item (\(reply.body.count) bytes)"
+            )
         }
         return mapped(error)
     }
 
-    /// The same for a stream whose Rust signature carries an error type `E`: the body is tried as
-    /// `E` first, then as the core's `String`.
-    ///
-    /// The two encodings can overlap for an `E` whose bytes also read as one `String` (an enum whose
-    /// first variant carries a `UInt16`, for instance, and an empty message); `E` wins. A distinct
-    /// wire flag for core-ended streams is a v2 item (ADR-032, Risks).
+    /// The same for a stream whose Rust signature carries an error type `E` (a
+    /// `Result<impl Stream, E>`, or a stream of `Result<T, E>`): its typed error item becomes `E`,
+    /// and one that does not decode as `E` is `.malformed`. Every other failure maps as for a
+    /// stream without an error type.
     public static func mapped<E: UndraError>(streamFailure error: any Error, domain: E.Type) -> any Error {
-        if let reply = error as? UndraReplyError, reply.status == .error {
-            if let typed = try? E.undraDecoded(from: reply.body) {
-                return typed
-            }
-            return fromStreamItem(reply)
-        }
-        return mapped(error)
+        return mapped(error, domain: domain)
     }
 
     // MARK: Pieces
 
-    /// The mapping of a reply status that is not the method's own error.
+    /// The mapping of a reply status that is not the method's own error. A stream ended by a
+    /// failed item arrives here with that item's status and the same body (ADR-036).
     private static func fromReply(_ reply: UndraReplyError) -> UndraCallError {
         switch reply.status {
         case .cancelled:
@@ -173,19 +170,6 @@ extension UndraCallError {
         case .ok:
             return .malformed("the core answered ok as a failure")
         }
-    }
-
-    /// A stream error item (flag 2) read as the `String` the core writes when it ends a stream
-    /// itself.
-    private static func fromStreamItem(_ reply: UndraReplyError) -> UndraCallError {
-        var reader = UndraReader(reply.body)
-        guard let text = try? reader.readString(), (try? reader.finish()) != nil else {
-            return .malformed("a stream error item that does not decode (\(reply.body.count) bytes)")
-        }
-        if text.hasPrefix("cancelled: ") {
-            return .cancelledByCore
-        }
-        return .panicked(message: text, backtrace: "")
     }
 }
 

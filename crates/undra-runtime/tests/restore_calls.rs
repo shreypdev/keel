@@ -48,7 +48,7 @@ fn m3_an_async_call_in_flight_across_a_restore_replies_cancelled_not_ok() {
 }
 
 #[test]
-fn m3_a_stream_in_flight_across_a_restore_ends_with_one_error_item() {
+fn m3_a_stream_in_flight_across_a_restore_ends_with_one_failed_item() {
     let t = TestRuntime::new();
     let rt = t.runtime().clone();
     let h = new_counter(&t, 1, "c");
@@ -68,9 +68,13 @@ fn m3_a_stream_in_flight_across_a_restore_ends_with_one_error_item() {
     rt.restore(&snapshot).unwrap();
     let items = t.host().take_stream_items();
     assert_eq!(items.len(), 1, "{items:?}");
-    assert_eq!((items[0].call_id, items[0].flag), (60, StreamFlag::Error));
-    let mut r = undra_wire::Reader::new(&items[0].body);
-    assert!(r.read_str().unwrap().contains("cancelled"), "{items:?}");
+    // ADR-036: flag 3, cancelled by the core, whatever the stream's own error type is.
+    assert_eq!((items[0].call_id, items[0].flag), (60, StreamFlag::Failed));
+    let failure =
+        undra_wire::payload::StreamFailure::decode(&mut undra_wire::Reader::new(&items[0].body))
+            .unwrap();
+    assert_eq!(failure.status, ReplyStatus::Cancelled, "{items:?}");
+    assert!(failure.message.contains("restore"), "{failure:?}");
     assert_eq!(stat(&t, "open_streams"), 0);
     // Credit for the ended stream is ignored; nothing follows.
     rt.stream_credit(60, 100);

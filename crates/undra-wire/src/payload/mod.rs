@@ -68,15 +68,95 @@ wire_u8_enum! {
 }
 
 wire_u8_enum! {
-    /// What a `StreamItem` carries (SPEC 3.7).
+    /// What a `StreamItem` carries (SPEC 3.7, ADR-036).
     pub enum StreamFlag {
         /// An item; the body is the item `T`.
         Item = 0,
         /// The stream ended normally; the body is empty.
         End = 1,
-        /// The stream failed; the body is the error `E` (or a `String` if the stream has no
-        /// error type).
+        /// The stream ended with **its own** typed error; the body is the encoded `E`. Only a
+        /// method whose schema return is `Result<Stream<T>, E>` sends it: a failed asynchronous
+        /// opening, or an `Err(e)` item of an `impl Stream<Item = Result<T, E>>`. A host that
+        /// receives it for a stream without an error type treats it as malformed.
         Error = 2,
+        /// The call failed, in the reply-failure vocabulary: the body is a [`StreamFailure`]
+        /// (`status u8, message String, detail String`). Sent by the core for a stream it ended
+        /// itself (a restore that replaced the receiver, shutdown: status 3) or that panicked
+        /// (status 2). Ends the stream; needs no credit.
+        Failed = 3,
+    }
+}
+
+/// The body of a [`StreamFlag::Failed`] item (SPEC 3.7, ADR-036): the call failed, with the same
+/// status codes as a failed [`Reply`], so every platform maps it exactly as it maps a failed
+/// reply with that status.
+///
+/// Layout: `status u8, message String, detail String`. `status` is one of
+/// [`ReplyStatus::Panic`] (2: `message` is the panic message, `detail` its backtrace),
+/// [`ReplyStatus::Cancelled`] (3: cancelled by the core; `message` is the reason, `detail` empty)
+/// or [`ReplyStatus::BadRequest`] (5: refused; `message` is the reason). Any other status is
+/// rejected as `InvalidTag`.
+///
+/// ```
+/// use undra_wire::payload::{ReplyStatus, StreamFailure};
+/// use undra_wire::{Reader, Writer};
+///
+/// let mut w = Writer::new();
+/// StreamFailure { status: ReplyStatus::Cancelled, message: "the runtime shut down", detail: "" }
+///     .encode(&mut w);
+/// let back = StreamFailure::decode(&mut Reader::new(w.as_slice())).unwrap();
+/// assert_eq!(back.status, ReplyStatus::Cancelled);
+/// assert_eq!(back.message, "the runtime shut down");
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreamFailure<'a> {
+    /// How the call failed: 2 panicked, 3 cancelled by the core, 5 refused.
+    pub status: ReplyStatus,
+    /// The panic message, the cancellation reason or the refusal reason.
+    pub message: &'a str,
+    /// The backtrace of a panic; empty otherwise.
+    pub detail: &'a str,
+}
+
+impl<'a> StreamFailure<'a> {
+    /// Whether `status` may appear in a stream failure: panicked, cancelled or refused.
+    pub const fn allows(status: ReplyStatus) -> bool {
+        matches!(
+            status,
+            ReplyStatus::Panic | ReplyStatus::Cancelled | ReplyStatus::BadRequest
+        )
+    }
+
+    /// Appends the body to `w`.
+    pub fn encode(&self, w: &mut Writer) {
+        w.reserve(9 + self.message.len() + self.detail.len());
+        w.write_u8(self.status.as_u8());
+        w.write_str(self.message);
+        w.write_str(self.detail);
+    }
+
+    /// Reads a body, borrowing the strings from the input. A status that is not 2, 3 or 5 is
+    /// `InvalidTag`.
+    pub fn decode(r: &mut Reader<'a>) -> Result<Self, WireError> {
+        let at = r.position();
+        let tag = r.read_u8()?;
+        let status = match ReplyStatus::from_u8(tag) {
+            Some(status) if StreamFailure::allows(status) => status,
+            // Every other byte, a known reply status or not, is the same error, so all four
+            // codecs report it alike.
+            _ => {
+                return Err(WireError::InvalidTag {
+                    tag: u32::from(tag),
+                    at,
+                    ty: "StreamFailure.status",
+                });
+            }
+        };
+        Ok(StreamFailure {
+            status,
+            message: r.read_str()?,
+            detail: r.read_str()?,
+        })
     }
 }
 
@@ -238,14 +318,15 @@ impl StreamCredit {
 
 /// One element of an open stream (kind `StreamItem`, SPEC 3.7).
 ///
-/// Layout: `call_id u32, flag u8, body` where the body is the rest of the payload.
+/// Layout: `call_id u32, flag u8, body` where the body is the rest of the payload: the item `T`
+/// (flag 0), nothing (1), the stream's own `E` (2) or a [`StreamFailure`] (3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StreamItem<'a> {
     /// The stream's call id.
     pub call_id: u32,
-    /// Item, end or error.
+    /// Item, end, the stream's error or a failure.
     pub flag: StreamFlag,
-    /// The encoded item or error; empty for `End`.
+    /// The encoded item, error or failure; empty for `End`.
     pub body: &'a [u8],
 }
 
@@ -464,8 +545,9 @@ mod tests {
         assert!(ReplyStatus::try_from(6).is_err());
         assert_eq!(PortStatus::ALL.len(), 3);
         assert!(PortStatus::try_from(3).is_err());
-        assert_eq!(StreamFlag::ALL.len(), 3);
-        assert!(StreamFlag::try_from(3).is_err());
+        assert_eq!(StreamFlag::ALL.len(), 4);
+        assert_eq!(StreamFlag::try_from(3), Ok(StreamFlag::Failed));
+        assert!(StreamFlag::try_from(4).is_err());
     }
 
     #[test]
@@ -585,6 +667,76 @@ mod tests {
         let b = bytes(|w| item.encode(w));
         assert_eq!(b, [4, 0, 0, 0, 0, 1, 2]);
         assert_eq!(StreamItem::decode(&mut Reader::new(&b)), Ok(item));
+    }
+
+    #[test]
+    fn stream_failure_layout_and_status_rule() {
+        let failure = StreamFailure {
+            status: ReplyStatus::Panic,
+            message: "boom",
+            detail: "at core.rs:1",
+        };
+        let body = bytes(|w| failure.encode(w));
+        assert_eq!(body[0], 2);
+        assert_eq!(&body[1..5], &[4, 0, 0, 0]);
+        let mut r = Reader::new(&body);
+        assert_eq!(StreamFailure::decode(&mut r), Ok(failure));
+        r.finish().unwrap();
+        // The item that carries it: flag 3.
+        let item = StreamItem {
+            call_id: 9,
+            flag: StreamFlag::Failed,
+            body: &body,
+        };
+        let b = bytes(|w| item.encode(w));
+        assert_eq!(&b[..5], &[9, 0, 0, 0, 3]);
+        assert_eq!(StreamItem::decode(&mut Reader::new(&b)), Ok(item));
+        // Only the failure statuses: ok, typed error and stream_opened are not failures, and
+        // neither is a byte that is no reply status at all.
+        for tag in [0_u8, 1, 4, 6, 255] {
+            let mut bad = body.clone();
+            bad[0] = tag;
+            assert_eq!(
+                StreamFailure::decode(&mut Reader::new(&bad)),
+                Err(WireError::InvalidTag {
+                    tag: u32::from(tag),
+                    at: 0,
+                    ty: "StreamFailure.status"
+                })
+            );
+        }
+        for cut in 0..body.len() {
+            assert!(StreamFailure::decode(&mut Reader::new(&body[..cut])).is_err());
+        }
+        // Review (runtime-lifecycle, surface 5): every status byte, not a sample of them.
+        for tag in 0..=u8::MAX {
+            let mut any = body.clone();
+            any[0] = tag;
+            let decoded = StreamFailure::decode(&mut Reader::new(&any));
+            match ReplyStatus::from_u8(tag).filter(|s| StreamFailure::allows(*s)) {
+                Some(status) => assert_eq!(decoded.map(|f| f.status), Ok(status), "{tag}"),
+                None => assert!(
+                    matches!(
+                        decoded,
+                        Err(WireError::InvalidTag {
+                            at: 0,
+                            ty: "StreamFailure.status",
+                            ..
+                        })
+                    ),
+                    "{tag}: {decoded:?}"
+                ),
+            }
+        }
+        // A message or detail that is not UTF-8 is refused, at the offending byte.
+        let mut bad_detail = Writer::new();
+        bad_detail.write_u8(ReplyStatus::Panic.as_u8());
+        bad_detail.write_str("boom");
+        bad_detail.write_bytes(&[0xff, 0xfe]);
+        assert_eq!(
+            StreamFailure::decode(&mut Reader::new(bad_detail.as_slice())),
+            Err(WireError::InvalidUtf8 { at: 13 })
+        );
     }
 
     #[test]

@@ -232,9 +232,11 @@ The runtime also cancels calls itself (`Runtime::abort_call`, same gate: whoever
 `calls` entry owns the terminal message): on `restore`, every call whose receiver the restore
 replaced or invalidated (ADR-023, finding M3), and on `shutdown`, every call that is still in
 flight (finding L1). A plain call is answered with status 3; a stream gets a `StreamItem` with
-flag 2 (error) and a `String` body that starts with `"cancelled: "` (the host did not ask for
-the end, so flag 1 would read as a clean completion, and all three platform runtimes end the
-stream on flag 2). The task is dropped under the panic guard. A call that has no receiver (a free
+flag 3 (failed, ADR-036): `status 3` (cancelled by the core) and the reason as its message (the
+host did not ask for the end, so flag 1 would read as a clean completion; and flag 2 carries only
+the stream's own `E`). A stream task that panics ends the same way with `status 2`, the panic
+message and its backtrace. Every platform maps a flag-3 item exactly as a failed reply with that
+status. The task is dropped under the panic guard. A call that has no receiver (a free
 function or a constructor) is not touched by a restore.
 
 ## 8. Streams and credit
@@ -331,42 +333,50 @@ exercises the no-writes rule; `TestRuntime::run_pending`, `run_until` and `advan
 closures to finish and run the tasks they wake, so tests still see results without waiting by
 hand.
 
-`f` must not write signals or call host entry points: it does not hold the core lock. Debug
-builds enforce the first half: the runtime installs an `undra_signals::set_write_checker` (an
-allowlist, see section 12) that refuses signal writes (with consequences: to an attached signal,
-or one with dependents) on a pool worker thread, so such a write panics in the closure, and the
-panic reaches the awaiting task like any other. Release builds do not check.
+`f` must not write signals or call host entry points: it does not hold the core lock. Every
+build enforces the first half (ADR-035): the runtime installs an `undra_signals::set_write_checker`
+(an allowlist, see section 12) that refuses signal writes (with consequences: to an attached
+signal, or one with dependents) on a pool worker thread, so such a write panics in the closure
+with E0065, and the panic reaches the awaiting task like any other.
 
 ## 12. Change-sets, the sink and ordering
 
 `undra-signals` has one process-global `ChangeSink`. The runtime installs a single
-`RuntimeSink` (once per process) that routes each committed change-set to
-`current_or_global()`: the runtime whose `CtxScope` is active on the committing thread, else
-the one created by `Runtime::init`. This is what allows many runtimes (every `TestRuntime`, in
-parallel test threads) to share the process.
+`RuntimeSink` (once per process) that routes each committed change-set **to the runtime that owns
+the store** (ADR-035): every commit calls `ChangeSink::deliver_from(owner, ..)` with the cell's
+owner, which the object table records on every store it places (`StoreCell::set_owner`, before
+the handle), and the sink looks the owner up in a process registry of live runtimes
+(`RUNTIMES`: id to `Weak<Runtime>`, registered in `build`, removed in `Drop`). Neither the
+runtime current on the committing thread nor the global one is consulted: a write to runtime A's
+store can no longer reach runtime B's host, and `undra dev` (non-global runtimes) and production
+(the global one) route alike. A store no runtime published (owner `0`) delivers nothing. This is
+what allows many runtimes (every `TestRuntime`, in parallel test threads) to share the process.
 
 Consequences:
 
-* Signal writes inside a dispatched call, a task poll, an event subscriber or `Ctx::txn` find
-  their runtime automatically. A write from test code outside any of those needs
-  `let _scope = ctx.enter();` (or `Ctx::txn`), or it has no runtime to be delivered to (it
-  reaches the global runtime if there is one, otherwise it is dropped).
+* Signal writes inside a dispatched call, a task poll, an event subscriber or `Ctx::with_core`
+  are delivered to their store's runtime; so are a `TestRuntime` driver thread's (no scope is
+  needed any more).
 * Delivery happens on the committing thread, under the core lock when that thread holds it.
   Change-sets are therefore delivered in commit order for everything that runs on the core.
   The sink deliberately never takes the core lock: `undra-signals` may call it while holding
   its own lock, and a thread holding that lock that waited for the core while the core
   waited for it would deadlock.
-* Debug builds refuse a signal write with consequences on any thread that does not hold a
-  runtime's core lock (an **allowlist**, ADR-023): a pool worker, a host or embedder thread and a
-  thread inside no runtime are refused; the holders of the core lock, a `TestRuntime` driver
-  thread (the thread that created it, or one that called `testing::drive_from_this_thread`) and
-  `testing::unchecked_writes` are allowed. Embedders write by spawning onto the runtime
-  (`ctx.spawn`) or calling in. In release builds the check does not run and an off-core write is
-  delivered from that thread without the core lock. `undra-signals` still
-  delivers the change-sets of one store one at a time, in claim order, but a write from another
-  thread is not part of the core's transaction (if the slot is already dirty in an open
-  transaction it ships with that transaction). Keep signal writes on the core (send the result
-  back to a task).
+* **Every build** refuses a signal write with consequences on a thread that does not hold **the
+  owning runtime's** core lock (an **allowlist**, ADR-023, made a rule of every build by ADR-035;
+  `write_allowed(owner)`): a pool worker, a host or embedder thread, a thread inside no runtime and
+  the core of another runtime are refused; the holders of that core lock (any core lock for a
+  signal of no published store, owner `0`), a `TestRuntime` driver thread (the thread that
+  created it, or one that called `testing::drive_from_this_thread`) and
+  `testing::unchecked_writes` are allowed. The refusal happens before the value changes: the
+  sink's `off_core_write` logs it at error level through the owning runtime and counts it
+  (`stats.off_core_writes`), then the writer panics with E0065 (`try_set` / `try_update` return
+  `WriteError` instead). Embedders write by spawning onto the runtime (`ctx.spawn`), calling in, or
+  `Ctx::with_core`, which takes the core lock on the calling thread, makes the runtime current and
+  runs the closure in one transaction. Before ADR-035 release builds skipped the check, and the
+  gap audit reproduced the result: a plain thread's write applied and never delivered, a pool
+  thread's write delivered without the core lock, and a write from B's core delivered to B's host
+  under A's handle.
 * `observe` delivers the initial change-set synchronously (before `observe` returns) through
   `StoreCell::observe_and_deliver`: the cell builds the entries, allocates the `txn_id` and calls
   the runtime's delivery function, all under the store's delivery lock, inside an
@@ -457,14 +467,21 @@ error item), a level 5 log record, `stats.panics += 1`, and the receiver object 
 ## 15. Lifetime, shutdown and reference cycles
 
 `Ctx` is an `Arc<Runtime>`. A store that keeps a `Ctx`, an event subscriber or Rust port
-binding that captured one, and every in-flight async call, is therefore a **reference cycle**
-with the runtime that owns it. `Runtime::shutdown` breaks them, in this order (ADR-023, L1):
+binding that captured one is therefore a **reference cycle** with the runtime that owns it.
+Since ADR-034 the runtime's own work does not form one: the call and stream tasks hold a
+`Weak<Runtime>` (they upgrade only to reply or emit, a stream once per item after its credit
+wait), a blocking job holds a `WeakCtx` until it runs, event subscribers receive the `Ctx` as an
+argument instead of capturing one, and `undra-query`'s tasks and query handles hold `WeakCtx`s.
+App code is asked to do the same (`WeakCtx`, SPEC 5.3). `Runtime::shutdown` breaks the cycles
+that remain, in this order (ADR-023, L1):
 
+0. close the **lifeline** (`Lifeline::close(Gone::ShutDown)`): `Ctx::closed`, `WeakCtx::closed`
+   and every pending `WeakCtx::sleep` complete, and `WeakCtx::upgrade` refuses from now on;
 1. flag the runtime shut down (later `call`s answer 5) and close the executor (`Executor::shutdown`
    sets `closed` under the `tasks` lock, so a racing `spawn` is refused instead of landing after
    the final `clear`);
 2. **under the core lock, before anything slow is joined**: `cancel_all_calls`, which for every
-   entry of the call table sends status 3 (a stream: a flag 2 item, `"cancelled: the runtime shut
+   entry of the call table sends status 3 (a stream: a flag 3 item, status 3, `"the runtime shut
    down"`) and drops its task (`abort_call`, the same exactly-once gate as cancel). Taking the
    lock here means no poll is running and no `call` is half way through its dispatch: a call
    either registered before (and is answered) or sees the flag and is refused;
@@ -476,9 +493,16 @@ with the runtime that owns it. `Runtime::shutdown` breaks them, in this order (A
    `Runtime::extension` values stay (they are handed out as `&T`; one that holds a `Ctx` must let go
    of it itself).
 
-After `shutdown` a runtime that nothing else references is freed; before it, an idle
-runtime with no stores holding a `Ctx` is also freed when the last `Arc` drops (its `Drop`
-runs the same teardown without locks, since nothing else can be running). `spawn`, `sleep`,
+After `shutdown` a runtime that nothing else references is freed. Without it, a runtime is
+freed when its owner drops the last `Arc` and no app code keeps a strong `Ctx` (ADR-034): its
+`Drop` closes the lifeline with `Gone::Dropped`, **answers what is in flight** exactly as step 2
+does (the tasks no longer pin the runtime, so a host may still be waiting; a stream's flag-3 item
+says `"the runtime was dropped"`), then joins the threads it does not run on and tears down. It runs on
+whichever thread released the last reference: the owner's, the `undra-core` thread at the end of
+a turn (it then skips joining itself; the loop sees the closed queue and exits), or a blocking
+worker whose job held the last `Ctx`. Nothing else can reach the runtime by then, so it takes no
+lock; it marks the thread as the core (`HeldMark`) so user `Drop` code that writes signals is
+allowed, and never calls `me()` (there is no strong reference left to make current). `spawn`, `sleep`,
 `port_call` and `event` on a surviving `Ctx` do nothing but log a WARN (the first eight per
 runtime; `warn_shut_down`): `spawn` drops the future unpolled and returns `TaskId::dead()`,
 `sleep` completes at once, `port_call` resolves to `PortError::Cancelled`, `event` returns.
@@ -539,10 +563,10 @@ Known limitations, each deliberate for v1:
   forever makes it run forever. `poll` is bounded (one turn of at most 64 polls).
 * `stream_credit` is not synchronised with a `call` that is still in progress on another thread
   for the same `call_id` (the host must grant credit after it has issued the call).
-* Signal writes from off-core threads (release builds only; debug builds refuse them, section 12)
-  are not ordered with core writes.
+* Signal writes made under `testing::unchecked_writes` from an off-core thread (tests only; every
+  other off-core write is refused, section 12) are not ordered with core writes.
 * An `Arc<Runtime>` held only by your code does not stop a global runtime, and a store's `Ctx`
-  keeps a runtime alive until `shutdown` (section 15).
+  keeps a runtime alive until `shutdown` (section 15); a `WeakCtx` field does not (ADR-034).
 * Generations are a process-wide `u32` counter: 2^32 - 1 handles per process, then object creation
   fails loudly (section 13, ADR-022).
 * `Runtime::extension` values are not released by `shutdown`; one that holds a `Ctx` pins the

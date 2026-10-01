@@ -14,9 +14,9 @@ It has two layers:
 
 ```
 undra-runtime/
-  settings.gradle.kts        includes :runtime  (future: :android-adapters)
+  settings.gradle.kts        includes :runtime, and :android-adapters when an Android SDK is found
   build.gradle.kts           group / version, Kotlin plugin declared once
-  gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3
+  gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3 (+ AGP 8.7.3, JUnit 4 and AndroidX Test for :android-adapters' tests)
   gradlew, gradle/wrapper/   Gradle 8.14.3 wrapper
   runtime/                   the library
     src/main/kotlin/dev/undra/runtime/
@@ -29,15 +29,17 @@ undra-runtime/
       wire/                                         the wire layer
     src/test/kotlin/dev/undra/runtime/               suites (see "Building and testing")
       support/                                      FakeTransport, FakeNative (JNI contract), WsTestServer, ...
-  android-adapters/README.md what the future Android module will hold (no code yet)
+  android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
   scripts/
     test-local.sh            build + test without Gradle or JUnit
     gen-vectors.py           regenerates WireVectors.kt from contract-tests/wire-vectors.json
     local/junit-stub/        a stub @Test annotation, used only by test-local.sh
 ```
 
-`:android-adapters` does not exist yet; see [android-adapters/README.md](android-adapters/README.md). `:runtime`
-never depends on it, and never touches an Android API at compile time (Android is detected by reflection).
+`:android-adapters` holds everything Android-specific (the Http, Kv, SecureStore, Fs, Connectivity and Lifecycle adapters,
+installed by `AndroidPlatformDefaults.install(core, context)`, and the Choreographer frame pacer); see
+[android-adapters/README.md](android-adapters/README.md). `:runtime` never depends on it, and never touches an Android API at
+compile time (Android is detected by reflection).
 
 ## Using it
 
@@ -59,7 +61,7 @@ todos.close()                             // or let the cleaner release it if yo
 | `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing of superseded full values; a throwing callback is logged and skipped, a malformed change-set is dropped whole |
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
 | `PortImpl(sync, methods)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply` |
-| Errors | `UndraException` (base of generated errors, and of everything below), `UndraCallError` (sealed: `CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; what a generated call throws besides its own `E` and `CancellationException`), `UndraUnhandledError(operation, error)` (what `LoadOptions.onError` receives), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraTransportException(reason, ...)`, `UndraProtocolException`, `UndraRestoreException(code)`, `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`, `WireException` (sealed) |
+| Errors | `UndraException` (base of generated errors, and of everything below), `UndraCallError` (sealed: `CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; what a generated call throws besides its own `E` and `CancellationException`), `UndraUnhandledError(operation, error)` (what `LoadOptions.onError` receives), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraTransportException(reason, ...)`, `UndraProtocolException`, `UndraRestoreException(code)`, `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`, `WireException` (sealed) A stream that fails ends with the same set (`UndraCallError.mappedStream`): `E` for its own typed error (flag 2), and for a failure the core ends it with (flag 3) `CancelledByCore`, `Panicked` or `Refused` by the failure's status (ADR-036), `Malformed` for an item or failure body the runtime cannot read |
 
 ### Threading, in one paragraph
 
@@ -75,8 +77,11 @@ waiting (up to 5 s) for the main thread from anywhere else.
 
 * `INPROC` (production): the core is loaded through JNI. `System.loadLibrary` uses the name in the system property
   `undra.native.name` (default `undra_core`); `undra.native.path` is an absolute path that wins over the name. If the library
-  cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global and
-  cannot be shut down over JNI, so there is one `INPROC` core per process and `close()` only detaches the host.
+  cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global,
+  so there is one `INPROC` core at a time per process. `close()` ends its work (ADR-034: `UndraNative.shutdown()` stops its
+  tasks, timers and port calls; in-flight calls fail as closed), **and waits for it**: it returns after the core's threads are
+  joined and the port callbacks running on other threads have returned, so it must not run under a lock a synchronous port
+  implementation needs. A later `load` starts a fresh core.
 * `REMOTE` (**development only**): a WebSocket to `undra dev` on the runtime's own client (RFC 6455 over `java.net.Socket`:
   the same code runs on a JVM and on Android; `java.net.http` is not used), envelope framing of SPEC §3.2, `Hello` handshake
   with the schema check. `callSync` and `construct` block the calling thread for a network round trip (up to
@@ -98,6 +103,7 @@ abiVersion ()I      schemaHash ()J        schemaJson ()[B        init ([BLdev/un
 call ([B)I          callSync ([B)[B       cancel (I)V            streamCredit (II)V
 observe (JIZ)V      release (J)V          portReply ([B)V        event (II[B)V
 timerFired (I)V     snapshot ()[B         restore ([B)I          statsJson ()Ljava/lang/String;
+shutdown ()V        (UndraCore.close() of an in-process core ends its work through it, ADR-034)
 
 UndraNative$Callbacks:  onReply (ILjava/nio/ByteBuffer;)V     onChangeSet (Ljava/nio/ByteBuffer;)V
                        onStream (ILjava/nio/ByteBuffer;)V     onPortCall (IIILjava/nio/ByteBuffer;)I     portSyncReply ()[B
@@ -115,7 +121,7 @@ registered is answered `2` (unavailable), so the shim should route every port id
 `<dataDir>/kv` and `<dataDir>/secure` (SHA-256-named, atomic writes; **not** encrypted); `Fs` over `<dataDir>/fs`, confined to its
 root; `Clock`, `Rng` (`SecureRandom`), `Log` (`java.util.logging`) and `Timer` (a scheduled executor). The data directory is the
 system property `undra.data.dir` or `~/.undra/data`; call `JvmAdapters.standard(dir) { core.timerFired(it) }` to choose another. On Android only
-Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters`. Port and method ids are `fnv1a32("port.<Trait>")`
+Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters` (`AndroidPlatformDefaults.install`). Port and method ids are `fnv1a32("port.<Trait>")`
 and `fnv1a32("<Trait>.<method>")` (`StandardPorts`), and the records of SPEC §8 have hand-written codecs
 (`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `NetKind`, `AppState`, `HttpMethod`).
 
