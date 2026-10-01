@@ -9,9 +9,52 @@
 //!   hook receives the [`Ctx`] with the core lock held and may spawn tasks (hydration is async).
 
 use core::any::{Any, TypeId};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::Mutex;
 
 use crate::ctx::Ctx;
+
+/// What an inspector answers with: one JSON document describing a part of the runtime's state
+/// (ADR-054). It runs on whatever thread asks (the dev server's devtools hub), never with the
+/// core lock held by the caller, and must not call back into the runtime or block.
+pub type InspectFn = Arc<dyn Fn() -> String + Send + Sync>;
+
+/// The inspectors registered with a runtime, by name. Dev tooling reads them; nothing in the
+/// core does.
+#[derive(Default)]
+pub(crate) struct Inspectors {
+    list: Mutex<Vec<(&'static str, InspectFn)>>,
+}
+
+impl Inspectors {
+    /// Registers `inspect` under `name`, replacing an earlier one of the same name.
+    pub(crate) fn register(&self, name: &'static str, inspect: InspectFn) {
+        let mut list = self.list.lock();
+        match list.iter_mut().find(|(n, _)| *n == name) {
+            Some(slot) => slot.1 = inspect,
+            None => list.push((name, inspect)),
+        }
+    }
+
+    /// The document `name` produces now. A panicking inspector is answered with `None`.
+    pub(crate) fn inspect(&self, name: &str) -> Option<String> {
+        let f = self
+            .list
+            .lock()
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, f)| f.clone())?;
+        // Outside the lock: an inspector may take locks of its own, and registering from inside
+        // one would otherwise deadlock.
+        crate::guard::guarded(move || f()).ok()
+    }
+
+    /// The names registered, in registration order.
+    pub(crate) fn names(&self) -> Vec<&'static str> {
+        self.list.lock().iter().map(|(n, _)| *n).collect()
+    }
+}
 
 /// Something to run once for every new runtime. Submit with `inventory::submit!`.
 ///

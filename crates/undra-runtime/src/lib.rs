@@ -81,7 +81,7 @@ mod timer;
 pub use config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
 pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
-pub use ext::InitHook;
+pub use ext::{InitHook, InspectFn};
 pub use host::{Host, PortCallOutcome};
 pub use lazy::{LazyList, LazyListInner};
 pub use object::{

@@ -21,7 +21,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use undra_runtime::PortCallOutcome;
-use undra_wire::payload::{Log, PortCall, Reply, ReplyStatus, StreamItem};
+use undra_wire::payload::{ChangeSetBuilder, ChangeSetRef, Log, PortCall, Reply, ReplyStatus, StreamItem};
 use undra_wire::{Envelope, Kind, Reader, Writer};
 use parking_lot::Mutex;
 
@@ -265,7 +265,11 @@ impl Conn {
         state.next_seq = state.next_seq.wrapping_add(1);
         let mut w = Writer::with_capacity(Envelope::HEADER_LEN + hint);
         Envelope::write_with(&mut w, kind, seq, self.schema, payload);
-        let frame = w.into_vec();
+        self.enqueue_locked(state, w.into_vec())
+    }
+
+    /// Queues one complete WebSocket message and applies the backlog bound.
+    fn enqueue_locked(&self, state: &mut State, frame: Vec<u8>) -> bool {
         let len = frame.len();
         let before = self.queued.fetch_add(len, Ordering::Relaxed);
         if state.tx.send(Item::Frame(frame)).is_err() {
@@ -285,6 +289,26 @@ impl Conn {
             return false;
         }
         true
+    }
+
+    /// Queues one message that is not an envelope: a devtools connection's (ADR-054). Returns
+    /// `false` (and drops it) once the connection is closing.
+    pub(crate) fn send_plain(&self, message: Vec<u8>) -> bool {
+        let mut state = self.state.lock();
+        if state.closing {
+            return false;
+        }
+        self.enqueue_locked(&mut state, message)
+    }
+
+    /// Bytes queued for the client that the writer has not written yet: the backlog.
+    pub(crate) fn queued_bytes(&self) -> usize {
+        self.queued.load(Ordering::Relaxed)
+    }
+
+    /// The signals of `handle` this client observes (`u32::MAX` stands for all of them).
+    pub(crate) fn observed_signals(&self, handle: u64) -> Vec<u32> {
+        self.state.lock().tracker.signals_of(handle)
     }
 
     /// Stops accepting frames and asks the writer to send a Close frame after everything
@@ -398,6 +422,37 @@ impl Conn {
     /// `Host::change_set`.
     pub(crate) fn on_change_set(&self, payload: &[u8]) {
         self.send(Kind::ChangeSet, payload);
+    }
+
+    /// `Host::change_set` while a devtools hub observes every store: the runtime's observed set
+    /// is then larger than this client's, so only the entries it observed are sent (ADR-054). The
+    /// bytes go out unchanged when it observed all of them, which is the usual case.
+    pub(crate) fn on_change_set_observed(&self, payload: &[u8]) {
+        let mut state = self.state.lock();
+        // What to send: the bytes as they are, a re-encoding with only the observed entries, or
+        // nothing.
+        let kept: Option<Vec<u8>> = match ChangeSetRef::decode(&mut Reader::new(payload)) {
+            // Not ours to judge: the runtime built it.
+            Err(_) => None,
+            Ok(set) => {
+                let tracker = &state.tracker;
+                if set.iter().all(|e| tracker.covers(e.handle.0, e.signal_id)) {
+                    None
+                } else {
+                    let mut w = Writer::with_capacity(payload.len());
+                    let mut builder = ChangeSetBuilder::new(&mut w, set.txn_id);
+                    for e in set.iter().filter(|e| tracker.covers(e.handle.0, e.signal_id)) {
+                        builder.push(e.handle, e.signal_id, e.op, e.value);
+                    }
+                    if builder.finish() == 0 {
+                        return;
+                    }
+                    Some(w.into_vec())
+                }
+            }
+        };
+        let bytes = kept.as_deref().unwrap_or(payload);
+        self.send_locked(&mut state, Kind::ChangeSet, bytes.len(), |w| w.write_raw(bytes));
     }
 
     /// `Host::stream_item`.

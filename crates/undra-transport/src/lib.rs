@@ -86,6 +86,7 @@ macro_rules! native_server {
 native_server! {
     mod bridge;
     mod conn;
+    pub mod devtools;
     mod error;
     mod notice;
     mod origin;
@@ -97,6 +98,7 @@ native_server! {
     mod ws;
 
     pub use bridge::{Bridge, ClientInfo, LogSink};
+    pub use devtools::{Asset, DevtoolsConfig};
     pub use error::ServeError;
     pub use notice::{AttachNotices, NOTICE_TARGET};
     pub use origin::OriginPolicy;

@@ -760,6 +760,18 @@ impl Shared {
         }
         // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
         // they captured would keep it alive. (`Shared` holds no `Ctx`.)
+        // The devtools page of `undra dev` reads the cache through the runtime (ADR-054). The
+        // inspector holds the client weakly, like everything the runtime owns (ADR-034).
+        let weak_shared = Arc::downgrade(self);
+        ctx.runtime().register_inspector(
+            "queries",
+            Arc::new(move || {
+                weak_shared.upgrade().map_or_else(
+                    || "{\"entries\":[]}".to_owned(),
+                    |s| crate::inspect::describe(&s),
+                )
+            }),
+        );
         let shared = self.clone();
         undra_ports::on_connectivity_changed(ctx, move |ctx, online, _kind| {
             shared.on_connectivity(ctx, online);

@@ -102,6 +102,23 @@ impl Tracker {
         }
     }
 
+    /// Whether the client observes `signal_id` of `handle` (one by one, or all of the store's).
+    pub(crate) fn covers(&self, handle: u64, signal_id: u32) -> bool {
+        self.observed.contains(&(handle, signal_id)) || self.observed.contains(&(handle, ALL_SIGNALS))
+    }
+
+    /// The signals of `handle` the client observes, sorted.
+    pub(crate) fn signals_of(&self, handle: u64) -> Vec<u32> {
+        let mut signals: Vec<u32> = self
+            .observed
+            .iter()
+            .filter(|&&(h, _)| h == handle)
+            .map(|&(_, s)| s)
+            .collect();
+        signals.sort_unstable();
+        signals
+    }
+
     /// The client released `handle`: nothing about it is left to clean up.
     pub(crate) fn release(&mut self, handle: u64) {
         self.observed.retain(|&(h, _)| h != handle);
