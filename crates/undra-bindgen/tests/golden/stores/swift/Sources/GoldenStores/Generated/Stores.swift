@@ -37,8 +37,9 @@ public final class Clock: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.now = try Date.undraDecode(&reader)
+                    let value = try Date.undraDecode(&reader)
                     try reader.finish()
+                    self.now = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -110,6 +111,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
             handle = try UndraHandle.undraDecoded(from: body)
+            if handle.isNull {
+                throw UndraProtocolError.nullHandle
+            }
         } catch {
             throw UndraCallError.mapped(error, domain: TodoError.self)
         }
@@ -117,6 +121,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// Shows only the todos matching `f`.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func setFilter(_ f: Filter) {
         var w = UndraWriter()
         f.undraEncode(&w)
@@ -164,6 +169,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
         }
     }
 
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func changes() -> AsyncThrowingStream<Todo, Error> {
         return self.core.stream(
             .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Todos.changes),
@@ -180,8 +186,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.todos = try [Todo].undraDecode(&reader)
+                    let value = try [Todo].undraDecode(&reader)
                     try reader.finish()
+                    self.todos = value
                 case .keyedPatch:
                     let ops: [PatchOp<Todo>] = try decodePatch(&reader)
                     try reader.finish()
@@ -192,8 +199,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.filter = try Filter.undraDecode(&reader)
+                    let value = try Filter.undraDecode(&reader)
                     try reader.finish()
+                    self.filter = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -202,8 +210,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.visible = try [Todo].undraDecode(&reader)
+                    let value = try [Todo].undraDecode(&reader)
                     try reader.finish()
+                    self.visible = value
                 case .keyedPatch:
                     let ops: [PatchOp<Todo>] = try decodePatch(&reader)
                     try reader.finish()
@@ -214,8 +223,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.remaining = try UInt32.undraDecode(&reader)
+                    let value = try UInt32.undraDecode(&reader)
                     try reader.finish()
+                    self.remaining = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -224,8 +234,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.selected = try Optional<Todo>.undraDecode(&reader)
+                    let value = try Optional<Todo>.undraDecode(&reader)
                     try reader.finish()
+                    self.selected = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -234,8 +245,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 5:
                 switch op {
                 case .fullValue:
-                    self.title = try String.undraDecode(&reader)
+                    let value = try String.undraDecode(&reader)
                     try reader.finish()
+                    self.title = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -244,8 +256,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 6:
                 switch op {
                 case .fullValue:
-                    self.counter = try Counter.undraDecode(&reader)
+                    let value = try Counter.undraDecode(&reader)
                     try reader.finish()
+                    self.counter = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -254,8 +267,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 7:
                 switch op {
                 case .fullValue:
-                    self.tags = try [String: UInt32].undraDecode(&reader)
+                    let value = try [String: UInt32].undraDecode(&reader)
                     try reader.finish()
+                    self.tags = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -264,8 +278,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 8:
                 switch op {
                 case .fullValue:
-                    self.lastError = try Optional<TodoError>.undraDecode(&reader)
+                    let value = try Optional<TodoError>.undraDecode(&reader)
                     try reader.finish()
+                    self.lastError = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -274,8 +289,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 9:
                 switch op {
                 case .fullValue:
-                    self.elapsed = try Duration.undraDecode(&reader)
+                    let value = try Duration.undraDecode(&reader)
                     try reader.finish()
+                    self.elapsed = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -284,8 +300,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 10:
                 switch op {
                 case .fullValue:
-                    self.created = try Date.undraDecode(&reader)
+                    let value = try Date.undraDecode(&reader)
                     try reader.finish()
+                    self.created = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -294,8 +311,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 11:
                 switch op {
                 case .fullValue:
-                    self.blob = try reader.readBytes()
+                    let value = try reader.readBytes()
                     try reader.finish()
+                    self.blob = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -304,8 +322,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 12:
                 switch op {
                 case .fullValue:
-                    self.total = try UInt64.undraDecode(&reader)
+                    let value = try UInt64.undraDecode(&reader)
                     try reader.finish()
+                    self.total = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -314,8 +333,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 13:
                 switch op {
                 case .fullValue:
-                    self.default_ = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.default_ = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -324,8 +344,9 @@ public final class Todos: UndraStore, @unchecked Sendable {
             case 14:
                 switch op {
                 case .fullValue:
-                    self.uuid = try UUID.undraDecode(&reader)
+                    let value = try UUID.undraDecode(&reader)
                     try reader.finish()
+                    self.uuid = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:

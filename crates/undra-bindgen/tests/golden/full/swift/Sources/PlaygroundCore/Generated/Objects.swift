@@ -57,6 +57,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         }
     }
 
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func ticks() -> AsyncThrowingStream<UInt32, Error> {
         return self.core.stream(
             .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.ticks),
@@ -67,6 +68,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         )
     }
 
+    /// - Note: Iterating throws ``TodoError``, or ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func watch(_ priority: Priority) -> AsyncThrowingStream<Todo, Error> {
         var w = UndraWriter()
         priority.undraEncode(&w)

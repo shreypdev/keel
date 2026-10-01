@@ -88,6 +88,11 @@ extension UndraCallError {
         if let transport = error as? UndraTransportError {
             return UndraCallError.unavailable(transport)
         }
+        if let mismatch = error as? UndraSchemaMismatchError {
+            // A remote core that came back with another schema (`undra dev` rebuilt it): the
+            // connection is closed and every call in flight fails with this.
+            return UndraCallError.unavailable(.connectionLost(reason: mismatch.description))
+        }
         if let protocolError = error as? UndraProtocolError {
             return UndraCallError.malformed(protocolError.description)
         }
@@ -184,7 +189,7 @@ extension UndraCallError {
 
 /// A failure no caller could see: a generated command (a synchronous method that returns nothing and
 /// has no error type) or a store's change could not be applied. Delivered to `LoadOptions.onError`.
-public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConvertible {
+public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError {
     /// What failed, as Swift spells it: `"Todos.toggle"`, `"configureRemote"`, `"Todos.apply(signal: 2)"`.
     public let operation: String
     /// Why.
@@ -199,5 +204,10 @@ public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConve
     /// `"<operation> failed: <error>"`.
     public var description: String {
         return "\(operation) failed: \(error.description)"
+    }
+
+    /// The same text as `description`, so `localizedDescription` reads well too.
+    public var errorDescription: String? {
+        return description
     }
 }

@@ -1087,7 +1087,7 @@ public final class UndraCore: @unchecked Sendable {
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> UndraHandle
   public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool); public func release(_ handle: UndraHandle)
   public let mirror: Mirror        // register(handle) { @MainActor (signalId, op, reader) in … }
-  public func registerPort(_ id: UInt32, _ impl: PortImpl)
+  public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning
   public func stats() -> UndraStats
   public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it
 }
@@ -1100,14 +1100,14 @@ public enum UndraCallError: Error, Sendable, Equatable, CustomStringConvertible,
   case cancelledByCore                                  // status 3
   case panicked(message: String, backtrace: String)     // status 2 (a stream panic has an empty backtrace)
   case refused(reason: String)                          // status 5 and the `undra_call` rejection
-  case unavailable(UndraTransportError)                 // this UndraCore is shut down, not loaded, or its connection closed or timed out
+  case unavailable(UndraTransportError)                 // this UndraCore is shut down, not loaded, or its connection closed or timed out (a remote core that changed schema included)
   case malformed(String)                                // a reply, a result or an `E` that does not decode (a bug in Undra after a successful schema check)
   public static func mapped(_ error: any Error) -> any Error                                        // generated methods without an `E`
   public static func mapped<E: UndraError>(_ error: any Error, domain: E.Type) -> any Error         // with an `E`: status 1 becomes `E`
   public static func mapped(streamFailure error: any Error) -> any Error                            // generated stream methods
   public static func mapped<E: UndraError>(streamFailure error: any Error, domain: E.Type) -> any Error
 }   // `mapped` returns `E`, `CancellationError` or an `UndraCallError`
-public struct UndraUnhandledError: Error, Sendable, Equatable { public let operation: String; public let error: UndraCallError }   // what `onError` receives
+public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError { public let operation: String; public let error: UndraCallError }   // what `onError` receives
 public protocol UndraRecord: UndraCodec, Sendable, Hashable {}; public protocol UndraEnum: UndraCodec, Sendable, Hashable {}; public protocol UndraError: UndraCodec, Error, Sendable, Hashable {}; public protocol UndraPort {}
 ```
 Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, …) to avoid clashing with generated port protocols.

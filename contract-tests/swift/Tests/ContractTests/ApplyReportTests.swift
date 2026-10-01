@@ -35,4 +35,23 @@ final class ApplyReportTests: XCTestCase {
         counter.increment()
         try await waitUntil("the store to follow the core after the skipped change") { counter.count == 1 }
     }
+
+    func testAChangeWithTrailingBytesIsSkippedWholeNotHalfApplied() async throws {
+        let core = try Fixture.shared.core()
+        let counter = try Counter(ctx: core)
+        defer { counter.close() }
+        let reportsBefore = Fixture.shared.unhandled.snapshot.count
+
+        // A whole `i32` (7) followed by a stray byte: the value decodes, the payload does not.
+        let malformed = Wire.ChangeSet(
+            txnId: 998,
+            entries: [Wire.ChangeEntry(handle: counter.handle, signalId: 0, op: .fullValue, value: [7, 0, 0, 0, 0xFF])]
+        )
+        core.mirror.enqueue(malformed.encode())
+        core.mirror.flush()
+
+        let reports = Array(Fixture.shared.unhandled.snapshot.dropFirst(reportsBefore))
+        XCTAssertEqual(reports.map { $0.operation }, ["Counter.apply(signal: 0)"])
+        XCTAssertEqual(counter.count, 0, "a change that does not decode whole is not stored")
+    }
 }

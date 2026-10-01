@@ -39,8 +39,9 @@ public final class Link: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.state = try UndraAppState.undraDecode(&reader)
+                    let value = try UndraAppState.undraDecode(&reader)
                     try reader.finish()
+                    self.state = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -49,8 +50,9 @@ public final class Link: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.kind = try NetKind.undraDecode(&reader)
+                    let value = try NetKind.undraDecode(&reader)
                     try reader.finish()
+                    self.kind = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -59,8 +61,9 @@ public final class Link: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.last = try Optional<HttpResponse>.undraDecode(&reader)
+                    let value = try Optional<HttpResponse>.undraDecode(&reader)
                     try reader.finish()
+                    self.last = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -69,8 +72,9 @@ public final class Link: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.failure = try Optional<HttpError>.undraDecode(&reader)
+                    let value = try Optional<HttpError>.undraDecode(&reader)
                     try reader.finish()
+                    self.failure = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -79,8 +83,9 @@ public final class Link: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.pending = try [HttpRequest].undraDecode(&reader)
+                    let value = try [HttpRequest].undraDecode(&reader)
                     try reader.finish()
+                    self.pending = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:

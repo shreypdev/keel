@@ -100,7 +100,8 @@ pub struct BindingsConfig {
     pub ts_package: Option<String>,
     /// Map `i64`/`u64` to `number` instead of `bigint` in TypeScript.
     pub ts_js_number: bool,
-    /// Emit `throws(E)` in Swift; `true` unless turned off.
+    /// Emit `throws(E)` on Swift port requirements (calls always use plain
+    /// `throws`, ADR-032); `true` unless turned off.
     pub swift_typed_throws: Option<bool>,
 }
 

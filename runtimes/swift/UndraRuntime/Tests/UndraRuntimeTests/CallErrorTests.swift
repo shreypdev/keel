@@ -183,6 +183,17 @@ final class CallErrorMappingTests: XCTestCase {
         }
     }
 
+    func testASchemaChangeOfTheRemoteCoreIsUnavailable() {
+        // What the remote transport fails every call in flight with when `undra dev` comes back
+        // with another schema (WebSocketTransport.handleFrame).
+        let mismatch = UndraSchemaMismatchError(expected: 1, got: 2)
+        XCTAssertEqual(mappedCall(mismatch), .unavailable(.connectionLost(reason: mismatch.description)))
+        XCTAssertEqual(
+            mappedCall(UndraCallError.mapped(mismatch, domain: WireTestError.self)),
+            .unavailable(.connectionLost(reason: mismatch.description))
+        )
+    }
+
     func testProtocolErrorsAreMalformed() {
         XCTAssertEqual(
             mappedCall(UndraProtocolError.nullHandle),
@@ -370,6 +381,7 @@ final class CallErrorMappingTests: XCTestCase {
         XCTAssertEqual(unhandled, UndraUnhandledError(operation: "Todos.toggle", error: .refused(reason: "closed")))
         XCTAssertEqual(unhandled.operation, "Todos.toggle")
         XCTAssertEqual(unhandled.error, .refused(reason: "closed"))
+        XCTAssertEqual(unhandled.localizedDescription, unhandled.description)
     }
 }
 
@@ -482,6 +494,29 @@ final class CallErrorCoreTests: XCTestCase {
         guard case .refused? = error as? UndraCallError else {
             return XCTFail("expected .refused, got \(String(describing: error))")
         }
+    }
+
+    func testACallTheRemoteTransportCannotSendIsUnavailableNotRefused() async throws {
+        // The remote transport refuses to send only once its connection is closed.
+        let transport = FakeTransport(directSync: false)
+        transport.onCall = { _, _ in return false }
+        let core = try makeCore(transport)
+        let error = await captureError { _ = try await self.asyncCall(core) }
+        XCTAssertEqual(error as? UndraCallError, .unavailable(.closed))
+        XCTAssertThrowsError(try syncCall(core)) { error in
+            XCTAssertEqual(error as? UndraCallError, .unavailable(.closed))
+        }
+        let stream = core.stream(
+            .freeFunction(methodId: 8),
+            method: 8,
+            args: [],
+            decode: { (body: [UInt8]) throws -> UInt8 in return body[0] },
+            mapError: { UndraCallError.mapped(streamFailure: $0) }
+        )
+        let streamError = await captureError {
+            for try await _ in stream {}
+        }
+        XCTAssertEqual(streamError as? UndraCallError, .unavailable(.closed))
     }
 
     func testACallCancelledWhileWaitingThrowsCancellationErrorAndNotCancelledByCore() async throws {
@@ -706,6 +741,44 @@ final class ReportTests: XCTestCase {
         // The flag is cleared again afterwards.
         core.report(UndraTransportError.closed, operation: "outer again")
         XCTAssertEqual(count.withLock { (value: inout Int) -> Int in return value }, 2)
+    }
+
+    func testATaskStartedFromTheHandlerInheritsTheGuardButADetachedOneDoesNot() async throws {
+        // Documented on `LoadOptions.onError`: a `Task` started inside the handler inherits the
+        // task-local "reporting" flag, so what it reports is only logged; `Task.detached` does not.
+        let log = ErrorLog()
+        let holder = Guarded<UndraCore?>(nil)
+        let children = Guarded<[Task<Void, Never>]>([])
+        let core = try core(onError: { unhandled in
+            log.append(unhandled)
+            guard unhandled.operation == "outer" else {
+                return
+            }
+            let inner = holder.withLock { (value: inout UndraCore?) -> UndraCore? in
+                return value
+            }
+            let child = Task { () -> Void in
+                inner?.report(UndraTransportError.closed, operation: "from a child task")
+            }
+            let detached = Task.detached { () -> Void in
+                inner?.report(UndraTransportError.closed, operation: "from a detached task")
+            }
+            children.withLock { (value: inout [Task<Void, Never>]) -> Void in
+                value.append(contentsOf: [child, detached])
+            }
+        })
+        holder.withLock { (value: inout UndraCore?) -> Void in
+            value = core
+        }
+        core.report(UndraTransportError.closed, operation: "outer")
+        let started = children.withLock { (value: inout [Task<Void, Never>]) -> [Task<Void, Never>] in
+            return value
+        }
+        XCTAssertEqual(started.count, 2)
+        for task in started {
+            await task.value
+        }
+        XCTAssertEqual(log.all.map { $0.operation }, ["outer", "from a detached task"])
     }
 
     func testTheHandlerRunsOnTheCallingThread() throws {

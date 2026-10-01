@@ -58,6 +58,9 @@ public final class Calculator: UndraObject, @unchecked Sendable {
                 args: w.finish()
             )
             handle = try UndraHandle.undraDecoded(from: body)
+            if handle.isNull {
+                throw UndraProtocolError.nullHandle
+            }
         } catch {
             throw UndraCallError.mapped(error, domain: CalcError.self)
         }
@@ -82,6 +85,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         }
     }
 
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func reset() {
         do {
             _ = try self.core.callSync(
@@ -173,6 +177,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
     }
 
     /// Counts up.
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func ticks(n: UInt32) -> AsyncThrowingStream<UInt32, Error> {
         var w = UndraWriter()
         n.undraEncode(&w)
@@ -186,6 +191,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
     }
 
     /// Streams todos, failing to open with a typed error.
+    /// - Note: Iterating throws ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func watch(_ mode: Mode) -> AsyncThrowingStream<Todo, Error> {
         var w = UndraWriter()
         mode.undraEncode(&w)
@@ -257,6 +263,7 @@ public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
     }
 }
 
+/// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
 public func numbers(upto: UInt32, ctx: UndraCore = .shared) -> AsyncThrowingStream<UInt32, Error> {
     var w = UndraWriter()
     upto.undraEncode(&w)

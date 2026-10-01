@@ -138,13 +138,16 @@ final class CoreCallTests: XCTestCase {
         XCTAssertEqual(core.stats().hostPendingCalls, 0)
     }
 
-    func testBlockingCallRejectedByTheCoreThrowsBadRequest() throws {
+    func testBlockingCallTheRemoteTransportCannotSendThrowsClosed() throws {
+        // The blocking path is the remote one, whose transport refuses to send only once its
+        // connection is closed (ADR-032: that is `.unavailable(.closed)`, not a refusal by the core).
         let transport = FakeTransport(directSync: false)
         transport.onCall = { _, _ in return false }
         let core = try makeCore(transport)
         XCTAssertThrowsError(try core.callSync(.freeFunction(methodId: 3), method: 3, args: [])) { error in
-            XCTAssertEqual((error as? UndraReplyError)?.status, .badRequest)
+            XCTAssertEqual(error as? UndraTransportError, .closed)
         }
+        XCTAssertEqual(core.stats().hostPendingCalls, 0)
     }
 
     // MARK: call

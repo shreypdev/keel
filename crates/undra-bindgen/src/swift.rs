@@ -964,6 +964,10 @@ impl SwiftGen<'_> {
                         "{bind}try {}",
                         t.decode_all(&TypeRef::named("UndraHandle"), &reply)
                     ));
+                    // `construct` makes the same check for a synchronous constructor.
+                    w.block(format!("if {handle}.isNull"), |w| {
+                        w.line("throw UndraProtocolError.nullHandle");
+                    });
                 } else {
                     w.call(
                         format!("{bind}try {ctx}.construct"),
@@ -1034,7 +1038,7 @@ impl SwiftGen<'_> {
 
         if let Ret::Stream(item) | Ret::ResultStream { item, .. } = &ret {
             // A stream is not `throws`: its failures end the iteration, mapped like a call's.
-            doc(w, c.docs, &[]);
+            doc(w, c.docs, &[stream_doc(err.as_deref())]);
             let item_ty = t.ty(item);
             let suffix = format!(" -> AsyncThrowingStream<{item_ty}, Error>");
             w.call_block(head, &params, suffix, false, |w| {
@@ -1067,7 +1071,7 @@ impl SwiftGen<'_> {
         // throw, so it reports (ADR-032, decision 4).
         let is_command = !c.is_async && err.is_none() && is_unit;
         if is_command {
-            doc(w, c.docs, &[]);
+            doc(w, c.docs, &[COMMAND_DOC.to_owned()]);
         } else {
             doc(w, c.docs, &[throws_doc(err.as_deref(), c.is_async)]);
         }
@@ -1140,11 +1144,14 @@ impl SwiftGen<'_> {
                                 switch_block(w, "op", |w| {
                                     w.line("case .fullValue:");
                                     w.indented(|w| {
+                                        // Decoded and checked before it is stored, so a change
+                                        // with trailing bytes is skipped whole (ADR-032).
                                         w.line(format!(
-                                            "{prop} = try {}",
+                                            "let value = try {}",
                                             t.read_expr(&g.ty, "reader")
                                         ));
                                         w.line("try reader.finish()");
+                                        w.line(format!("{prop} = value"));
                                     });
                                     w.line("case .keyedPatch:");
                                     w.indented(|w| {
@@ -1474,6 +1481,24 @@ fn throws_doc(err: Option<&str>, is_async: bool) -> String {
             "- Throws: ``{err}``, `CancellationError` if the task is cancelled, or ``UndraCallError``."
         ),
     }
+}
+
+/// The doc line of a command (ADR-032, decision 4): it does not throw, so the
+/// reader learns where a failure goes.
+const COMMAND_DOC: &str =
+    "- Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.";
+
+/// The doc line of a stream method: what iterating it throws (ADR-032).
+fn stream_doc(err: Option<&str>) -> String {
+    let thrown = match err {
+        Some(err) => format!(
+            "``{err}``, or ``UndraCallError`` if the call fails in the core or cannot reach it"
+        ),
+        None => "``UndraCallError`` if the call fails in the core or cannot reach it".to_owned(),
+    };
+    format!(
+        "- Note: Iterating throws {thrown}; cancelling the iterating task ends the loop quietly."
+    )
 }
 
 /// `switch subject { .. }` with the `case` labels at the level of the `switch`,

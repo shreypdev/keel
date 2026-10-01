@@ -42,6 +42,7 @@ public final class Syncer: UndraObject, @unchecked Sendable {
     }
 
     /// Streams the responses of a request that repeats.
+    /// - Note: Iterating throws ``HttpError``, or ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func follow(_ endpoint: Endpoint) -> AsyncThrowingStream<HttpResponse, Error> {
         var w = UndraWriter()
         endpoint.undraEncode(&w)

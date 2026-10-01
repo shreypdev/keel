@@ -296,6 +296,20 @@ fn swift_call_shapes_follow_adr_032() {
         "mapError: { UndraCallError.mapped(streamFailure: $0, domain: CalcError.self) }"
     ));
     assert!(swift.contains("mapError: { UndraCallError.mapped(streamFailure: $0) }"));
+    // A stream and a command say in their docs where a failure goes.
+    assert!(swift.contains(
+        "/// - Note: Iterating throws ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly."
+    ));
+    assert!(swift.contains(
+        "/// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly."
+    ));
+    assert!(swift.contains(
+        "/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.\n    public func reset() {"
+    ));
+    // An async constructor checks the handle the way `UndraCore.construct` does.
+    assert!(swift.contains(
+        "if handle.isNull {\n                throw UndraProtocolError.nullHandle\n            }"
+    ));
     // The per-error helpers of the old policy are gone.
     let errors = file(&out[0].1, "Errors.swift");
     assert!(!errors.contains("undraFromReply"));
@@ -354,6 +368,16 @@ fn swift_store_apply_reports_undecodable_changes() {
     assert!(!stores.contains("assertionFailure"));
     // A `PatchError` still re-observes the signal.
     assert!(stores.contains("} catch is PatchError {"));
+    // A full value is stored only once it decoded whole, so a change with trailing bytes is
+    // skipped, not half applied.
+    assert!(stores.contains("let value = try "));
+    assert!(stores.contains("try reader.finish()\n") && stores.contains(" = value\n"));
+    let finish = stores.find("try reader.finish()").unwrap();
+    let store = stores.find(" = value\n").unwrap();
+    assert!(
+        finish < store,
+        "a full value is stored before `finish()` checks it"
+    );
 }
 
 #[test]

@@ -136,7 +136,8 @@ public final class UndraCore: @unchecked Sendable {
         return unloaded
     }
 
-    /// The shared core, or `nil` if none is loaded.
+    /// The shared core, or `nil` if none is loaded. While it is `nil`, ``shared`` returns the
+    /// shut-down placeholder, so check `current` (not `shared`) to learn whether a core is loaded.
     public static var current: UndraCore? {
         return sharedSlot.withLock { (slot: inout UndraCore?) -> UndraCore? in
             return slot
@@ -290,7 +291,7 @@ public final class UndraCore: @unchecked Sendable {
                     }
                     if !self.transport.send(call: payload) {
                         self.removePending(callId)
-                        slot.complete(.failure(UndraCore.rejection()))
+                        slot.complete(.failure(self.notSent()))
                     }
                 }
             },
@@ -382,7 +383,7 @@ public final class UndraCore: @unchecked Sendable {
             transport.streamCredit(callId: callId, credit: StreamChannel.initialCredit)
         } else {
             removePending(callId)
-            channel.finish(.failed(UndraCore.rejection()))
+            channel.finish(.failed(notSent()))
         }
         return StreamConsumer(channel)
     }
@@ -483,9 +484,11 @@ public final class UndraCore: @unchecked Sendable {
     ///
     /// `impl` usually comes from a generated `<name>PortImpl(_:)` function. The standard ports
     /// have default adapters (`LoadOptions.adapters`); registering one afterwards overrides it. A
-    /// shut-down core ignores the call.
+    /// shut-down core (or the placeholder `shared` returns before a core is loaded) ignores the
+    /// call and logs a warning: register ports on the core `load(_:)` returned.
     public func registerPort(_ id: UInt32, _ impl: PortImpl) {
         if isShutDown {
+            UndraLog.warning("registerPort(\(id)) on a shut-down UndraCore is ignored; register ports on the core UndraCore.load(_:) returned")
             return
         }
         state.withLock { (current: inout State) -> Void in
@@ -607,7 +610,7 @@ public final class UndraCore: @unchecked Sendable {
         setPending(callId, .blocking(box))
         if !transport.send(call: payload) {
             removePending(callId)
-            throw UndraCore.rejection()
+            throw notSent()
         }
         guard let result = box.wait(timeoutSeconds: blockingTimeout) else {
             removePending(callId)
@@ -692,6 +695,17 @@ public final class UndraCore: @unchecked Sendable {
         } catch {
             return .failure(error)
         }
+    }
+
+    /// The error for a call the transport did not send. The remote transport refuses to send only
+    /// once its connection is closed, and a call that raced with `shutdown()` found the transport
+    /// already shut: both are `UndraTransportError.closed`, as for a call in flight when the
+    /// connection went. Otherwise the in-process core refused it (`rejection()`).
+    private func notSent() -> any Error {
+        if transport.mode == .remote || isShutDown {
+            return UndraTransportError.closed
+        }
+        return UndraCore.rejection()
     }
 
     /// The error for a call the core refused without replying (`undra_call` returned 5).

@@ -55,6 +55,7 @@ public final class Probe: UndraObject, @unchecked Sendable {
     }
 
     /// Sets every counter back to zero.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func reset() {
         do {
             _ = try self.core.callSync(
@@ -70,6 +71,7 @@ public final class Probe: UndraObject, @unchecked Sendable {
     /// A stream of the numbers `0..count`, produced one per poll. The runtime sends an item only
     /// against credit the platform granted and polls at most one item ahead of it, so `produced`
     /// stays within one of what the platform has asked for, however large `count` is.
+    /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
     public func ticks(count: UInt32) -> AsyncThrowingStream<UInt32, Error> {
         var w = UndraWriter()
         count.undraEncode(&w)
@@ -163,6 +165,7 @@ public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -> Double {
 /// Tells the core where the server is. Call it once at start-up, before anything observes
 /// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
+/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
 public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared) {
     var w = UndraWriter()
     config.undraEncode(&w)
@@ -354,6 +357,7 @@ public func parseCount(text: String, ctx: UndraCore = .shared) throws -> UInt32 
 }
 
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
+/// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
 public func ping(ctx: UndraCore = .shared) {
     do {
         _ = try ctx.callSync(

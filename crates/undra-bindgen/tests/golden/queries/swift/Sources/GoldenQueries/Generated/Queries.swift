@@ -43,6 +43,7 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func refetch() {
         do {
             _ = try self.core.callSync(
@@ -56,6 +57,7 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func invalidate() {
         do {
             _ = try self.core.callSync(
@@ -74,8 +76,9 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.data = try Optional<Todo>.undraDecode(&reader)
+                    let value = try Optional<Todo>.undraDecode(&reader)
                     try reader.finish()
+                    self.data = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -84,8 +87,9 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.status = try QueryStatus.undraDecode(&reader)
+                    let value = try QueryStatus.undraDecode(&reader)
                     try reader.finish()
+                    self.status = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -94,8 +98,9 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.error = try Optional<TodoError>.undraDecode(&reader)
+                    let value = try Optional<TodoError>.undraDecode(&reader)
                     try reader.finish()
+                    self.error = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -104,8 +109,9 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.fetching = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.fetching = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -114,8 +120,9 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.updatedAt = try Optional<Date>.undraDecode(&reader)
+                    let value = try Optional<Date>.undraDecode(&reader)
                     try reader.finish()
+                    self.updatedAt = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -170,6 +177,7 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func refetch() {
         do {
             _ = try self.core.callSync(
@@ -183,6 +191,7 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func invalidate() {
         do {
             _ = try self.core.callSync(
@@ -201,8 +210,9 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.data = try Optional<UInt32>.undraDecode(&reader)
+                    let value = try Optional<UInt32>.undraDecode(&reader)
                     try reader.finish()
+                    self.data = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -211,8 +221,9 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.status = try QueryStatus.undraDecode(&reader)
+                    let value = try QueryStatus.undraDecode(&reader)
                     try reader.finish()
+                    self.status = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -221,8 +232,9 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.error = try Optional<String>.undraDecode(&reader)
+                    let value = try Optional<String>.undraDecode(&reader)
                     try reader.finish()
+                    self.error = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -231,8 +243,9 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.fetching = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.fetching = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -241,8 +254,9 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.updatedAt = try Optional<Date>.undraDecode(&reader)
+                    let value = try Optional<Date>.undraDecode(&reader)
                     try reader.finish()
+                    self.updatedAt = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -299,6 +313,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// Fetches again now, even if the data is fresh.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func refetch() {
         do {
             _ = try self.core.callSync(
@@ -312,6 +327,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// Marks the cached entry stale; it refetches while observed.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func invalidate() {
         do {
             _ = try self.core.callSync(
@@ -330,8 +346,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 0:
                 switch op {
                 case .fullValue:
-                    self.data = try Optional<Page>.undraDecode(&reader)
+                    let value = try Optional<Page>.undraDecode(&reader)
                     try reader.finish()
+                    self.data = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -340,8 +357,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 1:
                 switch op {
                 case .fullValue:
-                    self.status = try QueryStatus.undraDecode(&reader)
+                    let value = try QueryStatus.undraDecode(&reader)
                     try reader.finish()
+                    self.status = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -350,8 +368,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 2:
                 switch op {
                 case .fullValue:
-                    self.error = try Optional<TodoError>.undraDecode(&reader)
+                    let value = try Optional<TodoError>.undraDecode(&reader)
                     try reader.finish()
+                    self.error = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -360,8 +379,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 3:
                 switch op {
                 case .fullValue:
-                    self.fetching = try Bool.undraDecode(&reader)
+                    let value = try Bool.undraDecode(&reader)
                     try reader.finish()
+                    self.fetching = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:
@@ -370,8 +390,9 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             case 4:
                 switch op {
                 case .fullValue:
-                    self.updatedAt = try Optional<Date>.undraDecode(&reader)
+                    let value = try Optional<Date>.undraDecode(&reader)
                     try reader.finish()
+                    self.updatedAt = value
                 case .keyedPatch:
                     break
                 case .lazyListInvalidated:

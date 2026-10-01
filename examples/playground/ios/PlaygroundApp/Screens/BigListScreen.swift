@@ -112,8 +112,8 @@ struct BigListScreen: View {
     }
 
     /// Runs one call into the core. A position the core refuses is a `ListError`; anything else that
-    /// can go wrong with a call (a cancelled task, a panic in the core) arrives as `CancellationError`
-    /// or `UndraCallError`. Both read well as `localizedDescription`.
+    /// can go wrong with the call (a panic in the core, a closed list) arrives as an `UndraCallError`.
+    /// Both read well as `localizedDescription`.
     private func run(_ action: () throws -> Void) {
         do {
             try action()
