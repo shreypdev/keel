@@ -78,8 +78,11 @@ describe("the web device benchmark", () => {
     expect(drain.merged.drain_ns.p50).toBeCloseTo(200_000, 3);
     // One update on its own costs 1.5 us minus the 1 us of an empty call on the fake clock: 0.5 us.
     expect(drain.unmerged_estimate.per_entry_ns.p50).toBeCloseTo(500, 3);
+    expect(drain.unmerged_estimate.per_entry_ns.n).toBe(QUICK.drainFrames);
     expect(drain.unmerged_estimate.frame_ns).toBeCloseTo(DRAIN_UPDATES_PER_FRAME * 500, 3);
+    expect(drain.unmerged_estimate.frame_ns_mean).toBeCloseTo(DRAIN_UPDATES_PER_FRAME * 500, 3);
     expect(drain.ratio_unmerged_over_merged).toBeCloseTo(500 / 1500, 6);
+    expect(drain.ratio_unmerged_over_merged_mean).toBeCloseTo(500 / 1500, 6);
   });
 
   it("refuses to report a run in which the mirror did not change", async () => {

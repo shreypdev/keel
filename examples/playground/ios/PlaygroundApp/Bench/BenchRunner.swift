@@ -20,8 +20,9 @@ struct BenchConfig {
     /// The ADR-031 drain experiment: frames that count, and frames before them that do not.
     var drainFrames = 240
     var drainWarmupFrames = 60
-    /// One-entry drains timed for the cost of an update that is not merged with any other.
-    var singleDrains = 2_000
+    /// After each frame of the drain experiment, this many calls on the main thread, each drained alone: the cost of an update that is
+    /// not merged with any other, measured in the same minutes as the merged frames.
+    var singlesPerRound = 8
     /// Reloads of the core inside one process, for the in-process cold-start row.
     var reloads = 30
     /// The 100 KB snapshot: this many to-dos of this many characters each.
@@ -31,7 +32,7 @@ struct BenchConfig {
     static let full = BenchConfig()
     static let quick = BenchConfig(
         syncBatch: 20, syncBatches: 4, warmupBatches: 1, eachSamples: 20, eachWarmup: 2, resetEveryInserts: 10,
-        drainFrames: 4, drainWarmupFrames: 1, singleDrains: 20, reloads: 2, snapshotTodos: 50, snapshotTitleLength: 80
+        drainFrames: 4, drainWarmupFrames: 1, singlesPerRound: 2, reloads: 2, snapshotTodos: 50, snapshotTitleLength: 80
     )
 }
 
@@ -100,7 +101,7 @@ final class BenchRunner {
             "config": [
                 "sync_batch": config.syncBatch, "sync_batches": config.syncBatches, "warmup_batches": config.warmupBatches,
                 "each_samples": config.eachSamples, "each_warmup": config.eachWarmup, "reset_every_inserts": config.resetEveryInserts,
-                "drain_frames": config.drainFrames, "drain_warmup_frames": config.drainWarmupFrames, "single_drains": config.singleDrains,
+                "drain_frames": config.drainFrames, "drain_warmup_frames": config.drainWarmupFrames, "singles_per_round": config.singlesPerRound,
                 "reloads": config.reloads,
             ],
             "ops": ops,
@@ -225,7 +226,7 @@ final class BenchRunner {
         var w = UndraWriter()
         UInt32(BenchRunner.updatesPerFrame).undraEncode(&w)
         let args = w.finish()
-        let total = config.drainWarmupFrames + config.drainFrames
+        let rounds = config.drainWarmupFrames + config.drainFrames
         let warmup = config.drainWarmupFrames
         let perBurst = BenchRunner.updatesPerFrame
 
@@ -236,29 +237,41 @@ final class BenchRunner {
             var entries: Int
             var applied: Int
         }
-        let bursts: [Burst] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[Burst], Error>) in
-            Thread.detachNewThread {
-                var out: [Burst] = []
-                do {
-                    for k in 1 ... total {
+        var bursts: [Burst] = []
+        var singles: [Double] = []
+        for round in 1 ... rounds {
+            let burst: Burst = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Burst, Error>) in
+                Thread.detachNewThread {
+                    do {
                         let start = recorder.position
                         _ = try core.callSync(.objectMethod(handle: handle, methodId: methodId), method: methodId, args: args)
                         guard recorder.wait(forChangeSets: start.changeSets + perBurst, timeout: 10) else {
-                            throw BenchCheckError(message: "burst \(k): the main thread did not drain \(perBurst) change-sets within 10 s")
+                            throw BenchCheckError(message: "burst \(round): the main thread did not drain \(perBurst) change-sets within 10 s")
                         }
                         let drains = recorder.drains(since: start.drains)
-                        if k > warmup {
-                            out.append(Burst(
-                                frameNs: drains.reduce(0) { $0 + $1.durationNs }, drains: drains.count,
-                                changeSets: drains.reduce(0) { $0 + $1.changeSets }, entries: drains.reduce(0) { $0 + $1.entries },
-                                applied: drains.reduce(0) { $0 + $1.applied }
-                            ))
-                        }
+                        continuation.resume(returning: Burst(
+                            frameNs: drains.reduce(0) { $0 + $1.durationNs }, drains: drains.count,
+                            changeSets: drains.reduce(0) { $0 + $1.changeSets }, entries: drains.reduce(0) { $0 + $1.entries },
+                            applied: drains.reduce(0) { $0 + $1.applied }
+                        ))
+                    } catch {
+                        continuation.resume(throwing: error)
                     }
-                    continuation.resume(returning: out)
-                } catch {
-                    continuation.resume(throwing: error)
                 }
+            }
+            // The cost of one update on its own, in the same minutes as the frames: a call on the main thread drains before it
+            // returns, so each of these is a drain of exactly one entry, and the drain listener times it.
+            let mark = recorder.position.drains
+            for _ in 0 ..< config.singlesPerRound {
+                bench.benchListUpdateBurst(n: 1)
+            }
+            let alone = recorder.drains(since: mark).filter { $0.changeSets == 1 && $0.entries == 1 && $0.applied == 1 }
+            if alone.count != config.singlesPerRound {
+                throw BenchCheckError(message: "round \(round): \(alone.count) of \(config.singlesPerRound) calls were drained as one entry on their own")
+            }
+            if round > warmup {
+                bursts.append(burst)
+                singles.append(contentsOf: alone.map(\.durationNs))
             }
         }
         if bench.rows.count != Int(BenchRunner.rows) {
@@ -267,21 +280,9 @@ final class BenchRunner {
         if let wrong = bursts.first(where: { $0.changeSets != perBurst }) {
             throw BenchCheckError(message: "a frame's drains consumed \(wrong.changeSets) change-sets, not \(perBurst)")
         }
-        let drainDurations = recorder.drains(since: 0).map(\.durationNs)
-
-        // The cost of one update on its own: a call on the main thread drains before it returns, so each of these is a
-        // drain of exactly one entry, and the drain listener times it.
-        recorder.reset()
-        for _ in 0 ..< (config.singleDrains + config.singleDrains / 10) {
-            bench.benchListUpdateBurst(n: 1)
-        }
-        let singles = recorder.drains(since: 0).filter { $0.changeSets == 1 && $0.entries == 1 && $0.applied == 1 }
-        if singles.count < config.singleDrains {
-            throw BenchCheckError(message: "\(singles.count) of \(config.singleDrains + config.singleDrains / 10) calls were drained as one entry on their own")
-        }
-        let perEntry = BenchSummary(samples: singles.dropFirst(config.singleDrains / 10).map(\.durationNs))
+        let drainDurations = recorder.drains(since: 0).filter { $0.changeSets > 1 }.map(\.durationNs)
+        let perEntry = BenchSummary(samples: singles)
         let merged = BenchSummary(samples: bursts.map(\.frameNs))
-        let unmergedFrame = Double(perBurst) * perEntry.p50
         func median(_ xs: [Int]) -> Double { return BenchSummary(samples: xs.map(Double.init)).p50 }
 
         return [
@@ -300,10 +301,12 @@ final class BenchRunner {
             ] as [String: Any],
             "unmerged_estimate": [
                 "per_entry_ns": perEntry.json,
-                "frame_ns": unmergedFrame,
-                "method": "the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), \(config.singleDrains) of them, median; times \(perBurst). The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here",
+                "frame_ns": Double(perBurst) * perEntry.p50,
+                "frame_ns_mean": Double(perBurst) * perEntry.mean,
+                "method": "the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), \(config.singlesPerRound) after each frame of the experiment so that both are measured in the same minutes (\(perEntry.n) in all); times \(perBurst), by the median entry and by the mean entry. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here",
             ] as [String: Any],
-            "ratio_unmerged_over_merged": unmergedFrame / merged.p50,
+            "ratio_unmerged_over_merged": Double(perBurst) * perEntry.p50 / merged.p50,
+            "ratio_unmerged_over_merged_mean": Double(perBurst) * perEntry.mean / merged.p50,
             "note": "merged frame = the drain(s) that consumed one burst, summed: decode and apply of the merged patch to the `@Observable` store",
         ]
     }

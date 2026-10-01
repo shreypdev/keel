@@ -72,10 +72,14 @@ export interface DrainResult {
     readonly per_entry_ns: Summary;
     /** `updates_per_frame` times the median per-entry cost. */
     readonly frame_ns: number;
+    /** `updates_per_frame` times the mean per-entry cost. */
+    readonly frame_ns_mean: number;
     readonly method: string;
   };
-  /** Estimated unmerged frame over measured merged frame (both medians). */
+  /** Estimated unmerged frame (by the median entry) over measured merged frame (median). */
   readonly ratio_unmerged_over_merged: number;
+  /** The same by the mean entry. */
+  readonly ratio_unmerged_over_merged_mean: number;
   readonly note: string;
 }
 
@@ -258,6 +262,7 @@ export async function measureDrain(env: BenchEnv, config: BenchConfig): Promise<
   const { bench } = env;
   await bench.benchListReset();
   const frames: { wall: number; drains: DrainStats[] }[] = [];
+  const perEntry: number[] = [];
   let current: DrainStats[] = [];
   const stop = env.onDrain((stats) => current.push(stats));
   try {
@@ -267,7 +272,20 @@ export async function measureDrain(env: BenchEnv, config: BenchConfig): Promise<
       const t0 = env.now();
       await bench.benchListUpdateBurst(DRAIN_UPDATES_PER_FRAME);
       const t1 = env.now();
-      if (f >= config.drainWarmupFrames) frames.push({ wall: (t1 - t0) * 1e6, drains: current });
+      const drains = current;
+      current = []; // the single-entry drains below are not part of the frame
+      // The cost of one update on its own, in the same minutes as the frames: calls that commit one update (one transaction, one drain of one
+      // entry, the list copy) minus calls that commit none (the same call with nothing to drain), as two batches.
+      const size = config.perEntryBatchSize;
+      const a0 = env.now();
+      for (let i = 0; i < size; i++) await bench.benchListUpdateBurst(1);
+      const a1 = env.now();
+      for (let i = 0; i < size; i++) await bench.benchListUpdateBurst(0);
+      const a2 = env.now();
+      if (f >= config.drainWarmupFrames) {
+        frames.push({ wall: (t1 - t0) * 1e6, drains });
+        perEntry.push(Math.max(0, ((a1 - a0) - (a2 - a1)) * 1e6) / size);
+      }
     }
   } finally {
     stop();
@@ -279,20 +297,10 @@ export async function measureDrain(env: BenchEnv, config: BenchConfig): Promise<
   const changeSets = sum((d) => d.changeSets);
   if (changeSets.some((n) => n !== DRAIN_UPDATES_PER_FRAME)) fail(`a frame's drains consumed ${changeSets.join(",")} change-sets, not ${DRAIN_UPDATES_PER_FRAME}`);
 
-  // The cost of one update on its own: a burst of one (one transaction, one drain of one entry) minus a burst of none (the same call
-  // with nothing to drain), in batches so the clock's step does not matter.
-  const perEntry: number[] = [];
-  for (let b = 0; b < config.perEntryBatches; b++) {
-    const t0 = env.now();
-    for (let i = 0; i < config.perEntryBatchSize; i++) await bench.benchListUpdateBurst(1);
-    const t1 = env.now();
-    for (let i = 0; i < config.perEntryBatchSize; i++) await bench.benchListUpdateBurst(0);
-    const t2 = env.now();
-    perEntry.push(Math.max(0, ((t1 - t0) - (t2 - t1)) * 1e6) / config.perEntryBatchSize);
-  }
   const perEntrySummary = summarize(perEntry);
   const mergedFrame = summarize(frames.map((frame) => frame.wall));
   const unmergedFrame = DRAIN_UPDATES_PER_FRAME * perEntrySummary.p50;
+  const unmergedFrameMean = DRAIN_UPDATES_PER_FRAME * perEntrySummary.mean;
   return {
     rows: BENCH_ROWS,
     updates_per_frame: DRAIN_UPDATES_PER_FRAME,
@@ -310,11 +318,13 @@ export async function measureDrain(env: BenchEnv, config: BenchConfig): Promise<
     unmerged_estimate: {
       per_entry_ns: perEntrySummary,
       frame_ns: unmergedFrame,
+      frame_ns_mean: unmergedFrameMean,
       method:
-        "a call that commits one update (one transaction, one drain of one entry, the list copy) minus a call that commits none, in batches of " +
-        `${config.perEntryBatchSize}; times ${DRAIN_UPDATES_PER_FRAME}. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here`,
+        `a call that commits one update (one transaction, one drain of one entry, the list copy) minus a call that commits none, as two batches of ${config.perEntryBatchSize} after each frame of the experiment so that both are measured in the same minutes (${perEntrySummary.n} batches); ` +
+        `times ${DRAIN_UPDATES_PER_FRAME}, by the median batch and by the mean batch. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here`,
     },
     ratio_unmerged_over_merged: unmergedFrame / mergedFrame.p50,
+    ratio_unmerged_over_merged_mean: unmergedFrameMean / mergedFrame.p50,
     note: "merged frame = the awaited burst call of 1,667 transactions plus the drain it ends with, as the page experiences it",
   };
 }

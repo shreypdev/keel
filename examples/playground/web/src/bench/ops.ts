@@ -43,8 +43,7 @@ export interface BenchConfig {
   /** Frames of the drain experiment that count, and the frames before them that do not. */
   readonly drainFrames: number;
   readonly drainWarmupFrames: number;
-  /** Timed batches of the per-entry cost of one unmerged update, and operations per batch. */
-  readonly perEntryBatches: number;
+  /** After each frame of the drain experiment: calls that commit one update and calls that commit none, timed as two batches of this size. */
   readonly perEntryBatchSize: number;
   /** Reloads of the core inside one page, for the in-process cold start row. */
   readonly reloads: number;
@@ -58,8 +57,7 @@ export const FULL: BenchConfig = {
   resetEveryInserts: 1_000,
   drainFrames: 240,
   drainWarmupFrames: 60,
-  perEntryBatches: 40,
-  perEntryBatchSize: 500,
+  perEntryBatchSize: 20,
   reloads: 20,
 };
 
@@ -71,7 +69,6 @@ export const QUICK: BenchConfig = {
   resetEveryInserts: 20,
   drainFrames: 4,
   drainWarmupFrames: 1,
-  perEntryBatches: 3,
-  perEntryBatchSize: 10,
+  perEntryBatchSize: 4,
   reloads: 2,
 };

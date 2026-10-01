@@ -125,8 +125,12 @@ export function validateRaw(raw) {
     for (const k of ["change_sets_per_frame_p50", "entries_per_frame_p50", "applied_per_frame_p50", "drains_per_frame_p50"]) {
       if (!isNum(d.merged?.[k])) problems.push(`drain.merged.${k} is not a finite number`);
     }
-    if (!isNum(d.unmerged_estimate?.frame_ns)) problems.push("drain.unmerged_estimate.frame_ns is not a finite number");
-    if (!isNum(d.ratio_unmerged_over_merged)) problems.push("drain.ratio_unmerged_over_merged is not a finite number");
+    for (const k of ["frame_ns", "frame_ns_mean"]) {
+      if (!isNum(d.unmerged_estimate?.[k])) problems.push(`drain.unmerged_estimate.${k} is not a finite number`);
+    }
+    for (const k of ["ratio_unmerged_over_merged", "ratio_unmerged_over_merged_mean"]) {
+      if (!isNum(d[k])) problems.push(`drain.${k} is not a finite number`);
+    }
   }
   const c = raw.cold;
   if (c !== undefined && c !== null) {
@@ -363,18 +367,25 @@ function coldDetail(result) {
   return parts.length === 0 ? null : parts.join("; ");
 }
 
+/** `a to b` for two numbers formatted with `fmt`, or just `a` when they print the same. */
+function range(a, b, fmt) {
+  const [x, y] = [fmt(Math.min(a, b)), fmt(Math.max(a, b))];
+  return x === y ? x : `${x} to ${y}`;
+}
+
 function drainTable(groups) {
   const lines = [
-    "| Target | Main-thread cost of a frame, merged (p50 / p99) | Entries received → applied | One entry applied on its own (p50) | Estimated unmerged frame | Merging saves | Share of a 60 Hz frame (merged / unmerged) |",
+    "| Target | Main-thread cost of a frame, merged (p50 / p99) | Entries received → applied | One entry applied on its own (median / mean) | Unmerged frame, estimated (median to mean entry) | Merging saves | Share of a 60 Hz frame, merged → unmerged |",
     "|---|---|---|---|---|---|---|",
   ];
   for (const runs of groups) {
     const r = runs.at(-1).result;
     const d = r.drain;
     const m = d.merged;
+    const u = d.unmerged_estimate;
     const share = (ns) => `${((100 * ns) / FRAME_NS).toFixed(1)}%`;
     lines.push(
-      `| ${r.label} | ${fmtNs(m.frame_ns.p50)} / ${fmtNs(m.frame_ns.p99)} | ${m.entries_per_frame_p50.toLocaleString("en-US")} → ${m.applied_per_frame_p50.toLocaleString("en-US")} (${m.drains_per_frame_p50} drain${m.drains_per_frame_p50 === 1 ? "" : "s"}) | ${fmtNs(d.unmerged_estimate.per_entry_ns.p50)} | ${fmtNs(d.unmerged_estimate.frame_ns)} | ${d.ratio_unmerged_over_merged.toFixed(1)}x | ${share(m.frame_ns.p50)} / ${share(d.unmerged_estimate.frame_ns)} |`,
+      `| ${r.label} | ${fmtNs(m.frame_ns.p50)} / ${fmtNs(m.frame_ns.p99)} | ${m.entries_per_frame_p50.toLocaleString("en-US")} → ${m.applied_per_frame_p50.toLocaleString("en-US")} (${m.drains_per_frame_p50} drain${m.drains_per_frame_p50 === 1 ? "" : "s"}) | ${fmtNs(u.per_entry_ns.p50)} / ${fmtNs(u.per_entry_ns.mean)} | ${range(u.frame_ns, u.frame_ns_mean, fmtNs)} | ${range(d.ratio_unmerged_over_merged, d.ratio_unmerged_over_merged_mean, (x) => `${x.toFixed(1)}x`)} | ${share(m.frame_ns.p50)} → ${range(u.frame_ns, u.frame_ns_mean, share)} |`,
     );
   }
   return lines;
