@@ -204,6 +204,55 @@ mod tests {
     }
 
     #[test]
+    fn the_documented_bounds_hold_at_their_edges() {
+        const MIB: usize = 1 << 20;
+        // 200 steps: the 200th is kept without evicting, the 201st evicts the oldest and only it.
+        let mut ring = Ring::new(200, 32 * MIB, 4 * MIB);
+        for i in 0..200_u8 {
+            assert!(ring.push(info(), vec![i; 1]).evicted_below.is_none());
+        }
+        assert_eq!(ring.len(), 200);
+        assert_eq!(ring.push(info(), vec![0; 1]).evicted_below, Some(2));
+        assert_eq!((ring.len(), ring.get(1).is_none(), ring.get(2).is_some()), (200, true, true));
+
+        // 4 MiB a step: exactly that is kept and restorable, one byte more is listed and not kept.
+        let mut ring = Ring::new(200, 32 * MIB, 4 * MIB);
+        let at = ring.push(info(), vec![0; 4 * MIB]).info;
+        assert!(at.restorable && ring.get(at.step).unwrap().bytes.is_some());
+        let over = ring.push(info(), vec![0; 4 * MIB + 1]).info;
+        assert!(!over.restorable && ring.get(over.step).unwrap().bytes.is_none());
+        assert_eq!(usize::try_from(over.bytes).unwrap(), 4 * MIB + 1, "the size is still told");
+        assert_eq!(ring.bytes(), 4 * MIB, "a step that was not kept weighs nothing");
+
+        // 32 MiB in all: eight steps of 4 MiB fill it exactly; the ninth evicts the oldest.
+        let mut ring = Ring::new(200, 32 * MIB, 4 * MIB);
+        for _ in 0..8 {
+            assert!(ring.push(info(), vec![0; 4 * MIB]).evicted_below.is_none());
+        }
+        assert_eq!(ring.bytes(), 32 * MIB);
+        assert_eq!(ring.push(info(), vec![1; 4 * MIB]).evicted_below, Some(2));
+        assert_eq!((ring.bytes(), ring.len()), (32 * MIB, 8));
+        // One byte over the total with the same step count evicts too.
+        let mut ring = Ring::new(200, 100, 100);
+        ring.push(info(), vec![0; 50]);
+        ring.push(info(), vec![0; 50]);
+        assert_eq!(ring.len(), 2, "exactly the bound fits");
+        assert_eq!(ring.push(info(), vec![0; 1]).evicted_below, Some(2));
+        assert_eq!(ring.bytes(), 51);
+    }
+
+    #[test]
+    fn a_step_that_was_not_kept_is_evicted_without_unbalancing_the_total() {
+        let mut ring = Ring::new(2, 1 << 20, 16);
+        ring.push(info(), vec![0; 17]); // listed, not kept
+        ring.push(info(), vec![0; 10]);
+        ring.push(info(), vec![0; 10]); // evicts the one that was not kept
+        assert_eq!((ring.len(), ring.bytes()), (2, 20));
+        ring.clear();
+        assert_eq!((ring.len(), ring.bytes()), (0, 0), "nothing is kept once the page leaves");
+    }
+
+    #[test]
     fn newest_bytes_is_what_the_dedupe_compares_with() {
         let mut ring = Ring::new(10, 1 << 20, 1 << 10);
         assert!(ring.newest_bytes().is_none());

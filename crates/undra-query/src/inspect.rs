@@ -7,6 +7,7 @@
 
 use std::fmt::Write as _;
 
+use crate::erased::Erased;
 use crate::shared::{Entry, Shared};
 
 /// Entries whose encoded value is larger than this are listed without it (`data` is `null`,
@@ -53,62 +54,92 @@ fn value(label: &str, bytes: Option<&[u8]>, out: &mut String) {
     let _ = write!(out, ",\"{label}_len\":{}", bytes.map_or(0, <[u8]>::len));
 }
 
-fn entry(e: &Entry, out: &mut String) {
-    let _ = write!(out, "{{\"query_id\":{},\"key\":", e.vt.id);
-    json_str(&e.rendered, out);
-    out.push_str(",\"template\":");
-    json_str(e.vt.key, out);
-    let _ = write!(
-        out,
-        ",\"status\":\"{}\",\"fetching\":{},\"observers\":{},\"invalidated\":{},\"failed\":{},\"layers\":{},\"stamp\":{}",
-        match e.status() {
-            crate::QueryStatus::Idle => "idle",
-            crate::QueryStatus::Fetching => "fetching",
-            crate::QueryStatus::Success => "success",
-            crate::QueryStatus::Error => "error",
-        },
-        e.inflight.is_some(),
-        e.observers,
-        e.invalidated,
-        e.failed,
-        e.layers.len(),
-        e.stamp,
-    );
-    match e.updated_at {
-        Some(at) => {
-            let _ = write!(out, ",\"updated_at\":{at}");
-        }
-        None => out.push_str(",\"updated_at\":null"),
-    }
-    value("data", e.data.as_ref().map(|d| &*d.bytes), out);
-    value("error", e.error.as_ref().map(|d| &*d.bytes), out);
-    out.push('}');
+/// What one entry shows, copied out of the cache so the document is built after its lock is
+/// released: the strings are small, and the values are shared (`Arc`), not copied.
+struct Row {
+    id: u32,
+    rendered: String,
+    template: &'static str,
+    status: &'static str,
+    fetching: bool,
+    observers: u32,
+    invalidated: bool,
+    failed: bool,
+    layers: usize,
+    stamp: u64,
+    updated_at: Option<i64>,
+    data: Option<Erased>,
+    error: Option<Erased>,
 }
 
-/// The cache of `shared` as JSON, entries ordered by query id then key.
-pub(crate) fn describe(shared: &Shared) -> String {
-    let (mut out, pending) = (String::with_capacity(512), shared.queue_len());
-    let mut rows: Vec<(u32, String, String)> = Vec::new();
-    {
-        let state = shared.state.lock();
-        for e in state.entries.values() {
-            let mut row = String::new();
-            entry(e, &mut row);
-            rows.push((e.vt.id, e.rendered.clone(), row));
+impl Row {
+    fn of(e: &Entry) -> Row {
+        Row {
+            id: e.vt.id,
+            rendered: e.rendered.clone(),
+            template: e.vt.key,
+            status: match e.status() {
+                crate::QueryStatus::Idle => "idle",
+                crate::QueryStatus::Fetching => "fetching",
+                crate::QueryStatus::Success => "success",
+                crate::QueryStatus::Error => "error",
+            },
+            fetching: e.inflight.is_some(),
+            observers: e.observers,
+            invalidated: e.invalidated,
+            failed: e.failed,
+            layers: e.layers.len(),
+            stamp: e.stamp,
+            updated_at: e.updated_at,
+            data: e.data.clone(),
+            error: e.error.clone(),
         }
     }
-    rows.sort();
+
+    fn write(&self, out: &mut String) {
+        let _ = write!(out, "{{\"query_id\":{},\"key\":", self.id);
+        json_str(&self.rendered, out);
+        out.push_str(",\"template\":");
+        json_str(self.template, out);
+        let _ = write!(
+            out,
+            ",\"status\":\"{}\",\"fetching\":{},\"observers\":{},\"invalidated\":{},\"failed\":{},\"layers\":{},\"stamp\":{}",
+            self.status, self.fetching, self.observers, self.invalidated, self.failed, self.layers, self.stamp,
+        );
+        match self.updated_at {
+            Some(at) => {
+                let _ = write!(out, ",\"updated_at\":{at}");
+            }
+            None => out.push_str(",\"updated_at\":null"),
+        }
+        value("data", self.data.as_ref().map(|d| &*d.bytes), out);
+        value("error", self.error.as_ref().map(|d| &*d.bytes), out);
+        out.push('}');
+    }
+}
+
+/// The cache of `shared` as JSON, entries ordered by query id then key. The cache's lock is held
+/// only while the rows are copied out (a `String` and a few numbers each); on ten thousand entries
+/// formatting takes several times longer than that, and no query operation waits for it.
+pub(crate) fn describe(shared: &Shared) -> String {
+    let pending = shared.queue_len();
+    let mut rows: Vec<Row> = {
+        let state = shared.state.lock();
+        state.entries.values().map(Row::of).collect()
+    };
+    rows.sort_by(|a, b| (a.id, &a.rendered).cmp(&(b.id, &b.rendered)));
+    let mut out = String::with_capacity(512 + rows.len() * 160);
     let _ = write!(
         out,
         "{{\"online\":{},\"gc_ms\":{},\"pending_mutations\":{pending},\"entries\":[",
         shared.online.load(std::sync::atomic::Ordering::Relaxed),
         shared.gc_ms.load(std::sync::atomic::Ordering::Relaxed),
     );
-    for (i, (_, _, row)) in rows.iter().enumerate() {
+    for (i, row) in rows.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(row);
+        row.write(&mut out);
     }
     out.push_str("]}");
     out

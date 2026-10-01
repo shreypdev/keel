@@ -48,6 +48,18 @@ pub(crate) fn run(
         http::serve_get(tcp, &line, None, config.handshake_timeout);
         return;
     };
+    // The token is in the request line, which was peeked and not consumed: it is checked before
+    // anything is allocated for the connection, and a request without it is answered by the very
+    // code (and so the very bytes) that answers every other `/devtools` request without it. The
+    // WebSocket library's own refusal has different headers: a prober could tell a server with
+    // devtools on from one with them off.
+    let token_ok = devtools.is_some_and(|c| {
+        query_param(&line.query, "token").is_some_and(|given| token_matches(&c.token, given))
+    });
+    if !token_ok {
+        http::serve_get(tcp, &line, devtools, config.handshake_timeout);
+        return;
+    }
     let (conn, queue) = Conn::new(id, shared.rt.schema_hash(), config.max_queued_bytes, Some(abort));
     let conn = Arc::new(conn);
     if !shared.attach(id, &conn) {

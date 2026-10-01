@@ -832,8 +832,23 @@ impl Runtime {
     }
 
     /// The document inspector `name` produces now, or `None` when there is none or it panicked.
+    ///
+    /// The inspector runs on the calling thread, with no lock of the runtime held by this call
+    /// (so it may take its own). A panic is contained (R6): it is logged once at level 5 with its
+    /// backtrace and counted in `panics`, and the inspector is then skipped (this returns `None`)
+    /// until a new one is registered under its name.
     pub fn inspect(&self, name: &str) -> Option<String> {
-        self.inspectors.inspect(name)
+        match self.inspectors.inspect(name) {
+            crate::ext::Answer::Document(document) => Some(document),
+            crate::ext::Answer::Panicked(report) => {
+                self.log_panic(
+                    &format!("inspector `{name}` panicked and is skipped from now on"),
+                    &report,
+                );
+                None
+            }
+            crate::ext::Answer::None => None,
+        }
     }
 
     /// The names of the registered inspectors.

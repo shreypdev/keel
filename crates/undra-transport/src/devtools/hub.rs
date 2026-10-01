@@ -53,6 +53,14 @@ const COALESCE: Duration = Duration::from_millis(10);
 /// How often the worker looks for new stores and a changed query cache when nothing else wakes it.
 const TICK: Duration = Duration::from_millis(250);
 
+/// The most of the worker's time a snapshot or a query sample may take: the next one waits for
+/// this many times as long as the last one took. A snapshot holds the core lock, so on a big
+/// state a burst of commits would otherwise keep the core busy for the page's sake.
+const DUTY: u32 = 9;
+
+/// The longest the worker waits between two snapshots whatever one cost.
+const MAX_GAP: Duration = Duration::from_secs(2);
+
 /// How many port calls the hub keeps open at once before it forgets the old ones.
 const MAX_OPEN_PORT_CALLS: usize = 2048;
 
@@ -488,15 +496,17 @@ impl Hub {
     fn work_loop(self: &Arc<Self>, rx: &Receiver<Event>) {
         let mut due: Option<Instant> = None;
         let mut last_stats = Instant::now().checked_sub(STATS_EVERY).unwrap_or_else(Instant::now);
-        let mut last_queries = String::new();
+        let mut queries = QuerySampler::default();
+        // How long to coalesce a burst before the snapshot: at least `COALESCE`, and long enough
+        // that the snapshots take at most a tenth of the worker's time (they hold the core lock).
         // The state the page attached to is step 1: the first thing it can travel back to.
-        self.capture();
+        let mut gap = COALESCE.max(self.capture_timed()).min(MAX_GAP);
         loop {
             let wait = due.map_or(TICK, |at| at.saturating_duration_since(Instant::now()));
             match rx.recv_timeout(wait) {
                 Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Event::Commit) => {
-                    due.get_or_insert_with(|| Instant::now() + COALESCE);
+                    due.get_or_insert_with(|| Instant::now() + gap);
                 }
                 Ok(Event::Sync(conn)) => self.sync_client(conn),
                 Ok(Event::Restore { request_id, step }) => self.travel(request_id, step),
@@ -504,7 +514,7 @@ impl Hub {
             }
             if due.is_some_and(|at| Instant::now() >= at) {
                 due = None;
-                self.capture();
+                gap = COALESCE.max(self.capture_timed()).min(MAX_GAP);
             }
             if due.is_none() {
                 // The backstop: a store built while nothing committed is noticed here, and a
@@ -512,13 +522,21 @@ impl Hub {
                 if self.live_stores_changed() {
                     self.capture();
                 }
-                self.sample_queries(&mut last_queries);
+                self.sample_queries(&mut queries);
                 if last_stats.elapsed() >= STATS_EVERY {
                     last_stats = Instant::now();
                     self.broadcast(&ServerMsg::Stats(self.stats_json()));
                 }
             }
         }
+    }
+
+    /// [`capture`](Self::capture), and the gap the next burst should be coalesced over: `DUTY`
+    /// times what this took.
+    fn capture_timed(&self) -> Duration {
+        let started = Instant::now();
+        self.capture();
+        started.elapsed().saturating_mul(DUTY)
     }
 
     fn live_stores_changed(&self) -> bool {
@@ -647,7 +665,11 @@ impl Hub {
             Ok(dropped) => {
                 self.counters.travels.fetch_add(1, Ordering::Relaxed);
                 self.note(INFO, &format!("time travel: restored step {step} ({dropped} store(s) dropped)"));
-                self.notify_app(&format!("time travel: step {step}"));
+                self.notify_app(&if dropped == 0 {
+                    format!("time travel: step {step}")
+                } else {
+                    format!("time travel: step {step} ({dropped} store(s) built since are gone)")
+                });
                 self.restored_from.store(step, Ordering::Release);
                 // The restore's change-sets carry its new state; the step that records it is
                 // taken now rather than after the burst, so it is labelled with its origin.
@@ -716,13 +738,21 @@ impl Hub {
         }
     }
 
-    /// Samples the query cache and sends it when it changed.
-    fn sample_queries(&self, last: &mut String) {
-        let Some(json) = self.rt.inspect("queries") else {
+    /// Samples the query cache and sends it when it changed. At most once per `TICK`, and when a
+    /// sample is slow (a big cache: it is built on this thread, and takes the cache's lock to copy
+    /// the rows) the next waits `DUTY` times as long, so the cost stays a tenth of a core at most.
+    fn sample_queries(&self, sampler: &mut QuerySampler) {
+        if Instant::now() < sampler.not_before {
+            return;
+        }
+        let started = Instant::now();
+        let json = self.rt.inspect("queries");
+        sampler.not_before = Instant::now() + TICK.max(started.elapsed().saturating_mul(DUTY));
+        let Some(json) = json else {
             return;
         };
-        if json != *last {
-            last.clone_from(&json);
+        if json != sampler.last {
+            sampler.last.clone_from(&json);
             self.broadcast(&ServerMsg::Queries {
                 at_ms: self.at_ms(),
                 json,
@@ -759,6 +789,23 @@ impl Hub {
     }
 }
 
+/// What the worker remembers about sampling the query cache.
+struct QuerySampler {
+    /// The last document sent.
+    last: String,
+    /// The earliest the cache is read again.
+    not_before: Instant,
+}
+
+impl Default for QuerySampler {
+    fn default() -> QuerySampler {
+        QuerySampler {
+            last: String::new(),
+            not_before: Instant::now(),
+        }
+    }
+}
+
 /// Encodes `msg` and queues it for one connection.
 pub(crate) fn send_msg(conn: &Conn, msg: &ServerMsg) {
     let mut w = Writer::new();
@@ -786,6 +833,58 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(current_route(), Route::Commit(Cause::Other));
+    }
+
+    #[test]
+    fn the_worker_and_the_observation_exist_only_while_a_page_is_attached() {
+        use undra_runtime::RuntimeConfig;
+        let bridge = Bridge::new();
+        let rt = Runtime::new(
+            RuntimeConfig {
+                platform: "rust".into(),
+                mode: "dev".into(),
+                core_threads: 1,
+                blocking_threads: 1,
+                log_level: 0,
+            },
+            bridge.clone(),
+        )
+        .unwrap();
+        let hub = Hub::new(rt.clone(), &bridge, DevtoolsConfig::new("0123456789abcdef", &[]));
+        bridge.set_hub(Some(hub.clone()));
+        let idle = |hub: &Hub| {
+            hub.worker.lock().is_none()
+                && hub.events.lock().is_none()
+                && !hub.is_active()
+                && hub.held.lock().is_empty()
+                && hub.ring.lock().len() == 0
+                && hub.ports.lock().is_empty()
+        };
+        assert!(idle(&hub), "a hub with no page owns no thread, no step and no observation");
+        assert!(!bridge.devtools_attached());
+
+        let (conn, _queue) = Conn::new(1, rt.schema_hash(), 1 << 20, None);
+        let conn = Arc::new(conn);
+        assert!(hub.attach(&conn));
+        assert!(hub.worker.lock().is_some(), "the first page starts the worker");
+        assert!(hub.is_active() && bridge.devtools_attached());
+        // A second page does not start a second worker.
+        let (second, _queue2) = Conn::new(2, rt.schema_hash(), 1 << 20, None);
+        let second = Arc::new(second);
+        assert!(hub.attach(&second));
+        hub.detach(1);
+        assert!(hub.worker.lock().is_some(), "one page is still attached");
+        hub.detach(2);
+        assert!(idle(&hub), "the last page out stops the worker and frees the ring");
+        assert!(!bridge.devtools_attached());
+        // Detaching a page that is not attached is a no-op; so is a second shutdown.
+        hub.detach(2);
+        hub.shutdown("test");
+        hub.shutdown("test");
+        assert!(idle(&hub));
+        assert!(!hub.attach(&conn), "a stopped hub takes no page");
+        bridge.set_hub(None);
+        rt.shutdown();
     }
 
     #[test]

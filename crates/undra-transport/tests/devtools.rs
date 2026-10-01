@@ -539,6 +539,16 @@ fn restoring_a_step_from_before_a_store_existed_says_the_store_is_dropped() {
         undra::wire::payload::ReplyStatus::BadRequest,
         "the app's handle is stale now"
     );
+    // The app is told how many, through the dev notice its status bar shows.
+    drain(&mut app);
+    let notices: Vec<String> = app
+        .frames_of(Kind::Log)
+        .iter()
+        .filter_map(|f| Log::decode(&mut Reader::new(&f.payload)).ok())
+        .filter(|log| log.target == "undra::dev")
+        .map(|log| log.message.to_owned())
+        .collect();
+    assert_eq!(notices, ["time travel: step 1 (1 store(s) built since are gone)"]);
 }
 
 #[test]
@@ -770,4 +780,624 @@ fn the_page_leaving_clears_the_history_and_a_new_page_starts_again_at_step_one()
     // The ring was cleared; step numbers keep counting within the process.
     let (n, _) = again.step();
     assert!(n >= 3, "a number is never reused: {n}");
+}
+
+// ----- adversarial review (2026-10-02) -------------------------------------------------------
+
+/// What a raw request is answered with, byte for byte (until the server closes).
+fn raw(fx: &Fixture, request: &str) -> Vec<u8> {
+    let mut tcp = TcpStream::connect(fx.server.addr()).unwrap();
+    tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    tcp.write_all(request.as_bytes()).unwrap();
+    let mut out = Vec::new();
+    let _ = tcp.read_to_end(&mut out);
+    out
+}
+
+const UPGRADE: &str = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+
+#[test]
+fn every_refusal_is_the_same_bytes_and_a_server_with_devtools_off_answers_the_same() {
+    let on = start_devtools();
+    let off = start_with(quick(), "dev");
+    let wrong = "t0k3nt0k3nt0k3nZY";
+    let requests = [
+        "GET /devtools HTTP/1.1\r\nHost: x\r\n\r\n".to_owned(),
+        format!("GET /devtools?token={wrong} HTTP/1.1\r\nHost: x\r\n\r\n"),
+        format!("GET /devtools?token={TOKEN}x HTTP/1.1\r\nHost: x\r\n\r\n"),
+        format!("GET /devtools?token={} HTTP/1.1\r\nHost: x\r\n\r\n", &TOKEN[..8]),
+        format!("GET /devtools/missing.js?token={TOKEN} HTTP/1.1\r\nHost: x\r\n\r\n"),
+        format!("GET /devtools/%2e%2e/x?token={TOKEN} HTTP/1.1\r\nHost: x\r\n\r\n"),
+        format!("POST /devtools?token={TOKEN} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"),
+        format!("HEAD /devtools?token={TOKEN} HTTP/1.1\r\nHost: x\r\n\r\n"),
+        "GET /devtools/ws HTTP/1.1\r\nHost: x\r\n\r\n".to_owned(),
+        format!("GET /devtools/ws HTTP/1.1\r\nHost: x\r\n{UPGRADE}\r\n"),
+        format!("GET /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\n{UPGRADE}\r\n"),
+        format!("GET /devtools/ws?token= HTTP/1.1\r\nHost: x\r\n{UPGRADE}\r\n"),
+        format!("GET /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.example\r\n{UPGRADE}\r\n"),
+        format!("POST /devtools/ws?token={wrong} HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"),
+        "GET /devtools/ws/ HTTP/1.1\r\nHost: x\r\n\r\n".to_owned(),
+    ];
+    let reference = raw(&off, &requests[0]);
+    assert!(reference.starts_with(b"HTTP/1.1 404"), "{}", String::from_utf8_lossy(&reference));
+    for request in &requests {
+        for (name, fx) in [("devtools on", &on), ("devtools off", &off)] {
+            assert_eq!(
+                raw(fx, request),
+                reference,
+                "{name}: {request:?} is not answered with the one 404"
+            );
+        }
+    }
+    // Nothing of this woke the hub, and no connection is left behind.
+    assert!(!on.bridge.devtools_attached() && !on.bridge.is_connected());
+}
+
+/// The first message of a page connection, or whether it was closed.
+fn closed_within(page: &mut Page, wait: Duration) -> bool {
+    let deadline = Instant::now() + wait;
+    while Instant::now() < deadline {
+        if page.next_within(Duration::from_millis(100)).is_none() {
+            // A read timeout is not a close: ask again with a write.
+            if page.ws.send(Message::Ping(vec![1].into())).is_err() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[test]
+fn a_page_cannot_reach_the_core_through_its_socket_whatever_it_sends() {
+    let fx = start_devtools();
+    let mut app = fx.client();
+    let counter = app.new_counter(10);
+    app.observe(counter, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    let value = |app: &mut TestClient| i32_of(&app.method(counter, GET, &[]).1);
+    let before = fx.rt.stats_json();
+    let calls_before = stat(&fx.rt, "calls");
+
+    // An app envelope (a Call that would add 100): not a message of this protocol.
+    let mut w = undra::wire::Writer::new();
+    undra::wire::Envelope::write(
+        &mut w,
+        Kind::Call,
+        1,
+        fx.schema(),
+        &undra::runtime::testing::call_payload(
+            undra::wire::payload::CallTarget::Method {
+                handle: undra::wire::Handle(counter),
+                method_id: ADD,
+            },
+            77,
+            &enc(&100_i32),
+        ),
+    );
+    let envelope = w.into_vec();
+    let mut shapes: Vec<Vec<u8>> = vec![
+        envelope,
+        vec![],
+        vec![0],
+        vec![1],
+        vec![1, 0, 0, 0],
+        vec![1, 1, 0, 0, 0, 1, 0, 0],
+        vec![1, 1, 0, 0, 0, 1, 0, 0, 0, 9],
+        vec![2, 0],
+        vec![2, 2],
+        vec![0xff; 9],
+        vec![0xff; 1000],
+    ];
+    // Every tag byte, with no body, a short body, and a body of the right size for a restore.
+    for tag in 0..=255_u8 {
+        shapes.push(vec![tag]);
+        shapes.push(vec![tag, 0xff, 0xff, 0xff]);
+        shapes.push(vec![tag, 5, 0, 0, 0, 1, 0, 0, 0]);
+    }
+    let mut closed = 0;
+    for shape in &shapes {
+        let mut page = Page::connect(&fx);
+        page.ws.send(Message::Binary(shape.clone().into())).unwrap();
+        // A message that is a valid `Resync` (tag 2, no body) or a `Restore` of a step that is
+        // not there keeps the page; every other one closes it. Neither may touch the core.
+        let valid = matches!(shape.as_slice(), [2] | [1, 5, 0, 0, 0, 1, 0, 0, 0]);
+        if valid {
+            continue;
+        }
+        assert!(
+            closed_within(&mut page, Duration::from_secs(5)),
+            "{shape:02x?} did not close the page"
+        );
+        closed += 1;
+    }
+    assert!(closed > 700, "{closed}");
+    // A text frame and an oversize message are refused too.
+    let mut page = Page::connect(&fx);
+    page.ws.send(Message::Text("restore 1".into())).unwrap();
+    assert!(closed_within(&mut page, Duration::from_secs(5)));
+    let mut page = Page::connect(&fx);
+    let _ = page.ws.send(Message::Binary(vec![1; 200 * 1024].into()));
+    assert!(closed_within(&mut page, Duration::from_secs(5)));
+
+    // The core and the app client did not notice: nothing was called, nothing was restored.
+    assert_eq!(value(&mut app), 10, "the Call envelope was not executed");
+    assert_eq!(
+        stat(&fx.rt, "calls") - calls_before,
+        1,
+        "only the app's own `get` was a call ({before})"
+    );
+    assert!(app.silent_for(Duration::from_millis(100)));
+    // The hub is intact: a page still attaches and sees the state.
+    let mut page = Page::connect(&fx);
+    assert_eq!(page.step().0 >= 1, true);
+    assert!(
+        fx.log_lines().iter().all(|l| !l.contains("panicked")),
+        "{:?}",
+        fx.log_lines()
+    );
+}
+
+// ----- observe-all routing, attacked --------------------------------------------------------
+
+/// Every `(handle, signal)` the app client was ever sent a value for.
+fn seen_by(app: &TestClient) -> std::collections::BTreeSet<(u64, u32)> {
+    change_sets(app)
+        .iter()
+        .flat_map(|set| set.entries.iter().map(|e| (e.handle.0, e.signal_id)))
+        .collect()
+}
+
+/// Reads everything the app client is sent until it has been quiet for a moment.
+fn drain(app: &mut TestClient) {
+    while !app.silent_for(Duration::from_millis(120)) {}
+}
+
+/// The next commit of the page that writes store `handle`.
+fn commit_of(page: &mut Page, handle: u64) -> ChangeSet {
+    page.until("a commit of the store", |m| match m {
+        ServerMsg::ChangeSet {
+            delivery: Delivery::Commit,
+            payload,
+            ..
+        } => {
+            let set = ChangeSet::decode(&mut Reader::new(payload)).unwrap();
+            set.entries
+                .iter()
+                .any(|e| e.handle.0 == handle)
+                .then_some(set)
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn the_app_gets_exactly_what_it_observed_before_during_and_after_a_page() {
+    let fx = start_devtools();
+    let mut app = fx.client();
+    let a = app.new_counter(0);
+    let b = app.new_counter(100);
+    app.observe(a, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    app.method(b, ADD, &enc(&1_i32)); // b = 101, nobody watches
+    assert!(app.silent_for(Duration::from_millis(100)));
+
+    let mut page = Page::connect(&fx);
+    page.step();
+    // B changes: the page sees it, the app does not. A changes: the app sees only A's `count`.
+    app.method(b, ADD, &enc(&1_i32)); // 102
+    assert_eq!(i32_of(&commit_of(&mut page, b).entries[0].value), 102);
+    app.method(a, ADD_AND_LABEL, &enc(&5_i32));
+    commit_of(&mut page, a);
+    drain(&mut app);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)],
+        "the app was sent A's observed signal and nothing of B or of A's label"
+    );
+
+    // The page leaves: the app's set is its own again, and B stays unseen by it.
+    drop(page);
+    fx.eventually("the hub to let go", |fx| !fx.bridge.devtools_attached());
+    app.method(b, ADD, &enc(&1_i32)); // 103
+    app.method(a, ADD_AND_LABEL, &enc(&1_i32));
+    drain(&mut app);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)],
+        "nothing of B reached the app after the page left either"
+    );
+    // The app observes B now and is told its current value, and then its changes.
+    app.observe(b, COUNT_SIGNAL, true);
+    let mut seen_b = None;
+    while seen_b.is_none() {
+        let set = change_set(&app.recv_kind(Kind::ChangeSet));
+        seen_b = set
+            .entries
+            .iter()
+            .find(|e| e.handle.0 == b)
+            .map(|e| i32_of(&e.value));
+    }
+    assert_eq!(seen_b, Some(103));
+}
+
+#[test]
+fn two_pages_share_the_observation_and_the_last_one_out_restores_the_app() {
+    let fx = start_devtools();
+    let mut app = fx.client();
+    let a = app.new_counter(0);
+    let b = app.new_counter(0);
+    app.observe(a, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    let mut one = Page::connect(&fx);
+    one.step();
+    let mut two = Page::connect(&fx);
+    two.step();
+
+    drop(one);
+    // One page is still attached: the hub stays active, B is still observed for it, and the app
+    // still gets only its own.
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(fx.bridge.devtools_attached());
+    app.method(b, ADD, &enc(&7_i32));
+    assert_eq!(i32_of(&commit_of(&mut two, b).entries[0].value), 7);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
+
+    drop(two);
+    fx.eventually("the hub to let go", |fx| !fx.bridge.devtools_attached());
+    app.method(b, ADD, &enc(&1_i32));
+    app.method(a, ADD, &enc(&1_i32));
+    // Whatever order the restatement and the write arrive in, B is never among it.
+    drain(&mut app);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
+}
+
+fn resuming_config() -> ServerConfig {
+    ServerConfig {
+        resume_grace: Duration::from_secs(600),
+        ..config()
+    }
+}
+
+#[test]
+fn an_app_that_reconnects_with_a_page_attached_is_sent_only_what_it_asks_for() {
+    let fx = start_with(resuming_config(), "dev");
+    let mut app = fx.session_client("tok-dt", false);
+    let a = app.new_counter(1);
+    let b = app.new_counter(50);
+    app.observe(a, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    let mut page = Page::connect(&fx);
+    page.step();
+
+    // The app drops and comes back with its session while the page is attached.
+    drop(app);
+    fx.eventually("the slot is free", |fx| !fx.bridge.is_connected());
+    page.until("the app to be gone", |m| {
+        matches!(m, ServerMsg::App { connected: false, .. }).then_some(())
+    });
+    let mut app = fx.session_client("tok-dt", true);
+    page.until("the app to be back", |m| {
+        matches!(m, ServerMsg::App { connected: true, .. }).then_some(())
+    });
+    // Before it observes anything the app is sent nothing, though the hub observes every store.
+    app.method(b, ADD, &enc(&1_i32));
+    app.method(a, ADD, &enc(&1_i32));
+    assert!(app.silent_for(Duration::from_millis(150)));
+    assert!(seen_by(&app).is_empty(), "{:?}", seen_by(&app));
+    // The page saw both writes.
+    commit_of(&mut page, b);
+    commit_of(&mut page, a);
+    // The app observes A: it is told A's value and not B's.
+    app.observe(a, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    app.method(b, ADD, &enc(&1_i32));
+    commit_of(&mut page, b);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
+    // The page leaves: what the app asked for stays observed, and only that.
+    drop(page);
+    fx.eventually("the hub to let go", |fx| !fx.bridge.devtools_attached());
+    app.method(b, ADD, &enc(&1_i32));
+    app.method(a, ADD, &enc(&1_i32));
+    drain(&mut app);
+    assert_eq!(
+        seen_by(&app).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
+}
+
+#[test]
+fn a_reload_with_a_page_attached_hands_the_app_session_over_without_the_hubs_observations() {
+    let fx = start_with(resuming_config(), "dev");
+    let addr = fx.server.addr();
+    let mut app = fx.session_client("tok-reload-dt", false);
+    let a = app.new_counter(1);
+    let b = app.new_counter(50);
+    app.observe(a, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    let mut page = Page::connect(&fx);
+    let ServerMsg::Welcome(first_epoch) = page.next_within(Duration::from_secs(5)).unwrap() else {
+        panic!("the welcome comes first");
+    };
+    page.step();
+
+    let suspended = fx.server.suspend(Duration::from_millis(500));
+    assert!(suspended.settled);
+    let session = suspended.session.expect("the app's session is handed over");
+    assert_eq!(session.token, "tok-reload-dt");
+    let mut handles = session.handles.clone();
+    handles.sort_unstable();
+    assert_eq!(handles, [a, b], "handles, and nothing the hub took");
+    let snapshot = fx.rt.snapshot();
+    drop(page);
+    drop(app);
+    drop(fx);
+
+    // The new core: restored, with the session. It has no page yet, so nothing is observed that
+    // the app has not asked for again.
+    let second = restarted(addr, &snapshot, session);
+    let mut back = second.session_client("tok-reload-dt", true);
+    back.method(b, ADD, &enc(&1_i32));
+    back.method(a, ADD, &enc(&1_i32));
+    assert!(
+        back.silent_for(Duration::from_millis(200)),
+        "the app is sent nothing until it observes again"
+    );
+    assert!(seen_by(&back).is_empty(), "{:?}", seen_by(&back));
+    back.observe(a, COUNT_SIGNAL, true);
+    back.recv_kind(Kind::ChangeSet);
+    assert_eq!(
+        seen_by(&back).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
+    // A page of the new core is a new hub: another epoch, and the same rules.
+    let mut page = Page::connect(&second);
+    let ServerMsg::Welcome(second_epoch) = page.next_within(Duration::from_secs(5)).unwrap() else {
+        panic!("the welcome comes first");
+    };
+    assert_ne!(first_epoch.core_epoch, second_epoch.core_epoch);
+    page.step();
+    back.method(b, ADD, &enc(&1_i32));
+    commit_of(&mut page, b);
+    assert_eq!(
+        seen_by(&back).into_iter().collect::<Vec<_>>(),
+        [(a, COUNT_SIGNAL)]
+    );
+}
+
+/// A server on `addr` whose runtime was restored from `snapshot` before it listened, with the
+/// session the old one handed over (what `undra dev` does at a reload).
+fn restarted(
+    addr: std::net::SocketAddr,
+    snapshot: &[u8],
+    session: undra_transport::KeptSession,
+) -> Fixture {
+    use undra::runtime::{Runtime, RuntimeConfig};
+    let config = ServerConfig {
+        inherited_session: Some(session),
+        ..resuming_config()
+    };
+    let mut last = None;
+    for _ in 0..50 {
+        let (snapshot, config) = (snapshot.to_vec(), config.clone());
+        match undra_transport::Server::start(addr, config, move |host| {
+            let rt = Runtime::new(
+                RuntimeConfig {
+                    platform: "rust".into(),
+                    mode: "dev".into(),
+                    core_threads: 1,
+                    blocking_threads: 1,
+                    log_level: 0,
+                },
+                host,
+            )?;
+            rt.restore(&snapshot).expect("the snapshot restores");
+            Ok(rt)
+        }) {
+            Ok(server) => {
+                return Fixture {
+                    rt: server.runtime().clone(),
+                    bridge: server.bridge().clone(),
+                    server,
+                    logs: Default::default(),
+                };
+            }
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+    panic!("the successor could not bind {addr}: {last:?}");
+}
+
+// ----- commit storms, bounds and cost, attacked -----------------------------------------------
+
+/// Pipelines `n` `add(1)` calls on `counter` (a commit each) and waits for every reply.
+fn storm(app: &mut TestClient, counter: u64, n: usize) {
+    let mut sent = 0;
+    while sent < n {
+        let batch = 500.min(n - sent);
+        let ids: Vec<u32> = (0..batch)
+            .map(|_| {
+                let id = app.next_call_id();
+                app.send_call(
+                    undra::wire::payload::CallTarget::Method {
+                        handle: undra::wire::Handle(counter),
+                        method_id: ADD,
+                    },
+                    id,
+                    &enc(&1_i32),
+                );
+                id
+            })
+            .collect();
+        for id in ids {
+            assert_eq!(app.await_reply(id).0, undra::wire::payload::ReplyStatus::Ok);
+        }
+        sent += batch;
+    }
+}
+
+/// Reads the page until it has been quiet for `quiet`.
+fn drain_page(page: &mut Page, quiet: Duration) -> Vec<ServerMsg> {
+    let mut got = Vec::new();
+    while let Some(msg) = page.next_within(quiet) {
+        got.push(msg);
+    }
+    got
+}
+
+#[test]
+fn a_commit_storm_costs_steps_by_time_not_by_commit_and_the_ring_stays_bounded() {
+    let fx = start_devtools();
+    let mut app = fx.client();
+    let counter = app.new_counter(0);
+    let mut page = Page::connect(&fx);
+    page.step();
+    drain_page(&mut page, Duration::from_millis(200));
+
+    const N: usize = 20_000;
+    let started = Instant::now();
+    storm(&mut app, counter, N);
+    let storm_took = started.elapsed();
+    let got = drain_page(&mut page, Duration::from_millis(700));
+    let elapsed = started.elapsed();
+
+    let commits = got
+        .iter()
+        .filter(|m| matches!(m, ServerMsg::ChangeSet { delivery: Delivery::Commit, .. }))
+        .count();
+    let steps: Vec<_> = got
+        .iter()
+        .filter_map(|m| match m {
+            ServerMsg::Step(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+    eprintln!(
+        "storm: {N} commits in {storm_took:?} ({:.0}/s); the page saw {commits} change-sets and {} steps in {elapsed:?}",
+        N as f64 / storm_took.as_secs_f64(),
+        steps.len()
+    );
+    // Back-pressure is the page's own queue (below), so a page that keeps up misses nothing...
+    assert_eq!(commits, N, "every commit reaches a page that reads");
+    // ...while the snapshots are taken by time: a step is at most one per coalescing window, however
+    // many commits there were. (The bound has slack for the first step and the final one.)
+    let window_ms = u64::try_from(elapsed.as_millis()).unwrap();
+    assert!(
+        (steps.len() as u64) <= window_ms / 10 + 20,
+        "{} steps in {window_ms} ms is more than one per 10 ms",
+        steps.len()
+    );
+    assert!(steps.len() < N / 10, "{} steps for {N} commits", steps.len());
+    // The page is not left behind: the last step covers the last commit.
+    let last_seq = got
+        .iter()
+        .filter_map(|m| match m {
+            ServerMsg::ChangeSet { seq, .. } => Some(*seq),
+            _ => None,
+        })
+        .max()
+        .unwrap();
+    assert_eq!(steps.last().unwrap().through_seq, last_seq, "the newest step is the final state");
+    // The ring stays within its bounds and says what it dropped.
+    let stats = got.iter().rev().find_map(|m| match m {
+        ServerMsg::Stats(j) => Some(serde_json::from_str::<serde_json::Value>(j).unwrap()),
+        _ => None,
+    });
+    if let Some(stats) = stats {
+        assert!(stats["server"]["ring_steps"].as_u64().unwrap() <= 200);
+        assert!(stats["server"]["ring_bytes"].as_u64().unwrap() <= 32 << 20);
+    }
+    // The core is where the app left it, and a restore of the oldest kept step still works.
+    assert_eq!(i32_of(&app.method(counter, GET, &[]).1), N as i32);
+    let oldest = {
+        let mut seen = steps.iter().map(|s| s.step).collect::<Vec<_>>();
+        seen.sort_unstable();
+        seen[seen.len().saturating_sub(150)]
+    };
+    page.send(ClientMsg::Restore { request_id: 9, step: oldest });
+    let t = page.until("the answer", |m| match m {
+        ServerMsg::Traveled(t) => Some(t.clone()),
+        _ => None,
+    });
+    assert!(t.ok, "{t:?}");
+}
+
+#[test]
+fn a_page_that_stops_reading_is_dropped_and_the_core_and_the_app_do_not_wait_for_it() {
+    let fx = start_with(
+        ServerConfig {
+            max_queued_bytes: 128 * 1024,
+            write_timeout: Duration::from_secs(30),
+            ..config()
+        },
+        "dev",
+    );
+    let mut app = fx.client();
+    let a = app.new_counter(0);
+    let b = app.new_counter(0);
+    app.observe(a, COUNT_SIGNAL, true);
+    app.recv_kind(Kind::ChangeSet);
+    let mut page = Page::connect(&fx);
+    page.step();
+    // The page does not read from here on.
+    let started = Instant::now();
+    storm(&mut app, b, 40_000);
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(60),
+        "the app was held up by a page that does not read: {took:?}"
+    );
+    fx.eventually("the slow page to be dropped and the hub to let go", |fx| {
+        !fx.bridge.devtools_attached()
+    });
+    // The app converged and is sent only its own signal; nothing of B reached it.
+    assert_eq!(i32_of(&app.method(b, GET, &[]).1), 40_000);
+    app.method(a, ADD, &enc(&1_i32));
+    drain(&mut app);
+    assert_eq!(seen_by(&app).into_iter().collect::<Vec<_>>(), [(a, COUNT_SIGNAL)]);
+    // And a page that comes back is served normally.
+    let mut again = Page::connect(&fx);
+    again.step();
+    drop(page);
+}
+
+#[test]
+fn nothing_is_recorded_or_counted_while_no_page_is_attached() {
+    let fx = start_devtools();
+    let mut app = fx.client();
+    let counter = app.new_counter(0);
+    storm(&mut app, counter, 300);
+    assert!(!fx.bridge.devtools_attached());
+    let mut page = Page::connect(&fx);
+    // The hub woke when the page came: its counters start there, and the ring has one step (the
+    // state the page attached to), not the three hundred commits that came before.
+    let stats = page.until("the counters", |m| match m {
+        ServerMsg::Stats(j) => Some(serde_json::from_str::<serde_json::Value>(j).unwrap()),
+        _ => None,
+    });
+    assert_eq!(stats["server"]["commits"], 0, "{stats}");
+    assert_eq!(stats["server"]["ring_steps"], 1, "{stats}");
+    assert_eq!(stats["server"]["steps"], 1, "{stats}");
+    // And after it leaves, the hub is idle again and a later page finds the history gone.
+    drop(page);
+    fx.eventually("the hub to let go", |fx| !fx.bridge.devtools_attached());
+    storm(&mut app, counter, 50);
+    let mut again = Page::connect(&fx);
+    let stats = again.until("the counters", |m| match m {
+        ServerMsg::Stats(j) => Some(serde_json::from_str::<serde_json::Value>(j).unwrap()),
+        _ => None,
+    });
+    assert_eq!(stats["server"]["ring_steps"], 1, "{stats}");
+    assert_eq!(stats["server"]["commits"], 0, "{stats}");
 }

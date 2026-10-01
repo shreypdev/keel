@@ -51,3 +51,29 @@ fn reading_the_cache_changes_nothing_and_sampling_is_stable() {
     assert_eq!(doc(&h), doc(&h), "reading the cache does not change it");
     drop(handle);
 }
+
+/// What sampling costs on a big cache (ADR-054 review): ten thousand entries, each with a value.
+/// The page samples once a second while it is open; the document is built under the cache's lock,
+/// so this is how long a query operation can wait behind a sample.
+#[test]
+fn sampling_a_cache_of_ten_thousand_entries_stays_within_a_budget() {
+    let h = Harness::new();
+    let mut handles = Vec::new();
+    for n in 0..10_000_u32 {
+        h.serve_page(n, vec![todo(1, "a title of some length, as a todo has")]);
+        handles.push(h.query().observe::<TodosQuery>((n,)));
+    }
+    h.t.run_pending();
+    let started = std::time::Instant::now();
+    let text = h.t.runtime().inspect("queries").expect("the inspector answers");
+    let took = started.elapsed();
+    let rows = serde_json::from_str::<serde_json::Value>(&text).unwrap()["entries"]
+        .as_array()
+        .unwrap()
+        .len();
+    eprintln!("describe: {rows} entries, {} KiB of JSON in {took:?}", text.len() / 1024);
+    assert_eq!(rows, 10_000);
+    // A debug build on a loaded machine; the release figure is a tenth of this.
+    assert!(took < std::time::Duration::from_millis(1500), "{took:?}");
+    drop(handles);
+}
