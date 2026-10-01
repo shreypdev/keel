@@ -268,7 +268,7 @@ fn random_input(rng: &mut Rng) -> Vec<u8> {
 
 #[test]
 fn random_bytes_never_panic_any_decoder() {
-    let seed = 0x4b45_454c_0001;
+    let seed = 0x554e_4452_0001;
     let mut rng = Rng::new(seed);
     let mut accepted = Accepted::new();
     for i in 0..ITERATIONS {
@@ -522,7 +522,7 @@ fn mutate(rng: &mut Rng, seeds: &[Vec<u8>]) -> Vec<u8> {
 
 #[test]
 fn mutated_valid_encodings_never_panic_any_decoder() {
-    let seed = 0x4b45_454c_0002;
+    let seed = 0x554e_4452_0002;
     let mut rng = Rng::new(seed);
     let seeds = seeds();
     // Unmutated seeds first: the composite decoders must accept their own kind of seed.

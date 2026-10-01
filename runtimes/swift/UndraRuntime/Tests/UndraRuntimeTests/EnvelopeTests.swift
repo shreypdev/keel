@@ -17,7 +17,7 @@ final class EnvelopeTests: XCTestCase {
     }
 
     func testContractVector() throws {
-        let expected = hexToBytes("4b45454c01000807060504030201010700000003000000aabbcc")
+        let expected = hexToBytes("554e445201000807060504030201010700000003000000aabbcc")
         XCTAssertEqual(validEnvelope(), expected)
         let decoded = try decodeEnvelope(expected)
         XCTAssertEqual(decoded.kind, .call)
@@ -27,7 +27,7 @@ final class EnvelopeTests: XCTestCase {
     }
 
     func testMagicAndVersionConstants() {
-        XCTAssertEqual(Envelope.magic, [0x4B, 0x45, 0x45, 0x4C])
+        XCTAssertEqual(Envelope.magic, [0x55, 0x4E, 0x44, 0x52])
         XCTAssertEqual(Envelope.version, 1)
         let bytes = validEnvelope()
         XCTAssertEqual(Array(bytes[0 ..< 4]), Envelope.magic)
@@ -139,7 +139,7 @@ final class EnvelopeTests: XCTestCase {
             _ = try decodeEnvelope(bytes)
         }
         var lowercase = validEnvelope()
-        lowercase[0] = UInt8(ascii: "k")
+        lowercase[0] = UInt8(ascii: "u")
         expectWireError(.badMagic) {
             _ = try decodeEnvelope(lowercase)
         }

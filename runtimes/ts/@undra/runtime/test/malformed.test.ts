@@ -17,7 +17,7 @@ const triggers: Record<WireErrorCode, [string, () => unknown][]> = {
     ["u32 from 3 bytes", () => decodeValue(codecs.u32, new Uint8Array(3))],
     ["empty input", () => decodeValue(codecs.string, new Uint8Array(0))],
     ["vec item cut short", () => decodeValue(codecs.vec(codecs.u32), fromHex("01000000 010000"))],
-    ["truncated envelope header", () => decodeEnvelope(fromHex("4b45454c0100"))],
+    ["truncated envelope header", () => decodeEnvelope(fromHex("554e44520100"))],
     ["truncated call", () => decodeCall(fromHex("01 0100000001000000"))],
     ["truncated uuid", () => decodeValue(codecs.uuid, new Uint8Array(15))],
   ],
@@ -56,7 +56,7 @@ const triggers: Record<WireErrorCode, [string, () => unknown][]> = {
   ],
   bad_magic: [
     ["wrong bytes", () => decodeEnvelope(fromHex("deadbeef"))],
-    ["lower-case magic", () => decodeEnvelope(corrupt(validEnvelope(), 0, 0x6b))],
+    ["lower-case magic", () => decodeEnvelope(corrupt(validEnvelope(), 0, 0x75))],
     ["zeroes", () => decodeEnvelope(new Uint8Array(40))],
   ],
   unsupported_version: [
@@ -173,7 +173,7 @@ describe("WireError", () => {
       "wire: 1 trailing byte after the end of the message",
     );
     expect(message(() => decodeEnvelope(fromHex("00000000")))).toBe(
-      'wire: bad magic: envelope does not start with 4b45454c',
+      'wire: bad magic: envelope does not start with 554e4452',
     );
     expect(message(() => decodeEnvelope(corrupt(validEnvelope(), 4, 2)))).toBe("wire: unsupported wire version 2");
     expect(message(() => decodeEnvelope(validEnvelope(), 7n))).toBe(

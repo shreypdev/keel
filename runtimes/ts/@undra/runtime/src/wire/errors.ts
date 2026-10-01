@@ -32,7 +32,7 @@ export type WireErrorDetail =
   | { readonly code: "length_too_large"; readonly len: number; readonly at: number }
   /** A message was fully decoded but bytes are left over. */
   | { readonly code: "trailing_bytes"; readonly count: number }
-  /** An envelope does not start with the magic bytes `4B 45 45 4C`. */
+  /** An envelope does not start with the magic bytes `55 4E 44 52`. */
   | { readonly code: "bad_magic" }
   /** An envelope carries a wire version this runtime does not speak. */
   | { readonly code: "unsupported_version"; readonly version: number }
@@ -64,7 +64,7 @@ function describe(d: WireErrorDetail): string {
     case "trailing_bytes":
       return `${d.count} trailing byte${d.count === 1 ? "" : "s"} after the end of the message`;
     case "bad_magic":
-      return "bad magic: envelope does not start with 4b45454c";
+      return "bad magic: envelope does not start with 554e4452";
     case "unsupported_version":
       return `unsupported wire version ${d.version}`;
     case "schema_mismatch":

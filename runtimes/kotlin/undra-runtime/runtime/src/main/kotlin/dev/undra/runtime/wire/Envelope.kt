@@ -5,7 +5,7 @@ package dev.undra.runtime.wire
  * the payload alone).
  *
  * ```
- * magic    4 bytes  4B 45 45 4C (fixed by the wire format)
+ * magic    4 bytes  55 4E 44 52, the ASCII of `UNDR` (fixed by the wire format)
  * version  u16      1
  * schema   u64      schema hash of the core that produced / expects this message
  * kind     u8       see [Kind]
@@ -126,10 +126,10 @@ public class Envelope(
         /** The only envelope version this runtime speaks. */
         public const val VERSION: UShort = 1u
 
-        private val MAGIC: ByteArray = byteArrayOf('K'.code.toByte(), 'E'.code.toByte(), 'E'.code.toByte(), 'L'.code.toByte())
+        private val MAGIC: ByteArray = byteArrayOf('U'.code.toByte(), 'N'.code.toByte(), 'D'.code.toByte(), 'R'.code.toByte())
 
         /** The magic as one little-endian `i32` (what reading the first four bytes yields). */
-        private const val MAGIC_LE_INT: Int = 0x4C45454B
+        private const val MAGIC_LE_INT: Int = 0x52444E55
 
         /**
          * Builds an envelope frame around [payload].
@@ -157,7 +157,7 @@ public class Envelope(
          * @param expectedSchema when non-null, the schema hash the message must carry. It is checked
          *   as soon as the header field is read, before the rest of the frame is trusted.
          * @throws WireException.UnexpectedEof if [bytes] is shorter than the header.
-         * @throws WireException.BadMagic if the magic is not `4B 45 45 4C`.
+         * @throws WireException.BadMagic if the magic is not `55 4E 44 52`.
          * @throws WireException.UnsupportedVersion if the version is not [VERSION].
          * @throws WireException.SchemaMismatch if [expectedSchema] is given and differs.
          * @throws WireException.InvalidTag if the kind code is unknown.
