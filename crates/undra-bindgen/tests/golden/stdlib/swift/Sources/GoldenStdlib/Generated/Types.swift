@@ -72,7 +72,7 @@ public struct Endpoint: UndraRecord, Sendable, Hashable, Codable {
 }
 
 /// What a live screen keeps.
-public struct Feed: UndraRecord, Sendable, Hashable, Codable {
+public struct Feed: UndraRecord, Sendable, Hashable {
     public var last: WsMessage
     public var event: SseEvent?
     public var cells: [DbValue]
