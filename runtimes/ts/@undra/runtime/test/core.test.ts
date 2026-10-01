@@ -1,5 +1,6 @@
 import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { UndraCallError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import { UndraError, UndraModeError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../src/errors.js";
 import type { Transport } from "../src/transport/transport.js";
@@ -9,13 +10,15 @@ import {
   Kind,
   ReplyStatus,
   StreamFlag,
+  type StreamFailure,
   WireError,
   codecs,
   decodeValue,
   encodeReply,
   encodeValue,
 } from "../src/wire/index.js";
-import { FakeCoreTransport, type FakeOptions, SCHEMA, type StreamScript } from "./support/fake-core.js";
+import { type Filter, filterCodec } from "./fixtures.js";
+import { FakeCoreTransport, type FakeOptions, type Responder, SCHEMA, type StreamScript } from "./support/fake-core.js";
 import { captureLog, deferred, macrotask, microtasks, track } from "./support/harness.js";
 import { u32 } from "./support/store.js";
 
@@ -334,6 +337,21 @@ describe("construct", () => {
     await expect(core.construct(1, M.ADD, new Uint8Array(0))).rejects.toBeInstanceOf(WireError);
   });
 
+  it("rejects the null handle as a protocol failure, which generated code reports as Malformed", async () => {
+    const { fake, core } = await setup();
+    fake.on(M.ADD, (_c, r) => {
+      r.ok(encodeValue(codecs.u64, 0n));
+    });
+    const failure = await core.construct(1, M.ADD, new Uint8Array(0)).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(failure).toBeInstanceOf(UndraTransportError);
+    expect((failure as UndraTransportError).reason).toBe("protocol");
+    expect(UndraCallError.mapped(failure)).toBeInstanceOf(UndraCallError.Malformed);
+    expect((await core.stats()).liveHandles).toBe(0);
+  });
+
   it("counts handles when the core reports no statistics of its own", async () => {
     const fake = new FakeCoreTransport();
     fake.stats = () => Promise.resolve(null);
@@ -478,6 +496,8 @@ describe("stream", () => {
     fake.emitStreamItem(77, StreamFlag.Item, u32(1));
     fake.emitStreamItem(77, StreamFlag.End);
     fake.emitStreamItem(77, StreamFlag.Error, u32(1));
+    fake.emitStreamFailure(77, { status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" });
+    fake.emitRawStreamItem(new Uint8Array([77, 0, 0, 0, StreamFlag.Failed, 9]));
     await fake.settle();
     expect(core.closed).toBe(false);
   });
@@ -488,12 +508,12 @@ describe("stream", () => {
     const iterator = core.stream(FREE, M.TICKS, new Uint8Array(0))[Symbol.asyncIterator]();
     await iterator.next();
     fake.emitRawStreamItem(new Uint8Array([1, 0]));
-    fake.emitRawStreamItem(new Uint8Array([1, 0, 0, 0, 7]));
+    fake.emitRawStreamItem(new Uint8Array([1, 0, 0, 0, 4]));
     await fake.settle();
     expect(log.records.some((r) => r.message.includes("truncated stream item"))).toBe(true);
     let outcome: unknown;
     for (let i = 0; i < 40 && outcome === undefined; i++) outcome = await iterator.next().then(() => undefined, (e: unknown) => e);
-    expect(outcome).toMatchObject({ kind: "transport", reason: "protocol" });
+    expect(outcome).toMatchObject({ kind: "transport", reason: "protocol", message: "the core sent stream flag 4" });
   });
 
   it("fails the stream when the channel is lost, after the buffered items", async () => {
@@ -536,6 +556,219 @@ describe("stream", () => {
   });
 });
 
+/** A stream script that yields `values`, then ends with the core's `failure` (flag 3). */
+function failingAfter(failure: StreamFailure, ...values: number[]): (call: unknown) => StreamScript {
+  return () => {
+    let i = 0;
+    return { next: () => (i < values.length ? { done: false, value: u32(values[i++] as number) } : { done: true, failure }) };
+  };
+}
+
+/** Iterates `source` until it ends or rejects; returns the items seen and the rejection. */
+async function drain(source: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>): Promise<{ seen: number[]; failure: unknown }> {
+  const iterator = Symbol.asyncIterator in source ? source[Symbol.asyncIterator]() : source;
+  const seen: number[] = [];
+  try {
+    for (;;) {
+      const step = await iterator.next();
+      if (step.done === true) return { seen, failure: undefined };
+      seen.push(decodeValue(codecs.u32, step.value));
+    }
+  } catch (failure) {
+    return { seen, failure };
+  }
+}
+
+/** The typed error `E` of the generated-code stand-in below. */
+class FilterError extends UndraError {
+  constructor(readonly filter: Filter) {
+    super("filter", `filter ${filter}`);
+  }
+}
+
+/**
+ * Shaped like what undra-bindgen generates for a method returning `Result<Stream<u32>, Filter>`
+ * (the golden `objects.ts`: `decodeStream` with `<E>.fromReply`): items are decoded, a status-1
+ * failure becomes the decoded `E`, every other failure passes through untouched.
+ */
+async function* generatedFilterStream(source: AsyncIterable<Uint8Array>): AsyncGenerator<number, void, undefined> {
+  try {
+    for await (const body of source) yield decodeValue(codecs.u32, body);
+  } catch (error) {
+    throw error instanceof UndraReplyError && error.status === ReplyStatus.Error
+      ? new FilterError(decodeValue(filterCodec, error.body))
+      : error;
+  }
+}
+
+/** The observable surface of an `UndraReplyError`, to compare a stream's failure with a call's. */
+function surface(error: unknown) {
+  const e = error as UndraReplyError;
+  return { name: e.name, kind: e.kind, status: e.status, body: e.body, message: e.message, reason: e.reason, backtrace: e.backtrace };
+}
+
+describe("stream failures (flag 3, ADR-036)", () => {
+  it("a stream the core cancelled rejects with the cancelled UndraReplyError after the buffered items", async () => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, failingAfter({ status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" }, 1, 2));
+    const { seen, failure } = await drain(core.stream(FREE, M.TICKS, new Uint8Array(0)));
+    expect(seen).toEqual([1, 2]);
+    expect(failure).toBeInstanceOf(UndraReplyError);
+    expect(failure).toBeInstanceOf(UndraError);
+    expect(failure).not.toBeInstanceOf(WireError);
+    const error = failure as UndraReplyError;
+    expect(error.kind).toBe("reply");
+    expect(error.status).toBe(ReplyStatus.Cancelled);
+    expect(error.body).toEqual(new Uint8Array(0));
+    expect(error.message).toBe("the call was cancelled");
+    // The core ended the stream itself: nothing is left to cancel.
+    expect(fake.cancelled).toEqual([]);
+    expect((await core.stats()).openStreams).toBe(0);
+  });
+
+  it("a panicked stream carries the panic message and backtrace", async () => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, failingAfter({ status: ReplyStatus.Panic, message: "boom", detail: "at core::foo\nat core::bar" }, 7));
+    const { seen, failure } = await drain(core.stream(FREE, M.TICKS, new Uint8Array(0)));
+    expect(seen).toEqual([7]);
+    const error = failure as UndraReplyError;
+    expect(error).toBeInstanceOf(UndraReplyError);
+    expect(error.status).toBe(ReplyStatus.Panic);
+    expect(error.reason).toBe("boom");
+    expect(error.backtrace).toBe("at core::foo\nat core::bar");
+    expect(error.message).toBe("the core panicked: boom");
+  });
+
+  it("a refused stream carries the reason", async () => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, failingAfter({ status: ReplyStatus.BadRequest, message: "stale handle", detail: "" }));
+    const { seen, failure } = await drain(core.stream(FREE, M.TICKS, new Uint8Array(0)));
+    expect(seen).toEqual([]);
+    const error = failure as UndraReplyError;
+    expect(error).toBeInstanceOf(UndraReplyError);
+    expect(error.status).toBe(ReplyStatus.BadRequest);
+    expect(error.reason).toBe("stale handle");
+    expect(error.backtrace).toBeUndefined();
+    expect(error.message).toBe("the core rejected the request: stale handle");
+  });
+
+  const failures: [string, StreamFailure, (r: Responder) => void][] = [
+    ["panicked", { status: ReplyStatus.Panic, message: "boom", detail: "at x" }, (r) => r.panic("boom", "at x")],
+    ["cancelled", { status: ReplyStatus.Cancelled, message: "a restore replaced the receiver", detail: "" }, (r) => r.cancelled()],
+    ["refused", { status: ReplyStatus.BadRequest, message: "stale handle", detail: "" }, (r) => r.badRequest("stale handle")],
+  ];
+  it.each(failures)("a %s stream rejects with exactly the error of a call that failed the same way", async (_name, failure, answer) => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, failingAfter(failure));
+    fake.on(M.FAIL, (_c, r) => {
+      answer(r);
+    });
+    const streamFailure = (await drain(core.stream(FREE, M.TICKS, new Uint8Array(0)))).failure;
+    const callFailure = await core.call(FREE, M.FAIL, new Uint8Array(0)).catch((e: unknown) => e);
+    expect(streamFailure).toBeInstanceOf(UndraReplyError);
+    expect(surface(streamFailure)).toEqual(surface(callFailure));
+  });
+
+  it("needs no credit: a failure that arrives while the window is used up ends the stream after the buffered items", async () => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, endless);
+    const iterator = core.stream(FREE, M.TICKS, new Uint8Array(0))[Symbol.asyncIterator]();
+    await iterator.next();
+    await fake.settle();
+    expect(fake.credits).toEqual([{ callId: 1, credit: 16 }]);
+    fake.emitStreamFailure(1, { status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" });
+    await fake.settle();
+    const { seen, failure } = await drain(iterator);
+    // The 15 items still buffered (16 credited, 1 consumed), then the failure; no credit is granted after it.
+    expect(seen).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+    expect((failure as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
+    expect(fake.credits).toEqual([{ callId: 1, credit: 16 }]);
+    expect(fake.cancelled).toEqual([]);
+  });
+
+  it("flag 2 still carries the stream's own E, as status 1 with the raw E bytes", async () => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, () => {
+      let sent = false;
+      return {
+        next: () => {
+          if (sent) return { done: true, error: encodeValue(filterCodec, "done") };
+          sent = true;
+          return { done: false, value: u32(5) };
+        },
+      };
+    });
+    const { seen, failure } = await drain(core.stream(FREE, M.TICKS, new Uint8Array(0)));
+    expect(seen).toEqual([5]);
+    const error = failure as UndraReplyError;
+    expect(error).toBeInstanceOf(UndraReplyError);
+    expect(error.status).toBe(ReplyStatus.Error);
+    expect(error.body).toEqual(new Uint8Array([2, 0]));
+  });
+
+  const malformed: [string, number[]][] = [
+    ["status 1 (a typed error is flag 2)", [1, 0, 0, 0, 0, 0, 0, 0, 0]],
+    ["status 4", [4, 0, 0, 0, 0, 0, 0, 0, 0]],
+    ["status 0", [0, 0, 0, 0, 0, 0, 0, 0, 0]],
+    ["an empty body", []],
+    ["a truncated message", [3, 5, 0, 0, 0, 0x61]],
+    ["a missing detail", [3, 0, 0, 0, 0]],
+    ["trailing bytes", [3, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+    ["invalid UTF-8", [2, 1, 0, 0, 0, 0xff, 0, 0, 0, 0]],
+  ];
+  it.each(malformed)("a flag-3 body with %s fails the stream with a protocol UndraTransportError", async (_name, body) => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, endless);
+    // Opening sends the call; the malformed item follows the core's "stream opened" and first items.
+    const iterator = core.stream(FREE, M.TICKS, new Uint8Array(0))[Symbol.asyncIterator]();
+    fake.emitRawStreamItem(new Uint8Array([1, 0, 0, 0, StreamFlag.Failed, ...body]));
+    const { failure } = await drain(iterator);
+    expect(failure).toBeInstanceOf(UndraTransportError);
+    expect(failure).toBeInstanceOf(UndraError);
+    expect(failure).not.toBeInstanceOf(WireError);
+    const error = failure as UndraTransportError;
+    expect(error.reason).toBe("protocol");
+    expect(error.message).toMatch(/^the core sent a malformed stream failure: wire: /);
+    expect(error.cause).toBeInstanceOf(WireError);
+    expect((await core.stats()).openStreams).toBe(0);
+  });
+
+  it("generated code for a stream with an error type sees a core cancellation as the cancelled reply error, not as its E or a WireError", async () => {
+    const { fake, core } = await setup();
+    fake.stream(M.TICKS, failingAfter({ status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" }, 3));
+    const seen: number[] = [];
+    const failure = await (async () => {
+      try {
+        for await (const value of generatedFilterStream(core.stream(FREE, M.TICKS, new Uint8Array(0)))) seen.push(value);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(seen).toEqual([3]);
+    expect(failure).toBeInstanceOf(UndraReplyError);
+    expect(failure).not.toBeInstanceOf(FilterError);
+    expect(failure).not.toBeInstanceOf(WireError);
+    expect((failure as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
+
+    // A stream of the same method ending with its own E (flag 2) is the typed error.
+    const WATCH = 0x77;
+    fake.stream(WATCH, () => ({ next: () => ({ done: true, error: encodeValue(filterCodec, "active") }) }));
+    const domain = await (async () => {
+      try {
+        for await (const _value of generatedFilterStream(core.stream(FREE, WATCH, new Uint8Array(0)))) {
+          // no items
+        }
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(domain).toBeInstanceOf(FilterError);
+    expect((domain as FilterError).filter).toBe("active");
+  });
+});
+
 describe("handshake and lifetime", () => {
   it("refuses a core with another schema hash", async () => {
     const fake = new FakeCoreTransport({ schemaHash: 0xdead_beef_dead_beefn });
@@ -553,24 +786,27 @@ describe("handshake and lifetime", () => {
   });
 
   it("the first core loaded is shared, later ones are not, and closing it frees the slot", async () => {
-    expect(() => UndraCore.shared).toThrow(UndraError);
-    expect(() => UndraCore.shared).toThrow(/UndraCore\.load/);
+    expect(UndraCore.current).toBeNull();
+    expect(UndraCore.shared.closed).toBe(true);
+    await expect(UndraCore.shared.call(FREE, M.ADD, new Uint8Array(0))).rejects.toThrow(/UndraCore\.load/);
     const first = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA }));
     const second = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA }));
     expect(UndraCore.shared).toBe(first);
+    expect(UndraCore.current).toBe(first);
     second.close();
     expect(UndraCore.shared).toBe(first);
     first.close();
-    expect(() => UndraCore.shared).toThrow(UndraError);
+    expect(UndraCore.current).toBeNull();
+    expect(UndraCore.shared.closed).toBe(true);
     const third = track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA }));
     expect(UndraCore.shared).toBe(third);
   });
 
   it("shared: false keeps a core out of the slot; a failed start never takes it", async () => {
     await UndraCore.attach(new FakeCoreTransport({ schemaHash: 1n }), { expectedSchemaHash: SCHEMA }).catch(() => undefined);
-    expect(() => UndraCore.shared).toThrow(UndraError);
+    expect(UndraCore.current).toBeNull();
     track(await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false }));
-    expect(() => UndraCore.shared).toThrow(UndraError);
+    expect(UndraCore.current).toBeNull();
   });
 
   it("load validates its options", async () => {

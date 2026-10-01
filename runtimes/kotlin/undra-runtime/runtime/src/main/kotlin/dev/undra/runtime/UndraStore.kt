@@ -33,6 +33,22 @@ public abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<
      */
     protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader)
 
+    /**
+     * Starts observing every signal, so the core reports their current values (applied before this returns when
+     * the core is in process). Generated stores call it from `init`. If the core cannot be reached the store is
+     * closed (no handle leaks) and the failure is thrown as an [UndraCallError].
+     *
+     * @throws UndraCallError if the core is closed or unreachable.
+     */
+    protected fun observeAll() {
+        try {
+            core.observe(handle, UInt.MAX_VALUE, true)
+        } catch (e: Exception) {
+            close()
+            throw UndraCallError.mapped(e)
+        }
+    }
+
     /** Creates the [MutableStateFlow] backing one signal, holding [initial] until the core reports the real value. */
     protected fun <T> signal(initial: T): MutableStateFlow<T> = MutableStateFlow(initial)
 

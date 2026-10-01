@@ -405,12 +405,19 @@ fn a_panicking_computed_at_commit_is_contained_and_recovers() {
     rig.cell.attach_computed(&inverse, 1).unwrap();
     rig.observe_all();
 
+    // ADR-019 amendment: the panic stays with the computed; the write and the rest of the store
+    // go through.
     let result = catch_unwind(AssertUnwindSafe(|| rig.run(|| src.set(0))));
-    assert!(result.is_err());
     assert!(
-        rig.sets().is_empty(),
-        "the store's change-set was abandoned, not half-sent"
+        result.is_ok(),
+        "the write that made the computed panic succeeds"
     );
+    assert_eq!(
+        ids(&rig.one_set()),
+        vec![0],
+        "only the computed is held back"
+    );
+    assert!(rig.cell.is_failed(1));
 
     rig.run(|| src.set(4));
     let set = rig.one_set();

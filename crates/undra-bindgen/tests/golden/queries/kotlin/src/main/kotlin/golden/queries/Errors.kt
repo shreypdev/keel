@@ -3,13 +3,10 @@
 package golden.queries
 
 import dev.undra.runtime.UndraException
-import dev.undra.runtime.UndraReplyException
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
-import dev.undra.runtime.wire.decodeAll
 
 sealed class TodoError(message: String) : UndraException(message) {
     data object Offline : TodoError("offline")
@@ -27,11 +24,6 @@ sealed class TodoError(message: String) : UndraException(message) {
                 0 -> Offline
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "TodoError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }

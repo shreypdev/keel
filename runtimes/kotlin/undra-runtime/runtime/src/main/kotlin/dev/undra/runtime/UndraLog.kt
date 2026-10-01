@@ -11,6 +11,11 @@ internal object UndraLog {
         logger.log(Level.WARNING, message, cause)
     }
 
+    /** A failure nobody could see (ADR-032, amendment A): `SEVERE`, which Android's logcat shows as an error. */
+    fun error(message: String, cause: Throwable? = null) {
+        logger.log(Level.SEVERE, message, cause)
+    }
+
     fun debug(message: String) {
         logger.log(Level.FINE, message)
     }

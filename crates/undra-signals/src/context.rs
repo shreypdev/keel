@@ -1,72 +1,76 @@
 //! The write-context check: a hook the embedder uses to say which threads may mutate signals.
 //!
 //! The Undra runtime serialises all mutation on its core (SPEC 5.1); this crate cannot know what
-//! "the core" is, so the runtime installs a checker. Debug builds call it on every write that
-//! has consequences for the host or for other nodes, and assert on `false`. Release builds do
-//! not evaluate it at all, so it costs nothing where it matters.
+//! "the core" is, so the runtime installs a checker. **Every build** asks it before a write that
+//! has consequences for the host or for other nodes, and refuses the write when it says no
+//! (ADR-035): a write from the wrong thread is a contract violation, and in a release build it
+//! used to be applied and then silently not delivered, or delivered unordered.
 
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use parking_lot::RwLock;
+use crate::error::WriteError;
 
-static CHECKER: RwLock<Option<fn() -> bool>> = RwLock::new(None);
-static INSTALLED: AtomicBool = AtomicBool::new(false);
+static CHECKER: OnceLock<fn(u64) -> bool> = OnceLock::new();
+static ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Installs the process-wide write-context checker, replacing any previous one. Called by the
-/// runtime at init.
+/// Installs the process-wide write-context checker. Called by the runtime at init.
 ///
-/// `f` answers "may the calling thread write signals right now?": `true` on the core (a
-/// dispatched call, a task poll), `false` on threads that must not mutate state: the blocking
-/// pool, and, for the runtime's own checker, every thread that does not hold its core lock
-/// (an allowlist since ADR-023). In **debug builds** every write to a signal that is
-/// attached to a store, or that has dependents, asserts `f()` before it changes anything, so a
-/// write from the wrong thread fails fast in tests instead of racing with the core: two threads
-/// that write one store are not one transaction, and a write can be delivered with another
-/// thread's transaction (see the crate docs, "Threading"). **Release builds never call `f`.**
+/// `f(owner)` answers "may the calling thread write a signal of the store owned by runtime
+/// `owner` right now?". `owner` is the id the runtime recorded on the store's cell
+/// ([`StoreCell::set_owner`](crate::StoreCell::set_owner)), or `0` for a signal that belongs to
+/// no published store (unattached with dependents, or attached to a store not yet published), for
+/// which the runtime accepts any thread that holds *a* core lock. The runtime's checker is an
+/// allowlist (ADR-023, ADR-035): a thread that holds that runtime's core lock, a `TestRuntime`
+/// driver thread, or one inside `testing::unchecked_writes`.
 ///
-/// While no checker is installed, a write costs one relaxed atomic load (debug builds) or
-/// nothing (release builds).
+/// In **every build** each write to a signal that is attached to a store, or that has
+/// dependents, asks `f` before anything changes; a refused write panics with the E0065 teaching
+/// message (or, through [`Signal::try_set`](crate::Signal::try_set) and
+/// [`Signal::try_update`](crate::Signal::try_update), returns [`WriteError::OffCore`]). A purely
+/// local signal (unattached, nothing depends on it) is never checked.
+///
+/// The checker is process-wide and set once: the first `f` installed stays for the life of the
+/// process (a second call only re-enables checking after [`clear_write_checker`]). While none is
+/// enabled a write costs one relaxed atomic load.
 ///
 /// # Example
 ///
 /// ```
 /// use undra_signals::{clear_write_checker, set_write_checker};
 ///
-/// fn on_the_core() -> bool {
+/// fn on_the_core(_owner: u64) -> bool {
 ///     true // the runtime checks its core lock here
 /// }
 /// set_write_checker(on_the_core);
 /// # clear_write_checker();
 /// ```
-pub fn set_write_checker(f: fn() -> bool) {
-    *CHECKER.write() = Some(f);
-    INSTALLED.store(true, Ordering::Relaxed);
+pub fn set_write_checker(f: fn(u64) -> bool) {
+    // First installed wins: the runtime installs one checker per process, and a test binary
+    // installs its own once.
+    let _ = CHECKER.set(f);
+    ENABLED.store(true, Ordering::Release);
 }
 
-/// Removes the write-context checker. Used by tests; the runtime never needs to.
+/// Stops consulting the write-context checker. Used by tests; the runtime never needs to.
 pub fn clear_write_checker() {
-    INSTALLED.store(false, Ordering::Relaxed);
-    *CHECKER.write() = None;
+    ENABLED.store(false, Ordering::Release);
 }
 
-/// Asserts that the calling thread may write signals, if a checker is installed.
-///
-/// Debug builds only. Skipped while the thread is already unwinding: a second panic there would
-/// abort the process.
-#[cfg(debug_assertions)]
-pub(crate) fn assert_write_allowed() {
-    if !INSTALLED.load(Ordering::Relaxed) || std::thread::panicking() {
-        return;
+/// Whether the calling thread may write a signal owned by runtime `owner` (`0`: no published
+/// store), according to the installed checker. Always `Ok` while no checker is enabled, and while
+/// the thread is unwinding (a second panic there would abort the process).
+pub(crate) fn check_write(owner: u64) -> Result<(), WriteError> {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return Ok(());
     }
-    let checker = *CHECKER.read();
-    if let Some(check) = checker {
-        assert!(
-            check(),
-            "undra-signals: a signal that is attached to a store (or has dependents) was written \
-             from a thread that is not allowed to mutate state. Signal writes belong on the \
-             core: send the result back to a task or a dispatched call instead of writing from \
-             a blocking-pool or host thread (see docs/SPEC.md 5.1 and 16.1)."
-        );
+    let Some(check) = CHECKER.get() else {
+        return Ok(());
+    };
+    if check(owner) || std::thread::panicking() {
+        Ok(())
+    } else {
+        Err(WriteError::OffCore { owner })
     }
 }
 
@@ -76,16 +80,17 @@ mod tests {
 
     #[test]
     fn set_and_clear_round_trip() {
-        // The checker is process-global, so this unit test only exercises the switch; the
-        // behaviour is tested in `tests/write_checker.rs`, which owns its process.
-        fn yes() -> bool {
+        // The checker is process-global (and the other unit tests of this binary write signals
+        // in parallel), so this test installs one that allows everything and only exercises the
+        // switch; refusals are tested in `tests/write_checker.rs`, which owns its process.
+        fn yes(_: u64) -> bool {
             true
         }
         set_write_checker(yes);
-        assert!(INSTALLED.load(Ordering::Relaxed));
-        #[cfg(debug_assertions)]
-        assert_write_allowed();
+        assert!(ENABLED.load(Ordering::Relaxed));
+        assert_eq!(check_write(7), Ok(()));
         clear_write_checker();
-        assert!(!INSTALLED.load(Ordering::Relaxed));
+        assert!(!ENABLED.load(Ordering::Relaxed));
+        assert_eq!(check_write(7), Ok(()));
     }
 }

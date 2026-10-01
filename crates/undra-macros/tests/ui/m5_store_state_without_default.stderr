@@ -1,5 +1,5 @@
 error[E0277]: error[undra::E0013]: store `Sync` cannot be restored automatically: its field of type `Config` has no `Default`
-                = note: restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument)
+                = note: restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument, a `WeakCtx` downgraded from it)
                 = help: implement `Default` for the type, or add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0013
   --> tests/ui/m5_store_state_without_default.rs:16:13

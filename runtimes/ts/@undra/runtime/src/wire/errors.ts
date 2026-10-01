@@ -1,3 +1,5 @@
+import { UndraError } from "../base-error.js";
+
 /**
  * Typed errors of the wire layer (docs/SPEC.md section 3.9).
  *
@@ -79,7 +81,9 @@ function describe(d: WireErrorDetail): string {
 }
 
 /**
- * Error thrown by every wire decoder for malformed input.
+ * Error thrown by every wire decoder for malformed input. It is an `UndraError`
+ * (`kind: "wire"`), so everything the runtime throws on purpose has one root; a
+ * generated call reports a decoding failure of a reply as `UndraCallError.Malformed`.
  *
  * Narrow on `detail.code` to reach the structured fields:
  *
@@ -91,7 +95,7 @@ function describe(d: WireErrorDetail): string {
  * }
  * ```
  */
-export class WireError extends Error {
+export class WireError extends UndraError {
   /** Always `"WireError"`. */
   override readonly name = "WireError";
   /** Discriminant, identical to `detail.code`. */
@@ -101,7 +105,7 @@ export class WireError extends Error {
 
   /** @param detail What went wrong; the message is derived from it. */
   constructor(detail: WireErrorDetail) {
-    super(`wire: ${describe(detail)}`);
+    super("wire", `wire: ${describe(detail)}`);
     this.code = detail.code;
     this.detail = detail;
   }

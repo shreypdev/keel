@@ -58,6 +58,7 @@ pub use undra_meta::inventory;
 pub use undra_signals;
 pub use undra_wire;
 
+mod atomic_update;
 mod blocking;
 mod config;
 mod ctx;
@@ -78,7 +79,7 @@ pub mod testing;
 mod timer;
 
 pub use config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
-pub use ctx::{Ctx, CtxScope};
+pub use ctx::{Closed, Ctx, CtxScope, Gone, WeakCtx, WeakSleep};
 pub use dispatch::{DispatchBytes, DispatchLayer, DispatchResult};
 pub use ext::InitHook;
 pub use host::{Host, PortCallOutcome};
@@ -91,7 +92,7 @@ pub use ports::{
     EventHandler, Events, MAX_ABANDONED, Port, PortDispatch, PortDispatcher, PortError, PortFuture,
     Subscription, port_call_sync,
 };
-pub use runtime::Runtime;
+pub use runtime::{Reentrant, Runtime};
 pub use undra_meta::{DispatchCall, DispatchOutcome};
 pub use undra_wire::Handle;
 

@@ -3,13 +3,10 @@
 package golden.errors
 
 import dev.undra.runtime.UndraException
-import dev.undra.runtime.UndraReplyException
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
-import dev.undra.runtime.wire.decodeAll
 
 /** An error that wraps a record, so errors and types reference each other. */
 sealed class Boxed(message: String) : UndraException(message) {
@@ -31,11 +28,6 @@ sealed class Boxed(message: String) : UndraException(message) {
                 0 -> Holding(value = Payload.decode(r))
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "Boxed")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }
@@ -72,11 +64,6 @@ sealed class HttpError(message: String) : UndraException(message) {
                 3 -> Cancelled
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "HttpError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }
@@ -132,11 +119,6 @@ sealed class TodoError(message: String) : UndraException(message) {
                 5 -> Detail(default = r.readStr())
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "TodoError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }

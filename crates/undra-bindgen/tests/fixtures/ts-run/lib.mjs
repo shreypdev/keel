@@ -29,6 +29,8 @@ export function fakeCoreClass(rt) {
     constructed = [];
     observed = [];
     events = [];
+    /** What commands and `_apply` handed to `report` (ADR-032, amendment A): the operation and the raw failure. */
+    reports = [];
     replies = [];
     streams = [];
     mirrorFns = new Map();
@@ -77,6 +79,10 @@ export function fakeCoreClass(rt) {
     }
 
     release() {}
+
+    report(error, operation) {
+      this.reports.push({ operation, error });
+    }
 
     /** Delivers a change-set entry the way the mirror would. */
     deliver(handle, signalId, op, value) {

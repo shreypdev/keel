@@ -2,8 +2,8 @@
 
 package golden.full
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.UndraStore
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
@@ -35,99 +35,123 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
     val selected: StateFlow<Todo?> = _selected.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     constructor(ctx: UndraCore = UndraCore.shared) : this(
         ctx,
-        ctx.construct(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0)),
+        ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0)),
     )
 
+    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
     fun setFilter(f: Filter) {
-        val w = UndraWriter()
-        Filter.encode(w, f)
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.SET_FILTER),
-            UndraIds.Objects.TodoStore.SET_FILTER,
-            w.toByteArray(),
-        )
+        try {
+            val w = UndraWriter()
+            Filter.encode(w, f)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.SET_FILTER),
+                UndraIds.Objects.TodoStore.SET_FILTER,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodoStore.setFilter")
+        }
     }
 
-    /** @throws TodoError */
+    /**
+     * @throws TodoError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
     suspend fun add(title: String): Todo {
         val w = UndraWriter()
         w.writeStr(title)
-        val body = try {
-            this.core.call(
+        try {
+            val body = this.core.call(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.ADD),
                 UndraIds.Objects.TodoStore.ADD,
                 w.toByteArray(),
             )
-        } catch (e: UndraReplyException) {
-            throw TodoError.fromReply(e)
+            return Todo.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, TodoError)
         }
-        return Todo.decodeAll(body)
     }
 
+    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
     fun toggle(id: UUID) {
-        val w = UndraWriter()
-        Codecs.uuid.encode(w, id)
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.TOGGLE),
-            UndraIds.Objects.TodoStore.TOGGLE,
-            w.toByteArray(),
-        )
+        try {
+            val w = UndraWriter()
+            Codecs.uuid.encode(w, id)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.TOGGLE),
+                UndraIds.Objects.TodoStore.TOGGLE,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodoStore.toggle")
+        }
     }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _todos.value = codecVecTodo.decode(reader)
-                    reader.finish()
-                } else if (op == ChangeOp.PATCH) {
-                    val ops = KeyedPatch.decodePatch(reader, Todo)
-                    reader.finish()
-                    try {
-                        _todos.value = KeyedPatch.applyPatch(_todos.value, ops)
-                    } catch (e: WireException.PatchOutOfBounds) {
-                        resync(0u)
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecVecTodo.decode(reader)
+                        reader.finish()
+                        _todos.value = value
+                    } else if (op == ChangeOp.PATCH) {
+                        val ops = KeyedPatch.decodePatch(reader, Todo)
+                        reader.finish()
+                        try {
+                            _todos.value = KeyedPatch.applyPatch(_todos.value, ops)
+                        } catch (e: WireException.PatchOutOfBounds) {
+                            resync(0u)
+                        }
                     }
                 }
-            }
-            1u -> {
-                if (op == ChangeOp.FULL) {
-                    _filter.value = Filter.decode(reader)
-                    reader.finish()
-                }
-            }
-            2u -> {
-                if (op == ChangeOp.FULL) {
-                    _visible.value = codecVecTodo.decode(reader)
-                    reader.finish()
-                } else if (op == ChangeOp.PATCH) {
-                    val ops = KeyedPatch.decodePatch(reader, Todo)
-                    reader.finish()
-                    try {
-                        _visible.value = KeyedPatch.applyPatch(_visible.value, ops)
-                    } catch (e: WireException.PatchOutOfBounds) {
-                        resync(2u)
+                1u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Filter.decode(reader)
+                        reader.finish()
+                        _filter.value = value
                     }
                 }
-            }
-            3u -> {
-                if (op == ChangeOp.FULL) {
-                    _remaining.value = Codecs.u32.decode(reader)
-                    reader.finish()
+                2u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecVecTodo.decode(reader)
+                        reader.finish()
+                        _visible.value = value
+                    } else if (op == ChangeOp.PATCH) {
+                        val ops = KeyedPatch.decodePatch(reader, Todo)
+                        reader.finish()
+                        try {
+                            _visible.value = KeyedPatch.applyPatch(_visible.value, ops)
+                        } catch (e: WireException.PatchOutOfBounds) {
+                            resync(2u)
+                        }
+                    }
                 }
-            }
-            4u -> {
-                if (op == ChangeOp.FULL) {
-                    _selected.value = codecOptionTodo.decode(reader)
-                    reader.finish()
+                3u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.u32.decode(reader)
+                        reader.finish()
+                        _remaining.value = value
+                    }
                 }
+                4u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTodo.decode(reader)
+                        reader.finish()
+                        _selected.value = value
+                    }
+                }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "TodoStore.apply(signal: $signalId)")
         }
     }
 
@@ -138,20 +162,26 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraCore.shared): TodoStore {
-            val handle = ctx.construct(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0))
+            val handle = ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0))
             return TodoStore(ctx, handle)
         }
 
-        /** @throws TodoError */
+        /**
+         * @throws TodoError
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         * @throws CancellationException if the calling coroutine is cancelled.
+         */
         suspend fun open(path: String, ctx: UndraCore = UndraCore.shared): TodoStore {
             val w = UndraWriter()
             w.writeStr(path)
             val handle = try {
                 Codecs.handle.decodeAll(ctx.call(CallTarget.Constructor(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.OPEN), UndraIds.Objects.TodoStore.OPEN, w.toByteArray()))
-            } catch (e: UndraReplyException) {
-                throw TodoError.fromReply(e)
+            } catch (e: Exception) {
+                throw UndraCallError.mapped(e, TodoError)
             }
+            if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
             return TodoStore(ctx, handle)
         }
     }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PortIds } from "../src/adapters/ids.js";
 import { HttpErrorCodec, HttpRequestCodec, HttpResponseCodec, NetKindCodec, AppStateCodec } from "../src/adapters/codecs.js";
 import { HttpError, type Adapters, type AppState, type KvAdapter, type NetKind } from "../src/adapters/types.js";
+import { UndraCallError, UndraUnhandledError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import { UndraPortError } from "../src/errors.js";
 import type { PortImpl } from "../src/port.js";
@@ -95,9 +96,15 @@ describe("port dispatch", () => {
     });
     expect(await fake.callPort(P, M)).toMatchObject({ status: PortStatus.Unavailable, body: new Uint8Array(0) });
     expect(await fake.callPort(P, M2)).toMatchObject({ status: PortStatus.Unavailable });
-    expect(errors.map((e) => (e as Error).message)).toEqual(["sync failure", "async failure"]);
+    expect(errors.map((e) => (e as UndraUnhandledError).operation)).toEqual([
+      "port 0xabcd0001 method 0xabcd0002",
+      "port 0xabcd0001 method 0xabcd0003",
+    ]);
+    expect(errors.map((e) => ((e as UndraUnhandledError).cause as Error).message)).toEqual(["sync failure", "async failure"]);
+    expect((errors[0] as UndraUnhandledError).error).toBeInstanceOf(UndraCallError.Malformed);
     expect(log.records.map((r) => r.level)).toEqual([4, 4]);
-    expect(log.records[0]?.message).toContain("port 0xabcd0001 method 0xabcd0002: sync failure");
+    expect(log.records[0]?.message).toContain("port 0xabcd0001 method 0xabcd0002 failed: ");
+    expect(log.records[0]?.message).toContain("sync failure");
   });
 
   it("reports an unregistered port or method as unavailable", async () => {

@@ -200,8 +200,8 @@ public class TimerAdapter internal constructor(private val fire: (UInt) -> Unit,
 
 /**
  * Sends `Connectivity.changed` to the core. There is no connectivity source on a plain JVM, so this is a
- * stub for tests and desktop hosts to drive by hand; the `android-adapters` module will feed it from
- * `ConnectivityManager`. Until told otherwise the core assumes the network is up.
+ * stub for tests and desktop hosts to drive by hand; the `android-adapters` module feeds it from
+ * `ConnectivityManager` (`AndroidConnectivityAdapter`). Until told otherwise the core assumes the network is up.
  */
 public class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) {
     /** Reports that the network is [online] (or not) and of what [kind] it is. */
@@ -215,7 +215,7 @@ public class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) 
 
 /**
  * Sends `Lifecycle.changed` to the core. A stub on a plain JVM (nothing observes an app lifecycle there);
- * the `android-adapters` module will feed it from `ProcessLifecycleOwner`.
+ * the `android-adapters` module feeds it from the app's activities (`AndroidLifecycleAdapter`).
  */
 public class LifecycleEvents(private val core: UndraCore = UndraCore.shared) {
     /** Reports that the app moved to [state]. */

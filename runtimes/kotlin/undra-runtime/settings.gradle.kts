@@ -2,8 +2,8 @@
 //
 //   :runtime           pure-JVM runtime: wire layer, transports, mirror, codecs. No Android APIs.
 //   :android-adapters  Android-specific code (an Android library depending on :runtime, never the reverse):
-//                      today the Choreographer frame pacer of ADR-031; later the Application-context port
-//                      adapters and the JNI loader (see android-adapters/README.md). Included only when an
+//                      the adapters of the ten standard ports and the Choreographer frame pacer of ADR-031 (see
+//                      android-adapters/README.md). Included only when an
 //                      Android SDK is found (ANDROID_HOME, ANDROID_SDK_ROOT, or sdk.dir in local.properties of
 //                      this build or of the build that includes it), so a JVM-only checkout builds :runtime.
 

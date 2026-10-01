@@ -1,7 +1,9 @@
 //! [`StoreCell`]: the per-store table that connects signals to the host.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -83,10 +85,14 @@ struct Slot {
 ///   observed slot re-sends the value: that is how a host resynchronises after a bad patch
 ///   (SPEC 3.8).
 /// * Entries of one change-set are ordered by `signal_id`.
-/// * A change-set whose building or delivery panicked is abandoned whole, and its slots are
-///   remembered: the next commit that touches the store sends them again as full values (keyed
-///   baselines and the op logs recorded against them are dropped), so the host cannot be left
-///   with values the core has moved on from.
+/// * A computed whose evaluation panics is left out and held back on its own (ADR-019
+///   amendment): the rest of the change-set is delivered, the slot is listed in
+///   [`failed_signals`](StoreCell::failed_signals), and it is evaluated again when its inputs
+///   change.
+/// * A change-set whose building or delivery otherwise panicked (an encoder, the sink) is
+///   abandoned whole, and its slots are remembered: the next commit that touches the store sends
+///   them again as full values (keyed baselines and the op logs recorded against them are
+///   dropped), so the host cannot be left with values the core has moved on from.
 ///
 /// # Keyed lists: O(change), not O(list)
 ///
@@ -136,6 +142,9 @@ struct Slot {
 pub struct StoreCell {
     type_id: u32,
     handle: AtomicU64,
+    /// The id of the runtime that owns the store (`0` until published), shared with every
+    /// signal's binding so a write can be checked against it cheaply (ADR-035).
+    owner: Arc<AtomicU64>,
     slots: RwLock<Vec<Arc<Slot>>>,
     /// Slots whose change was claimed for delivery but never reached the sink, sorted (see
     /// `commit_slots`). The next commit that touches this store sends them again.
@@ -148,6 +157,44 @@ pub struct StoreCell {
     delivery: Mutex<()>,
     /// The `txn_id` of the change-set delivered last; guarded by `delivery`.
     last_txn: AtomicU64,
+    /// The computed slots whose evaluation panicked, with the panic message: held back until
+    /// they evaluate again (ADR-019 amendment). The slot's `failed` flag is the fast check.
+    failed: Mutex<BTreeMap<u32, String>>,
+}
+
+/// What evaluating the computeds of one delivery did to their failed state: reported to the sink
+/// after the store's delivery lock is released.
+#[derive(Default)]
+struct Health {
+    /// Slots that panicked, with the message.
+    failed: Vec<(u32, String)>,
+    /// Slots that had failed and evaluated successfully again.
+    recovered: Vec<u32>,
+}
+
+impl Health {
+    fn is_empty(&self) -> bool {
+        self.failed.is_empty() && self.recovered.is_empty()
+    }
+}
+
+/// The message of a caught panic.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_owned()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panic with a non-string payload".to_owned()
+    }
+}
+
+/// Encodes a computed slot's value into `out` (which is cleared first) with its panic caught: the
+/// one place a computed's closure runs during a delivery (ADR-019 amendment).
+fn encode_computed(slot: &Slot, out: &mut Writer) -> Result<(), String> {
+    out.clear();
+    catch_unwind(AssertUnwindSafe(|| (slot.encode)(out)))
+        .map_err(|payload| panic_message(&*payload))
 }
 
 impl StoreCell {
@@ -156,11 +203,13 @@ impl StoreCell {
         Arc::new(StoreCell {
             type_id,
             handle: AtomicU64::new(0),
+            owner: Arc::new(AtomicU64::new(0)),
             slots: RwLock::new(Vec::new()),
             unsent: Mutex::new(Vec::new()),
             has_unsent: AtomicBool::new(false),
             delivery: Mutex::new(()),
             last_txn: AtomicU64::new(0),
+            failed: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -271,6 +320,7 @@ impl StoreCell {
             cell: Arc::downgrade(self),
             signal_id,
             flags: Arc::clone(&flags),
+            owner: Arc::clone(&self.owner),
         };
         if binding.set(bound).is_err() {
             return Err(SignalsError::AlreadyAttached);
@@ -316,6 +366,22 @@ impl StoreCell {
         self.handle.load(Ordering::SeqCst)
     }
 
+    /// Records the id of the runtime that owns the store. The runtime calls this wherever it
+    /// sets the handle (inserting the store, restoring it), before the handle (ADR-035).
+    ///
+    /// Two things follow from it: a write to one of the store's signals is allowed only on a
+    /// thread that holds **that** runtime's core lock (the checker of
+    /// [`set_write_checker`](crate::set_write_checker) is asked about this id), and the store's
+    /// change-sets go to that runtime ([`ChangeSink::deliver_from`]), whichever thread commits.
+    pub fn set_owner(&self, runtime_id: u64) {
+        self.owner.store(runtime_id, Ordering::SeqCst);
+    }
+
+    /// The owner recorded by [`set_owner`](StoreCell::set_owner), or `0`.
+    pub fn owner(&self) -> u64 {
+        self.owner.load(Ordering::SeqCst)
+    }
+
     /// The store type's id.
     pub fn type_id(&self) -> u32 {
         self.type_id
@@ -330,6 +396,72 @@ impl StoreCell {
     pub fn is_observed(&self, signal_id: u32) -> bool {
         self.slot(signal_id)
             .is_some_and(|slot| slot.flags.observed.load(Ordering::SeqCst))
+    }
+
+    /// The computed signals of this store whose last evaluation panicked, with the panic
+    /// message, in id order: the typed *poisoned* state of a signal (ADR-019 amendment). Such a
+    /// signal is held back (the host keeps the last value it received) while every other signal
+    /// of the store keeps being delivered; it is evaluated again when its inputs change, and
+    /// leaves this list when that succeeds.
+    pub fn failed_signals(&self) -> Vec<(u32, String)> {
+        self.failed
+            .lock()
+            .iter()
+            .map(|(id, message)| (*id, message.clone()))
+            .collect()
+    }
+
+    /// Whether the computed `signal_id` is currently held back because its evaluation panicked
+    /// (see [`failed_signals`](StoreCell::failed_signals)).
+    pub fn is_failed(&self, signal_id: u32) -> bool {
+        self.slot(signal_id)
+            .is_some_and(|slot| slot.flags.failed.load(Ordering::SeqCst))
+    }
+
+    /// Records what a delivery's computed evaluations did and tells the sink: once per transition
+    /// into the failed state, and once when a failed slot recovers. Called with no lock held.
+    fn note_health(&self, targets: &[(u32, Arc<Slot>)], health: Health) {
+        if health.is_empty() {
+            return;
+        }
+        let slot_of = |id: u32| {
+            targets
+                .iter()
+                .find(|(slot_id, _)| *slot_id == id)
+                .map(|(_, slot)| slot)
+        };
+        let mut newly_failed = Vec::new();
+        let mut recovered = Vec::new();
+        {
+            let mut failed = self.failed.lock();
+            for (id, message) in health.failed {
+                let Some(slot) = slot_of(id) else { continue };
+                if !slot.flags.failed.swap(true, Ordering::SeqCst) {
+                    newly_failed.push((id, message.clone()));
+                }
+                failed.insert(id, message);
+            }
+            for id in health.recovered {
+                let Some(slot) = slot_of(id) else { continue };
+                if slot.flags.failed.swap(false, Ordering::SeqCst) {
+                    recovered.push(id);
+                }
+                failed.remove(&id);
+            }
+        }
+        let Some(sink) = crate::sink::current() else {
+            return;
+        };
+        let (owner, handle) = (self.owner(), self.handle());
+        // A sink that panics while reporting must not undo a delivery that already happened.
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            for (id, message) in &newly_failed {
+                sink.computed_failed(owner, handle, *id, message);
+            }
+            for id in &recovered {
+                sink.computed_recovered(owner, handle, *id);
+            }
+        }));
     }
 
     /// Starts or stops observation of one signal, or of all of them (`signal_id ==`
@@ -402,13 +534,14 @@ impl StoreCell {
         // (the guard is declared first, so it is dropped last).
         let _txn = TxnGuard::enter();
         let mut rollback = self.start_observing(&targets);
-        let entries = self.encode_settled(&targets);
+        let (entries, count, health) = self.encode_settled(&targets);
         rollback.armed = false;
         // The host is about to receive the current value of every target, so an earlier
         // abandoned delivery of one of them no longer needs a retry.
         self.forget_unsent(targets.iter().map(|(id, _)| *id));
         out.write_raw(entries.as_slice());
-        u32::try_from(targets.len()).unwrap_or(u32::MAX)
+        self.note_health(&targets, health);
+        count
     }
 
     /// Starts observing `signal_ids` (any of them may be [`ALL_SIGNALS`]) and hands the host
@@ -473,24 +606,30 @@ impl StoreCell {
         // Declared first, so dropped last: writes that could not settle commit only after the
         // delivery lock below has been released (the commit takes it again).
         let _txn = TxnGuard::enter();
-        let _delivery = self.delivery.lock();
+        let delivery = self.delivery.lock();
         let mut rollback = self.start_observing(&targets);
-        let entries = self.encode_settled(&targets);
-        let count = u32::try_from(targets.len()).unwrap_or(u32::MAX);
+        let (entries, count, health) = self.encode_settled(&targets);
 
-        // Allocated under the lock, after everything delivered before it, and recorded, so
-        // `commit_slots` replaces a shared transaction id that this one has overtaken.
-        let txn = next_txn_id();
-        self.last_txn.store(txn, Ordering::SeqCst);
-        let mut payload = Writer::from_vec(take_buffer());
-        payload.write_u64(txn);
-        payload.write_u32(count);
-        payload.write_raw(entries.as_slice());
-        // A panic in `deliver` leaves the rollback armed: the host may not have these values.
-        deliver(payload.as_slice());
+        // A target whose computed panicked has no entry (it stays observed and is sent when it
+        // evaluates again); a change-set with no entry at all is not sent.
+        if count > 0 {
+            // Allocated under the lock, after everything delivered before it, and recorded, so
+            // `commit_slots` replaces a shared transaction id that this one has overtaken.
+            let txn = next_txn_id();
+            self.last_txn.store(txn, Ordering::SeqCst);
+            let mut payload = Writer::from_vec(take_buffer());
+            payload.write_u64(txn);
+            payload.write_u32(count);
+            payload.write_raw(entries.as_slice());
+            // A panic in `deliver` leaves the rollback armed: the host may not have these
+            // values.
+            deliver(payload.as_slice());
+            recycle_buffer(payload.into_vec());
+        }
         rollback.armed = false;
-        recycle_buffer(payload.into_vec());
         self.forget_unsent(targets.iter().map(|(id, _)| *id));
+        drop(delivery);
+        self.note_health(&targets, health);
         count
     }
 
@@ -527,11 +666,15 @@ impl StoreCell {
     /// Encodes the current value of every target as change-set entries, re-encoding while a
     /// computed closure writes one of the targets (at most [`OBSERVE_SETTLE_PASSES`] passes), so
     /// that the entries hold the post-write values. The caller holds a transaction open.
-    fn encode_settled(&self, targets: &[(u32, Arc<Slot>)]) -> Writer {
+    fn encode_settled(&self, targets: &[(u32, Arc<Slot>)]) -> (Writer, u32, Health) {
         let handle = Handle(self.handle());
         let mut entries = Writer::new();
+        let mut count = 0_u32;
+        let mut health = Health::default();
         for pass in 1..=OBSERVE_SETTLE_PASSES {
             entries.clear();
+            count = 0;
+            health = Health::default();
             for (id, slot) in targets {
                 // Clear the dirty bit *before* reading the value: a write that lands in between
                 // is recorded again and delivered by its own commit, instead of being lost.
@@ -539,7 +682,20 @@ impl StoreCell {
                 let mut value = Writer::new();
                 match &slot.kind {
                     SlotKind::Keyed(state) => state.resync(&mut value),
-                    SlotKind::Plain | SlotKind::Computed => (slot.encode)(&mut value),
+                    SlotKind::Plain => (slot.encode)(&mut value),
+                    // A computed that panics is left out and held back, not the whole observe
+                    // (ADR-019 amendment).
+                    SlotKind::Computed => match encode_computed(slot, &mut value) {
+                        Ok(()) => {
+                            if slot.flags.failed.load(Ordering::SeqCst) {
+                                health.recovered.push(*id);
+                            }
+                        }
+                        Err(message) => {
+                            health.failed.push((*id, message));
+                            continue;
+                        }
+                    },
                 }
                 ChangeEntry {
                     handle,
@@ -548,6 +704,7 @@ impl StoreCell {
                     value: value.into_vec(),
                 }
                 .encode(&mut entries);
+                count += 1;
             }
             // A target that is dirty again was written while the entries were being built (by
             // a computed's closure), possibly after its own entry was encoded: encode once more,
@@ -560,7 +717,7 @@ impl StoreCell {
                 break;
             }
         }
-        entries
+        (entries, count, health)
     }
 
     /// Appends the full encoded value of one signal to `out` (no entry header, no length).
@@ -656,7 +813,7 @@ impl StoreCell {
         // thread that dirtied the store waits here, so its change-set cannot overtake this one
         // (a patch computed against a baseline that a still-undelivered patch has already moved
         // would otherwise reach the host first). See the crate docs, "Threading".
-        let _delivery = self.delivery.lock();
+        let delivery = self.delivery.lock();
 
         // Slots an earlier commit of this store abandoned are sent again with this one.
         let unsent = self.take_unsent();
@@ -720,6 +877,8 @@ impl StoreCell {
         let mut payload = Writer::from_vec(take_buffer());
         let mut scratch = Writer::new();
         let mut builder = ChangeSetBuilder::new(&mut payload, txn);
+        let mut health = Health::default();
+        let mut entries = 0_usize;
         for (id, slot) in &claimed {
             match &slot.kind {
                 SlotKind::Keyed(state) => {
@@ -732,15 +891,35 @@ impl StoreCell {
                     };
                     builder.push(handle, *id, op, scratch.as_slice());
                 }
-                SlotKind::Plain | SlotKind::Computed => {
+                SlotKind::Plain => {
                     builder.push_with(handle, *id, ChangeOp::Full, |w| (slot.encode)(w));
                 }
+                // A computed is evaluated with its panic caught (ADR-019 amendment): one that
+                // panics on its current inputs is left out and held back; the store's other
+                // slots still go, and the write that triggered the commit succeeds.
+                SlotKind::Computed => match encode_computed(slot, &mut scratch) {
+                    Ok(()) => {
+                        builder.push(handle, *id, ChangeOp::Full, scratch.as_slice());
+                        if slot.flags.failed.load(Ordering::SeqCst) {
+                            health.recovered.push(*id);
+                        }
+                    }
+                    Err(message) => {
+                        health.failed.push((*id, message));
+                        continue;
+                    }
+                },
             }
+            entries += 1;
         }
         builder.finish();
-        sink.deliver(payload.as_slice());
+        if entries > 0 {
+            sink.deliver_from(self.owner(), payload.as_slice());
+        }
         abandon.armed = false;
         recycle_buffer(payload.into_vec());
+        drop(delivery);
+        self.note_health(&claimed, health);
     }
 
     /// Releases a slot that a cut-off commit still had queued: it is clean again (so any thread's
@@ -1132,7 +1311,7 @@ fn same_encoding<I: SignalValue>(a: &[I], b: &[I]) -> bool {
 mod tests {
     use super::*;
     use crate::testing::CaptureSink;
-    use crate::{Computed, txn, with_sink};
+    use crate::{txn, with_sink};
 
     #[test]
     fn new_cell_is_empty() {
@@ -1325,18 +1504,22 @@ mod tests {
     #[test]
     fn an_abandoned_commit_disarms_the_log_with_the_baseline() {
         use std::sync::atomic::AtomicBool;
+        /// A value whose encoding panics while armed: a plain slot holding one abandons the
+        /// store's change-set (a panicking computed no longer does, ADR-019 amendment).
+        #[derive(Clone)]
+        struct Bomb(Arc<AtomicBool>);
+        impl undra_wire::Encode for Bomb {
+            fn encode(&self, w: &mut Writer) {
+                assert!(!self.0.load(Ordering::SeqCst), "encoder failure");
+                0_u32.encode(w);
+            }
+        }
         let cell = StoreCell::new(1);
         let list = Signal::new(vec![1_u32, 2, 3]);
         let armed = Arc::new(AtomicBool::new(false));
-        let bomb = {
-            let armed = Arc::clone(&armed);
-            Computed::new(&list, move |_: &Vec<u32>| {
-                assert!(!armed.load(Ordering::SeqCst), "computed failure");
-                0_u32
-            })
-        };
+        let bomb = Signal::new(Bomb(Arc::clone(&armed)));
         cell.attach_keyed(&list, 0, u32_key).unwrap();
-        cell.attach_computed(&bomb, 1).unwrap();
+        cell.attach(&bomb, 1).unwrap();
         cell.set_handle(7);
         cell.observe(ALL_SIGNALS, true, &mut Writer::new());
         let log = log_of(&list);
@@ -1345,7 +1528,12 @@ mod tests {
         armed.store(true, Ordering::SeqCst);
         let sink = CaptureSink::new();
         let aborted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            with_sink(sink.clone(), || list.push(4));
+            with_sink(sink.clone(), || {
+                txn(|| {
+                    list.push(4);
+                    bomb.update(|_| {});
+                });
+            });
         }));
         assert!(aborted.is_err());
         assert!(

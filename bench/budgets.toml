@@ -275,6 +275,12 @@ measured_ns = 625.0
 budget_ns = 1700
 measured_ns = 333.0
 
+# ADR-035: one attached write and its commit, nobody observing. Pins the cost of the write check
+# every build runs (a release build used to skip it).
+[bench."signals/set_attached"]
+budget_ns = 65
+measured_ns = 12.7
+
 [bench."signals/computed/recompute_1"]
 budget_ns = 250
 measured_ns = 40.3

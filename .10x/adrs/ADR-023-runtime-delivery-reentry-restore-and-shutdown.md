@@ -58,14 +58,16 @@ after a restore that is every call with a non-null receiver). A plain call gets 
 (cancelled) exactly once**; a stream is ended with a **`StreamItem` flag 2 (error) whose body is a
 `String`** (`"cancelled: ..."`, the same shape as a stream panic), because the host did not ask for
 the cancel and flag 1 would read as a clean end; a silent close (what `keel_cancel` does) would
-strand the host. The tasks are dropped. Calls with no receiver (free functions, constructors) are
+strand the host. *(2026-10-01: superseded in the item it sends by ADR-036: the stream now ends with
+a flag 3 "failed" item, status 3, because flag 2 carries only the stream's own `E`.)* The tasks are dropped. Calls with no receiver (free functions, constructors) are
 unaffected.
 
 ## 4. L1 + L5: shutdown answers and releases everything
 
 Decision. `shutdown` first drains the call table: every in-flight call gets status 3, every open
 stream the same flag-2 `"cancelled: the runtime shut down"` item, each exactly once (the call
-table is the gate, as for cancel). Then the threads stop, pending port calls fail with `Cancelled`,
+table is the gate, as for cancel). *(2026-10-01: the item is a flag 3 "failed" item with status 3
+since ADR-036.)* Then the threads stop, pending port calls fail with `Cancelled`,
 event subscribers and Rust port bindings are cleared (they may hold a `Ctx`, a reference cycle
 that kept the runtime alive), and tasks and objects drop. After `shutdown`, `spawn`, `sleep`,
 `port_call` and `event` on a surviving `Ctx` are no-ops that log a WARN (never a panic, never

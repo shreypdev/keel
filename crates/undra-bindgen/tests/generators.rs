@@ -4,7 +4,7 @@
 mod common;
 
 use undra_bindgen::{GeneratedFile, Generator};
-use undra_meta::Schema;
+use undra_meta::{Schema, TypeRef};
 
 fn all_files(case: &str, configure: impl Fn(&mut Generator)) -> Vec<(String, Vec<GeneratedFile>)> {
     let schema = common::case(case);
@@ -619,4 +619,502 @@ fn comment_terminators_in_docs_cannot_break_out() {
         assert!(balanced("x.kt", &text).is_ok(), "{text}");
         assert!(!text.contains("closes */ early"), "{text}");
     }
+}
+
+// ----- recursive types (Swift) ---------------------------------------------------------------
+
+/// `Types.swift` of `schema`.
+fn swift_types(schema: &Schema) -> String {
+    let files = Generator::for_crate("t").swift(schema).unwrap();
+    file(&files, "Types.swift").to_owned()
+}
+
+/// The text of the Swift declaration that starts with `head`, up to its closing line.
+fn swift_decl<'a>(swift: &'a str, head: &str) -> &'a str {
+    let start = swift
+        .find(head)
+        .unwrap_or_else(|| panic!("no declaration starts with `{head}` in:\n{swift}"));
+    let rest = &swift[start..];
+    let end = rest.find("\n}\n").map_or(rest.len(), |i| i + 3);
+    &rest[..end]
+}
+
+/// A record whose fields are `(name, type)`.
+fn record_of(name: &str, fields: Vec<(&str, TypeRef)>) -> undra_meta::RecordDef {
+    common::record(
+        name,
+        "",
+        fields
+            .into_iter()
+            .map(|(n, t)| common::field(n, t))
+            .collect(),
+    )
+}
+
+fn optional(name: &str) -> TypeRef {
+    TypeRef::option(common::named(name))
+}
+
+#[test]
+fn swift_keeps_the_public_shape_of_a_recursive_record_and_boxes_only_its_storage() {
+    let types = swift_types(&common::case("recursive"));
+    let node = swift_decl(&types, "public struct ListNode");
+    // A Swift engineer reads this as an ordinary optional property.
+    assert!(
+        node.contains("    public var next: ListNode? {\n"),
+        "{node}"
+    );
+    assert!(node.contains("get { _next?.value }"), "{node}");
+    assert!(node.contains("set { _next = newValue.map(UndraIndirect.init) }"));
+    assert!(node.contains("    private var _next: UndraIndirect<ListNode>?\n"));
+    // The public initializer takes the plain optional; the key on the wire and in `Codable`
+    // stays `next`, so a missing key decodes as nil and a nil child is omitted.
+    assert!(node.contains("public init(value: Int32, next: ListNode?)"));
+    assert!(node.contains("self._next = next.map(UndraIndirect.init)"));
+    assert!(node.contains("case _next = \"next\""));
+    assert!(node.contains("UndraRecord, Sendable, Hashable, Codable"));
+    // The wire code reads and writes the public property.
+    assert!(node.contains("self.next.undraEncode(&w)"));
+    assert!(node.contains("next: Optional<ListNode>.undraDecode(&r)"));
+    // An array keeps its elements on the heap: no box, no storage, no coding keys.
+    let tree = swift_decl(&types, "public struct Tree");
+    assert!(tree.contains("    public var children: [Tree]\n"));
+    assert!(
+        !tree.contains("UndraIndirect") && !tree.contains("CodingKeys"),
+        "{tree}"
+    );
+}
+
+#[test]
+fn swift_emits_the_indirect_box_once_and_only_when_a_record_needs_it() {
+    for case in common::CASES {
+        let out = all_files(case, |_| {});
+        let types = file(&out[0].1, "Types.swift");
+        let declarations = types.matches("final class UndraIndirect<").count();
+        let uses = out[0]
+            .1
+            .iter()
+            .filter(|f| !f.path.ends_with("Types.swift"))
+            .any(|f| f.contents.contains("UndraIndirect"));
+        assert!(!uses, "{case}: only Types.swift mentions the box");
+        assert_eq!(
+            declarations,
+            usize::from(*case == "recursive"),
+            "{case}: the box is declared exactly when a record holds itself"
+        );
+    }
+    // `records` already has a record with a `Vec<Self>` field and an optional that is not a
+    // cycle: neither needs the box.
+    let types = swift_types(&common::case("records"));
+    assert!(!types.contains("UndraIndirect"));
+}
+
+#[test]
+fn swift_boxes_each_field_of_a_cycle_through_records_and_only_those() {
+    let mut s = Schema::new("t");
+    // A holds B, B holds C, C holds B again: B and C are on a cycle, A only leads into it.
+    s.records.push(record_of(
+        "A",
+        vec![("b", optional("B")), ("n", TypeRef::I32)],
+    ));
+    s.records.push(record_of("B", vec![("c", optional("C"))]));
+    s.records.push(record_of(
+        "C",
+        vec![("b", optional("B")), ("a", optional("A"))],
+    ));
+    // D and E hold each other through arrays, which never need a box.
+    s.records.push(record_of(
+        "D",
+        vec![("e", TypeRef::vec(common::named("E")))],
+    ));
+    s.records.push(record_of(
+        "E",
+        vec![
+            ("d", optional("D")),
+            ("m", TypeRef::map(TypeRef::String, common::named("D"))),
+        ],
+    ));
+    let types = swift_types(&s);
+    // C -> A -> B -> C closes a cycle too, so every edge among A, B and C is on one: A.b, B.c,
+    // C.b and C.a.
+    assert!(swift_decl(&types, "public struct A").contains("private var _b: UndraIndirect<B>?"));
+    assert!(swift_decl(&types, "public struct B").contains("private var _c: UndraIndirect<C>?"));
+    let c = swift_decl(&types, "public struct C");
+    assert!(c.contains("private var _b: UndraIndirect<B>?"), "{c}");
+    assert!(c.contains("private var _a: UndraIndirect<A>?"), "{c}");
+    // `n` is not a field that holds anything.
+    assert!(swift_decl(&types, "public struct A").contains("    public var n: Int32\n"));
+    // D -> E through an array, E -> D through an optional: the array breaks the cycle.
+    let d = swift_decl(&types, "public struct D");
+    assert!(
+        d.contains("    public var e: [E]\n") && !d.contains("UndraIndirect"),
+        "{d}"
+    );
+    let e = swift_decl(&types, "public struct E");
+    assert!(
+        e.contains("    public var d: D?\n") && !e.contains("UndraIndirect"),
+        "{e}"
+    );
+    assert_eq!(types.matches("final class UndraIndirect<").count(), 1);
+
+    // Break C -> A: A is no longer on a cycle, so its field goes back to a plain property.
+    s.records[2].fields.retain(|f| f.name != "a");
+    let types = swift_types(&s);
+    assert!(swift_decl(&types, "public struct A").contains("    public var b: B?\n"));
+    assert!(swift_decl(&types, "public struct B").contains("private var _c: UndraIndirect<C>?"));
+    assert!(swift_decl(&types, "public struct C").contains("private var _b: UndraIndirect<B>?"));
+}
+
+#[test]
+fn swift_names_the_storage_after_the_field_even_when_the_field_is_a_keyword() {
+    let mut s = Schema::new("t");
+    // A field called `self` is a keyword and is backticked; its storage, `_self`, is not.
+    s.records.push(record_of(
+        "Node",
+        vec![("self", optional("Node")), ("class_name", TypeRef::String)],
+    ));
+    let types = swift_types(&s);
+    let node = swift_decl(&types, "public struct Node");
+    assert!(node.contains("    public var `self`: Node? {\n"), "{node}");
+    assert!(
+        node.contains("private var _self: UndraIndirect<Node>?"),
+        "{node}"
+    );
+    assert!(node.contains("case _self = \"self\""), "{node}");
+    assert!(node.contains("case className\n"), "{node}");
+}
+
+#[test]
+fn swift_makes_an_enum_indirect_when_a_payload_lies_on_a_cycle() {
+    let mut s = Schema::new("t");
+    // Direct, optional and mutual self reference: all `indirect`.
+    s.enums.push(common::enum_def(
+        "Direct",
+        "",
+        vec![
+            common::unit_variant("End", 0),
+            common::tuple_variant("Next", 1, vec![common::named("Direct")]),
+        ],
+    ));
+    s.enums.push(common::enum_def(
+        "Maybe",
+        "",
+        vec![common::tuple_variant("Next", 0, vec![optional("Maybe")])],
+    ));
+    s.enums.push(common::enum_def(
+        "Ping",
+        "",
+        vec![common::tuple_variant(
+            "Pong",
+            0,
+            vec![common::named("Pong")],
+        )],
+    ));
+    s.enums.push(common::enum_def(
+        "Pong",
+        "",
+        vec![
+            common::tuple_variant("Ping", 0, vec![optional("Ping")]),
+            common::unit_variant("Stop", 1),
+        ],
+    ));
+    // An enum that leads into a cycle without being on it, an array, and a map: none of them.
+    s.enums.push(common::enum_def(
+        "Into",
+        "",
+        vec![common::tuple_variant(
+            "Ping",
+            0,
+            vec![common::named("Ping")],
+        )],
+    ));
+    s.enums.push(common::enum_def(
+        "Listy",
+        "",
+        vec![
+            common::tuple_variant("Items", 0, vec![TypeRef::vec(common::named("Listy"))]),
+            common::tuple_variant(
+                "Named",
+                1,
+                vec![TypeRef::map(TypeRef::String, common::named("Listy"))],
+            ),
+        ],
+    ));
+    // A record on a cycle with an enum: the enum is `indirect`, the record boxes its field.
+    s.enums.push(common::enum_def(
+        "Expr",
+        "",
+        vec![
+            common::tuple_variant("Num", 0, vec![TypeRef::F64]),
+            common::tuple_variant("Block", 1, vec![common::named("Block")]),
+        ],
+    ));
+    s.records
+        .push(record_of("Block", vec![("last", optional("Expr"))]));
+    // An error that wraps itself.
+    s.enums.push(common::error_def(
+        "Failure",
+        "",
+        vec![
+            common::with_message(common::unit_variant("Leaf", 0), "leaf"),
+            common::with_message(
+                common::tuple_variant("Wrapped", 1, vec![TypeRef::U8, common::named("Failure")]),
+                "wrapped",
+            ),
+        ],
+    ));
+    let files = Generator::for_crate("t").swift(&s).unwrap();
+    let types = file(&files, "Types.swift");
+    for name in ["Direct", "Maybe", "Ping", "Pong", "Expr"] {
+        assert!(
+            types.contains(&format!("public indirect enum {name}: UndraEnum")),
+            "{name} must be indirect:\n{types}"
+        );
+    }
+    for name in ["Into", "Listy"] {
+        assert!(
+            types.contains(&format!("public enum {name}: UndraEnum")),
+            "{name} must not be indirect:\n{types}"
+        );
+    }
+    assert!(
+        swift_decl(types, "public struct Block")
+            .contains("private var _last: UndraIndirect<Expr>?")
+    );
+    assert!(file(&files, "Errors.swift").contains("public indirect enum Failure: UndraError"));
+}
+
+/// Store signals whose types recurse: an enum whose base case is its last variant, a record that
+/// holds it, and two enums that need each other unless one takes its other variant. A signal is
+/// initialised with a placeholder until the core's first change-set arrives; the placeholder of a
+/// recursive type is built from the first variant that does not need the type itself, wherever the
+/// schema lists it, and never from an optional, array or map.
+fn recursive_placeholders() -> Schema {
+    let mut s = Schema::new("t");
+    s.enums.push(common::enum_def(
+        "Sum",
+        "",
+        vec![
+            common::tuple_variant("Add", 0, vec![common::named("Sum"), common::named("Sum")]),
+            common::tuple_variant("Neg", 1, vec![common::named("Sum")]),
+            common::unit_variant("Zero", 2),
+        ],
+    ));
+    s.records.push(record_of(
+        "Frame",
+        vec![
+            ("sum", common::named("Sum")),
+            ("next", optional("Frame")),
+            ("kids", TypeRef::vec(common::named("Frame"))),
+        ],
+    ));
+    // Two types that need each other unless one of them takes its other variant.
+    s.enums.push(common::enum_def(
+        "Left",
+        "",
+        vec![
+            common::tuple_variant("Over", 0, vec![common::named("Right")]),
+            common::unit_variant("Done", 1),
+        ],
+    ));
+    s.enums.push(common::enum_def(
+        "Right",
+        "",
+        vec![common::tuple_variant(
+            "Over",
+            0,
+            vec![common::named("Left")],
+        )],
+    ));
+    s.objects.push(common::store(
+        common::object(
+            "Box",
+            "",
+            vec![common::ctor("Box", "new", vec![], false)],
+            vec![],
+        ),
+        vec![
+            ("sum", common::named("Sum"), false, None),
+            ("frame", common::named("Frame"), false, None),
+            ("left", common::named("Left"), false, None),
+            ("right", common::named("Right"), false, None),
+        ],
+    ));
+    s
+}
+
+#[test]
+fn swift_placeholders_of_a_recursive_type_use_its_base_case() {
+    // A signal is initialised with a placeholder until the core's first change-set arrives. The
+    // placeholder of a recursive type is built from its first variant that does not need the
+    // type itself, wherever the schema lists it, and never from an optional, array or map.
+    let s = recursive_placeholders();
+    let files = Generator::for_crate("t").swift(&s).unwrap();
+    let stores = file(&files, "Stores.swift");
+    assert!(
+        stores.contains("public private(set) var sum: Sum = Sum.zero\n"),
+        "{stores}"
+    );
+    assert!(
+        stores.contains(
+            "public private(set) var frame: Frame = Frame(sum: Sum.zero, next: nil, kids: [])\n"
+        ),
+        "{stores}"
+    );
+    // `Left` cannot take `Over` (it needs a `Right`, which needs a `Left` again): it takes `Done`.
+    assert!(
+        stores.contains("public private(set) var left: Left = Left.done\n"),
+        "{stores}"
+    );
+    assert!(
+        stores.contains("public private(set) var right: Right = Right.over(Left.done)\n"),
+        "{stores}"
+    );
+    for f in &files {
+        for trap in ["fatalError", "preconditionFailure", "try!"] {
+            assert!(!f.contents.contains(trap), "{}: `{trap}`", f.path);
+        }
+    }
+}
+
+#[test]
+fn kotlin_and_typescript_placeholders_of_a_recursive_type_use_its_base_case() {
+    // The same search as Swift's (`crate::zero`). Before it, Kotlin expanded the first variant of
+    // `Sum` exponentially until a depth guard wrote `error("recursive default")`, which throws
+    // when the store is created, and TypeScript overflowed the generator's stack.
+    let s = recursive_placeholders();
+    let kotlin = Generator::for_crate("t").kotlin(&s).unwrap();
+    let stores = file(&kotlin, "Stores.kt");
+    for expected in [
+        "private val _sum: MutableStateFlow<Sum> = signal(Sum.Zero)\n",
+        "private val _frame: MutableStateFlow<Frame> = signal(Frame(sum = Sum.Zero, next = null, kids = emptyList()))\n",
+        "private val _left: MutableStateFlow<Left> = signal(Left.Done)\n",
+        "private val _right: MutableStateFlow<Right> = signal(Right.Over(value = Left.Done))\n",
+    ] {
+        assert!(stores.contains(expected), "{expected}\n{stores}");
+    }
+    let ts = Generator::for_crate("t").typescript(&s).unwrap();
+    let stores = file(&ts, "stores.ts");
+    for expected in [
+        "readonly sum: Signal<Sum> = new Signal<Sum>({ kind: \"zero\" });\n",
+        "readonly frame: Signal<Frame> = new Signal<Frame>({ sum: { kind: \"zero\" }, next: null, kids: [] });\n",
+        "readonly left: Signal<Left> = new Signal<Left>({ kind: \"done\" });\n",
+        "readonly right: Signal<Right> = new Signal<Right>({ kind: \"over\", value: { kind: \"done\" } });\n",
+    ] {
+        assert!(stores.contains(expected), "{expected}\n{stores}");
+    }
+    for f in kotlin.iter().chain(&ts) {
+        assert!(!f.contents.contains("recursive default"), "{}", f.path);
+        assert!(!f.contents.contains("as never"), "{}", f.path);
+    }
+}
+
+#[test]
+fn kotlin_placeholders_of_deeply_nested_records_are_built_whole() {
+    // The old depth guard stopped at nine levels and wrote a trap for a type that is not recursive
+    // at all; the path-based search has no depth limit.
+    let mut s = Schema::new("t");
+    s.records.push(record_of("L0", vec![("v", TypeRef::I32)]));
+    for level in 1..12 {
+        let inner = format!("L{}", level - 1);
+        s.records.push(record_of(
+            &format!("L{level}"),
+            vec![("inner", common::named(&inner))],
+        ));
+    }
+    s.objects.push(common::store(
+        common::object(
+            "Deep",
+            "",
+            vec![common::ctor("Deep", "new", vec![], false)],
+            vec![],
+        ),
+        vec![("top", common::named("L11"), false, None)],
+    ));
+    let kotlin = Generator::for_crate("t").kotlin(&s).unwrap();
+    let stores = file(&kotlin, "Stores.kt");
+    assert!(!stores.contains("recursive default"), "{stores}");
+    assert!(
+        stores.contains("signal(L11(inner = L10(inner = L9("),
+        "{stores}"
+    );
+    assert!(stores.contains("L0(v = 0)"), "{stores}");
+}
+
+#[test]
+fn kotlin_and_typescript_survive_a_type_that_has_no_value_at_all() {
+    // As for Swift: a schema is data, and a type every way to build which needs itself must
+    // neither loop nor overflow the generator's stack. No Rust core can have such a store.
+    let mut s = Schema::new("t");
+    s.enums.push(common::enum_def(
+        "Never2",
+        "",
+        vec![common::tuple_variant(
+            "Again",
+            0,
+            vec![common::named("Never2")],
+        )],
+    ));
+    s.records
+        .push(record_of("Own", vec![("again", common::named("Own"))]));
+    s.objects.push(common::store(
+        common::object(
+            "Holder",
+            "",
+            vec![common::ctor("Holder", "new", vec![], false)],
+            vec![],
+        ),
+        vec![
+            ("never", common::named("Never2"), false, None),
+            ("own", common::named("Own"), false, None),
+        ],
+    ));
+    let kotlin = Generator::for_crate("t").kotlin(&s).unwrap();
+    assert!(file(&kotlin, "Stores.kt").contains("class Holder"));
+    let ts = Generator::for_crate("t").typescript(&s).unwrap();
+    let stores = file(&ts, "stores.ts");
+    assert!(
+        stores.contains("new Signal<Never2>(undefined as never)"),
+        "{stores}"
+    );
+}
+
+#[test]
+fn swift_survives_a_type_that_has_no_value_at_all() {
+    // Nothing in Rust can be like this (`enum E { A(Box<E>) }` has no value), but a schema is
+    // data: the generator must neither loop nor overflow the stack on it.
+    let mut s = Schema::new("t");
+    s.enums.push(common::enum_def(
+        "Never2",
+        "",
+        vec![common::tuple_variant(
+            "Again",
+            0,
+            vec![common::named("Never2")],
+        )],
+    ));
+    s.records
+        .push(record_of("Own", vec![("again", common::named("Own"))]));
+    // Signals of both types need a placeholder, which no value can give.
+    s.objects.push(common::store(
+        common::object(
+            "Holder",
+            "",
+            vec![common::ctor("Holder", "new", vec![], false)],
+            vec![],
+        ),
+        vec![
+            ("never", common::named("Never2"), false, None),
+            ("own", common::named("Own"), false, None),
+        ],
+    ));
+    let files = Generator::for_crate("t").swift(&s).unwrap();
+    let types = file(&files, "Types.swift");
+    assert!(types.contains("public indirect enum Never2"));
+    // A record that holds itself outright is boxed too, so the layout stays finite.
+    assert!(
+        types.contains("private var _again: UndraIndirect<Own>\n"),
+        "{types}"
+    );
+    assert!(file(&files, "Stores.swift").contains("public final class Holder"));
 }

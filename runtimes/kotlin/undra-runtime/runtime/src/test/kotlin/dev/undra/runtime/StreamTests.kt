@@ -13,6 +13,7 @@ import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ReplyStatus
+import dev.undra.runtime.wire.WireException
 import dev.undra.runtime.wire.decodeAll
 import dev.undra.runtime.wire.encodeToByteArray
 import kotlinx.coroutines.CompletableDeferred
@@ -134,6 +135,127 @@ class StreamTests : Suite() {
                 assertEq(listOf<Byte>(4, 5), e.body.toList())
                 assertEq(0, core.stats().hostPendingCalls)
                 assertEq(0, t.cancels.size)
+            }
+        }
+
+        // ---- flag 3: the core ended the stream with a failure (ADR-036) ----
+
+        case("a stream the core cancels (flag 3, status 3) throws UndraReplyException CANCELLED, never a WireException") {
+            val t = FakeTransport()
+            val cancelled = Payloads.StreamFailure(ReplyStatus.CANCELLED, "the runtime shut down", "")
+            t.onCall = { call -> t.serveStream(call, List(2) { item(it) }, failed = cancelled) }
+            attach(t).use { core ->
+                val seen = ArrayList<Int>()
+                val e: Throwable = assertThrows<Throwable> {
+                    runBlocking { core.stream(TARGET, METHOD, NO_BYTES).collect { seen.add(decode(it)) } }
+                }
+                assertTrue(e !is WireException, "a WireException escaped the UndraException hierarchy: $e")
+                assertTrue(e is UndraReplyException, "expected UndraReplyException, got $e")
+                e as UndraReplyException
+                assertEq(listOf(0, 1), seen)
+                assertEq(ReplyStatus.CANCELLED, e.status)
+                assertEq(0, e.body.size, "a status 3 body is empty (SPEC 3.4)")
+                assertEq(null, e.panicInfo)
+                assertEq(null, e.badRequestReason)
+                assertEq("the call was cancelled", e.message)
+                assertEq(0, core.stats().hostPendingCalls)
+                assertEq(0, t.cancels.size, "the core ended the stream itself; nothing to cancel")
+            }
+        }
+
+        case("a stream that panicked (flag 3, status 2) throws UndraReplyException PANIC with panicInfo") {
+            val t = FakeTransport()
+            val panic = Payloads.StreamFailure(ReplyStatus.PANIC, "boom", "at core.rs:1")
+            t.onCall = { call -> t.serveStream(call, List(1) { item(it) }, failed = panic) }
+            attach(t).use { core ->
+                val e = assertThrows<UndraReplyException> { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
+                assertEq(ReplyStatus.PANIC, e.status)
+                assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), e.panicInfo)
+                // The body is exactly a status 2 reply's: the failure without its status byte.
+                assertEq(panic.toByteArray().drop(1), e.body.toList())
+                assertTrue(e.message!!.contains("boom"), e.message!!)
+                assertEq(0, core.stats().hostPendingCalls)
+                assertEq(0, t.cancels.size)
+            }
+        }
+
+        case("a stream the core refuses (flag 3, status 5) throws UndraReplyException BAD_REQUEST with badRequestReason") {
+            val t = FakeTransport()
+            t.onCall = { call ->
+                t.replyOnCore(call.callId, ReplyStatus.STREAM_OPENED)
+                t.failedOnCore(call.callId, Payloads.StreamFailure(ReplyStatus.BAD_REQUEST, "stale handle", ""))
+            }
+            attach(t).use { core ->
+                val e = assertThrows<UndraReplyException> { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
+                assertEq(ReplyStatus.BAD_REQUEST, e.status)
+                assertEq("stale handle", e.badRequestReason)
+                assertEq(null, e.panicInfo)
+                assertEq(0, core.stats().hostPendingCalls)
+                assertEq(0, t.cancels.size)
+            }
+        }
+
+        case("flag 2 is still the stream's own E: ERROR with the bytes untouched, even when they look like a String") {
+            val t = FakeTransport()
+            val stringLike = Codecs.string.encodeToByteArray("cancelled: the runtime shut down")
+            t.onCall = { call ->
+                t.replyOnCore(call.callId, ReplyStatus.STREAM_OPENED)
+                t.errorOnCore(call.callId, stringLike)
+            }
+            attach(t).use { core ->
+                val e = assertThrows<UndraReplyException> { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
+                assertEq(ReplyStatus.ERROR, e.status)
+                assertTrue(e.body.contentEquals(stringLike), "the E bytes are passed through as they came")
+            }
+        }
+
+        case("a flag-3 body that does not decode ends the stream with an UndraProtocolException (Malformed), inside the UndraException hierarchy") {
+            val valid = Payloads.StreamFailure(ReplyStatus.CANCELLED, "x", "").toByteArray()
+            val malformed = listOf(
+                "empty" to NO_BYTES,
+                "status 1 (a typed error is flag 2)" to byteArrayOf(1) + valid.copyOfRange(1, valid.size),
+                "status 0" to byteArrayOf(0) + valid.copyOfRange(1, valid.size),
+                "status 4" to byteArrayOf(4) + valid.copyOfRange(1, valid.size),
+                "status 6" to byteArrayOf(6) + valid.copyOfRange(1, valid.size),
+                "truncated" to valid.copyOf(valid.size - 1),
+                "trailing byte" to valid + 0,
+                "invalid UTF-8" to byteArrayOf(3, 1, 0, 0, 0, 0xFF.toByte(), 0, 0, 0, 0),
+            )
+            for ((what, body) in malformed) {
+                val t = FakeTransport()
+                t.onCall = { call ->
+                    t.replyOnCore(call.callId, ReplyStatus.STREAM_OPENED)
+                    t.failedOnCore(call.callId, body)
+                }
+                attach(t).use { core ->
+                    val e = assertThrows<UndraProtocolException>(what) { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
+                    assertTrue(e.message!!.startsWith("the core sent a malformed stream failure: "), "$what: ${e.message}")
+                    assertTrue(UndraCallError.mappedStream(e) is UndraCallError.Malformed, "$what: maps to Malformed")
+                    assertEq(0, core.stats().hostPendingCalls, what)
+                }
+            }
+        }
+
+        case("a flag-3 item before the stream opened fails the collection the same way") {
+            val t = FakeTransport()
+            t.onCall = { call -> t.failedOnCore(call.callId, Payloads.StreamFailure(ReplyStatus.CANCELLED, "a restore replaced the receiver", "")) }
+            attach(t).use { core ->
+                val e = assertThrows<UndraReplyException> { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
+                assertEq(ReplyStatus.CANCELLED, e.status)
+                assertEq(0, t.credits.size, "no credit for a stream that never opened")
+                assertEq(0, core.stats().hostPendingCalls)
+            }
+        }
+
+        case("a flag-3 item for a stream that is no longer pending is ignored") {
+            val t = FakeTransport()
+            t.onCall = { call -> t.serveStream(call, List(2) { item(it) }) }
+            attach(t).use { core ->
+                assertEq(2, runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() }.size)
+                t.failedOnCore(t.calls.single().callId, Payloads.StreamFailure(ReplyStatus.PANIC, "late", ""))
+                t.failedOnCore(t.calls.single().callId, byteArrayOf(9))
+                t.awaitCore()
+                assertEq(0, core.stats().hostPendingCalls)
             }
         }
 
@@ -285,6 +407,7 @@ class StreamTests : Suite() {
             assertEq(0.toUByte(), Payloads.StreamFlag.ITEM.code)
             assertEq(1.toUByte(), Payloads.StreamFlag.END.code)
             assertEq(2.toUByte(), Payloads.StreamFlag.ERROR.code)
+            assertEq(3.toUByte(), Payloads.StreamFlag.FAILED.code)
         }
     }
 

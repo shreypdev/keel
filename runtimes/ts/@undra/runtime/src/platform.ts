@@ -4,7 +4,13 @@ export function hostPlatform(): string {
   return typeof process?.versions?.node === "string" ? "node" : "web";
 }
 
-/** Text of anything thrown. */
+/** Text of anything thrown. Never throws itself (`report` relies on that): a value without a string form reads as its tag. */
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  try {
+    return String(error);
+  } catch {
+    // `Object.create(null)`, a `toString` that throws: `String()` cannot convert it.
+    return Object.prototype.toString.call(error);
+  }
 }

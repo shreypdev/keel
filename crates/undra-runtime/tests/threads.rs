@@ -293,7 +293,7 @@ fn a_task_may_spawn_from_a_blocking_thread() {
 /// The review's blocking-thread repro (M2): a store signal written from a pool worker, which
 /// has a runtime installed but does not hold the core lock.
 #[test]
-fn m2_a_signal_write_on_a_blocking_thread_is_refused_in_debug_builds() {
+fn m2_ow1_a_signal_write_on_a_blocking_thread_is_refused_in_every_build() {
     let (rt, _host) = threaded();
     let h = new_counter_rt(&rt, 0, "");
     let counter = rt.object::<Counter>(h.0).unwrap();
@@ -317,17 +317,11 @@ fn m2_a_signal_write_on_a_blocking_thread_is_refused_in_debug_builds() {
     });
     assert!(wait_until(LONG, || outcome.lock().is_some()));
     let refused = outcome.lock().take().unwrap();
-    #[cfg(debug_assertions)]
-    {
-        let message = refused.expect("debug builds refuse the write");
-        assert!(message.contains("not allowed to mutate state"), "{message}");
-        assert_eq!(counter.count.get(), 0, "refused before anything changed");
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        assert!(refused.is_none(), "release builds do not check");
-        assert_eq!(counter.count.get(), 7);
-    }
+    // Every build refuses it (ADR-035; the audit's release probe delivered it without the core
+    // lock, unordered against the core's transactions).
+    let message = refused.expect("the write is refused in every build");
+    assert!(message.starts_with("error[undra::E0065]"), "{message}");
+    assert_eq!(counter.count.get(), 0, "refused before anything changed");
 
     // The core is unaffected: a task writes the same signal without complaint.
     let (c, done) = (counter.clone(), Arc::new(AtomicBool::new(false)));

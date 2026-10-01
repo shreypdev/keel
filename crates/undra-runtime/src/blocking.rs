@@ -3,10 +3,10 @@
 //!
 //! * **Native**: up to `min(4, cores)` worker threads (or `RuntimeConfig::blocking_threads`),
 //!   started on demand, named `undra-blocking-N`, alive until shutdown.
-//! * **wasm and test runtimes**: there is no thread to run on, so `f` runs **inline,
-//!   synchronously, inside the `spawn_blocking` call**, and the returned future is already
-//!   complete. Code that is correct on wasm therefore never relies on the pool for
-//!   concurrency.
+//! * **wasm**: there is no thread to run on, so `f` runs **inline, synchronously, inside the
+//!   `spawn_blocking` call**, and the returned future is already complete. Code that is correct
+//!   on wasm therefore never relies on the pool for concurrency. (Test runtimes use the real
+//!   pool, ADR-023, so a test sees the native rules.)
 //!
 //! The closure runs with the runtime installed as current on its thread, so `Ctx::current()`
 //! works, but *without the core lock*: it must not write signals or call the host entry
@@ -75,9 +75,11 @@ impl<T> Future for BlockingTask<T> {
     }
 }
 
-/// Wraps `f` into a job that stores its outcome in a fresh slot.
+/// Wraps `f` into a job that stores its outcome in a fresh slot. The job holds the runtime weakly
+/// until it runs (ADR-034); a runtime that is gone by then does not run it (its pool is being torn
+/// down, and so is the task that would await the result).
 fn make_job<T: Send + 'static>(
-    ctx: crate::Ctx,
+    ctx: crate::WeakCtx,
     f: impl FnOnce() -> T + Send + 'static,
 ) -> (Job, Arc<Slot<T>>) {
     let slot = Arc::new(Slot {
@@ -88,8 +90,16 @@ fn make_job<T: Send + 'static>(
     });
     let out = slot.clone();
     let job: Job = Box::new(move || {
-        let _scope = ctx.enter();
-        out.complete(guard::guarded(f));
+        let Ok(ctx) = ctx.upgrade() else {
+            return;
+        };
+        let scope = ctx.enter();
+        drop(ctx);
+        let result = guard::guarded(f);
+        // Leave the runtime before waking the awaiting task: the scope may hold the last strong
+        // reference, and the runtime it drops must not find its own job still running here.
+        drop(scope);
+        out.complete(result);
     });
     (job, slot)
 }
@@ -213,7 +223,10 @@ mod native {
                     let shared = self.shared.clone();
                     let spawned = std::thread::Builder::new()
                         .name(format!("undra-blocking-{n}"))
-                        .spawn(move || worker(&shared));
+                        .spawn(move || {
+                            let _alive = crate::testing::ThreadMark::enter();
+                            worker(&shared);
+                        });
                     match spawned {
                         Ok(handle) => self.workers.lock().push(handle),
                         Err(_) => {
@@ -320,7 +333,7 @@ impl Blocking {
     /// Runs `f` (see the module documentation for where).
     pub(crate) fn spawn<T: Send + 'static>(
         &self,
-        ctx: crate::Ctx,
+        ctx: crate::WeakCtx,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> BlockingTask<T> {
         let (job, slot) = make_job(ctx, f);

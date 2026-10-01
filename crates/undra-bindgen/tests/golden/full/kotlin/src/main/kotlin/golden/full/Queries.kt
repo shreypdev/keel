@@ -2,8 +2,8 @@
 
 package golden.full
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.UndraStore
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
@@ -39,68 +39,92 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
-    /** Fetches again now, even if the data is fresh. */
+    /**
+     * Fetches again now, even if the data is fresh.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun refetch() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.REFETCH),
-            UndraIds.Objects.TodosQueryHandle.REFETCH,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.REFETCH),
+                UndraIds.Objects.TodosQueryHandle.REFETCH,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodosQueryHandle.refetch")
+        }
     }
 
-    /** Marks the cached entry stale; it refetches while observed. */
+    /**
+     * Marks the cached entry stale; it refetches while observed.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun invalidate() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.INVALIDATE),
-            UndraIds.Objects.TodosQueryHandle.INVALIDATE,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodosQueryHandle.INVALIDATE),
+                UndraIds.Objects.TodosQueryHandle.INVALIDATE,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "TodosQueryHandle.invalidate")
+        }
     }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _data.value = codecOptionPage.decode(reader)
-                    reader.finish()
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionPage.decode(reader)
+                        reader.finish()
+                        _data.value = value
+                    }
                 }
-            }
-            1u -> {
-                if (op == ChangeOp.FULL) {
-                    _status.value = QueryStatus.decode(reader)
-                    reader.finish()
+                1u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = QueryStatus.decode(reader)
+                        reader.finish()
+                        _status.value = value
+                    }
                 }
-            }
-            2u -> {
-                if (op == ChangeOp.FULL) {
-                    _error.value = codecOptionTodoError.decode(reader)
-                    reader.finish()
+                2u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTodoError.decode(reader)
+                        reader.finish()
+                        _error.value = value
+                    }
                 }
-            }
-            3u -> {
-                if (op == ChangeOp.FULL) {
-                    _fetching.value = Codecs.bool.decode(reader)
-                    reader.finish()
+                3u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.bool.decode(reader)
+                        reader.finish()
+                        _fetching.value = value
+                    }
                 }
-            }
-            4u -> {
-                if (op == ChangeOp.FULL) {
-                    _updatedAt.value = codecOptionTimestamp.decode(reader)
-                    reader.finish()
+                4u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTimestamp.decode(reader)
+                        reader.finish()
+                        _updatedAt.value = value
+                    }
                 }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "TodosQueryHandle.apply(signal: $signalId)")
         }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(page: UInt, ctx: UndraCore = UndraCore.shared): TodosQueryHandle {
             val w = UndraWriter()
             w.writeU32(page)
-            val handle = ctx.construct(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
+            val handle = ctx.constructObject(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
             return TodosQueryHandle(ctx, handle)
         }
     }
@@ -109,20 +133,22 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
 /**
  * Runs the `add_todo` mutation.
  * @throws TodoError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
  */
 suspend fun addTodo(title: String, ctx: UndraCore = UndraCore.shared): Todo {
     val w = UndraWriter()
     w.writeStr(title)
-    val body = try {
-        ctx.call(
+    try {
+        val body = ctx.call(
             CallTarget.FreeFunction(UndraIds.Queries.ADD_TODO),
             UndraIds.Queries.ADD_TODO,
             w.toByteArray(),
         )
-    } catch (e: UndraReplyException) {
-        throw TodoError.fromReply(e)
+        return Todo.decodeAll(body)
+    } catch (e: Exception) {
+        throw UndraCallError.mapped(e, TodoError)
     }
-    return Todo.decodeAll(body)
 }
 
 private val codecOptionPage = Codecs.option(Page)

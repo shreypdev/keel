@@ -20,7 +20,7 @@
 <meta name="twitter:description" content="What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.">
 <meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/api-kotlin.html#article","headline":"API overview, Kotlin · Undra docs","description":"What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.","url":"https://shreypdev.github.io/undra/docs/api-kotlin.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"API overview, Kotlin","item":"https://shreypdev.github.io/undra/docs/api-kotlin.html"}]}]}
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/api-kotlin.html#article","headline":"API overview, Kotlin · Undra docs","description":"What Undra's generated Kotlin looks like: data classes, sealed types, suspend functions, StateFlow-backed stores, query handles and ports.","url":"https://shreypdev.github.io/undra/docs/api-kotlin.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"API overview, Kotlin","item":"https://shreypdev.github.io/undra/docs/api-kotlin.html"}]}]}
 </script>
 <!-- chrome:head -->
 <meta name="theme-color" content="#0a0a0a">
@@ -75,7 +75,7 @@
         )
     }
 }</code></pre></div>
-<p>The core is <code>libundra_core.so</code>, which <code>undra build --platform android</code> writes to <code>build/android/jniLibs/&lt;abi&gt;/</code>. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: <code>Todos()</code> is <code>Todos(ctx = UndraCore.shared)</code>.</p>
+<p>The core is <code>libundra_core.so</code>, which <code>undra build --platform android</code> writes to <code>build/android/jniLibs/&lt;abi&gt;/</code>. On Android the runtime installs the adapters that need nothing from the platform (Clock, Rng, Log, Timer); pass the others you want to replace. After loading, every generated type defaults to the shared core: <code>Todos()</code> is <code>Todos(ctx = UndraCore.shared)</code>. Before a core is loaded, or after it was closed, <code>UndraCore.shared</code> is a closed placeholder: constructors and calls on it fail with <code>UndraCallError.Unavailable</code> instead of crashing, and the first use logs what to do. Check <code>UndraCore.current</code>, not <code>shared</code>, to learn whether a core is loaded.</p>
 <h2 id="type-mapping">Type mapping<a class="anchor" href="#type-mapping" aria-label="Link to this section">#</a></h2>
 <div class="table-wrap"><table><thead><tr><th>Rust</th><th>Kotlin</th></tr></thead><tbody><tr><td><code>bool</code>, <code>f32</code>, <code>f64</code></td><td><code>Boolean</code>, <code>Float</code>, <code>Double</code></td></tr><tr><td><code>i8</code> … <code>i64</code></td><td><code>Byte</code>, <code>Short</code>, <code>Int</code>, <code>Long</code></td></tr><tr><td><code>u8</code> … <code>u64</code></td><td><code>UByte</code>, <code>UShort</code>, <code>UInt</code>, <code>ULong</code></td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>String</code>, <code>ByteArray</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Timestamp</code>, <code>UUID</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T?</code>, <code>List&lt;T&gt;</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>Map&lt;K, V&gt;</code></td></tr><tr><td>record, enum, error</td><td><code>data class</code>, <code>enum class</code> or <code>sealed interface</code>, <code>sealed class</code></td></tr></tbody></table></div>
 <p>Names follow the platform: Rust <code>snake_case</code> becomes <code>camelCase</code> for functions and properties and <code>PascalCase</code> for types. Unit enum variants become <code>UPPER_SNAKE</code> constants; data enum variants become <code>PascalCase</code> classes. Undra does not support <code>Option&lt;Option&lt;T&gt;&gt;</code> because Kotlin cannot express nested optionality (<code>E0063</code>).</p>
@@ -100,7 +100,7 @@ sealed interface Figure : UndraEnum {
 }</code></pre></div>
 <p><code>when (figure)</code> over a sealed interface is exhaustive, so adding a variant in Rust is a compile error in every <code>when</code> that forgot it.</p>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
-<p>A <code>#[undra::error]</code> becomes a <code>sealed class</code> extending <code>UndraException</code>, with the message from <code>#[error("…")]</code>. A failing <code>suspend</code> function throws the typed error, so <code>catch (e: TodoError)</code> and <code>when (e)</code> work.</p>
+<p>A <code>#[undra::error]</code> becomes a <code>sealed class</code> extending <code>UndraException</code>, with the message from <code>#[error("…")]</code>. A generated call that can fail throws exactly one of three things: its own error, thrown as the sealed class itself, so <code>catch (e: TodoError)</code> and <code>when (e)</code> work; <code>CancellationException</code>, when the calling coroutine was cancelled; or <code>UndraCallError</code>, for anything else that went wrong with the call. The method's <code>@throws</code> documentation names its error.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">sealed class TodoError(message: String) : UndraException(message) {
     data object EmptyTitle : TodoError("the title cannot be empty")
     // a variant wrapping another error carries it: data class Http(val cause: HttpError)
@@ -113,20 +113,37 @@ viewModelScope.launch {
         problem = when (e) {
             TodoError.EmptyTitle -&gt; "Give it a title first."
         }
-    }
+    } catch (e: UndraCallError) {
+        problem = e.message   // Panicked, Refused, Unavailable, …
+    }   // a CancellationException ends the coroutine as usual
 }</code></pre></div>
+<p><code>UndraCallError</code> is a sealed class under <code>UndraException</code>, so one <code>catch (e: UndraException)</code> shows either kind of failure to the user, and <code>e.message</code> reads well in a dialog. Every failure of the call is a typed value: no reply status, lost connection or undecodable byte reaches you as a bare <code>UndraException</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>Case</th><th>When</th></tr></thead><tbody><tr><td><code>CancelledByCore</code></td><td>The core cancelled the call: a restore replaced the object it ran on, or the core shut down. Not a <code>CancellationException</code>, because your coroutine was not cancelled and the write did not land.</td></tr><tr><td><code>Panicked(panicMessage, backtrace)</code></td><td>The core panicked while running the call. It caught the panic and keeps working.</td></tr><tr><td><code>Refused(reason)</code></td><td>The core would not run the call: the object was closed or replaced by a restore, the call came from inside one of the core's callbacks (<code>E_REENTRANT</code>), or its arguments did not decode.</td></tr><tr><td><code>Unavailable(transport)</code></td><td>The core cannot be reached: it was closed or never loaded, or the remote connection closed or timed out. <code>transport</code> is an <code>UndraTransportException</code> whose <code>reason</code> says which: <code>CONNECTION_LOST</code>, <code>CLOSED</code>, <code>TIMEOUT</code> or <code>INTERRUPTED</code>. While <code>undra dev</code> is reconnecting, every call fails with it at once (<code>CONNECTION_LOST</code>); so does every call on a core that a rebuild closed for good (<code>transport.cause</code> is an <code>UndraSessionLostException</code>).</td></tr><tr><td><code>Malformed(detail)</code></td><td>The core answered with something the bindings cannot read. After a successful schema check this is a bug in Undra; report it with the text.</td></tr></tbody></table></div>
+<p><strong>Commands report instead of throwing.</strong> A synchronous method that returns nothing and has no error type, such as <code>store.setFilter(f)</code>, stays non-throwing, so a Compose <code>onClick</code> calls it directly. If it fails, the runtime logs the failure at error level, passes an <code>UndraUnhandledError</code> to <code>LoadOptions.onError</code> and returns. A store's flows change only from the core's change-sets, so a refused command leaves the screen showing exactly what the core holds. A value the wire cannot represent is reported as <code>Malformed</code>, not thrown into the handler. A store that cannot decode a change from the core skips it and reports it the same way, and so does a malformed change-set (dropped whole) or a port implementation that failed.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">UndraCore.load(
+    LoadOptions(
+        expectedSchemaHash = UndraIds.SCHEMA_HASH,
+        onError = { unhandled -&gt;
+            // "Todos.toggle failed: the Undra core refused the call: …"
+            Log.w("app", "${unhandled.operation} failed: ${unhandled.error.message}")
+        },
+    ),
+)</code></pre></div>
+<p>The handler runs on the thread that made the call (the main thread for a click), so keep it short, and it must not call into Undra. To crash at the failing line in debug builds, install <code>onError = { throw AssertionError(it) }</code>.</p>
+<p><strong>A lost connection is not an <code>onError</code> event.</strong> Over <code>undra dev</code>, a command tapped while the dev server is away fails with <code>Unavailable</code> too, and the connection state (<code>connectionState</code> on the core <code>load</code> returned, or <code>LoadOptions.onConnectionChange</code>) already says so, once. A failure that is the connection being down (<code>CONNECTION_LOST</code>) is therefore logged at warning level and not handed to <code>onError</code>; a crash reporter would otherwise get one event per tap for as long as the laptop sleeps. Everything else <code>Unavailable</code> is still reported: a command on a core you closed yourself, and a timeout.</p>
 <h2 id="objects-and-functions">Objects and functions<a class="anchor" href="#objects-and-functions" aria-label="Link to this section">#</a></h2>
-<p>An object is a class holding a handle into the core. Sync methods are plain functions, async methods are <code>suspend</code>, and stream methods return a <code>Flow</code>. A free Rust function is a top-level Kotlin function that takes the core as its last, defaulted parameter.</p>
+<p>An object is a class holding a handle into the core. Sync methods that return a value are plain functions, async methods are <code>suspend</code>, a sync method that returns nothing is a command (it reports instead of throwing, see <a href="#errors">Errors</a>), and stream methods return a <code>Flow</code> that fails with the same errors while you collect it. A free Rust function is a top-level Kotlin function that takes the core as its last, defaulted parameter.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     fun counters(): ProbeCounters                       // sync
     suspend fun wait(ms: UInt): UInt                    // async, cancellable
     fun ticks(count: UInt): Flow&lt;UInt&gt;                  // stream
+    fun reset()                                         // a command
     companion object { fun create(ctx: UndraCore = UndraCore.shared): Probe }
 }
 
 fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
 suspend fun createRemoteTodo(list: String, title: String, ctx: UndraCore = UndraCore.shared): RemoteTodo</code></pre></div>
-<p>Cancelling the coroutine cancels the call in the core, and a <code>Flow</code> applies backpressure: the runtime grants credit as your collector consumes items. The runtime contains core panics at the boundary, so a bug in the core is a typed failure, not a crash.</p>
+<p>Cancelling the coroutine cancels the call in the core, and a <code>Flow</code> applies backpressure: the runtime grants credit as your collector consumes items. The runtime contains core panics at the boundary: a bug in the core fails the call with <code>Panicked</code>, not a crash.</p>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p>A store extends <code>UndraStore</code>. Every signal is a read-only <code>StateFlow</code>; computed signals are updated by the core. Read them in Compose with <code>collectAsState()</code>, no extra module needed.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">class Todos : UndraStore {
@@ -136,7 +153,7 @@ suspend fun createRemoteTodo(list: String, title: String, ctx: UndraCore = Undra
     val remaining: StateFlow&lt;UInt&gt;            // computed by the core
 
     constructor(ctx: UndraCore = UndraCore.shared)
-    fun setFilter(f: Filter)
+    fun setFilter(f: Filter)                  // a command
     suspend fun add(title: String): Todo      // throws TodoError
 }</code></pre></div>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">@Composable
@@ -158,7 +175,7 @@ val items by inbox.data.collectAsState()        // List&lt;RemoteTodo&gt;?
 val busy by inbox.fetching.collectAsState()</code></pre></div>
 <p>See <a href="queries.html">Queries &amp; mutations</a>.</p>
 <h2 id="ports">Ports<a class="anchor" href="#ports" aria-label="Link to this section">#</a></h2>
-<p>The ten standard ports are implemented in <code>dev.undra.runtime.adapters</code> (<code>OkHttp</code> or <code>HttpURLConnection</code>, <code>SharedPreferences</code>-backed files, <code>EncryptedFile</code>, <code>ConnectivityManager</code>, <code>ProcessLifecycleOwner</code> and so on) and are not generated into your module. You replace one by passing an implementation in <code>LoadOptions.adapters</code>, keyed by its port id. A port you define yourself becomes an <code>interface</code>:</p>
+<p>The ten standard ports are implemented in <code>dev.undra.runtime.adapters</code> and, for Android, in the <code>android-adapters</code> module (<code>HttpURLConnection</code>, files, an Android Keystore key, <code>ConnectivityManager</code>, activity lifecycle callbacks and so on; <code>AndroidPlatformDefaults.install(core, context)</code> registers them all) and are not generated into your module. You replace one by passing an implementation in <code>LoadOptions.adapters</code>, keyed by its port id, or by registering it after the load with <code>core.registerPort</code>. A port you define yourself becomes an <code>interface</code>:</p>
 <div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">interface Http : UndraPort {
     suspend fun request(req: HttpRequest): HttpResponse     // throws HttpError
 }</code></pre></div>

@@ -157,6 +157,8 @@ final class WireVectorTests: XCTestCase {
             return checkReply(name: name, hex: hex, value: value)
         case "changeset payload":
             return checkChangeSet(name: name, hex: hex, value: value)
+        case "stream item payload":
+            return checkStreamItem(name: name, hex: hex, value: value)
         case "keyed patch (item i32)":
             return checkPatch(name: name, hex: hex, value: value)
         default:
@@ -345,6 +347,45 @@ final class WireVectorTests: XCTestCase {
             ))
         }
         assertCodec(Wire.ChangeSet(txnId: txnId, entries: entries), hex: hex, name)
+        return true
+    }
+
+    /// A stream item (docs/SPEC.md section 3.7, ADR-036): `{call_id, flag, body_hex}`, or for flag 3
+    /// (`failed`) `{call_id, flag, status, message, detail}`, the fields of its `Wire.StreamFailure`.
+    private func checkStreamItem(name: String, hex: String, value: Any) -> Bool {
+        guard let fields = value as? [String: Any],
+              let rawCall = jsonUInt64(jsonField(fields, "call_id")),
+              let callId = UInt32(exactly: rawCall),
+              let rawFlag = jsonUInt64(jsonField(fields, "flag")),
+              let flagByte = UInt8(exactly: rawFlag),
+              let flag = Wire.StreamFlag(rawValue: flagByte)
+        else { return bad(name, "stream item fields") }
+        guard flag == .failed else {
+            // Flag 1 (end) has no body; the others carry theirs as hex.
+            let bodyHex = (fields["body_hex"] as? String) ?? ""
+            if flag != .end && fields["body_hex"] == nil {
+                return bad(name, "body_hex")
+            }
+            assertCodec(Wire.StreamItem(callId: callId, flag: flag, body: ArraySlice(hexToBytes(bodyHex))), hex: hex, name)
+            return true
+        }
+        guard let rawStatus = jsonUInt64(jsonField(fields, "status")),
+              let statusByte = UInt8(exactly: rawStatus),
+              let status = ReplyStatus(rawValue: statusByte),
+              Wire.StreamFailure.allows(status),
+              let message = fields["message"] as? String,
+              let detail = fields["detail"] as? String
+        else { return bad(name, "stream failure fields") }
+        let failure = Wire.StreamFailure(status: status, message: message, detail: detail)
+        // The body is what follows `call_id u32, flag u8`.
+        assertCodec(failure, hex: bytesToHex(Array(hexToBytes(hex).dropFirst(5))), "\(name) failure body")
+        assertCodec(Wire.StreamItem(callId: callId, flag: .failed, body: ArraySlice(failure.encode())), hex: hex, name)
+        do {
+            let decoded = try Wire.StreamItem.decode(hexToBytes(hex))
+            XCTAssertEqual(try decoded.failure(), failure, "\(name) failure")
+        } catch {
+            XCTFail("\(name) decode threw \(error)")
+        }
         return true
     }
 

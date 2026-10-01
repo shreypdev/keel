@@ -33,10 +33,11 @@
 //! assert!(table.get::<Counter>(second).is_ok());
 //! ```
 
+use crate::atomic_update::cas_update;
 use core::fmt;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
@@ -213,12 +214,11 @@ impl Generations {
 
     /// The next generation, or `None` if all `u32::MAX` of them have been issued.
     fn issue(&self) -> Option<u32> {
-        self.last
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |last| {
-                last.checked_add(1)
-            })
-            .ok()
-            .map(|previous| previous + 1)
+        cas_update(&self.last, Ordering::AcqRel, Ordering::Acquire, |last| {
+            last.checked_add(1)
+        })
+        .ok()
+        .map(|previous| previous + 1)
     }
 
     /// The highest generation issued so far.
@@ -255,6 +255,9 @@ pub(crate) struct Cleared {
 /// The generation-tagged slab of live objects. See the [module documentation](self).
 pub struct ObjectTable {
     inner: RwLock<Inner>,
+    /// The id of the runtime that owns the table: every store placed in it learns it
+    /// (`StoreCell::set_owner`, ADR-035). `0` for a table no runtime owns.
+    owner: AtomicU64,
     /// `None`: the process-wide counter. Tables built with [`ObjectTable::isolated`] own one
     /// (unit tests that need exact generations).
     own_generations: Option<Generations>,
@@ -277,8 +280,14 @@ impl ObjectTable {
                 live: 0,
                 stores: BTreeSet::new(),
             }),
+            owner: AtomicU64::new(0),
             own_generations: None,
         }
+    }
+
+    /// Records the runtime that owns the table; stores inserted from now on learn it.
+    pub(crate) fn set_owner(&self, runtime_id: u64) {
+        self.owner.store(runtime_id, Ordering::Relaxed);
     }
 
     /// A table with a generation counter of its own, starting at 1: the same behaviour with
@@ -383,6 +392,8 @@ impl ObjectTable {
             handle
         };
         if let Some(cell) = cell {
+            // The owner first: a commit that sees the handle must route to the right runtime.
+            cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
         }
         handle
@@ -437,6 +448,7 @@ impl ObjectTable {
             }
         }
         if let Some(cell) = cell {
+            cell.set_owner(self.owner.load(Ordering::Relaxed));
             cell.set_handle(handle.0);
         }
         Ok(())

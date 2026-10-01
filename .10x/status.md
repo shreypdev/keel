@@ -296,3 +296,68 @@ Matrix at checkpoint 3: Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · wasm 
 Every piece of the launch-v2 spec and every review follow-up is merged; no worktrees remain.
 Matrix at checkpoint 4: Rust 2,236 · TS 931 · Kotlin 500 · Swift 425 · web playground 102 · wasm 29 · contracts 54/54.
 CI has been green on every `main` run since `1b550c1` except two flakes, both fixed (the alloc test, the port test).
+
+## v1.x program (2026-10-01, afternoon) — integrator ledger
+
+Spec `.10x/specs/2026-10-01-v1x-default-choice-design.md` (Tracks A–H, Amendments A–D). Phase 1 pieces
+merged in dependency order after an adversarial review each; every merge ran the full local matrix first.
+
+### Checkpoint 5 (2026-10-01, afternoon) — phase 1 landing
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| gap audit + ADR-034…037 drafts; competitive limitations (68, 36-row matrix); ADR-039 derived lists | `c40e2d6`, `15c6098` | design artefacts only; Amendments B–D record the decisions |
+| C1+C2 schema-json: `undra_schema_json` is the whole schema (ADR-050), Swift `Port*` types public, bindgen fallback gone | `249ee26` | opus review `.10x/reviews/2026-10-01-schema-json-review.md`: a doc-only change moves the export, not the hash (probed on four paths); M1 → ADR-050 |
+| E1 device-bench: `undra bench --device`, simulator/emulator/Chromium rows, `bench/results/device/*.json`, floor gates on the site | `4b2515a` | opus review `.10x/reviews/2026-10-01-device-bench-review.md`: rows publishable as labelled; the web size claim was false (85 → **135 KB gzipped, over budget**), corrected everywhere in `535f2c8`, E5 tracks the fix |
+| D1 diagnostics: 44 E-codes with what/why/fix/link, an emitter and a golden each; `site/docs/errors.html` regenerates | `42fdd42` | opus review `.10x/reviews/2026-10-01-diagnostics-review.md`: R8 holds on every reachable case; 3 fixed in `1931f81`; Rust 2,296 |
+| B1+B2 dev-loop: Android remote mode (RFC 6455 client in Kotlin), auto-reconnect with backoff + session resume on all three platforms (ADR-051), visible status, hostile-server tests | `a0d638f` (fast-forward after a cross-merge on the branch) | opus review `.10x/reviews/2026-10-01-dev-loop-review.md`: session token is URL material only, resume grace off by default; remote-mode smoke on the `undra` emulator; Rust 2,327 · Kotlin 555 · Swift 465 · TS 966 · contracts 54/54 |
+
+Matrix at checkpoint 5: Rust 2,327 · TS 966 · Kotlin 555 · Swift 465 · contracts 54/54 (18 × 3).
+
+In flight (one worktree each): `parity` (C3/C4, reviewed, crossing main) → `android-adapters`
+(reviewed, awaiting cross-merge) → `runtime-lifecycle` (Track A, ADR-034/035/036 + ADR-019
+amendment, implemented, opus review running) → `react-native` (G1, implemented, review running);
+`tooling` (D2–D5) and `wasm-size` (E5, ADR-052) started in parallel. After those: wave 0 of the
+boundary plan (`abi-table` ADR-044, `ios-floor` ADR-045, `newtypes` ADR-042), `persistence-v2`
+(ADR-037/049), `dev-reload` (B3), `testkit` (F), derived lists (ADR-039), then the v1.2 bets.
+
+### Checkpoint 6 (2026-10-01, late afternoon) — parity landed; Rust 1.99.0 handled
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| Rust 1.99.0 reached stable and failed every CI job on `a0d638f` (`fetch_update` deprecated, const-eval panic wording changed under the trybuild goldens) | `d59b486`, `43348eb` | `cas_update` (MSRV-safe CAS loop) replaces the three call sites; CI pins `1.98.1` in ci/bench/site/release.yml; the deliberate bump is an open item (header comment in `ci.yml` says how) |
+| the schema-docs test (CI-only, `--ignored`) pinned the playground hash by hand and went stale when device-bench moved it | `3a2ff1f` | the test reads the hash from the committed bindings |
+| C3+C4 parity: Kotlin/TS `UndraCallError` closed sets, `UndraTransportException` under `UndraException`, non-throwing commands with `onError`/`report`, `onError` silent for a drop the connection state reports, TS snapshot/restore, worker-mode fix, recursive records, `docs/ERRORS.md` (replaces `SWIFT_ERRORS.md`), interop scripts assert the typed failure | `143b72a` | opus review (parity) + the cross-merge record in `.10x/decisions/sde/parity.md`; Rust 2,349 · Kotlin 585 · TS 1,049 · Swift 467 · wasm 24 · contracts 54/54 |
+
+Matrix at checkpoint 6: Rust 2,349 · TS 1,049 · Kotlin 585 · Swift 467 · wasm 24 · contracts 54/54.
+In flight: `android-adapters` (crossing main), `runtime-lifecycle` (opus review), `react-native`
+(cross-merge + CI jobs + Android reload re-check), `tooling` (D2–D5), `wasm-size` (E5, ADR-052),
+`site-errors` (API pages for the Kotlin/TS error channel).
+
+### Checkpoint 7 (2026-10-01, evening) — React Native landed
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| site: the Kotlin/TS API pages describe the typed error channel (samples compiled under kotlinc and tsc --strict); roadmap refreshed to what shipped / in flight / next | `c538222`, `afa4bfd` | docs; 342/350 landing words |
+| a Kotlin test lambda CI's kotlinc 2.0.21 could not infer (brew's 2.4.20 could) | `7c8d2d8` | the Kotlin suite now runs under 2.0.21 too (ONBOARDING row) |
+| **G1 React Native runtime** (ADR-038): `@undra/react-native` TurboModule over the C ABI under the TS mirror, `undra build --platform rn`, the playground RN app, a `react-native` CI job + `rn-devices.yml` (simulator/emulator on PRs touching RN, weekly), `scripts/rn-device-checks.sh` | `6fe1643` | opus review `.10x/reviews/2026-10-01-react-native-review.md`: ownership trace holds, 2 Medium fixed (a failed second start froze the running core; a stopped runtime kept calling the new core), 11 Low fixed; 10/10 on-device checks on the iPhone 17 Pro simulator and the `undra-rn` emulator; 20 Android reloads with flat heap; limits documented in `docs/REACT_NATIVE.md` (RN 0.87 New Architecture, one instance per process until ADR-044, ~10k patches/s on Hermes — E4, app supplies adapters — G1b open) |
+
+Matrix at checkpoint 7: Rust 2,351 · TS 1,049 · Kotlin 585 · Swift 467 · RN 41 + 14/14 C++ · contracts 54/54.
+
+### Checkpoint 8 (2026-10-01, evening) — Android adapters landed
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **Android platform adapters**: `AndroidPlatformDefaults.install(core, context)` registers Kv, SecureStore (Keystore-sealed), Fs (root-guarded), Http, Connectivity and Lifecycle; the playground and the `undra init` template use it instead of the fakes; JVM `FsAdapter.delete` recursive, `FileKv.list` header-only; typed port errors stay typed (`HttpError.Network` offline), untyped adapter failures reach `onError` as `Malformed`; SPEC §8 Fs semantics; `docs/ERRORS.md` rows | `429fb9f` | opus review `.10x/reviews/2026-10-01-android-adapters-review.md` + cross-merge record in `.10x/decisions/sde/android-adapters.md`; Kotlin 588 (brew 2.4.20 and CI's 2.0.21), adapters 130/131 JVM, **112/113 instrumented on the `undra` AVD**, `smoke.sh` passed (offline queue, replay with the idempotency key), remote mode against `undra dev` reinstalls the adapters after a session loss; contracts 54/54; Rust 2,351. Open: M1 Maven publishing; remote cores drop Connectivity/Lifecycle reports made while the connection is down (dev only); F3–F6 |
+
+Matrix at checkpoint 8: Rust 2,351 · TS 1,049 · Kotlin 588 · Swift 467 · RN 41 · contracts 54/54.
+
+### Checkpoint 9 (2026-10-01, night) — Track A landed: the runtime lifecycle
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **Track A** — ADR-034 `WeakCtx`/`Gone`/`Ctx::closed()`, a runtime ends when its owner lets go (Kotlin `close()` ends an in-process core; `runtime_threads` in stats); ADR-035 off-core writes refused in every build (E0065, `try_set` → `WriteError::OffCore`, change-sets routed to the owning runtime); ADR-019 amendment: a panicking computed poisons only itself; ADR-036 typed stream errors (flag 2 carries `E`, flag 3 `StreamFailure{status,message,detail}`, the text-guessing stop-gap removed on Kotlin/TS, status 5 → `Refused` on all three); macros accept `Stream<Item = Result<T,E>>`; S07.6/S07.7/S17.7; ADR-034 Amendment A (what a call pins) | `2186bad` | opus review `.10x/reviews/2026-10-01-runtime-lifecycle-review.md`: merge after fixes; no High; M1 fixed (S17.7 could not fail — `runtime_threads == 0` asserted after every close, proven with a mutant), M2 documented as the amendment; JNI shutdown raced under Miri; "answered once" raced in release; the write checker compares runtime ids, 8.5 ns vs 65 ns; wire version stays 1 per ADR-036/Amendment C. Rust 2,400 · TS 1,102 · Kotlin 612 (2.4.20 and 2.0.21) · Swift 480 · RN 45 · wasm 19+24 · contracts 54/54; playground hash `0xddcdea47fa95a8d4`. Open Lows: L2–L5, L8, TS unknown-flag path |
+
+Matrix at checkpoint 9: Rust 2,400 · TS 1,102 · Kotlin 612 · Swift 480 · RN 45 · contracts 54/54.
+In flight: `wasm-size` (E5, review), `tooling` (D2–D5, review), `dev-reload` (B3, ADR-053 accepted), `docs-reference` (H3), `rn-adapters` (G1b).
+Unblocked now that Track A is in: `abi-table` (ADR-044), `persistence-v2` (ADR-037/049), `derived-lists` (ADR-039), E4, `ts-runtime-size`, `testkit`, the Rust 1.99 bump.

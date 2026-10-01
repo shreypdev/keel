@@ -7,8 +7,9 @@ import XCTest
 /// would use them and through `UndraCore`'s own API for the raw checks.
 ///
 /// XCTest runs a class's tests in alphabetical order, which is the order of the ids
-/// (`testS01_` .. `testS18_`). They share one core; S16 is the one that shuts it down and loads it
-/// again, so it is ordered before S17 and S18 on purpose.
+/// (`testS01_` .. `testS18_`). They share one core. S16 shuts it down and loads it again, S17 shuts
+/// it down at its end (and loads and closes a core of its own), and S18 then loads it once more
+/// through `Fixture.core()`.
 @MainActor
 final class ContractScenarios: ScenarioCase {
     /// The shared core.

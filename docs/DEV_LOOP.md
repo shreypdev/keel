@@ -48,9 +48,8 @@ a device has to reach you, and then only on a network you trust.
   the default `127.0.0.1` is reachable at it. A USB device has no such name: `adb reverse` makes the device's own
   `127.0.0.1:<port>` reach yours. `undra dev --android` runs it for every attached device (only the one in
   `ANDROID_SERIAL`, when that is set) at start and after every restart.
-* Debug builds only. The Android dev URL, the `INTERNET` permission the playground needs for it and
-  `usesCleartextTraffic` live in the debug build type (`app/src/debug/AndroidManifest.xml`, a `BuildConfig` field);
-  a release build has none of them. On iOS the URL is read under `#if DEBUG`, and the app needs
+* Debug builds only. The Android dev URL and `usesCleartextTraffic` live in the debug build type
+  (`app/src/debug/AndroidManifest.xml`, a `BuildConfig` field); a release build has neither. On iOS the URL is read under `#if DEBUG`, and the app needs
   `NSAllowsLocalNetworking` in its Info.plist for a `ws://` address. On the web `?undra=` is read only by a
   development build (`import.meta.env.DEV`): a production page that took its core's address from a link would give
   whoever wrote the link its ports and its screen.
@@ -93,9 +92,12 @@ reason is `requested` (you closed the core), `schemaMismatch`, `sessionLost` or 
   do not retry in step: 250, 500, 1000, 2000, 4000, 5000, 5000 ms, jittered. Each attempt gets at most 5 s.
   The first connection of `load` is not retried: it fails fast, as before, with the URL it tried.
 * **In flight.** When the connection drops, every call, stream and pending `observe` fails **at once** with the
-  platform's existing "unavailable" outcome (TypeScript `UndraTransportError("closed")`, Kotlin `UndraException`,
-  Swift `UndraCallError.unavailable(.connectionLost)`). Calls made while reconnecting fail the same way, at once.
-  Nothing waits for the network and nothing is replayed behind your back.
+  platform's "unavailable" outcome (TypeScript `UndraTransportError("closed")`, Kotlin `UndraTransportException`
+  with reason `CONNECTION_LOST`, Swift `UndraTransportError.connectionLost`), which a generated call throws as
+  `UndraCallError.Unavailable` (`docs/ERRORS.md`). Calls made while reconnecting fail the same way, at once.
+  Nothing waits for the network and nothing is replayed behind your back. A command (a method that returns nothing
+  and has no error type) that fails this way is logged at warning level and is **not** handed to `onError`: the
+  connection state already reports the drop.
 * **Resync.** After the handshake the runtime observes every store signal you observed and releases what you
   released meanwhile. The core answers each observation with its current values, so every mirror converges by
   itself. (`connected` is announced after that.)
@@ -147,7 +149,7 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
 | You see | Look at |
 |---|---|
 | The app says it cannot reach the dev server | Is `undra dev` running, on that port? Emulator: `ws://10.0.2.2:<port>`. USB device: `adb reverse tcp:<port> tcp:<port>` (or `undra dev --android`) and `ws://127.0.0.1:<port>`. A phone on Wi-Fi needs `--addr 0.0.0.0:<port>` and your computer's address. |
-| Android: `Cleartext HTTP traffic ... not permitted`, or no connection at all | Only a debug build has the cleartext and `INTERNET` entries; install `:app:installDebug`, not a release build. |
+| Android: `Cleartext HTTP traffic ... not permitted`, or no connection at all | Only a debug build has the cleartext entry (the `INTERNET` permission is in every build); install `:app:installDebug`, not a release build. |
 | iOS: the connection fails at once | `NSAllowsLocalNetworking` in the Info.plist; on a device, the local-network permission prompt. |
 | `schema mismatch` | The core and the bindings differ: `undra bindgen`, rebuild the app. |
 | `refused ... one is already attached` / close 1013 | Another client holds the server: a second simulator, a browser tab, a forgotten app. It retries by itself once the first is gone. |

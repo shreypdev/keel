@@ -1,3 +1,4 @@
+import { UndraCallError } from "@undra/runtime";
 import { useSignal } from "@undra/runtime/react";
 import { type BigList, ListError } from "@playground/core";
 import { useEffect, useRef, useState } from "react";
@@ -60,7 +61,7 @@ export function BigListView({ bigList, autoStream = false }: { readonly bigList:
       setReadout(`${name}: ${(performance.now() - started).toFixed(2)} ms`);
       setProblem(null);
     } catch (error) {
-      setProblem(error instanceof ListError ? error.message : String(error));
+      setProblem(error instanceof ListError || error instanceof UndraCallError ? error.message : String(error));
     }
   };
 

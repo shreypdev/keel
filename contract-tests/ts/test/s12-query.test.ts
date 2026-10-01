@@ -53,7 +53,10 @@ test("S12 query: fetch, stale, refetch", async () => {
     clock.advance(31_000);
     server.on("GET", URL, replies.json(200, [milk, dog]));
     third = await RemoteTodosQueryHandle.create(LIST, core);
-    expect(gets(), "the stale entry is fetched by the new observer").toBe(2);
+    // In wasm-main the core runs the fetch before `create` resumes; a host whose core has its own
+    // thread (the React Native column, like Swift and Kotlin) sees the request a moment later.
+    await waitFor("the stale entry to be fetched by the new observer", () => gets() >= 2);
+    expect(gets(), "the stale entry is fetched by the new observer, once").toBe(2);
     const refreshed = CLOCK_START_MS + 41_000;
     for (const [name, handle] of [["first", first], ["second", second], ["third", third]] as const) {
       await waitFor(`the ${name} handle to show two items`, () => handle.data.peek()?.length === 2 && handle.status.peek() === "success");
@@ -65,6 +68,7 @@ test("S12 query: fetch, stale, refetch", async () => {
 
   await step("4. refetch() fetches although the data is fresh", async () => {
     await second.refetch();
+    await waitFor("the refetch to reach the server", () => gets() >= 3);
     expect(gets()).toBe(3);
     await waitFor("the refetch to finish", () => second.fetching.peek() === false && second.status.peek() === "success");
   });

@@ -3,13 +3,10 @@
 package golden.objects
 
 import dev.undra.runtime.UndraException
-import dev.undra.runtime.UndraReplyException
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
-import dev.undra.runtime.wire.decodeAll
 
 sealed class CalcError(message: String) : UndraException(message) {
     data object Overflow : CalcError("overflow")
@@ -30,11 +27,6 @@ sealed class CalcError(message: String) : UndraException(message) {
                 1 -> DivideByZero
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "CalcError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }

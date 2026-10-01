@@ -92,7 +92,7 @@ class PortTests : Suite() {
                     assertEq(PortStatus.ERROR, typed.status)
                     assertEq(listOf<Byte>(7, 7), typed.body.toList())
                     assertEq(PortOutcome.Unavailable, t.portCall(PORT, FAIL_OTHER, 6u, NO_BYTES))
-                    assertTrue(log.records.any { it.thrown is IllegalStateException })
+                    eventually("the failure was reported") { log.records.any { it.thrown is IllegalStateException } }
                 }
             }
         }

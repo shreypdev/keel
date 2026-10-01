@@ -293,6 +293,130 @@ fn self_in_fields_means_the_type_itself() {
     assert_eq!(def.variants[2].fields[0].ty, TypeRef::named("Expr"));
 }
 
+/// A singly linked list: `Option<Box<Self>>` is the idiomatic spelling of a record that holds
+/// itself, and every platform generator must take it (Swift boxes the field).
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListNode {
+    pub value: i32,
+    pub next: Option<Box<Self>>,
+}
+
+/// Two records that hold each other through boxed options.
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Parent {
+    pub name: String,
+    pub child: Option<Box<Child>>,
+}
+
+/// The other half of `Parent`.
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Child {
+    pub name: String,
+    pub parent: Option<Box<Parent>>,
+}
+
+/// A record and an enum that hold each other.
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Block {
+    pub label: String,
+    pub last: Option<Box<Stmt>>,
+}
+
+/// The enum half of `Block`.
+#[k::api]
+#[derive(Clone, Debug, PartialEq)]
+pub enum Stmt {
+    Nop,
+    Nested(Block),
+}
+
+fn list(values: &[i32]) -> Option<Box<ListNode>> {
+    values.iter().rev().fold(None, |next, &value| {
+        Some(Box::new(ListNode { value, next }))
+    })
+}
+
+#[test]
+fn a_linked_record_is_an_option_of_itself_on_the_wire_and_in_the_schema() {
+    let node = ListNode {
+        value: 1,
+        next: list(&[2, 3]),
+    };
+    let bytes = node.encode_to_vec();
+    // value, then `Some` (1) and the next node, down to `None` (0).
+    assert_eq!(
+        bytes,
+        [
+            1, 0, 0, 0, 1, //
+            2, 0, 0, 0, 1, //
+            3, 0, 0, 0, 0
+        ]
+    );
+    assert_eq!(ListNode::decode_exact(&bytes).unwrap(), node);
+    let end = ListNode {
+        value: 7,
+        next: None,
+    };
+    assert_eq!(end.encode_to_vec(), [7, 0, 0, 0, 0]);
+
+    let def = record_def("ListNode");
+    assert_eq!(def.fields[0].ty, TypeRef::I32);
+    assert_eq!(
+        def.fields[1].ty,
+        TypeRef::option(TypeRef::named("ListNode"))
+    );
+}
+
+#[test]
+fn mutually_recursive_records_round_trip_and_name_each_other() {
+    let family = Parent {
+        name: "p".into(),
+        child: Some(Box::new(Child {
+            name: "c".into(),
+            parent: Some(Box::new(Parent {
+                name: "pp".into(),
+                child: None,
+            })),
+        })),
+    };
+    assert_eq!(
+        Parent::decode_exact(&family.encode_to_vec()).unwrap(),
+        family
+    );
+    assert_eq!(
+        record_def("Parent").fields[1].ty,
+        TypeRef::option(TypeRef::named("Child"))
+    );
+    assert_eq!(
+        record_def("Child").fields[1].ty,
+        TypeRef::option(TypeRef::named("Parent"))
+    );
+}
+
+#[test]
+fn a_record_and_an_enum_can_hold_each_other() {
+    let block = Block {
+        label: "outer".into(),
+        last: Some(Box::new(Stmt::Nested(Block {
+            label: "inner".into(),
+            last: Some(Box::new(Stmt::Nop)),
+        }))),
+    };
+    assert_eq!(Block::decode_exact(&block.encode_to_vec()).unwrap(), block);
+    assert_eq!(
+        record_def("Block").fields[1].ty,
+        TypeRef::option(TypeRef::named("Stmt"))
+    );
+    assert_eq!(
+        enum_def("Stmt").variants[1].fields[0].ty,
+        TypeRef::named("Block")
+    );
+}
+
 /// A second path to the facade, to exercise `crate = ".."`.
 mod rooted {
     pub use undra::{meta, wire};

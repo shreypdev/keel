@@ -29,7 +29,8 @@ public enum class Mode {
  *   with [UndraSchemaMismatchException] if the core reports another one.
  * @property defaultAdapters install the JVM default adapters (`dev.undra.runtime.adapters.JvmAdapters`) for
  *   every standard port not in [adapters]. On Android only the portable ones (Clock, Rng, Log, Timer) are
- *   installed; Http, Kv, SecureStore and Fs come from the `android-adapters` module.
+ *   installed; Http, Kv, SecureStore, Fs, Connectivity and Lifecycle come from the `android-adapters` module, which
+ *   installs all ten with `AndroidPlatformDefaults.install(core, context)` after [UndraCore.load].
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
@@ -38,6 +39,15 @@ public enum class Mode {
  * @property onConnectionChange called with every change of [UndraCore.connectionState], starting with
  *   [ConnectionState.Connecting], on the thread that changed it (a thread of the runtime's own for a reconnect). It
  *   must return quickly and must not call into the core.
+ * @property onError called with every failure that has no caller to throw to (ADR-032, amendment A): a generated
+ *   command (a synchronous method that returns nothing and has no error type) that failed, a store change that
+ *   could not be applied, a malformed change-set, a port implementation that failed. The failure is also logged at
+ *   error level, whether or not a handler is set. The handler runs synchronously on the thread that made the call
+ *   (the main thread for a store's `apply` and for a command called from a click handler); keep it short and do not
+ *   call into Undra from it: a failure reported while a handler runs on the same thread is only logged. An
+ *   `Exception` it throws is logged and dropped; an `Error` propagates, so a debug build can crash on purpose with
+ *   `onError = { throw AssertionError(it) }`. Failures that originate in a core callback (a malformed change-set, a
+ *   failed port) are delivered from the runtime's delivery thread instead.
  */
 public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
@@ -49,11 +59,12 @@ public class LoadOptions(
     public val mirror: MirrorOptions = MirrorOptions(),
     public val reconnect: ReconnectPolicy? = ReconnectPolicy(),
     public val onConnectionChange: ((ConnectionState) -> Unit)? = null,
+    public val onError: ((UndraUnhandledError) -> Unit)? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
             "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
-            "mirror=$mirror, reconnect=$reconnect)"
+            "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"})"
 }
 
 /**

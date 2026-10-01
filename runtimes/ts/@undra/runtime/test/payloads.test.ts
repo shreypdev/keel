@@ -21,6 +21,7 @@ import {
   decodeReply,
   decodeSnapshot,
   decodeStreamCredit,
+  decodeStreamFailure,
   decodeStreamItem,
   decodeTimerFired,
   encodeCall,
@@ -36,16 +37,19 @@ import {
   encodeReply,
   encodeSnapshot,
   encodeStreamCredit,
+  encodeStreamFailure,
   encodeStreamItem,
   encodeTimerFired,
   iterateChangeSet,
   readChangeSetHeader,
+  streamFailureReplyBody,
   type CallPayload,
   type ChangeEntry,
   type ReplyPayload,
+  type StreamFailure,
   type StreamItemPayload,
 } from "../src/wire/payloads.js";
-import { embedded, expectWireError, fromHex, toHex } from "./helpers.js";
+import { catchWireError, embedded, expectWireError, fromHex, toHex } from "./helpers.js";
 
 const i32 = (n: number): Uint8Array => encodeValue(codecs.i32, n);
 const HANDLE = 4294967297n;
@@ -455,17 +459,29 @@ describe("Cancel, StreamCredit and StreamItem", () => {
     expectWireError(() => decodeStreamCredit(fromHex("090000001000000000")), "trailing_bytes");
   });
 
-  it("has the three stream flags of SPEC 3.7", () => {
+  it("has the four stream flags of SPEC 3.7 (ADR-036)", () => {
     expect(StreamFlag.Item).toBe(0);
     expect(StreamFlag.End).toBe(1);
     expect(StreamFlag.Error).toBe(2);
+    expect(StreamFlag.Failed).toBe(3);
   });
 
+  const boom: StreamFailure = { status: ReplyStatus.Panic, message: "boom", detail: "at x" };
   const items: [string, StreamItemPayload, string][] = [
     ["item", { callId: 4, flag: StreamFlag.Item, body: i32(7) }, "04000000" + "00" + "07000000"],
     ["end", { callId: 4, flag: StreamFlag.End }, "04000000" + "01"],
     ["error", { callId: 4, flag: StreamFlag.Error, body: fromHex("0300") }, "04000000" + "02" + "0300"],
     ["empty item", { callId: 4, flag: StreamFlag.Item, body: new Uint8Array(0) }, "04000000" + "00"],
+    [
+      "failure",
+      { callId: 4, flag: StreamFlag.Failed, failure: boom },
+      "04000000" + "03" + "02" + "04000000626f6f6d" + "0400000061742078",
+    ],
+    [
+      "cancellation by the core",
+      { callId: 4, flag: StreamFlag.Failed, failure: { status: ReplyStatus.Cancelled, message: "", detail: "" } },
+      "04000000" + "03" + "03" + "00000000" + "00000000",
+    ],
   ];
   it.each(items)("round-trips a stream %s", (_name, item, hex) => {
     expect(toHex(encodeStreamItem(item))).toBe(hex);
@@ -474,13 +490,103 @@ describe("Cancel, StreamCredit and StreamItem", () => {
   });
 
   it("rejects an unknown flag, a body on End, and a truncated item", () => {
-    expectWireError(() => decodeStreamItem(fromHex("0400000003")), "invalid_tag", { tag: 3, at: 4, ty: "StreamFlag" });
+    expectWireError(() => decodeStreamItem(fromHex("0400000004")), "invalid_tag", { tag: 4, at: 4, ty: "StreamFlag" });
+    expectWireError(() => decodeStreamItem(fromHex("04000000ff")), "invalid_tag", { tag: 255, at: 4, ty: "StreamFlag" });
     expectWireError(() => decodeStreamItem(fromHex("040000000100")), "trailing_bytes", { count: 1 });
     for (let n = 0; n < 5; n++) {
       expectWireError(() => decodeStreamItem(new Uint8Array(n)), "unexpected_eof");
     }
   });
+
+  it("rejects a flag-3 item whose failure is malformed, at the item's offsets", () => {
+    const item = encodeStreamItem({ callId: 4, flag: StreamFlag.Failed, failure: boom });
+    const badStatus = item.slice();
+    badStatus[5] = ReplyStatus.Error;
+    expectWireError(() => decodeStreamItem(badStatus), "invalid_tag", { tag: 1, at: 5, ty: "StreamFailure.status" });
+    expectWireError(() => decodeStreamItem(new Uint8Array([...item, 0])), "trailing_bytes", { count: 1 });
+    // A flag-3 item has no empty body: the status and both strings are required.
+    for (let n = 5; n < item.length; n++) {
+      const err = catchWireError(() => decodeStreamItem(item.subarray(0, n)));
+      expect(["unexpected_eof", "length_too_large"], `prefix ${n}`).toContain(err.code);
+    }
+  });
 });
+
+describe("StreamFailure (the body of a flag-3 stream item, ADR-036)", () => {
+  it("is status u8, message String, detail String", () => {
+    expect(toHex(encodeStreamFailure({ status: ReplyStatus.Panic, message: "boom", detail: "at core.rs:1" }))).toBe(
+      "02" + "04000000626f6f6d" + "0c000000" + toHex(new TextEncoder().encode("at core.rs:1")),
+    );
+    expect(toHex(encodeStreamFailure({ status: ReplyStatus.Cancelled, message: "", detail: "" }))).toBe(
+      "03" + "00000000" + "00000000",
+    );
+  });
+
+  const failures: [string, StreamFailure][] = [
+    ["panic", { status: ReplyStatus.Panic, message: "index out of bounds", detail: "at core::foo\nat core::bar" }],
+    ["cancellation", { status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" }],
+    ["refusal", { status: ReplyStatus.BadRequest, message: "stale handle", detail: "" }],
+    ["unicode and empty strings", { status: ReplyStatus.Panic, message: "\u{1f4a5} café", detail: "日本".repeat(300) }],
+  ];
+  it.each(failures)("round-trips a %s", (_name, failure) => {
+    const bytes = encodeStreamFailure(failure);
+    expect(decodeStreamFailure(bytes)).toEqual(failure);
+    expect(decodeStreamFailure(embedded(bytes))).toEqual(failure);
+  });
+
+  it("accepts only the failure statuses 2, 3 and 5", () => {
+    const body = encodeStreamFailure({ status: ReplyStatus.Cancelled, message: "m", detail: "" });
+    for (const status of [ReplyStatus.Ok, ReplyStatus.Error, ReplyStatus.StreamOpened, 6, 255]) {
+      const bad = body.slice();
+      bad[0] = status;
+      expectWireError(() => decodeStreamFailure(bad), "invalid_tag", { tag: status, at: 0, ty: "StreamFailure.status" });
+    }
+    for (const status of [ReplyStatus.Panic, ReplyStatus.Cancelled, ReplyStatus.BadRequest]) {
+      const good = body.slice();
+      good[0] = status;
+      expect(decodeStreamFailure(good).status).toBe(status);
+    }
+  });
+
+  it("rejects every truncation, trailing bytes and invalid UTF-8", () => {
+    const body = encodeStreamFailure({ status: ReplyStatus.Panic, message: "boom", detail: "at x" });
+    for (let n = 0; n < body.length; n++) {
+      const err = catchWireError(() => decodeStreamFailure(body.subarray(0, n)));
+      expect(["unexpected_eof", "length_too_large"], `prefix ${n}`).toContain(err.code);
+    }
+    expectWireError(() => decodeStreamFailure(new Uint8Array([...body, 0])), "trailing_bytes", { count: 1 });
+    expectWireError(() => decodeStreamFailure(fromHex("02 01000000 ff 00000000")), "invalid_utf8", { at: 1 });
+  });
+
+  it("maps to the section 3.4 body of a failed reply with the same status", () => {
+    // Panic: String message + String backtrace, i.e. the failure body without its status byte.
+    const panic: StreamFailure = { status: ReplyStatus.Panic, message: "boom", detail: "at x" };
+    const panicBody = streamFailureReplyBody(panic);
+    expect(panicBody).toEqual(encodeStreamFailure(panic).subarray(1));
+    expect(decodeReply(encodeReplyWithBody(ReplyStatus.Panic, panicBody))).toEqual({
+      callId: 1,
+      status: ReplyStatus.Panic,
+      message: "boom",
+      backtrace: "at x",
+    });
+    // Cancelled: empty, whatever the reason.
+    const cancelled = streamFailureReplyBody({ status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" });
+    expect(cancelled).toEqual(new Uint8Array(0));
+    expect(decodeReply(encodeReplyWithBody(ReplyStatus.Cancelled, cancelled))).toEqual({ callId: 1, status: ReplyStatus.Cancelled });
+    // Refused: String reason.
+    const refused = streamFailureReplyBody({ status: ReplyStatus.BadRequest, message: "stale handle", detail: "" });
+    expect(decodeReply(encodeReplyWithBody(ReplyStatus.BadRequest, refused))).toEqual({
+      callId: 1,
+      status: ReplyStatus.BadRequest,
+      reason: "stale handle",
+    });
+  });
+});
+
+/** A reply payload for call 1 with `status` and a raw `body`, to check a body against `decodeReply`. */
+function encodeReplyWithBody(status: ReplyStatus, body: Uint8Array): Uint8Array {
+  return new Uint8Array([1, 0, 0, 0, status, ...body]);
+}
 
 describe("Observe, Release and Event", () => {
   it("round-trips Observe", () => {

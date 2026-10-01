@@ -15,7 +15,7 @@ pub(crate) const ALL_SIGNALS: u32 = u32::MAX;
 enum CallState {
     /// Answered by exactly one `Reply`. `constructor` calls yield a new handle.
     Pending { constructor: bool },
-    /// Answered `stream_opened`; items follow until `End` or `Error`.
+    /// Answered `stream_opened`; items follow until `End`, `Error` or `Failed` (ADR-036).
     Stream,
 }
 
@@ -146,9 +146,13 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_stays_open_until_its_end_or_error_marker() {
+    fn a_stream_stays_open_until_its_end_error_or_failed_marker() {
         let mut t = Tracker::default();
-        for (id, closing) in [(1, StreamFlag::End), (2, StreamFlag::Error)] {
+        for (id, closing) in [
+            (1, StreamFlag::End),
+            (2, StreamFlag::Error),
+            (3, StreamFlag::Failed),
+        ] {
             t.begin_call(id, false);
             t.on_reply(id, ReplyStatus::StreamOpened, &[]);
             t.on_stream_item(id, StreamFlag::Item);

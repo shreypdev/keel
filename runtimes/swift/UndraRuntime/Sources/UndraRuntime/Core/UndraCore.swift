@@ -445,7 +445,10 @@ public final class UndraCore: @unchecked Sendable {
     /// consumer's unread window drops below 8, so the core never runs more than about 16 items
     /// ahead of the consumer. Ending the stream early (cancelling the consuming task, or dropping
     /// the stream) cancels it in the core. A stream that fails throws `UndraReplyError` from
-    /// `next()`; typed stream errors arrive as `status == .error` with the encoded `E` in `body`.
+    /// `next()`, in the vocabulary of a failed reply (docs/SPEC.md sections 3.4 and 3.7, ADR-036):
+    /// the stream's own typed error arrives as `status == .error` with the encoded `E` in `body`;
+    /// a stream the core ended itself as `.cancelled`, one that panicked as `.panic` and one the
+    /// core refused as `.badRequest`, each with the body a reply of that status carries.
     public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], any Error> {
         return stream(target, method: method, args: args, decode: { $0 })
     }
@@ -462,7 +465,9 @@ public final class UndraCore: @unchecked Sendable {
     ///   - decode: turns the body of one item into the element. If it throws, the stream ends with
     ///     that error (after `mapError`) and is cancelled in the core.
     ///   - mapError: turns a failure of the stream (an `UndraReplyError` carrying a typed error, for
-    ///     instance) into the error the consumer sees. The default passes it through.
+    ///     instance) into the error the consumer sees. The default passes it through; generated
+    ///     code passes `UndraCallError.mapped(streamFailure:)` or
+    ///     `UndraCallError.mapped(streamFailure:domain:)`.
     public func stream<Item: Sendable>(
         _ target: CallTarget,
         method: UInt32,
@@ -556,7 +561,10 @@ public final class UndraCore: @unchecked Sendable {
     /// `error` is mapped the way a throwing call's error is (``UndraCallError/mapped(_:)``), so the
     /// handler always receives an ``UndraCallError``. The handler runs synchronously on the calling
     /// thread. A report made while the handler is running (a handler that calls a failing command) is
-    /// only logged.
+    /// only logged, and so is a failure that is a remote core's connection being down
+    /// (``UndraCallError/unavailable(_:)`` while ``connectionState`` is `.reconnecting`, or `.closed` for a reason
+    /// other than `shutdown()`): the connection state and `LoadOptions.onConnectionChange` already report that,
+    /// once, and a command tapped meanwhile is not a second failure to hand to a crash reporter.
     ///
     /// - Parameters:
     ///   - error: What the call threw.
@@ -565,12 +573,35 @@ public final class UndraCore: @unchecked Sendable {
         let mapped = (UndraCallError.mapped(error) as? UndraCallError)
             ?? UndraCallError.malformed(String(describing: error))
         let unhandled = UndraUnhandledError(operation: operation, error: mapped)
+        if isConnectionDown(mapped) {
+            UndraLog.warning("\(unhandled.description) (the connection to the core is down: see connectionState)")
+            return
+        }
         UndraLog.error(unhandled.description)
         guard let handler = onError, !UndraCore.isReporting else {
             return
         }
         UndraCore.$isReporting.withValue(true) {
             handler(unhandled)
+        }
+    }
+
+    /// Whether `error` is the connection of a remote core being down, which ``connectionState`` already reports. A
+    /// core the app shut down itself and an in-process core are not: those are still reported.
+    private func isConnectionDown(_ error: UndraCallError) -> Bool {
+        guard case .unavailable(let reason) = error, transport.mode == .remote else {
+            return false
+        }
+        if case .connectionLost = reason {
+            return true
+        }
+        switch connectionState {
+        case .reconnecting:
+            return true
+        case .closed(let why):
+            return why != .requested
+        case .connecting, .connected:
+            return false
         }
     }
 
@@ -1003,7 +1034,27 @@ extension UndraCore: UndraInbound {
             channel.finish(.ended)
         case .error:
             channel.finish(.failed(UndraReplyError(status: .error, body: Array(item.body))))
+        case .failed:
+            // The last item of the stream in the core whatever its body says, so nothing is
+            // cancelled even when the body does not decode.
+            channel.finish(.failed(UndraCore.streamFailureError(item.body)))
         }
+    }
+
+    /// The error a `.failed` stream item ends its stream with (ADR-036): the failed reply it
+    /// stands for, an `UndraReplyError` with the item's status and the docs/SPEC.md section 3.4
+    /// body of that status, so that it maps exactly as a failed reply does. A body that does not
+    /// decode is `UndraProtocolError.malformedMessage`.
+    static func streamFailureError(_ body: ArraySlice<UInt8>) -> any Error {
+        let failure: Wire.StreamFailure
+        do {
+            failure = try Wire.StreamFailure.decode(slice: body)
+        } catch let error as WireError {
+            return UndraProtocolError.malformedMessage(context: "stream failure", error: error)
+        } catch {
+            return error
+        }
+        return UndraReplyError(status: failure.status, body: failure.replyBody())
     }
 
     func onPortCall(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome {

@@ -148,7 +148,7 @@ final class CoreStreamTests: XCTestCase {
     func testAStreamThatFailsDeliversItsItemsThenThrowsTheTypedBody() async throws {
         let transport = FakeTransport()
         transport.onCall = { call, fake in
-            fake.openStream(call.callId, items: [[1], [2]], failureBody: [9, 9])
+            fake.openStream(call.callId, items: [[1], [2]], ending: .error([9, 9]))
             return true
         }
         let core = try makeCore(transport)
@@ -166,6 +166,209 @@ final class CoreStreamTests: XCTestCase {
         XCTAssertEqual(seen, [[1], [2]])
         XCTAssertEqual(error as? UndraReplyError, UndraReplyError(status: .error, body: [9, 9]))
         XCTAssertEqual(core.stats().hostOpenStreams, 0)
+    }
+
+    // MARK: Failed items (flag 3, ADR-036)
+
+    /// A core whose streams send `items` and then `ending`.
+    private func makeEndingCore(_ transport: FakeTransport, items: [[UInt8]], ending: FakeTransport.Ending) throws -> UndraCore {
+        transport.onCall = { call, fake in
+            fake.openStream(call.callId, items: items, ending: ending)
+            return true
+        }
+        return try makeCore(transport)
+    }
+
+    /// `texts` encoded one after the other: the body of a panic reply (message, backtrace) or of a
+    /// refusal (reason), docs/SPEC.md section 3.4.
+    private func strings(_ texts: String...) -> [UInt8] {
+        var writer = UndraWriter()
+        for text in texts {
+            writer.writeString(text)
+        }
+        return writer.finish()
+    }
+
+    /// What a generated stream method returns: the items decoded, the failure mapped with
+    /// `mapped(streamFailure:)`, or `mapped(streamFailure:domain:)` when the method has an error type.
+    private func generatedStream(_ core: UndraCore, domain: Bool) -> AsyncThrowingStream<UInt8, any Error> {
+        return core.stream(
+            .freeFunction(methodId: 8),
+            method: 8,
+            args: [],
+            decode: { (body: [UInt8]) throws -> UInt8 in
+                return body[0]
+            },
+            mapError: { (error: any Error) -> any Error in
+                if domain {
+                    return UndraCallError.mapped(streamFailure: error, domain: WireTestError.self)
+                }
+                return UndraCallError.mapped(streamFailure: error)
+            }
+        )
+    }
+
+    /// Runs a generated stream to its end; returns the items it delivered and the error it threw.
+    private func drain(_ stream: AsyncThrowingStream<UInt8, any Error>) async -> ([UInt8], (any Error)?) {
+        var received: [UInt8] = []
+        let error = await captureError {
+            for try await item in stream {
+                received.append(item)
+            }
+        }
+        return (received, error)
+    }
+
+    func testAFailedItemEndsTheRawStreamWithTheReplyErrorItStandsFor() async throws {
+        let cases: [(Wire.StreamFailure, UndraReplyError)] = [
+            (
+                Wire.StreamFailure(status: .cancelled, message: "the runtime shut down"),
+                UndraReplyError(status: .cancelled, body: [])
+            ),
+            (
+                Wire.StreamFailure(status: .panic, message: "boom", detail: "frame 0\nframe 1"),
+                UndraReplyError(status: .panic, body: strings("boom", "frame 0\nframe 1"))
+            ),
+            (
+                Wire.StreamFailure(status: .badRequest, message: "stale handle"),
+                UndraReplyError(status: .badRequest, body: strings("stale handle"))
+            ),
+        ]
+        for (failure, expected) in cases {
+            let transport = FakeTransport()
+            let core = try makeEndingCore(transport, items: [[1], [2]], ending: .failure(failure))
+            var received: [[UInt8]] = []
+            let error = await captureError {
+                for try await item in core.stream(.freeFunction(methodId: 8), method: 8, args: []) {
+                    received.append(item)
+                }
+            }
+            XCTAssertEqual(received, [[1], [2]], "\(failure.status): the items before the failure arrive")
+            XCTAssertEqual(error as? UndraReplyError, expected, "\(failure.status)")
+            XCTAssertTrue(transport.cancels.isEmpty, "\(failure.status): a failed item is the stream's last; nothing to cancel")
+            XCTAssertEqual(core.stats().hostOpenStreams, 0)
+            XCTAssertEqual(core.stats().hostPendingCalls, 0)
+        }
+    }
+
+    func testAStreamCancelledByTheCoreThrowsCancelledByCoreWithAndWithoutADomain() async throws {
+        for reason in ["the runtime shut down", "a restore replaced the receiver"] {
+            for domain in [false, true] {
+                let transport = FakeTransport()
+                let failure = Wire.StreamFailure(status: .cancelled, message: reason)
+                let core = try makeEndingCore(transport, items: [[4]], ending: .failure(failure))
+                let (received, error) = await drain(generatedStream(core, domain: domain))
+                XCTAssertEqual(received, [4])
+                XCTAssertEqual(error as? UndraCallError, .cancelledByCore, "\(reason), domain: \(domain)")
+                XCTAssertFalse(error is CancellationError, "the consumer's task was not cancelled")
+            }
+        }
+    }
+
+    func testAPanickedStreamThrowsPanickedWithItsMessageAndBacktrace() async throws {
+        for domain in [false, true] {
+            let transport = FakeTransport()
+            let failure = Wire.StreamFailure(status: .panic, message: "index out of bounds", detail: "0: core::panicking\n1: app::tick")
+            let core = try makeEndingCore(transport, items: [[1], [2], [3]], ending: .failure(failure))
+            let (received, error) = await drain(generatedStream(core, domain: domain))
+            XCTAssertEqual(received, [1, 2, 3])
+            XCTAssertEqual(
+                error as? UndraCallError,
+                .panicked(message: "index out of bounds", backtrace: "0: core::panicking\n1: app::tick"),
+                "domain: \(domain)"
+            )
+        }
+    }
+
+    func testARefusedStreamThrowsRefusedWithTheReason() async throws {
+        for domain in [false, true] {
+            let transport = FakeTransport()
+            let failure = Wire.StreamFailure(status: .badRequest, message: "the object was closed", detail: "ignored")
+            let core = try makeEndingCore(transport, items: [], ending: .failure(failure))
+            let (received, error) = await drain(generatedStream(core, domain: domain))
+            XCTAssertEqual(received, [])
+            XCTAssertEqual(error as? UndraCallError, .refused(reason: "the object was closed"), "domain: \(domain)")
+        }
+    }
+
+    func testAFailedItemNeedsNoCreditAndComesAfterEveryItemInTheWindow() async throws {
+        // Sixteen items use the whole initial credit; the failed item still follows, without credit.
+        let transport = FakeTransport()
+        let failure = Wire.StreamFailure(status: .cancelled, message: "the runtime shut down")
+        let core = try makeEndingCore(transport, items: numbered(16), ending: .failure(failure))
+        let stream = generatedStream(core, domain: false)
+        let callId = transport.calls[0].callId
+        XCTAssertEqual(transport.credits(for: callId), [16])
+        XCTAssertEqual(transport.deliveredCount(callId), 16)
+        XCTAssertEqual(core.stats().hostOpenStreams, 0, "the failed item already ended the stream")
+        let (received, error) = await drain(stream)
+        XCTAssertEqual(received, (0 ..< 16).map { UInt8($0) })
+        XCTAssertEqual(error as? UndraCallError, .cancelledByCore)
+        XCTAssertTrue(transport.cancels.isEmpty)
+    }
+
+    func testAFailedItemThatDoesNotDecodeIsMalformedAndNotCancelled() async throws {
+        let cases: [(String, [UInt8], WireError)] = [
+            ("empty", [], .unexpectedEOF(needed: 1, at: 0)),
+            ("truncated message", [3, 1, 0], .unexpectedEOF(needed: 4, at: 1)),
+            ("missing detail", [5, 0, 0, 0, 0], .unexpectedEOF(needed: 4, at: 5)),
+            (
+                "the typed-error status",
+                Wire.StreamFailure(status: .error, message: "x").encode(),
+                .invalidTag(tag: 1, at: 0, type: "StreamFailure.status")
+            ),
+            ("an unknown status", [6, 0, 0, 0, 0, 0, 0, 0, 0], .invalidTag(tag: 6, at: 0, type: "StreamFailure.status")),
+            (
+                "trailing bytes",
+                Wire.StreamFailure(status: .cancelled, message: "").encode() + [0],
+                .trailingBytes(count: 1)
+            ),
+        ]
+        for (name, body, wire) in cases {
+            let expected = UndraProtocolError.malformedMessage(context: "stream failure", error: wire)
+            // The raw stream.
+            let rawTransport = FakeTransport()
+            let rawCore = try makeEndingCore(rawTransport, items: [[1]], ending: .failed(body))
+            var received: [[UInt8]] = []
+            let rawError = await captureError {
+                for try await item in rawCore.stream(.freeFunction(methodId: 8), method: 8, args: []) {
+                    received.append(item)
+                }
+            }
+            XCTAssertEqual(received, [[1]], name)
+            XCTAssertEqual(rawError as? UndraProtocolError, expected, name)
+            XCTAssertTrue(rawTransport.cancels.isEmpty, "\(name): the core ended the stream with its flag")
+            XCTAssertEqual(rawCore.stats().hostOpenStreams, 0, name)
+            // A generated stream, with and without a domain.
+            for domain in [false, true] {
+                let transport = FakeTransport()
+                let core = try makeEndingCore(transport, items: [[1]], ending: .failed(body))
+                let (_, error) = await drain(generatedStream(core, domain: domain))
+                XCTAssertEqual(error as? UndraCallError, .malformed(expected.description), "\(name), domain: \(domain)")
+            }
+        }
+    }
+
+    func testAnItemWithAnUnknownFlagFailsTheStreamAndCancelsIt() async throws {
+        let transport = FakeTransport()
+        let core = try makeStreamingCore(transport, items: [], holdOpen: true)
+        let stream = generatedStream(core, domain: true)
+        let callId = transport.calls[0].callId
+        var payload = UndraWriter()
+        payload.writeU32(callId)
+        payload.writeU8(4)
+        let bytes = payload.finish()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.01) {
+            transport.deliverRawStreamItem(callId, bytes)
+        }
+        let (_, error) = await drain(stream)
+        let expected = UndraProtocolError.malformedMessage(
+            context: "stream item",
+            error: .invalidTag(tag: 4, at: 4, type: "StreamFlag")
+        )
+        XCTAssertEqual(error as? UndraCallError, .malformed(expected.description))
+        let cancelled = await waitUntil { transport.cancels == [callId] }
+        XCTAssertTrue(cancelled, "an item the host cannot read may not be the last one: the core is told to stop")
     }
 
     func testAStreamThatCannotBeOpenedThrowsTheReplyError() async throws {
@@ -381,7 +584,7 @@ final class CoreStreamTests: XCTestCase {
     func testMapErrorTurnsAStreamFailureIntoTheConsumersError() async throws {
         let transport = FakeTransport()
         transport.onCall = { call, fake in
-            fake.openStream(call.callId, items: [[1], [2]], failureBody: [7])
+            fake.openStream(call.callId, items: [[1], [2]], ending: .error([7]))
             return true
         }
         let core = try makeCore(transport)

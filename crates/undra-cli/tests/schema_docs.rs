@@ -18,9 +18,23 @@ use std::process::{Command, Stdio};
 
 use common::{TempDir, repo_root, run_ok, shared_target, undra};
 
-/// The playground core's schema hash. A change to the core's public surface moves it (and the
-/// generated bindings, which pin it too); update it together with `examples/playground/generated`.
-const PLAYGROUND_HASH: u64 = 0xabdf_844b_53e0_bc10;
+/// The playground core's schema hash, read from the committed bindings: every generated file
+/// carries `(schema hash 0x…)` in its header, and `undra bindgen --check` keeps those files
+/// current. Reading it there means a change to the core's public surface (which moves the hash
+/// and the bindings together) cannot leave this test pinned to yesterday's hash, while the
+/// assertion still holds both routes to what is committed.
+fn playground_hash() -> u64 {
+    let ids =
+        playground().join("generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt");
+    let header =
+        std::fs::read_to_string(&ids).unwrap_or_else(|e| panic!("reading {}: {e}", ids.display()));
+    let (_, rest) = header
+        .split_once("(schema hash 0x")
+        .unwrap_or_else(|| panic!("{} carries no `(schema hash 0x…)` header", ids.display()));
+    let hex: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+    u64::from_str_radix(&hex, 16)
+        .unwrap_or_else(|e| panic!("{} schema hash {hex:?} is not hex: {e}", ids.display()))
+}
 
 fn playground() -> PathBuf {
     repo_root().join("examples/playground")
@@ -98,9 +112,10 @@ fn docs_read_from_the_library_are_what_the_dev_runner_prints() {
     let scratch = TempDir::new("docs");
     let from_library = scratch.path().join("library");
     let report = bindgen(&from_library, &["--docs"]);
+    let playground_hash = playground_hash();
     assert!(
-        report.contains(&format!("schema hash {PLAYGROUND_HASH:#018x}")),
-        "the library's schema hash moved off {PLAYGROUND_HASH:#018x}:\n{report}"
+        report.contains(&format!("schema hash {playground_hash:#018x}")),
+        "the library's schema hash moved off the committed bindings' {playground_hash:#018x}:\n{report}"
     );
     let library_files = tree(&from_library);
     let types = &library_files["swift/Sources/PlaygroundCore/Generated/Types.swift"];
@@ -112,7 +127,7 @@ fn docs_read_from_the_library_are_what_the_dev_runner_prints() {
     // The runner route: its banner hash, then its full schema through `--schema`.
     assert_eq!(
         runner_schema_hash(),
-        PLAYGROUND_HASH,
+        playground_hash,
         "the dev runner's schema hash differs from the library's"
     );
     let runner = shared_target().join("debug/undra-dev-runner");
@@ -143,7 +158,7 @@ fn docs_read_from_the_library_are_what_the_dev_runner_prints() {
         ],
     );
     assert!(
-        report.contains(&format!("schema hash {PLAYGROUND_HASH:#018x}")),
+        report.contains(&format!("schema hash {playground_hash:#018x}")),
         "{report}"
     );
 
@@ -182,7 +197,7 @@ fn docs_read_from_the_library_are_what_the_dev_runner_prints() {
     let undocumented = scratch.path().join("none");
     let report = bindgen(&undocumented, &[]);
     assert!(
-        report.contains(&format!("schema hash {PLAYGROUND_HASH:#018x}")),
+        report.contains(&format!("schema hash {playground_hash:#018x}")),
         "{report}"
     );
     let bare = tree(&undocumented);

@@ -36,6 +36,7 @@ use parking_lot::{Mutex, RwLock};
 use undra_wire::payload::{PortReply, PortStatus};
 use undra_wire::{Reader, WireError};
 
+use crate::ctx::Ctx;
 use crate::log::WARN;
 use crate::runtime::Runtime;
 
@@ -550,10 +551,12 @@ pub fn port_call_sync(
 
 // ----- events ----------------------------------------------------------------------------
 
-type Callback = dyn Fn(&[u8]) + Send + Sync;
+type Callback = dyn Fn(&Ctx, &[u8]) + Send + Sync;
 
-/// A boxed event subscriber, as passed to [`Events::subscribe`].
-pub type EventHandler = Box<dyn Fn(&[u8]) + Send + Sync>;
+/// A boxed event subscriber, as passed to [`Events::subscribe`]: it receives the runtime's [`Ctx`]
+/// for the call and the event's encoded parameters, so it never needs to capture a `Ctx` (which
+/// would keep the runtime alive, ADR-034).
+pub type EventHandler = Box<dyn Fn(&Ctx, &[u8]) + Send + Sync>;
 
 /// `(port_id, method_id)`.
 type EventKey = (u32, u32);
@@ -567,19 +570,22 @@ struct EventsInner {
 }
 
 /// Host-to-core events (`Connectivity::changed`, `Lifecycle::changed`, ...): subscribers are
-/// called on the core loop, with the core lock held, in subscription order.
+/// called on the core loop, with the core lock held, in subscription order, with the runtime's
+/// [`Ctx`] as their first argument.
 ///
 /// A subscriber must not block, and must not call back into the runtime through the host
 /// entry points (`call_sync` and friends); it may write signals and spawn tasks. A panicking
-/// subscriber is logged and skipped; the others still run.
+/// subscriber is logged and skipped; the others still run. It should use the `Ctx` it is given
+/// rather than one it captured: the runtime owns its subscribers, so a captured `Ctx` is a
+/// reference cycle that keeps a dropped runtime alive (ADR-034).
 #[derive(Default)]
 pub struct Events {
     inner: Arc<EventsInner>,
 }
 
 impl Events {
-    /// Subscribes to `(port_id, method_id)`. The callback receives the event's encoded
-    /// parameters. Dropping the returned [`Subscription`] unsubscribes.
+    /// Subscribes to `(port_id, method_id)`. The callback receives the runtime's [`Ctx`] and the
+    /// event's encoded parameters. Dropping the returned [`Subscription`] unsubscribes.
     pub fn subscribe(&self, port_id: u32, method_id: u32, callback: EventHandler) -> Subscription {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
         self.inner
@@ -692,7 +698,7 @@ mod tests {
     #[test]
     fn subscribing_and_detaching_leaves_no_reference_to_the_table_behind() {
         let events = Events::default();
-        let handler = || -> EventHandler { Box::new(|_: &[u8]| {}) };
+        let handler = || -> EventHandler { Box::new(|_: &Ctx, _: &[u8]| {}) };
         for _ in 0..1000 {
             events.subscribe(1, 2, handler()).detach();
         }
@@ -721,7 +727,7 @@ mod tests {
     fn dropped_subscriptions_leave_the_list_empty_across_many_cycles() {
         let events = Events::default();
         for _ in 0..1000 {
-            let subscription = events.subscribe(1, 2, Box::new(|_: &[u8]| {}));
+            let subscription = events.subscribe(1, 2, Box::new(|_: &Ctx, _: &[u8]| {}));
             assert_eq!(events.subscriber_count(1, 2), 1);
             drop(subscription);
             assert_eq!(events.subscriber_count(1, 2), 0);
@@ -857,13 +863,22 @@ mod tests {
         let events = Events::default();
         let log = Arc::new(Mutex::new(Vec::new()));
         let l1 = log.clone();
-        let s1 = events.subscribe(1, 2, Box::new(move |p| l1.lock().push(("a", p.to_vec()))));
+        let s1 = events.subscribe(
+            1,
+            2,
+            Box::new(move |_: &Ctx, p: &[u8]| l1.lock().push(("a", p.to_vec()))),
+        );
         let l2 = log.clone();
-        let s2 = events.subscribe(1, 2, Box::new(move |p| l2.lock().push(("b", p.to_vec()))));
+        let s2 = events.subscribe(
+            1,
+            2,
+            Box::new(move |_: &Ctx, p: &[u8]| l2.lock().push(("b", p.to_vec()))),
+        );
         assert_eq!(events.subscriber_count(1, 2), 2);
         assert_eq!(events.subscriber_count(1, 3), 0);
+        let t = crate::testing::TestRuntime::new();
         for cb in events.callbacks(1, 2) {
-            cb(&[7]);
+            cb(&t.ctx(), &[7]);
         }
         assert_eq!(*log.lock(), [("a", vec![7]), ("b", vec![7])]);
         drop(s1);
@@ -876,7 +891,7 @@ mod tests {
     #[test]
     fn subscription_may_outlive_the_events_table() {
         let events = Events::default();
-        let sub = events.subscribe(1, 1, Box::new(|_| {}));
+        let sub = events.subscribe(1, 1, Box::new(|_: &Ctx, _: &[u8]| {}));
         drop(events);
         drop(sub);
     }
@@ -884,7 +899,9 @@ mod tests {
     #[test]
     fn detached_subscription_stays_subscribed() {
         let events = Events::default();
-        events.subscribe(5, 5, Box::new(|_| {})).detach();
+        events
+            .subscribe(5, 5, Box::new(|_: &Ctx, _: &[u8]| {}))
+            .detach();
         assert_eq!(events.subscriber_count(5, 5), 1);
     }
 }

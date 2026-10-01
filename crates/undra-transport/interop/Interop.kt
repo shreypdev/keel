@@ -101,11 +101,27 @@ private fun reconnecting(binary: String, hash: ULong, counter: UInt, newId: UInt
         pc.mirror.register(handle) { _, _, r -> seen += Codecs.i32.decode(r) }
         pc.observe(handle, UInt.MAX_VALUE, true)
         check(Codecs.i32.decodeAll(runBlocking { pc.call(target, addId, Codecs.i32.encodeToByteArray(3)) }) == 8)
+        // A call races the drop: it may be answered first, and if it is not it fails with the typed failure of a lost
+        // connection, which a generated call throws as UndraCallError.Unavailable (ADR-032 amendment A).
+        val raced = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val racer = Thread { raced.set(runCatching { runBlocking { pc.call(target, addId, Codecs.i32.encodeToByteArray(0)) } }.exceptionOrNull()) }
+        racer.start()
         proxy.dropAll()
+        racer.join(10_000)
+        // And a call made while it is down fails the same way, at once (the first retry waits 50 ms).
+        var whileDown: Throwable? = null
+        val spinUntil = System.currentTimeMillis() + 10_000
+        while (whileDown == null && System.currentTimeMillis() < spinUntil && !(states.size > 2 && states.last() == ConnectionState.Connected)) {
+            whileDown = runCatching { runBlocking { pc.call(target, addId, Codecs.i32.encodeToByteArray(0)) } }.exceptionOrNull()
+        }
+        for (failure in listOfNotNull(raced.get(), whileDown)) {
+            check(failure is UndraTransportException && failure.reason == UndraTransportException.Reason.CONNECTION_LOST) { "not the typed failure: $failure" }
+            check(UndraCallError.mapped(failure) is UndraCallError.Unavailable)
+        }
         val deadline = System.currentTimeMillis() + 10_000
         while ((states.lastOrNull() != ConnectionState.Connected || states.size < 3) && System.currentTimeMillis() < deadline) Thread.sleep(20)
         check(states.last() == ConnectionState.Connected && states.any { it is ConnectionState.Reconnecting }) { "states: $states" }
-        println("ok  a dropped connection was reconnected: ${states.map { it::class.simpleName }}")
+        println("ok  a dropped connection was reconnected: ${states.map { it::class.simpleName }} (failures seen: ${listOfNotNull(raced.get(), whileDown).size}, all typed Unavailable)")
         // The server kept the object: same handle, same state; the mirror was observed again.
         check(Codecs.i32.decodeAll(runBlocking { pc.call(target, addId, Codecs.i32.encodeToByteArray(1)) }) == 9)
         val settle = System.currentTimeMillis() + 5_000
