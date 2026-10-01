@@ -37,11 +37,17 @@ pub const CORE_SCHEMA: &str = include_str!("../templates/core/schema.json");
 pub const IOS: &[TemplateFile] = &[
     template!("ios/project.pbxproj" => "ios/@@APP@@.xcodeproj/project.pbxproj"),
     template!("ios/Info.plist" => "ios/Config/Info.plist"),
+    template!("ios/undra-core-outputs.xcfilelist" => "ios/Config/undra-core-outputs.xcfilelist"),
     template!("ios/App.swift" => "ios/@@APP@@/MainApp.swift"),
     template!("ios/UndraBootstrap.swift" => "ios/@@APP@@/UndraBootstrap.swift"),
     template!("ios/ContentView.swift" => "ios/@@APP@@/ContentView.swift"),
     template!("ios/DevStatusBar.swift" => "ios/@@APP@@/DevStatusBar.swift"),
 ];
+
+/// The output list of the iOS Run Script phase (a template of its own so the tests can render it
+/// for other simulator architectures).
+#[cfg(test)]
+pub const IOS_OUTPUT_LIST: &str = include_str!("../templates/ios/undra-core-outputs.xcfilelist");
 
 /// The Android app: a Gradle project with a Compose screen.
 pub const ANDROID: &[TemplateFile] = &[

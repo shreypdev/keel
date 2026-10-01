@@ -115,7 +115,14 @@ EXAMPLES
 
 iOS DEBUG BUILDS
     Link the library with -force_load (the generated Xcode project already does), or the core's
-    registrations are dropped by the linker and the schema is empty. Release builds need no flag."
+    registrations are dropped by the linker and the schema is empty. Release builds need no flag.
+
+NOT A MANUAL STEP
+    In a project made by `undra init` the app builds run this for you, each only when the core changed:
+    Gradle's `undraBuild` task (preBuild depends on it; debug or release follows the variant), the
+    \"Build the Undra core\" Run Script phase of the Xcode project (it passes `--configuration
+    $CONFIGURATION`) and the `undra()` Vite plugin (on start, and on every change of core/src under
+    `vite dev`). They find `undra` on PATH; `undra doctor` checks that it is there."
     )]
     Build(BuildArgs),
     /// Serve the core over a WebSocket to running apps, rebuilding when the code changes.
@@ -266,6 +273,13 @@ pub struct BuildArgs {
     /// optimized.
     #[arg(long)]
     pub release: bool,
+
+    /// An Xcode build configuration, as the Run Script phase of the generated Xcode project passes
+    /// it (`$CONFIGURATION`): `Release` and names that contain it build release, any other name
+    /// debug. After an iOS build it writes the stamp that tells Xcode which configuration the
+    /// XCFramework is for.
+    #[arg(long, value_name = "NAME", conflicts_with = "release")]
+    pub configuration: Option<String>,
 }
 
 /// Arguments of `undra dev`.
@@ -370,6 +384,45 @@ mod tests {
         };
         assert_eq!(args.platform.as_deref(), Some("ios,web"));
         assert!(args.release);
+    }
+
+    #[test]
+    fn build_takes_an_xcode_configuration_instead_of_release() {
+        let cli = Cli::try_parse_from([
+            "undra",
+            "build",
+            "--platform",
+            "ios",
+            "--configuration",
+            "Release",
+        ])
+        .unwrap();
+        let Command::Build(args) = cli.command else {
+            panic!("not build")
+        };
+        assert_eq!(args.configuration.as_deref(), Some("Release"));
+        assert!(!args.release);
+        // The two say the same thing in different words: only one of them.
+        assert!(
+            Cli::try_parse_from(["undra", "build", "--release", "--configuration", "Debug"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn doctor_takes_fix_or_json_but_not_both() {
+        let cli = Cli::try_parse_from(["undra", "doctor", "--fix"]).unwrap();
+        let Command::Doctor(args) = cli.command else {
+            panic!("not doctor")
+        };
+        assert!(args.fix && !args.json);
+        let cli = Cli::try_parse_from(["undra", "doctor", "--json", "--platform", "web"]).unwrap();
+        let Command::Doctor(args) = cli.command else {
+            panic!("not doctor")
+        };
+        assert!(args.json && !args.fix);
+        assert_eq!(args.platform.as_deref(), Some("web"));
+        assert!(Cli::try_parse_from(["undra", "doctor", "--fix", "--json"]).is_err());
     }
 
     #[test]

@@ -201,6 +201,11 @@ pub(super) fn variables(setup: &Setup) -> Vars {
         _ => "",
     };
     vars.set("XCFRAMEWORK_PATH", xcframework_rel);
+    // The Run Script phase that builds the core (`undra build --platform ios`) and its file lists.
+    vars.set("ROOT_REL", rel(&ios_dir, root));
+    vars.set("CORE_REL", rel(&ios_dir, &root.join(&config.core_path)));
+    vars.set("BUILD_REL", rel(&ios_dir, &build));
+    vars.set("SIM_SLICE", slice_sim);
     vars.set("LINK_FLAGS", format!("{link_flags}{excluded}"));
     vars.set("DEPLOYMENT_TARGET", config.ios.deployment_target.clone());
     vars.set(
@@ -221,6 +226,11 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     vars.set(
         "JNI_LIBS_PATH",
         rel(&android_dir.join("app"), &build.join("android/jniLibs")),
+    );
+    vars.set("PROJECT_ROOT_FROM_APP", rel(&android_dir.join("app"), root));
+    vars.set(
+        "CORE_FROM_APP",
+        rel(&android_dir.join("app"), &root.join(&config.core_path)),
     );
     vars.set("MIN_SDK", config.android.min_sdk.to_string());
     vars.set(
@@ -261,6 +271,9 @@ pub(super) fn variables(setup: &Setup) -> Vars {
     match &runtimes.ts {
         RuntimeRef::Path(dir) => {
             let runtime_src = rel(&web_dir, &dir.join("src/index.ts"));
+            // vite.config.ts is bundled by Vite and run by Node, so it names the plugin's source by
+            // path (a checkout has no `node_modules/@undra/runtime`).
+            vars.set("RUNTIME_VITE_IMPORT", rel(&web_dir, &dir.join("src/vite")));
             vars.set("RUNTIME_DEPENDENCY", "");
             vars.set(
                 "RUNTIME_ALIAS",
@@ -276,6 +289,7 @@ pub(super) fn variables(setup: &Setup) -> Vars {
             );
         }
         RuntimeRef::Registry { version } => {
+            vars.set("RUNTIME_VITE_IMPORT", "@undra/runtime/vite");
             vars.set(
                 "RUNTIME_DEPENDENCY",
                 format!("\"@undra/runtime\": \"^{version}.0\",\n    "),
@@ -329,7 +343,15 @@ fn scaffold(setup: &Setup) -> Result<usize> {
     let mut count = scaffold_core(setup, &vars)?;
     for platform in &setup.config.platforms {
         count += match platform {
-            Platform::Ios => write_set(&setup.root, templates::IOS, &vars)?,
+            Platform::Ios => {
+                // The Run Script phase's input list is made from the core just written: the
+                // same function refreshes it on every iOS build (`builds::xcode`).
+                crate::builds::xcode::write_inputs(
+                    &setup.root,
+                    &[setup.root.join(&setup.config.core_path)],
+                )?;
+                1 + write_set(&setup.root, templates::IOS, &vars)?
+            }
             Platform::Android => write_set(&setup.root, templates::ANDROID, &vars)?,
             Platform::Web => write_set(&setup.root, templates::WEB, &vars)?,
         };
@@ -409,14 +431,21 @@ const README_IOS: &str = "
 ## iOS
 
 ```sh
-undra build --platform ios                     # build/ios/UndraCore.xcframework (device + simulator)
 UNDRA_LINK_CORE=1 xcodebuild -project ios/@@APP@@.xcodeproj -scheme @@APP@@ \\
     -destination 'generic/platform=iOS Simulator' build
 ```
 
-Open `ios/@@APP@@.xcodeproj` in Xcode 16 or newer to run it. The app target links the XCFramework with
-`-force_load` (a debug static library has many object files and the linker would otherwise drop the ones
-that register the core's `#[undra::api]` items; release builds do not need it, and it is harmless there).
+Open `ios/@@APP@@.xcodeproj` in Xcode 16 or newer to run it. There is no `undra build` to run first: the **Build the
+Undra core** Run Script phase, before Compile Sources, runs `undra build --platform ios --configuration $CONFIGURATION`
+(a Debug build makes a debug core, a Release build a release one, `build/ios/UndraCore.xcframework`). Xcode skips it
+while the files in `ios/Config/undra-core-inputs.xcfilelist` are older than the ones in
+`ios/Config/undra-core-outputs.xcfilelist`; `undra build` keeps the input list in step with the core's sources, so
+commit it. The phase finds `undra` on `PATH` or in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories (Xcode
+started from the Dock has a short `PATH`) and says how to install it when it is missing; it turns user script
+sandboxing off for the target, since it runs Cargo. The app links the core with `-force_load` (a debug static library
+has many object files and the linker would otherwise drop the ones that register the core's `#[undra::api]` items;
+release builds do not need it, and it is harmless there), not as a framework: Xcode reads an XCFramework while it
+plans the build, before the phase could have made it.
 
 **`UNDRA_LINK_CORE=1`.** The Swift runtime package ships link-time stand-ins for the core so that it builds
 and tests without one; that variable switches them off so the real core is linked. Xcode reads it when it
@@ -434,13 +463,19 @@ const README_ANDROID: &str = "
 ## Android
 
 ```sh
-undra build --platform android --release       # build/android/jniLibs/<abi>/libundra_core.so, about 1.5 MB per ABI
 cd android && ./gradlew :app:assembleDebug    # or open android/ in Android Studio
 ```
 
-`--release` is the packaging path. A plain `undra build --platform android` makes a debug core: fast to
-build, right for the dev loop, but tens of megabytes per ABI (42 MB for the playground), and the APK carries
-every byte of it. `undra build` says so when it makes one.
+There is no `undra build` to run first: `android/app/build.gradle.kts` has an `undraBuild` task that runs
+`undra build --platform android`, `preBuild` depends on it, and Gradle skips it while the core's sources
+(`core/src/**`, the Cargo manifests) and `build/android/jniLibs` are unchanged. The variant decides the profile:
+`assembleRelease` and `bundleRelease` build a release core (about 1.5 MB per ABI), anything else a debug core (fast to
+build, right for the dev loop, but tens of megabytes per ABI: 42 MB for the playground, and the APK carries every
+byte of it). `-PundraRelease=true` or `false` overrides, `-PundraSkipBuild=true` (or `UNDRA_SKIP_BUILD=1`) skips
+the task when the core was built in an earlier step. Sources outside `core/` (a path dependency in a monorepo) go in
+with `undraBuild { sources.from(\"../../shared/src\") }`. The task finds `undra` on `PATH` or in `~/.undra/bin`,
+`~/.cargo/bin` and Homebrew's directories (a GUI-launched Gradle has a short `PATH`), `UNDRA_BIN` names one
+explicitly, and it says how to install it when it is missing.
 
 The app module packages `build/android/jniLibs` (the path in `android/app/build.gradle.kts` is relative to
 the module, `android/app`; after a build `undra` checks that it still names the directory it wrote) and
@@ -467,15 +502,20 @@ const README_WEB: &str = "
 ## Web
 
 ```sh
-undra build --platform web                     # build/web/undra_core.wasm
 cd web && npm install && npm run dev          # http://localhost:5173
+npm run build                                 # type-checks and bundles
 ```
+
+There is no `undra build` to run first: the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) runs
+`undra build --platform web` when Vite starts, for `npm run build` as for `npm run dev`, and under `npm run dev` it
+rebuilds the core and reloads the page whenever `core/src` changes. It finds `undra` on `PATH` (or `UNDRA_BIN`) and says
+how to install it when it is missing; `UNDRA_SKIP_BUILD=1` skips it when the core was built in an earlier step.
 
 The page loads the wasm core and runs it on the main thread. Add `?undra=ws://127.0.0.1:7443` to the URL
 (with `undra dev` running) to use the core that `undra dev` serves instead: edit the Rust, save, and the page
 reloads onto the rebuilt core (a dropped connection is reconnected by the runtime; a bar at the top shows what
 it is doing, and `core.connection` is the signal behind it). Only `npm run dev` reads `?undra=`: a production
-build ignores it. `npm run build` type-checks and bundles.
+build ignores it.
 ";
 
 /// What `init` generated from the embedded schema.
@@ -561,7 +601,7 @@ fn gradle_wrapper(env: &Env<'_>, setup: &Setup) {
 fn next_steps(setup: &Setup) -> String {
     let name = &setup.names.project;
     let mut out = format!(
-        "Next:\n  cd {name}\n  undra doctor                 check this machine\n  undra dev                    serve the core to a running app, rebuilding on change\n  undra build --release        libraries for the apps to link\n"
+        "Next:\n  cd {name}\n  undra doctor                 check this machine\n  undra dev                    serve the core to a running app, rebuilding on change\n"
     );
     out.push_str("\nThen run an app:\n");
     for platform in &setup.config.platforms {
@@ -798,16 +838,17 @@ mod tests {
     }
 
     #[test]
-    fn the_readme_documents_release_as_the_android_packaging_path() {
+    fn the_readme_documents_the_gradle_task_and_the_release_variant() {
         let parent = fsutil::unique_temp_dir("init-readme");
         create_dir_all(&parent).unwrap();
         run(&env(&parent), &args("demo", "android")).unwrap();
         let root = parent.canonicalize().unwrap().join("demo");
         let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
         assert!(
-            readme.contains("undra build --platform android --release")
-                && readme.contains("packaging path")
-                && readme.contains("debug core"),
+            readme.contains("`undraBuild` task")
+                && readme.contains("`assembleRelease` and `bundleRelease` build a release core")
+                && readme.contains("anything else a debug core")
+                && readme.contains("-PundraSkipBuild=true"),
             "{readme}"
         );
         // The Gradle line says what its path is relative to, and is the one `undra build` checks.
@@ -819,6 +860,254 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(parent);
     }
+    /// The 24-digit object ids of a pbxproj that are defined (`ID /* name */ = {`) and the ones that appear.
+    fn pbx_ids(
+        text: &str,
+    ) -> (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    ) {
+        let mut defined = std::collections::BTreeSet::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for line in text.lines() {
+            let mut rest = line;
+            while let Some(at) = rest.find("A0A0A0A0A0A0A0A0") {
+                let id = &rest[at..(at + 24).min(rest.len())];
+                if id.len() == 24 && id.chars().all(|c| c.is_ascii_hexdigit()) {
+                    seen.insert(id.to_owned());
+                    let after = rest[at + 24..].trim_start();
+                    let after = after.strip_prefix("/*").map_or(after, |c| {
+                        c.split_once("*/").map_or("", |(_, tail)| tail.trim_start())
+                    });
+                    if line.trim_start().starts_with(id) && after.starts_with("= {") {
+                        defined.insert(id.to_owned());
+                    }
+                }
+                rest = &rest[at + 24..];
+            }
+        }
+        (defined, seen)
+    }
+
+    #[test]
+    fn the_xcode_project_builds_the_core_in_a_run_script_phase_before_compile_sources() {
+        let parent = fsutil::unique_temp_dir("init-xcode");
+        create_dir_all(&parent).unwrap();
+        run(&env(&parent), &args("phased", "ios")).unwrap();
+        let root = parent.canonicalize().unwrap().join("phased");
+        let pbx =
+            std::fs::read_to_string(root.join("ios/Phased.xcodeproj/project.pbxproj")).unwrap();
+
+        // The phase exists, runs before Sources, and has file lists.
+        let phases = pbx
+            .split("buildPhases = (")
+            .nth(1)
+            .unwrap()
+            .split(");")
+            .next()
+            .unwrap();
+        let order: Vec<&str> = phases
+            .lines()
+            .filter_map(|l| l.split("/*").nth(1)?.split("*/").next())
+            .map(str::trim)
+            .collect();
+        assert_eq!(
+            order,
+            ["Build the Undra core", "Sources", "Frameworks", "Resources"],
+            "{phases}"
+        );
+        for needle in [
+            "isa = PBXShellScriptBuildPhase;",
+            "inputFileListPaths = (\n\t\t\t\t\"$(SRCROOT)/Config/undra-core-inputs.xcfilelist\",",
+            "outputFileListPaths = (\n\t\t\t\t\"$(SRCROOT)/Config/undra-core-outputs.xcfilelist\",",
+            "shellPath = /bin/sh;",
+        ] {
+            assert!(pbx.contains(needle), "no {needle:?}:\n{pbx}");
+        }
+        // The script: finds undra, teaches when it is missing, hands it a clean environment, passes the configuration.
+        let script = pbx
+            .lines()
+            .find(|l| l.trim_start().starts_with("shellScript = "))
+            .unwrap();
+        for needle in [
+            "export PATH=\\\"$HOME/.undra/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\\\"",
+            "command -v undra",
+            "error: [undra::C0003] 'undra' was not found",
+            "curl -fsSL https://shreypdev.github.io/undra/install.sh | sh",
+            "exec env -i HOME=",
+            "undra -C \\\"$SRCROOT/..\\\" build --platform ios --configuration \\\"$CONFIGURATION\\\"",
+        ] {
+            assert!(
+                script.contains(needle),
+                "the script lacks {needle:?}:\n{script}"
+            );
+        }
+        // (A backtick in an echoed string would run a command; the comments may have them.)
+        for line in script
+            .split("\\n")
+            .filter(|l| l.trim_start().starts_with("echo"))
+        {
+            assert!(
+                !line.contains('`'),
+                "a backtick would run a command: {line}"
+            );
+        }
+        // Sandboxing is off for the app target (the phase runs Cargo), and the core is not a framework of the project.
+        assert_eq!(
+            pbx.matches("ENABLE_USER_SCRIPT_SANDBOXING = NO;").count(),
+            2
+        );
+        assert!(
+            !pbx.contains("UndraCore.xcframework in Frameworks"),
+            "Xcode would read it before the phase made it"
+        );
+        assert!(
+            pbx.contains("-force_load")
+                && pbx.contains("build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a"),
+            "{pbx}"
+        );
+        // Every object the file refers to is defined.
+        let (defined, seen) = pbx_ids(&pbx);
+        assert!(defined.contains("A0A0A0A0A0A0A0A000000092"));
+        assert_eq!(
+            seen.difference(&defined).collect::<Vec<_>>(),
+            Vec::<&String>::new(),
+            "ids used but never defined"
+        );
+
+        // The lists: inputs from the core, outputs the XCFramework slices and the configuration's stamp.
+        let inputs =
+            std::fs::read_to_string(root.join("ios/Config/undra-core-inputs.xcfilelist")).unwrap();
+        assert_eq!(
+            inputs,
+            "$(SRCROOT)/../Cargo.toml\n$(SRCROOT)/../core/Cargo.toml\n$(SRCROOT)/../core/src\n$(SRCROOT)/../core/src/lib.rs\n$(SRCROOT)/../undra.toml\n"
+        );
+        let outputs =
+            std::fs::read_to_string(root.join("ios/Config/undra-core-outputs.xcfilelist")).unwrap();
+        assert_eq!(
+            outputs,
+            "$(SRCROOT)/../build/ios/UndraCore.xcframework/Info.plist\n$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a\n$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64-simulator/libundra_core.a\n$(SRCROOT)/../build/ios/.undra-configuration-$(CONFIGURATION)\n"
+        );
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn an_intel_simulator_slice_is_a_listed_output() {
+        let setup = |archs: &[&str]| {
+            let parent = fsutil::unique_temp_dir("init-xcode-archs");
+            create_dir_all(&parent).unwrap();
+            run(&env(&parent), &args("slices", "ios")).unwrap();
+            let root = parent.canonicalize().unwrap().join("slices");
+            let toml = std::fs::read_to_string(root.join("undra.toml")).unwrap();
+            let list = archs
+                .iter()
+                .map(|a| format!("\"{a}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            std::fs::write(
+                root.join("undra.toml"),
+                toml.replace(
+                    "simulator_archs = [\"arm64\"]",
+                    &format!("simulator_archs = [{list}]"),
+                ),
+            )
+            .unwrap();
+            // Render again from the changed project, the way `variables` reads it.
+            let project = Project::open(&root).unwrap();
+            let vars = variables(&Setup {
+                root: root.clone(),
+                names: Names::derive("slices"),
+                config: project.config,
+                repo: None,
+            });
+            let outputs = vars.render(templates::IOS_OUTPUT_LIST).unwrap();
+            let _ = std::fs::remove_dir_all(parent);
+            outputs
+        };
+        assert!(
+            setup(&["arm64", "x86_64"]).contains("/ios-arm64_x86_64-simulator/libundra_core.a")
+        );
+        assert!(setup(&["x86_64"]).contains("/ios-x86_64-simulator/libundra_core.a"));
+    }
+
+    #[test]
+    fn the_gradle_app_builds_the_core_with_a_task_prebuild_depends_on() {
+        let parent = fsutil::unique_temp_dir("init-gradle");
+        create_dir_all(&parent).unwrap();
+        run(&env(&parent), &args("tasked", "android")).unwrap();
+        let root = parent.canonicalize().unwrap().join("tasked");
+        let app = std::fs::read_to_string(root.join("android/app/build.gradle.kts")).unwrap();
+        for needle in [
+            "abstract class UndraBuild @Inject constructor(private val execOps: ExecOperations) : DefaultTask()",
+            "tasks.register<UndraBuild>(\"undraBuild\")",
+            "tasks.named(\"preBuild\") { dependsOn(undraBuild) }",
+            // The inputs are the core's sources and manifests, the output the directory `undra build` writes.
+            "@get:InputFiles",
+            "@get:OutputDirectory",
+            "layout.projectDirectory.dir(\"../../core\")",
+            "include(\"src/**\", \"Cargo.toml\", \"build.rs\")",
+            "layout.projectDirectory.dir(\"../..\").file(\"undra.toml\")",
+            "libraries.set(layout.projectDirectory.dir(\"../../build/android/jniLibs\"))",
+            // The command, the variant and the escape hatches.
+            "\"-C\", projectRoot.get().asFile.absolutePath, \"build\", \"--platform\", \"android\"",
+            "if (release.get()) command.add(\"--release\")",
+            "it.name.contains(\"Release\")",
+            "undraRelease",
+            "undraSkipBuild",
+            "UNDRA_SKIP_BUILD",
+            "UNDRA_BIN",
+            // A missing undra teaches, in the shape of the CLI's errors.
+            "error[undra::C0003]: `undra` was not found",
+            "curl -fsSL https://shreypdev.github.io/undra/install.sh | sh",
+        ] {
+            assert!(
+                app.contains(needle),
+                "the Gradle script lacks {needle:?}:\n{app}"
+            );
+        }
+        // The packaging line that `undra build` verifies is still the only `jniLibs.srcDir` there is.
+        assert_eq!(app.matches("jniLibs.srcDir(").count(), 1, "{app}");
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn the_vite_config_uses_the_undra_plugin() {
+        let parent = fsutil::unique_temp_dir("init-vite");
+        create_dir_all(&parent).unwrap();
+        run(&env(&parent), &args("plugged", "web")).unwrap();
+        let root = parent.canonicalize().unwrap().join("plugged");
+        let vite = std::fs::read_to_string(root.join("web/vite.config.ts")).unwrap();
+        assert!(
+            vite.contains("import { undra } from \"@undra/runtime/vite\";"),
+            "{vite}"
+        );
+        assert!(vite.contains("plugins: [undra(), react()],"), "{vite}");
+        let _ = std::fs::remove_dir_all(parent);
+
+        // In a checkout there is no node_modules/@undra/runtime: the config names the plugin's source.
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let parent = fsutil::unique_temp_dir("init-vite-path");
+        create_dir_all(&parent).unwrap();
+        let mut a = args("plugged", "web");
+        a.undra_path = Some(repo);
+        run(&env(&parent), &a).unwrap();
+        let root = parent.canonicalize().unwrap().join("plugged");
+        let vite = std::fs::read_to_string(root.join("web/vite.config.ts")).unwrap();
+        let import = vite
+            .lines()
+            .find(|l| l.starts_with("import { undra }"))
+            .unwrap();
+        let path = import.split('"').nth(1).unwrap();
+        assert!(
+            root.join("web").join(path).with_extension("ts").is_file(),
+            "{import} does not lead to src/vite.ts"
+        );
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
     #[test]
     fn a_project_outside_a_checkout_pins_the_release_by_git_tag() {
         let parent = fsutil::unique_temp_dir("init-pinned");
