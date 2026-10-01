@@ -1,4 +1,4 @@
-import { HttpError, type HttpRequest } from "@keel/runtime";
+import { HttpError, type HttpRequest } from "@undra/runtime";
 import { describe, expect, test } from "vitest";
 import { FakeServer, replies } from "../src/fake-server.js";
 import { CLOCK_START_MS, ManualClock } from "../src/manual-clock.js";

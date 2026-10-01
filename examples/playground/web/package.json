@@ -2,7 +2,7 @@
   "name": "@playground/web",
   "private": true,
   "version": "0.1.0",
-  "description": "The Keel playground, web: a React and Vite UI over the one Rust core (wasm) and the generated TypeScript bindings.",
+  "description": "The Undra playground, web: a React and Vite UI over the one Rust core (wasm) and the generated TypeScript bindings.",
   "type": "module",
   "scripts": {
     "dev": "vite",

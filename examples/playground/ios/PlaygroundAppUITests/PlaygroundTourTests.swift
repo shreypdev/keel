@@ -79,7 +79,7 @@ final class PlaygroundTourTests: XCTestCase {
         app.buttons["todo-add"].tap()
         wait(for: app.staticTexts["todo-problem"], toRead: "the title cannot be empty")
 
-        for title in ["Buy milk", "Walk the dog", "Write Keel"] {
+        for title in ["Buy milk", "Walk the dog", "Write Undra"] {
             input.tap()
             if let current = input.value as? String, current != "What needs doing?", !current.isEmpty {
                 input.typeText(XCUIKeyboardKey.delete.rawValue.description)
@@ -102,7 +102,7 @@ final class PlaygroundTourTests: XCTestCase {
         app.segmentedControls["todo-filter"].buttons["All"].tap()
 
         // Swipe to remove, then clear what is done.
-        app.buttons["Write Keel"].swipeLeft()
+        app.buttons["Write Undra"].swipeLeft()
         app.buttons["Delete"].tap()
         wait(for: app.staticTexts["remaining"], toRead: "1 left")
         app.buttons["todo-clear-done"].tap()

@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 22
       - name: TS runtime dev dependencies (the bindgen fixtures compile it with tsc)
-        working-directory: runtimes/ts/@keel/runtime
+        working-directory: runtimes/ts/@undra/runtime
         run: npm ci
       - name: Format
         run: cargo fmt --check
@@ -32,17 +32,19 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
-      - name: Clippy (keel-ffi on wasm32)
-        run: cargo clippy -p keel-ffi --target wasm32-unknown-unknown -- -D warnings
-      - name: C ABI acceptance (keel.h with -Werror; the host contract under ASan)
-        run: KEEL_C_SANITIZE=1 bash crates/keel-ffi/tests/c/run.sh
+      - name: Clippy (undra-ffi on wasm32)
+        run: cargo clippy -p undra-ffi --target wasm32-unknown-unknown -- -D warnings
+      - name: C ABI acceptance (undra.h with -Werror; the host contract under ASan)
+        run: UNDRA_C_SANITIZE=1 bash crates/undra-ffi/tests/c/run.sh
+      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression)
+        run: cargo test -p undra-cli --test schema_retention -- --ignored --nocapture
       - name: Docs
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
       - name: wasm32 build (core crates)
         run: |
-          for p in keel-meta keel-wire keel-signals keel-runtime keel-ports keel-query keel-ffi keel playground-core; do
+          for p in undra-meta undra-wire undra-signals undra-runtime undra-ports undra-query undra-ffi undra playground-core; do
             cargo build -p $p --target wasm32-unknown-unknown
           done
 
@@ -55,7 +57,7 @@ jobs:
         with:
           node-version: 22
       - name: Test
-        working-directory: runtimes/ts/@keel/runtime
+        working-directory: runtimes/ts/@undra/runtime
         run: |
           npm ci
           npm test
@@ -82,13 +84,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build the JNI library
-        run: cargo build -p keel-ffi --features jni
+        run: cargo build -p undra-ffi --features jni
       - name: Test (incl. JNI smoke against the real library)
         env:
-          KEEL_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
-          KEEL_NATIVE_LIB_DIR: ${{ github.workspace }}/target/debug
-          KEEL_NATIVE_NAME: keel_ffi
-        run: runtimes/kotlin/keel-runtime/scripts/test-local.sh
+          UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+          UNDRA_NATIVE_LIB_DIR: ${{ github.workspace }}/target/debug
+          UNDRA_NATIVE_NAME: undra_ffi
+        run: runtimes/kotlin/undra-runtime/scripts/test-local.sh
 
   wasm-ffi:
     name: wasm ABI (real module, TS runtime)
@@ -103,12 +105,12 @@ jobs:
         with:
           node-version: 22
       - name: Install the TypeScript runtime's dependencies
-        working-directory: runtimes/ts/@keel/runtime
+        working-directory: runtimes/ts/@undra/runtime
         run: npm ci
       # run.sh builds the TypeScript runtime from source into a scratch directory and fails (it does
       # not skip) when it cannot, so this leg can neither be stale nor silently absent.
       - name: wasm acceptance (raw host + TS runtime)
-        run: bash crates/keel-ffi/tests/wasm/run.sh
+        run: bash crates/undra-ffi/tests/wasm/run.sh
 
   macos:
     name: Swift runtime + C ABI (macOS)
@@ -118,17 +120,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Swift tests
-        working-directory: runtimes/swift/KeelRuntime
+        working-directory: runtimes/swift/UndraRuntime
         run: swift test
       - name: Swift-over-C-ABI acceptance
-        run: bash crates/keel-ffi/tests/swift/run.sh
-      - name: C ABI acceptance (keel.h with -Werror; the host contract under ASan)
-        run: KEEL_C_SANITIZE=1 bash crates/keel-ffi/tests/c/run.sh
+        run: bash crates/undra-ffi/tests/swift/run.sh
+      - name: C ABI acceptance (undra.h with -Werror; the host contract under ASan)
+        run: UNDRA_C_SANITIZE=1 bash crates/undra-ffi/tests/c/run.sh
+      - name: Loaded cdylib keeps its schema + JNI exports (ADR-029 regression, macOS dead-strip)
+        run: cargo test -p undra-cli --test schema_retention -- --ignored --nocapture
       - name: iOS cross-build (device + simulator)
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
-          cargo check -p keel-ffi --target aarch64-apple-ios
-          cargo check -p keel-ffi --target aarch64-apple-ios-sim
+          cargo check -p undra-ffi --target aarch64-apple-ios
+          cargo check -p undra-ffi --target aarch64-apple-ios-sim
 
   android:
     name: Android cross-build
@@ -142,13 +146,13 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
       - name: Build the JNI library for both ABIs
-        run: cargo ndk -t arm64-v8a -t x86_64 build -p keel-ffi --features jni
+        run: cargo ndk -t arm64-v8a -t x86_64 build -p undra-ffi --features jni
 
   ffi-miri:
     # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
     # Linux futex call (upstream toolchain friction, not our code); the macOS backend has
-    # no futex path and checks the same keel-ffi code.
-    name: keel-ffi under Miri
+    # no futex path and checks the same undra-ffi code.
+    name: undra-ffi under Miri
     runs-on: macos-15
     env:
       RUSTFLAGS: ""
@@ -159,14 +163,14 @@ jobs:
           components: miri, rust-src
       - uses: Swatinem/rust-cache@v2
       - name: Miri (unit tests; FFI-callback tests excluded)
-        run: cargo +nightly miri test -p keel-ffi --lib
+        run: cargo +nightly miri test -p undra-ffi --lib
       - name: Miri (host-allocated port replies, out_reply is always free()d)
         run: |
-          MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test -p keel-ffi --test abi -- \
+          MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test -p undra-ffi --test abi -- \
             a_host_that_sets_cap sync_port_answers
 
   ffi-asan:
-    name: keel-ffi under ASan
+    name: undra-ffi under ASan
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: ""
@@ -181,7 +185,7 @@ jobs:
         # ASan instrumentation perturbs (it is a performance-accounting test, not a safety one, and
         # runs unmodified in the normal Rust job).
         run: |
-          RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p keel-ffi \
+          RUSTFLAGS="-Z sanitizer=address" cargo +nightly test -p undra-ffi \
             --target x86_64-unknown-linux-gnu --lib --test abi --test host_contract
 
   contracts:
@@ -212,10 +216,10 @@ jobs:
             https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
       - name: Run the scenario runners
         env:
-          KEEL_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
+          UNDRA_KOTLINX_COROUTINES: /home/runner/lib/kotlinx-coroutines-core-jvm-1.6.4.jar
           # The Kotlin contract runner requires the stdlib path explicitly (it does not derive
           # it from the kotlinc location the way test-local.sh does).
-          KEEL_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
+          UNDRA_KOTLIN_STDLIB: /home/runner/kotlin/kotlinc/lib/kotlin-stdlib.jar
         run: bash contract-tests/run-all.sh ts kotlin
 
   contracts-swift:

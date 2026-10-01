@@ -1,4 +1,4 @@
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 import SwiftUI
 
@@ -12,12 +12,12 @@ struct PlaygroundApp: App {
 
     init() {
         do {
-            try KeelBootstrap.start()
+            try UndraBootstrap.start()
             _model = State(initialValue: try PlaygroundModel())
         } catch {
             // Loading fails when the core was built from another schema than these bindings
-            // (`keel bindgen`, `keel build`), or when it cannot be reached (`keel dev`).
-            fatalError("Keel did not start: \(error)")
+            // (`undra bindgen`, `undra build`), or when it cannot be reached (`undra dev`).
+            fatalError("Undra did not start: \(error)")
         }
     }
 
@@ -40,6 +40,6 @@ final class PlaygroundModel {
         todos = try Todos()
         counter = try Counter()
         bigList = try BigList()
-        inbox = try RemoteTodosQueryHandle(list: KeelBootstrap.inboxList)
+        inbox = try RemoteTodosQueryHandle(list: UndraBootstrap.inboxList)
     }
 }

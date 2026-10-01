@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { ChangeOp, codecs } from "@keel/runtime";
-import { KeelIds, ParityCodec } from "@playground/core";
+import { ChangeOp, codecs } from "@undra/runtime";
+import { UndraIds, ParityCodec } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { RawStore, type SignalUpdate, valueOf } from "../src/raw-store.js";
 import { counters } from "../src/stats.js";
@@ -9,8 +9,8 @@ import { step } from "../src/wait.js";
 // S09 transaction: a store command that writes several signals is one transaction and so one
 // change-set, however many entries it carries; nothing is delivered while nobody observes.
 
-const Counter = KeelIds.Objects.Counter;
-const Bench = KeelIds.Objects.Bench;
+const Counter = UndraIds.Objects.Counter;
+const Bench = UndraIds.Objects.Bench;
 
 /** The value a counter signal carries in a set of entries: `count` (0), `changes` (1), `parity` (2). */
 function counterState(entries: readonly SignalUpdate[]): { count: number; changes: number; parity: string } {

@@ -1,5 +1,5 @@
 import Foundation
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 import XCTest
 
@@ -11,7 +11,7 @@ extension ContractScenarios {
             let core = try self.core
 
             // 1. Raw: observing delivers the current values before `observe` returns.
-            let raw = try RawStore(core: core, type: KeelIds.Objects.Todos.typeId, method: KeelIds.Objects.Todos.new)
+            let raw = try RawStore(core: core, type: UndraIds.Objects.Todos.typeId, method: UndraIds.Objects.Todos.new)
             defer { raw.close() }
             try checkEqual(raw.entries.count, 0, "entries before observe")
             raw.observe()
@@ -47,7 +47,7 @@ extension ContractScenarios {
             // 4. Observation off: a write delivers nothing; observing again delivers the current values once.
             raw.stopObserving()
             raw.clear()
-            let added: Todo = try decoded(Todo.self, try await raw.call(KeelIds.Objects.Todos.add, encoded { (w: inout KeelWriter) in w.writeString("x") }))
+            let added: Todo = try decoded(Todo.self, try await raw.call(UndraIds.Objects.Todos.add, encoded { (w: inout UndraWriter) in w.writeString("x") }))
             try checkEqual(added.title, "x", "the added item")
             try await quietFor(milliseconds: 200)
             try checkEqual(raw.entries.count, 0, "entries delivered while not observing")
@@ -71,7 +71,7 @@ extension ContractScenarios {
     func testS09_transactionIsASingleChangeSet() async {
         await scenario("S09", "transaction: a single change-set") {
             let core = try self.core
-            let counterType = KeelIds.Objects.Counter.self
+            let counterType = UndraIds.Objects.Counter.self
             let counter = try RawStore(core: core, type: counterType.typeId, method: counterType.new)
             defer { counter.close() }
             counter.observe()
@@ -89,7 +89,7 @@ extension ContractScenarios {
             // 1. `add(5)` is one transaction: three entries, one change-set.
             let transactions = core.stat("transactions")
             let changeSets = core.stat("crossings.change_sets")
-            try counter.callSync(counterType.add, encoded { (w: inout KeelWriter) in w.writeI32(5) })
+            try counter.callSync(counterType.add, encoded { (w: inout UndraWriter) in w.writeI32(5) })
             try await waitUntil("the entries of add(5)") { counter.entries.count >= 3 }
             try await quietFor(milliseconds: 50)
             try checkEqual(counter.entries.count, 3, "entries of add(5)")
@@ -122,12 +122,12 @@ extension ContractScenarios {
             try checkEqual(reset.parity, .even, "parity after reset")
 
             // 4. A hundred dirty signals are one change-set of a hundred entries.
-            let bench = try RawStore(core: core, type: KeelIds.Objects.Bench.typeId, method: KeelIds.Objects.Bench.new)
+            let bench = try RawStore(core: core, type: UndraIds.Objects.Bench.typeId, method: UndraIds.Objects.Bench.new)
             defer { bench.close() }
             bench.observe()
             try checkEqual(bench.entries.count, 129, "entries of the bench store's initial change-set (list + 128 counters)")
             @MainActor func touch(_ count: UInt32) throws {
-                try bench.callSync(KeelIds.Objects.Bench.benchTouchSignals, encoded { (w: inout KeelWriter) in w.writeU32(count) })
+                try bench.callSync(UndraIds.Objects.Bench.benchTouchSignals, encoded { (w: inout UndraWriter) in w.writeU32(count) })
             }
             bench.clear()
             let beforeHundred = core.stat("transactions")
@@ -156,7 +156,7 @@ extension ContractScenarios {
             let quiet = try RawStore(core: core, type: counterType.typeId, method: counterType.new)
             defer { quiet.close() }
             let beforeQuiet = core.stat("transactions")
-            try quiet.callSync(counterType.add, encoded { (w: inout KeelWriter) in w.writeI32(1) })
+            try quiet.callSync(counterType.add, encoded { (w: inout UndraWriter) in w.writeI32(1) })
             try await quietFor(milliseconds: 100)
             try checkEqual(core.stat("transactions") - beforeQuiet, 0, "transactions of a write nobody observes")
             try checkEqual(quiet.entries.count, 0, "entries of a write nobody observes")
@@ -171,7 +171,7 @@ extension ContractScenarios {
     func testS10_keyedPatch() async {
         await scenario("S10", "keyed patch") {
             let core = try self.core
-            let type = KeelIds.Objects.BigList.self
+            let type = UndraIds.Objects.BigList.self
 
             // 1. The initial entry for `items` is a full value of 10,000 items.
             let store = try RawStore(core: core, type: type.typeId, method: type.new)
@@ -202,7 +202,7 @@ extension ContractScenarios {
 
             // 2. An insert is one operation, and small.
             store.clear()
-            let inserted = try decoded(UInt32.self, try store.callSync(type.insertAt, encoded { (w: inout KeelWriter) in
+            let inserted = try decoded(UInt32.self, try store.callSync(type.insertAt, encoded { (w: inout UndraWriter) in
                 w.writeU32(5000)
                 w.writeString("fresh")
             }))
@@ -215,7 +215,7 @@ extension ContractScenarios {
 
             // 3. An update.
             store.clear()
-            try store.callSync(type.updateAt, encoded { (w: inout KeelWriter) in
+            try store.callSync(type.updateAt, encoded { (w: inout UndraWriter) in
                 w.writeU32(42)
                 w.writeString("renamed")
             })
@@ -224,7 +224,7 @@ extension ContractScenarios {
 
             // 4. A move.
             store.clear()
-            try store.callSync(type.moveItem, encoded { (w: inout KeelWriter) in
+            try store.callSync(type.moveItem, encoded { (w: inout UndraWriter) in
                 w.writeU32(10)
                 w.writeU32(9000)
             })
@@ -235,16 +235,16 @@ extension ContractScenarios {
 
             // 5. A removal.
             store.clear()
-            try store.callSync(type.removeAt, encoded { (w: inout KeelWriter) in w.writeU32(0) })
+            try store.callSync(type.removeAt, encoded { (w: inout UndraWriter) in w.writeU32(0) })
             _ = try await expectPatch("remove_at", .remove(index: 0)) { $0.remove(at: 0) }
 
             // 7. The bench list takes the same path: one insert into 10,000 rows.
-            let bench = try RawStore(core: core, type: KeelIds.Objects.Bench.typeId, method: KeelIds.Objects.Bench.new)
+            let bench = try RawStore(core: core, type: UndraIds.Objects.Bench.typeId, method: UndraIds.Objects.Bench.new)
             defer { bench.close() }
             bench.observe()
             try checkEqual(try bench.entries(of: 0)[0].decode([Item].self).count, 10_000, "the bench list's rows")
             bench.clear()
-            try bench.callSync(KeelIds.Objects.Bench.benchListInsert, encoded { (w: inout KeelWriter) in w.writeU32(123) })
+            try bench.callSync(UndraIds.Objects.Bench.benchListInsert, encoded { (w: inout UndraWriter) in w.writeU32(123) })
             try await waitUntil("the bench insert") { !bench.entries(of: 0).isEmpty }
             let benchEntry = bench.entries(of: 0)[0]
             try checkEqual(benchEntry.op, .keyedPatch, "form of the bench insert")
@@ -256,7 +256,7 @@ extension ContractScenarios {
             defer { fresher.close() }
             fresher.observe()
             fresher.clear()
-            try fresher.callSync(type.removeAt, encoded { (w: inout KeelWriter) in w.writeU32(0) })
+            try fresher.callSync(type.removeAt, encoded { (w: inout UndraWriter) in w.writeU32(0) })
             try await waitUntil("the removal") { !fresher.entries(of: 0).isEmpty }
             fresher.clear()
             try fresher.callSync(type.reset)
@@ -287,19 +287,19 @@ extension ContractScenarios {
             try checkEqual(todos.visible.map(\.done), [false, true, false], "done flags")
 
             // 2. One change-set carries the filter and the recomputed `visible`; `remaining` does not change.
-            let raw = try RawStore(core: core, type: KeelIds.Objects.Todos.typeId, method: KeelIds.Objects.Todos.new)
+            let raw = try RawStore(core: core, type: UndraIds.Objects.Todos.typeId, method: UndraIds.Objects.Todos.new)
             defer { raw.close() }
             raw.observe()
             var rawIds: [UUID] = []
             for title in ["a", "b", "c"] {
-                let todo: Todo = try decoded(Todo.self, try await raw.call(KeelIds.Objects.Todos.add, encoded { (w: inout KeelWriter) in w.writeString(title) }))
+                let todo: Todo = try decoded(Todo.self, try await raw.call(UndraIds.Objects.Todos.add, encoded { (w: inout UndraWriter) in w.writeString(title) }))
                 rawIds.append(todo.id)
             }
-            try raw.callSync(KeelIds.Objects.Todos.toggle, encoded { (w: inout KeelWriter) in rawIds[1].keelEncode(&w) })
+            try raw.callSync(UndraIds.Objects.Todos.toggle, encoded { (w: inout UndraWriter) in rawIds[1].undraEncode(&w) })
             try await waitUntil("the raw store to settle") { raw.entries(of: 3).last.flatMap { try? $0.decode(UInt32.self) } == 2 }
             raw.clear()
             let transactions = core.stat("transactions")
-            try raw.callSync(KeelIds.Objects.Todos.setFilter, encoded { (w: inout KeelWriter) in Filter.done.keelEncode(&w) })
+            try raw.callSync(UndraIds.Objects.Todos.setFilter, encoded { (w: inout UndraWriter) in Filter.done.undraEncode(&w) })
             try await waitUntil("the change-set of set_filter(Done)") { raw.entries.count >= 2 }
             try await quietFor(milliseconds: 50)
             try checkEqual(core.stat("transactions") - transactions, 1, "change-sets for set_filter(Done)")

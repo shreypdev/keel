@@ -1,17 +1,17 @@
-//! The application core the benchmarks run against: real `#[keel::api]` / `#[keel::store]`
+//! The application core the benchmarks run against: real `#[undra::api]` / `#[undra::store]`
 //! output, exactly what an app would write, so the numbers include the generated dispatchers,
 //! codecs and change-set plumbing rather than hand-rolled stand-ins (constitution R10 in
 //! spirit: bench through the public surface).
 #![allow(missing_docs, dead_code)]
 
-use keel::prelude::*;
+use undra::prelude::*;
 
 // ---------------------------------------------------------------------------------------------
 // Wire fixtures
 // ---------------------------------------------------------------------------------------------
 
 /// A small record: five fields of mixed kinds, about 50 bytes encoded.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record5 {
     pub id: u64,
@@ -23,7 +23,7 @@ pub struct Record5 {
 
 /// The blueprint's "1 KB record": exactly 1,024 encoded bytes (asserted in `fixtures` tests and
 /// when the workloads are built).
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record1k {
     pub id: Uuid,
@@ -35,7 +35,7 @@ pub struct Record1k {
 }
 
 /// A data enum: unit, one-field and multi-field variants.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
     Empty,
@@ -79,7 +79,7 @@ pub struct Calculator {
     base: i64,
 }
 
-#[keel::api]
+#[undra::api]
 impl Calculator {
     pub fn new(base: i64) -> Self {
         Calculator { base }
@@ -102,7 +102,7 @@ impl Calculator {
 }
 
 /// A free function: no handle to look up.
-#[keel::api]
+#[undra::api]
 pub fn add_one(n: u32) -> u32 {
     n.wrapping_add(1)
 }
@@ -115,12 +115,12 @@ pub fn add_one(n: u32) -> u32 {
 /// transaction: the blueprint's "change-set with 100 dirty signals".
 macro_rules! wide_store {
     ($name:ident; $($field:ident),+ $(,)?) => {
-        #[keel::store]
+        #[undra::store]
         pub struct $name {
             $( $field: Signal<u32>, )+
         }
 
-        #[keel::api(store)]
+        #[undra::api(store)]
         #[allow(clippy::new_without_default)]
         impl $name {
             pub fn new() -> Self {
@@ -151,7 +151,7 @@ wide_store!(Wide100;
 );
 
 /// A list row.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub id: u64,
@@ -160,13 +160,13 @@ pub struct Item {
 }
 
 /// A store with one keyed list: what a todo screen, a feed or a chat is.
-#[keel::store]
+#[undra::store]
 pub struct Feed {
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     items: Signal<Vec<Item>>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 #[allow(clippy::new_without_default)]
 impl Feed {
     pub fn new() -> Self {

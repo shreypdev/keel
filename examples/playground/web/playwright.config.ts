@@ -3,9 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * The smoke test drives the production build (`npm run build`, served by `vite preview`) in a real
  * headless Chromium. `npx playwright install chromium` fetches the browser once; to use an installed
- * Chrome instead, set KEEL_BROWSER_CHANNEL=chrome.
+ * Chrome instead, set UNDRA_BROWSER_CHANNEL=chrome.
  */
-const channel = process.env["KEEL_BROWSER_CHANNEL"];
+const channel = process.env["UNDRA_BROWSER_CHANNEL"];
 
 export default defineConfig({
   testDir: "smoke",

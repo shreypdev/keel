@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ALL_SIGNALS, type KeelCore, KeelError, KeelTransportError } from "@keel/runtime";
+import { ALL_SIGNALS, type UndraCore, UndraError, UndraTransportError } from "@undra/runtime";
 import { Todos, add, explode } from "@playground/core";
 import { boot, bootRaw } from "../src/harness.js";
 import { step, waitFor } from "../src/wait.js";
@@ -16,8 +16,8 @@ import { restore, snapshot } from "../src/wasm-exports.js";
  * one: see NOTES.md ("no way to adopt a restored handle"). The constructor is private in the
  * type system only, so the scenario reaches it the way the generated `create()` does.
  */
-function adoptTodos(core: KeelCore, handle: bigint): Todos {
-  const construct = Todos as unknown as new (core: KeelCore, handle: bigint) => Todos;
+function adoptTodos(core: UndraCore, handle: bigint): Todos {
+  const construct = Todos as unknown as new (core: UndraCore, handle: bigint) => Todos;
   return new construct(core, handle);
 }
 
@@ -44,25 +44,25 @@ test("S17 panic containment", async () => {
       () => undefined,
       (e: unknown) => e,
     );
-    expect(failure, "the call fails instead of hanging").toBeInstanceOf(KeelError);
-    expect(failure).toBeInstanceOf(KeelTransportError);
-    expect((failure as KeelTransportError).reason).toBe("trap");
-    expect((failure as KeelTransportError).message).toMatch(/trapped/);
+    expect(failure, "the call fails instead of hanging").toBeInstanceOf(UndraError);
+    expect(failure).toBeInstanceOf(UndraTransportError);
+    expect((failure as UndraTransportError).reason).toBe("trap");
+    expect((failure as UndraTransportError).message).toMatch(/trapped/);
 
     await waitFor("the core to close", () => victim.core.closed);
     expect(victim.closed, "onClose fired, once").toHaveLength(1);
-    expect(victim.closed[0]).toBeInstanceOf(KeelTransportError);
+    expect(victim.closed[0]).toBeInstanceOf(UndraTransportError);
 
     const fatal = victim.log.find({ minLevel: 5, contains: "kaboom" });
     expect(fatal, "a fatal record mentioning kaboom reached the Log port").toHaveLength(1);
-    expect(fatal[0]?.target).toBe("keel::panic");
+    expect(fatal[0]?.target).toBe("undra::panic");
 
     // A closed core refuses everything, with a typed error.
-    await expect(add(1, 2, victim.core)).rejects.toBeInstanceOf(KeelTransportError);
+    await expect(add(1, 2, victim.core)).rejects.toBeInstanceOf(UndraTransportError);
   });
 
   await step("3. the page can restart: a fresh load succeeds, and the snapshot restores into it", async () => {
-    // The plain `KeelCore.load`, as an app's restart would do.
+    // The plain `UndraCore.load`, as an app's restart would do.
     const fresh = await boot();
     expect(await add(1, 2, fresh.core)).toBe(3);
 

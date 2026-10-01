@@ -1,0 +1,17 @@
+error[E0560]: struct `Plain` has no field named `__undra_cell`
+  --> tests/ui/e0011_store_marker_without_store.rs:11:1
+   |
+11 | #[k::api(store)]
+   | ^^^^^^^^^^^^^^^^ `Plain` does not have this field
+   |
+   = note: all struct fields are already assigned
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation panicked: error[undra::E0011]: `Plain` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]`
+                = note: the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up
+                = help: add `#[undra::store]` to `struct Plain`, or remove `store` from the impl attribute
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011
+  --> tests/ui/e0011_store_marker_without_store.rs:11:1
+   |
+11 | #[k::api(store)]
+   | ^^^^^^^^^^^^^^^^ evaluation of `_` failed here

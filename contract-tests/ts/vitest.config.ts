@@ -9,7 +9,7 @@ export default defineConfig({
     alias: {
       // The runtime and the generated bindings are used from their TypeScript sources, exactly as
       // the playground's web app does, so a change to either is tested without a build step.
-      "@keel/runtime": at("../../runtimes/ts/@keel/runtime/src/index.ts"),
+      "@undra/runtime": at("../../runtimes/ts/@undra/runtime/src/index.ts"),
       "@playground/core": at("../../examples/playground/generated/ts/src/index.ts"),
     },
   },

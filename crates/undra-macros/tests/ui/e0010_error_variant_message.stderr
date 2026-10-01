@@ -1,0 +1,26 @@
+error: error[undra::E0010]: variant `NotFound` has no `#[error(..)]` message
+         = note: every variant of a `#[undra::error]` enum needs a message, because the platforms show it to users and logs
+         = help: add `#[error("what went wrong")]`, or `#[error(transparent)]` to forward to the inner error
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0010
+ --> tests/ui/e0010_error_variant_message.rs:9:5
+  |
+9 |     NotFound(u32),
+  |     ^^^^^^^^
+
+error: error[undra::E0010]: invalid message for variant `Missing`: `{1}` refers to field 1, but the variant has 1
+         = note: the message is a template over the variant's fields
+         = help: use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0010
+  --> tests/ui/e0010_error_variant_message.rs:10:13
+   |
+10 |     #[error("todo {1} not found")]
+   |             ^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0010]: `#[error(transparent)]` on variant `Both` needs exactly one field, found 2
+         = note: `transparent` forwards `Display` and `source()` to the variant's only field
+         = help: give the variant a single field holding the inner error
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0010
+  --> tests/ui/e0010_error_variant_message.rs:12:5
+   |
+12 |     #[error(transparent)]
+   |     ^^^^^^^^^^^^^^^^^^^^^

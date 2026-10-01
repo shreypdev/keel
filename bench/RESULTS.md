@@ -1,11 +1,11 @@
-# Keel benchmark results
+# Undra benchmark results
 
 Host-measured numbers for every row of the blueprint's section 14 budget table that a host can
 measure, the full criterion tables behind them, and what is still waiting for devices.
 
-* Reproduce: `cargo bench -p keel-bench` (criterion, for humans) and
-  `cargo bench -p keel-ffi --bench boundary` (the C ABI).
-* The CI gate is different and cheaper: `cargo test -p keel-bench --test budgets --release`
+* Reproduce: `cargo bench -p undra-bench` (criterion, for humans) and
+  `cargo bench -p undra-ffi --bench boundary` (the C ABI).
+* The CI gate is different and cheaper: `cargo test -p undra-bench --test budgets --release`
   times the same operations with plain `Instant` and fails over `bench/budgets.toml` (see
   [The CI gate](#the-ci-gate)).
 * Medians are criterion's; the bracket is its 95% confidence interval on the median.
@@ -18,7 +18,7 @@ measure, the full criterion tables behind them, and what is still waiting for de
 | OS | macOS 26.5 (25F71) |
 | Rust | rustc 1.98.1 (48a229cea 2026-09-01), criterion 0.5 |
 | Profile | `bench` inheriting `release`: opt-level 3, `lto = "fat"`, `codegen-units = 1`, `panic = "unwind"` |
-| Runtime | no `keel-core` thread unless a row says so: the host drives the executor, as the wasm shell does |
+| Runtime | no `undra-core` thread unless a row says so: the host drives the executor, as the wasm shell does |
 | Load | **shared**: other builds ran on this machine during the measurements (load average from 5 to several hundred), so a thread-wake-dependent number can swing; two full runs and the gate's own timings agreed within about 5% for everything single-threaded |
 
 ## Section 14 rows, measured on the host
@@ -36,19 +36,19 @@ iOS target.
 | Change-set, 100 dirty signals (core side: write, build, deliver) | `signals/changeset_100/runtime` | 2.30 µs | ≤ 100 µs | 0.02x | within |
 | Keyed patch on 10,000 items, one insert (recorded list operation) | `signals/keyed_10k/insert` | 6.31 µs | ≤ 20 µs | 0.32x | within |
 | Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 70.87 µs | ≤ 3 ms | 0.02x | within |
-| Core cold start, including the `keel-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 79.70 µs | ≤ 3 ms | 0.03x | within |
+| Core cold start, including the `undra-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 79.70 µs | ≤ 3 ms | 0.03x | within |
 | Web crash recovery, 1 MB state (restore) | `snapshot/restore_1mb` | 270.31 µs | ≤ 100 ms | 0.003x | within |
 
 Two more rows have a host proxy, which is a data point and not a verdict:
 
 | Row | Host proxy | Value | Target | Note |
 |---|---|---|---|---|
-| Hello-world size added to the app | `keel-ffi` cdylib on `aarch64-apple-darwin`, release, LTO fat, stripped, no app code | 734 KB (316 KB gzipped) | ≤ 900 KB (iOS, arm64) | 82% of the budget before any app code; a macOS dylib carries Mach-O overhead an iOS static link does not. The `keel-ffi` test fixture core (runtime, JNI glue and a test core) is 978 KB stripped. A real measurement needs `aarch64-apple-ios` |
-| Runtime memory at idle | resident-set growth of a test process after `Runtime::new` with a `keel-core` thread | about 0.45 MB for the first runtime, about 70 KB for each further one (no core thread) | ≤ 2 MB | `ps` RSS, page-granular, so indicative only; a heap counter needs `unsafe` (R2) |
+| Hello-world size added to the app | `undra-ffi` cdylib on `aarch64-apple-darwin`, release, LTO fat, stripped, no app code | 734 KB (316 KB gzipped) | ≤ 900 KB (iOS, arm64) | 82% of the budget before any app code; a macOS dylib carries Mach-O overhead an iOS static link does not. The `undra-ffi` test fixture core (runtime, JNI glue and a test core) is 978 KB stripped. A real measurement needs `aarch64-apple-ios` |
+| Runtime memory at idle | resident-set growth of a test process after `Runtime::new` with an `undra-core` thread | about 0.45 MB for the first runtime, about 70 KB for each further one (no core thread) | ≤ 2 MB | `ps` RSS, page-granular, so indicative only; a heap counter needs `unsafe` (R2) |
 
-Also measured, not a row: the same handle method call through the C ABI (`keel_call_sync`,
+Also measured, not a row: the same handle method call through the C ABI (`undra_call_sync`,
 `boundary/call_sync/add`) is 49.8 ns (79.3 ns before ADR-028), so the ABI itself adds about 6 ns (the
-`Runtime::global()` lookup and the `KeelBuf` hand-off). Without the one allocation that hand-off owes, the
+`Runtime::global()` lookup and the `UndraBuf` hand-off). Without the one allocation that hand-off owes, the
 same call is 31.5 ns (`dispatch/call_sync_with/add`).
 
 ## Findings
@@ -69,8 +69,8 @@ operation through the runtime (`signals/keyed_*`, criterion medians):
 | **10,000, recorded** | **6.31 µs** | **272.3 ns** | **9.74 µs** | 0.6 ns |
 
 **The cause** was the design that `StoreCell`'s docs described ("each commit costs O(n) to compute the patch"): at every
-commit `KeyedList::diff` (`crates/keel-signals/src/store.rs`) called `KeyedPatch::diff`
-(`crates/keel-wire/src/patch.rs`) over the old and the new list, and that diff hashes every key of both lists into two
+commit `KeyedList::diff` (`crates/undra-signals/src/store.rs`) called `KeyedPatch::diff`
+(`crates/undra-wire/src/patch.rs`) over the old and the new list, and that diff hashes every key of both lists into two
 `HashMap`s and builds position tables before it looks at what changed. Measured on its own, with a plain `u64` key and
 `PartialEq` (`wire/keyed_patch_10k/diff`), it takes 456.79 µs: **85% of the 536.16 µs**; the rest was the generated key
 function, the encoded comparison of surviving rows and the baseline replay.
@@ -102,11 +102,11 @@ ADR-028 removes all three. A generated dispatcher answers a synchronous method w
 (`sync_err` for a typed error): when `call_sync` has armed the thread's reply slot, that encodes the whole `Reply` payload
 (`call_id`, status, value) into one reusable thread-local buffer and returns a zero-sized outcome (boxing a zero-sized
 value does not allocate); `Runtime::call_sync_with` lends the buffer to a closure. `Runtime::call_sync` copies it into the
-`Vec` it returns, which is the one allocation left and the one the C ABI owes (`keel_call_sync` hands that `Vec` over as
-the `KeelBuf` the caller frees). Whatever the buffer cannot serve (`keel_call`, dispatch layers, a call nested in another,
-a second runtime) takes the old allocating path, byte-identical on the wire. `crates/keel-ffi/tests/sync_alloc.rs` counts
+`Vec` it returns, which is the one allocation left and the one the C ABI owes (`undra_call_sync` hands that `Vec` over as
+the `UndraBuf` the caller frees). Whatever the buffer cannot serve (`undra_call`, dispatch layers, a call nested in another,
+a second runtime) takes the old allocating path, byte-identical on the wire. `crates/undra-ffi/tests/sync_alloc.rs` counts
 allocations with a global allocator and holds the path to exactly 0 per `call_sync_with`, 1 per `call_sync` and 1 per
-`keel_call_sync`. Four smaller costs on the same path went with it: SipHash on the `u32` dispatch ids, a linear scan of
+`undra_call_sync`. Four smaller costs on the same path went with it: SipHash on the `u32` dispatch ids, a linear scan of
 the object's method list per call, an `Arc` reference taken twice per receiver lookup, and several thread-local accesses
 in the panic guard.
 
@@ -120,7 +120,7 @@ about 3% between rounds when it was not saturated):
 | `dispatch/call_sync_with/add` (new: no allocation at all) | n/a | 31.5 ns |
 | `dispatch/call_sync/function` | 65.4 ns | 35.8 ns |
 | `dispatch/call_sync/echo_record1k` | 268.4 ns | 139.5 ns |
-| `boundary/call_sync/add` (C ABI, one `KeelBuf`) | 79.3 ns | 49.8 ns |
+| `boundary/call_sync/add` (C ABI, one `UndraBuf`) | 79.3 ns | 49.8 ns |
 | `boundary/call_sync/unknown` (status 5: formats a reason, allocates by nature) | 106.8 ns | 107.3 ns |
 | `boundary/call/add` (the async entry; the slot is not armed there) | 102.3 ns | 99.2 ns |
 
@@ -133,17 +133,17 @@ neither changes a contract.
 
 **The row is not closed.** 43.9 ns against 60 ns is a pass on a core faster than an A15, which is necessary and not
 sufficient: the row passes on the device only if an A15 core runs this path within 1.37x of this core's time (60 / 43.9),
-and this note has no A15 to measure. The verdict belongs to the device phase. `keel_call` (the async entry) still
+and this note has no A15 to measure. The verdict belongs to the device phase. `undra_call` (the async entry) still
 allocates its reply; it is not on the synchronous row's path.
 
 ### 3. `Runtime::new` + drop, without `shutdown()`, leaks the runtime and two threads
 
 Found while building the cold-start benchmark: a `Runtime` created with `Runtime::new` and merely dropped is never
-freed, and its `keel-core` thread and a second thread stay alive (100 create/drop cycles: +200 threads; after
+freed, and its `undra-core` thread and a second thread stay alive (100 create/drop cycles: +200 threads; after
 about 1,500 cycles thread creation on this host degrades from ~100 µs to several ms). `shutdown()` before the
-drop fixes it (+0 threads, runtime freed). The cause is a reference cycle through the `keel-query.hydrate`
+drop fixes it (+0 threads, runtime freed). The cause is a reference cycle through the `undra-query.hydrate`
 init hook: it spawns a task that holds a `Ctx` and parks on the unavailable `Kv` port, so the executor owns a
-task that owns the runtime. `TestRuntime` and `keel-transport`'s server both call `shutdown()`, so nothing in
+task that owns the runtime. `TestRuntime` and `undra-transport`'s server both call `shutdown()`, so nothing in
 the tree trips over it, and `Runtime::shutdown` documents that surviving `Ctx`s keep a runtime alive; but an
 embedder that relies on drop leaks silently. The bench harness wraps its runtimes so they are shut down.
 
@@ -188,7 +188,7 @@ value; `roundtrip` is what a call argument or return value pays: `encode_to_vec`
 | `result_ok` | 1.99 ns | 2.71 ns | 16.9 ns |
 | `result_err` | 3.43 ns | 23.5 ns | 68.5 ns |
 
-### Wire: keyed patch (keel-wire)
+### Wire: keyed patch (undra-wire)
 
 The patch algorithm and its host-side replay on their own, with a cheap key and `PartialEq`. `diff` is the O(list) fallback that a raw write (`set`, `update`, `replace`) takes since ADR-027; a recorded list operation does not run it. Before ADR-027 it was 85% of the keyed signals rows (Finding 1).
 
@@ -200,7 +200,7 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 
 ### Dispatch
 
-`Runtime::call_sync` / `Runtime::call` with a prebuilt payload and a host that only counts: `keel_call_sync` without the C ABI. `call_sync` returns the reply as a `Vec` (the one allocation the C ABI owes the host); `call_sync_with` lends the reply buffer instead and allocates nothing (ADR-028). `call_async` includes building the `Call` payload (a host must) and running the executor (`run_pending`) on this thread; there is no thread hop.
+`Runtime::call_sync` / `Runtime::call` with a prebuilt payload and a host that only counts: `undra_call_sync` without the C ABI. `call_sync` returns the reply as a `Vec` (the one allocation the C ABI owes the host); `call_sync_with` lends the reply buffer instead and allocates nothing (ADR-028). `call_async` includes building the `Call` payload (a host must) and running the executor (`run_pending`) on this thread; there is no thread hop.
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
@@ -212,7 +212,7 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 
 ### Signals and stores
 
-`cell` is the signals crate alone (100 `Signal<u32>` attached to a `StoreCell`, one transaction, a counting sink). `runtime` is the same 100 writes as one method call on a macro-generated store through the runtime. `decode` is a host validating and walking that change-set (borrowed). Keyed rows are one call through the runtime on an observed `Signal<Vec<Item>>` with `#[keel(key = "id")]`, written with the recorded list operations (`insert`, `update_at`, `move_item`); `raw_update_diff` is the same one-row edit through the raw `update`, which takes the diff path. Insert runs against a list that is restored outside the timed region. The wide interval on `raw_update_diff` is machine load (the gate harness measured 528.7 µs p50).
+`cell` is the signals crate alone (100 `Signal<u32>` attached to a `StoreCell`, one transaction, a counting sink). `runtime` is the same 100 writes as one method call on a macro-generated store through the runtime. `decode` is a host validating and walking that change-set (borrowed). Keyed rows are one call through the runtime on an observed `Signal<Vec<Item>>` with `#[undra(key = "id")]`, written with the recorded list operations (`insert`, `update_at`, `move_item`); `raw_update_diff` is the same one-row edit through the raw `update`, which takes the diff path. Insert runs against a list that is restored outside the timed region. The wide interval on `raw_update_diff` is machine load (the gate harness measured 528.7 µs p50).
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
@@ -241,9 +241,9 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `snapshot/cold_start_restore_100kb` | 70.87 µs | 70.12 µs .. 71.58 µs |
 | `snapshot/cold_start_restore_100kb_core_thread` | 79.70 µs | 78.65 µs .. 80.96 µs |
 
-### C ABI (`crates/keel-ffi/benches/boundary.rs`)
+### C ABI (`crates/undra-ffi/benches/boundary.rs`)
 
-`call/ready_add` is the only row that includes a real `keel-core` thread hop (spawn, wake, poll, reply on the core thread) and is the one most sensitive to machine load.
+`call/ready_add` is the only row that includes a real `undra-core` thread hop (spawn, wake, poll, reply on the core thread) and is the one most sensitive to machine load.
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
@@ -275,7 +275,7 @@ ADR-027: the insert row's gate is 31 µs, 5x what it measures, and what it measu
 20 µs device target. The handle method call was the other until ADR-028: its budget now guards the 43.9 ns
 it measures, not the allocator.) The test takes the best p50 of up to three attempts, runs in `--release` only (a debug build
 just smoke-runs every operation, so `cargo test --workspace` stays green and fast), and supports
-`KEEL_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
+`UNDRA_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
 
 ## Device numbers (iOS, Android, Web)
 
@@ -296,7 +296,7 @@ mid-range Android phone, Chromium) from `examples/playground`. Until then:
 | Keyed patch on 10,000 items, all three | the list mirror applying a patch (the core half is fixed, Finding 1) |
 | Core cold start with 100 KB snapshot restore | dlopen/app launch on iOS and Android, wasm compile and instantiate on web (the web row is "after wasm compile") |
 | Hello-world size added to the app | release builds for `aarch64-apple-ios`, the Android ABIs and `wasm32-unknown-unknown` (none of these targets is installed here); the host proxy above is thin against 900 KB |
-| Runtime memory at idle | a device memory profile (Instruments, Android Studio); the host proxy above is an RSS delta, and an exact heap counter needs a custom global allocator, which is `unsafe` and outside `keel-ffi` (R2) |
-| Incremental core rebuild in `keel dev`, 20k-line core | a 20k-line core, which the playground does not yet have |
+| Runtime memory at idle | a device memory profile (Instruments, Android Studio); the host proxy above is an RSS delta, and an exact heap counter needs a custom global allocator, which is `unsafe` and outside `undra-ffi` (R2) |
+| Incremental core rebuild in `undra dev`, 20k-line core | a 20k-line core, which the playground does not yet have |
 | Web crash recovery, 1 MB | the wasm build; the restore itself is measured above |
 | Comparison with UniFFI and KMP baselines | the playground phase; the blueprint publishes these per release |

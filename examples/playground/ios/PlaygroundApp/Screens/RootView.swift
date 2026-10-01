@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The four screens, one per tab. Launch with `-tab remote` (or `todos`, `counter`, `biglist`) to
-/// start on another one: `xcrun simctl launch booted dev.keel.playground -tab remote`.
+/// start on another one: `xcrun simctl launch booted dev.undra.playground -tab remote`.
 struct RootView: View {
     /// A tab of the app; the raw value is what `-tab` takes.
     enum Tab: String {
