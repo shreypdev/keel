@@ -9,6 +9,7 @@
 //! | 1 KB record, round trip | [`Bench::bench_echo_bytes`] with a 1,024-byte payload |
 //! | Change-set with 100 dirty signals | [`Bench::bench_touch_signals`] with `k = 100` |
 //! | Keyed patch on a 10,000-item list, one insert | [`Bench::bench_list_insert`] |
+//! | ADR-031 drain: 1,667 one-operation keyed patches in one frame | [`Bench::bench_list_update_burst`] |
 //!
 //! The store has [`SIGNALS`] counters (`s000` .. `s127`) and a keyed list of [`ROWS`] rows. The
 //! counters are written by position, so the signal table is generated from one list of names.
@@ -102,6 +103,26 @@ macro_rules! bench_store {
                 // what the device benchmarks time.
                 let at = (i as usize).min(self.rows.with(Vec::len));
                 self.rows.insert(at, Item::numbered(id));
+            }
+
+            /// Updates `n` rows of the list, **one transaction each**: `n` change-sets, each a
+            /// keyed patch of a single `Update` (the row's `version` goes up by one), the way a
+            /// socket or a sensor feed that writes a row at a time reaches the platform. The rows
+            /// are spread over the list (consecutive updates are far apart) and the same
+            /// positions come out for the same list length, so a run is repeatable. This is what
+            /// the device benchmarks drain (ADR-031: 100,000 patches a second is 1,667 a frame).
+            pub fn bench_list_update_burst(&self, n: u32) {
+                let len = self.rows.with(Vec::len);
+                if len == 0 {
+                    return;
+                }
+                for step in 0..n as usize {
+                    // 7,919 is prime, so the positions visit every row of a list whose length it
+                    // does not divide before any repeats.
+                    let at = step.wrapping_mul(7_919) % len;
+                    self.rows
+                        .update_at(at, |item| item.version = item.version.wrapping_add(1));
+                }
             }
 
             /// Puts the list back to its [`ROWS`] starting rows and writes zero to every counter,
@@ -280,6 +301,40 @@ mod tests {
         let mut r = Reader::new(&sets[0].entries[0].value);
         let patch = KeyedPatch::<Item>::decode(&mut r).unwrap();
         assert!(matches!(&patch.ops[0], PatchOp::Insert { index, .. } if *index == ROWS + 1));
+    }
+
+    #[test]
+    fn an_update_burst_is_one_change_set_of_one_update_per_step() {
+        let app = App::new();
+        app.call("bench_list_update_burst", &0u32.encode_to_vec());
+        assert!(app.change_sets().is_empty(), "no steps, no change-sets");
+
+        app.call("bench_list_update_burst", &5u32.encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(sets.len(), 5, "one transaction per update");
+        for (step, set) in sets.iter().enumerate() {
+            assert_eq!(set.entries.len(), 1);
+            let entry = &set.entries[0];
+            assert_eq!((entry.signal_id, entry.op), (ROWS_SIGNAL, ChangeOp::KeyedPatch));
+            let mut r = Reader::new(&entry.value);
+            let patch = KeyedPatch::<Item>::decode(&mut r).unwrap();
+            assert_eq!(patch.ops.len(), 1);
+            let want = (step as u32 * 7_919) % ROWS;
+            assert!(
+                matches!(&patch.ops[0], PatchOp::Update { index, item }
+                    if *index == want && item.id == want + 1 && item.version == 1),
+                "step {step}: {:?}",
+                patch.ops
+            );
+            assert!(entry.value.len() < 64, "{} bytes", entry.value.len());
+        }
+
+        // The same positions again: every row was touched once, so the versions are now 2.
+        app.call("bench_list_update_burst", &1u32.encode_to_vec());
+        let sets = app.change_sets();
+        let mut r = Reader::new(&sets[0].entries[0].value);
+        let patch = KeyedPatch::<Item>::decode(&mut r).unwrap();
+        assert!(matches!(&patch.ops[0], PatchOp::Update { index: 0, item } if item.version == 2));
     }
 
     #[test]
