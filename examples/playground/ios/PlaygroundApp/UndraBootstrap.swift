@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UndraRuntime
 import PlaygroundCore
 
@@ -10,6 +11,16 @@ enum UndraBootstrap {
 
     /// The server list the remote screen shows.
     static let inboxList = "inbox"
+
+    /// Where failures that nobody could catch end up: a command (`todos.toggle(id:)`) that the core
+    /// refused, a change a store could not apply. Undra has already logged each one; this puts it
+    /// in the app's own log too. The handler runs on the thread that made the call and must not
+    /// call back into Undra. In a debug build you could stop at the failing line instead:
+    /// `{ assertionFailure("\($0)") }`.
+    private static let onError: @Sendable (UndraUnhandledError) -> Void = { unhandled in
+        Logger(subsystem: "dev.undra.playground", category: "undra")
+            .error("\(unhandled.description, privacy: .public)")
+    }
 
     /// Loads the core linked into the app (`undra build --platform ios`) with the default adapters,
     /// except that `Http` is the in-memory server, `Connectivity` is the one the Offline switch
@@ -29,12 +40,12 @@ enum UndraBootstrap {
             .replacing(KvAdapter(directory: store))
         #if DEBUG
         if let url = ProcessInfo.processInfo.environment["UNDRA_DEV_URL"], !url.isEmpty {
-            try UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
+            try UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: onError))
             configureRemote(RemoteConfig(baseUrl: serverURL))
             return
         }
         #endif
-        try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
+        try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: onError))
         // Tell the core where the server is, before anything observes the remote list.
         configureRemote(RemoteConfig(baseUrl: serverURL))
     }

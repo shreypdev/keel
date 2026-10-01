@@ -144,17 +144,24 @@ public final class Bench: UndraStore, @unchecked Sendable {
     }
 
     /// A store with every counter at zero and [`ROWS`] rows numbered from 1.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Bench.typeId,
-            method: UndraIds.Objects.Bench.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Bench.typeId,
+                method: UndraIds.Objects.Bench.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Adds two numbers: the cheapest call there is, for the handle-call row.
-    public func benchAdd(a: UInt32, b: UInt32) -> UInt32 {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func benchAdd(a: UInt32, b: UInt32) throws -> UInt32 {
         var w = UndraWriter()
         a.undraEncode(&w)
         b.undraEncode(&w)
@@ -166,13 +173,14 @@ public final class Bench: UndraStore, @unchecked Sendable {
             )
             return try UInt32.undraDecoded(from: body)
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
     /// Returns `data` unchanged: a payload of `data.len()` bytes crosses the boundary
     /// twice.
-    public func benchEchoBytes(data: [UInt8]) -> [UInt8] {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func benchEchoBytes(data: [UInt8]) throws -> [UInt8] {
         var w = UndraWriter()
         w.writeBytes(data)
         do {
@@ -183,7 +191,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
             )
             return try UndraBytes.undraDecoded(from: body).bytes
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
@@ -200,7 +208,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Bench.benchListInsert")
         }
     }
 
@@ -214,7 +222,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Bench.benchListReset")
         }
     }
 
@@ -230,7 +238,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Bench.benchTouchSignals")
         }
     }
 
@@ -1537,7 +1545,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Bench: \(error)")
+            self.core.report(error, operation: "Bench.apply(signal: \(signal))")
         }
     }
 }
@@ -1555,19 +1563,25 @@ public final class BigList: UndraStore, @unchecked Sendable {
     }
 
     /// A list of [`LIST_LEN`] items numbered from 1.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.BigList.typeId,
-            method: UndraIds.Objects.BigList.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.BigList.typeId,
+                method: UndraIds.Objects.BigList.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
     /// returns its identity. One keyed `Insert`.
-    /// - Throws: ``ListError``.
-    public func insertAt(index: UInt32, label: String) throws(ListError) -> UInt32 {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func insertAt(index: UInt32, label: String) throws -> UInt32 {
         var w = UndraWriter()
         index.undraEncode(&w)
         label.undraEncode(&w)
@@ -1579,14 +1593,13 @@ public final class BigList: UndraStore, @unchecked Sendable {
             )
             return try UInt32.undraDecoded(from: body)
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
     /// Moves the row at `from` so that it ends at `to`. One keyed `Move`.
-    /// - Throws: ``ListError``.
-    public func moveItem(from: UInt32, to: UInt32) throws(ListError) {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func moveItem(from: UInt32, to: UInt32) throws {
         var w = UndraWriter()
         from.undraEncode(&w)
         to.undraEncode(&w)
@@ -1597,14 +1610,13 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
     /// Removes the row at `index`. One keyed `Remove`.
-    /// - Throws: ``ListError``.
-    public func removeAt(index: UInt32) throws(ListError) {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func removeAt(index: UInt32) throws {
         var w = UndraWriter()
         index.undraEncode(&w)
         do {
@@ -1614,8 +1626,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
@@ -1630,13 +1641,13 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "BigList.reset")
         }
     }
 
     /// Changes the label of the row at `index` and bumps its version. One keyed `Update`.
-    /// - Throws: ``ListError``.
-    public func updateAt(index: UInt32, label: String) throws(ListError) {
+    /// - Throws: ``ListError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func updateAt(index: UInt32, label: String) throws {
         var w = UndraWriter()
         index.undraEncode(&w)
         label.undraEncode(&w)
@@ -1647,8 +1658,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = ListError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: ListError.self)
         }
     }
 
@@ -1685,7 +1695,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of BigList: \(error)")
+            self.core.report(error, operation: "BigList.apply(signal: \(signal))")
         }
     }
 }
@@ -1704,12 +1714,18 @@ public final class Counter: UndraStore, @unchecked Sendable {
     }
 
     /// A counter at zero with no changes made.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Counter.typeId,
-            method: UndraIds.Objects.Counter.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Counter.typeId,
+                method: UndraIds.Objects.Counter.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
@@ -1726,7 +1742,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.add")
         }
     }
 
@@ -1739,7 +1755,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.decrement")
         }
     }
 
@@ -1752,7 +1768,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.increment")
         }
     }
 
@@ -1765,7 +1781,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Counter.reset")
         }
     }
 
@@ -1810,7 +1826,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Counter: \(error)")
+            self.core.report(error, operation: "Counter.apply(signal: \(signal))")
         }
     }
 }
@@ -1831,18 +1847,24 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// An empty list showing every item.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Todos.typeId,
-            method: UndraIds.Objects.Todos.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Todos.typeId,
+                method: UndraIds.Objects.Todos.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Adds an item at the end of the list.
-    /// - Throws: ``TodoError``.
-    public func add(title: String) async throws(TodoError) -> Todo {
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func add(title: String) async throws -> Todo {
         var w = UndraWriter()
         title.undraEncode(&w)
         do {
@@ -1853,8 +1875,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
             )
             return try Todo.undraDecoded(from: body)
         } catch {
-            guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
     }
 
@@ -1867,7 +1888,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.clearDone")
         }
     }
 
@@ -1882,7 +1903,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.remove")
         }
     }
 
@@ -1897,7 +1918,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.setFilter")
         }
     }
 
@@ -1912,7 +1933,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.toggle")
         }
     }
 
@@ -1969,7 +1990,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Todos: \(error)")
+            self.core.report(error, operation: "Todos.apply(signal: \(signal))")
         }
     }
 }
