@@ -1,4 +1,4 @@
-# playground Android smoke run on the real platform adapters, 2026-10-01 10:13:50
+# playground Android smoke run on the real platform adapters, 2026-10-01 12:08:31
 
 $ adb shell getprop (device)
 sdk_gphone64_arm64
@@ -6,7 +6,7 @@ arm64-v8a
 35
 
 $ (cd examples/playground/android && ./gradlew :app:assembleDebug)
-13203542 bytes  /Users/shrey/Desktop/src/.work/android-adapters/examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
+14793992 bytes  /Users/shrey/Desktop/src/.work/android-adapters/examples/playground/android/app/build/outputs/apk/debug/app-debug.apk
 
 $ adb_ shell cmd connectivity airplane-mode disable
 
@@ -25,8 +25,8 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 2554
-WaitTime: 2569
+TotalTime: 4040
+WaitTime: 4086
 Complete
 screenshot .proof/android-adapters-tab-todos.png
 alive: todos
@@ -36,8 +36,8 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1942
-WaitTime: 1946
+TotalTime: 1431
+WaitTime: 1435
 Complete
 screenshot .proof/android-adapters-tab-counter.png
 alive: counter
@@ -47,8 +47,8 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 2509
-WaitTime: 2512
+TotalTime: 1550
+WaitTime: 1559
 Complete
 screenshot .proof/android-adapters-tab-biglist.png
 alive: biglist
@@ -58,14 +58,14 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1770
-WaitTime: 1777
+TotalTime: 1371
+WaitTime: 1376
 Complete
 screenshot .proof/android-adapters-tab-remote.png
 alive: remote
 
 $ the adapters the app installed (logcat, tag Undra)
-I/Undra   (10413): AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity and Lifecycle
+I/Undra   ( 4857): AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity and Lifecycle
 
 ## Remote: persisted query, offline toggle, queue, kill, real airplane mode, replay
 
@@ -74,28 +74,28 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1524
-WaitTime: 1525
+TotalTime: 1204
+WaitTime: 1205
 Complete
 ok: the inbox list is fetched (3 rows, status Success)
-remote-updated: Updated 10:14:27
+remote-updated: Updated 12:09:09
 screenshot .proof/android-adapters-remote-fetched.png
 files in the Kv directory (run-as dev.undra.playground ls files/undra/kv): 1
 
 $ 1. the Offline switch simulates losing the network; add an item
 
-$ tap remote-offline (142 543)
+$ tap remote-offline (142 605)
 
-$ tap remote-input (433 985)
+$ tap remote-input (433 1047)
 
 $ type 'Queued while offline'
 
-$ tap remote-add (942 986)
+$ tap remote-add (942 1048)
 ok: the item shows as queued
 screenshot .proof/android-adapters-remote-queued.png
 files in the Kv directory after queueing: 2  (the cache entry and the offline queue)
-Idempotency-Key of the dropped request: 674d4f38-7256-48cb-b600-3a9603fb9641
-I/UndraDemoServer(10504): POST /lists/inbox/todos dropped: the network is down (Idempotency-Key 674d4f38-7256-48cb-b600-3a9603fb9641)
+Idempotency-Key of the dropped request: 3e44f0ec-2e81-4739-a761-2907d52f3058
+I/UndraDemoServer( 4961): POST /lists/inbox/todos dropped: the network is down (Idempotency-Key 3e44f0ec-2e81-4739-a761-2907d52f3058)
 
 $ 2. kill the app with the queue unsent
 
@@ -112,30 +112,30 @@ Starting: Intent { cmp=dev.undra.playground/.MainActivity (has extras) }
 Status: ok
 LaunchState: COLD
 Activity: dev.undra.playground/.MainActivity
-TotalTime: 1190
-WaitTime: 1192
+TotalTime: 2564
+WaitTime: 2610
 Complete
 ok: the cached list is shown from Kv while offline (3 rows, the time of the fetch before the kill)
-remote-updated: Updated 10:14:27   (before the kill: Updated 10:14:27)
+remote-updated: Updated 12:09:09   (before the kill: Updated 12:09:09)
 POST requests sent while the Connectivity adapter says offline: 0  (the core holds the queue instead of retrying)
 
-$ tap remote-refresh (878 397)
+$ tap remote-refresh (878 459)
 ok: Refresh fails with the Http adapter's network error
 remote-error:   Last fetch failed: network: network error: Connection reset
 screenshot .proof/android-adapters-remote-restarted-offline.png
-I/UndraDemoServer(10776): GET /lists/inbox/todos dropped: the network is down
-I/UndraDemoServer(10776): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
 
 $ 4. airplane mode off: the Connectivity adapter reports online and the core replays the queue
 
 $ adb_ shell cmd connectivity airplane-mode disable
 ok: the item is on the server and in the list (4 rows)
 screenshot .proof/android-adapters-remote-replayed.png
-I/UndraDemoServer(10776): GET /lists/inbox/todos dropped: the network is down
-I/UndraDemoServer(10776): GET /lists/inbox/todos dropped: the network is down
-I/UndraDemoServer(10776): GET /lists/inbox/todos -> 200
-I/UndraDemoServer(10776): POST /lists/inbox/todos -> 201 (Idempotency-Key 674d4f38-7256-48cb-b600-3a9603fb9641)
-I/UndraDemoServer(10776): GET /lists/inbox/todos -> 200
+I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 5294): GET /lists/inbox/todos dropped: the network is down
+I/UndraDemoServer( 5294): POST /lists/inbox/todos -> 201 (Idempotency-Key 3e44f0ec-2e81-4739-a761-2907d52f3058)
+I/UndraDemoServer( 5294): GET /lists/inbox/todos -> 200
+I/UndraDemoServer( 5294): GET /lists/inbox/todos -> 200
 the server received the replayed request with the original Idempotency-Key
 
 $ process and log health
@@ -144,6 +144,6 @@ crash markers: 0
 
 $ files the app keeps (run-as)
 total 8
--rw------- 1 u0_a212 u0_a212 158 2026-10-01 10:15 7de49eda0951005e898663f3af23aa06036787a1b3dc1f22c2ab0ecd66251374
+-rw------- 1 u0_a208 u0_a208 158 2026-10-01 12:09 7de49eda0951005e898663f3af23aa06036787a1b3dc1f22c2ab0ecd66251374
 
 SMOKE PASSED
