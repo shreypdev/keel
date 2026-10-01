@@ -1,4 +1,4 @@
-import type { NativeHostCounters, UndraNativeModule } from "../../src/native.js";
+import type { NativeHostCounters, NativePlatformDefaults, UndraNativeModule } from "../../src/native.js";
 import { RecordKind } from "../../src/native.js";
 
 /** Where a fake record comes from: the JS thread inside a host function, or a core thread. */
@@ -28,6 +28,8 @@ export class FakeNative implements UndraNativeModule {
   restoreCode = 0;
   /** The bytes the last `restore` was given. */
   restored: Uint8Array | undefined;
+  /** What `platformDefaults()` reports: the standard ports this fake platform answers natively (none by default). */
+  defaults: NativePlatformDefaults = { ports: [] };
 
   /** What the scripted core does with a `Call` payload; returns the `undra_call` code. */
   onCall: (payload: Uint8Array) => number = () => 0;
@@ -38,7 +40,7 @@ export class FakeNative implements UndraNativeModule {
 
   readonly log: string[] = [];
   readonly portReplies: Uint8Array[] = [];
-  started: { config: Uint8Array; ports: number[]; syncMethods: number[] } | null = null;
+  started: { config: Uint8Array; ports: number[]; syncMethods: number[]; nativePorts: number[] } | null = null;
   shutdowns = 0;
   frameRequests = 0;
   batches = 0;
@@ -114,11 +116,26 @@ export class FakeNative implements UndraNativeModule {
   schemaJson(): string {
     return JSON.stringify(this.schema);
   }
-  start(config: ArrayBuffer, byteOffset: number, byteLength: number, ports: readonly number[], syncMethods: readonly number[]): number {
+  start(
+    config: ArrayBuffer,
+    byteOffset: number,
+    byteLength: number,
+    ports: readonly number[],
+    syncMethods: readonly number[],
+    nativePorts: readonly number[] = [],
+  ): number {
     this.log.push("start");
     if (this.startCode !== 0) return this.startCode;
-    this.started = { config: new Uint8Array(config, byteOffset, byteLength).slice(), ports: [...ports], syncMethods: [...syncMethods] };
+    this.started = {
+      config: new Uint8Array(config, byteOffset, byteLength).slice(),
+      ports: [...ports],
+      syncMethods: [...syncMethods],
+      nativePorts: [...nativePorts],
+    };
     return 0;
+  }
+  platformDefaults(): NativePlatformDefaults {
+    return this.defaults;
   }
   shutdown(): void {
     this.shutdowns++;

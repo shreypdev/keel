@@ -1,5 +1,8 @@
-import type { AdapterOverrides, AppState as UndraAppState, LifecycleAdapter } from "@undra/runtime";
+import { type AdapterOverrides, type AppState as UndraAppState, type LifecycleAdapter, PortIds } from "@undra/runtime";
 import { AppState } from "react-native";
+import { reactNativeHttp } from "./http.js";
+import type { NativePlatformDefaults } from "./native.js";
+import type { NativeLoadOptions } from "./load.js";
 
 /** React Native's `AppState` (`"active"`, `"inactive"`, `"background"`, ...) as the core's `Lifecycle` state. */
 export function lifecycleState(state: string | null | undefined): UndraAppState {
@@ -36,12 +39,39 @@ export function appStateLifecycle(): LifecycleAdapter {
 }
 
 /**
- * The adapters `loadNative` adds to the TypeScript runtime's defaults (which give `fetch` for
- * `Http`, the console for `Log` and `setTimeout` for `Timer` in React Native): `Lifecycle` from
- * `AppState`. React Native's core has no key-value store, file system or connectivity API, so `Kv`,
- * `SecureStore`, `Fs` and `Connectivity` are the app's to supply (docs/REACT_NATIVE.md). `Clock`,
- * `Rng` and `Timer` are native and need no adapter.
+ * The JavaScript adapters `loadNative` adds to the TypeScript runtime's defaults (ADR-038 amendment B): `Http` over
+ * React Native's `fetch` ({@link reactNativeHttp}) and `Lifecycle` from `AppState`. The other standard ports are the
+ * module's own, natively: `Kv`, `SecureStore`, `Fs` and the `Connectivity` source (see {@link nativeDefaultPorts}),
+ * and `Clock`, `Rng`, `Log` and `Timer` (decision 7 of ADR-038).
  */
 export function reactNativeAdapters(): AdapterOverrides {
-  return { lifecycle: appStateLifecycle() };
+  return { http: reactNativeHttp(), lifecycle: appStateLifecycle() };
+}
+
+/** The adapter name (in `AttachOptions.adapters`) of each standard port the module can answer natively. */
+const NATIVE_DEFAULTS: ReadonlyArray<readonly [number, keyof AdapterOverrides]> = [
+  [PortIds.Kv.portId, "kv"],
+  [PortIds.SecureStore.portId, "secureStore"],
+  [PortIds.Fs.portId, "fs"],
+  [PortIds.Connectivity.portId, "connectivity"],
+];
+
+/**
+ * Which standard ports the module answers natively for these options (ADR-038 amendment B, B7): those the platform
+ * offers (`platformDefaults().ports`) that the app did not override. A port is overridden when `adapters` has a value
+ * for it, an adapter (JavaScript) or `null` (no adapter: the port is unavailable), or when `ports` has an
+ * implementation for its id.
+ */
+export function nativeDefaultPorts(
+  offered: Pick<NativePlatformDefaults, "ports">,
+  options: Pick<NativeLoadOptions, "adapters" | "ports">,
+): number[] {
+  const chosen: number[] = [];
+  for (const [portId, name] of NATIVE_DEFAULTS) {
+    if (!offered.ports.includes(portId)) continue;
+    if (options.adapters?.[name] !== undefined) continue;
+    if (options.ports?.[portId] !== undefined) continue;
+    chosen.push(portId);
+  }
+  return chosen;
 }

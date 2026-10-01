@@ -44,6 +44,12 @@ export interface NativeTransportOptions {
   readonly logLevel?: number;
   /** Receives failures that have no caller: a malformed inbox record, a handler that threw. */
   readonly onError?: (error: unknown) => void;
+  /**
+   * The standard ports the module answers natively instead of the handler (ADR-038 amendment B): ids of `Kv`,
+   * `SecureStore`, `Fs` and `Connectivity`, from the module's `platformDefaults()`. `loadNative` picks the ones the
+   * app did not override. Default none: every port is the handler's.
+   */
+  readonly nativePorts?: readonly number[];
 }
 
 /** The `ArrayBuffer` behind a view, for the native module (which only takes `ArrayBuffer`s). */
@@ -80,9 +86,11 @@ function exactBuffer(bytes: Uint8Array): ArrayBuffer {
  * JS thread. One inbox for every thread keeps the core's commit order.
  *
  * Ports: `Clock`, `Rng` and `Log` are answered natively (log records are forwarded to the
- * handler), `Timer` is the core's own; async port methods are answered by the handler and sent
- * back with `PortReply`; a synchronous port method implemented in JavaScript is answered only when
- * the core calls it on the JS thread (docs/REACT_NATIVE.md, limits).
+ * handler), `Timer` is the core's own, and so are the standard ports of `nativePorts` (`Kv`,
+ * `SecureStore`, `Fs`, the `Connectivity` source: ADR-038 amendment B); other async port methods
+ * are answered by the handler and sent back with `PortReply`; a synchronous port method implemented
+ * in JavaScript is answered only when the core calls it on the JS thread (docs/REACT_NATIVE.md,
+ * limits).
  */
 export class NativeTransport implements Transport {
   readonly mode = "native";
@@ -146,7 +154,7 @@ export class NativeTransport implements Transport {
     native.portSync = this.#portSyncFn;
     let code: number;
     try {
-      code = native.start(bufferOf(bytes), bytes.byteOffset, bytes.byteLength, plan.ports, plan.syncMethods);
+      code = native.start(bufferOf(bytes), bytes.byteOffset, bytes.byteLength, plan.ports, plan.syncMethods, this.#options.nativePorts ?? []);
     } catch (error) {
       this.#detach(previous);
       throw error;
