@@ -292,8 +292,11 @@ where
             match self.tap.take_ops() {
                 Some(ops) => {
                     self.replay(st, ops);
-                    self.adopt_params(st);
-                    return None;
+                    if !st.needs_rebuild {
+                        self.adopt_params(st);
+                        return None;
+                    }
+                    // An op did not fit the index: rebuild from a snapshot now, in this drain.
                 }
                 None => st.needs_rebuild = true,
             }
