@@ -18,13 +18,14 @@ before the rename merged; the post-rename and post-site runs are being watched.
 5. Docs truth pass from the fact-check.
 
 ## In flight (one worktree each; see status.md)
-Merged since checkpoint 1: `magic` (ADR-033), `dist`, `stress` (S1a + landing cards), `swift-errors`
-(ADR-032). Still open: `coalesce` (ADR-031, all three runtimes + S18 + `no_coalesce` through the
-schema; TS done, Kotlin/Swift in progress) and `flake` (deterministic transport tests). Each: adversarial
-review, full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
+Every piece of the launch-v2 spec is merged (checkpoints 1–3 in status.md): ADR-029…033, the rename,
+site v2 + blog, distribution (dry run green), the harsh-conditions harness, the Swift error channel,
+frame-coalesced delivery (contracts 54/54), deterministic transport tests. Open worktrees:
+`bench-followups` (stress review M1/M3/M4/L4–L8) and `stress-screen` (S1b). Each: adversarial review,
+full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
 
 ## Next after those
-* Playground stress screen (S1b) and the harsh-conditions rows in `site/data/bench.json`.
+* Device-phase numbers for Kotlin/Swift drains (ADR-031 measured TS only); the `undra init` Android template could adopt `ChoreographerFramePacer` like the playground.
 * Founder steps (`docs/RELEASING.md`; the dry run is green): npm org `undra` + automation token →
   `NPM_TOKEN`; repository `shreypdev/homebrew-undra` with `Formula/` + fine-grained PAT →
   `HOMEBREW_TAP_TOKEN`; the `release` environment with a `v*` tag restriction and a `v*` tag ruleset;

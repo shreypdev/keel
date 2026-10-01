@@ -271,3 +271,15 @@ Matrix at checkpoint 2: Rust 2,156 · TS 897 · Kotlin 454 · Swift 384 · wasm 
 Review follow-ups recorded, not yet done: stress M1 (gates would not catch a 2× regression —
 ratio gates or runner baselines), M3 (a contended-writes scenario), M4 (a real drift gate), L4–L8;
 dist: the `release` environment + `v*` tag ruleset are founder steps.
+
+### Checkpoint 3 (2026-10-01, morning)
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| transport tests deterministic (injected clock; the fuzz test sized to the flood guard; TIME_WAIT fix) | `33e4172` | 100/100 and 200/200 loaded runs |
+| `UNDRA_BENCH_SCALE=2` in `bench.yml` | `b993067` | the slowest runner class is 6.2× the host on `changeset_100/cell`; Bench green since |
+| **ADR-031 frame-coalesced delivery** — all three runtimes, `no_coalesce` through the schema, `Stress` store, S18 | `ce4fd85` | opus review `.10x/reviews/2026-10-01-frame-coalesced-delivery-review.md`: mirror-equals-core holds (model tests 30k/20k/20k histories); 2 Medium fixed (either patch bound drops; Kotlin drain no longer chases); Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · **contracts 54/54** |
+
+Every piece of the launch-v2 spec (§7) is merged. In flight: `bench-followups` (stress review M1/M3/M4/L4–L8)
+and `stress-screen` (S1b: the playground stress screen and the landing page's "Push it").
+Matrix at checkpoint 3: Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · wasm 29 · contracts 54/54 (18 scenarios × 3).
