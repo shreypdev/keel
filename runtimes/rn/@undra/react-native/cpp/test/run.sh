@@ -5,7 +5,9 @@
 #   runtimes/rn/@undra/react-native/cpp/test/run.sh
 #
 # Needs the playground core for this machine: `undra build -C examples/playground --platform host`
-# (built here when missing). UNDRA_CORE_DYLIB points at another core.
+# (built here when missing). UNDRA_CORE_DYLIB points at another core. CXX picks the compiler (clang++).
+# The JSI compile check (step 3) is skipped when the playground app's dependencies are not installed;
+# UNDRA_RN_REQUIRE_JSI=1 (CI) makes that a failure instead of a skip.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +55,9 @@ if [ -f "$rn/jsi/jsi/jsi.h" ]; then
   "${CXX:-clang++}" -std=c++20 -fsyntax-only -Wall -Wextra -Werror -I "$rn/jsi" -I "$rn/callinvoker" -I "$rn" -I "$pkg/cpp" \
     "$pkg/cpp/UndraJsi.cpp"
   echo "ok - UndraJsi.cpp compiles"
+elif [ "${UNDRA_RN_REQUIRE_JSI:-}" = 1 ]; then
+  echo "not ok - the JSI compile check needs React Native's headers: npm ci in examples/playground/rn first" >&2
+  exit 1
 else
   echo "# skipped the JSI compile check: npm install in examples/playground/rn first"
 fi
