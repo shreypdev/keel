@@ -155,6 +155,11 @@ phase_run() {
   echo "==> running suites"
   local jflags=(-Xmx512m)
   local pair
+  if [ -n "${UNDRA_NATIVE_NAME:-}${UNDRA_NATIVE_PATH:-}" ]; then
+    echo "warning: UNDRA_NATIVE_NAME / UNDRA_NATIVE_PATH are gone (ADR-044: a core's library is lib<namespace>);" \
+      "NativeSmokeTests loads undra-ffi's fixture core: UNDRA_NATIVE_LIB_DIR=<dir of libundra_fixture> or" \
+      "UNDRA_NATIVE_PATHS=\"undra_fixture=<file>\"" >&2
+  fi
   if [ -n "${UNDRA_NATIVE_LIB_DIR:-}" ]; then jflags+=("-Djava.library.path=$UNDRA_NATIVE_LIB_DIR"); fi
   for pair in ${UNDRA_NATIVE_PATHS:-}; do
     case "$pair" in
