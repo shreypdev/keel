@@ -133,8 +133,15 @@ impl<T: SignalValue> Computed<T> {
         deps: D,
         f: impl for<'a> Fn(D::Values<'a>) -> T + Send + Sync + 'static,
     ) -> Computed<T> {
+        Computed::from_compute(deps.into_compute(f))
+    }
+
+    /// A computed whose recompute step is `compute` (which also knows what to subscribe to): what
+    /// [`new`](Computed::new) builds from its dependencies, and what `Derive::count` builds from a
+    /// derived list.
+    pub(crate) fn from_compute(compute: Box<dyn Compute<T>>) -> Computed<T> {
         let inner = Arc::new(ComputedInner {
-            compute: deps.into_compute(f),
+            compute,
             cache: RwLock::new(Cache {
                 value: None,
                 ticket: 0,
@@ -186,7 +193,9 @@ impl<T: SignalValue> Computed<T> {
 
 impl<T: SignalValue> ComputedInner<T> {
     /// The up-to-date value.
-    fn current(&self) -> Arc<T> {
+    pub(crate) fn current(&self) -> Arc<T> {
+        // Debug builds: a derived list's closure must not read computeds (ADR-039 section 6).
+        crate::derived::assert_not_deriving("read");
         if !self.dirty.load(Ordering::SeqCst) {
             if let Some(value) = self.cache.read_recursive().value.clone() {
                 return value;

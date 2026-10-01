@@ -2,7 +2,7 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all eighteen, then the check
+#   contract-tests/swift/run.sh                 all nineteen, then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #
 # What it does:
@@ -14,7 +14,7 @@
 #      A dynamic library (not the static one the apps link) keeps the linker from dropping the
 #      object files whose constructors register the core's items, so no -force_load is needed,
 #   4. pipes the `SCENARIO` lines through contract-tests/check.sh.
-# The exit status is non-zero if the tests fail or any of the eighteen scenarios is not a PASS.
+# The exit status is non-zero if the tests fail or any of the nineteen scenarios is not a PASS.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -44,7 +44,10 @@ if [ ! -f "$STAGE/libundra_core.dylib" ] || [ "$CORE" -nt "$STAGE/libundra_core.
   codesign --force --sign - "$STAGE/libundra_core.dylib" >/dev/null 2>&1
 fi
 
-# 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each.
+# 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each. S19 step 9
+#    replays the derived-list recording (written when missing or stale).
+"$REPO/contract-tests/derived-vectors.sh" >&2
+export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$PROJECT/build/derived-vectors.bin}"
 cd "$HERE"
 status=0
 UNDRA_LINK_CORE=1 swift test "$@" 2>&1 | tee "$LOG" || status=$?

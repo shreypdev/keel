@@ -34,7 +34,9 @@ use undra_bench::rss::{RssGrowth, RssSeries};
 use undra_bench::stats::Histogram;
 use undra_bench::workload::{Workload, plain};
 
-use super::fixtures::{Churn, Fetcher, Producer, SOURCE_PORT, TickSink, Ticker, tick_event};
+use super::fixtures::{
+    Churn, ChurnViews, Fetcher, Producer, SOURCE_PORT, TickSink, Ticker, open_by_title, tick_event,
+};
 use super::host::{
     ApplyingHost, CopyingHost, Core, CountingHost, DrainHost, ListMirror, MainStats, MainThread,
     call_ok, construct, method_call, runtime, runtime_with,
@@ -68,13 +70,14 @@ pub const fn u32_change_set_bytes(entries: u64) -> u64 {
 // Layer A: per-operation workloads
 // ---------------------------------------------------------------------------------------------
 
-/// The eight layer-A rows (`stress/...`), added to `workloads::all()` and `group("stress")`.
+/// The nine layer-A rows (`stress/...`), added to `workloads::all()` and `group("stress")`.
 pub fn workloads() -> Vec<Workload> {
     vec![
         Workload::new("stress/firehose/txn_x1000", firehose_burst),
         Workload::new("stress/firehose/call_set", firehose_call),
         Workload::new("stress/firehose/event", firehose_event),
         Workload::new("stress/keyed_churn_10k/ops_x1000", churn_ops),
+        Workload::new("stress/derived_churn_10k/ops_x1000", derived_churn_ops),
         Workload::new("stress/fanout/100k_observed_1k_dirty", || {
             fanout_cell(100_000, 1_000)
         }),
@@ -198,6 +201,55 @@ fn assert_churn_in_sync(rt: &Core, host: &ApplyingHost, churn: Handle) {
         CHURN_ROWS as usize,
         "the cycle keeps the length"
     );
+}
+
+/// 1,000 recorded operations on `ChurnViews`, each its own transaction: the source and its sorted
+/// derived view both observed and applied to host-side lists.
+fn derived_churn_ops() -> Box<dyn undra_bench::workload::Bench> {
+    let (rt, host, views) = derived_churn_runtime();
+    let payload = method_call(views, "ChurnViews", "churn", 3, &enc(&1_000_u32));
+    let sets = host.counts.change_sets();
+    call_ok(&rt, &payload);
+    assert_eq!(
+        host.counts.change_sets() - sets,
+        1_000,
+        "one change-set per operation"
+    );
+    let store = rt.object::<ChurnViews>(views.0).expect("the store");
+    host.with_mirror_at(1, |m| {
+        assert_eq!(m.errors, 0, "a view patch failed to apply");
+        assert!(
+            m.list == open_by_title(&store.rows_now()),
+            "the host's view is filter + stable sort"
+        );
+        assert_eq!(m.fulls, 1, "the view was sent whole once, at the observe");
+    });
+    plain(move || {
+        black_box(rt.call_sync(black_box(&payload)));
+    })
+}
+
+/// A runtime whose host mirrors a seeded, observed `ChurnViews`: its rows (signal 0) and its
+/// derived view `open` (signal 1, the rows not done by title).
+fn derived_churn_runtime() -> (Arc<Core>, Arc<ApplyingHost>, Handle) {
+    let host = Arc::new(ApplyingHost::default());
+    let rt = runtime_with(host.clone(), 0);
+    let views = construct(&rt, "ChurnViews", &[]);
+    call_ok(
+        &rt,
+        &method_call(views, "ChurnViews", "seed", 2, &enc(&CHURN_ROWS)),
+    );
+    host.watch(ListMirror::new(views, 0));
+    host.watch(ListMirror::new(views, 1));
+    rt.observe(views.0, ALL_SIGNALS, true);
+    host.with_mirror_at(1, |m| {
+        assert_eq!(
+            m.list.len(),
+            CHURN_ROWS as usize,
+            "the initial emission of the view"
+        );
+    });
+    (rt, host, views)
 }
 
 /// A sink that counts what it is given.
@@ -561,6 +613,7 @@ pub fn scenarios() -> Vec<(&'static str, Scenario)> {
         ("firehose/sustained", firehose),
         ("event/sustained", event_firehose),
         ("keyed_churn_10k/sustained", keyed_churn),
+        ("derived_churn_10k/sustained", derived_churn),
         ("fanout/sustained", fanout),
         ("fanout_stores/sustained", fanout_stores),
         ("stream/backpressure", stream_backpressure),
@@ -834,6 +887,129 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
             warnings(&host.counts),
         ],
         notes: Vec::new(),
+    }
+}
+
+/// **Derived churn** (ADR-039): `keyed_churn`'s list and cycle with a derived view of it, `open` =
+/// the rows not done, sorted by title, both observed and mirrored on the host. Every `Update` of
+/// the cycle toggles `done`, so it moves a row into or out of the view. Each timed step is the
+/// commit (the source's op and the view's), delivery and both host applies. At the end the host's
+/// view must be `filter + stable sort` of the core's rows, field for field.
+pub fn derived_churn(cfg: &StressConfig) -> StressReport {
+    let host = Arc::new(ApplyingHost::default());
+    let rt = runtime_with(host.clone(), 0);
+    let views = construct(&rt, "ChurnViews", &[]);
+    call_ok(
+        &rt,
+        &method_call(views, "ChurnViews", "seed", 2, &enc(&CHURN_ROWS)),
+    );
+    let mut view = ListMirror::new(views, 1);
+    match cfg.fault {
+        Fault::SkipPatches => view.skip_every(101),
+        Fault::DropOneUpdate => view.skip_nth(1),
+        Fault::None | Fault::SwapChangeSets | Fault::DropChangeSet => {}
+    }
+    host.watch(ListMirror::new(views, 0));
+    host.watch(view);
+    rt.observe(views.0, ALL_SIGNALS, true);
+    let seeded = host.with_mirror(|m| m.list.len());
+    let call = method_call(views, "ChurnViews", "churn", 3, &enc(&1_u32));
+
+    let warm_ops = warm_up(cfg.warmup(), 10, |_| {
+        black_box(rt.call_sync(&call));
+    });
+    let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
+    let (latency, ops, elapsed) = time_ops(cfg.duration, 10, |_| {
+        let reply = rt.call_sync(&call);
+        black_box(&reply);
+    });
+
+    let delivered = host.counts.change_sets() - sets;
+    let shipped = host.counts.change_set_bytes() - bytes;
+    let store = rt.object::<ChurnViews>(views.0).expect("the store");
+    let core_rows = store.rows_now();
+    let expected = open_by_title(&core_rows);
+    let core_view = store.open_now();
+    let stats = store.open_stats();
+    let rows_equal = host.with_mirror(|m| m.list == core_rows && m.errors == 0);
+    let (view_equal, view_len, view_errors, view_patches, view_seen, view_fulls, view_ops) = host
+        .with_mirror_at(1, |m| {
+            (
+                m.list == expected,
+                m.list.len(),
+                m.errors,
+                m.patches,
+                m.patches_seen,
+                m.fulls,
+                m.ops,
+            )
+        });
+    let all_ops = warm_ops + ops;
+    StressReport {
+        name: "derived_churn_10k/sustained",
+        ops,
+        elapsed,
+        warmup: cfg.warmup(),
+        latency,
+        bytes: shipped,
+        rss: None,
+        invariants: vec![
+            Invariant::new(
+                format!(
+                    "the host's view equals filter + stable sort of the core's rows, field for field \
+                     ({view_len} and {} rows)",
+                    expected.len()
+                ),
+                view_equal,
+            ),
+            Invariant::new(
+                "the core's view (DerivedList::get) equals filter + stable sort of its rows",
+                core_view == expected,
+            ),
+            Invariant::new(
+                "the host's source list equals the core's, and every patch of it applied",
+                rows_equal,
+            ),
+            Invariant::new(
+                format!(
+                    "every source operation produced at most two view ops ({view_ops} view ops for \
+                     {all_ops} operations, warm-up included)"
+                ),
+                view_ops <= 2 * all_ops,
+            ),
+            Invariant::new(
+                format!(
+                    "every view entry after the first full value was a patch, applied ({view_patches} \
+                     applied of {view_seen} delivered; {view_fulls} full values, 1 expected; the core \
+                     rebuilt {} times and sent {} full values, 1 and 1 expected)",
+                    stats.rebuilds, stats.full_values
+                ),
+                view_patches == view_seen
+                    && view_fulls == 1
+                    && stats.rebuilds == 1
+                    && stats.full_values == 1,
+            ),
+            Invariant::new(
+                format!("every view patch applied on the host ({view_errors} failed)"),
+                view_errors == 0,
+            ),
+            Invariant::new(
+                format!("one change-set per operation ({delivered} for {ops})"),
+                delivered == ops,
+            ),
+            Invariant::new(
+                format!(
+                    "the list is back at {seeded} rows after {all_ops} operations ({})",
+                    core_rows.len()
+                ),
+                core_rows.len() == seeded && seeded == CHURN_ROWS as usize,
+            ),
+            warnings(&host.counts),
+        ],
+        notes: vec![format!(
+            "{:.1} bytes per operation (the source's op and, when the row is in the view, the view's)",
+            shipped as f64 / ops.max(1) as f64
+        )],
     }
 }
 

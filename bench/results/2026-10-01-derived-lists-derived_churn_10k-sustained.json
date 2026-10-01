@@ -1,0 +1,14 @@
+{
+  "scenario": "derived_churn_10k/sustained",
+  "kind": "sustained",
+  "date": "2026-10-01",
+  "tag": "derived-lists",
+  "command": "UNDRA_BENCH_RESULTS_TAG=derived-lists UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_FILTER=churn cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "482f5fcf7d10-dirty"},
+  "load_average": {"before": 9.98, "after": 7.85},
+  "run": {"seconds": 10, "warmup_ms": 200, "elapsed_s": 10.000023625, "attempt": 1, "attempts": 3, "scale": 1, "baseline": null},
+  "result": {"ops": 1219540, "per_sec": 121953.71188435567, "p50_ns": 5759, "p99_ns": 24575, "p999_ns": 100351, "max_ns": 331792, "bytes_per_op": 93.03307886580185, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 22 k ops/s, p99 at most 170.00 us", "passed": true, "failures": []},
+  "invariants": [{"what": "the host's view equals filter + stable sort of the core's rows, field for field (6025 and 6025 rows)", "holds": true, "timing": false}, {"what": "the core's view (DerivedList::get) equals filter + stable sort of its rows", "holds": true, "timing": false}, {"what": "the host's source list equals the core's, and every patch of it applied", "holds": true, "timing": false}, {"what": "every source operation produced at most two view ops (896219 view ops for 1243830 operations, warm-up included)", "holds": true, "timing": false}, {"what": "every view entry after the first full value was a patch, applied (896219 applied of 896219 delivered; 1 full values, 1 expected; the core rebuilt 1 times and sent 1 full values, 1 and 1 expected)", "holds": true, "timing": false}, {"what": "every view patch applied on the host (0 failed)", "holds": true, "timing": false}, {"what": "one change-set per operation (1219540 for 1219540)", "holds": true, "timing": false}, {"what": "the list is back at 10000 rows after 1243830 operations (10000)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": ["93.0 bytes per operation (the source's op and, when the row is in the view, the view's)"]
+}

@@ -596,6 +596,31 @@ fn a_skipped_patch_fails_the_equality_invariant() {
 }
 
 #[test]
+fn a_skipped_view_patch_fails_the_view_invariant() {
+    // ADR-039: the host's derived view must equal filter + stable sort of the core's rows.
+    let _serial = serial();
+    let cfg = StressConfig {
+        duration: Duration::from_millis(200),
+        rss: false,
+        fault: Fault::SkipPatches,
+        warmup: None,
+    };
+    let report = common::stress::derived_churn(&cfg);
+    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    assert!(
+        broken
+            .iter()
+            .any(|what| what.contains("the host's view equals filter + stable sort")),
+        "a host that drops a view patch must fail the view invariant: {broken:?}"
+    );
+    assert!(
+        broken.iter().any(|what| what
+            .contains("every view entry after the first full value was a patch, applied")),
+        "and the patch-count invariant: {broken:?}"
+    );
+}
+
+#[test]
 fn a_single_dropped_update_fails_the_mirror_invariants() {
     // One lost `Update` keeps every id in place, and a later update of the same row repairs
     // the content: only counting the patches applied sees it for certain.
@@ -983,6 +1008,13 @@ const SITE_ROWS: &[(&str, &str, &str, &str, &str)] = &[
         "Keyed churn: a 10,000-row list, one list operation per transaction",
         "ops",
         "operation (commit + deliver + host apply)",
+    ),
+    (
+        "derived_churn_10k/sustained",
+        "stress/derived_churn",
+        "Derived churn: a 10,000-row list and a sorted view of it, one list operation per transaction",
+        "ops",
+        "operation (commit of the list and its view + deliver + both host applies)",
     ),
     (
         "fanout/sustained",

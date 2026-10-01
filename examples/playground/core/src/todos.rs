@@ -1,9 +1,11 @@
-//! The to-do list: a store with a keyed list, a filter and two computed values.
+//! The to-do list: a store with a keyed list, a filter, a derived list and a count.
 //!
-//! This is the screen every playground app shows first. `todos` is keyed by `id`, so the core
-//! ships an insert, a remove or an update as a keyed patch (SPEC 3.8) and the UI diffs by the same
-//! key; `visible` and `remaining` are [`Computed`]s, recomputed in the core and pushed in the same
-//! change-set as the write that caused them.
+//! This is the screen every playground app shows first. `todos` is keyed by `id` and written with
+//! the recorded list operations (`push`, `update_at`, `remove`), so the core ships an insert, a
+//! remove or an update as a one-op keyed patch (SPEC 3.8). `visible` is a [`DerivedList`] of it
+//! (ADR-039): kept current from those same operations, it reaches the UI as keyed patches too, one
+//! op per changed row however long the list is, and a change the filter hides sends nothing.
+//! `remaining` is the length of another view, kept as rows come and go with no scan of the list.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -60,7 +62,8 @@ pub struct Todos {
     #[undra(key = "id")]
     todos: Signal<Vec<Todo>>,
     filter: Signal<Filter>,
-    visible: Computed<Vec<Todo>>,
+    #[undra(key = "id")]
+    visible: DerivedList<Todo>,
     remaining: Computed<u32>,
 }
 
@@ -73,16 +76,15 @@ impl Todos {
 
     // Used by `new` and, through `restore = ".."`, to rebuild the store from a snapshot.
     fn assemble(_ctx: Ctx, todos: Signal<Vec<Todo>>, filter: Signal<Filter>) -> Self {
-        let visible = Computed::new((&todos, &filter), |(todos, filter)| {
-            todos
-                .iter()
-                .filter(|todo| filter.matches(todo))
-                .cloned()
-                .collect()
-        });
-        let remaining = Computed::new(&todos, |todos| {
-            todos.iter().filter(|todo| !todo.done).count() as u32
-        });
+        // Kept current from the list's recorded operations: one toggle is one op at 10 or 100,000
+        // rows. A filter change walks the list once and sends what entered and left (or the
+        // whole view).
+        let visible = todos
+            .derive()
+            .filter_with(&filter, |filter, todo| filter.matches(todo))
+            .build();
+        // Only the length of a view is needed here: kept as rows come and go, no scan per change.
+        let remaining = todos.derive().filter(|todo| !todo.done).count();
         // Identities come from a counter (the core reads no clock and no random source): after a
         // restore it continues above the largest identity the snapshot holds.
         let next = todos.with(|list| {
@@ -111,22 +113,24 @@ impl Todos {
             title,
             done: false,
         };
-        self.todos.update(|list| list.push(todo.clone()));
+        // A recorded operation: one `Insert` for `todos`, and one for `visible` if it shows it.
+        self.todos.push(todo.clone());
         Ok(todo)
     }
 
     /// Flips the `done` flag of the item with `id`; unknown ids are ignored.
     pub fn toggle(&self, id: Uuid) {
-        self.todos.update(|list| {
-            if let Some(todo) = list.iter_mut().find(|todo| todo.id == id) {
-                todo.done = !todo.done;
-            }
-        });
+        if let Some(at) = self.position(id) {
+            // `todos`: one `Update`; `visible`: an `Update`, an `Insert` or a `Remove`, or nothing.
+            self.todos.update_at(at, |todo| todo.done = !todo.done);
+        }
     }
 
     /// Removes the item with `id`; unknown ids are ignored.
     pub fn remove(&self, id: Uuid) {
-        self.todos.update(|list| list.retain(|todo| todo.id != id));
+        if let Some(at) = self.position(id) {
+            self.todos.remove(at);
+        }
     }
 
     /// Chooses which items `visible` holds.
@@ -136,7 +140,38 @@ impl Todos {
 
     /// Removes every finished item.
     pub fn clear_done(&self) {
-        self.todos.update(|list| list.retain(|todo| !todo.done));
+        let done: Vec<usize> = self
+            .todos
+            .with(|list| (0..list.len()).rev().filter(|&at| list[at].done).collect());
+        txn(|| {
+            // Highest index first, so the indices still to remove do not move; one change-set.
+            for at in done {
+                self.todos.remove(at);
+            }
+        });
+    }
+
+    /// Appends `count` items titled `Item 1`, `Item 2`, .. with every fourth one finished, in one
+    /// transaction (a demo and test helper: the big-list screen of the docs, contract scenario S19).
+    /// A bulk load is a raw write, so `todos` and `visible` are sent as full values this once; the
+    /// writes after it are patches again.
+    pub fn fill(&self, count: u32) {
+        let first = self.next.fetch_add(u64::from(count), Ordering::Relaxed);
+        let items: Vec<Todo> = (0..u64::from(count))
+            .map(|n| Todo {
+                id: id_of(first + n),
+                title: format!("Item {}", n + 1),
+                done: n % 4 == 3,
+            })
+            .collect();
+        self.todos.update(|list| list.extend(items));
+    }
+
+    /// Where the item with `id` is. O(n) in app code: finding a row by key is not the core's job
+    /// (ADR-039 section 9).
+    fn position(&self, id: Uuid) -> Option<usize> {
+        self.todos
+            .with(|list| list.iter().position(|todo| todo.id == id))
     }
 }
 
@@ -160,7 +195,7 @@ mod tests {
     use undra::runtime::testing::TestRuntime;
     use undra::signals::ALL_SIGNALS;
     use undra::wire::payload::{CallTarget, ChangeOp, ChangeSet, ReplyStatus};
-    use undra::wire::{Decode, Encode, KeyedPatch, Reader};
+    use undra::wire::{Decode, Encode, KeyedPatch, PatchOp, Reader};
 
     use super::*;
 
@@ -266,6 +301,50 @@ mod tests {
         cs.entries.iter().map(|e| e.signal_id).collect()
     }
 
+    /// The ops of `signal`'s keyed-patch entry.
+    fn ops(cs: &ChangeSet, signal: u32) -> Vec<PatchOp<Todo>> {
+        let entry = cs
+            .entries
+            .iter()
+            .find(|e| e.signal_id == signal)
+            .unwrap_or_else(|| panic!("no entry for signal {signal} in {cs:?}"));
+        assert_eq!(entry.op, ChangeOp::KeyedPatch, "{cs:?}");
+        let mut r = Reader::new(&entry.value);
+        let patch = KeyedPatch::<Todo>::decode(&mut r).unwrap();
+        r.finish().unwrap();
+        patch.ops
+    }
+
+    /// What a platform holds of `visible`: full values replace it, patches apply to it.
+    #[derive(Default)]
+    struct Mirror(Vec<Todo>);
+
+    impl Mirror {
+        fn apply(&mut self, sets: &[ChangeSet]) {
+            for cs in sets {
+                for e in cs.entries.iter().filter(|e| e.signal_id == VISIBLE) {
+                    match e.op {
+                        ChangeOp::Full => self.0 = Vec::<Todo>::decode_exact(&e.value).unwrap(),
+                        ChangeOp::KeyedPatch => {
+                            let mut r = Reader::new(&e.value);
+                            let patch = KeyedPatch::<Todo>::decode(&mut r).unwrap();
+                            patch.apply(&mut self.0).unwrap();
+                        }
+                        other => panic!("{other:?}"),
+                    }
+                }
+            }
+        }
+    }
+
+    fn todo(n: u64, title: &str, done: bool) -> Todo {
+        Todo {
+            id: id_of(n),
+            title: title.into(),
+            done,
+        }
+    }
+
     #[test]
     fn observing_sends_every_signal_once() {
         let app = App::new();
@@ -274,11 +353,12 @@ mod tests {
         assert_eq!(signal_ids(&initial), [TODOS, FILTER, VISIBLE, REMAINING]);
         assert_eq!(value::<Vec<Todo>>(&initial, TODOS), []);
         assert_eq!(value::<Filter>(&initial, FILTER), Filter::All);
+        assert_eq!(value::<Vec<Todo>>(&initial, VISIBLE), []);
         assert_eq!(value::<u32>(&initial, REMAINING), 0);
     }
 
     #[test]
-    fn adding_ships_the_list_the_computeds_and_one_change_set() {
+    fn adding_is_one_insert_in_the_list_and_in_the_view() {
         let app = App::new();
         let store = app.store();
         app.observe(store);
@@ -291,7 +371,16 @@ mod tests {
         assert_eq!(sets.len(), 1, "one write, one change-set: {sets:?}");
         assert_eq!(signal_ids(&sets[0]), [TODOS, VISIBLE, REMAINING]);
         assert_eq!(value::<u32>(&sets[0], REMAINING), 1);
-        assert_eq!(value::<Vec<Todo>>(&sets[0], VISIBLE), [todo]);
+        let insert = vec![PatchOp::Insert {
+            index: 0,
+            item: todo,
+        }];
+        assert_eq!(ops(&sets[0], TODOS), insert);
+        assert_eq!(
+            ops(&sets[0], VISIBLE),
+            insert,
+            "the view is patched, not sent"
+        );
     }
 
     #[test]
@@ -309,31 +398,51 @@ mod tests {
     }
 
     #[test]
-    fn toggling_one_of_many_items_is_a_keyed_update_patch() {
+    fn toggling_one_of_many_items_is_one_op_in_the_list_and_the_view() {
         let app = App::new();
         let store = app.store();
         for title in ["a", "b", "c"] {
             assert_eq!(app.add(store, title).0, ReplyStatus::Ok);
         }
         app.observe(store);
-        let second = id_of(2);
-        app.sync(store, "toggle", &second.encode_to_vec());
+        app.sync(store, "toggle", &id_of(2).encode_to_vec());
         let sets = app.change_sets();
         assert_eq!(sets.len(), 1);
         assert_eq!(entry_op(&sets[0], TODOS), ChangeOp::KeyedPatch);
-        let entry = sets[0]
-            .entries
-            .iter()
-            .find(|e| e.signal_id == TODOS)
-            .unwrap();
-        let mut r = Reader::new(&entry.value);
-        let patch = KeyedPatch::<Todo>::decode(&mut r).unwrap();
-        assert_eq!(patch.ops.len(), 1, "an O(change) patch: {patch:?}");
+        let update = vec![PatchOp::Update {
+            index: 1,
+            item: todo(2, "b", true),
+        }];
+        assert_eq!(ops(&sets[0], TODOS), update);
+        assert_eq!(ops(&sets[0], VISIBLE), update, "under `All` the row stays");
         assert_eq!(value::<u32>(&sets[0], REMAINING), 2);
     }
 
     #[test]
-    fn the_filter_selects_what_visible_holds() {
+    fn under_a_filter_a_toggle_is_a_remove_or_an_insert() {
+        let app = App::new();
+        let store = app.store();
+        for title in ["a", "b", "c"] {
+            app.add(store, title);
+        }
+        app.sync(store, "set_filter", &Filter::Active.encode_to_vec());
+        app.observe(store);
+        app.sync(store, "toggle", &id_of(1).encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(ops(&sets[0], VISIBLE), [PatchOp::Remove { index: 0 }]);
+        app.sync(store, "toggle", &id_of(1).encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(
+            ops(&sets[0], VISIBLE),
+            [PatchOp::Insert {
+                index: 0,
+                item: todo(1, "a", false)
+            }]
+        );
+    }
+
+    #[test]
+    fn the_filter_sends_what_entered_and_left_the_view() {
         let app = App::new();
         let store = app.store();
         for title in ["a", "b"] {
@@ -344,11 +453,21 @@ mod tests {
         app.sync(store, "set_filter", &Filter::Done.encode_to_vec());
         let sets = app.change_sets();
         assert_eq!(sets.len(), 1);
-        // `todos` did not change: only the filter and what is derived from it.
+        // `todos` did not change: only the filter and the view's membership patch.
         assert_eq!(signal_ids(&sets[0]), [FILTER, VISIBLE]);
-        let visible = value::<Vec<Todo>>(&sets[0], VISIBLE);
-        assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].title, "a");
+        assert_eq!(ops(&sets[0], VISIBLE), [PatchOp::Remove { index: 1 }]);
+        app.sync(store, "set_filter", &Filter::Active.encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(
+            ops(&sets[0], VISIBLE),
+            [
+                PatchOp::Remove { index: 0 },
+                PatchOp::Insert {
+                    index: 0,
+                    item: todo(2, "b", false)
+                }
+            ]
+        );
     }
 
     #[test]
@@ -359,17 +478,54 @@ mod tests {
             app.add(store, title);
         }
         app.sync(store, "toggle", &id_of(3).encode_to_vec());
-        app.observe(store);
+        let mut mirror = Mirror::default();
+        mirror.apply(&[app.observe(store)]);
         app.sync(store, "remove", &id_of(1).encode_to_vec());
         app.sync(store, "remove", &id_of(99).encode_to_vec());
         app.sync(store, "clear_done", &[]);
         let sets = app.change_sets();
-        let last = sets.last().expect("a change-set");
-        let titles: Vec<String> = value::<Vec<Todo>>(last, VISIBLE)
-            .into_iter()
-            .map(|t| t.title)
-            .collect();
+        mirror.apply(&sets);
+        let titles: Vec<&str> = mirror.0.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, ["b", "d"]);
+        assert!(
+            sets.iter()
+                .flat_map(|cs| &cs.entries)
+                .filter(|e| e.signal_id == VISIBLE)
+                .all(|e| e.op == ChangeOp::KeyedPatch),
+            "only patches after the observe"
+        );
+    }
+
+    #[test]
+    fn a_toggle_in_ten_thousand_rows_is_one_small_patch() {
+        let app = App::new();
+        let store = app.store();
+        app.observe(store);
+        app.sync(store, "fill", &10_000_u32.encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(value::<u32>(&sets[0], REMAINING), 7_500);
+        let mut mirror = Mirror::default();
+        mirror.apply(&sets);
+        assert_eq!(mirror.0.len(), 10_000);
+        // `Item 5001` (identity 5001, index 5000) is open; under `All` it stays visible.
+        app.sync(store, "toggle", &id_of(5_001).encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(sets.len(), 1);
+        let entry = sets[0]
+            .entries
+            .iter()
+            .find(|e| e.signal_id == VISIBLE)
+            .unwrap();
+        assert_eq!(entry.op, ChangeOp::KeyedPatch);
+        assert!(
+            entry.value.len() < 100,
+            "one op, not the view: {} bytes",
+            entry.value.len()
+        );
+        assert_eq!(ops(&sets[0], VISIBLE).len(), 1);
+        assert_eq!(value::<u32>(&sets[0], REMAINING), 7_499);
+        mirror.apply(&sets);
+        assert!(mirror.0[5_000].done);
     }
 
     #[test]
@@ -390,6 +546,33 @@ mod tests {
         let (status, body) = app.add(store, "d");
         assert_eq!(status, ReplyStatus::Ok);
         assert_eq!(Todo::decode_exact(&body).unwrap().id, id_of(4));
+    }
+
+    #[test]
+    fn restore_rebuilds_the_view_and_observing_sends_it_whole() {
+        let app = App::new();
+        let store = app.store();
+        for title in ["a", "b", "c"] {
+            app.add(store, title);
+        }
+        app.sync(store, "toggle", &id_of(2).encode_to_vec());
+        app.sync(store, "set_filter", &Filter::Active.encode_to_vec());
+        let snapshot = app.t.runtime().snapshot();
+        app.t
+            .runtime()
+            .restore(&snapshot)
+            .expect("the snapshot restores");
+        let initial = app.observe(store);
+        assert_eq!(entry_op(&initial, VISIBLE), ChangeOp::Full);
+        assert_eq!(
+            value::<Vec<Todo>>(&initial, VISIBLE),
+            [todo(1, "a", false), todo(3, "c", false)]
+        );
+        assert_eq!(value::<u32>(&initial, REMAINING), 2);
+        // And patches resume.
+        app.sync(store, "toggle", &id_of(3).encode_to_vec());
+        let sets = app.change_sets();
+        assert_eq!(ops(&sets[0], VISIBLE), [PatchOp::Remove { index: 1 }]);
     }
 
     #[test]
