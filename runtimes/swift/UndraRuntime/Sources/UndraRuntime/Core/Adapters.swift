@@ -49,7 +49,7 @@ public struct PortImplAdapter: UndraAdapter {
 /// // The defaults, with the app's own Http implementation instead of URLSession:
 /// let adapters = Adapters.platformDefault
 ///     .replacing(portId: UndraIds.Ports.Http.portId, with: httpPortImpl(MyHttp()))
-/// let core = try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash))
+/// let core = try UndraPlaygroundCore.load(.inproc(adapters: adapters))
 /// ```
 public struct Adapters: Sendable {
     /// The adapters, in registration order.
