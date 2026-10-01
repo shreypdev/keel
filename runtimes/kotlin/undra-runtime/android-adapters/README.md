@@ -36,6 +36,18 @@ sources. To change one port, register another implementation afterwards: `core.r
 replaces what `install` registered. `install(core, context, http = AndroidHttpAdapter(connectTimeoutMs = ...))` changes
 the HTTP limits; `requireValidatedNetwork = true` makes the Connectivity adapter wait for Android's own reachability check.
 
+Install before the first activity starts: in `Application.onCreate`, or in the first activity's `onCreate` when the core is
+loaded there (the playground and the `undra init` template do, so that a debug build can choose between the in-process core
+and `undra dev`). The Lifecycle adapter counts started and resumed activities from the moment it is installed; installed
+later (a Retry button, say) it starts from the process importance and counts from zero, so a dialog over the app can read as
+`Background` instead of `Inactive` until the next activity change.
+
+**Against `undra dev` (`Mode.REMOTE`)** the adapters stay on the device and the core, on your computer, calls them over the
+connection; install after `UndraCore.load` as usual. A core that `undra dev` replaced (`Closed(SESSION_LOST)`) is a new core
+that needs its own `install`: `close()` the previous `AndroidPlatform` first, so its callbacks stop reporting to a core that is
+gone (the playground's `UndraApp.load` does). `Connectivity` and `Lifecycle` reports made while the connection is down are
+dropped with a log line, so the dev server's core can hold an older state until the next change.
+
 Without `install`, an Android core has only Clock, Rng, Log and Timer: no network, no storage, no connectivity. `Http`
 calls fail with `Network("the Http port has no adapter registered")` and the query layer's persistence and offline queue do
 nothing.
@@ -96,7 +108,7 @@ failure is a typed `Network` error naming the policy. The playground allows only
 * No Android API is referenced at compile time in `:runtime`; `android.os.Looper` is found by reflection (once, for the main thread).
 * `java.lang.ref.Cleaner` (Android 13+) is optional: a phantom-reference queue with one daemon thread stands in below API 33.
 * With `LoadOptions.defaultAdapters` on Android, only the portable adapters (Clock, Rng, Log, Timer) are installed; the classes that
-  need `java.net.http` are never loaded. `Mode.REMOTE` fails with an `UndraModeException` because the JDK WebSocket is missing.
+  need `java.net.http` are never loaded. `Mode.REMOTE` (`undra dev`) works: the runtime has its own WebSocket client.
 
 ## Still to come
 
