@@ -15,6 +15,7 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
+use syn::visit_mut::VisitMut;
 use syn::{Fields, ItemEnum, ItemStruct};
 
 use super::attrs::{Site, take};
@@ -101,6 +102,10 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
         syn::Item::Enum(item) => (item.ident.clone(), item.generics.clone(), true),
         _ => return TokenStream::new(),
     };
+    // A field written `&str` is rejected as E0001 ("use an owned `String`"); left in the item, it
+    // would also be `rustc`'s "missing lifetime specifier", whose advice (introduce a lifetime)
+    // contradicts it. The item only has to type-check here, so the borrow gets one.
+    StaticRefs.visit_item_mut(item);
     let attrs = match item {
         syn::Item::Struct(item) => &mut item.attrs,
         syn::Item::Enum(item) => &mut item.attrs,
@@ -180,6 +185,18 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
             }
         }
         #error_impls
+    }
+}
+
+/// Gives every reference without a lifetime `'static` (see [`recover`]).
+struct StaticRefs;
+
+impl syn::visit_mut::VisitMut for StaticRefs {
+    fn visit_type_reference_mut(&mut self, node: &mut syn::TypeReference) {
+        if node.lifetime.is_none() {
+            node.lifetime = Some(syn::parse_quote!('static));
+        }
+        syn::visit_mut::visit_type_reference_mut(self, node);
     }
 }
 

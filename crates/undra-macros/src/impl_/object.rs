@@ -40,7 +40,7 @@ use syn::visit_mut::{self, VisitMut};
 use syn::{FnArg, ImplItem, ItemFn, ItemImpl, Pat, ReturnType, Signature, Type, Visibility};
 
 use super::attrs::{Site, docs, is_undra_macro_path, take};
-use super::check::Checks;
+use super::check::{Checks, panic_text};
 use super::common::{
     check_generics, derived, item_root, mentions_self, param_meta, send_assertion, submit,
 };
@@ -1219,14 +1219,28 @@ pub(crate) fn expand_impl(
 
     // The impl block and the struct must agree on whether this is a store.
     let probe_message = if store {
-        format!(
-            "error[undra::E0011]: `{type_name}` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]`\n  = note: the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up\n  = help: add `#[undra::store]` to `struct {type_name}`, or remove `store` from the impl attribute\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011"
+        Diag::new(
+            code::E0011,
+            format!(
+                "`{type_name}` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]`"
+            ),
+            "the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up",
+            format!(
+                "add `#[undra::store]` to `struct {type_name}`, or remove `store` from the impl attribute"
+            ),
         )
     } else {
-        format!(
-            "error[undra::E0011]: `{type_name}` is a `#[undra::store]` but its `#[undra::api]` impl block is not marked as a store\n  = note: the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field\n  = help: write `#[undra::api(store)]` on the impl block\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011"
+        Diag::new(
+            code::E0011,
+            format!(
+                "`{type_name}` is a `#[undra::store]` but its `#[undra::api]` impl block is not marked as a store"
+            ),
+            "the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field",
+            "write `#[undra::api(store)]` on the impl block",
         )
     };
+    // The text of an assertion is a format string: braces escaped.
+    let probe_message = panic_text(&probe_message);
     let probe_assert = if store {
         quote!(::core::assert!(<#self_ty>::__UNDRA_IS_STORE, #probe_message);)
     } else {

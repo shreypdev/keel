@@ -392,6 +392,11 @@ pub(crate) fn expand_store(
         .map(|s| s.name.clone())
         .collect::<Vec<_>>();
     if restore_hook.is_none() && !derived_signals.is_empty() {
+        // On the first computed field: it is what makes the store unrestorable.
+        let first = signals
+            .iter()
+            .find(|s| s.kind == SigKind::Computed)
+            .map_or_else(|| name.clone(), |s| s.ident.clone());
         errors.push(
             Diag::new(
                 code::E0013,
@@ -402,7 +407,7 @@ pub(crate) fn expand_store(
                 "restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them",
                 "add `#[undra::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store",
             )
-            .on(&name),
+            .on(&first),
         );
     }
     errors.finish()?;

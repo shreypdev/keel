@@ -215,6 +215,14 @@ fn messages(golden: &str, text: &str) -> Vec<Message> {
         };
         for next in &lines[index + 1..] {
             let trimmed = next.trim_start();
+            // The fix of a command-line diagnostic may take several lines, indented under `= help:`.
+            if !trimmed.starts_with("= ") && next.starts_with("          ") && !trimmed.is_empty() {
+                if let Some(last) = message.lines.last_mut() {
+                    last.push(' ');
+                    last.push_str(trimmed);
+                }
+                continue;
+            }
             if !trimmed.starts_with("= ") {
                 break;
             }
@@ -485,6 +493,32 @@ fn the_command_line_codes_are_the_catalogues() {
         in_spec,
         "the codes of undra-cli's `Code` and the second table of SPEC section 12 differ"
     );
+}
+
+/// The command-line codes whose message cannot be produced by a test that needs nothing but the
+/// binary: C0006 needs a built core to load, C0012 a platform that this machine is not, C0013 a
+/// dev server that fails to start. Their messages are covered by unit tests in `undra-cli/src`;
+/// the page shows their meaning and trigger. A code that can be produced cheaply does not belong
+/// here: add its test to `crates/undra-cli/tests/diagnostics.rs`.
+const CLI_WITHOUT_A_GOLDEN: &[&str] = &["C0006", "C0012", "C0013"];
+
+#[test]
+fn every_command_line_code_has_a_golden_or_a_reason() {
+    let shown = golden_codes();
+    let spec = spec_rows();
+    for code in spec.keys().filter(|c| c.starts_with('C')) {
+        let listed = CLI_WITHOUT_A_GOLDEN.contains(&code.as_str());
+        assert_eq!(
+            shown.contains_key(code),
+            !listed,
+            "{code}: {}",
+            if listed {
+                "has a golden now: remove it from CLI_WITHOUT_A_GOLDEN"
+            } else {
+                "needs a test in crates/undra-cli/tests/diagnostics.rs (or a reason in CLI_WITHOUT_A_GOLDEN)"
+            }
+        );
+    }
 }
 
 #[test]

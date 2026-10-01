@@ -52,7 +52,7 @@ help: the trait `undra::undra_wire::Decode` is not implemented for `Plain`
            and $N others
 
 error[E0080]: evaluation panicked: error[undra::E0061]: `Plain` is not a type declared with `#[undra::api]`
-                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Plain = u64`, has no definition the platforms could generate
+                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate
                 = help: add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
   --> tests/ui/d1_not_an_undra_type.rs:16:16
@@ -61,7 +61,7 @@ error[E0080]: evaluation panicked: error[undra::E0061]: `Plain` is not a type de
    |                ^^^^^ evaluation of `_::_` failed here
 
 error[E0080]: evaluation panicked: error[undra::E0061]: `Id` is not a type declared with `#[undra::api]`
-                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Id = u64`, has no definition the platforms could generate
+                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate
                 = help: add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
   --> tests/ui/d1_not_an_undra_type.rs:20:19

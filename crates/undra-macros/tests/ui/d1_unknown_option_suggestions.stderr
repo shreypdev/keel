@@ -2,54 +2,61 @@ error: error[undra::E0008]: unknown option `defualt` in `#[undra(..)]`
          = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
          = help: did you mean `default`? Otherwise remove `defualt`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/d1_unknown_option_suggestions.rs:10:13
+  --> tests/ui/d1_unknown_option_suggestions.rs:12:13
    |
-10 |     #[undra(defualt)]
+12 |     #[undra(defualt)]
    |             ^^^^^^^
 
 error: error[undra::E0008]: unknown option `frobnicate` in `#[undra(..)]`
          = note: the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields)
          = help: remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/d1_unknown_option_suggestions.rs:12:13
+  --> tests/ui/d1_unknown_option_suggestions.rs:14:13
    |
-12 |     #[undra(frobnicate)]
+14 |     #[undra(frobnicate)]
    |             ^^^^^^^^^^
 
 error: error[undra::E0008]: `#[undra(key)]` is not valid on a record or variant field
          = note: `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches
          = help: move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/d1_unknown_option_suggestions.rs:14:13
+  --> tests/ui/d1_unknown_option_suggestions.rs:16:13
    |
-14 |     #[undra(key = "id")]
+16 |     #[undra(key = "id")]
    |             ^^^
 
 error: error[undra::E0008]: unknown argument `restor` for `#[undra::store]`
          = note: `#[undra::store]` accepts: `crate = "path"` and `restore = "Self::function"`
          = help: did you mean `restore`? Otherwise remove `restor`
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
-  --> tests/ui/d1_unknown_option_suggestions.rs:18:12
+  --> tests/ui/d1_unknown_option_suggestions.rs:20:12
    |
-18 | #[k::store(restor = "Self::rebuild")]
+20 | #[k::store(restor = "Self::rebuild")]
    |            ^^^^^^
 
 error: error[undra::E0007]: `#[undra::store]` cannot be applied to an `enum`
          = note: `#[undra::store]` applies to a struct
          = help: move `#[undra::store]` onto a struct, or remove it
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
-  --> tests/ui/d1_unknown_option_suggestions.rs:25:1
+  --> tests/ui/d1_unknown_option_suggestions.rs:27:10
    |
-25 | / pub enum NotAStruct {
-26 | |     A,
-27 | | }
-   | |_^
+27 | pub enum NotAStruct {
+   |          ^^^^^^^^^^
 
 error: error[undra::E0007]: `#[undra::api]` cannot be applied to a type alias
          = note: `#[undra::api]` applies to a struct, an enum, an `impl` block or a free `fn`
          = help: move `#[undra::api]` onto a struct, an enum, an `impl` block or a free `fn`, or remove it
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
-  --> tests/ui/d1_unknown_option_suggestions.rs:30:1
+  --> tests/ui/d1_unknown_option_suggestions.rs:32:10
    |
-30 | pub type Alias = u32;
-   | ^^^^^^^^^^^^^^^^^^^^^
+32 | pub type Alias = u32;
+   |          ^^^^^
+
+error: error[undra::E0008]: `store` is only valid on an `impl` block
+         = note: `#[undra::api(store)]` marks the impl block of a `#[undra::store]` struct so constructors can be wired to the store's signals
+         = help: remove `store`, or apply the attribute to the store's impl block
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/d1_unknown_option_suggestions.rs:34:10
+   |
+34 | #[k::api(store)]
+   |          ^^^^^

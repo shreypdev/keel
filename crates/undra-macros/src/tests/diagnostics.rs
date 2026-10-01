@@ -1028,3 +1028,19 @@ fn a_keyed_list_looks_its_key_up_in_the_users_crate() {
         "no field access of the user's spelling: {text}"
     );
 }
+
+#[test]
+fn a_reference_field_is_reported_once_and_not_again_as_a_missing_lifetime() {
+    // `&str` is E0001 ("use an owned `String`"). The item is still emitted, and without a lifetime
+    // it would add rustc's E0106, whose advice (introduce a lifetime) says the opposite.
+    let tokens = api(quote!(
+        pub struct Profile {
+            pub name: &str,
+            pub tags: Vec<&str>,
+        }
+    ));
+    expect("E0001", tokens.clone(), "struct Profile");
+    let text = squashed(&tokens);
+    assert!(text.contains("pubname:&'staticstr"), "{text}");
+    assert!(text.contains("Vec<&'staticstr>"), "{text}");
+}

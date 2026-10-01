@@ -404,9 +404,7 @@ impl Named {
         let undeclared = panic_text(&Diag::new(
             code::E0061,
             format!("`{name}` is not a type declared with `#[undra::api]`"),
-            format!(
-                "Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type {name} = u64`, has no definition the platforms could generate"
-            ),
+            "Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate",
             format!(
                 "add `#[undra::api]` to `{name}`, or, if it is an alias, write the type it stands for where it is used"
             ),

@@ -666,7 +666,7 @@ const _: () = {
         let __undra_id = <CalcError>::UNDRA_TYPE_ID;
         if __undra_id == 0 {
             ::core::panic!(
-                "error[undra::E0061]: `CalcError` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type CalcError = u64`, has no definition the platforms could generate\n  = help: add `#[undra::api]` to `CalcError`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `CalcError` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate\n  = help: add `#[undra::api]` to `CalcError`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
         if __undra_id != ::undra::meta::ids::type_id("CalcError") {

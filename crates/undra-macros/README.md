@@ -111,6 +111,9 @@ the fields there are. Everything else `rustc` reports about a type the user wrot
   (`tests/support`), proxies, restore functions, keyed patches, event subscriptions.
 * `--test compile_fail`: trybuild expectations for the diagnostics
   (`TRYBUILD=overwrite` regenerates them).
+* `--test catalogue`: the audit of the diagnostic catalogue (SPEC section 12, the code table, the
+  emitting sites, the goldens of every crate, the docs links); it fails on a code without a
+  constant, an emitter or a golden, and on a message without what, why, fix or the link of its code.
 * `--test ui_runtime`: compile-pass files written as a user writes a core
   (`tests/ui-runtime/`), checked against the real runtime and signals.
 

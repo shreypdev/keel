@@ -2,7 +2,7 @@ error: error[undra::E0013]: store `Todos` cannot be restored automatically: `cou
          = note: restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them
          = help: add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store
          = docs: https://shreypdev.github.io/undra/docs/errors.html#E0013
- --> tests/ui/e0013_store_restore.rs:9:12
-  |
-9 | pub struct Todos {
-  |            ^^^^^
+  --> tests/ui/e0013_store_restore.rs:12:5
+   |
+12 |     count: Computed<u32>,
+   |     ^^^^^

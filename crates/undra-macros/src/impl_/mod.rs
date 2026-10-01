@@ -80,7 +80,36 @@ fn wrong_item(macro_name: &str, expected: &str, item: &syn::Item) -> syn::Error 
         format!("`#[undra::{macro_name}]` applies to {expected}"),
         format!("move `#[undra::{macro_name}]` onto {expected}, or remove it"),
     )
-    .on(item)
+    .on(&Pointer::of(item))
+}
+
+/// Where a diagnostic about a whole item points: its name if it has one (the rest of a `struct`
+/// or an `enum` is not what is wrong with it), else the item.
+struct Pointer<'a>(&'a syn::Item);
+
+impl<'a> Pointer<'a> {
+    fn of(item: &'a syn::Item) -> Pointer<'a> {
+        Pointer(item)
+    }
+}
+
+impl quote::ToTokens for Pointer<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        use syn::Item;
+        match self.0 {
+            Item::Const(i) => i.ident.to_tokens(tokens),
+            Item::Enum(i) => i.ident.to_tokens(tokens),
+            Item::Fn(i) => i.sig.ident.to_tokens(tokens),
+            Item::Mod(i) => i.ident.to_tokens(tokens),
+            Item::Static(i) => i.ident.to_tokens(tokens),
+            Item::Struct(i) => i.ident.to_tokens(tokens),
+            Item::Trait(i) => i.ident.to_tokens(tokens),
+            Item::TraitAlias(i) => i.ident.to_tokens(tokens),
+            Item::Type(i) => i.ident.to_tokens(tokens),
+            Item::Union(i) => i.ident.to_tokens(tokens),
+            other => other.to_tokens(tokens),
+        }
+    }
 }
 
 /// What an item is, with its article, for a sentence ("a `trait`", "an `enum`").
@@ -133,7 +162,7 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     run_recovering(item, strip, recover, |item| {
         let mut root: Option<Root> = None;
-        let mut store = false;
+        let mut store: Option<proc_macro2::Span> = None;
         parse_args(
             attr,
             "api",
@@ -144,26 +173,26 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
                     Ok(true)
                 } else if meta.path.is_ident("store") {
                     flag(meta, code::E0008, "store")?;
-                    store = true;
+                    store = Some(syn::spanned::Spanned::span(&meta.path));
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             },
         )?;
-        if store && !matches!(item, syn::Item::Impl(_)) {
+        if let Some(span) = store.filter(|_| !matches!(item, syn::Item::Impl(_))) {
             return Err(Diag::new(
                 code::E0008,
                 "`store` is only valid on an `impl` block",
                 "`#[undra::api(store)]` marks the impl block of a `#[undra::store]` struct so constructors can be wired to the store's signals",
                 "remove `store`, or apply the attribute to the store's impl block",
             )
-            .on(&item));
+            .at(span));
         }
         match item {
             syn::Item::Struct(item) => record::expand_struct(root, item),
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Api),
-            syn::Item::Impl(item) => object::expand_impl(root, store, item),
+            syn::Item::Impl(item) => object::expand_impl(root, store.is_some(), item),
             syn::Item::Fn(item) => object::expand_fn(root, item),
             other => Err(wrong_item(
                 "api",
