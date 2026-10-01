@@ -30,7 +30,7 @@ private func waitUntil(_ what: @autoclosure () -> String, timeout: Duration = .s
 @MainActor
 final class PreviewAndRecordedTests: XCTestCase {
     func testT1APreviewedStoreRunsTheRealLogicOnTheFakes() async throws {
-        let preview = try PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: try Seed(json: try fixture("fixtures/seed.json")))
+        let preview = try PreviewCore.load(UndraPlaygroundCore.load, seed: try Seed(json: try fixture("fixtures/seed.json")))
         defer { preview.close() }
         let todos = try Todos(ctx: preview.core)
         _ = try await todos.add(title: "Buy milk")
@@ -42,7 +42,7 @@ final class PreviewAndRecordedTests: XCTestCase {
     }
 
     func testT2TheSeedAnswersTheQueryAndTheManualClockMakesItStale() async throws {
-        let preview = try PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: try Seed(json: try fixture("fixtures/seed.json")))
+        let preview = try PreviewCore.load(UndraPlaygroundCore.load, seed: try Seed(json: try fixture("fixtures/seed.json")))
         defer { preview.close() }
         configureRemote(RemoteConfig(baseUrl: "https://api.test"), ctx: preview.core)
         let first = try RemoteTodosQueryHandle(list: "inbox", ctx: preview.core)
@@ -68,7 +68,7 @@ final class PreviewAndRecordedTests: XCTestCase {
     }
 
     func testT3TheSeededPortsAreWhatTheCoreReadsAndWhatItWritesLandsInTheFakes() async throws {
-        let preview = try PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: try Seed(json: try fixture("fixtures/seed.json")))
+        let preview = try PreviewCore.load(UndraPlaygroundCore.load, seed: try Seed(json: try fixture("fixtures/seed.json")))
         defer { preview.close() }
         let core = preview.core
         let greeting = try await kvGet(key: "greeting", ctx: core)

@@ -38,7 +38,7 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags([
                     "-L", coreDirectory,
-                    "-lundra_core",
+                    "-lplayground_core",
                     "-Xlinker", "-rpath", "-Xlinker", coreDirectory,
                 ]),
             ]

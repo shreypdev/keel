@@ -240,7 +240,7 @@ internal class ReplayTransport(private val recording: Recording, private val opt
  * ```
  */
 public class RecordedCore private constructor(
-    /** The core: the generated bindings take it as their `core`, or it becomes `UndraCore.shared`. */
+    /** The core: pass it to the generated classes as `core`. */
     public val core: UndraCore,
     private val transport: ReplayTransport,
 ) : AutoCloseable {

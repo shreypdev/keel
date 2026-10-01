@@ -20,7 +20,7 @@ import UndraTestKit
 }
 
 #Preview("Todos: the real core on scripted ports") {
-    let preview = try! PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: PreviewData.seed())
+    let preview = try! PreviewCore.load(UndraPlaygroundCore.load, seed: PreviewData.seed())
     let todos = try! Todos(ctx: preview.core)
     return TodosScreen(todos: todos)
         .task {
@@ -31,7 +31,7 @@ import UndraTestKit
 }
 
 #Preview("Remote list: the seeded server answers") {
-    let preview = try! PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: PreviewData.seed())
+    let preview = try! PreviewCore.load(UndraPlaygroundCore.load, seed: PreviewData.seed())
     configureRemote(RemoteConfig(baseUrl: "https://api.test"), ctx: preview.core)
     return RemoteScreen(inbox: try! RemoteTodosQueryHandle(list: "inbox", ctx: preview.core))
 }

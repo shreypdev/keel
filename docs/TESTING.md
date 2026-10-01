@@ -35,7 +35,7 @@ beside the runtimes.
 ```swift
 // Swift: a SwiftUI preview
 #Preview("Todos, three items") {
-    let preview = try! PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: seed)
+    let preview = try! PreviewCore.load(UndraPlaygroundCore.load, seed: seed)
     let todos = try! Todos(ctx: preview.core)
     return TodosScreen(todos: todos)
         .task { for title in ["Buy milk", "Walk the dog"] { _ = try? await todos.add(title: title) } }
@@ -44,7 +44,7 @@ beside the runtimes.
 
 ```kotlin
 // Kotlin: an instrumented or JVM test
-val preview = PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(seedJson))
+val preview = PreviewCore.load(UndraPlaygroundCore::load, Seed.fromJson(seedJson))
 val todos = Todos(preview.core)
 preview.fakes.http.respond("https://api.test/todos", httpResponse(200, "[]"))
 preview.advance(31_000)       // the cached list goes stale; the core refetches
@@ -68,7 +68,9 @@ event sources for `Connectivity` and `Lifecycle` (`preview.fakes.connectivity.go
   (`Clock`: staleness, timestamps) and timers armed through the `Timer` port. A delay a native core sleeps through is waited for, not advanced.
 * **Settling.** The core runs on its own thread (native) or after microtasks (web), so a preview waits for it to be idle: `settle()` and every
   `advance` do. "Idle" is observed (the core's counters stand still and no port call is pending), so raise the quiet window on a busy machine.
-* **One core per process.** `load` shuts down the shared core first (a refreshed preview does the same) unless `replaceCurrent` is off.
+* **One core per namespace.** Swift and Kotlin load the core through the entry of its bindings (`UndraPlaygroundCore.load`, ADR-044), which knows its
+  library and schema hash and is also what the generated stores use by default. `load` shuts down the shared core first (a refreshed preview does
+  the same) unless `replaceCurrent` is off; the entry refuses a second load of a core that is still open.
 * **Loading order.** The core's start-up work (the query cache reads the `Kv` port) runs concurrently with the host registering its ports in Swift
   (SPEC 6: a port registered after `undra_init` is racy against the hooks). The kit registers the stores first; do not rely on a persisted cache
   being hydrated in a preview. Seed the data through the `Http` fake instead.
@@ -164,7 +166,7 @@ while it grows and once more when `undra dev` stops.
 
 ```swift
 let recorder = PortRecorder(schemaHash: UndraIds.schemaHash, platform: "ios")
-let core = try UndraCore.load(.inproc(adapters: recorder.wrap(.platformDefault), expectedSchemaHash: UndraIds.schemaHash))
+let core = try UndraPlaygroundCore.load(.inproc(adapters: recorder.wrap(.platformDefault)))
 // ... use the app ...
 try recorder.toJSON().write(toFile: "session.json", atomically: true, encoding: .utf8)
 ```

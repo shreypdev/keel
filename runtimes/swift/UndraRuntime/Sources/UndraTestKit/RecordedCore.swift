@@ -315,7 +315,7 @@ final class ReplayTransport: UndraTransport, @unchecked Sendable {
 /// await recorded.advance(ms: 300)                 // the change-sets up to 300 ms into the session
 /// ```
 public final class RecordedCore: @unchecked Sendable {
-    /// The core: the generated bindings take it as `core`, or it becomes `UndraCore.shared`.
+    /// The core: pass it to the generated stores as `ctx`.
     public let core: UndraCore
     private let transport: ReplayTransport
 

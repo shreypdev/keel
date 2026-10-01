@@ -4,14 +4,15 @@ import dev.undra.playground.core.QueryStatus
 import dev.undra.playground.core.RemoteConfig
 import dev.undra.playground.core.RemoteTodosQueryHandle
 import dev.undra.playground.core.Todos
+import dev.undra.playground.core.UndraCoreNative
 import dev.undra.playground.core.UndraIds
+import dev.undra.playground.core.UndraPlaygroundCore
 import dev.undra.playground.core.configureRemote
 import dev.undra.playground.core.fileRead
 import dev.undra.playground.core.fileWrite
 import dev.undra.playground.core.kvGet
 import dev.undra.playground.core.kvPut
 import dev.undra.playground.core.secretGet
-import dev.undra.runtime.UndraNative
 import dev.undra.testkit.PreviewCore
 import dev.undra.testkit.RecordedCore
 import dev.undra.testkit.Seed
@@ -42,7 +43,7 @@ private fun <T> eventually(what: String, read: () -> T, done: (T) -> Boolean): T
 }
 
 private fun t1StoreRunsTheRealLogicOnTheFakes() {
-    PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(SEED)).use { preview ->
+    PreviewCore.load(UndraPlaygroundCore::load, Seed.fromJson(SEED)).use { preview ->
         val todos = Todos(preview.core)
         runBlocking {
             todos.add("Buy milk")
@@ -56,7 +57,7 @@ private fun t1StoreRunsTheRealLogicOnTheFakes() {
 }
 
 private fun t2SeedAnswersTheQueryAndTheManualClockMakesItStale() {
-    PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(SEED)).use { preview ->
+    PreviewCore.load(UndraPlaygroundCore::load, Seed.fromJson(SEED)).use { preview ->
         configureRemote(RemoteConfig("https://api.test"), preview.core)
         val first = RemoteTodosQueryHandle.create("inbox", preview.core)
         preview.settle()
@@ -82,7 +83,7 @@ private fun t2SeedAnswersTheQueryAndTheManualClockMakesItStale() {
 }
 
 private fun t3SeededPortsAreWhatTheCoreReadsAndWhatItWritesLandsInTheFakes() {
-    PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(SEED)).use { preview ->
+    PreviewCore.load(UndraPlaygroundCore::load, Seed.fromJson(SEED)).use { preview ->
         val core = preview.core
         runBlocking {
             check(kvGet("greeting", core)?.decodeToString() == "hello") { "the seeded Kv value" }
@@ -125,8 +126,8 @@ private fun t4RecordedSessionUnderTheGeneratedStore() {
 
 fun main() {
     System.setProperty("undra.data.dir", Files.createTempDirectory("undra-testkit-kotlin").toString())
-    if (!UndraNative.isAvailable) {
-        println("the native core library could not be loaded: ${UndraNative.unavailableReason}")
+    if (!UndraCoreNative.isAvailable) {
+        println("the native core library could not be loaded: ${UndraCoreNative.unavailableReason}")
         exitProcess(2)
     }
     val cases = listOf(

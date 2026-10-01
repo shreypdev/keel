@@ -14,17 +14,19 @@ import kotlinx.coroutines.runBlocking
  *
  * ```kotlin
  * val preview = PreviewCore.load(
- *     expectedSchemaHash = UndraIds.SCHEMA_HASH,
+ *     UndraPlaygroundCore::load,                         // the entry of the app's bindings (ADR-044)
  *     seed = Seed.fromJson(seedJson),                   // or Seed(http = listOf(...)), or script preview.fakes by hand
  * )
  * val todos = Todos(preview.core)
  * preview.advance(31_000)                                // the cached list goes stale; the core refetches
  * ```
  *
- * The core is the one `undra build --platform host` (a desktop JVM) or the Android `.so` provides. Android Studio's preview pane runs on a
- * desktop JVM that cannot load an Android library, so a Compose `@Preview` uses [RecordedCore] instead.
+ * The core is the one `undra build --platform host` (a desktop JVM) or the Android `.so` provides, loaded through the entry of its bindings, so it
+ * is also the core the bindings' stores use by default. Android Studio's preview pane runs on a desktop JVM that cannot load an Android library,
+ * so a Compose `@Preview` uses [RecordedCore] instead.
  *
- * A process holds one in-process core. [load] closes the shared one first (a refreshed preview does the same), unless `replaceCurrent` is `false`.
+ * A process holds one in-process core per namespace. [load] closes the shared one first (a refreshed preview does the same), unless
+ * `replaceCurrent` is `false`.
  */
 public class PreviewCore private constructor(
     /** The core. */
@@ -94,19 +96,19 @@ public class PreviewCore private constructor(
         /**
          * Loads the core with the fakes installed.
          *
-         * @param expectedSchemaHash the schema hash of the bindings (`UndraIds.SCHEMA_HASH`).
+         * @param entry the load function of the bindings the app was generated with (`UndraPlaygroundCore::load`): it knows the core's natives and
+         *   its schema hash, and remembers the core for the generated classes.
          * @param seed the starting state of the fakes, applied before the core starts.
          * @param fakes fakes to use instead of fresh ones (for example ones a test already holds).
          * @param adapters further ports on top of the fakes (an app's own port, or a [Replayer]'s ports).
-         * @param replaceCurrent close the shared core first, if there is one (a process holds one in-process core).
+         * @param replaceCurrent close the shared core first, if there is one (a process holds one in-process core per namespace).
          */
         public fun load(
-            expectedSchemaHash: ULong,
+            entry: (LoadOptions) -> UndraCore,
             seed: Seed? = null,
             fakes: Fakes = Fakes(),
             adapters: Map<UInt, PortImpl> = emptyMap(),
             replaceCurrent: Boolean = true,
-            makeShared: Boolean = true,
             onError: ((UndraUnhandledError) -> Unit)? = null,
         ): PreviewCore {
             seed?.apply(fakes)
@@ -114,11 +116,10 @@ public class PreviewCore private constructor(
             val options = LoadOptions(
                 mode = Mode.INPROC,
                 adapters = fakes.ports() + adapters,
-                expectedSchemaHash = expectedSchemaHash,
                 defaultAdapters = false,
                 onError = onError,
             )
-            val core = UndraCore.load(options)
+            val core = entry(options)
             fakes.clock.onTimerFired = { core.timerFired(it) }
             fakes.connectivity.attach(core)
             fakes.lifecycle.attach(core)

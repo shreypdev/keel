@@ -68,12 +68,12 @@
 <p><code>PreviewCore.load</code> starts your app&rsquo;s own core in the process with a deterministic fake behind every standard port. A seed fills them; <code>advance</code> moves the clock one deadline at a time and lets the core settle between.</p>
 <details class="reveal-code"><summary>Show Swift, Kotlin and TypeScript <span>3 snippets</span></summary>
 <div class="code"><div class="code-bar"><span>SwiftUI preview</span></div><pre><code data-lang="swift">#Preview("Todos, three items") {
-    let preview = try! PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: seed)
+    let preview = try! PreviewCore.load(UndraPlaygroundCore.load, seed: seed)
     let todos = try! Todos(ctx: preview.core)
     return TodosScreen(todos: todos)
         .task { for title in ["Buy milk", "Walk the dog"] { _ = try? await todos.add(title: title) } }
 }</code></pre></div>
-<div class="code"><div class="code-bar"><span>Kotlin test</span></div><pre><code data-lang="kotlin">val preview = PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(seedJson))
+<div class="code"><div class="code-bar"><span>Kotlin test</span></div><pre><code data-lang="kotlin">val preview = PreviewCore.load(UndraPlaygroundCore::load, Seed.fromJson(seedJson))
 val todos = Todos(preview.core)
 preview.fakes.http.respond("https://api.test/todos", httpResponse(200, "[]"))
 preview.advance(31_000)       // the cached list goes stale; the core refetches</code></pre></div>
@@ -125,7 +125,7 @@ recorded.advance(ms: 300)                      // the change-sets up to 300 ms i
 <p>A <code>Replayer</code> answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed <code>mismatch</code>, an extra one is <code>exhausted</code>, and a recorded call never made is <code>unconsumed</code>. A deviation consumes nothing, so one wrong call does not shift every later answer.</p>
 <details class="reveal-code"><summary>Show Swift and Rust <span>2 snippets</span></summary>
 <div class="code"><div class="code-bar"><span>Swift</span></div><pre><code data-lang="swift">let replayer = Replayer(try Recording(json: text))
-let core = try UndraCore.load(.inproc(adapters: replayer.adapters(), expectedSchemaHash: UndraIds.schemaHash))
+let core = try UndraPlaygroundCore.load(.inproc(adapters: replayer.adapters()))
 // ... run the flow ...
 try replayer.finish()    // throws each mismatch, and each recorded call the core never made</code></pre></div>
 <div class="code"><div class="code-bar"><span>Rust</span></div><pre><code data-lang="rust">let replayer = Arc::new(Replayer::new(&amp;Recording::from_json(&amp;text)?));

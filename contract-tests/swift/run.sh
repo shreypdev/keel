@@ -59,6 +59,6 @@ swift test --skip TestKitTests "$@" 2>&1 | tee "$LOG" || status=$?
 # 5. The testing kit against the same core (its own process: a process holds one in-process core). Skipped when the caller filtered the run.
 if [ "$#" = 0 ]; then
   echo "==> the testing kit (PreviewCore, RecordedCore) against the real core" >&2
-  UNDRA_LINK_CORE=1 swift test --filter TestKitTests 2>&1 | tee "$HERE/.build/testkit.log" || status=1
+  swift test --filter TestKitTests 2>&1 | tee "$HERE/.build/testkit.log" || status=1
 fi
 exit "$status"

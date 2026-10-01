@@ -6,12 +6,13 @@ import UndraRuntime
 ///
 /// ```swift
 /// #Preview("Todos, three items") {
-///     let preview = try! PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: try! Seed(json: seedJSON))
-///     TodosScreen(todos: try! Todos())          // uses UndraCore.shared, which is the preview's core
+///     let preview = try! PreviewCore.load(UndraPlaygroundCore.load, seed: try! Seed(json: seedJSON))
+///     TodosScreen(todos: try! Todos())          // the generated stores use the bindings' own core, which is the preview's
 /// }
 /// ```
 ///
-/// A process holds one in-process core. ``load(expectedSchemaHash:seed:fakes:adapters:replaceCurrent:onError:)`` shuts the shared one down first
+/// The core is loaded through the entry of its bindings (`UndraPlaygroundCore.load`, ADR-044), so it is also what the bindings' stores use by default.
+/// A process holds one in-process core per namespace. ``load(_:seed:fakes:adapters:replaceCurrent:onError:)`` shuts the shared one down first
 /// (a refreshed preview does the same), unless `replaceCurrent` is `false`.
 ///
 /// The manual clock moves the `Clock` port and the timers armed through the `Timer` port. A native core runs its own `ctx.sleep` on the runtime's
@@ -36,14 +37,15 @@ public final class PreviewCore: @unchecked Sendable {
     /// Loads the core with the fakes installed.
     ///
     /// - Parameters:
-    ///   - expectedSchemaHash: the schema hash of the bindings (`UndraIds.schemaHash`).
+    ///   - entry: the load function of the bindings the app was generated with (`UndraPlaygroundCore.load`): it knows the core's table and its schema
+    ///     hash, and remembers the core for the generated stores.
     ///   - seed: the starting state of the fakes, applied before the core starts.
     ///   - fakes: fakes to use instead of fresh ones (for example ones a test already holds).
     ///   - adapters: further ports on top of the fakes (an app's own port, or a ``Replayer``'s adapters).
     ///   - replaceCurrent: shut the shared core down first, if there is one (a process holds one in-process core).
     @discardableResult
     public static func load(
-        expectedSchemaHash: UInt64,
+        _ entry: (LoadOptions) throws -> UndraCore,
         seed: Seed? = nil,
         fakes: Fakes = Fakes(),
         adapters: Adapters = .none,
@@ -58,7 +60,7 @@ public final class PreviewCore: @unchecked Sendable {
         for adapter in adapters.all {
             all = all.replacing(adapter)
         }
-        let core = try UndraCore.load(.inproc(adapters: all, expectedSchemaHash: expectedSchemaHash, onError: onError))
+        let core = try entry(.inproc(adapters: all, onError: onError))
         fakes.clock.onTimerFired = { [weak core] id in core?.timerFired(id) }
         return PreviewCore(core: core, fakes: fakes)
     }
