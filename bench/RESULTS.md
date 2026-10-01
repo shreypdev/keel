@@ -159,7 +159,16 @@ is repeated, a broken invariant is not.
 
 ### Method
 
-* **Sustained throughput** is operations divided by the wall time of the whole run, not the sum of
+* **Warm-up** is excluded and configurable. Every sustained scenario first runs for a warm-up, results
+  discarded (thread start-up, cold caches, the first allocations): a tenth of the measured run, at most 200 ms, so a
+  10 s run warms up for 200 ms and a 2 s CI run for 200 ms. `UNDRA_STRESS_WARMUP_MS` sets it (`0` measures from the
+  first operation); each result file records the warm-up it used. The measured run is then exactly
+  `UNDRA_STRESS_SECONDS`; throughput, percentiles and bytes are of that run only, while the invariants cover both (a
+  patch lost during the warm-up still fails). The stream has no warm-up of its own: its slow half and the 20% RSS
+  warm-up do that job. Before this change no scenario excluded one, which at CI's 2 s put thread start-up and the
+  first cold calls into the completions histogram. The soak's warm-up is `--warmup PCT` (default half the run: the RSS
+  and drift gates look only at what follows; the rate gate counts every second).
+* **Sustained throughput** is operations divided by the wall time of the measured run, not the sum of
   per-operation samples. **Latencies** time every operation with one `Instant` pair into a fixed log-linear
   histogram (1/32 relative error, no allocation per sample), so p999 is of millions of samples; a percentile is
   the upper bound of its bucket. `Instant` ticks at 41.67 ns on this host, so a 167 ns p50 is four ticks, and
@@ -167,11 +176,20 @@ is repeated, a broken invariant is not.
   operation costs about 35 ns of wall time per sample here (an empty timed step runs at 28 M/s), which the
   throughput includes: the firehose's 5.8 M/s is the rate with that clock (and the host's copy) in the loop,
   against 8 M/s for the same call timed in batches with a host that only counts (layer A, 125 ns).
-* **Bytes** are what the host's callback was handed (`payload.len()`), deterministic, so gated exactly.
+* **Bytes** are what the host's callback was handed (`payload.len()`) and are deterministic: every load is a fixed
+  cycle at fixed widths. The gate in `budgets.toml` (`bytes_per_op`) is a **ceiling**, not an equality: a run that
+  ships fewer bytes passes it. What makes it exact is each scenario's own invariant in code, which asserts the exact
+  count (37 bytes per change-set for the firehose, event and both completions scenarios, 61 per operation for
+  churn, 21,012 and 33,000 per transaction for the fan-outs); a scenario that shipped fewer bytes fails there.
 * **Memory** is resident set size (`/proc/self/status` on Linux, `ps -o rss=` on macOS, nothing else), sampled
   outside the timed region and page-granular (16 KiB here), so the gate is "at most 1% **or** 64 KiB" from the
   first sample after the warm-up to the last. A platform that cannot be sampled reports the gate as skipped, never
-  as passed.
+  as passed. **A flat RSS is weaker evidence on macOS than on Linux**: `ps`'s `rss` leaves out the pages the system has
+  compressed, so under memory pressure a leak that was written once can be compressed away and the line stays flat.
+  `phys_footprint` is the right metric there, and it needs `proc_pid_rusage` (FFI), which R2 keeps out of this crate.
+  Both the stress test and the soak print this next to their RSS verdict; trust the 60 s soak over the 10 s one, and
+  prefer a Linux run (CI) for a verdict on small leaks. The exact check is an allocation-balance test in `undra-ffi`
+  (review, "A stricter memory check"), which is not built.
 * **Invariants** are asserted in code and are not scaled or retried: a fast core that loses or reorders a
   change-set fails. They have teeth: tests make the host drop every 101st patch, drop one single patch (an
   update that a later write of the same row repairs, so only the count of applied patches sees it), and make
@@ -183,6 +201,14 @@ is repeated, a broken invariant is not.
 * **Host stand-ins**: a copy of every change-set (what each FFI callback does), a host list that decodes and
   applies each keyed patch, and a "main thread" that drains once a frame and checks per-store order. They stand
   in for the platform's mailbox and list state; they cost far less than the platform's own work does.
+* **Where a number comes from.** The harness writes the JSON behind a run when `UNDRA_BENCH_RESULTS_DIR` names a
+  directory: one file per sustained scenario (`<date>-<scenario>.json`), one for the layer A rows and ratio gates
+  (`<date>-layer-a.json`) and one for a soak (`<date>-soak-<N>s.json`), each with the numbers, the command, the machine
+  (CPU, cores, OS, compiler, commit) and the one-minute load average before and after. The published numbers
+  are those files, in `bench/results/`, and the sections above name them; CI uploads the same files of every run as an
+  artifact. `UNDRA_BENCH_RESULTS_TAG=name` puts a tag in the file names for a run that is evidence and not a published
+  number. The `measured_*` values in `budgets.toml` are different: the best of three runs at the time a gate was set,
+  kept for humans and checked to be inside their gates.
 * **Budgets** follow the file's rule: floor = measured / 5, p99 ceiling 5x, p999 ceiling 10x, bytes exact,
   RSS 1%; each layer A row 5x its p50. Reproduce: `UNDRA_STRESS_SECONDS=10 cargo test -p undra-bench --test
   stress --release -- --nocapture`, `cargo run -p undra-bench --release --bin soak -- --seconds 60`,
@@ -504,6 +530,9 @@ debug build of the stress test checks invariants only (500 churn rows, 100 ms pe
 Before those steps `bench.yml` records a baseline from the base commit on the same VM, and the budgets and stress
 steps gate against it as well (see [Gates that catch a 2x regression](#gates-that-catch-a-2x-regression)); the
 ratio tables of `budgets.toml` run in every budgets step on every machine.
+
+Every run uploads the JSON behind its numbers (`UNDRA_BENCH_RESULTS_DIR`, see Method) as the `bench-results`
+artifact; the soak runs each attempt in a fresh process.
 
 ## Device numbers (iOS, Android, Web)
 

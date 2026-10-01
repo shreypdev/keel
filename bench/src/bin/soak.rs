@@ -38,11 +38,17 @@
 //!
 //! `--attempts N` (CI uses 2) runs the soak again when it failed only on the noisy gates (RSS,
 //! drift, rate), the way the budgets test takes the best of three; a broken invariant is never
-//! retried, because an intermittent reordering is a bug and not noise.
+//! retried, because an intermittent reordering is a bug and not noise. **Each attempt is a fresh
+//! process** (the binary runs itself once per attempt), so attempt 2 starts from a clean heap and
+//! a clean scheduler placement instead of inheriting attempt 1's. Exit status: 0 passed, 1 a noisy
+//! gate failed (after every attempt), 2 usage or a harness error, 3 an invariant broke.
 //!
 //! `cargo run -p undra-bench --release --bin soak -- --seconds 60` (locally; CI runs 10).
-//! Options: `--seconds N`, `--warmup PCT` (default 50), `--rss-limit-pct X`,
-//! `--attempts N`, `--json PATH`.
+//! Options: `--seconds N`, `--warmup PCT` (default 50: the first half of the run is warm-up for the
+//! RSS and drift gates, which only look at what follows), `--rss-limit-pct X`, `--attempts N`,
+//! `--json PATH`. `UNDRA_BENCH_RESULTS_DIR=dir` writes the JSON behind the run (the command, the
+//! machine, its load, every second) as `<date>-soak-<N>s.json`. A flat RSS means less on macOS than
+//! on Linux: the run prints why (`undra_bench::rss::rss_caveat`).
 //!
 //! The pieces (`fixtures`, `host`, `stress`) are the ones the sustained scenarios use, included
 //! by path so the macro-generated registrations live in this binary and cannot be dropped by
@@ -58,7 +64,9 @@ use std::time::{Duration, Instant};
 use undra::signals::ALL_SIGNALS;
 use undra::wire::Encode;
 use undra_bench::budget::Budgets;
-use undra_bench::rss::{RssSeries, resident_bytes};
+use undra_bench::hostinfo;
+use undra_bench::results;
+use undra_bench::rss::{RssSeries, resident_bytes, rss_caveat};
 use undra_bench::stats::{Histogram, drift, median_and_worst};
 
 #[path = "../../common/fixtures.rs"]
@@ -106,11 +114,17 @@ struct Args {
 const USAGE: &str = "usage: soak [--seconds N] [--warmup PCT] [--rss-limit-pct X] [--attempts N] [--json PATH]
 
   --seconds N          how long to run (default 60; CI uses 10)
-  --warmup PCT         the first PCT percent of the run is warm-up (default 50)
+  --warmup PCT         the first PCT percent of the run is warm-up for the RSS and drift gates
+                       (default 50: they look at the second half only; the rate gate counts every second)
   --rss-limit-pct X    RSS growth limit in percent (default: [stress.\"soak/mixed\"] of budgets.toml)
-  --attempts N         run again (up to N runs) when only the noisy gates failed: RSS, drift, rate
-                       (default 1; a broken invariant is never retried)
-  --json PATH          also write one JSON row per second and a summary row (the last attempt)";
+  --attempts N         run again (up to N runs, each a fresh process) when only the noisy gates failed:
+                       RSS, drift, rate (default 1; a broken invariant is never retried)
+  --json PATH          also write the run as JSON: the machine, every second, the verdict (the last attempt)
+
+environment: UNDRA_BENCH_RESULTS_DIR=dir writes <date>-soak-<N>s.json there (UNDRA_BENCH_RESULTS_TAG,
+UNDRA_BENCH_DATE adjust the name); UNDRA_BENCH_BUDGETS=path reads another budgets file
+
+exit status: 0 passed; 1 a noisy gate failed; 2 usage or a harness error; 3 an invariant broke";
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
@@ -276,6 +290,13 @@ fn mb(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)
 }
 
+/// Which attempt a child process is (the parent sets `UNDRA_SOAK_ATTEMPT=a/n`).
+fn attempt_from_env() -> Option<(u32, u32)> {
+    let text = std::env::var("UNDRA_SOAK_ATTEMPT").ok()?;
+    let (a, n) = text.split_once('/')?;
+    Some((a.parse().ok()?, n.parse().ok()?))
+}
+
 /// How a run ended.
 struct Outcome {
     passed: bool,
@@ -286,6 +307,7 @@ struct Outcome {
 fn run(args: &Args) -> Result<Outcome, String> {
     let limit = args.rss_limit_pct.unwrap_or_else(budget_limit);
     let warmup = warmup_fraction(args);
+    let load_before = hostinfo::load_average();
 
     // ---- the runtime and its stores -----------------------------------------------------
     let host = Arc::new(DrainHost::new(4_096, SOURCE_PORT));
@@ -340,6 +362,9 @@ fn run(args: &Args) -> Result<Outcome, String> {
         COMPLETION_WINDOW,
         STREAM_RATE,
     );
+    if let Some(note) = rss_caveat() {
+        eprintln!("note: {note}");
+    }
     eprintln!(
         "{:>4} {:>9} {:>7} {:>7} {:>7} {:>10} {:>10} {:>10} {:>10} {:>8} {:>4}",
         "sec",
@@ -567,6 +592,12 @@ fn run(args: &Args) -> Result<Outcome, String> {
             );
             if growth.within(limit) {
                 notes.push(format!("ok   {line}; limit {limit}% or 64 KiB"));
+                if rss_caveat().is_some() {
+                    notes.push(
+                        "note on macOS a flat RSS is weaker evidence than on Linux (see the note at the top)"
+                            .to_owned(),
+                    );
+                }
             } else {
                 failures.push(format!("{line}; over the limit of {limit}% (and 64 KiB)"));
             }
@@ -804,10 +835,27 @@ fn run(args: &Args) -> Result<Outcome, String> {
     let passed = failures.is_empty() && broken.is_empty();
     eprintln!("soak {}", if passed { "PASSED" } else { "FAILED" });
 
+    let all: Vec<String> = failures.iter().chain(&broken).cloned().collect();
+    let verdict = Verdict {
+        windows: &windows,
+        series: &series,
+        notes: &notes,
+        failures: &all,
+        load: (load_before, hostinfo::load_average()),
+    };
     if let Some(path) = &args.json {
-        let all: Vec<String> = failures.iter().chain(&broken).cloned().collect();
-        write_json(path, args, warmup, &windows, &series, &notes, &all)
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        results::write(path, &json_text(args, warmup, &verdict));
+    }
+    if let Some(dir) = results::dir_from_env() {
+        let (date, tag) = (hostinfo::date(), results::tag_from_env());
+        let path = results::path_for(
+            &dir,
+            &date,
+            tag.as_deref(),
+            &format!("soak-{}s", args.seconds),
+        );
+        results::write(&path, &json_text(args, warmup, &verdict));
+        eprintln!("wrote {}", path.display());
     }
     drop(rt);
     Ok(Outcome {
@@ -816,35 +864,25 @@ fn run(args: &Args) -> Result<Outcome, String> {
     })
 }
 
-fn json_string(text: &str) -> String {
-    let mut out = String::from("\"");
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+/// What a run found, for its JSON.
+struct Verdict<'a> {
+    windows: &'a [Window],
+    series: &'a RssSeries,
+    notes: &'a [String],
+    failures: &'a [String],
+    /// The one-minute load average before and after the run.
+    load: (Option<f64>, Option<f64>),
 }
 
-/// One object per second and a last object with the verdict.
-fn write_json(
-    path: &PathBuf,
-    args: &Args,
-    warmup: f64,
-    windows: &[Window],
-    series: &RssSeries,
-    notes: &[String],
-    failures: &[String],
-) -> std::io::Result<()> {
-    let mut rows: Vec<String> = windows
+/// The run as one JSON object: the command and the machine (with its load), the second-by-second
+/// windows and the verdict.
+fn json_text(args: &Args, warmup: f64, verdict: &Verdict<'_>) -> String {
+    let windows: Vec<String> = verdict
+        .windows
         .iter()
         .map(|w| {
             format!(
-                "  {{\"second\": {}, \"rss_bytes\": {}, \"p50_ns\": {}, \"p99_ns\": {}, \"p999_ns\": {}, \"firehose_per_sec\": {:.0}, \"churn_ops_per_sec\": {:.0}, \"completions_per_sec\": {:.0}, \"stream_items_per_sec\": {:.0}, \"largest_drain_batch\": {}, \"out_of_order\": {}}}",
+                "    {{\"second\": {}, \"rss_bytes\": {}, \"p50_ns\": {}, \"p99_ns\": {}, \"p999_ns\": {}, \"firehose_per_sec\": {:.0}, \"churn_ops_per_sec\": {:.0}, \"completions_per_sec\": {:.0}, \"stream_items_per_sec\": {:.0}, \"largest_drain_batch\": {}, \"out_of_order\": {}}}",
                 w.second,
                 w.rss_bytes.map_or_else(|| "null".to_owned(), |b| b.to_string()),
                 w.p50_ns,
@@ -859,16 +897,78 @@ fn write_json(
             )
         })
         .collect();
-    let growth = series.growth(warmup);
-    rows.push(format!(
-        "  {{\"summary\": true, \"seconds\": {}, \"passed\": {}, \"rss_growth_pct\": {}, \"notes\": [{}], \"failures\": [{}]}}",
+    let growth = verdict.series.growth(warmup);
+    let strings = |items: &[String]| {
+        items
+            .iter()
+            .map(|n| results::json_string(n))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let attempts = attempt_from_env().map_or(args.attempts, |(_, n)| n);
+    let mut flags = format!("--seconds {} --attempts {attempts}", args.seconds);
+    if let Some(pct) = args.warmup_pct {
+        flags.push_str(&format!(" --warmup {pct}"));
+    }
+    if let Some(pct) = args.rss_limit_pct {
+        flags.push_str(&format!(" --rss-limit-pct {pct}"));
+    }
+    let command = results::command(
+        &format!("cargo run -p undra-bench --release --bin soak -- {flags}"),
+        &["UNDRA_BENCH_RESULTS_TAG", "UNDRA_BENCH_BUDGETS"],
+    );
+    let attempt = attempt_from_env().map_or(1, |(a, _)| a);
+    format!(
+        "{{\n  \"kind\": \"soak\",\n  \"date\": {},\n  \"tag\": {},\n  \"command\": {},\n  {},\n  \
+         \"run\": {{\"seconds\": {}, \"warmup_pct\": {}, \"attempt\": {}, \"attempts\": {}, \"rss_caveat\": {}}},\n  \
+         \"summary\": {{\"passed\": {}, \"rss_growth_pct\": {}, \"notes\": [{}], \"failures\": [{}]}},\n  \
+         \"windows\": [\n{}\n  ]\n}}\n",
+        results::json_string(&hostinfo::date()),
+        results::tag_from_env().map_or_else(|| "null".to_owned(), |t| results::json_string(&t)),
+        results::json_string(&command),
+        results::machine_members(verdict.load.0, verdict.load.1),
         args.seconds,
-        failures.is_empty(),
+        results::json_number(warmup * 100.0),
+        attempt,
+        attempts,
+        rss_caveat().map_or_else(|| "null".to_owned(), results::json_string),
+        verdict.failures.is_empty(),
         growth.map_or_else(|| "null".to_owned(), |g| format!("{:.3}", g.growth_pct)),
-        notes.iter().map(|n| json_string(n)).collect::<Vec<_>>().join(", "),
-        failures.iter().map(|n| json_string(n)).collect::<Vec<_>>().join(", "),
-    ));
-    std::fs::write(path, format!("[\n{}\n]\n", rows.join(",\n")))
+        strings(verdict.notes),
+        strings(verdict.failures),
+        windows.join(",\n"),
+    )
+}
+
+/// The exit status of one finished run (see the header).
+fn exit_status(outcome: &Outcome) -> u8 {
+    if outcome.passed {
+        0
+    } else if outcome.invariant_broken {
+        3
+    } else {
+        1
+    }
+}
+
+/// The command line of one attempt: this run's options with a single attempt.
+fn child_args(args: &Args) -> Vec<String> {
+    let mut out = vec![
+        "--seconds".to_owned(),
+        args.seconds.to_string(),
+        "--attempts".to_owned(),
+        "1".to_owned(),
+    ];
+    if let Some(pct) = args.warmup_pct {
+        out.extend(["--warmup".to_owned(), pct.to_string()]);
+    }
+    if let Some(pct) = args.rss_limit_pct {
+        out.extend(["--rss-limit-pct".to_owned(), pct.to_string()]);
+    }
+    if let Some(path) = &args.json {
+        out.extend(["--json".to_owned(), path.display().to_string()]);
+    }
+    out
 }
 
 fn main() -> ExitCode {
@@ -879,12 +979,37 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    for attempt in 1..=args.attempts {
-        if args.attempts > 1 {
-            eprintln!("soak: attempt {attempt} of {}", args.attempts);
+    if args.attempts == 1 {
+        return match run(&args) {
+            Ok(outcome) => ExitCode::from(exit_status(&outcome)),
+            Err(message) => {
+                eprintln!("soak: {message}");
+                ExitCode::from(2)
+            }
+        };
+    }
+    // Several attempts: each one is this binary again, in a fresh process, so that attempt 2 does
+    // not inherit attempt 1's heap (a leak that started at 9.8 MB started the next attempt at
+    // 12.3 MB in review) or its scheduler placement. The exit status says why a child failed:
+    // 1 is a noisy gate (try again), 3 an invariant (never retried).
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => {
+            eprintln!("soak: cannot find this binary to run the attempts in fresh processes: {e}");
+            return ExitCode::from(2);
         }
-        match run(&args) {
-            Ok(outcome) if outcome.passed => {
+    };
+    for attempt in 1..=args.attempts {
+        eprintln!(
+            "soak: attempt {attempt} of {} (a fresh process)",
+            args.attempts
+        );
+        let status = std::process::Command::new(&exe)
+            .args(child_args(&args))
+            .env("UNDRA_SOAK_ATTEMPT", format!("{attempt}/{}", args.attempts))
+            .status();
+        match status.map(|s| s.code()) {
+            Ok(Some(0)) => {
                 if attempt > 1 {
                     eprintln!(
                         "soak: passed on attempt {attempt} of {}; the attempts before it failed a \
@@ -894,12 +1019,20 @@ fn main() -> ExitCode {
                 }
                 return ExitCode::SUCCESS;
             }
-            Ok(outcome) if outcome.invariant_broken || attempt == args.attempts => {
-                return ExitCode::from(1);
+            Ok(Some(3)) => {
+                eprintln!("soak: an invariant broke: not retried");
+                return ExitCode::from(3);
             }
-            Ok(_) => eprintln!("soak: only the noisy gates failed; trying again"),
-            Err(message) => {
-                eprintln!("soak: {message}");
+            Ok(Some(1)) if attempt < args.attempts => {
+                eprintln!("soak: only the noisy gates failed; trying again");
+            }
+            Ok(Some(1)) => return ExitCode::from(1),
+            Ok(other) => {
+                eprintln!("soak: an attempt ended with {other:?}, not with a verdict");
+                return ExitCode::from(2);
+            }
+            Err(e) => {
+                eprintln!("soak: cannot run an attempt: {e}");
                 return ExitCode::from(2);
             }
         }

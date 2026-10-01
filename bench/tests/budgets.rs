@@ -16,6 +16,8 @@
 //!   run, so the machine's speed cancels; and `UNDRA_BENCH_BASELINE` selects a **baseline**
 //!   (`bench/baselines/<name>.toml`, or a file recorded earlier in the same job) that fails a row
 //!   whose p50 is 1.5x its baseline's. `UNDRA_BENCH_RECORD=path` records one.
+//! * `UNDRA_BENCH_RESULTS_DIR=dir` writes the JSON behind the run (every row, every ratio, the
+//!   command, the machine and its load) as `<date>-layer-a.json`, for `bench/results/`.
 //! * Knobs: `UNDRA_BENCH_SCALE=2.5` multiplies every budget (a slower runner; not a baseline or a
 //!   ratio), `UNDRA_BENCH_FILTER=keyed` measures only matching names, `UNDRA_BENCH_BUDGETS=path`
 //!   reads another file, `UNDRA_BENCH_BASELINE`, `UNDRA_BENCH_BASELINE_TOLERANCE` and
@@ -236,6 +238,8 @@ fn budgets() {
     let load_before = hostinfo::load_average();
     let mut failures = Vec::new();
     let mut p50s: BTreeMap<String, f64> = BTreeMap::new();
+    let mut rows: Vec<RowResult> = Vec::new();
+    let mut ratio_results: Vec<RatioResult> = Vec::new();
     match &baseline {
         Some(b) => eprintln!("{}", b.describe()),
         None => eprintln!(
@@ -259,6 +263,14 @@ fn budgets() {
         let stop_at = if recording.is_some() { 0.0 } else { effective };
         let stats = best_of(workload, ATTEMPTS, stop_at);
         p50s.insert(workload.name.clone(), stats.p50_ns);
+        rows.push(RowResult {
+            name: workload.name.clone(),
+            p50_ns: stats.p50_ns,
+            p90_ns: stats.p90_ns,
+            budget_ns: limit,
+            baseline_ns: gate.map(|g| g.baseline_ns),
+            iterations: stats.iterations,
+        });
         let margin = limit / stats.p50_ns;
         let blueprint = match (budget.blueprint_ns, &budget.blueprint) {
             (Some(ns), Some(text)) => {
@@ -337,6 +349,14 @@ fn budgets() {
             }
         }
         let value = ratio.value(num, den);
+        ratio_results.push(RatioResult {
+            name: name.clone(),
+            num: ratio.num.clone(),
+            den: ratio.den.clone(),
+            value,
+            max: ratio.max,
+            attempts: attempt,
+        });
         eprintln!(
             "{:<26} {:>8.2} {:>8.2} {:>6.2}x  {} / {}{}",
             name,
@@ -364,12 +384,110 @@ fn budgets() {
     if let Some(path) = &recording {
         record(path, &p50s, load_before);
     }
+    if let Some(dir) = undra_bench::results::dir_from_env() {
+        write_results(
+            &dir,
+            &rows,
+            &ratio_results,
+            baseline.as_ref(),
+            (scale, load_before, hostinfo::load_average()),
+        );
+    }
     assert!(
         failures.is_empty(),
         "{} budget(s) exceeded:\n  {}",
         failures.len(),
         failures.join("\n  ")
     );
+}
+
+/// One layer A row of a run, for the results file.
+struct RowResult {
+    name: String,
+    p50_ns: f64,
+    p90_ns: f64,
+    budget_ns: f64,
+    baseline_ns: Option<f64>,
+    iterations: u64,
+}
+
+/// One ratio gate of a run, for the results file.
+struct RatioResult {
+    name: String,
+    num: String,
+    den: String,
+    value: f64,
+    max: f64,
+    attempts: usize,
+}
+
+/// Writes the JSON behind the run: `<dir>/<date>[-<tag>]-layer-a.json`.
+fn write_results(
+    dir: &Path,
+    rows: &[RowResult],
+    ratios: &[RatioResult],
+    baseline: Option<&Selected>,
+    (scale, load_before, load_after): (f64, Option<f64>, Option<f64>),
+) {
+    use undra_bench::results::{
+        command, json_number, json_opt, json_string, machine_members, path_for, tag_from_env, write,
+    };
+    let (date, tag) = (hostinfo::date(), tag_from_env());
+    let how = command(
+        "cargo test -p undra-bench --test budgets --release -- --nocapture",
+        &[
+            "UNDRA_BENCH_RESULTS_TAG",
+            "UNDRA_BENCH_SCALE",
+            "UNDRA_BENCH_FILTER",
+            "UNDRA_BENCH_BASELINE",
+            "UNDRA_BENCH_BASELINE_TOLERANCE",
+        ],
+    );
+    let rows_json: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "    {{\"name\": {}, \"p50_ns\": {}, \"p90_ns\": {}, \"budget_ns\": {}, \"baseline_p50_ns\": {}, \"iterations\": {}}}",
+                json_string(&r.name),
+                json_number(r.p50_ns),
+                json_number(r.p90_ns),
+                json_number(r.budget_ns),
+                json_opt(r.baseline_ns),
+                r.iterations
+            )
+        })
+        .collect();
+    let ratios_json: Vec<String> = ratios
+        .iter()
+        .map(|r| {
+            format!(
+                "    {{\"name\": {}, \"num\": {}, \"den\": {}, \"value\": {}, \"max\": {}, \"attempts\": {}}}",
+                json_string(&r.name),
+                json_string(&r.num),
+                json_string(&r.den),
+                json_number(r.value),
+                json_number(r.max),
+                r.attempts
+            )
+        })
+        .collect();
+    let text = format!(
+        "{{\n  \"kind\": \"layer-a\",\n  \"date\": {},\n  \"tag\": {},\n  \"command\": {},\n  {},\n  \"scale\": {},\n  \"baseline\": {},\n  \"rows\": [\n{}\n  ],\n  \"ratios\": [\n{}\n  ]\n}}\n",
+        json_string(&date),
+        tag.as_deref()
+            .map_or_else(|| "null".to_owned(), json_string),
+        json_string(&how),
+        machine_members(load_before, load_after),
+        json_number(scale),
+        baseline.map_or_else(
+            || "null".to_owned(),
+            |b| json_string(&b.path.display().to_string())
+        ),
+        rows_json.join(",\n"),
+        ratios_json.join(",\n"),
+    );
+    write(&path_for(dir, &date, tag.as_deref(), "layer-a"), &text);
+    eprintln!("wrote {} rows to {}", rows.len(), dir.display());
 }
 
 /// Writes what this run measured as a baseline, next to the facts about the machine.

@@ -30,7 +30,10 @@
 # HARSH CONDITIONS (layer B). The `[stress."name"]` tables at the end gate the sustained scenarios
 # of `cargo test -p undra-bench --test stress --release` (and, for `soak/mixed`, the soak binary):
 # what the core does at rates far above any UI, for seconds at a time. Same machine, same best-of-
-# three rule, measured with UNDRA_STRESS_SECONDS=10; each scenario's invariants (nothing lost,
+# three rule, measured with UNDRA_STRESS_SECONDS=10 (each run first warms up for 200 ms, results
+# discarded: UNDRA_STRESS_WARMUP_MS; the measured_* values below were taken before that was added and
+# are the best of three at the time, kept for humans; the published numbers are the files of
+# bench/results/); each scenario's invariants (nothing lost,
 # nothing reordered, the host list equals the core list, a stream never more than one item ahead)
 # are asserted in code and are not negotiable. The rules:
 #   min_per_sec     measured throughput / 5, rounded DOWN to two significant figures

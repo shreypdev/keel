@@ -57,6 +57,7 @@ pub mod baseline;
 pub mod budget;
 pub mod hostinfo;
 pub mod measure;
+pub mod results;
 pub mod rss;
 pub mod stats;
 pub mod workload;

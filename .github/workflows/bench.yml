@@ -29,16 +29,19 @@ name: Bench
 #
 # Harsh conditions (the stress and soak steps): the sustained scenarios of `bench/tests/stress.rs`
 # run for 2 s each (UNDRA_STRESS_SECONDS) at rates far above any UI, with 8 threads completing port
-# calls under a 60 Hz drain thread, and fail
+# calls under a 60 Hz drain thread, alone and with a host thread writing the same store, and fail
 # on a throughput floor, a tail ceiling, change-set bytes or RSS growth over their
 # `[stress."..."]` table in `bench/budgets.toml`, or on a broken invariant (nothing lost, nothing
 # reordered, the host list equals the core list, a stream never more than one item ahead of its
 # credit). Then the soak runs the mixed paced load of a busy app for 10 s and fails on RSS growth,
-# p99 drift, a broken invariant or a host that could not carry the load. A noisy run gets three
-# attempts per scenario (two for the soak); an invariant that breaks is never retried. UNDRA_BENCH_SCALE applies
+# p99 drift (the trend of the second half, and one bad second), a broken invariant or a host that
+# could not carry the load; each attempt is a fresh process. A noisy run gets three attempts per
+# scenario (two for the soak); an invariant that breaks is never retried. UNDRA_BENCH_SCALE applies
 # to rates and latencies here too, never to bytes, RSS, invariants or a baseline. These are
 # core-side host numbers: what a platform does with a change-set afterwards is measured on the
 # platform (`bench/RESULTS.md`, "Harsh conditions").
+#
+# Every run uploads the JSON behind its numbers (UNDRA_BENCH_RESULTS_DIR) as an artifact.
 
 on:
   push:
@@ -56,6 +59,7 @@ env:
   # slowest runner. It does not touch the ratio gates or the baseline gate (it would defeat them).
   UNDRA_BENCH_SCALE: "2"
   CARGO_TERM_COLOR: always
+  UNDRA_BENCH_RESULTS_DIR: ${{ github.workspace }}/bench-results
 
 jobs:
   budgets:
@@ -94,3 +98,10 @@ jobs:
         run: cargo test -p undra-bench --test stress --release -- --nocapture
       - name: Soak (10 s)
         run: cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2
+      - name: The JSON behind the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results
+          if-no-files-found: ignore

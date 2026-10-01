@@ -12,6 +12,12 @@
 //!
 //! RSS is page-granular (16 KiB pages on Apple silicon), so the growth check is "at most X
 //! percent **or** at most 64 KiB" from a baseline taken after a warm-up.
+//!
+//! **A flat RSS is weaker evidence on macOS** than on Linux: `ps`'s `rss` leaves out the pages
+//! the system has compressed, so under memory pressure a leak that was written once can be
+//! compressed away and the number stays flat. `phys_footprint` is the right metric there, and it
+//! needs `proc_pid_rusage` (FFI, which R2 keeps out of this crate). [`rss_caveat`] is the sentence
+//! every run on such a platform prints.
 
 use std::time::Duration;
 
@@ -76,6 +82,26 @@ pub fn resident_bytes() -> Option<u64> {
     {
         None
     }
+}
+
+/// What a flat RSS does not prove on this platform, when there is something to say: macOS only.
+/// Runs print it next to their RSS verdict.
+///
+/// # Example
+///
+/// ```
+/// // `Some(..)` on macOS, `None` where `VmRSS` is the measure.
+/// let caveat = undra_bench::rss::rss_caveat();
+/// assert_eq!(caveat.is_some(), cfg!(target_os = "macos"));
+/// ```
+pub fn rss_caveat() -> Option<&'static str> {
+    cfg!(target_os = "macos").then_some(
+        "RSS here is `ps -o rss=`, which on macOS leaves out pages the system has compressed: under \
+         memory pressure a leak that was written once can be compressed away and RSS stays flat, so \
+         a flat line is weaker evidence than on Linux. `phys_footprint` is the right metric and \
+         needs FFI (R2 keeps that out of this crate); run on a machine with free memory, and trust \
+         the 60 s soak over the 10 s one",
+    )
 }
 
 /// How resident memory moved between the first sample after the warm-up and the last sample.
