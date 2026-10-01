@@ -2,7 +2,13 @@ import { UndraError, UndraReplyError, UndraSchemaMismatchError, UndraTransportEr
 import { errorMessage } from "./platform.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
-import type { HostToWorker, WorkerFailure, WorkerToHost, WorkerWasm } from "./transport/worker-protocol.js";
+import {
+  type HostToWorker,
+  WORKER_PROTOCOL_VERSION,
+  type WorkerFailure,
+  type WorkerToHost,
+  type WorkerWasm,
+} from "./transport/worker-protocol.js";
 import {
   Kind,
   ReplyStatus,
@@ -53,19 +59,48 @@ function wasmSource(wasm: WorkerWasm): WasmSource {
  * Starts serving the main thread on `scope`: waits for `init`, loads the core,
  * then relays envelopes. Returns a function that stops listening and closes
  * the core.
+ *
+ * The envelopes the core produces during one task of this worker (a burst of
+ * change-sets and the reply that follows them) travel to the main thread as one
+ * `envelopes` message, posted from a microtask, so the main thread pays one
+ * task for the burst instead of one per change-set (ADR-031). A host that did
+ * not announce protocol 2 gets one `envelope` message each, as before.
  */
 export function runWorker(scope: WorkerScope): () => void {
   let transport: Transport | null = null;
   let schema = 0n;
   let seq = 0;
+  let batching = false;
+  let batch: ArrayBuffer[] = [];
+  let flushQueued = false;
 
+  const flushEnvelopes = (): void => {
+    flushQueued = false;
+    if (batch.length === 0) return;
+    const data = batch;
+    batch = [];
+    const message: WorkerToHost = { t: "envelopes", data };
+    scope.postMessage(message, data);
+  };
+
+  // Control messages keep their place behind the envelopes produced before them.
   const post = (message: WorkerToHost, transfer?: Transferable[]): void => {
+    flushEnvelopes();
     scope.postMessage(message, transfer);
   };
 
   const postEnvelope = (kind: Kind, payload: Uint8Array): void => {
     const bytes = encodeEnvelope(kind, seq++ >>> 0, schema, payload);
-    post({ t: "envelope", data: bytes.buffer as ArrayBuffer }, [bytes.buffer as ArrayBuffer]);
+    const buffer = bytes.buffer as ArrayBuffer;
+    if (!batching) {
+      post({ t: "envelope", data: buffer }, [buffer]);
+      return;
+    }
+    batch.push(buffer);
+    if (!flushQueued) {
+      flushQueued = true;
+      queueMicrotask(flushEnvelopes);
+    }
   };
 
   const handler: TransportHandler = {
@@ -102,6 +137,7 @@ export function runWorker(scope: WorkerScope): () => void {
   };
 
   const start = async (init: Extract<HostToWorker, { t: "init" }>): Promise<void> => {
+    batching = (init.protocol ?? 1) >= WORKER_PROTOCOL_VERSION;
     try {
       const wasm = new WasmMainTransport({
         wasm: wasmSource(init.wasm),

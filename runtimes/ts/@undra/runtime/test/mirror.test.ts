@@ -51,14 +51,14 @@ describe("Mirror change-sets", () => {
     mirror.register(1n, (signalId, op, value) => seen.push([signalId, op, [...value]]));
     mirror.register(2n, (signalId, op, value) => seen.push(["two", signalId, op, [...value]]));
     mirror.enqueue(
-      changeSet([1n, 0, bytes(1)], [2n, 5, bytes(2, 2), ChangeOp.KeyedPatch], [1n, 1, bytes(), ChangeOp.LazyInvalidated]),
+      changeSet([1n, 0, bytes(1)], [2n, 5, bytes(1, 0, 0, 0, 1, 2, 0, 0, 0), ChangeOp.KeyedPatch], [1n, 1, bytes(), ChangeOp.LazyInvalidated]),
     );
     expect(seen).toEqual([]); // nothing until the flush
     expect(mirror.pending).toBe(3);
     mirror.flush();
     expect(seen).toEqual([
       [0, ChangeOp.FullValue, [1]],
-      ["two", 5, ChangeOp.KeyedPatch, [2, 2]],
+      ["two", 5, ChangeOp.KeyedPatch, [1, 0, 0, 0, 1, 2, 0, 0, 0]],
       [1, ChangeOp.LazyInvalidated, []],
     ]);
     expect(mirror.pending).toBe(0);
