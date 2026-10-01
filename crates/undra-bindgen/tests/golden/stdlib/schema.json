@@ -283,7 +283,7 @@
           "fields": [],
           "tuple": false,
           "message": "the disk is full",
-          "docs": "The disk or the storage quota is exhausted (ADR-049)."
+          "docs": "The disk or the quota is exhausted."
         },
         {
           "name": "Unavailable",
@@ -299,7 +299,7 @@
           ],
           "tuple": true,
           "message": "the file system is unavailable: {0}",
-          "docs": "No file system in this context, or no adapter registered; the text says which (ADR-049)."
+          "docs": "No file system here, or no adapter; the text says which."
         }
       ],
       "docs": "Why a file operation failed."
@@ -491,7 +491,7 @@
           ],
           "tuple": true,
           "message": "storage is unavailable: {0}",
-          "docs": "No adapter is registered, or the platform has no backend in this context; the text says\nwhich."
+          "docs": "No adapter, or no backend here; the text says which."
         },
         {
           "name": "Full",
@@ -507,7 +507,7 @@
           "fields": [],
           "tuple": false,
           "message": "the storage is locked",
-          "docs": "Protected data cannot be read now (before the device's first unlock, or a key that needs\nthe user to authenticate)."
+          "docs": "Protected data cannot be read now (before the first unlock, or user authentication)."
         },
         {
           "name": "Corrupt",
@@ -523,7 +523,7 @@
           ],
           "tuple": true,
           "message": "stored data is corrupt: {0}",
-          "docs": "The stored bytes (or ciphertext) cannot be read back; the key is still there."
+          "docs": "The stored bytes cannot be read back; the key is still there."
         },
         {
           "name": "Io",
@@ -542,7 +542,7 @@
           "docs": "Any other failure; the text is the platform's."
         }
       ],
-      "docs": "Why a `Kv` or `SecureStore` operation failed (ADR-049).\n\nStorage is not infallible: a quota runs out, a Keychain is locked before the first unlock, a\nstored file is damaged. Every method of the two storage ports reports those as one of these\nvariants instead of panicking (a panic traps a wasm core), and every platform adapter maps its\nfailures onto them:\n\n| Variant | Meaning |\n|---|---|\n| `Unavailable` | no adapter, or no backend in this context (no IndexedDB, no secure context, no Keystore) |\n| `Full` | the quota or the disk is exhausted |\n| `Locked` | protected data cannot be read now (a Keychain before first unlock, a key that needs user authentication) |\n| `Corrupt` | stored bytes or ciphertext that cannot be read back; the key is still there |\n| `Io` | anything else, with the platform's message |\n\n```\nuse undra_ports::StorageError;\nuse undra_runtime::PortError;\n\nassert!(matches!(StorageError::from(PortError::Unavailable), StorageError::Unavailable(_)));\nassert_eq!(StorageError::Full.to_string(), \"the storage is full\");\n```"
+      "docs": "Why a `Kv` or `SecureStore` operation failed (ADR-049); platform adapters map their failures\nonto these variants instead of panicking."
     },
     {
       "name": "SyncError",
@@ -1179,7 +1179,7 @@
           "docs": "The keys that start with `prefix`, in ascending order."
         }
       ],
-      "docs": "A persistent key-value store of byte strings.\n\nEvery method can fail with a [`StorageError`] (ADR-049): a quota that runs out, storage that is\nlocked before the device's first unlock, bytes that cannot be read back, or no adapter at all\n(`Unavailable`, through `impl From<PortError> for StorageError`, instead of a panic that would\ntrap a wasm core)."
+      "docs": "A persistent key-value store of byte strings; every method can fail with a [`StorageError`]."
     },
     {
       "name": "Lifecycle",

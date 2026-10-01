@@ -69,12 +69,11 @@ pub trait Http {
     async fn request(&self, req: HttpRequest) -> Result<HttpResponse, HttpError>;
 }
 
-/// A persistent key-value store of byte strings.
-///
-/// Every method can fail with a [`StorageError`] (ADR-049): a quota that runs out, storage that is
-/// locked before the device's first unlock, bytes that cannot be read back, or no adapter at all
-/// (`Unavailable`, through `impl From<PortError> for StorageError`, instead of a panic that would
-/// trap a wasm core).
+/// A persistent key-value store of byte strings; every method can fail with a [`StorageError`].
+// ADR-049: a quota that runs out, storage locked before the device's first unlock, bytes that
+// cannot be read back, or no adapter at all (`Unavailable`, through `impl From<PortError> for
+// StorageError`, instead of a panic that would trap a wasm core). Kept out of the doc comment:
+// a core embeds its schema's docs (ADR-050), and every core has this port.
 #[undra_macros::port]
 #[undra(crate = "crate::root")]
 pub trait Kv {

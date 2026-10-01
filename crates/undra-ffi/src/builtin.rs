@@ -121,7 +121,7 @@ pub(crate) fn answer(
                     4,
                     &log_record(
                         "undra::rng",
-                        "Rng.fill: the host has no cryptographic random source (the web needs WebCrypto, crypto.getRandomValues); the Rng port answers unavailable instead of predictable bytes",
+                        "Rng.fill: no cryptographic random source (the web needs WebCrypto); the Rng port answers unavailable",
                     ),
                 );
                 return None;

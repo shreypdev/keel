@@ -257,52 +257,34 @@ pub enum FsError {
     /// Any other I/O failure; the text is the platform's.
     #[error("I/O error: {0}")]
     Io(String),
-    /// The disk or the storage quota is exhausted (ADR-049).
+    /// The disk or the quota is exhausted.
     #[error("the disk is full")]
     Full,
-    /// No file system in this context, or no adapter registered; the text says which (ADR-049).
+    /// No file system here, or no adapter; the text says which.
     #[error("the file system is unavailable: {0}")]
     Unavailable(String),
 }
 
-/// Why a `Kv` or `SecureStore` operation failed (ADR-049).
-///
-/// Storage is not infallible: a quota runs out, a Keychain is locked before the first unlock, a
-/// stored file is damaged. Every method of the two storage ports reports those as one of these
-/// variants instead of panicking (a panic traps a wasm core), and every platform adapter maps its
-/// failures onto them:
-///
-/// | Variant | Meaning |
-/// |---|---|
-/// | `Unavailable` | no adapter, or no backend in this context (no IndexedDB, no secure context, no Keystore) |
-/// | `Full` | the quota or the disk is exhausted |
-/// | `Locked` | protected data cannot be read now (a Keychain before first unlock, a key that needs user authentication) |
-/// | `Corrupt` | stored bytes or ciphertext that cannot be read back; the key is still there |
-/// | `Io` | anything else, with the platform's message |
-///
-/// ```
-/// use undra_ports::StorageError;
-/// use undra_runtime::PortError;
-///
-/// assert!(matches!(StorageError::from(PortError::Unavailable), StorageError::Unavailable(_)));
-/// assert_eq!(StorageError::Full.to_string(), "the storage is full");
-/// ```
+/// Why a `Kv` or `SecureStore` operation failed (ADR-049); platform adapters map their failures
+/// onto these variants instead of panicking.
+// A quota runs out, a Keychain is locked before the first unlock, a stored file is damaged:
+// every method of the two storage ports reports those as one of these variants (a panic would
+// trap a wasm core). The doc comment stays one sentence because a core embeds its schema's docs
+// (ADR-050) and every core has this type (ADR-052's budget); the variants say the rest.
 #[undra_macros::error]
 #[undra(crate = "crate::root")]
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum StorageError {
-    /// No adapter is registered, or the platform has no backend in this context; the text says
-    /// which.
+    /// No adapter, or no backend here; the text says which.
     #[error("storage is unavailable: {0}")]
     Unavailable(String),
     /// The quota or the disk is exhausted.
     #[error("the storage is full")]
     Full,
-    /// Protected data cannot be read now (before the device's first unlock, or a key that needs
-    /// the user to authenticate).
+    /// Protected data cannot be read now (before the first unlock, or user authentication).
     #[error("the storage is locked")]
     Locked,
-    /// The stored bytes (or ciphertext) cannot be read back; the key is still there.
+    /// The stored bytes cannot be read back; the key is still there.
     #[error("stored data is corrupt: {0}")]
     Corrupt(String),
     /// Any other failure; the text is the platform's.
