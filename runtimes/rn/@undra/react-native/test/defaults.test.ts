@@ -178,8 +178,12 @@ describe("loadNative and the native defaults", () => {
     const core = await loadNative({ expectedSchemaHash: native.hash });
     await tick();
     setAppState("background");
+    setAppState("background"); // the same state again is not a report
+    setAppState("unknown"); // nor one that maps to the same state
     const events = native.log.filter((l) => l.startsWith(`event ${PortIds.Lifecycle.portId} `));
     expect(events).toHaveLength(2); // the current state first, then the change
+    setAppState("active");
+    expect(native.log.filter((l) => l.startsWith(`event ${PortIds.Lifecycle.portId} `))).toHaveLength(3);
     core.close();
   });
 });

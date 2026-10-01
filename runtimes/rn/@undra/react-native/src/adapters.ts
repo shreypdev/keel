@@ -18,17 +18,25 @@ export function lifecycleState(state: string | null | undefined): UndraAppState 
 
 /**
  * The `Lifecycle` event source of React Native: `AppState`. Reports the current state from a
- * microtask, then every change.
+ * microtask, then every change; a state equal to the last one reported is not reported again
+ * (React Native announces `active` up to three times while an app starts).
  */
 export function appStateLifecycle(): LifecycleAdapter {
   return {
     subscribe(emit) {
       let active = true;
+      let last: UndraAppState | null = null;
+      const report = (state: string | null | undefined): void => {
+        const next = lifecycleState(state);
+        if (!active || next === last) return;
+        last = next;
+        emit(next);
+      };
       queueMicrotask(() => {
-        if (active) emit(lifecycleState(AppState.currentState));
+        report(AppState.currentState);
       });
       const subscription = AppState.addEventListener("change", (state) => {
-        if (active) emit(lifecycleState(state));
+        report(state);
       });
       return () => {
         active = false;
