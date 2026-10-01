@@ -1,5 +1,9 @@
 # Undra v1 — status
 
+> **Note (2026-09-30, evening):** the product was renamed Keel → Undra (ADR-030) by a mechanical
+> script; identifiers in the entries below were rewritten with it, so branch names and crate names
+> in older entries read `undra…` here while git history still says `keel…`.
+
 Updated: 2026-09-30 (integrator takeover, branch `claude/undra-framework-takeover-66c4ea`)
 
 ## Phase
@@ -234,3 +238,22 @@ CI → adversarial reviews closed.
 - **Findings for the integrator** (details in `decisions/sde/playground.md`): keyed patch cost is O(list)
   (471 us native vs a 20 us budget), undra-query rollback drops a later placeholder, generated Swift streams lose
   backpressure, Swift `load` inits before the schema check, TS Mirror strands a subscriber-enqueued change-set.
+
+## Launch v2 (2026-09-30, evening) — integrator ledger
+
+Spec: `.10x/specs/2026-09-30-launch-v2-design.md` (+ Amendment A). Decisions under
+`.10x/decisions/{cto,product-manager,architect,devops,qa}/launch-v2.md`.
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| cdylib dead-strip fix (ADR-029) | `1a4b038` | contracts green on CI for the first time; Rust 2,110 |
+| contract runner diagnostics, S04 spacing, fixed-finding test, per-call alloc assertion | `e2374f4`…`dd5a2cd` | CI all-green twice (`1b550c1`, `dd5a2cd`) — first fully green runs of the project |
+| state: spec, ADR-030 (Undra), role decisions | `2d4f0fe`, `6a0a67a` | — |
+| rename Keel → Undra (ADR-030; 1,290 files; `scripts/rename-keel-to-undra.sh`) | `31a1f37` | every suite green on the branch incl. iOS sim + Android emulator launches; repo renamed to `shreypdev/undra` |
+| docs truth pass (blueprint claims, README label/count, TS count) | `4fdd36e`, `0b0f292` | from the blog fact-check |
+| site v2 (v1 palette, 332-word landing, live demo, roadmap, SEO, error codes page) + 4 fact-checked posts | `c9e6bf8` | fable reviews: `.10x/reviews/2026-09-30-site-v2-review.md`, `…-blog-factcheck.md` |
+
+In flight (worktrees under `/Users/shrey/Desktop/src/.work/`): `stress` (harsh-conditions harness,
+S1a), `dist` (release pipeline, npm/brew/curl), `magic` (ADR-033 envelope magic `UNDR`),
+`coalesce` (ADR-031 frame-coalesced delivery), `swift-errors` (ADR-032 Swift error channel).
+Matrix at this checkpoint: Rust 2,110 · TS 897 · Kotlin 454 · Swift 328 · wasm 29 · contracts 51/51.
