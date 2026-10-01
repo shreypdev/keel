@@ -283,3 +283,16 @@ dist: the `release` environment + `v*` tag ruleset are founder steps.
 Every piece of the launch-v2 spec (§7) is merged. In flight: `bench-followups` (stress review M1/M3/M4/L4–L8)
 and `stress-screen` (S1b: the playground stress screen and the landing page's "Push it").
 Matrix at checkpoint 3: Rust 2,168 · TS 931 · Kotlin 500 · Swift 425 · wasm 29 · contracts 54/54 (18 scenarios × 3).
+
+### Checkpoint 4 (2026-10-01, late morning) — launch v2 complete
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| S1b playground stress screen + landing "Push it" | `a4efd8d` | fable review `.10x/reviews/2026-10-01-stress-screen-review.md`: live numbers honest; 100k updates/s → 120 applies/s after merge, drain p99 ≈ 1 ms, 0 dropped frames; 2,185 Rust · 102 web |
+| roadmap data: shipped since v1.0 | `7c1a0b5` | — |
+| port tests wait for the Echo port's call (dev-mode Kv/Wall calls arrived first on a slow runner) | `74106e1` | 30 loaded runs clean; CI green |
+| bench follow-ups: ratio gates, same-VM base baseline in CI, contended completions, Theil–Sen drift gate, L4–L8, the completions deadline fix | `0c88c8a` | opus review `.10x/reviews/2026-10-01-bench-followups-review.md` (2 High fixed: an out-of-sample ratio bound; `cancel-in-progress` had been cancelling merge runs); first runner Bench run green — the baseline step took the no-baseline path (warning annotation); 2,236 Rust |
+
+Every piece of the launch-v2 spec and every review follow-up is merged; no worktrees remain.
+Matrix at checkpoint 4: Rust 2,236 · TS 931 · Kotlin 500 · Swift 425 · web playground 102 · wasm 29 · contracts 54/54.
+CI has been green on every `main` run since `1b550c1` except two flakes, both fixed (the alloc test, the port test).

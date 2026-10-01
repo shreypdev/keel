@@ -20,8 +20,8 @@ before the rename merged; the post-rename and post-site runs are being watched.
 ## In flight (one worktree each; see status.md)
 Every piece of the launch-v2 spec is merged (checkpoints 1–3 in status.md): ADR-029…033, the rename,
 site v2 + blog, distribution (dry run green), the harsh-conditions harness, the Swift error channel,
-frame-coalesced delivery (contracts 54/54), deterministic transport tests. Open worktrees:
-`bench-followups` (stress review M1/M3/M4/L4–L8); S1b (the playground stress screen) is merged. Each: adversarial review,
+frame-coalesced delivery (contracts 54/54), deterministic transport tests. No open worktrees: the bench follow-ups (ratio gates, same-VM base baseline in CI, contended
+completions, drift gate) and S1b (the playground stress screen) are merged too. Each: adversarial review,
 full local matrix, CI green, `state(<piece>)` commit, `scripts/wt.sh rm`.
 
 ## Next after those
