@@ -58,6 +58,9 @@ internal class FakeTransport(
 
     @Volatile var statsJson: String? = null
     @Volatile var snapshotBytes: ByteArray? = null
+
+    /** Runs inside [restore], on the calling thread: where an in-process core delivers the restored values. */
+    @Volatile var onRestore: (() -> Unit)? = null
     @Volatile var restoreResult: Int = 0
     @Volatile var connectFailure: RuntimeException? = null
 
@@ -181,6 +184,7 @@ internal class FakeTransport(
 
     override fun restore(snapshot: ByteArray): Int {
         if (snapshotBytes == null) throw UndraModeException("fake: no snapshots")
+        onRestore?.invoke()
         return restoreResult
     }
 

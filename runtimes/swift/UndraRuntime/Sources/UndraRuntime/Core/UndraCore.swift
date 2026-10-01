@@ -537,12 +537,15 @@ public final class UndraCore: @unchecked Sendable {
     }
 
     /// Rebuilds the stores from `snapshot`; handles held by the host stay valid. A rejected
-    /// snapshot leaves the core unchanged.
+    /// snapshot leaves the core unchanged. Called on the main thread, it applies the restored
+    /// values to the stores before it returns, like any synchronous call (docs/SPEC.md section 11).
     ///
     /// - Throws: `UndraRestoreError` if the core rejects it; `UndraModeError` over the remote
     ///   transport.
     public func restore(_ snapshot: [UInt8]) throws {
-        try transport.restore(snapshot)
+        try mirror.withImmediateDrain {
+            try transport.restore(snapshot)
+        }
     }
 
     // MARK: Shutdown

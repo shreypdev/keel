@@ -19,7 +19,7 @@
 // immediately (see `UndraCore`), so code that awaits a call sees the call's effects.
 //
 // The queue is bounded: past `maxPendingEntries` or `maxPendingBytes` the enqueuing thread folds
-// it in place. A signal whose merged patch grows past both patch bounds is dropped there and
+// it in place. A signal whose merged patch grows past either patch bound is dropped there and
 // re-observed by the next drain, so memory stays proportional to the observed signals however far
 // the main thread falls behind.
 
@@ -51,8 +51,10 @@ public final class Mirror: @unchecked Sendable {
     static let defaultMaxPendingEntries = 65_536
     /// Default of `LoadOptions.maxPendingBytes`.
     static let defaultMaxPendingBytes = 16 * 1024 * 1024
-    /// A merged patch with more operations than this **and** more bytes than
-    /// `maxMergedPatchBytes` is dropped by a compaction and its signal re-observed.
+    /// A merged patch with more operations than this, **or** more op bytes than
+    /// `maxMergedPatchBytes`, is dropped by a compaction and its signal re-observed: the bytes
+    /// bound what the backlog holds per signal, the operations what a drain replays for it (the
+    /// core's own op log stops at 4,096 too).
     static let maxMergedPatchOps = 4096
     /// See `maxMergedPatchOps`.
     static let maxMergedPatchBytes = 1024 * 1024
@@ -651,9 +653,9 @@ public final class Mirror: @unchecked Sendable {
             opBytes = 0
         }
 
-        /// Whether the merged patch passes both patch bounds a compaction keeps.
+        /// Whether the merged patch passes either patch bound a compaction keeps.
         var oversized: Bool {
-            return ops > Mirror.maxMergedPatchOps && opBytes > Mirror.maxMergedPatchBytes
+            return ops > Mirror.maxMergedPatchOps || opBytes > Mirror.maxMergedPatchBytes
         }
 
         /// The patches as one keyed patch: the sum of the counts, then every patch's ops in
@@ -742,8 +744,8 @@ public final class Mirror: @unchecked Sendable {
     }
 
     /// Folds the queue in place (decision 3 of ADR-031), with the lock held, on the thread that
-    /// passed the bound: every signal, `no_coalesce` ones included. A merged patch past both patch
-    /// bounds is dropped and its signal re-observed by the next drain; surviving values are copied
+    /// passed the bound: every signal, `no_coalesce` ones included. A merged patch past either patch
+    /// bound is dropped and its signal re-observed by the next drain; surviving values are copied
     /// so they no longer keep whole payloads alive. The next compaction waits until the queue
     /// doubles, so folding stays O(1) per entry. Returns the signals with unmergeable patches.
     private static func compact(_ current: inout State, maxEntries: Int, maxBytes: Int) -> [Key] {

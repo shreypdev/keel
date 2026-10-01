@@ -74,6 +74,8 @@ private class Rng(seed: Int) {
     }
 }
 
+private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
 /** A frame pacer whose frames never come: only a reply, a sync call or a flush can apply anything. */
 private val NEVER = FramePacer { }
 
@@ -488,14 +490,14 @@ class CoalesceTests : Suite() {
                 core.mirror.flushOnThisThread(main)
                 assertEq(truth.snapshot(), host.snapshot())
                 assertEq(0, core.mirror.stats().pendingEntries)
-                // Each list's patches passed both patch bounds (hundreds of thousands of ops), so they were dropped and re-observed.
+                // Each list's patches passed the operations bound (hundreds of thousands of ops), so they were dropped and re-observed.
                 assertEq(listOf(Triple(1L, 0u, true), Triple(1L, 1u, true)), t.observes.sortedBy { it.second }.toList())
                 assertEq(2L, core.stats().mirror.resyncs)
                 assertEq(1L, core.stats().mirror.drains)
             }
         }
 
-        case("a merged patch past both patch bounds is dropped and its signal re-observed once") {
+        case("a merged patch past the patch bounds is dropped and its signal re-observed once") {
             val main = ManualMainThread()
             val big: UndraCodec<String> = Codecs.string
             var truth: List<String> = emptyList()
@@ -511,7 +513,7 @@ class CoalesceTests : Suite() {
                 list = if (op == ChangeOp.FULL) Codecs.vec(big).decode(r) else KeyedPatch.applyPatch(list, KeyedPatch.decodePatch(r, big))
             }
             val text = "x".repeat(300)
-            // Compactions run every 1,000 entries; the one after the 4,096th op finds the merged patch past both bounds.
+            // Compactions run every 1,000 entries; the one after the 1 MiB-th byte (about 3,400 ops) finds the merged patch past a bound.
             for (i in 0 until Mirror.MAX_MERGED_PATCH_OPS.toInt() + 1500) {
                 val op = PatchOp.Insert(truth.size.toUInt(), "$i$text")
                 truth = truth + op.item
@@ -523,6 +525,41 @@ class CoalesceTests : Suite() {
             mirror.flushOnThisThread(main)
             assertEq(listOf(0u), resyncs.toList())
             assertEq(truth, list)
+        }
+
+        case("a merged patch past either bound is dropped: a few large items (bytes), or many small operations (count)") {
+            // ADR-031 decision 3 promises O(observed keys x (value + 1 MiB)): the byte bound must drop a patch on its own,
+            // however few operations it has (40 inserts of 64 KiB here), and the operation bound caps what a drain replays
+            // (5,000 inserts of a one-letter item, 50 KiB).
+            val strings = Codecs.vec(Codecs.string)
+            for ((shape, count, item, maxPendingEntries) in listOf(
+                Quad("bytes", 40, "z".repeat(64 * 1024), 8),
+                Quad("operations", Mirror.MAX_MERGED_PATCH_OPS.toInt() + 904, "a", 64),
+            )) {
+                val main = ManualMainThread()
+                var truth: List<String> = emptyList()
+                val resyncs = CopyOnWriteArrayList<UInt>()
+                lateinit var mirror: Mirror
+                mirror = manualMirror(main, NEVER, maxPendingEntries = maxPendingEntries, resync = { _, s ->
+                    resyncs.add(s)
+                    mirror.submit(cs(full(1L, 0u, strings.encodeToByteArray(truth))))
+                })
+                var list: List<String> = emptyList()
+                mirror.register(1L) { _, op, r ->
+                    list = if (op == ChangeOp.FULL) strings.decode(r) else KeyedPatch.applyPatch(list, KeyedPatch.decodePatch(r, Codecs.string))
+                }
+                var maxBytes = 0L
+                repeat(count) {
+                    val op = PatchOp.Insert(truth.size.toUInt(), item)
+                    truth = truth + item
+                    mirror.submit(cs(patch(1L, 0u, KeyedPatch.encodePatch(listOf(op), Codecs.string))))
+                    maxBytes = maxOf(maxBytes, mirror.stats().pendingBytes)
+                }
+                assertTrue(maxBytes < Mirror.MAX_MERGED_PATCH_BYTES + 2L * 64 * 1024 * maxPendingEntries, "$shape: $maxBytes bytes pending")
+                mirror.flushOnThisThread(main)
+                assertEq(listOf(0u), resyncs.toList(), shape)
+                assertEq(truth, list, shape)
+            }
         }
 
         case("the backlog is folded when its bytes pass their bound too") {
@@ -673,6 +710,14 @@ class CoalesceTests : Suite() {
                     rig.count
                 }
                 assertEq(21u, seen)
+            }
+        }
+
+        case("restore on the main thread applies the restored values before it returns") {
+            Rig().use { rig ->
+                rig.t.snapshotBytes = byteArrayOf(1)
+                rig.t.onRestore = { rig.t.events.onChangeSet(cs(full(Rig.HANDLE, 0u, u32(77)))) }
+                assertEq(77u, rig.onMain { rig.core.restore(byteArrayOf(1)); rig.count })
             }
         }
 

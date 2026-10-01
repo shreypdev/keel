@@ -451,11 +451,10 @@ impl Model {
     }
 }
 
-/// Whether an enum's variants all carry no fields.
-#[must_use]
 /// The ids of a store's `#[undra(no_coalesce)]` signals, in signal order: what the generated store
 /// passes to its mirror registration so the platform applies every entry of them (ADR-031).
 /// Empty for an object that is not a store or has none.
+#[must_use]
 pub fn no_coalesce_ids(object: &ObjectDef) -> Vec<u32> {
     object
         .store
@@ -466,6 +465,8 @@ pub fn no_coalesce_ids(object: &ObjectDef) -> Vec<u32> {
         .collect()
 }
 
+/// Whether an enum's variants all carry no fields.
+#[must_use]
 pub fn is_unit_enum(en: &EnumDef) -> bool {
     !en.is_error && en.variants.iter().all(|v| v.fields.is_empty())
 }

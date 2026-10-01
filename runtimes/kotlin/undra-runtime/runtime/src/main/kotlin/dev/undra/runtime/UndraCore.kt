@@ -127,7 +127,8 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * Calls a synchronous method or function and returns the reply body. In [Mode.INPROC] this is a
      * direct call into the core. In [Mode.REMOTE] it blocks the calling thread for a network round
      * trip (up to [LoadOptions.remoteTimeout]); that is acceptable for development only. Called on the
-     * main thread, it returns after the change-sets the call produced have been applied to the stores.
+     * main thread, it returns after the change-sets the call produced have been applied to the stores
+     * (from inside a store's `apply`, the running drain applies them in its next round instead).
      *
      * [methodId] must equal the id inside [target] (a [CallTarget.LazyListPage] carries none).
      *
@@ -209,7 +210,8 @@ public open class UndraCore protected constructor() : AutoCloseable {
     public open fun snapshot(): ByteArray = throw unsupported("snapshot")
 
     /**
-     * Rebuilds the stores from [snapshot]; the handles the app holds stay valid.
+     * Rebuilds the stores from [snapshot]; the handles the app holds stay valid. Called on the main thread, it
+     * applies the restored values to the stores before it returns, like any synchronous call.
      *
      * @throws UndraModeException over a remote transport.
      * @throws UndraException if the core rejects the snapshot.

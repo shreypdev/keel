@@ -32,7 +32,7 @@ import kotlin.time.Duration.Companion.nanoseconds
  *    entry by entry instead.
  *  - **Bounded.** Past [MirrorOptions.maxPendingEntries] or [MirrorOptions.maxPendingBytes] the queue is
  *    folded in place on the thread that passed the bound. A signal whose merged patch grows past 4,096
- *    operations and 1 MiB is dropped and re-observed at the next drain, so a main thread that falls far
+ *    operations or 1 MiB is dropped and re-observed at the next drain, so a main thread that falls far
  *    behind (or an app in the background) catches up in one drain with bounded memory.
  *  - **Isolated.** A callback that throws is logged and skipped; the other signals are still applied. A
  *    malformed change-set is dropped as a whole.
@@ -76,6 +76,13 @@ public open class Mirror internal constructor(
     private var queuedEntries = 0
     private var frameRequested = false
     private var immediatePosted = false
+
+    /**
+     * Something was queued on the main thread while a drain ran (a callback's synchronous call, a resync
+     * answered in process): the drain runs another round for it. What other threads queue meanwhile waits
+     * for the next frame, so a producer that never pauses cannot keep one drain going round after round.
+     */
+    private var moreRounds = false
 
     /** Signals whose content was dropped: `true` until re-observed, then `false` until their next full value. */
     private val awaiting = HashMap<SignalKey, Boolean>()
@@ -206,6 +213,7 @@ public open class Mirror internal constructor(
             queuedChangeSets++
             queuedEntries += added
             if (queue.size > compactAtEntries || queueBytes > compactAtBytes) compactLocked()
+            if (insideDrain) moreRounds = true
             if (added > 0 && !frameRequested && !insideDrain) {
                 frameRequested = true
                 request = true
@@ -294,8 +302,8 @@ public open class Mirror internal constructor(
     /**
      * Folds the backlog in place (ADR-031 decision 3), on the thread that passed the bound. Every signal is
      * folded, `no_coalesce` ones included (the bound wins over the opt-out); values are copied out of
-     * their payloads when they would otherwise keep a much larger array alive. A merged patch past both
-     * patch bounds is dropped and its signal re-observed at the next drain. The next compaction waits
+     * their payloads when they would otherwise keep a much larger array alive. A merged patch past either
+     * patch bound is dropped and its signal re-observed at the next drain. The next compaction waits
      * until the backlog doubles, so folding stays O(1) per entry.
      */
     private fun compactLocked() {
@@ -425,6 +433,7 @@ public open class Mirror internal constructor(
         queueBytes = 0L
         compactAtEntries = maxEntries
         compactAtBytes = maxBytes
+        moreRounds = false
         val round = Round(batch, if (batch.size > 0) fold(batch, everyKey = false) else emptyList(), queuedChangeSets, queuedEntries)
         queuedChangeSets = 0
         queuedEntries = 0
@@ -433,9 +442,10 @@ public open class Mirror internal constructor(
 
     /**
      * Drains: takes the queue, folds it and applies it (see the class documentation), re-observes the
-     * signals a compaction dropped, then calls the drain listeners. Entries queued while draining (a
-     * callback whose synchronous core call commits, a resync answered in process) are applied by further
-     * rounds of the same drain; after 1000 rounds the rest is left to the next frame.
+     * signals a compaction dropped, then calls the drain listeners. Entries the drain itself caused on the
+     * main thread (a callback whose synchronous core call commits, a resync answered in process) are applied
+     * by further rounds of the same drain; after 1000 rounds the rest is left to the next frame. Change-sets
+     * other threads deliver while it runs wait for the next frame (they asked for one), as on Swift.
      */
     private fun drain() {
         if (draining) return
@@ -455,6 +465,7 @@ public open class Mirror internal constructor(
                     )
                     break
                 }
+                if (rounds > 0 && !lock.withLock { moreRounds || resyncDue }) break
                 val round = takeRound() ?: break
                 rounds++
                 changeSets += round.changeSets
@@ -656,7 +667,7 @@ public open class Mirror internal constructor(
         /** Entries folded into this slot (weights). */
         var entries = 0
 
-        val oversized: Boolean get() = ops > MAX_MERGED_PATCH_OPS && opBytes > MAX_MERGED_PATCH_BYTES
+        val oversized: Boolean get() = ops > MAX_MERGED_PATCH_OPS || opBytes > MAX_MERGED_PATCH_BYTES
 
         fun setFull(index: Int) {
             full = index
@@ -757,7 +768,11 @@ public open class Mirror internal constructor(
         /** What a queued entry costs besides its value: the wire's fixed part (handle, signal id, op, length). */
         const val ENTRY_OVERHEAD: Int = 17
 
-        /** A merged patch with more operations than this **and** more op bytes than [MAX_MERGED_PATCH_BYTES] is dropped by a compaction. */
+        /**
+         * A merged patch with more operations than this, **or** more op bytes than [MAX_MERGED_PATCH_BYTES], is dropped by
+         * a compaction and its signal re-observed: the bytes bound what the backlog holds per signal, the operations what a
+         * drain replays for it (the core's own op log stops at 4,096 too).
+         */
         const val MAX_MERGED_PATCH_OPS: Long = 4096
 
         /** See [MAX_MERGED_PATCH_OPS]. */

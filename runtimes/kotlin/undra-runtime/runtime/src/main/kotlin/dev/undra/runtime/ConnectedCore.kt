@@ -317,6 +317,8 @@ internal class ConnectedCore(
     override fun restore(snapshot: ByteArray) {
         ensureOpen()
         val code = transport.restore(snapshot)
+        // Like any synchronous call made on the main thread, the restored values are applied before it returns.
+        liveMirror.drainIfOnMainThread()
         if (code != 0) throw UndraException("the core rejected the snapshot (code $code)")
     }
 

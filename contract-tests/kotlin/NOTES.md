@@ -28,7 +28,9 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   change-sets there, at the next frame for what the core sends on its own (ADR-031), so a test that takes a
   mark in the list of raw entries first drains the mirror on that thread (`RawStore.mark` -> `flushMainThread`,
   which calls `mirror.flush()` there); without it a change-set of the previous step can arrive after the mark.
-  S18 makes its calls on the main thread itself, where a synchronous call drains before it returns.
+  S18 makes its calls on the main thread itself, where a synchronous call drains before it returns, and adds a
+  Kotlin-only last check that does not drain: a burst made off the main thread must reach its store at a frame of
+  the runtime's own pacer, so the frame path stays covered although every wait drains.
 
 ## Reading the scenarios on the JVM
 

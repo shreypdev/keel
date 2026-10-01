@@ -79,7 +79,11 @@ export interface MirrorOptions {
 export const DEFAULT_MAX_PENDING_ENTRIES = 65_536;
 /** Default of {@link MirrorOptions.maxPendingBytes}. */
 export const DEFAULT_MAX_PENDING_BYTES = 16 * 1024 * 1024;
-/** A merged patch with more operations than this **and** more bytes than {@link MAX_MERGED_PATCH_BYTES} is dropped by a compaction and the signal re-observed. */
+/**
+ * A merged patch with more operations than this, **or** more op bytes than {@link MAX_MERGED_PATCH_BYTES},
+ * is dropped by a compaction and the signal re-observed: the bytes bound what the backlog holds per
+ * signal, the operations what a drain replays for it (the core's own op log stops at 4,096 too).
+ */
 export const MAX_MERGED_PATCH_OPS = 4096;
 /** See {@link MAX_MERGED_PATCH_OPS}. */
 export const MAX_MERGED_PATCH_BYTES = 1024 * 1024;
@@ -192,9 +196,9 @@ class Slot {
     return true;
   }
 
-  /** Whether the merged patch passes both bounds a compaction keeps. */
+  /** Whether the merged patch passes either bound a compaction keeps. */
   get oversized(): boolean {
-    return this.ops > MAX_MERGED_PATCH_OPS && this.opBytes > MAX_MERGED_PATCH_BYTES;
+    return this.ops > MAX_MERGED_PATCH_OPS || this.opBytes > MAX_MERGED_PATCH_BYTES;
   }
 
   /**
@@ -586,7 +590,7 @@ export class Mirror {
 
   /**
    * Folds the backlog in place (decision 3 of ADR-031), on the thread that passed the bound. A
-   * merged patch past both patch bounds is dropped and its signal re-observed at the next drain.
+   * merged patch past either patch bound is dropped and its signal re-observed at the next drain.
    * The next compaction waits until the backlog doubles, so folding stays O(1) per entry.
    */
   #compact(): void {

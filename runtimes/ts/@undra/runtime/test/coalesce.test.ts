@@ -4,6 +4,7 @@ import {
   DEFAULT_MAX_PENDING_BYTES,
   DEFAULT_MAX_PENDING_ENTRIES,
   type DrainStats,
+  MAX_MERGED_PATCH_BYTES,
   MAX_MERGED_PATCH_OPS,
   Mirror,
   type MirrorOptions,
@@ -458,12 +459,12 @@ describe("the backlog is bounded", () => {
     mirror.flush();
     expect(host.snapshot()).toEqual(core.snapshot());
     expect(mirror.pending).toBe(0);
-    // Each list's patches passed both patch bounds (about 300,000 ops of 9 bytes each), so they were dropped and re-observed.
+    // Each list's patches passed the operations bound (about 300,000 ops of 9 bytes each), so they were dropped and re-observed.
     expect(resyncs.sort()).toEqual([0, 1]);
     expect(mirror.stats().resyncs).toBe(2);
   }, 60_000);
 
-  it("drops a merged patch that passes both patch bounds and re-observes its signal once", () => {
+  it("drops a merged patch that passes the patch bounds and re-observes its signal once", () => {
     const big = codecs.string;
     let truth: string[] = [];
     const resyncs: number[] = [];
@@ -486,7 +487,7 @@ describe("the backlog is bounded", () => {
       }
     });
     const text = "x".repeat(300);
-    // Compactions run every 1,000 entries; the one after the 4,096th op finds the merged patch past both bounds.
+    // Compactions run every 1,000 entries; the one after the 1 MiB-th byte (about 3,400 ops) finds the merged patch past a bound.
     for (let i = 0; i < MAX_MERGED_PATCH_OPS + 1500; i++) {
       const op: PatchOp<string> = { op: "insert", index: truth.length, item: `${i}${text}` };
       truth = [...truth, op.item];
@@ -500,6 +501,47 @@ describe("the backlog is bounded", () => {
     mirror.flush();
     expect(resyncs).toEqual([0]);
     expect(list.peek()).toEqual(truth);
+  });
+
+  it("drops a merged patch past either bound: a few large items (bytes), or many small operations (count)", () => {
+    // ADR-031 decision 3 promises O(observed keys x (value + 1 MiB)): the byte bound must drop a
+    // patch on its own, however few operations it has (40 inserts of 64 KiB here), and the
+    // operation bound caps what a drain replays (5,000 inserts of a one-letter item, 50 KiB).
+    for (const [shape, count, item, maxPendingEntries] of [
+      ["bytes", 40, "z".repeat(64 * 1024), 8],
+      ["operations", MAX_MERGED_PATCH_OPS + 904, "a", 64],
+    ] as const) {
+      let truth: string[] = [];
+      const resyncs: number[] = [];
+      const list = new Signal<string[]>([]);
+      const strings = codecs.vec(codecs.string);
+      let mirror: Mirror;
+      mirror = new Mirror({
+        schedule: () => {},
+        maxPendingEntries,
+        resync: (_h, signalId) => {
+          resyncs.push(signalId);
+          mirror.enqueue(cs({ signalId: 0, value: encodeValue(strings, truth) }));
+        },
+      });
+      mirror.register(1n, (_id, op, value) => {
+        if (op === ChangeOp.FullValue) list._set(decodeValue(strings, value));
+        else list._set(applyPatch(list.peek(), decodePatch(new UndraReader(value), codecs.string)));
+      });
+      let maxBytes = 0;
+      for (let i = 0; i < count; i++) {
+        const op: PatchOp<string> = { op: "insert", index: truth.length, item };
+        truth = [...truth, item];
+        const w = new UndraWriter();
+        encodePatch(w, [op], codecs.string);
+        mirror.enqueue(cs({ signalId: 0, op: ChangeOp.KeyedPatch, value: w.finish() }));
+        maxBytes = Math.max(maxBytes, mirror.stats().pendingBytes);
+      }
+      expect(maxBytes, shape).toBeLessThan(MAX_MERGED_PATCH_BYTES + 2 * 64 * 1024 * maxPendingEntries);
+      mirror.flush();
+      expect(resyncs, shape).toEqual([0]);
+      expect(list.peek(), shape).toEqual(truth);
+    }
   });
 
   it("folds when the bytes pass their bound too", () => {
@@ -868,6 +910,38 @@ describe("the worker sends one task's envelopes as one message", () => {
     expect(items).toEqual([5]);
     expect(w.messages() - before).toBe(1);
     w.close();
+  });
+
+  it("a batch that is not a list of envelopes fails the transport as a protocol error", async () => {
+    // A hand-rolled worker: answers `init` with `ready`, then sends a malformed protocol 2 batch.
+    const listeners: Array<(event: Event) => void> = [];
+    const worker: WorkerLike = {
+      addEventListener: (type, fn) => {
+        if (type === "message") listeners.push(fn as (event: Event) => void);
+      },
+      removeEventListener: () => {},
+      postMessage: (message) => {
+        if ((message as { t: string }).t !== "init") return;
+        const hello = { undraVersion: "test", schemaHash: STUB.SCHEMA_HASH, platform: "test", mode: "dev" };
+        queueMicrotask(() => {
+          for (const fn of listeners) fn({ data: { t: "ready", hello } } as MessageEvent);
+        });
+      },
+      close: () => {},
+    };
+    const transport = new WasmWorkerTransport({ wasm: new Uint8Array(8), expectedSchemaHash: STUB.SCHEMA_HASH, worker });
+    const closed: unknown[] = [];
+    await transport.start({
+      reply: () => {},
+      changeSet: () => {},
+      streamItem: () => {},
+      portCall: () => ({ kind: "unavailable" }),
+      log: () => {},
+      closed: (error) => closed.push(error),
+    });
+    for (const fn of listeners) fn({ data: { t: "envelopes", data: 7 } } as MessageEvent);
+    expect(closed).toHaveLength(1);
+    expect(String(closed[0])).toContain("without a list of envelopes");
   });
 
   it("the main thread still reads one envelope per message (a version 1 worker's shape)", async () => {

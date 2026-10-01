@@ -895,6 +895,24 @@ mod tests {
     }
 
     #[test]
+    fn no_coalesce_needs_a_signal_field() {
+        // ADR-031 puts the flag in the schema, so a misplaced one must teach (R8), not vanish.
+        let message = expand("struct S { a: Signal<i32>, #[undra(no_coalesce)] cache: Vec<u8> }")
+            .unwrap_err();
+        assert!(message.contains("error[undra::E0008]"), "{message}");
+        assert!(
+            message.contains("`#[undra(no_coalesce)]` is not valid on a non-signal store field"),
+            "{message}"
+        );
+        assert!(
+            message.contains("makes a store signal deliver every commit"),
+            "{message}"
+        );
+        assert!(message.contains("remove the option"), "{message}");
+        assert!(message.contains("= docs: "), "{message}");
+    }
+
+    #[test]
     fn key_needs_a_vec_signal() {
         for src in [
             "struct S { #[undra(key = \"id\")] a: Signal<i32> }",

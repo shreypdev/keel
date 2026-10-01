@@ -61,6 +61,9 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     var statsDocument: String?
     var snapshotBytes: [UInt8] = []
     var restoreCode: UInt32 = 0
+    /// Runs inside `restore`, on the calling thread: where an in-process core delivers the
+    /// restored values.
+    var onRestore: (@Sendable (FakeTransport) -> Void)?
 
     init(schemaHash: UInt64 = 0x1234, directSync: Bool = true) {
         self.schemaHash = schemaHash
@@ -164,6 +167,7 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         if restoreCode != 0 {
             throw UndraRestoreError(code: restoreCode)
         }
+        onRestore?(self)
     }
 
     func statsJSON() -> String? {

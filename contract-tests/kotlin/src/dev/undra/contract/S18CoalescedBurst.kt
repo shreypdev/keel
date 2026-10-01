@@ -62,6 +62,21 @@ fun s18CoalescedBurst(w: World) {
     }
     expectEq("progress right after burst(PROGRESS, 10)", 10u, progress)
     expectEq("progress entries the mirror applied", 10L, applied)
+
+    // Kotlin only: the waits of this runner drain the mirror before each look (NOTES.md), so this checks the
+    // frame path itself. A burst made off the main thread, where nothing drains for the caller, reaches the
+    // store at a frame of the runtime's own pacer, with no drain from the test.
+    val offMain = onMain { Stress(w.core) }
+    try {
+        offMain.burst(StressMode.FIREHOSE, 1000u)
+        val deadline = System.nanoTime() + WAIT_MS * 1_000_000L
+        while (offMain.value.value != 1000uL) {
+            if (System.nanoTime() > deadline) fail("burst(FIREHOSE, 1000) made off the main thread never reached the store at a frame")
+            Thread.sleep(2L)
+        }
+    } finally {
+        onMain { offMain.close() }
+    }
 }
 
 private fun burstArgs(mode: StressMode, transactions: UInt): ByteArray {

@@ -152,6 +152,10 @@ export class WasmWorkerTransport implements Transport {
             return;
           case "envelopes":
             // One task's worth of the worker's output (protocol 2), in order. A failure stops the rest.
+            if (!Array.isArray(message.data)) {
+              this.#fail(new UndraTransportError("protocol", "the worker sent an `envelopes` message without a list of envelopes"));
+              return;
+            }
             for (const data of message.data) {
               if (this.#handler === null) return;
               this.#receive(data);

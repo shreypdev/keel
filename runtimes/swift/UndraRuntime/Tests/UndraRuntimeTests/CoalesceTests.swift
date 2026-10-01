@@ -677,7 +677,7 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual(host.store.scalars, model.scalars)
         XCTAssertEqual(mirror.pendingCount, 0)
         XCTAssertEqual(host.store.patchFailures, 0)
-        // Each list's merged patch passed both patch bounds (well over 4,096 ops and 1 MiB), so a
+        // Each list's merged patch passed the operations bound (well over 4,096 ops), so a
         // compaction dropped it and the drain re-observed the list, once.
         XCTAssertEqual(host.transport.sent, [.observe(storeHandle.rawValue, 0, true), .observe(storeHandle.rawValue, 1, true)])
         let after = mirror.stats()
@@ -686,7 +686,7 @@ final class CoalesceTests: XCTestCase {
         XCTAssertLessThanOrEqual(host.store.applies.values.max() ?? 0, 2)
     }
 
-    func testAMergedPatchPastBothBoundsIsDroppedAndReobservedOnce() throws {
+    func testAMergedPatchPastTheBoundsIsDroppedAndReobservedOnce() throws {
         final class Truth: @unchecked Sendable {
             var items: [String] = []
         }
@@ -715,8 +715,8 @@ final class CoalesceTests: XCTestCase {
             }
         }
         let text = String(repeating: "x", count: 300)
-        // Compactions run every 1,000 entries; the one after the 4,096th op finds the merged patch
-        // past both bounds (more than 4,096 ops, more than 1 MiB).
+        // Compactions run every 1,000 entries; the one after the 1 MiB-th byte (about 3,400 ops)
+        // finds the merged patch past a bound.
         for index in 0 ..< Mirror.maxMergedPatchOps + 1500 {
             let item = "\(index)\(text)"
             let op = PatchOp<String>.insert(index: UInt32(truth.items.count), item: item)
@@ -739,6 +739,56 @@ final class CoalesceTests: XCTestCase {
         core.mirror.flush()
         XCTAssertEqual(applied.items, truth.items)
         XCTAssertEqual(core.mirror.stats().resyncs, 1)
+    }
+
+    /// ADR-031 decision 3 promises O(observed keys x (value + 1 MiB)): the byte bound must drop a
+    /// patch on its own, however few operations it has (40 inserts of 64 KiB here), and the
+    /// operation bound caps what a drain replays (5,000 inserts of a one-letter item, 50 KiB).
+    func testAMergedPatchPastEitherBoundIsDroppedLargeItemsOrManySmallOperations() throws {
+        final class Truth: @unchecked Sendable {
+            var items: [String] = []
+        }
+        let shapes: [(String, Int, String, Int)] = [
+            ("bytes", 40, String(repeating: "z", count: 64 * 1024), 8),
+            ("operations", Mirror.maxMergedPatchOps + 904, "a", 64),
+        ]
+        for (shape, count, item, maxPendingEntries) in shapes {
+            let truth = Truth()
+            let transport = FakeTransport()
+            transport.onObserve = { _, signal, on, fake in
+                if on {
+                    fake.deliverChangeSet(changeSet(fullEntry(signal, truth.items.undraEncoded())))
+                }
+            }
+            let core = try makeCore(transport, frames: ManualFrameScheduler(), maxPendingEntries: maxPendingEntries)
+            let applied = ListBox()
+            core.mirror.register(storeHandle) { _, op, reader in
+                do {
+                    switch op {
+                    case .fullValue:
+                        applied.items = try [String].undraDecode(&reader)
+                    case .keyedPatch:
+                        let ops: [PatchOp<String>] = try decodePatch(&reader)
+                        try applyPatch(ops, to: &applied.items)
+                    case .lazyListInvalidated:
+                        break
+                    }
+                } catch {
+                    XCTFail("\(shape): \(error)")
+                }
+            }
+            var maxBytes = 0
+            for _ in 0 ..< count {
+                let op = PatchOp<String>.insert(index: UInt32(truth.items.count), item: item)
+                truth.items.append(item)
+                transport.deliverChangeSet(changeSet(patchEntry(0, patchBytes([op]))))
+                maxBytes = max(maxBytes, core.mirror.stats().pendingBytes)
+            }
+            XCTAssertLessThan(maxBytes, Mirror.maxMergedPatchBytes + 2 * 64 * 1024 * maxPendingEntries, shape)
+            core.mirror.flush()
+            XCTAssertEqual(transport.sent, [.observe(storeHandle.rawValue, 0, true)], shape)
+            XCTAssertEqual(applied.items, truth.items, shape)
+        }
     }
 
     func testTheBacklogIsFoldedWhenItsBytesPassTheirBound() throws {
@@ -833,6 +883,21 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual(core.mirror.pendingCount, 0)
         XCTAssertEqual(core.mirror.stats().drains, 1)
         XCTAssertEqual(frames.requests, 0, "a synchronous call on the main thread drains itself: no frame")
+    }
+
+    func testRestoreOnTheMainThreadAppliesTheRestoredValuesBeforeItReturns() throws {
+        let frames = ManualFrameScheduler()
+        let transport = FakeTransport()
+        let target = storeHandle
+        transport.onRestore = { fake in
+            // In process the core delivers the restored values on the calling thread.
+            fake.deliverChangeSet(changeSet(fullEntry(0, u32(77), handle: target)))
+        }
+        let core = try makeCore(transport, frames: frames)
+        let store = CounterProbe(core: core, handle: target)
+        try core.restore([1])
+        XCTAssertEqual(store.count, 77)
+        XCTAssertEqual(frames.requests, 0, "a restore on the main thread drains itself: no frame")
     }
 
     func testAFailedCallSyncStillAppliesItsChangeSets() throws {

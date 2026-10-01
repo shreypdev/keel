@@ -28,8 +28,8 @@ change-sets to your stores) merges before it applies:
 * **Bounded.** The backlog holds at most 65,536 entries or 16 MiB (tunable). Past that it is folded in
   place, so a blocked main thread, a backgrounded app or a hidden tab costs memory proportional to the
   number of signals you observe, not to the number of transactions, and catches up in one drain. A
-  list whose merged patch grows past 4,096 operations and 1 MiB is dropped and re-observed instead:
-  one full value is cheaper than that patch.
+  list whose merged patch grows past 4,096 operations or 1 MiB is dropped and re-observed instead:
+  one full value is cheaper than that patch, and memory stays bounded however large the items.
 
 On the web, 1,667 one-row patches per frame on a 10,000-row list (100,000 per second) went from about
 4 ms of main-thread work per frame to about 0.4 ms with this merge (ADR-031, "Consequences").
@@ -73,8 +73,8 @@ Know what you are asking for:
   SwiftUI and React render once per frame. If you need to *react* to each value in code, subscribe to
   the signal (TS `signal.subscribe`) or, better, make the steps a **stream** (`Stream<T>` return
   type): streams have credit-based backpressure and deliver every item.
-* **The backlog bound wins.** If the main thread falls 65,536 entries behind, a `no_coalesce` signal
-  is folded like any other.
+* **The backlog bound wins.** If the main thread falls past the backlog bound (65,536 entries or
+  16 MiB by default), a `no_coalesce` signal is folded like any other.
 * **It costs what coalescing saves.** A `no_coalesce` signal written 100,000 times per second is
   100,000 applies per second on the main thread. Keep it for low-rate step semantics.
 

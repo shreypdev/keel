@@ -348,7 +348,9 @@ export class UndraCore {
    * `wasm-main` only; every other mode throws {@link UndraModeError}. Rejects
    * asynchronous methods (the core answers status 5). Throws
    * {@link UndraReplyError} when the call does not succeed. The change-sets
-   * the call produced are applied to the stores before it returns.
+   * the call produced are applied to the stores before it returns, except
+   * when it is made from inside a drain (a signal subscriber): the running
+   * drain applies them in its next round, after the subscriber returns.
    */
   callSync(target: CallTargetArg, methodId: number, args: Uint8Array): Uint8Array {
     const transport = this.#transport;
