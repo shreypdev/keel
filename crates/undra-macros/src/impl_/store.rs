@@ -2,9 +2,11 @@
 //!
 //! # Signals
 //!
-//! Fields typed `Signal<T>` and `Computed<T>` are the store's signals, numbered `0..n` in
-//! declaration order (other fields are private state, `Ctx` included).
-//! `#[undra(key = "id")]` on a `Signal<Vec<T>>` makes it a keyed list that ships patches;
+//! Fields typed `Signal<T>`, `Computed<T>` and `DerivedList<T>` are the store's signals, numbered
+//! `0..n` in declaration order (other fields are private state, `Ctx` included).
+//! `#[undra(key = "id")]` on a `Signal<Vec<T>>` makes it a keyed list that ships patches; a
+//! `DerivedList<T>` (ADR-039) must have one, and is described as a read-only keyed list
+//! (`computed: true` with a `key`, the schema of a `Vec<T>`);
 //! `#[undra(no_coalesce)]` makes every commit of a signal reach the platforms, and is recorded in
 //! the signal's schema entry so their mirrors apply every one of them (ADR-031). `Lazy<T>` fields
 //! are rejected (E0001): lazily paged lists are not available in v1.
@@ -36,8 +38,9 @@
 //!
 //! Signals are attached with the `StoreCell` family that fits the field: `attach` for a plain
 //! `Signal<T>`, `attach_keyed` (with a typed `fn(&Item) -> u64` that hashes the encoded key
-//! field) for `#[undra(key = "..")]`, `attach_computed` for a `Computed<T>`, and
-//! `set_no_coalesce` after any of them for `#[undra(no_coalesce)]`.
+//! field) for `#[undra(key = "..")]`, `attach_computed` for a `Computed<T>`, `attach_derived` (with
+//! the same key function) for a `DerivedList<T>`, and `set_no_coalesce` after any of them for
+//! `#[undra(no_coalesce)]`.
 //!
 //! # Restore
 //!
@@ -47,7 +50,7 @@
 //!
 //! * automatically, if every non-signal field is a `Ctx` (cloned from the argument), a `WeakCtx`
 //!   (downgraded from it; what a store should keep, ADR-034) or `Default`, and there are no
-//!   `Computed` fields: a struct literal;
+//!   `Computed` or `DerivedList` fields: a struct literal;
 //! * through a hook, `#[undra::store(restore = "Self::rebuild")]`, with the signature
 //!   `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in order>) -> Self`. Use it when
 //!   the store has computed fields (only your code knows how to derive them) or other
@@ -71,6 +74,16 @@ use super::types::{Allow, KType, Pos, map_type, ty_string};
 enum SigKind {
     Signal,
     Computed,
+    /// `DerivedList<T>` (ADR-039): computed by the core, shipped as keyed patches.
+    Derived,
+}
+
+impl SigKind {
+    /// Evaluated by the core, not written: read-only on the platforms, left out of snapshots,
+    /// rebuilt by the restore hook.
+    fn is_computed(self) -> bool {
+        self != SigKind::Signal
+    }
 }
 
 struct SignalField {
@@ -78,7 +91,8 @@ struct SignalField {
     name: String,
     id: u32,
     kind: SigKind,
-    /// The `T` of `Signal<T>` / `Computed<T>` / `Lazy<T>`.
+    /// The `T` of `Signal<T>` / `Computed<T>`, and `Vec<T>` for a `DerivedList<T>`: the value
+    /// the platforms see.
     value_ty: syn::Type,
     /// The schema type of the signal.
     kty: KType,
@@ -137,14 +151,29 @@ fn wrapper_of(ty: &syn::Type) -> Option<(String, syn::Type)> {
     Some((seg.ident.to_string(), value.clone()))
 }
 
-/// `Signal<T>` or `Computed<T>` (by last path segment) with its `T`.
+/// `Signal<T>`, `Computed<T>` or `DerivedList<T>` (by last path segment) with its `T`.
 fn signal_wrapper(ty: &syn::Type) -> Option<(SigKind, syn::Type)> {
     let (name, value) = wrapper_of(ty)?;
     match name.as_str() {
         "Signal" => Some((SigKind::Signal, value)),
         "Computed" => Some((SigKind::Computed, value)),
+        "DerivedList" => Some((SigKind::Derived, value)),
         _ => None,
     }
+}
+
+/// `DerivedList` spelled without exactly one type argument.
+fn is_bare_derived(ty: &syn::Type) -> bool {
+    let syn::Type::Path(path) = ty else {
+        return false;
+    };
+    path.qself.is_none()
+        && path
+            .path
+            .segments
+            .last()
+            .is_some_and(|seg| seg.ident == "DerivedList")
+        && wrapper_of(ty).is_none()
 }
 
 /// `Lazy<T>`: recognised only to be rejected with a teaching diagnostic (not in v1).
@@ -361,8 +390,30 @@ pub(crate) fn expand_store(
                     );
                     continue;
                 }
+                if is_bare_derived(&field.ty) {
+                    take(&mut field.attrs, Site::SIGNAL, &mut errors);
+                    errors.push(
+                        Diag::new(
+                            code::E0001,
+                            format!("`{}` needs the type of its rows", ty_string(&field.ty)),
+                            "a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument",
+                            format!("write `DerivedList<Row>` for `{ident}`, with the type the pipeline's `build()` produces"),
+                        )
+                        .on(&field.ty),
+                    );
+                    continue;
+                }
                 match signal_wrapper(&field.ty) {
-                    Some((kind, value_ty)) => {
+                    Some((kind, item_or_value)) => {
+                        // A derived list of `T` is a `Vec<T>` to the schema and the type checks.
+                        let (value_ty, derived_item) = if kind == SigKind::Derived {
+                            (
+                                syn::parse_quote!(::std::vec::Vec<#item_or_value>),
+                                Some(item_or_value),
+                            )
+                        } else {
+                            (item_or_value, None)
+                        };
                         let attr = take(&mut field.attrs, Site::SIGNAL, &mut errors);
                         let kty = match map_type(&value_ty, Pos::Signal, Allow::NONE) {
                             Ok(kty) => kty,
@@ -371,21 +422,34 @@ pub(crate) fn expand_store(
                                 KType::Unit
                             }
                         };
+                        let had_key = attr.key.is_some();
                         let key = attr.key.and_then(|lit| {
                             let key_name = lit.value();
-                            let Some(item_ty) = (kind == SigKind::Signal)
-                                .then(|| vec_item(&value_ty))
-                                .flatten()
-                            else {
-                                errors.push(
+                            let item_ty = match kind {
+                                SigKind::Signal => vec_item(&value_ty),
+                                SigKind::Derived => derived_item.clone(),
+                                SigKind::Computed => None,
+                            };
+                            let Some(item_ty) = item_ty else {
+                                let what = format!(
+                                    "`#[undra(key = \"{key_name}\")]` on `{ident}` needs a `Signal<Vec<T>>` or a `DerivedList<T>`"
+                                );
+                                let diag = if kind == SigKind::Computed {
                                     Diag::new(
                                         code::E0008,
-                                        format!("`#[undra(key = \"{key_name}\")]` on `{ident}` needs a `Signal<Vec<T>>`"),
+                                        what,
+                                        "a computed list is sent whole: the core recomputes it and keeps no record of which rows changed",
+                                        "to send it as keyed patches, build it as a `DerivedList<T>` (`source.derive().filter(..).build()`) and key that; otherwise remove `key`",
+                                    )
+                                } else {
+                                    Diag::new(
+                                        code::E0008,
+                                        what,
                                         "only lists of records can be keyed: the key identifies an item across updates so changes ship as patches",
                                         "use a `Signal<Vec<T>>` field, or remove `key`",
                                     )
-                                    .at(lit.span()),
-                                );
+                                };
+                                errors.push(diag.at(lit.span()));
                                 return None;
                             };
                             // Whether `key_name` is a field of the item is checked in the user's
@@ -396,6 +460,22 @@ pub(crate) fn expand_store(
                                 item_ty,
                             })
                         });
+                        if kind == SigKind::Derived && !had_key {
+                            let row = derived_item
+                                .as_ref()
+                                .map_or_else(|| "T".to_owned(), ty_string);
+                            errors.push(
+                                Diag::new(
+                                    code::E0008,
+                                    format!(
+                                        "`{ident}` is a `DerivedList<{row}>` without `#[undra(key = \"..\")]`"
+                                    ),
+                                    "a derived list reaches the platforms as keyed patches; the key names the field that identifies a row",
+                                    format!("add `#[undra(key = \"id\")]` naming a field of `{row}`"),
+                                )
+                                .on(&field.ty),
+                            );
+                        }
                         signals.push(SignalField {
                             name: unraw(&ident),
                             ident,
@@ -431,14 +511,14 @@ pub(crate) fn expand_store(
 
     let derived_signals = signals
         .iter()
-        .filter(|s| s.kind == SigKind::Computed)
+        .filter(|s| s.kind.is_computed())
         .map(|s| s.name.clone())
         .collect::<Vec<_>>();
     if restore_hook.is_none() && !derived_signals.is_empty() {
         // On the first computed field: it is what makes the store unrestorable.
         let first = signals
             .iter()
-            .find(|s| s.kind == SigKind::Computed)
+            .find(|s| s.kind.is_computed())
             .map_or_else(|| name.clone(), |s| s.ident.clone());
         errors.push(
             Diag::new(
@@ -479,7 +559,8 @@ pub(crate) fn expand_store(
         let sname = &s.name;
         let id = s.id;
         let ty = s.kty.meta(&meta);
-        let computed = s.kind == SigKind::Computed;
+        // A derived list is a computed with a key (ADR-039): no new schema field.
+        let computed = s.kind.is_computed();
         let key = match &s.key {
             Some(keyed) => {
                 let key_name = &keyed.name;
@@ -512,6 +593,12 @@ pub(crate) fn expand_store(
             }
             (SigKind::Signal, None) => quote!(__cell.attach(&self.#ident, #id)?;),
             (SigKind::Computed, _) => quote!(__cell.attach_computed(&self.#ident, #id)?;),
+            (SigKind::Derived, Some(_)) => {
+                let fn_name = format_ident!("__undra_key_{}", s.ident);
+                quote!(__cell.attach_derived(&self.#ident, #id, #fn_name)?;)
+            }
+            // Refused above (E0008): the build has already failed.
+            (SigKind::Derived, None) => TokenStream::new(),
         };
         let coalesce = if s.no_coalesce {
             quote!(__cell.set_no_coalesce(#id)?;)
@@ -811,6 +898,13 @@ pub(crate) fn recover(args_root: Option<Root>, item: &mut syn::Item) -> TokenStr
     let runtime = root.runtime();
     let wire = root.wire();
     if let Fields::Named(named) = &mut item.fields {
+        // A `DerivedList` without its row type has been reported (E0001); give it one so that
+        // `rustc` does not report the missing generic argument as well.
+        for field in &mut named.named {
+            if is_bare_derived(&field.ty) {
+                field.ty = syn::parse_quote!(#signals::DerivedList<()>);
+            }
+        }
         let has_cell = named.named.iter().any(|field| {
             field
                 .ident
@@ -1096,8 +1190,126 @@ mod tests {
         ] {
             let message = expand_with_hook(src).unwrap_err();
             assert!(message.contains("error[undra::E0008]"), "{message}");
-            assert!(message.contains("needs a `Signal<Vec<T>>`"), "{message}");
+            assert!(
+                message.contains("needs a `Signal<Vec<T>>` or a `DerivedList<T>`"),
+                "{message}"
+            );
         }
+    }
+
+    #[test]
+    fn a_keyed_computed_list_is_told_to_become_a_derived_list() {
+        let message = expand_with_hook("struct S { #[undra(key = \"id\")] a: Computed<Vec<Row>> }")
+            .unwrap_err();
+        assert!(
+            message.contains("a computed list is sent whole"),
+            "{message}"
+        );
+        assert!(
+            message.contains(
+                "build it as a `DerivedList<T>` (`source.derive().filter(..).build()`) and key that"
+            ),
+            "{message}"
+        );
+        // A plain signal keeps the old advice.
+        let message =
+            expand_with_hook("struct S { #[undra(key = \"id\")] a: Signal<i32> }").unwrap_err();
+        assert!(
+            message.contains("use a `Signal<Vec<T>>` field"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_derived_list_is_a_keyed_computed_list() {
+        let out = expand_with_hook(
+            "struct S { #[undra(key = \"id\")] rows: Signal<Vec<Row>>, filter: Signal<u8>, #[undra(key = \"id\", no_coalesce)] visible: DerivedList<Row> }",
+        )
+        .unwrap();
+        // The schema: a `Vec<Row>`, computed, keyed. No new field.
+        assert!(
+            has(
+                &out,
+                "SignalMeta { name: \"visible\", signal_id: 2u32, ty: ::undra::meta::TypeRefMeta::Vec(&::undra::meta::TypeRefMeta::Named(\"Row\")), computed: true, key: ::core::option::Option::Some(\"id\"), no_coalesce: true }"
+            ),
+            "{out}"
+        );
+        // Attached with the key function of its rows.
+        assert!(
+            has(&out, "fn __undra_key_visible(__item: &Row) -> u64"),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "__cell.attach_derived(&self.visible, 2u32, __undra_key_visible)?;"
+            ),
+            "{out}"
+        );
+        assert!(has(&out, "__cell.set_no_coalesce(2u32)?;"), "{out}");
+        // Left out of the snapshot and of the restore hook's parameters, like a computed.
+        assert!(
+            has(
+                &out,
+                "Self::rebuild(__ctx, ::undra::signals::Signal::<Vec<Row>>::new(__value_rows), ::undra::signals::Signal::<u8>::new(__value_filter))"
+            ),
+            "{out}"
+        );
+        assert!(!has(&out, "__value_visible"), "{out}");
+    }
+
+    #[test]
+    fn a_derived_list_needs_a_key() {
+        let message =
+            expand_with_hook("struct S { rows: Signal<Vec<Todo>>, visible: DerivedList<Todo> }")
+                .unwrap_err();
+        assert!(
+            message.starts_with(
+                "error[undra::E0008]: `visible` is a `DerivedList<Todo>` without `#[undra(key = \"..\")]`"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains("a derived list reaches the platforms as keyed patches; the key names the field that identifies a row"),
+            "{message}"
+        );
+        assert!(
+            message.contains("add `#[undra(key = \"id\")]` naming a field of `Todo`"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_derived_list_needs_its_row_type() {
+        for src in [
+            "struct S { #[undra(key = \"id\")] visible: DerivedList }",
+            "struct S { visible: DerivedList<Row, u8> }",
+        ] {
+            let message = expand_with_hook(src).unwrap_err();
+            assert!(
+                message.starts_with("error[undra::E0001]: `DerivedList"),
+                "{message}"
+            );
+            assert!(message.contains("needs the type of its rows"), "{message}");
+            assert!(
+                message.contains("write `DerivedList<Row>` for `visible`"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_derived_list_needs_a_restore_hook() {
+        let message = expand(
+            "struct S { #[undra(key = \"id\")] rows: Signal<Vec<Row>>, #[undra(key = \"id\")] visible: DerivedList<Row> }",
+        )
+        .unwrap_err();
+        assert!(
+            message.starts_with(
+                "error[undra::E0013]: store `S` cannot be restored automatically: `visible` is computed"
+            ),
+            "{message}"
+        );
     }
 
     #[test]

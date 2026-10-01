@@ -1,0 +1,8 @@
+error: error[undra::E0001]: `DerivedList` needs the type of its rows
+         = note: a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument
+         = help: write `DerivedList<Row>` for `visible`, with the type the pipeline's `build()` produces
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_derived_list_row_type.rs:11:14
+   |
+11 |     visible: DerivedList,
+   |              ^^^^^^^^^^^
