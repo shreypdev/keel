@@ -1384,7 +1384,7 @@ void testsWithNativeDb(const Api *api) {
   const Record *reopened = method(notes, kNotesOpen, name.bytes);
   check(reopened->payload[4] == 0, "a database open at shutdown");
   f.host->shutdown();
-  check(Host::runningHost() == nullptr, "the slot is released");
+  check(Host::runningHost(api->name_space) == nullptr, "the slot is released");
   check(platform->started.load() >= 1 && platform->started.load() == platform->ended.load(),
       "every database thread ended (" + std::to_string(platform->started.load()) + " started)");
   ok("shutdown joins the database threads before the slot is released");

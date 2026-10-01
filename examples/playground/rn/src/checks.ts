@@ -397,7 +397,7 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       }
       const calls = (nativeCounters(core)?.nativePortCalls ?? 0) - before;
       expect(calls >= 10, `the core's Db calls were answered by the module (${calls})`);
-      return `notes kept across close and reopen in ${nativePlatformDefaults().db ?? '?'}; unique id refused; ${calls} native port calls`;
+      return `notes kept across close and reopen in ${nativePlatformDefaults(UndraPlaygroundCore.namespace).db ?? '?'}; unique id refused; ${calls} native port calls`;
     },
   ],
   [

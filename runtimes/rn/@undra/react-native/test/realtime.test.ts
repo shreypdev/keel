@@ -19,6 +19,7 @@ import {
 } from "@undra/runtime";
 import type { PlatformWebSocket } from "@undra/runtime/realtime";
 import {
+  type NativeCoreEntry,
   type ReactNativeWebSocketConstructor,
   loadNative,
   nativeDefaultPorts,
@@ -68,7 +69,7 @@ afterAll(async () => {
   await server.close();
 });
 
-const g = globalThis as { __undraNative?: unknown };
+const g = globalThis as { __undraNative?: Record<string, FakeNative> };
 
 afterEach(() => {
   delete g.__undraNative;
@@ -315,11 +316,16 @@ describe("reactNativeSse over a streaming fetch", () => {
 
 function installFake(native: FakeNative): void {
   setTurboModule("UndraNative", {
-    install() {
-      g.__undraNative = native;
+    install(namespace: string) {
+      g.__undraNative = { ...g.__undraNative, [namespace]: native };
       return true;
     },
   });
+}
+
+/** The core entry of a fake, as a generated `Undra<Namespace>` would be. */
+function entryOf(native: FakeNative): NativeCoreEntry {
+  return { namespace: native.namespace, schemaHash: native.hash };
 }
 
 describe("loadNative and the opt-in ports", () => {
@@ -338,7 +344,7 @@ describe("loadNative and the opt-in ports", () => {
       ],
     };
     installFake(native);
-    const core = await loadNative({ expectedSchemaHash: native.hash });
+    const core = await loadNative(entryOf(native));
     expect(native.started?.ports).toEqual([PortIds.WebSocket.portId, PortIds.Sse.portId]);
     const connect = new UndraWriter(32);
     connect.writeStr("http://not-a-websocket");
@@ -366,8 +372,7 @@ describe("loadNative and the opt-in ports", () => {
     native.schema = { ports: [{ port_id: PortIds.WebSocket.portId, kind: "async", methods: [{ method_id: PortIds.WebSocket.connect, is_async: true }] }] };
     installFake(native);
     const seen: number[] = [];
-    const core = await loadNative({
-      expectedSchemaHash: native.hash,
+    const core = await loadNative(entryOf(native), {
       ports: {
         [PortIds.WebSocket.portId]: {
           sync: false,
@@ -398,8 +403,8 @@ describe("loadNative and the opt-in ports", () => {
     native.defaults = { ports: [PortIds.Db.portId], db: "/data/user/0/app/databases/undra-<name>.sqlite" };
     native.schema = { ports: [{ port_id: PortIds.Db.portId, kind: "async", methods: [{ method_id: PortIds.Db.open, is_async: true }] }] };
     installFake(native);
-    expect(nativePlatformDefaults().db).toBe("/data/user/0/app/databases/undra-<name>.sqlite");
-    const core = await loadNative({ expectedSchemaHash: native.hash });
+    expect(nativePlatformDefaults(native.namespace).db).toBe("/data/user/0/app/databases/undra-<name>.sqlite");
+    const core = await loadNative(entryOf(native));
     expect(native.started?.nativePorts).toEqual([PortIds.Db.portId]);
     core.close();
   });
