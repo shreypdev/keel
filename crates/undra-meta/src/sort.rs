@@ -216,6 +216,67 @@ mod tests {
         assert_eq!(reversed, std);
     }
 
+    /// The keys the property tests draw from: few, so most inputs have runs of equal keys, and
+    /// ordered the way `str::cmp` orders them (byte-wise: `"B" < "a"`, `"ü"` last).
+    const WORDS: [&str; 6] = ["", "B", "a", "aa", "b", "ü"];
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(2048))]
+
+        /// `by_name` is `sort_by(|a, b| a.name.cmp(&b.name))`, the comparator `collect_schema`
+        /// and the canonical form used before: same order, equal names in input order, on both
+        /// sides of the in-place threshold (16) and well past it.
+        #[test]
+        fn by_name_is_sort_by_on_any_input(keys in proptest::collection::vec(0..WORDS.len(), 0..80)) {
+            let input: Vec<Item> = keys.iter().map(|&k| WORDS[k]).zip(0..).collect();
+            let mut ours = input.clone();
+            by_name(&mut ours, name);
+            let mut std = input;
+            std.sort_by(|a, b| a.0.cmp(b.0));
+            proptest::prop_assert_eq!(ours, std);
+        }
+
+        /// `by_index` is `sort_by_key(|v| v.index)`, the variants' comparator, on any `u16`
+        /// (a narrow range most of the time, so indexes repeat).
+        #[test]
+        fn by_index_is_sort_by_key_on_any_input(
+            keys in proptest::collection::vec(proptest::prop_oneof![0..4_u16, proptest::num::u16::ANY], 0..80),
+        ) {
+            let input: Vec<(u16, usize)> = keys.into_iter().zip(0..).collect();
+            let mut ours = input.clone();
+            by_index(&mut ours, |i| i.0);
+            let mut std = input;
+            std.sort_by_key(|i| i.0);
+            proptest::prop_assert_eq!(ours, std);
+        }
+    }
+
+    #[test]
+    fn the_threshold_between_the_two_paths() {
+        // 15 to 18 items: the last in-place lengths and the first merge-sorted ones, for inputs
+        // already in order (the merge path's one-pass exit), reversed, all equal (stability is
+        // all there is to check) and alternating.
+        for len in 15..=18 {
+            let shapes: [Vec<&str>; 4] = [
+                (0..len).map(|i| WORDS[i * WORDS.len() / len]).collect(),
+                (0..len)
+                    .rev()
+                    .map(|i| WORDS[i * WORDS.len() / len])
+                    .collect(),
+                vec!["a"; len],
+                (0..len).map(|i| WORDS[i % 2 + 1]).collect(),
+            ];
+            for shape in shapes {
+                let input: Vec<Item> = shape.into_iter().zip(0..).collect();
+                let mut ours = input.clone();
+                by_name(&mut ours, name);
+                let mut std = input.clone();
+                std.sort_by(|a, b| a.0.cmp(b.0));
+                assert_eq!(ours, std, "length {len}: {input:?}");
+            }
+        }
+    }
+
     #[test]
     fn permute_applies_the_order() {
         let mut items = ['a', 'b', 'c', 'd', 'e'];
