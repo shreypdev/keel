@@ -190,23 +190,31 @@ fn http_retry_script_is_consumed_in_order_through_the_accessor() {
 fn kv_through_the_proxy_stores_in_the_fake() {
     let (t, fakes) = rig();
     let kv = KvProxy::new(t.ctx());
-    assert_eq!(t.run_until(kv.get("missing".into())), None);
-    t.run_until(kv.set("todos/2".into(), Bytes(vec![2])));
-    t.run_until(kv.set("todos/1".into(), Bytes(vec![1])));
-    t.run_until(kv.set("other".into(), Bytes(vec![])));
-    assert_eq!(t.run_until(kv.get("todos/1".into())), Some(Bytes(vec![1])));
+    assert_eq!(t.run_until(kv.get("missing".into())), Ok(None));
+    t.run_until(kv.set("todos/2".into(), Bytes(vec![2])))
+        .unwrap();
+    t.run_until(kv.set("todos/1".into(), Bytes(vec![1])))
+        .unwrap();
+    t.run_until(kv.set("other".into(), Bytes(vec![]))).unwrap();
+    assert_eq!(
+        t.run_until(kv.get("todos/1".into())),
+        Ok(Some(Bytes(vec![1])))
+    );
     assert_eq!(
         t.run_until(kv.get("other".into())),
-        Some(Bytes(vec![])),
+        Ok(Some(Bytes(vec![]))),
         "an empty value is not a missing key"
     );
     assert_eq!(
-        t.run_until(kv.list("todos/".into())),
+        t.run_until(kv.list("todos/".into())).unwrap(),
         ["todos/1", "todos/2"]
     );
-    t.run_until(kv.delete("todos/1".into()));
-    t.run_until(kv.delete("never-there".into()));
-    assert_eq!(t.run_until(kv.list("".into())), ["other", "todos/2"]);
+    t.run_until(kv.delete("todos/1".into())).unwrap();
+    t.run_until(kv.delete("never-there".into())).unwrap();
+    assert_eq!(
+        t.run_until(kv.list("".into())).unwrap(),
+        ["other", "todos/2"]
+    );
     assert_eq!(fakes.kv.keys(), ["other", "todos/2"]);
     assert_eq!(fakes.kv.value("todos/2"), Some(vec![2]));
     assert!(
@@ -216,20 +224,38 @@ fn kv_through_the_proxy_stores_in_the_fake() {
 }
 
 #[test]
+fn an_injected_kv_failure_reaches_the_caller_through_the_proxy() {
+    let (t, fakes) = rig();
+    let kv = KvProxy::new(t.ctx());
+    fakes.kv.fail(
+        undra_ports::fakes::FailOn::Set,
+        undra_ports::StorageError::Full,
+    );
+    assert_eq!(
+        t.run_until(kv.set("k".into(), Bytes(vec![1]))),
+        Err(undra_ports::StorageError::Full)
+    );
+    fakes.kv.heal();
+    assert_eq!(t.run_until(kv.set("k".into(), Bytes(vec![1]))), Ok(()));
+}
+
+#[test]
 fn secure_store_through_the_proxy_stores_in_its_own_fake() {
     let (t, fakes) = rig();
     let secrets = SecureStoreProxy::new(t.ctx());
-    t.run_until(secrets.set("token".into(), Bytes(b"s3cr3t".to_vec())));
+    t.run_until(secrets.set("token".into(), Bytes(b"s3cr3t".to_vec())))
+        .unwrap();
     assert_eq!(
         t.run_until(secrets.get("token".into())),
-        Some(Bytes(b"s3cr3t".to_vec()))
+        Ok(Some(Bytes(b"s3cr3t".to_vec())))
     );
-    assert_eq!(t.run_until(secrets.list("t".into())), ["token"]);
+    assert_eq!(t.run_until(secrets.list("t".into())).unwrap(), ["token"]);
     assert!(fakes.kv.is_empty());
-    t.run_until(secrets.delete("token".into()));
-    assert_eq!(t.run_until(secrets.get("token".into())), None);
+    t.run_until(secrets.delete("token".into())).unwrap();
+    assert_eq!(t.run_until(secrets.get("token".into())), Ok(None));
     // Through the accessor, straight to the fake.
-    t.run_until(undra_ports::secure_store(&t.ctx()).set("k".into(), Bytes(vec![1])));
+    t.run_until(undra_ports::secure_store(&t.ctx()).set("k".into(), Bytes(vec![1])))
+        .unwrap();
     assert_eq!(fakes.secure_store.value("k"), Some(vec![1]));
 }
 
@@ -612,8 +638,8 @@ fn fakes_tolerate_concurrent_use() {
             std::thread::spawn(move || {
                 for i in 0..50 {
                     let key = format!("k/{worker}/{i}");
-                    common::ready(Kv::set(&*fakes.kv, key.clone(), Bytes(vec![1])));
-                    assert!(common::ready(Kv::get(&*fakes.kv, key)).is_some());
+                    common::ready(Kv::set(&*fakes.kv, key.clone(), Bytes(vec![1]))).unwrap();
+                    assert!(common::ready(Kv::get(&*fakes.kv, key)).unwrap().is_some());
                     common::ready(Http::request(&*fakes.http, HttpRequest::get("u"))).unwrap();
                     Log::log(&*fakes.log, 2, "t".into(), format!("{worker}/{i}"));
                     let _ = Rng::fill(&*fakes.rng, 4);
@@ -646,7 +672,7 @@ fn h2_request_reply_ports_report_an_unbound_port_as_their_typed_error() {
         ))
     );
     let fs = FsProxy::new(t.ctx());
-    let expected = FsError::Io(
+    let expected = FsError::Unavailable(
         "the Fs port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into(),
     );
     assert_eq!(t.run_until(fs.read("a".into())), Err(expected.clone()));
@@ -660,15 +686,15 @@ fn h2_request_reply_ports_report_an_unbound_port_as_their_typed_error() {
 
 #[test]
 fn h2_a_port_without_an_error_channel_still_panics_and_says_how_to_bind_it() {
+    // Since ADR-049 the storage ports have an error channel; the sync ports have none (randomness
+    // and time must not fail), so an unbound `Rng` is the case that still panics.
     let t = TestRuntime::new();
-    let kv = KvProxy::new(t.ctx());
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        t.run_until(kv.get("k".into()))
-    }))
-    .expect_err("an unbound Kv cannot answer");
+    let rng = RngProxy::new(t.ctx());
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rng.fill(4)))
+        .expect_err("an unbound Rng cannot answer");
     let message = panic.downcast_ref::<String>().cloned().unwrap_or_default();
     assert!(
-        message.contains("the `Kv` port has no adapter registered (method `get`)"),
+        message.contains("the `Rng` port has no adapter registered (method `fill`)"),
         "{message}"
     );
     assert!(message.contains("registerPort"), "{message}");

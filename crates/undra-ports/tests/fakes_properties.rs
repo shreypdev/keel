@@ -45,20 +45,20 @@ proptest! {
         for op in ops {
             match op {
                 KvOp::Set(k, v) => {
-                    ready(kv.set(k.clone(), Bytes(v.clone())));
+                    ready(kv.set(k.clone(), Bytes(v.clone()))).unwrap();
                     model.insert(k, v);
                 }
                 KvOp::Delete(k) => {
-                    ready(kv.delete(k.clone()));
+                    ready(kv.delete(k.clone())).unwrap();
                     model.remove(&k);
                 }
                 KvOp::Get(k) => {
-                    prop_assert_eq!(ready(kv.get(k.clone())).map(|b| b.0), model.get(&k).cloned());
+                    prop_assert_eq!(ready(kv.get(k.clone())).unwrap().map(|b| b.0), model.get(&k).cloned());
                 }
                 KvOp::List(prefix) => {
                     let expected: Vec<String> =
                         model.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
-                    prop_assert_eq!(ready(kv.list(prefix)), expected);
+                    prop_assert_eq!(ready(kv.list(prefix)).unwrap(), expected);
                 }
             }
             prop_assert_eq!(kv.entries(), model.clone());

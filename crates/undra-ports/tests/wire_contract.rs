@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex};
 use undra_ports::{
     AppState, Clock, ClockProxy, Fs, FsError, FsProxy, Http, HttpError, HttpMethod, HttpProxy,
     HttpRequest, HttpResponse, Kv, KvProxy, Log, LogProxy, NetKind, Rng, RngProxy, SecureStore,
-    SecureStoreProxy, Timer, TimerProxy, on_connectivity_changed, on_lifecycle_changed,
+    SecureStoreProxy, StorageError, Timer, TimerProxy, on_connectivity_changed,
+    on_lifecycle_changed,
 };
 use undra_runtime::testing::{PortCallRecord, TestRuntime, port_reply};
 use undra_runtime::{Ctx, PortCallOutcome};
@@ -200,7 +201,7 @@ fn http_can_be_answered_later_through_port_reply() {
 fn key_value_contract(name: &str, port: u32, get: u32, set: u32, delete: u32, list: u32, kv: bool) {
     let t = platform();
     let c = ctx(&t);
-    let proxy_get = |key: &str| -> Option<Bytes> {
+    let proxy_get = |key: &str| -> Result<Option<Bytes>, StorageError> {
         if kv {
             t.run_until(KvProxy::new(c.clone()).get(key.into()))
         } else {
@@ -209,30 +210,37 @@ fn key_value_contract(name: &str, port: u32, get: u32, set: u32, delete: u32, li
     };
     // get: `Option<Bytes>` is a 0/1 tag then the bytes.
     ok(&t, port, get, "01 02000000 0102");
-    assert_eq!(proxy_get("k"), Some(Bytes(vec![1, 2])), "{name}.get some");
+    assert_eq!(
+        proxy_get("k"),
+        Ok(Some(Bytes(vec![1, 2]))),
+        "{name}.get some"
+    );
     ok(&t, port, get, "00");
-    assert_eq!(proxy_get("k"), None, "{name}.get none");
+    assert_eq!(proxy_get("k"), Ok(None), "{name}.get none");
     // set: key then value; the reply carries nothing.
     ok(&t, port, set, "");
-    if kv {
-        t.run_until(KvProxy::new(c.clone()).set("k".into(), Bytes(vec![1, 2])));
+    let set_result = if kv {
+        t.run_until(KvProxy::new(c.clone()).set("k".into(), Bytes(vec![1, 2])))
     } else {
-        t.run_until(SecureStoreProxy::new(c.clone()).set("k".into(), Bytes(vec![1, 2])));
-    }
+        t.run_until(SecureStoreProxy::new(c.clone()).set("k".into(), Bytes(vec![1, 2])))
+    };
+    assert_eq!(set_result, Ok(()), "{name}.set");
     // delete: key.
     ok(&t, port, delete, "");
-    if kv {
-        t.run_until(KvProxy::new(c.clone()).delete("k".into()));
+    let delete_result = if kv {
+        t.run_until(KvProxy::new(c.clone()).delete("k".into()))
     } else {
-        t.run_until(SecureStoreProxy::new(c.clone()).delete("k".into()));
-    }
+        t.run_until(SecureStoreProxy::new(c.clone()).delete("k".into()))
+    };
+    assert_eq!(delete_result, Ok(()), "{name}.delete");
     // list: prefix, then `Vec<String>`.
     ok(&t, port, list, "02000000 01000000 61 01000000 62");
     let keys = if kv {
         t.run_until(KvProxy::new(c.clone()).list("p".into()))
     } else {
         t.run_until(SecureStoreProxy::new(c.clone()).list("p".into()))
-    };
+    }
+    .unwrap();
     assert_eq!(keys, ["a", "b"], "{name}.list");
     assert_eq!(
         calls(&t),
@@ -312,6 +320,8 @@ fn fs_reply_status_error_is_the_typed_fs_error() {
         ("0000", FsError::NotFound),
         ("0100", FsError::Denied),
         ("0200 01000000 65", FsError::Io("e".into())),
+        ("0300", FsError::Full),
+        ("0400 01000000 65", FsError::Unavailable("e".into())),
     ] {
         t.host().script_port(
             0x4ea3_4cab,
@@ -320,6 +330,46 @@ fn fs_reply_status_error_is_the_typed_fs_error() {
         );
         assert_eq!(t.run_until(fs.read("f".into())), Err(expected));
     }
+}
+
+/// ADR-049: every storage method answers status 1 with a `StorageError`, and an unavailable port
+/// is `StorageError::Unavailable`, not a panic.
+#[test]
+fn storage_reply_status_error_is_the_typed_storage_error() {
+    let t = platform();
+    let (port, get, set, delete, list) = (
+        0x5389_110d,
+        0xf050_bb1a,
+        0x6242_7856,
+        0x60a3_86b9,
+        0x32f1_d03a,
+    );
+    let kv = KvProxy::new(ctx(&t));
+    for (body, expected) in [
+        ("0000 01000000 65", StorageError::Unavailable("e".into())),
+        ("0100", StorageError::Full),
+        ("0200", StorageError::Locked),
+        ("0300 01000000 65", StorageError::Corrupt("e".into())),
+        ("0400 01000000 65", StorageError::Io("e".into())),
+    ] {
+        for method in [get, set, delete, list] {
+            t.host()
+                .script_port(port, method, answer(PortStatus::Error, hex(body)));
+        }
+        assert_eq!(t.run_until(kv.get("k".into())), Err(expected.clone()));
+        assert_eq!(
+            t.run_until(kv.set("k".into(), Bytes(vec![1]))),
+            Err(expected.clone())
+        );
+        assert_eq!(t.run_until(kv.delete("k".into())), Err(expected.clone()));
+        assert_eq!(t.run_until(kv.list("k".into())), Err(expected));
+    }
+    // Nobody registered `SecureStore`: unavailable is a typed error, not a panic (E0062).
+    let secrets = SecureStoreProxy::new(ctx(&t));
+    assert!(matches!(
+        t.run_until(secrets.get("k".into())),
+        Err(StorageError::Unavailable(message)) if message.contains("E0062")
+    ));
 }
 
 // ---- event ports -------------------------------------------------------------------------------

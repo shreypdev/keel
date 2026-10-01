@@ -276,6 +276,30 @@
           "tuple": true,
           "message": "I/O error: {0}",
           "docs": "Any other I/O failure; the text is the platform's."
+        },
+        {
+          "name": "Full",
+          "index": 3,
+          "fields": [],
+          "tuple": false,
+          "message": "the disk is full",
+          "docs": "The disk or the storage quota is exhausted (ADR-049)."
+        },
+        {
+          "name": "Unavailable",
+          "index": 4,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "the file system is unavailable: {0}",
+          "docs": "No file system in this context, or no adapter registered; the text says which (ADR-049)."
         }
       ],
       "docs": "Why a file operation failed."
@@ -447,6 +471,78 @@
         }
       ],
       "docs": "What kind of network the device is on."
+    },
+    {
+      "name": "StorageError",
+      "type_id": 1027649552,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Unavailable",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "storage is unavailable: {0}",
+          "docs": "No adapter is registered, or the platform has no backend in this context; the text says\nwhich."
+        },
+        {
+          "name": "Full",
+          "index": 1,
+          "fields": [],
+          "tuple": false,
+          "message": "the storage is full",
+          "docs": "The quota or the disk is exhausted."
+        },
+        {
+          "name": "Locked",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": "the storage is locked",
+          "docs": "Protected data cannot be read now (before the device's first unlock, or a key that needs\nthe user to authenticate)."
+        },
+        {
+          "name": "Corrupt",
+          "index": 3,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "stored data is corrupt: {0}",
+          "docs": "The stored bytes (or ciphertext) cannot be read back; the key is still there."
+        },
+        {
+          "name": "Io",
+          "index": 4,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": "storage I/O error: {0}",
+          "docs": "Any other failure; the text is the platform's."
+        }
+      ],
+      "docs": "Why a `Kv` or `SecureStore` operation failed (ADR-049).\n\nStorage is not infallible: a quota runs out, a Keychain is locked before the first unlock, a\nstored file is damaged. Every method of the two storage ports reports those as one of these\nvariants instead of panicking (a panic traps a wasm core), and every platform adapter maps its\nfailures onto them:\n\n| Variant | Meaning |\n|---|---|\n| `Unavailable` | no adapter, or no backend in this context (no IndexedDB, no secure context, no Keystore) |\n| `Full` | the quota or the disk is exhausted |\n| `Locked` | protected data cannot be read now (a Keychain before first unlock, a key that needs user authentication) |\n| `Corrupt` | stored bytes or ciphertext that cannot be read back; the key is still there |\n| `Io` | anything else, with the platform's message |\n\n```\nuse undra_ports::StorageError;\nuse undra_runtime::PortError;\n\nassert!(matches!(StorageError::from(PortError::Unavailable), StorageError::Unavailable(_)));\nassert_eq!(StorageError::Full.to_string(), \"the storage is full\");\n```"
     },
     {
       "name": "SyncError",
@@ -918,7 +1014,7 @@
           "docs": "The names of the entries directly inside `dir`, in ascending order."
         }
       ],
-      "docs": "A sandboxed file system. Paths are `/`-separated and relative to the platform's root.\n\nA platform without a file system answers \"unavailable\"; every method reports that as an\n`FsError::Io` through `impl From<PortError> for FsError` instead of panicking."
+      "docs": "A sandboxed file system. Paths are `/`-separated and relative to the platform's root.\n\nA platform without a file system answers \"unavailable\"; every method reports that as an\n`FsError::Unavailable` through `impl From<PortError> for FsError` instead of panicking."
     },
     {
       "name": "Http",
@@ -974,10 +1070,19 @@
             }
           ],
           "returns": {
-            "kind": "option",
-            "of": {
-              "kind": "bytes"
-            }
+            "kind": "result",
+            "of": [
+              {
+                "kind": "option",
+                "of": {
+                  "kind": "bytes"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
@@ -1001,7 +1106,16 @@
             }
           ],
           "returns": {
-            "kind": "unit"
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
@@ -1019,7 +1133,16 @@
             }
           ],
           "returns": {
-            "kind": "unit"
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
@@ -1037,17 +1160,26 @@
             }
           ],
           "returns": {
-            "kind": "vec",
-            "of": {
-              "kind": "string"
-            }
+            "kind": "result",
+            "of": [
+              {
+                "kind": "vec",
+                "of": {
+                  "kind": "string"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
           "docs": "The keys that start with `prefix`, in ascending order."
         }
       ],
-      "docs": "A persistent key-value store of byte strings.\n\nThe methods have no error channel: calling one while no adapter is registered panics with a\nmessage that names the port and says how to register one (E0062), which traps a wasm core.\nRegister `Kv` (or bind a fake) before the core uses it."
+      "docs": "A persistent key-value store of byte strings.\n\nEvery method can fail with a [`StorageError`] (ADR-049): a quota that runs out, storage that is\nlocked before the device's first unlock, bytes that cannot be read back, or no adapter at all\n(`Unavailable`, through `impl From<PortError> for StorageError`, instead of a panic that would\ntrap a wasm core)."
     },
     {
       "name": "Lifecycle",
@@ -1157,10 +1289,19 @@
             }
           ],
           "returns": {
-            "kind": "option",
-            "of": {
-              "kind": "bytes"
-            }
+            "kind": "result",
+            "of": [
+              {
+                "kind": "option",
+                "of": {
+                  "kind": "bytes"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
@@ -1184,7 +1325,16 @@
             }
           ],
           "returns": {
-            "kind": "unit"
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
@@ -1202,7 +1352,16 @@
             }
           ],
           "returns": {
-            "kind": "unit"
+            "kind": "result",
+            "of": [
+              {
+                "kind": "unit"
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
@@ -1220,17 +1379,26 @@
             }
           ],
           "returns": {
-            "kind": "vec",
-            "of": {
-              "kind": "string"
-            }
+            "kind": "result",
+            "of": [
+              {
+                "kind": "vec",
+                "of": {
+                  "kind": "string"
+                }
+              },
+              {
+                "kind": "named",
+                "of": "StorageError"
+              }
+            ]
           },
           "is_async": true,
           "takes_ctx": false,
           "docs": "The keys that start with `prefix`, in ascending order."
         }
       ],
-      "docs": "A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same\nbehaviour when no adapter is registered (a panic naming the port, E0062)."
+      "docs": "A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same\n[`StorageError`] channel (ADR-049)."
     },
     {
       "name": "Timer",

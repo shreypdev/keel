@@ -26,7 +26,9 @@
 
 use undra_wire::Bytes;
 
-use crate::records::{AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind};
+use crate::records::{
+    AppState, FsError, HttpError, HttpRequest, HttpResponse, NetKind, StorageError,
+};
 
 /// Wall-clock and monotonic time. The core asks this port instead of reading the system clock.
 #[undra_macros::port(sync)]
@@ -69,41 +71,42 @@ pub trait Http {
 
 /// A persistent key-value store of byte strings.
 ///
-/// The methods have no error channel: calling one while no adapter is registered panics with a
-/// message that names the port and says how to register one (E0062), which traps a wasm core.
-/// Register `Kv` (or bind a fake) before the core uses it.
+/// Every method can fail with a [`StorageError`] (ADR-049): a quota that runs out, storage that is
+/// locked before the device's first unlock, bytes that cannot be read back, or no adapter at all
+/// (`Unavailable`, through `impl From<PortError> for StorageError`, instead of a panic that would
+/// trap a wasm core).
 #[undra_macros::port]
 #[undra(crate = "crate::root")]
 pub trait Kv {
     /// The value stored under `key`, if any.
-    async fn get(&self, key: String) -> Option<Bytes>;
+    async fn get(&self, key: String) -> Result<Option<Bytes>, StorageError>;
     /// Stores `value` under `key`, replacing any previous value.
-    async fn set(&self, key: String, value: Bytes);
+    async fn set(&self, key: String, value: Bytes) -> Result<(), StorageError>;
     /// Removes `key`; a missing key is not an error.
-    async fn delete(&self, key: String);
+    async fn delete(&self, key: String) -> Result<(), StorageError>;
     /// The keys that start with `prefix`, in ascending order.
-    async fn list(&self, prefix: String) -> Vec<String>;
+    async fn list(&self, prefix: String) -> Result<Vec<String>, StorageError>;
 }
 
 /// A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same
-/// behaviour when no adapter is registered (a panic naming the port, E0062).
+/// [`StorageError`] channel (ADR-049).
 #[undra_macros::port]
 #[undra(crate = "crate::root")]
 pub trait SecureStore {
     /// The value stored under `key`, if any.
-    async fn get(&self, key: String) -> Option<Bytes>;
+    async fn get(&self, key: String) -> Result<Option<Bytes>, StorageError>;
     /// Stores `value` under `key`, replacing any previous value.
-    async fn set(&self, key: String, value: Bytes);
+    async fn set(&self, key: String, value: Bytes) -> Result<(), StorageError>;
     /// Removes `key`; a missing key is not an error.
-    async fn delete(&self, key: String);
+    async fn delete(&self, key: String) -> Result<(), StorageError>;
     /// The keys that start with `prefix`, in ascending order.
-    async fn list(&self, prefix: String) -> Vec<String>;
+    async fn list(&self, prefix: String) -> Result<Vec<String>, StorageError>;
 }
 
 /// A sandboxed file system. Paths are `/`-separated and relative to the platform's root.
 ///
 /// A platform without a file system answers "unavailable"; every method reports that as an
-/// `FsError::Io` through `impl From<PortError> for FsError` instead of panicking.
+/// `FsError::Unavailable` through `impl From<PortError> for FsError` instead of panicking.
 #[undra_macros::port]
 #[undra(crate = "crate::root")]
 pub trait Fs {

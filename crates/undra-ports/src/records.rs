@@ -11,7 +11,8 @@
 //! | [`HttpRequest`] | `method, url String, headers Vec<Header>, body Option<Bytes>, timeout_ms Option<u32>` |
 //! | [`HttpResponse`] | `status u16, headers Vec<Header>, body Bytes` |
 //! | [`HttpError`] | `u16` index: `Network(String)` 0, `Timeout` 1, `Cancelled` 2, `InvalidUrl(String)` 3 |
-//! | [`FsError`] | `u16` index: `NotFound` 0, `Denied` 1, `Io(String)` 2 |
+//! | [`FsError`] | `u16` index: `NotFound` 0, `Denied` 1, `Io(String)` 2, `Full` 3, `Unavailable(String)` 4 |
+//! | [`StorageError`] | `u16` index: `Unavailable(String)` 0, `Full` 1, `Locked` 2, `Corrupt(String)` 3, `Io(String)` 4 |
 //! | [`NetKind`] | `u16` index: `Wifi` 0, `Cellular` 1, `Wired` 2, `Unknown` 3, `None` 4 |
 //! | [`AppState`] | `u16` index: `Active` 0, `Inactive` 1, `Background` 2 |
 
@@ -256,6 +257,70 @@ pub enum FsError {
     /// Any other I/O failure; the text is the platform's.
     #[error("I/O error: {0}")]
     Io(String),
+    /// The disk or the storage quota is exhausted (ADR-049).
+    #[error("the disk is full")]
+    Full,
+    /// No file system in this context, or no adapter registered; the text says which (ADR-049).
+    #[error("the file system is unavailable: {0}")]
+    Unavailable(String),
+}
+
+/// Why a `Kv` or `SecureStore` operation failed (ADR-049).
+///
+/// Storage is not infallible: a quota runs out, a Keychain is locked before the first unlock, a
+/// stored file is damaged. Every method of the two storage ports reports those as one of these
+/// variants instead of panicking (a panic traps a wasm core), and every platform adapter maps its
+/// failures onto them:
+///
+/// | Variant | Meaning |
+/// |---|---|
+/// | `Unavailable` | no adapter, or no backend in this context (no IndexedDB, no secure context, no Keystore) |
+/// | `Full` | the quota or the disk is exhausted |
+/// | `Locked` | protected data cannot be read now (a Keychain before first unlock, a key that needs user authentication) |
+/// | `Corrupt` | stored bytes or ciphertext that cannot be read back; the key is still there |
+/// | `Io` | anything else, with the platform's message |
+///
+/// ```
+/// use undra_ports::StorageError;
+/// use undra_runtime::PortError;
+///
+/// assert!(matches!(StorageError::from(PortError::Unavailable), StorageError::Unavailable(_)));
+/// assert_eq!(StorageError::Full.to_string(), "the storage is full");
+/// ```
+#[undra_macros::error]
+#[undra(crate = "crate::root")]
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum StorageError {
+    /// No adapter is registered, or the platform has no backend in this context; the text says
+    /// which.
+    #[error("storage is unavailable: {0}")]
+    Unavailable(String),
+    /// The quota or the disk is exhausted.
+    #[error("the storage is full")]
+    Full,
+    /// Protected data cannot be read now (before the device's first unlock, or a key that needs
+    /// the user to authenticate).
+    #[error("the storage is locked")]
+    Locked,
+    /// The stored bytes (or ciphertext) cannot be read back; the key is still there.
+    #[error("stored data is corrupt: {0}")]
+    Corrupt(String),
+    /// Any other failure; the text is the platform's.
+    #[error("storage I/O error: {0}")]
+    Io(String),
+}
+
+impl StorageError {
+    /// Whether retrying later can succeed without anything changing in the stored data:
+    /// `Unavailable`, `Locked` and `Io` are about the moment, `Full` and `Corrupt` about the
+    /// store. `undra-query` uses it to decide between waiting for a queue and moving it aside.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            StorageError::Unavailable(_) | StorageError::Locked | StorageError::Io(_)
+        )
+    }
 }
 
 /// The text of an unavailable port as a typed error: names the port and carries the code and the
@@ -302,7 +367,7 @@ impl From<PortError> for HttpError {
 ///
 /// | `PortError` | `FsError` |
 /// |---|---|
-/// | `Unavailable` | `Io("the Fs port has no adapter registered (E0062: ..)")` |
+/// | `Unavailable` | `Unavailable("the Fs port has no adapter registered (E0062: ..)")` |
 /// | `Cancelled` | `Io("the Fs call was cancelled")` |
 /// | `Decode(e)` | `Io("malformed port reply: <e>")` |
 /// | `Failed(bytes)` | the decoded `FsError`, else `Io("the Fs port reported an error that does not decode")` |
@@ -317,10 +382,41 @@ impl From<PortError> for FsError {
             };
         }
         match error {
-            PortError::Unavailable => FsError::Io(no_adapter("Fs")),
+            PortError::Unavailable => FsError::Unavailable(no_adapter("Fs")),
             PortError::Cancelled => FsError::Io("the Fs call was cancelled".to_owned()),
             PortError::Decode(why) => FsError::Io(format!("malformed port reply: {why}")),
             other => FsError::Io(format!("the Fs port call failed: {other}")),
+        }
+    }
+}
+
+/// A storage port that cannot answer is an ordinary outcome (ADR-049), not a bug. Every method of
+/// `KvProxy` and `SecureStoreProxy` returns it as a [`StorageError`] instead of panicking:
+///
+/// | `PortError` | `StorageError` |
+/// |---|---|
+/// | `Unavailable` | `Unavailable("the Kv port has no adapter registered (E0062: ..)")` |
+/// | `Cancelled` | `Io("cancelled")` |
+/// | `Decode(e)` | `Corrupt("malformed port reply: <e>")` |
+/// | `Failed(bytes)` | the decoded `StorageError`, else `Io("the storage port reported an error that does not decode")` |
+///
+/// The proxy does not know which of the two storage ports it serves, so the text of `Unavailable`
+/// names `Kv`; a `SecureStore` adapter that is missing reads the same.
+impl From<PortError> for StorageError {
+    fn from(error: PortError) -> Self {
+        if let PortError::Failed(bytes) = &error {
+            return match StorageError::decode_exact(bytes) {
+                Ok(typed) => typed,
+                Err(_) => StorageError::Io(
+                    "the storage port reported an error that does not decode".to_owned(),
+                ),
+            };
+        }
+        match error {
+            PortError::Unavailable => StorageError::Unavailable(no_adapter("Kv")),
+            PortError::Cancelled => StorageError::Io("cancelled".to_owned()),
+            PortError::Decode(why) => StorageError::Corrupt(format!("malformed port reply: {why}")),
+            other => StorageError::Io(format!("the storage port call failed: {other}")),
         }
     }
 }
@@ -427,6 +523,25 @@ mod tests {
         assert_eq!(FsError::NotFound.to_string(), "not found");
         assert_eq!(FsError::Denied.to_string(), "access denied");
         assert_eq!(FsError::Io("disk".into()).to_string(), "I/O error: disk");
+        assert_eq!(FsError::Full.to_string(), "the disk is full");
+        assert_eq!(
+            FsError::Unavailable("no OPFS".into()).to_string(),
+            "the file system is unavailable: no OPFS"
+        );
+        assert_eq!(
+            StorageError::Unavailable("needs IndexedDB".into()).to_string(),
+            "storage is unavailable: needs IndexedDB"
+        );
+        assert_eq!(StorageError::Full.to_string(), "the storage is full");
+        assert_eq!(StorageError::Locked.to_string(), "the storage is locked");
+        assert_eq!(
+            StorageError::Corrupt("bad tag".into()).to_string(),
+            "stored data is corrupt: bad tag"
+        );
+        assert_eq!(
+            StorageError::Io("EIO".into()).to_string(),
+            "storage I/O error: EIO"
+        );
         let boxed: Box<dyn std::error::Error> = Box::new(HttpError::Timeout);
         assert_eq!(boxed.to_string(), "the request timed out");
     }
@@ -463,7 +578,7 @@ mod tests {
 
         assert_eq!(
             FsError::from(PortError::Unavailable),
-            FsError::Io(
+            FsError::Unavailable(
                 "the Fs port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into()
             )
         );
@@ -483,6 +598,38 @@ mod tests {
             FsError::from(PortError::Failed(vec![9])),
             FsError::Io("the Fs port reported an error that does not decode".into())
         );
+
+        assert_eq!(
+            StorageError::from(PortError::Unavailable),
+            StorageError::Unavailable(
+                "the Kv port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into()
+            )
+        );
+        assert_eq!(
+            StorageError::from(PortError::Cancelled),
+            StorageError::Io("cancelled".into())
+        );
+        assert_eq!(
+            StorageError::from(PortError::Decode(bad)),
+            StorageError::Corrupt(format!("malformed port reply: {bad}"))
+        );
+        assert_eq!(
+            StorageError::from(PortError::Failed(StorageError::Locked.encode_to_vec())),
+            StorageError::Locked
+        );
+        assert_eq!(
+            StorageError::from(PortError::Failed(vec![0xff])),
+            StorageError::Io("the storage port reported an error that does not decode".into())
+        );
+    }
+
+    #[test]
+    fn transient_storage_errors() {
+        assert!(StorageError::Unavailable(String::new()).is_transient());
+        assert!(StorageError::Locked.is_transient());
+        assert!(StorageError::Io(String::new()).is_transient());
+        assert!(!StorageError::Full.is_transient());
+        assert!(!StorageError::Corrupt(String::new()).is_transient());
     }
 
     #[test]
@@ -507,6 +654,7 @@ mod tests {
         assert!(NetKind::decode_exact(&[5, 0]).is_err());
         assert!(AppState::decode_exact(&[3, 0]).is_err());
         assert!(HttpError::decode_exact(&[4, 0]).is_err());
-        assert!(FsError::decode_exact(&[3, 0]).is_err());
+        assert!(FsError::decode_exact(&[5, 0]).is_err());
+        assert!(StorageError::decode_exact(&[5, 0]).is_err());
     }
 }

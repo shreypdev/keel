@@ -3,7 +3,8 @@
 //! | Fake | Port(s) | Behaviour |
 //! |---|---|---|
 //! | [`FakeHttp`] | [`Http`] | scripted replies chosen by [`Matcher`], every request recorded |
-//! | [`MemKv`] | [`Kv`] | in-memory ordered map, operations recorded |
+//! | [`MemKv`] | [`Kv`] | in-memory ordered map, operations recorded, failures injectable ([`MemStore::fail`]) |
+//! | [`FailingKv`] | [`Kv`] | every operation fails with one [`StorageError`](crate::StorageError) |
 //! | [`MemSecureStore`] | [`SecureStore`] | same, under its own port id |
 //! | [`MemFs`] | [`Fs`] | in-memory tree with the platform adapters' error semantics |
 //! | [`FakeClock`] | [`Clock`] + [`Timer`] | settable time; `advance` fires due timers |
@@ -47,7 +48,7 @@ pub use fs::MemFs;
 pub use http::{FakeHttp, Matcher};
 pub use log::{CaptureLog, LogEntry};
 pub use rng::SeededRng;
-pub use store::{MemKv, MemSecureStore, MemStore, StoreOp};
+pub use store::{FailOn, FailingKv, MemKv, MemSecureStore, MemStore, StoreOp};
 
 use crate::{Clock, Connectivity, Fs, Http, Kv, Lifecycle, Log, Rng, SecureStore, Timer};
 
