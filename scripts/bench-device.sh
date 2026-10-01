@@ -145,7 +145,7 @@ bench_ios() {
   info="$(node -e '
     const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).devices;
     for (const [runtime, list] of Object.entries(d)) for (const x of list) if (x.udid === process.argv[2]) {
-      // The device type's name, not the simulator's own: a simulator cloned for this run is still an "iPhone 17 Pro".
+      // The name of the device type, not of the simulator: a simulator cloned for this run is still an "iPhone 17 Pro".
       const type = (x.deviceTypeIdentifier ?? "").replace(/.*SimDeviceType\./, "").replace(/-/g, " ");
       console.log([type || x.name, x.state].join("|"));
     }' "$WORK/simctl.json" "$udid")"

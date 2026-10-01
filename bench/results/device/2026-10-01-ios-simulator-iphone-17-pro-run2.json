@@ -1,0 +1,222 @@
+{
+ "schema": "undra-device-bench/1",
+ "date": "2026-10-01",
+ "finished_at": "2026-10-01T16:28:27.533Z",
+ "target": "ios-simulator-iphone-17-pro",
+ "platform": "ios",
+ "kind": "simulator",
+ "label": "iPhone 17 Pro simulator (iOS 26.5, arm64 on Apple M5 Pro)",
+ "claim": "Not a device: simulator, emulator or desktop browser on a Mac. Real-device rows are pending hardware, and no claim of meeting a device target is made from this file.",
+ "device": {
+  "arch": "arm64",
+  "cores": 18,
+  "is_virtual": true,
+  "low_power_mode": false,
+  "model": "iPhone18,1 (simulated)",
+  "os": "iOS 26.5",
+  "physical_memory_bytes": 51539607552,
+  "swift_configuration": "Release",
+  "thermal_state": "nominal"
+ },
+ "host": {
+  "cpu": "Apple M5 Pro",
+  "os": "macOS 26.5 (25F71)",
+  "arch": "arm64",
+  "load_before": 6.12,
+  "load_after": 4.3
+ },
+ "build": {
+  "type": "release",
+  "core": "release (LTO fat), static XCFramework slice",
+  "app": "Release (-O, whole-module); UI test launches in benchmark mode",
+  "commit": "b5b4c9b",
+  "dirty": true
+ },
+ "command": "scripts/bench-device.sh --device ios --target C7835F25-1C6D-4F7D-92FB-CB4FB3D33983 --runs 2 --no-render --keep-booted",
+ "runtime": "inproc (C ABI, linked static library)",
+ "timer": {
+  "kind": "clock_gettime_nsec_np(CLOCK_UPTIME_RAW)",
+  "overhead_ns": 8.35792,
+  "resolution_ns": 41
+ },
+ "config": {
+  "drain_frames": 240,
+  "drain_warmup_frames": 60,
+  "each_samples": 2000,
+  "each_warmup": 200,
+  "reloads": 30,
+  "reset_every_inserts": 500,
+  "single_drains": 2000,
+  "sync_batch": 1000,
+  "sync_batches": 200,
+  "warmup_batches": 20
+ },
+ "ops": [
+  {
+   "batch": 1000,
+   "id": "sync_call",
+   "max": 361.958,
+   "mean": 307.46455499999996,
+   "min": 298.708,
+   "mode": "batched",
+   "note": "`try bench.benchAdd(a:b:)` on the main actor: encode, `callSync` through the C ABI, decode, through the generated binding",
+   "p50": 303.125,
+   "p90": 322.25,
+   "p99": 339.375,
+   "samples": 200
+  },
+  {
+   "batch": 1,
+   "id": "record_1kb",
+   "max": 750,
+   "mean": 508.4575,
+   "min": 416,
+   "mode": "each",
+   "note": "`try bench.benchEchoBytes(data:)` with 1,024 bytes: the payload crosses the boundary twice (a byte string, which is cheaper than a record of the same size)",
+   "p50": 500,
+   "p90": 542,
+   "p99": 625,
+   "samples": 2000
+  },
+  {
+   "batch": 1,
+   "id": "keyed_insert_10k",
+   "max": 51708,
+   "mean": 8842.5935,
+   "min": 8167,
+   "mode": "each",
+   "note": "`bench.benchListInsert(i: 5000)` on about 10,000 rows: the call, the core's recorded insert, the one-operation patch, applied to the mirror's list before the call returns",
+   "p50": 8667,
+   "p90": 9000,
+   "p99": 11041,
+   "samples": 2000
+  },
+  {
+   "batch": 1,
+   "id": "changeset_100",
+   "max": 31750,
+   "mean": 25567.7525,
+   "min": 24459,
+   "mode": "each",
+   "note": "`bench.benchTouchSignals(k: 100)`: one call, one change-set of 100 entries, applied to 100 `@Observable` properties of the mirror before the call returns",
+   "p50": 25500,
+   "p90": 26083,
+   "p99": 28333,
+   "samples": 2000
+  }
+ ],
+ "cold": {
+  "first_load_in_run_ns": 2645208,
+  "launches": [
+   {
+    "load_ns": 2198083,
+    "restore_ns": 59000
+   },
+   {
+    "load_ns": 2475250,
+    "restore_ns": 53542
+   },
+   {
+    "load_ns": 2321084,
+    "restore_ns": 50958
+   },
+   {
+    "load_ns": 2217875,
+    "restore_ns": 53209
+   },
+   {
+    "load_ns": 2359208,
+    "restore_ns": 52625
+   },
+   {
+    "load_ns": 2230125,
+    "restore_ns": 53625
+   },
+   {
+    "load_ns": 2347791,
+    "restore_ns": 62791
+   },
+   {
+    "load_ns": 2186833,
+    "restore_ns": 55458
+   },
+   {
+    "load_ns": 2139625,
+    "restore_ns": 59875
+   },
+   {
+    "load_ns": 2138541,
+    "restore_ns": 60625
+   }
+  ],
+  "note": "a 100 KB snapshot is 1000 to-dos of 80 characters (the host row restores four stores of 250 rows of 100 bytes); load = `UndraCore.load` of the linked core, which starts the runtime and its core thread; the C library is statically linked, so there is no dlopen",
+  "reload_in_process": {
+   "load_ns": {
+    "max": 567375,
+    "mean": 278836.1666666667,
+    "min": 241875,
+    "n": 30,
+    "p50": 260833,
+    "p90": 332584,
+    "p99": 567375
+   },
+   "restore_ns": {
+    "max": 51791,
+    "mean": 39409.7,
+    "min": 31125,
+    "n": 30,
+    "p50": 38208,
+    "p90": 45208,
+    "p99": 51791
+   }
+  },
+  "snapshot_bytes": 101046
+ },
+ "drain": {
+  "frames": 240,
+  "merged": {
+   "applied_per_frame_p50": 1,
+   "change_sets_per_frame_p50": 1667,
+   "drain_ns": {
+    "max": 1358167,
+    "mean": 654842.76,
+    "min": 294166,
+    "n": 300,
+    "p50": 490792,
+    "p90": 1145375,
+    "p99": 1280208
+   },
+   "drains_per_frame_p50": 1,
+   "entries_per_frame_p50": 1667,
+   "frame_ns": {
+    "max": 1358167,
+    "mean": 707502.925,
+    "min": 294166,
+    "n": 240,
+    "p50": 735958,
+    "p90": 1172416,
+    "p99": 1335958
+   }
+  },
+  "note": "merged frame = the drain(s) that consumed one burst, summed: decode and apply of the merged patch to the `@Observable` store",
+  "producer": "a thread of its own commits the burst (the core's side of a socket or a timer): the main thread's cost of a frame is the drain at the next frame, as `DrainStats.duration` times it (`ContinuousClock`)",
+  "ratio_unmerged_over_merged": 3.7758798735797425,
+  "rows": 10000,
+  "unmerged_estimate": {
+   "frame_ns": 2778889,
+   "method": "the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), 2000 of them, median; times 1667. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here",
+   "per_entry_ns": {
+    "max": 9792,
+    "mean": 1669.687,
+    "min": 1000,
+    "n": 2000,
+    "p50": 1667,
+    "p90": 2333,
+    "p99": 2417
+   }
+  },
+  "updates_per_frame": 1667,
+  "warmup_frames": 60
+ },
+ "notes": []
+}
