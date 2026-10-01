@@ -426,7 +426,8 @@ or build from the command line as above.
 **Against `undra dev`.** In the scheme's Run environment variables set `UNDRA_DEV_URL` to the `ws://` URL
 `undra dev` prints (a simulator can use `ws://127.0.0.1:7443`; a device needs your computer's address and
 `undra dev --addr 0.0.0.0:7443`). Debug builds then use that core instead of the linked one: edit the Rust,
-save, and the app reconnects and starts over on the rebuilt core (a bar at the top shows the connection;
+save, and the app reconnects and comes back to the screen it was on, with its state (`undra dev` carries the
+core's state across a rebuild; the bar at the top says `Reloaded, state kept`, and shows the connection;
 `core.connectionState` and `core.connection` are the API). See docs/DEV_LOOP.md in the Undra repository.
 ";
 
@@ -459,8 +460,9 @@ adb shell am start -n @@APP_ID@@/.MainActivity --es undra_dev_url ws://127.0.0.1
 `10.0.2.2` is how the emulator reaches this machine; a USB device uses `adb reverse tcp:7443 tcp:7443` (which
 `undra dev --android` runs) and `127.0.0.1`. Cleartext traffic and the dev URL exist in debug builds only
 (`android/app/src/debug/AndroidManifest.xml`; release builds get neither). Edit the Rust, save, and the app
-reconnects and starts over on the rebuilt core; a bar at the top shows the connection (`core.connectionState`
-is a `StateFlow`). See docs/DEV_LOOP.md in the Undra repository.
+reconnects and comes back to the screen it was on, with its state (`undra dev` carries the core's state across a
+rebuild; the bar at the top says `Reloaded, state kept` and shows the connection, `core.connectionState` is a
+`StateFlow`). See docs/DEV_LOOP.md in the Undra repository.
 ";
 
 const README_WEB: &str = "
@@ -472,9 +474,9 @@ cd web && npm install && npm run dev          # http://localhost:5173
 ```
 
 The page loads the wasm core and runs it on the main thread. Add `?undra=ws://127.0.0.1:7443` to the URL
-(with `undra dev` running) to use the core that `undra dev` serves instead: edit the Rust, save, and the page
-reloads onto the rebuilt core (a dropped connection is reconnected by the runtime; a bar at the top shows what
-it is doing, and `core.connection` is the signal behind it). Only `npm run dev` reads `?undra=`: a production
+(with `undra dev` running) to use the core that `undra dev` serves instead: edit the Rust, save, and the page is
+on the rebuilt core with its state, no reload (a dropped connection is reconnected by the runtime; a bar at the top
+shows what it is doing, `Reloaded, state kept` after a rebuild, and `core.connection` is the signal behind it). Only `npm run dev` reads `?undra=`: a production
 build ignores it. `npm run build` type-checks and bundles.
 ";
 
