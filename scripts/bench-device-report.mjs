@@ -451,14 +451,15 @@ export function renderBlock(files, targets) {
   );
   for (const runs of groups) {
     const r = runs.at(-1).result;
-    out.push(`* **${r.label}.** ${r.drain.producer}. ${r.drain.note}. Unmerged estimate: ${r.drain.unmerged_estimate.method}.`);
+    const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+    out.push(`* **${r.label}.** ${sentence(r.drain.producer)}. ${sentence(r.drain.note)}. Unmerged estimate: ${r.drain.unmerged_estimate.method}.`);
   }
   out.push("");
   const repro = reproducibility(groups, targets);
   if (repro.length > 0) out.push("#### Reproducibility", "", ...repro, "");
   const have = new Set(groups.map((g) => `${g.at(-1).result.platform}:${g.at(-1).result.kind}`));
   const pending = [];
-  if (!have.has("ios:device")) pending.push(["iOS", targets.devices.ios, "an iPhone with an A15-class chip, attached over USB with a development team"]);
+  if (!have.has("ios:device")) pending.push(["iOS", targets.devices.ios, "an iPhone with an A15-class chip, attached over USB, trusted, in Developer Mode, and `UNDRA_IOS_TEAM` set to a development team id"]);
   if (!have.has("android:device")) pending.push(["Android", targets.devices.android, "a 2022 mid-range phone with USB debugging enabled"]);
   if (pending.length > 0) {
     out.push("#### Pending hardware", "", "| Platform | Reference device | What is needed |", "|---|---|---|");

@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
 /**
  * The device benchmark's Playwright config (`npm run bench`, `scripts/bench-device.sh --device web`): the production
@@ -15,7 +15,8 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   use: { baseURL: "http://127.0.0.1:4174" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], ...(channel === undefined ? {} : { channel }) } }],
+  // No device descriptor: its user agent would claim to be Chrome on Windows, and the file should say what the browser is.
+  projects: [{ name: "chromium", use: { browserName: "chromium", ...(channel === undefined ? {} : { channel }) } }],
   webServer: {
     command: "npm run preview:bench",
     url: "http://127.0.0.1:4174/bench.html",
