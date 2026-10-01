@@ -139,6 +139,26 @@ fn size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
+/// Whether a file directly inside `dir` (an `.app`: the executable, its debug dylib) holds `needle`.
+fn bundle_contains(dir: &Path, needle: &str) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_file())
+        .any(|e| {
+            std::fs::read(e.path())
+                .is_ok_and(|bytes| bytes.windows(needle.len()).any(|w| w == needle.as_bytes()))
+        })
+}
+
+/// Replaces `from` with `to` in the file at `path`; panics when `from` is not there.
+fn replace_in(path: &Path, from: &str, to: &str) {
+    let text = std::fs::read_to_string(path).unwrap();
+    assert!(text.contains(from), "{}: no {from:?}", path.display());
+    std::fs::write(path, text.replacen(from, to, 1)).unwrap();
+}
+
 #[test]
 fn gradle_builds_the_core_before_the_app_and_skips_it_while_nothing_changed() {
     let _serial = serial();
@@ -262,6 +282,46 @@ fn gradle_builds_the_core_before_the_app_and_skips_it_while_nothing_changed() {
     assert!(
         release_size < 5_000_000,
         "a release core is megabytes, not tens of megabytes: {release_size}"
+    );
+
+    // 4b. Back to debug: both profiles write the same directory, so the debug core is built again and
+    // the debug APK packages it, not the release core the last build left there.
+    let (ok, log) = gradle(&["assembleDebug"], path_with_undra());
+    evidence(
+        "gradle assembleDebug after assembleRelease",
+        &log,
+        &["Task :app:undraBuild", "undra: ", "BUILD "],
+    );
+    assert!(ok, "{log}");
+    assert!(log.contains("undra: build --platform android\n"), "{log}");
+    let debug_again = size(&jni.join("arm64-v8a/libundra_core.so"));
+    assert!(
+        debug_again > 4 * release_size,
+        "the debug core is back: {debug_again} bytes against the release core's {release_size}"
+    );
+    let packaged = std::process::Command::new("unzip")
+        .arg("-lv")
+        .arg(android.join("app/build/outputs/apk/debug/app-debug.apk"))
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    if let Some(line) = packaged
+        .lines()
+        .find(|l| l.contains("arm64-v8a/libundra_core.so"))
+    {
+        assert!(
+            line.trim_start().starts_with(&debug_again.to_string()),
+            "the debug APK packages the debug core: {line}"
+        );
+    }
+
+    // 4c. Cargo.lock is an input: a change of it builds the core again (the shim follows the lock).
+    append(&project.root.join("Cargo.lock"), "\n");
+    let (ok, log) = gradle(&["assembleDebug"], path_with_undra());
+    assert!(ok, "{log}");
+    assert!(
+        log.contains("> Task :app:undraBuild\n") || log.contains("> Task :app:undraBuild "),
+        "a change of Cargo.lock runs the task:\n{log}"
     );
 
     // 5. -PundraSkipBuild leaves the build to the caller.
@@ -406,7 +466,10 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
             .is_dir()
     );
 
-    // 2. Nothing changed: Xcode does not run the phase.
+    // 2. Nothing changed: Xcode does not run the phase. (The first build wrote Cargo.lock, which the
+    // refreshed input list then names: the list changed, so the second build may run the phase once
+    // more, as Gradle's second run may.)
+    let _ = build("Debug");
     let (ok, log) = build("Debug");
     evidence(
         "xcodebuild, nothing changed",
@@ -419,8 +482,14 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
         "Xcode skips the phase while no input changed:\n{log}"
     );
 
-    // 3. A change of a source of the core runs it again; so does a new file, and after it an edit of that file.
-    append(&project.root.join("core/src/lib.rs"), "\n// a change\n");
+    // 3. A change of a source of the core runs it again, and the app is linked again with the new
+    // core (the library is named in OTHER_LDFLAGS, not as a build input); so does a new file, and after
+    // it an edit of that file.
+    replace_in(
+        &project.root.join("core/src/lib.rs"),
+        "from the xcodeproof core",
+        "from the xcodeproof core, rebuilt",
+    );
     let (ok, log) = build("Debug");
     evidence(
         "xcodebuild, core/src/lib.rs changed",
@@ -428,6 +497,13 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
         &[phase, "note: undra build", "BUILD "],
     );
     assert!(ok && log.contains(phase), "{log}");
+    let debug_app = derived
+        .path()
+        .join("Build/Products/Debug-iphonesimulator/Xcodeproof.app");
+    assert!(
+        bundle_contains(&debug_app, "from the xcodeproof core, rebuilt"),
+        "the app links the core that was just built"
+    );
     std::fs::write(
         project.root.join("core/src/extra.rs"),
         "// not compiled yet\n",
@@ -458,6 +534,8 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
     );
 
     // 4. Another configuration builds the other kind of core, and switching back runs the phase again.
+    let simulator_lib = xcframework.join("ios-arm64-simulator/libundra_core.a");
+    let debug_lib = size(&simulator_lib);
     let (ok, log) = build("Release");
     evidence(
         "xcodebuild -configuration Release",
@@ -494,12 +572,26 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
             .join("build/ios/.undra-configuration-Debug")
             .exists()
     );
+    let release_lib = size(&simulator_lib);
+    assert!(
+        release_lib * 2 < debug_lib,
+        "a release core is linked for Release: {release_lib} bytes against the debug core's {debug_lib}"
+    );
     let (ok, log) = build("Release");
     assert!(ok && !log.contains(phase), "{log}");
     let (ok, log) = build("Debug");
     assert!(
         ok && log.contains(phase),
         "back to Debug rebuilds the debug core:\n{log}"
+    );
+    assert!(
+        log.contains("==> Building the core for ios (debug)"),
+        "{log}"
+    );
+    assert_eq!(
+        size(&simulator_lib),
+        debug_lib,
+        "the third build leaves the debug core where the app links it"
     );
 }
 
