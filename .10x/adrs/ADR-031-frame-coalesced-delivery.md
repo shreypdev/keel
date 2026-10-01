@@ -153,6 +153,16 @@ coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never r
   mutates through `inout` (`generated/swift/.../Stores.swift:1666`); whether that copies the array depends on
   the `@Observable` accessors and on a view holding a reference, which the device phase measures; either way
   it saves the per-entry work. The out-of-bounds rule is unchanged.
+* **Measured on the implementation (TS mirror, before/after).** The design's probe method: Node 24.21 on the
+  Apple M5 Pro (shared, load average 8 to 13), the runtime's own `Mirror` and `applyPatch` built from the
+  commit before and after this piece, a store `_apply` shaped like the generated one, 1,667 change-sets per
+  frame (100 k/s at 60 Hz) enqueued and then drained, p50 over 240 frames after 60 warm-up frames, three runs
+  each. One-op keyed patches (an `Update` of a `{ id, title, version }` row at a random index) on 10,000 rows:
+  **3.7-4.4 ms per frame before, 0.33-0.45 ms after** (the drain alone 3.6-4.1 ms before, 0.18-0.26 ms
+  after). `u64` full values: 0.24-0.36 ms before, 0.21-0.29 ms after (the drain alone 0.10-0.14 ms before,
+  0.013-0.019 ms after). What remains per frame is mostly parsing each change-set's entry table on arrival
+  (about 120-200 ns each, which keeps a malformed change-set from being half-applied) and decoding the merged
+  patch's 1,667 items; the "about 5 us" above is the list work alone.
 * **Observe and restore (ADR-023).** Their change-sets go through the same queue; `observe` keeps its
   immediate drain; a restore's per-store change-sets may merge with nothing and apply in one drain.
 * **Latency.** A change the core makes on its own reaches the UI at the next frame (at most one frame
