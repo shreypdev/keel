@@ -50,12 +50,15 @@ const _: () = {
         fn __undra_set_handle(&self, _handle: u64) {}
     }
     impl __UndraStoreProbe_Todos for Todos {}
-    const _: () = {
+    fn __undra_store_probe() -> [(); {
         ::core::assert!(
             < Todos > ::__UNDRA_IS_STORE,
             "error[undra::E0011]: `Todos` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]`\n  = note: the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up\n  = help: add `#[undra::store]` to `struct Todos`, or remove `store` from the impl attribute\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011"
         );
-    };
+        0
+    }] {
+        []
+    }
     #[automatically_derived]
     impl ::undra::runtime::StoreObject for Todos {
         fn cell(&self) -> &::std::sync::Arc<::undra::signals::StoreCell> {

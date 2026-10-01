@@ -2,10 +2,10 @@
 //!
 //! `#[undra(key = "id")]` on a `Signal<Vec<Row>>` names a field of `Row`, which a macro cannot
 //! see: `Row` is another item. Every `#[undra::api]` record therefore lists its field names
-//! (`Row::__UNDRA_FIELDS`) and encodes the field at an index (`Row::__undra_encode_field::<I>`);
-//! the store asks [`index_of`] for the index in a constant, so a key that names no field is a
-//! compile error with a message of Undra's own, listing the fields there are ([`message`]),
-//! instead of `rustc`'s "no field `idd` on type `&Row`".
+//! (`Row::__UNDRA_FIELDS`, a constant and nothing else); the store asks [`index_of`] for the key
+//! in a constant, so a key that names no field is a compile error with a message of Undra's own,
+//! listing the fields there are ([`message`]), instead of `rustc`'s "no field `idd` on type
+//! `&Row`" (the store reads the field through a type that only exists when the check passed).
 //!
 //! Everything here is a `const fn`: it runs while the user's crate compiles.
 //!

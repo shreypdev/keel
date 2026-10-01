@@ -22,24 +22,6 @@ impl Todo {
         "due",
         "scores",
     ];
-    /// Encodes the field at index `__I` of `__UNDRA_FIELDS`, as `Encode` does.
-    #[doc(hidden)]
-    #[inline(always)]
-    #[allow(unused_variables)]
-    pub fn __undra_encode_field<const __I: usize>(
-        &self,
-        __w: &mut ::undra::wire::Writer,
-    ) {
-        match __I {
-            0usize => ::undra::wire::Encode::encode(&self.id, __w),
-            1usize => ::undra::wire::Encode::encode(&self.title, __w),
-            2usize => ::undra::wire::Encode::encode(&self.done, __w),
-            3usize => ::undra::wire::Encode::encode(&self.tags, __w),
-            4usize => ::undra::wire::Encode::encode(&self.due, __w),
-            5usize => ::undra::wire::Encode::encode(&self.scores, __w),
-            _ => {}
-        }
-    }
 }
 #[automatically_derived]
 impl ::undra::wire::Encode for Todo {

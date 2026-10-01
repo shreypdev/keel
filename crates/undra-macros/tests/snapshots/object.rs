@@ -67,12 +67,15 @@ const _: () = {
         fn __undra_set_handle(&self, _handle: u64) {}
     }
     impl __UndraStoreProbe_Calculator for Calculator {}
-    const _: () = {
+    fn __undra_store_probe() -> [(); {
         ::core::assert!(
             ! < Calculator > ::__UNDRA_IS_STORE,
             "error[undra::E0011]: `Calculator` is a `#[undra::store]` but its `#[undra::api]` impl block is not marked as a store\n  = note: the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field\n  = help: write `#[undra::api(store)]` on the impl block\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011"
         );
-    };
+        0
+    }] {
+        []
+    }
     #[allow(unused_variables, unused_mut, deprecated, clippy::all)]
     fn __undra_dispatch_Calculator(
         __rt: &dyn ::core::any::Any,
@@ -671,7 +674,7 @@ const _: () = {
         }
         if __undra_id != ::undra::meta::ids::type_id("CalcError") {
             ::core::panic!(
-                "error[undra::E0061]: `CalcError` here is an alias or a renamed import of a different Undra type, not the type declared as `CalcError`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type CalcError = Other` or `use path::Other as CalcError` the platforms would be told `CalcError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct CalcError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `CalcError` here is an alias or a renamed import of an Undra type that is declared under another name\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type CalcError = Other` or `use path::Other as CalcError` the platforms would be told `CalcError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct CalcError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
         if !<CalcError>::UNDRA_IS_ERROR {

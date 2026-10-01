@@ -147,8 +147,6 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
         quote! {
             #[doc(hidden)]
             pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
-            #[doc(hidden)]
-            pub fn __undra_encode_field<const __I: usize>(&self, __w: &mut #wire::Writer) {}
         }
     };
     let error_impls = if is_error {
@@ -347,14 +345,11 @@ pub(crate) fn expand_struct(
         let ty = &f.ty;
         quote_spanned! {f.ty.span()=> + <#ty as #wire::Decode>::MIN_ENCODED_LEN }
     });
-    // What a keyed list (`#[undra(key = "..")]` in a store) needs of its item: the field names, and
-    // the encoding of one field by index. The store looks the name up in a constant, so a key that
-    // names no field is a branded error, and then calls the field's encoder (`undra_meta::keys`).
+    // What a keyed list (`#[undra(key = "..")]` in a store) needs of its item: the field names. The
+    // store looks the key up in this constant, so a key that names no field is a branded error
+    // listing these names, and only then reads the field (`undra_meta::keys`). A constant is
+    // all a record pays for it: nothing is generated per field.
     let field_names = fields.iter().map(|f| &f.name);
-    let encode_by_index = fields.iter().enumerate().map(|(index, f)| {
-        let ident = f.ident.as_ref().expect("named field");
-        quote_spanned! {f.ty.span()=> #index => #wire::Encode::encode(&self.#ident, __w), }
-    });
     let field_metas = fields
         .iter()
         .map(|f| field_meta(&meta, &f.name, &f.kty, f.default, &f.docs));
@@ -375,16 +370,6 @@ pub(crate) fn expand_struct(
             /// The names of the fields, in declaration order (see `undra_meta::keys`).
             #[doc(hidden)]
             pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
-            /// Encodes the field at index `__I` of `__UNDRA_FIELDS`, as `Encode` does.
-            #[doc(hidden)]
-            #[inline(always)]
-            #[allow(unused_variables)]
-            pub fn __undra_encode_field<const __I: usize>(&self, __w: &mut #wire::Writer) {
-                match __I {
-                    #(#encode_by_index)*
-                    _ => {}
-                }
-            }
         }
 
         #derived

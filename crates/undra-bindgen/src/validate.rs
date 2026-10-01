@@ -727,7 +727,6 @@ impl<'a> Checker<'a> {
                 at: at.clone(),
                 what: "an enum with no variants".to_owned(),
                 why: "an enum without variants has no value that could be sent".to_owned(),
-
                 help: "give it at least one variant".to_owned(),
             });
         }
@@ -838,8 +837,7 @@ impl<'a> Checker<'a> {
                 self.errors.push(BindgenError::Unsupported {
                     at: at.clone(),
                     what: "an object without a constructor".to_owned(),
-                    why: "the platforms create an object by calling one of its constructors, and an object can only be reached through other calls, which are not supported".to_owned(),
-
+                    why: "the platforms create an object by calling one of its constructors, and no other call can hand one out, so without a constructor it can never be created".to_owned(),
                     help: "add `pub fn new(..) -> Self` to its `#[undra::api]` impl block so the platform can create it".to_owned(),
                 });
             }
@@ -872,7 +870,6 @@ impl<'a> Checker<'a> {
                         at: gat.clone(),
                         what: "a Lazy<T> signal".to_owned(),
                         why: "a lazy list needs a runtime API that SPEC section 17 does not define yet, so no platform could observe it".to_owned(),
-
                         help: "expose the items as a `Vec<T>` signal, or as a method that takes an offset and a limit".to_owned(),
                     });
                 } else {
@@ -883,7 +880,6 @@ impl<'a> Checker<'a> {
                             what: "a signal of type ()".to_owned(),
                             why: "a signal holds a value the platform shows, and `()` has none"
                                 .to_owned(),
-
                             help: "give the signal a value type, or remove it".to_owned(),
                         });
                     }
@@ -893,7 +889,6 @@ impl<'a> Checker<'a> {
                         at: gat,
                         what: "a keyed signal that is not a Vec<T>".to_owned(),
                         why: "a key identifies an item of a list across updates, so only a list can have one".to_owned(),
-
                         help: "put `#[undra(key = ..)]` on a `Signal<Vec<T>>` only, or remove it".to_owned(),
                     });
                 }
@@ -918,7 +913,6 @@ impl<'a> Checker<'a> {
                 at: at.to_owned(),
                 what: format!("a constructor returning `{}`", c.returns),
                 why: "a constructor creates the object, so it returns the object (or fails with a typed error)".to_owned(),
-
                 help: format!(
                     "make it return `{0}` or `Result<{0}, E>` where `E` is a `#[undra::error]` enum",
                     object.name
@@ -986,7 +980,6 @@ impl<'a> Checker<'a> {
                     at: at.clone(),
                     what: "a query that returns ()".to_owned(),
                     why: "a query caches the value it returns, and `()` has none".to_owned(),
-
                     help: "use a mutation for a call that only has effects, or return the data the platform needs".to_owned(),
                 });
             }
@@ -995,7 +988,6 @@ impl<'a> Checker<'a> {
                     at,
                     what: "a query that returns an Option".to_owned(),
                     why: "the handle's `data` signal is already optional (no data yet), so an optional result would be ambiguous".to_owned(),
-
                     help: "return a record or a list (an empty `Vec` says \"nothing\"), or an enum naming the cases".to_owned(),
                 });
             }
@@ -1036,7 +1028,6 @@ impl<'a> Checker<'a> {
                 at: at.to_owned(),
                 what: format!("`{err}` as the error type of a Result"),
                 why: "the platforms throw the error by name, and only a `#[undra::error]` enum carries the messages they show".to_owned(),
-
                 help: format!("declare `{err}` with `#[undra::error]`, or use an error enum as the error type"),
             });
         }
@@ -1057,7 +1048,6 @@ impl<'a> Checker<'a> {
                 at,
                 what: format!("the return type `{ty}`"),
                 why: "a method answers with a value, a typed error, a stream, or a stream that can fail to open; nothing else crosses the boundary".to_owned(),
-
                 help: "return `T`, `Result<T, E>`, `Stream<T>` or `Result<Stream<T>, E>` where `E` is a `#[undra::error]` enum".to_owned(),
             });
             return;
@@ -1072,7 +1062,6 @@ impl<'a> Checker<'a> {
                 why:
                     "port calls and queries are request/reply, and a stream has no place in either"
                         .to_owned(),
-
                 help:
                     "return a `Vec<T>` page, or have the platform push events through an event port"
                         .to_owned(),
@@ -1090,7 +1079,6 @@ impl<'a> Checker<'a> {
                         at,
                         what: "a stream of ()".to_owned(),
                         why: "a stream yields values the platform handles one by one, and `()` has none".to_owned(),
-
                         help: "give the stream an item type, for example `impl Stream<Item = u64>`".to_owned(),
                     });
                 } else {
@@ -1108,7 +1096,6 @@ impl<'a> Checker<'a> {
                 at: at.to_owned(),
                 what: "the type ()".to_owned(),
                 why: "`()` occupies zero bytes on the wire, and zero-width values defeat length validation (SPEC section 3.1)".to_owned(),
-
                 help: "remove the value, or use `bool` if you need a marker".to_owned(),
             }),
             TypeRef::Named(name) if self.kinds.get(name.as_str()) == Some(&Kind::Object) => {
@@ -1116,7 +1103,6 @@ impl<'a> Checker<'a> {
                     at: at.to_owned(),
                     what: format!("the object `{name}` used as a value"),
                     why: "an object lives in the core and crosses the boundary as a handle; its contents have no wire representation".to_owned(),
-
                     help: "return a record with the data the platform needs, or construct the object from the platform with one of its constructors".to_owned(),
                 });
             }
@@ -1126,7 +1112,6 @@ impl<'a> Checker<'a> {
                         at: at.to_owned(),
                         what: format!("the nested option `{ty}`"),
                         why: "Kotlin and TypeScript cannot tell `Some(None)` from `None`".to_owned(),
-
                         help: "wrap the inner option in a record or an enum that names the two cases".to_owned(),
                     });
                 }

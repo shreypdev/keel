@@ -1370,9 +1370,13 @@ pub(crate) fn expand_impl(
             }
             impl #probe_trait for #self_ty {}
 
-            const _: () = {
-                #probe_assert
-            };
+            // The assertion is the length of an array in a signature, so `rustc` evaluates it
+            // while it checks signatures, before any function body: E0011 comes before what the
+            // bodies get wrong because of it (a struct literal patched with `__undra_cell` when
+            // the struct is not a store).
+            fn __undra_store_probe() -> [(); { #probe_assert 0 }] {
+                []
+            }
 
             #store_object
 

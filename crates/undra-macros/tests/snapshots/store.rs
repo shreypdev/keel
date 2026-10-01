@@ -54,16 +54,19 @@ impl Todos {
         ::std::sync::Arc<::undra::signals::StoreCell>,
         ::undra::signals::SignalsError,
     > {
-        #[allow(non_camel_case_types)]
+        #[allow(non_camel_case_types, dead_code)]
         fn __undra_key_rows(__item: &Row) -> u64 {
             trait __UndraKeyed {
                 const __UNDRA_FIELDS: &'static [&'static str] = &[];
-                fn __undra_encode_field<const __I: usize>(
-                    &self,
-                    __w: &mut ::undra::wire::Writer,
-                ) {}
             }
             impl<__T: ?::core::marker::Sized> __UndraKeyed for __T {}
+            struct __UndraGate<const __OK: bool>;
+            trait __UndraPass<__T: ?::core::marker::Sized> {
+                type Out: ?::core::marker::Sized;
+            }
+            impl<__T: ?::core::marker::Sized> __UndraPass<__T> for __UndraGate<true> {
+                type Out = __T;
+            }
             const __UNDRA_FIELDS: &[&str] = <Row>::__UNDRA_FIELDS;
             const __UNDRA_INDEX: usize = ::undra::meta::keys::index_of(
                 __UNDRA_FIELDS,
@@ -84,10 +87,10 @@ impl Todos {
             const __UNDRA_MESSAGE_TEXT: &str = ::undra::meta::keys::as_str(
                 &__UNDRA_MESSAGE,
             );
-            const __UNDRA_KEY: usize = if __UNDRA_INDEX == usize::MAX {
+            const __UNDRA_KEY_IS_A_FIELD: bool = if __UNDRA_INDEX == usize::MAX {
                 ::core::panic!("{}", __UNDRA_MESSAGE_TEXT)
             } else {
-                __UNDRA_INDEX
+                true
             };
             ::std::thread_local! {
                 static __UNDRA_KEY_BUF : ::core::cell::RefCell < ::undra::wire::Writer >
@@ -97,7 +100,10 @@ impl Todos {
                 .with(|__buf| {
                     let mut __buf = __buf.borrow_mut();
                     __buf.clear();
-                    __item.__undra_encode_field::<{ __UNDRA_KEY }>(&mut __buf);
+                    let __row: &<__UndraGate<
+                        { __UNDRA_KEY_IS_A_FIELD },
+                    > as __UndraPass<Row>>::Out = __item;
+                    ::undra::wire::Encode::encode(&__row.id, &mut __buf);
                     ::undra::meta::ids::fnv1a64(__buf.as_slice())
                 })
         }
@@ -283,7 +289,7 @@ const _: () = {
         }
         if __undra_id != ::undra::meta::ids::type_id("Row") {
             ::core::panic!(
-                "error[undra::E0061]: `Row` here is an alias or a renamed import of a different Undra type, not the type declared as `Row`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Row = Other` or `use path::Other as Row` the platforms would be told `Row` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Row` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `Row` here is an alias or a renamed import of an Undra type that is declared under another name\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Row = Other` or `use path::Other as Row` the platforms would be told `Row` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Row` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
     };

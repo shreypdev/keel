@@ -135,7 +135,7 @@ const _: () = {
         }
         if __undra_id != ::undra::meta::ids::type_id("GreetError") {
             ::core::panic!(
-                "error[undra::E0061]: `GreetError` here is an alias or a renamed import of a different Undra type, not the type declared as `GreetError`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type GreetError = Other` or `use path::Other as GreetError` the platforms would be told `GreetError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct GreetError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `GreetError` here is an alias or a renamed import of an Undra type that is declared under another name\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type GreetError = Other` or `use path::Other as GreetError` the platforms would be told `GreetError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct GreetError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
         if !<GreetError>::UNDRA_IS_ERROR {

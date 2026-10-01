@@ -392,7 +392,7 @@ impl Named {
         let mismatch = panic_text(&Diag::new(
             code::E0061,
             format!(
-                "`{name}` here is an alias or a renamed import of a different Undra type, not the type declared as `{name}`"
+                "`{name}` here is an alias or a renamed import of an Undra type that is declared under another name"
             ),
             format!(
                 "Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type {name} = Other` or `use path::Other as {name}` the platforms would be told `{name}` and receive the layout of `Other`"

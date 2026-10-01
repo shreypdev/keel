@@ -5,7 +5,7 @@ error[E0080]: evaluation panicked: error[undra::E0008]: `#[undra(key = "identifi
   --> tests/ui/l5_key_names_a_missing_field.rs:17:19
    |
 17 |     #[undra(key = "identifier")]
-   |                   ^^^^^^^^^^^^ evaluation of `Rows::__undra_build_cell::__undra_key_rows::__UNDRA_KEY` failed here
+   |                   ^^^^^^^^^^^^ evaluation of `Rows::__undra_build_cell::__undra_key_rows::__UNDRA_KEY_IS_A_FIELD` failed here
 
 note: erroneous constant encountered
   --> tests/ui/l5_key_names_a_missing_field.rs:17:19

@@ -58,7 +58,7 @@ pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<Todo>, HttpError> { /* ..
 
 | Macro | Generated (besides the item as written) |
 |---|---|
-| `api` on a struct | `impl Encode`, `impl Decode`, `UNDRA_TYPE_ID`, the hidden field table a keyed list looks its key up in (`__UNDRA_FIELDS`, `__undra_encode_field`), `static __UNDRA_META_<T>: RecordMeta`, registration |
+| `api` on a struct | `impl Encode`, `impl Decode`, `UNDRA_TYPE_ID`, the hidden field-name list a keyed list looks its key up in (`__UNDRA_FIELDS`), `static __UNDRA_META_<T>: RecordMeta`, registration |
 | `api` / `error` on an enum | the same with a `u16` variant index; `error` adds `Display`, `Error`, `From` for `#[from]` |
 | `api` on `impl T` | `impl UndraObject`, `fn __undra_dispatch_<T>` and `ObjectMeta` + registration (private to an anonymous `const _`, so a second block for the type does not define them twice) |
 | `api` on a `fn` | `fn __undra_dispatch_fn_<name>`, `FunctionMeta` + registration |

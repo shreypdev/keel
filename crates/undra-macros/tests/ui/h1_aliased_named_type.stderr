@@ -1,4 +1,4 @@
-error[E0080]: evaluation panicked: error[undra::E0061]: `Todo` here is an alias or a renamed import of a different Undra type, not the type declared as `Todo`
+error[E0080]: evaluation panicked: error[undra::E0061]: `Todo` here is an alias or a renamed import of an Undra type that is declared under another name
                 = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Todo = Other` or `use path::Other as Todo` the platforms would be told `Todo` and receive the layout of `Other`
                 = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Todo` if you mean a distinct type
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
@@ -7,7 +7,7 @@ error[E0080]: evaluation panicked: error[undra::E0061]: `Todo` here is an alias 
 19 |     pub fn legacy_echo(t: Todo) -> Todo {
    |                           ^^^^ evaluation of `legacy::_::_` failed here
 
-error[E0080]: evaluation panicked: error[undra::E0061]: `Entry` here is an alias or a renamed import of a different Undra type, not the type declared as `Entry`
+error[E0080]: evaluation panicked: error[undra::E0061]: `Entry` here is an alias or a renamed import of an Undra type that is declared under another name
                 = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Entry = Other` or `use path::Other as Entry` the platforms would be told `Entry` and receive the layout of `Other`
                 = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Entry` if you mean a distinct type
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061

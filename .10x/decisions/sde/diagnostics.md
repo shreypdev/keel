@@ -53,7 +53,7 @@ server and are listed in `catalogue.rs`). Before: 10 codes showed "no compile-fa
 (E0011, E0022, E0033, E0050 to E0052, E0060 to E0062, E0064: four had no golden at all, six had one
 in a shape the page's parser did not read), E0022 had no constant, the schema-level messages of nine
 codes had no why or fix, the runtime message of E0062 was not in the shape and the CLI's 14 codes
-linked to anchors that did not exist. After: the page shows 44 codes and 133 real messages.
+linked to anchors that did not exist. After: the page shows 44 codes and 134 real messages (135 after the review added a case).
 
 E0050 to E0052 cannot be a compile error (a macro sees one item), so their tests are two kinds: message
 goldens for hand-built schemas (`undra-bindgen/tests/diagnostics.rs`) and the path a user takes, a core
@@ -159,3 +159,12 @@ undra-macros --lib`, `UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test diagnos
 test -p undra-ports --test ports_runtime`, `UPDATE_GOLDEN=1 cargo test -p undra-cli --test
 diagnostics`, then `node site/scripts/build-errors.mjs && node site/scripts/build-all.mjs && node
 site/scripts/check-links.mjs`.
+
+## After review
+
+The adversarial review (`.10x/reviews/2026-10-01-diagnostics-review.md`) changed three things described
+above: a record now carries `__UNDRA_FIELDS` only (the per-record `__undra_encode_field::<I>` cost about 16 %
+of `cargo check` on a records-only crate; the key function reads the field by name through a reference typed by
+the constant check, so a key naming no field is still the one E0008); the E0011 store probe is the length of an
+array in a signature, so `e0011_store_marker_without_store` reports E0011 before the E0560; and the catalogue
+and the page accept a compiler-only golden for E0022 alone. SPEC 16.3 describes the result.

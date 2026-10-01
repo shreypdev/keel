@@ -8,20 +8,6 @@ impl Point {
     /// The names of the fields, in declaration order (see `undra_meta::keys`).
     #[doc(hidden)]
     pub const __UNDRA_FIELDS: &'static [&'static str] = &["x", "y"];
-    /// Encodes the field at index `__I` of `__UNDRA_FIELDS`, as `Encode` does.
-    #[doc(hidden)]
-    #[inline(always)]
-    #[allow(unused_variables)]
-    pub fn __undra_encode_field<const __I: usize>(
-        &self,
-        __w: &mut ::undra_runtime::wire::Writer,
-    ) {
-        match __I {
-            0usize => ::undra_runtime::wire::Encode::encode(&self.x, __w),
-            1usize => ::undra_runtime::wire::Encode::encode(&self.y, __w),
-            _ => {}
-        }
-    }
 }
 #[automatically_derived]
 impl ::undra_runtime::wire::Encode for Point {

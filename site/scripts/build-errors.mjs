@@ -28,7 +28,8 @@ const spec = read(join(REPO, "docs/SPEC.md"));
 const sec = spec.slice(spec.indexOf("## 12. Diagnostics"), spec.indexOf("## 13."));
 const trigger = new Map();
 const raisedBy = new Map();
-for (const m of sec.matchAll(/^\| ([EC]\d{4}) \| ([^|]+?) \| (.+) \|$/gm)) {
+// Whitespace-tolerant, so a reflowed (padded) table reads the same.
+for (const m of sec.matchAll(/^\s*\|\s*([EC]\d{4})\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*\|\s*$/gm)) {
   trigger.set(m[1], m[3]);
   raisedBy.set(m[1], m[2]);
 }
@@ -77,11 +78,18 @@ const add = (message) => {
   seen.set(message.code, rows);
 };
 const ui = join(REPO, "crates", macros, "tests/ui");
+// The compiler's own message stands in for a branded one only for a code SPEC says rustc raises,
+// and only if it quotes the name the macro gave the thing rustc reports (how a reader finds the code).
+const compilerRaised = (c) => /^rustc\b/.test(raisedBy.get(c) ?? "");
 for (const f of readdirSync(ui).filter((x) => x.endsWith(".stderr")).sort()) {
   const text = read(join(ui, f));
   for (const message of messagesOf(text)) add(message);
   const named = /^(e\d{4})_/.exec(f);
-  if (named) nativeGolden.set(named[1].toUpperCase(), { file: f, text });
+  const c = named?.[1].toUpperCase();
+  if (c && compilerRaised(c)) {
+    if (!text.includes(`_error_${c}_`)) throw new Error(`${f}: the compiler's message of ${c} does not name the assertion that leads to the code`);
+    nativeGolden.set(c, { file: f, text });
+  }
 }
 /** Every `crates/<crate>/tests/golden/diagnostics/*.txt`: messages that no macro test can show. */
 const goldenDirs = readdirSync(join(REPO, "crates"))
@@ -105,6 +113,12 @@ const FAMILIES = [
 const md = (t) => t.split("`").map((part, i) => (i % 2 ? `<code>${esc(part)}</code>` : esc(part))).join("");
 const codes = [...trigger.keys()].sort();
 const short = (c) => meaning.get(c) ?? String(trigger.get(c)).split(/[;(]/)[0].trim();
+
+// The catalogue as parsed must hold every code the code table of the macros and the command line's
+// `Code` know: a SPEC table the regex above cannot read must fail here, not drop codes from the page.
+const known = [...meaning.keys()];
+const unread = known.filter((c) => !trigger.has(c));
+if (unread.length) throw new Error(`codes in diag.rs or error.rs that are not read from SPEC section 12: ${unread.join(", ")}`);
 
 // Every code of the catalogue shows a real message: a branded one, or the compiler's own.
 const bare = codes.filter((c) => c[0] === "E" && !seen.has(c) && !nativeGolden.has(c));

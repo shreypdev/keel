@@ -52,7 +52,7 @@
 //!   the store has computed fields (only your code knows how to derive them) or other
 //!   state without a `Default`.
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{Fields, ItemStruct};
@@ -186,16 +186,30 @@ fn peel_box(ty: &syn::Type) -> (&syn::Type, usize) {
     (ty, depth)
 }
 
+/// The key as the field it reads: `id`, `r#type` for a keyword, and for a key that is not an
+/// identifier at all a name no field has (the constant check of [`key_function`] has already
+/// failed for it, so the access is never type-checked against a real type).
+fn key_field(name: &str, span: Span) -> syn::Ident {
+    let mut ident = syn::parse_str::<syn::Ident>(name)
+        .or_else(|_| syn::parse_str::<syn::Ident>(&format!("r#{name}")))
+        .unwrap_or_else(|_| format_ident!("__undra_not_a_field_name"));
+    ident.set_span(span);
+    ident
+}
+
 /// The key function of a keyed list: `fn(&Item) -> u64`, the FNV-1a hash of the encoded key field.
 ///
 /// The macro cannot see the fields of `Item`, so the lookup of the key's name happens in constants
 /// in the user's crate: `Item::__UNDRA_FIELDS` (every `#[undra::api]` record has it) is searched
 /// by `undra_meta::keys::index_of`, and a key that names no field panics with a diagnostic that
-/// lists the fields there are (E0008), reported on the string where the key was written. The field
-/// itself is then encoded by index (`Item::__undra_encode_field::<I>`), so no `rustc` error about
-/// an unknown field, with its own suggestion, can follow. A type that is not a record has neither
-/// member: the trait declared in the function gives it empty ones, and the same diagnostic says
-/// it has no fields.
+/// lists the fields there are (E0008), reported on the string where the key was written. A type
+/// that is not a record has no such constant: the trait declared in the function gives it an empty
+/// one, and the same diagnostic says it has no fields.
+///
+/// The field is then read by name, through a reference whose type only exists when the check
+/// passed (`<__UndraGate<{ ok }> as __UndraPass<Item>>::Out`, which is `Item`): when the check
+/// fails the reference has no type, so `rustc` adds no "no field `idd`" error, with its own
+/// suggestion, after the diagnostic. Records therefore carry a constant and nothing else.
 fn key_function(root: &Root, signal: &SignalField, keyed: &KeyedList) -> TokenStream {
     let meta = root.meta();
     let wire = root.wire();
@@ -230,6 +244,7 @@ fn key_function(root: &Root, signal: &SignalField, keyed: &KeyedList) -> TokenSt
 
     let span = keyed.lit.span();
     let key_name = &keyed.name;
+    let field = key_field(key_name, span);
     let check = quote_spanned! {span=>
         const __UNDRA_FIELDS: &[&str] = <#core_ty>::__UNDRA_FIELDS;
         const __UNDRA_INDEX: usize = #meta::keys::index_of(__UNDRA_FIELDS, #key_name);
@@ -237,25 +252,33 @@ fn key_function(root: &Root, signal: &SignalField, keyed: &KeyedList) -> TokenSt
         const __UNDRA_MESSAGE: [u8; __UNDRA_MESSAGE_LEN] =
             #meta::keys::message::<__UNDRA_MESSAGE_LEN>(#before, __UNDRA_FIELDS, #after);
         const __UNDRA_MESSAGE_TEXT: &str = #meta::keys::as_str(&__UNDRA_MESSAGE);
-        const __UNDRA_KEY: usize = if __UNDRA_INDEX == usize::MAX {
+        const __UNDRA_KEY_IS_A_FIELD: bool = if __UNDRA_INDEX == usize::MAX {
             ::core::panic!("{}", __UNDRA_MESSAGE_TEXT)
         } else {
-            __UNDRA_INDEX
+            true
         };
     };
-    // The call that uses the constant has the string's span too, so rustc's "erroneous constant
-    // encountered" note lands where the error does and not on the list's item type.
+    // The statements that use the constant have the string's span too, so rustc's "erroneous
+    // constant encountered" note lands where the error does and not on the list's item type.
     let encode = quote_spanned! {span=>
-        #row.__undra_encode_field::<{ __UNDRA_KEY }>(&mut __buf);
+        let __row: &<__UndraGate<{ __UNDRA_KEY_IS_A_FIELD }> as __UndraPass<#core_ty>>::Out = #row;
+        #wire::Encode::encode(&__row.#field, &mut __buf);
     };
     quote_spanned! {item_ty.span()=>
-        #[allow(non_camel_case_types)]
+        #[allow(non_camel_case_types, dead_code)]
         fn #fn_name(__item: &#item_ty) -> u64 {
             trait __UndraKeyed {
                 const __UNDRA_FIELDS: &'static [&'static str] = &[];
-                fn __undra_encode_field<const __I: usize>(&self, __w: &mut #wire::Writer) {}
             }
             impl<__T: ?::core::marker::Sized> __UndraKeyed for __T {}
+            // `Out` is `T` only for `__UndraGate<true>`: see the doc of `key_function`.
+            struct __UndraGate<const __OK: bool>;
+            trait __UndraPass<__T: ?::core::marker::Sized> {
+                type Out: ?::core::marker::Sized;
+            }
+            impl<__T: ?::core::marker::Sized> __UndraPass<__T> for __UndraGate<true> {
+                type Out = __T;
+            }
             #check
             ::std::thread_local! {
                 static __UNDRA_KEY_BUF: ::core::cell::RefCell<#wire::Writer> =
@@ -967,8 +990,8 @@ mod tests {
             has(&out, "fn __undra_key_rows(__item: &Row) -> u64"),
             "{out}"
         );
-        // The key field is found by name in a constant (E0008 when there is none) and encoded by
-        // index, so no field access of the user's name reaches `rustc`.
+        // The key field is found by name in a constant (E0008 when there is none), and read
+        // through a reference typed by that check, so a missing field is not also `rustc`'s error.
         assert!(
             has(
                 &out,
@@ -980,7 +1003,14 @@ mod tests {
         assert!(
             has(
                 &out,
-                "__item.__undra_encode_field::<{ __UNDRA_KEY }>(&mut __buf)"
+                "let __row: &<__UndraGate<{ __UNDRA_KEY_IS_A_FIELD }> as __UndraPass<Row>>::Out = __item;"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(
+                &out,
+                "::undra::wire::Encode::encode(&__row.id, &mut __buf);"
             ),
             "{out}"
         );
@@ -1059,10 +1089,38 @@ mod tests {
             "{out}"
         );
         assert!(has(&out, "<Row>::__UNDRA_FIELDS"), "{out}");
-        assert!(has(&out, "(&** __item).__undra_encode_field"), "{out}");
+        assert!(
+            has(&out, "as __UndraPass<Row>>::Out = (&** __item);"),
+            "{out}"
+        );
         let out =
             expand("struct S { #[undra(key = \"id\")] rows: Signal<Vec<Box<Box<Row>>>> }").unwrap();
-        assert!(has(&out, "(&*** __item).__undra_encode_field"), "{out}");
+        assert!(
+            has(&out, "as __UndraPass<Row>>::Out = (&*** __item);"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_key_is_read_as_the_field_it_names() {
+        let read = |key: &str| {
+            let src = format!("struct S {{ #[undra(key = \"{key}\")] rows: Signal<Vec<Row>> }}");
+            expand(&src).unwrap()
+        };
+        assert!(has(&read("id"), "&__row.id,"), "a plain name");
+        assert!(
+            has(&read("type"), "&__row.r#type,"),
+            "a keyword is a raw identifier"
+        );
+        // Not an identifier: no field has the name, so the constant check fails first and the
+        // access never meets a real type.
+        for key in ["not a name", "self", "1st", ""] {
+            let out = read(key);
+            assert!(
+                has(&out, "&__row.__undra_not_a_field_name,"),
+                "{key}: {out}"
+            );
+        }
     }
 
     #[test]

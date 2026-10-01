@@ -68,6 +68,7 @@ fn spec_rows() -> BTreeMap<String, (String, String)> {
     let mut rows = BTreeMap::new();
     for line in spec[start..end].lines() {
         let cells: Vec<&str> = line
+            .trim()
             .trim_matches('|')
             .splitn(3, " | ")
             .map(str::trim)
@@ -256,22 +257,41 @@ fn goldens() -> Vec<(String, String)> {
     out
 }
 
-/// The codes the goldens show: a branded message of the code, or (E0022, whose message is the
-/// compiler's own) a ui test named after it.
+/// The codes whose message is the compiler's own (SPEC section 12 says "rustc, named by a macro"):
+/// their golden is the ui test named after the code, and it must quote the name the macro gave the
+/// thing `rustc` reports, which is how a reader finds the code. Every other code needs a branded
+/// message in a golden: a ui test named after a code proves nothing if its message is gone.
+const COMPILER_MESSAGES: &[(&str, &str)] = &[(
+    "E0022",
+    "_undra_error_E0022_the_future_of_an_async_method_must_be_Send",
+)];
+
+/// The codes the goldens show: a branded message of the code, or (the codes of
+/// [`COMPILER_MESSAGES`]) a ui test named after it that quotes the macro's name.
 fn golden_codes() -> BTreeMap<String, BTreeSet<String>> {
     let mut codes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for (name, text) in goldens() {
         for message in messages(&name, &text) {
             codes.entry(message.code).or_default().insert(name.clone());
         }
-        if let Some(file) = name.rsplit('/').next() {
-            let upper = file.to_uppercase();
-            if upper.starts_with('E') && is_code(&upper[..5]) && name.ends_with(".stderr") {
-                codes
-                    .entry(upper[..5].to_owned())
-                    .or_default()
-                    .insert(name.clone());
-            }
+        let Some(file) = name.rsplit('/').next() else {
+            continue;
+        };
+        let upper = file.to_uppercase();
+        let named = upper
+            .get(..5)
+            .filter(|c| is_code(c) && name.ends_with(".stderr"));
+        if let Some(&(code, quoted)) =
+            named.and_then(|c| COMPILER_MESSAGES.iter().find(|(k, _)| *k == c))
+        {
+            assert!(
+                text.contains(quoted),
+                "{name}: the compiler's message of {code} must quote `{quoted}`, the name that leads to the code"
+            );
+            codes
+                .entry(code.to_owned())
+                .or_default()
+                .insert(name.clone());
         }
     }
     codes
@@ -372,6 +392,13 @@ fn every_code_is_emitted_by_code_that_is_not_a_test() {
 fn every_code_has_a_golden_with_its_real_message() {
     let spec = spec_rows();
     let shown = golden_codes();
+    for (code, _) in COMPILER_MESSAGES {
+        let (raised_by, _) = &spec[*code];
+        assert!(
+            raised_by.starts_with("rustc"),
+            "{code} is listed as the compiler's message, but SPEC section 12 says it is raised by {raised_by}"
+        );
+    }
     for code in spec.keys().filter(|c| c.starts_with('E')) {
         assert!(
             shown.contains_key(code),
