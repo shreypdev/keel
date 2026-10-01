@@ -6,6 +6,7 @@
 mod common;
 
 use common::*;
+use undra::prelude::{DynRecord, DynValue, MigrateError};
 use undra::wire::Writer;
 use undra_meta::{FieldDef, Schema, TypeClosure, TypeRef};
 use undra_ports::fakes::{FailOn, Fakes, Matcher};
@@ -458,4 +459,112 @@ fn the_stats_section_reports_the_client() {
     ] {
         assert_eq!(q["persist"][counter], 0, "{counter}");
     }
+}
+
+// ----- a mutation hook ---------------------------------------------------------------------------
+
+/// The older `flaky_add` called its parameter `name`; this build calls it `title`. A rename is not
+/// structural: this hook converts it (ADR-037 decision 6).
+#[undra::migrate(mutation = "flaky_add")]
+fn flaky_add_from_name(old: &DynRecord) -> Result<DynRecord, MigrateError> {
+    let mut new = old.clone();
+    new.rename("name", "title");
+    Ok(new)
+}
+
+/// `flaky_add(name: String)`, as the older build declared it.
+fn older_flaky_add() -> TypeClosure {
+    let mut old = schema();
+    let def = old
+        .queries
+        .iter_mut()
+        .find(|q| q.query_id == FlakyAddMutation::MUTATION_ID)
+        .unwrap();
+    def.params[0].name = "name".into();
+    old.mutation_closure(FlakyAddMutation::MUTATION_ID).unwrap()
+}
+
+fn flaky_item(fingerprint: u64, key: u8) -> (u32, u64, Vec<u8>, Uuid) {
+    (
+        FlakyAddMutation::MUTATION_ID,
+        fingerprint,
+        ("milk".to_owned(),).encode_to_vec(),
+        Uuid([key; 16]),
+    )
+}
+
+fn write_item(w: &mut Writer, item: &(u32, u64, Vec<u8>, Uuid)) {
+    w.write_u32(item.0);
+    w.write_u64(item.1);
+    w.write_bytes(&item.2);
+    item.3.encode(w);
+}
+
+#[test]
+fn a_mutation_hook_migrates_what_is_not_structural() {
+    let closure = older_flaky_add();
+    let fakes = Fakes::new();
+    store_closure(&fakes, &closure);
+    let mut w = Writer::new();
+    w.write_u16(2);
+    w.write_u64(0xdead_beef);
+    w.write_len(1);
+    write_item(&mut w, &flaky_item(closure.fingerprint(), 3));
+    fakes.kv.insert(QUEUE_KEY, w.into_vec());
+    fakes
+        .http
+        .respond(Matcher::post(format!("{API}/flaky")), ok(&todo(1, "milk")));
+    let h = Harness::with_fakes(fakes);
+    h.settle();
+    let posts: Vec<_> = h
+        .fakes
+        .http
+        .calls()
+        .into_iter()
+        .filter(|r| r.url.ends_with("/flaky"))
+        .collect();
+    assert_eq!(posts.len(), 1, "replayed through the hook");
+    assert_eq!(posts[0].body.as_ref().unwrap().0, b"milk");
+    assert_eq!(query_stats(&h)["persist"]["migrated"], 1);
+}
+
+/// A dead letter an older client could not migrate (it had no hook) is retried by this build,
+/// which has one: it goes back to the queue and replays.
+#[test]
+fn retrying_a_dead_letter_runs_the_hooks_again() {
+    let closure = older_flaky_add();
+    let fakes = Fakes::new();
+    store_closure(&fakes, &closure);
+    let mut w = Writer::new();
+    w.write_u16(2);
+    w.write_u64(0xdead_beef);
+    w.write_len(1);
+    write_item(&mut w, &flaky_item(closure.fingerprint(), 4));
+    w.write_str("its input does not migrate to this build");
+    fakes.kv.insert(undra_query::DEAD_LETTER_KEY, w.into_vec());
+    fakes
+        .http
+        .respond(Matcher::post(format!("{API}/flaky")), ok(&todo(1, "milk")));
+    let h = Harness::with_fakes(fakes);
+    h.settle();
+    let dead = h.query().dead_letters();
+    assert_eq!(dead.len(), 1);
+    assert_eq!(
+        dead[0].params.get("name"),
+        Some(&DynValue::String("milk".into())),
+        "decoded with the description it was written with"
+    );
+    assert_eq!(h.query().retry_dead_letter(Uuid([4; 16])), Ok(()));
+    h.t.run_pending();
+    assert!(h.query().dead_letters().is_empty());
+    assert_eq!(
+        h.fakes
+            .http
+            .calls()
+            .into_iter()
+            .filter(|r| r.url.ends_with("/flaky"))
+            .count(),
+        1
+    );
+    assert!(!h.fakes.kv.contains_key(undra_query::DEAD_LETTER_KEY));
 }
