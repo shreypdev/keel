@@ -261,9 +261,9 @@ room, and the deviations:
   or zeros, leaves it detectable, and the port answers unavailable after an ERROR naming the cause, so the proxy's
   E0062 traps loudly. The TypeScript import throws internally and its guard writes nothing.
 * **The bridges' untyped-throw path** logs at ERROR naming the port, the method and the adapter (Swift, Kotlin,
-  TypeScript). Kotlin also accepts a standard error type thrown raw (additive). TypeScript types `StorageError`, and
-  the raw platform errors it recognises (`QuotaExceededError`, `ENOSPC` → `Full`; `SecurityError` → `Unavailable`);
-  any other throw stays the bug path. `browserAdapters()` registers `Fs` anyway too (answering `Unavailable("needs the
+  TypeScript). Kotlin also accepts a standard error type thrown raw (additive). TypeScript's ports type only `StorageError` and
+  `FsError` instances; its built-in adapters map raw platform errors themselves (`StorageError.from`, `fsErrorFrom`:
+  `QuotaExceededError`, `ENOSPC` → `Full`; `SecurityError` → `Unavailable`), and any other throw stays the bug path. `browserAdapters()` registers `Fs` anyway too (answering `Unavailable("needs the
   origin private file system")`), like `Kv` and `SecureStore`. Android registers no stand-in storage ports: an adapter
   installed after load would otherwise end hydration's wait for one. Swift maps more Keychain statuses than the table
   (`errSecAuthFailed` → `Locked`, `errSecDecode` → `Corrupt`, `errSecNotAvailable`/`errSecMissingEntitlement` →
@@ -278,6 +278,10 @@ room, and the deviations:
   3.3). A port registered on the host after load sends `ports`. Explicit `adapters.clock`/`rng`/`timer` in worker mode
   log a warning once rather than fail `load` (the contract harness passes `clock`); `load`'s WebCrypto check is
   skipped in `wasm-main` when `adapters.rng` is given (the app supplies its own source).
+* **`LoadOptions.recovery` takes `crashRecovery(options?)`**, not `true | { .. }` (decision 3.2): an object the app
+  imports, so a core loaded without recovery ships none of its code. ADR-052's gate on the hello-world JavaScript
+  runtime (26 KB gzipped) measures what an app's loader imports with lazy imports folded in; recovery is a layer over the
+  core's transport, and the hello runtime measures 25,906 bytes (29,788 with recovery built into `UndraCore`).
 * **Snapshots are taken after the core emits a change-set**, where the core runs, not after a main-thread drain
   (decision 3.3): that is what lets the worker keep its own.
 * **The panic report.** ADR-046 is not implemented yet, so `onPanic` receives a minimal `UndraPanicReport { message,

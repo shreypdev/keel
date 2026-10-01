@@ -225,7 +225,7 @@ nothing from the text of a message.
 * TypeScript has an abort path the others spell differently (`AbortSignal` versus task or coroutine cancellation), and
   its methods are all `Promise`s: a command's promise resolves rather than being `void`.
 * A wasm core cannot contain a panic (SPEC 7: `panic=abort`): the call fails as `unavailable` (reason `trap`) and the
-  core is closed, where a native core answers `panicked` and keeps working. **With `recovery` on** (TypeScript,
+  core is closed, where a native core answers `panicked` and keeps working. **With `recovery: crashRecovery()`** (TypeScript,
   ADR-049, SPEC 17.1) the core is restarted from its last snapshot instead: the call that trapped, every other call and
   stream in flight, and every call made until the restart completes fail as `unavailable` with the transport reason
   `restarted` (they may or may not have run, and nothing retries them); `onPanic` gets the panic report first, then

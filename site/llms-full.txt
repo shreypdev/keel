@@ -755,14 +755,16 @@ A synchronous port registered on the main thread in this mode is refused when th
 
 ## Recovering from a crash
 
-A native core contains a panic and keeps going. A wasm core cannot: the panic traps the instance. With `recovery` on, the runtime keeps a snapshot of your stores (at most once a second while they change, in an idle moment, in the worker in worker mode) and restarts from it:
+A native core contains a panic and keeps going. A wasm core cannot: the panic traps the instance. With `recovery: crashRecovery()` (imported from `@undra/runtime`, so an app without it ships none of this code), the runtime keeps a snapshot of your stores (at most once a second while they change, in an idle moment, in the worker in worker mode) and restarts from it:
 
 ts
 
 ```ts
+import { UndraCore, crashRecovery } from "@undra/runtime";
+
 const core = await UndraCore.load({
   mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.schemaHash,
-  recovery: true, // or { snapshotEveryMs, maxSnapshotBytes, maxRestarts, perMs }
+  recovery: crashRecovery(), // or crashRecovery({ snapshotEveryMs, maxSnapshotBytes, maxRestarts, perMs })
   onPanic: (report) => crashReporter.send(report),
   onCoreRestarted: (e) => configureRemote(core, settings), // re-apply core state that is not in a store
 });
