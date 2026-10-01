@@ -12,6 +12,7 @@ export default defineConfig({
       // The more specific alias first: the first match wins, and `@undra/runtime` would claim the subpath too.
       "@undra/runtime/worker": at("../../runtimes/ts/@undra/runtime/src/worker.ts"),
       "@undra/runtime": at("../../runtimes/ts/@undra/runtime/src/index.ts"),
+      "@undra/testkit": at("../../runtimes/ts/@undra/testkit/src/index.ts"),
       "@playground/core": at("../../examples/playground/generated/ts/src/index.ts"),
     },
   },

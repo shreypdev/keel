@@ -16,13 +16,16 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@undra/runtime/worker": ["../../runtimes/ts/@undra/runtime/src/worker.ts"],
-      "@undra/runtime": ["../../runtimes/ts/@undra/runtime/src/index.ts"],
-      "@undra/testkit": ["../../runtimes/ts/@undra/testkit/src/index.ts"],
-      "@playground/core": ["../../examples/playground/generated/ts/src/index.ts"]
+      "@undra/runtime": ["../runtime/src/index.ts"],
+      "@playground/core": ["../../../../examples/playground/generated/ts/src/index.ts"],
+      "vitest": ["./node_modules/vitest"],
+      "vitest/*": ["./node_modules/vitest/*"]
     }
   },
   "include": ["src", "test", "vitest.config.ts"]

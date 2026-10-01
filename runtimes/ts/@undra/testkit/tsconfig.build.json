@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@undra/runtime": ["../runtime/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
