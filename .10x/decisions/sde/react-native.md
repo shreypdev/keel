@@ -54,7 +54,8 @@ Release core (`undra build -C examples/playground --platform rn --release`), rel
   8.2 ms; Bench screen 10/10. Debug core: the same 10/10.
 * Android emulator (arm64, API 35, a dedicated AVD `undra-rn`: the `undra` AVD was in use by another
   agent): `CHECKS 10/10`, a to-do typed through the UI, list operations, the stream switch updating
-  rows, native vsync source confirmed.
+  rows, native vsync source confirmed. A debug build on Metro reloaded mid-benchmark: the core was
+  shut down with the runtime and a fresh one started in the same process (`CHECKS 10/10` twice).
 Numbers: ADR-038, Consequences.
 
 ## Deviations and notes

@@ -127,11 +127,18 @@ mod tests {
 
     #[test]
     fn the_podspec_vendors_and_force_loads_the_xcframework() {
-        let spec = podspec("playground", "0.1", "17.0", &Slices::of(&["arm64".to_owned()]));
+        let spec = podspec(
+            "playground",
+            "0.1",
+            "17.0",
+            &Slices::of(&["arm64".to_owned()]),
+        );
         assert!(spec.contains(r#"s.name                = "UndraCore""#));
         assert!(spec.contains(r#"s.vendored_frameworks = "UndraCore.xcframework""#));
         assert!(spec.contains(r#"{ :ios => "17.0" }"#));
-        assert!(spec.contains(r#""UNDRA_CORE_SLICE[sdk=iphonesimulator*]" => "ios-arm64-simulator""#));
+        assert!(
+            spec.contains(r#""UNDRA_CORE_SLICE[sdk=iphonesimulator*]" => "ios-arm64-simulator""#)
+        );
         assert!(spec.contains(r#""UNDRA_CORE_SLICE[sdk=iphoneos*]" => "ios-arm64""#));
         assert!(spec.contains(
             r##"-force_load \"#{File.join(__dir__, 'UndraCore.xcframework')}/$(UNDRA_CORE_SLICE)/libundra_core.a\""##

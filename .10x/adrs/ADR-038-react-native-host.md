@@ -236,34 +236,38 @@ with `undra_buf_free`.
     panic containment) by the playground's React Native app: ten on-device checks (RN01 to RN10: sync
     and async calls, typed errors, panic containment, cancellation, a stream with backpressure,
     read-your-writes, a keyed patch on 10,000 rows, the native Clock and Timer, the schema gate) pass on
-    the iPhone 17 Pro simulator and on the Android emulator.
+    the iPhone 17 Pro simulator and on the Android emulator; on Android, a JavaScript reload in the
+    middle of the benchmarks (a debug build on Metro) tore the core down with the runtime and the next
+    `loadNative` started a fresh one in the same process (10/10 again).
 * **Measurements** (release core, release app with Hermes bytecode; Apple M-series Mac, iPhone 17 Pro
-  simulator on iOS 26.5 and an arm64 Android 15 emulator with 2 GB and a software GPU, on a shared
-  machine; medians):
+  simulator on iOS 26.5 and an arm64 Android 15 emulator with 2 GB and a software GPU, on a machine
+  shared with other agents' builds and emulators; medians, the range over three runs each, the Android
+  emulator's widest because of that load):
 
   | Row | iOS simulator | Android emulator |
   |---|---|---|
-  | JSI host function, the floor | 23 ns | 32 ns |
-  | Sync call, prebuilt payload straight to `__undraNative.callSync` (JSI, the core, the reply `ArrayBuffer`) | 0.23 us | 0.71 us |
-  | Sync call through `UndraCore.callSync` (`Bench.bench_add`) | 6.0 to 8.0 us | 15 to 18 us |
-  | of which `encodeCall` (a new `UndraWriter` per call, in Hermes) | 4.2 us | 12.0 us |
-  | `await bench.benchAdd(1, 2)` (the generated method: call, inbox reply, promise) | 15 to 20 us | 32 to 44 us |
-  | 1 KB record round trip, `callSync`, decoded | 9.1 to 12.4 us | 17.7 to 22.9 us |
-  | 1 KB record round trip, `await bench.benchEchoBytes` | 17.8 to 27.1 us | 27.1 to 42.6 us |
-  | 1,667 one-op keyed patches per frame on 10,000 rows: the one drain (mirror) | 5.5 to 6.4 ms | 8.2 to 12.2 ms |
-  | the same 1,667 change-sets parsed on arrival (`mirror.enqueue`) | 7.8 to 9.4 ms | 12.7 to 19.5 ms |
-  | 1,667 `BigList.updateAt` calls through JSI in one turn, then their one drain | 38 to 40 ms (23 us a call), drain 6.2 ms | 84 to 100 ms (50 to 60 us a call), drain 12 to 15 ms |
-  | Drain interval under a 10,000/s firehose the core generates (Stress) | 16.66 ms, 123 drains in 2.1 s, 83x merged | 16.8 to 17.1 ms, 114 to 116 drains, 88 to 90x merged |
+  | JSI host function, the floor | 17 to 23 ns | 18 to 32 ns |
+  | Sync call, prebuilt payload straight to `__undraNative.callSync` (JSI, the core, the reply `ArrayBuffer`) | 0.19 to 0.23 us | 0.36 to 0.71 us |
+  | Sync call through `UndraCore.callSync` (`Bench.bench_add`) | 5.7 to 8.0 us | 6.2 to 18 us |
+  | of which `encodeCall` (a new `UndraWriter` per call, in Hermes) | 4.1 to 4.2 us | 4.6 to 12 us |
+  | `await bench.benchAdd(1, 2)` (the generated method: call, inbox reply, promise) | 15 to 20 us | 17 to 44 us |
+  | 1 KB record round trip, `callSync`, decoded | 8.9 to 12.4 us | 9.9 to 23 us |
+  | 1 KB record round trip, `await bench.benchEchoBytes` | 18 to 27 us | 20 to 43 us |
+  | 1,667 one-op keyed patches per frame on 10,000 rows: the one drain (mirror) | 5.3 to 6.4 ms | 5.4 to 12 ms |
+  | the same 1,667 change-sets parsed on arrival (`mirror.enqueue`) | 7.8 to 9.4 ms | 8.2 to 19.5 ms |
+  | 1,667 `BigList.updateAt` calls through JSI in one turn, then their one drain | 39 to 40 ms (23 to 24 us a call), drain 6.2 to 6.5 ms | 41 to 100 ms (25 to 60 us a call), drain 7.5 to 15 ms |
+  | Drain interval under a 10,000/s firehose the core generates (Stress) | 16.66 ms, 123 drains in 2.1 s, 83x merged | 16.7 to 17.1 ms, 114 to 120 drains, 85 to 90x merged |
   | `requestAnimationFrame` interval | 16.67 ms | 16.6 to 17.0 ms |
 
-  The boundary itself is cheap: 0.23 us for a synchronous call through JSI and the core on the
+  The boundary itself is cheap: about 0.2 us for a synchronous call through JSI and the core on the
   simulator, against 50 ns for the C ABI alone on the Mac (ADR-028). What a React Native app pays per
   call is the TypeScript runtime's JavaScript under Hermes, which interprets bytecode: building the
   call payload alone is 4 us (a fresh `UndraWriter` and a `bigint` handle per call). The mirror's
   per-frame work at 100,000 patches a second is 13 to 16 ms on the simulator against 0.3 to 0.5 ms on
   V8 (ADR-031), so on React Native that rate is past the frame budget; 10,000 a second is not. Both are
   costs of `@undra/runtime`'s JavaScript under an interpreter, a follow-up for that package (a reused
-  writer in `callSync`, a cheaper change-set parse), not of this host.
+  writer in `callSync`, a cheaper change-set parse; the binding call path is Amendment D's E4), not of
+  this host.
 * Limits, documented in `docs/REACT_NATIVE.md`: one core per process until ADR-044; JS-implemented
   synchronous ports are reachable only from calls made on the JS thread; `Clock`, `Rng` and `Timer`
   are native and not overridable from JavaScript; there is no default `Kv`/`SecureStore`/`Fs` adapter in
