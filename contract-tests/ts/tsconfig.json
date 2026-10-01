@@ -21,7 +21,9 @@
     "paths": {
       "@undra/runtime/worker": ["../../runtimes/ts/@undra/runtime/src/worker.ts"],
       "@undra/runtime": ["../../runtimes/ts/@undra/runtime/src/index.ts"],
-      "@playground/core": ["../../examples/playground/generated/ts/src/index.ts"]
+      "@playground/core": ["../../examples/playground/generated/ts/src/index.ts"],
+      "@two-cores/a": ["../../examples/two-cores/a/generated/ts/src/index.ts"],
+      "@two-cores/b": ["../../examples/two-cores/b/generated/ts/src/index.ts"]
     }
   },
   "include": ["src", "test", "vitest.config.ts"]

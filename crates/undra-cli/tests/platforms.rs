@@ -51,9 +51,10 @@ fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
         !stderr.to_ascii_lowercase().contains("android"),
         "an iOS build says nothing about Android:\n{stderr}"
     );
-    let xcframework = project.root.join("build/ios/UndraCore.xcframework");
+    // Named after the core's namespace, `ios_build_core` (ADR-044).
+    let xcframework = project.root.join("build/ios/IosBuildCore.xcframework");
     for slice in ["ios-arm64", "ios-arm64-simulator"] {
-        let lib = xcframework.join(slice).join("libundra_core.a");
+        let lib = xcframework.join(slice).join("libios_build_core.a");
         assert!(lib.is_file(), "{slice} has no library:\n{stdout}");
         // A release static library of the template core: a few MB, LTO'd into one object.
         let bytes = size(&lib);
@@ -63,8 +64,17 @@ fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
         );
         eprintln!("ios {slice}: {bytes} bytes");
     }
-    // Headerless, on purpose: the Swift runtime's UndraFFI target already declares the module.
-    assert!(!xcframework.join("ios-arm64/Headers").exists());
+    // The core's header, without a module map: the generated Swift package declares the module.
+    assert!(
+        xcframework
+            .join("ios-arm64/Headers/ios_build_core_undra.h")
+            .is_file()
+    );
+    assert!(
+        !xcframework
+            .join("ios-arm64/Headers/module.modulemap")
+            .exists()
+    );
     assert!(
         stdout.contains("ios xcframework") && stdout.contains("budget 900 KB"),
         "{stdout}"
@@ -86,8 +96,6 @@ fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
             ])
             .arg(derived.path())
             .arg("build")
-            // The runtime package ships link-time stand-ins for the core; this switches them off.
-            .env("UNDRA_LINK_CORE", "1")
             // The build phase of the project runs `undra build` (it finds `undra` on PATH).
             .env("PATH", path_with_undra())
             .output()
@@ -134,7 +142,7 @@ fn android_builds_a_16kb_aligned_library_per_abi() {
             .root
             .join("build/android/jniLibs")
             .join(abi)
-            .join("libundra_core.so");
+            .join("libandroidbuild_core.so");
         assert!(lib.is_file(), "{abi}: no library\n{stdout}");
         let bytes = size(&lib);
         assert!(
@@ -144,7 +152,7 @@ fn android_builds_a_16kb_aligned_library_per_abi() {
         eprintln!("android {abi}: {bytes} bytes");
     }
     assert!(stdout.contains("16 KB aligned"), "{stdout}");
-    // Only libundra_core.so is shipped (cargo-ndk also copies the undra-ffi library it built).
+    // Only the core's library is shipped (cargo-ndk also copies what else it built).
     assert!(
         !project
             .root
@@ -237,7 +245,7 @@ fn a_debug_android_build_hints_at_release_and_lands_where_the_gradle_app_looks()
             .root
             .join("android/build/android/jniLibs")
             .join(abi)
-            .join("libundra_core.so");
+            .join("libandroidwiring_core.so");
         assert!(copy.is_file(), "{abi}: nothing at {}", copy.display());
         assert_eq!(
             size(&copy),
@@ -246,7 +254,7 @@ fn a_debug_android_build_hints_at_release_and_lands_where_the_gradle_app_looks()
                     .root
                     .join("build/android/jniLibs")
                     .join(abi)
-                    .join("libundra_core.so")
+                    .join("libandroidwiring_core.so")
             )
         );
     }

@@ -448,14 +448,14 @@ final class CoreCallTests: XCTestCase {
     // MARK: The shared core
 
     func testSharedIsEmptyUntilACoreIsLoaded() {
-        // No test in this target loads a real core, so nothing is shared.
+        // Every test in this target that loads a core (over a fake table) shuts it down again.
         XCTAssertNil(UndraCore.current)
     }
 
-    func testLoadingTheLinkTimeStubFailsWithAnABIMismatch() throws {
-        try XCTSkipUnless(InprocTransport.linkedABIVersion == 0, "the real core is linked")
+    func testLoadingInProcessWithoutACoreTableFails() throws {
+        // The runtime links no core of its own (ADR-044): an in-process load needs the table.
         XCTAssertThrowsError(try UndraCore.load(.inproc(adapters: Adapters.none, expectedSchemaHash: 1))) { error in
-            XCTAssertEqual(error as? UndraLoadError, UndraLoadError.abiMismatch(expected: 1, got: 0))
+            XCTAssertEqual(error as? UndraLoadError, UndraLoadError.missingCoreTable)
         }
         XCTAssertNil(UndraCore.current)
     }

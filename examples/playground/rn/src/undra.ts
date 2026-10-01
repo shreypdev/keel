@@ -1,6 +1,6 @@
-import { loadNative, nativePlatformDefaults, reactNativeHttp, type NativeTransport } from '@undra/react-native';
+import { installNative, loadNative, nativePlatformDefaults, reactNativeHttp, type NativeTransport } from '@undra/react-native';
 import type { HttpAdapter, UndraCore } from '@undra/runtime';
-import { BigList, Device, Todos, UndraIds, kvGet, kvPut } from '@playground/core';
+import { BigList, Device, Todos, UndraPlaygroundCore, kvGet, kvPut } from '@playground/core';
 
 /** What the screens share: the core and its long-lived stores. */
 export interface Playground {
@@ -41,21 +41,24 @@ function taggedHttp(inner: HttpAdapter = reactNativeHttp()): HttpAdapter {
 const text = new TextEncoder();
 const fromBytes = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
-/** Loads the native core (it is linked into the app) and creates the stores the screens show. */
+/**
+ * Loads the native core `playground_core` (its pod, PlaygroundCore, on iOS; libplayground_core.so on
+ * Android) through the generated entry, so it is `UndraPlaygroundCore.core`, and creates the stores
+ * the screens show.
+ */
 export async function startUndra(log: Log): Promise<Playground> {
   const started = performance.now();
   const nonce = `${Date.now().toString(36)}${Math.floor(Math.random() * 0xffffff).toString(36)}`;
-  const core = await loadNative({
-    expectedSchemaHash: UndraIds.schemaHash,
+  const core = await loadNative(UndraPlaygroundCore, {
     adapters: { http: taggedHttp() },
     onError: error => log(`UNDRA-RN error ${String(error)}`),
   });
   log(
-    `UNDRA-RN loaded mode=${core.mode} platform=${core.hello.platform} schema=0x${core.hello.schemaHash.toString(16)} hermes=${String(
+    `UNDRA-RN loaded core=${UndraPlaygroundCore.namespace} mode=${core.mode} platform=${core.hello.platform} schema=0x${core.hello.schemaHash.toString(16)} abi=${core.hello.undraVersion} hermes=${String(
       typeof (globalThis as { HermesInternal?: unknown }).HermesInternal === 'object',
     )}`,
   );
-  const defaults = nativePlatformDefaults();
+  const defaults = nativePlatformDefaults(UndraPlaygroundCore.namespace);
   log(`UNDRA-RN defaults native=${defaults.ports.length} kv=${defaults.kv ?? '-'} fs=${defaults.fs ?? '-'} secure=${defaults.secureStore ?? '-'}${defaults.error ? ` error=${defaults.error}` : ''}`);
 
   // What the previous launch left in Kv, then this launch's token: the device script kills the app between two
@@ -84,6 +87,5 @@ export async function startUndra(log: Log): Promise<Playground> {
 
 /** The transport's native counters, when the core is the native one. */
 export function nativeCounters(core: UndraCore): ReturnType<NativeTransport['counters']> | null {
-  const native = (globalThis as { __undraNative?: { hostCounters(): ReturnType<NativeTransport['counters']> } }).__undraNative;
-  return core.mode === 'native' && native !== undefined ? native.hostCounters() : null;
+  return core.mode === 'native' ? installNative(UndraPlaygroundCore.namespace).hostCounters() : null;
 }

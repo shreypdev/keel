@@ -20,8 +20,12 @@ use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use undra_ffi::{
-    UndraBuf, init_code, undra_init, undra_port_register, undra_port_reply, undra_shutdown,
+use undra_ffi::{UndraBuf, init_code};
+
+#[path = "common/table.rs"]
+mod table;
+use table::{
+    undra_buf_free, undra_init, undra_port_register, undra_port_reply, undra_shutdown,
     undra_stats_json,
 };
 
@@ -272,7 +276,7 @@ fn replacing_a_port_waits_for_the_old_callback() {
 
 #[test]
 fn shutdown_waits_for_running_port_callbacks() {
-    the_host_may_free_user_once_removal_returns(|| undra_shutdown());
+    the_host_may_free_user_once_removal_returns(undra_shutdown);
 }
 
 /// Four threads race registrations against callbacks: a callback that starts after the
@@ -507,6 +511,6 @@ fn a_port_registered_before_init_is_served_after_it() {
     // SAFETY: a buffer the core returned, read and freed once.
     unsafe {
         assert!(stats.as_slice().starts_with(b"{"));
-        undra_ffi::undra_buf_free(stats);
+        undra_buf_free(stats);
     }
 }

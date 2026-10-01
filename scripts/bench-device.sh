@@ -153,7 +153,6 @@ bench_ios() {
       const type = (x.deviceTypeIdentifier ?? "").replace(/.*SimDeviceType\./, "").replace(/-/g, " ");
       console.log([type || x.name, x.state].join("|"));
     }' "$WORK/simctl.json" "$udid")"
-  export UNDRA_LINK_CORE=1
   local derived="$PROJECT/ios/DerivedData/bench" team=()
   if [ -n "$info" ]; then
     kind=simulator
@@ -313,7 +312,7 @@ bench_android() {
       battery="$("$ADB" -s "$serial" shell dumpsys battery | tr -d '\r' | grep -E "level|temperature|status" | tr -s ' ' | tr '\n' ';')"
     fi
     finalize_run "$WORK/raw-$n.json" "$slug_" "$kind" "$label" "$(run_tag "$n")" \
-      "release (LTO fat), libundra_core.so" "benchmark build type (release, not debuggable); ART compile filter speed; instrumented test" "$l1" "$l2" "${battery:+battery after the run: $battery}"
+      "release (LTO fat), libplayground_core.so" "benchmark build type (release, not debuggable); ART compile filter speed; instrumented test" "$l1" "$l2" "${battery:+battery after the run: $battery}"
   done
   [ "$kind" != device ] || "$ADB" -s "$serial" shell svc power stayon false >/dev/null 2>&1 || true
 }

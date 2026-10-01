@@ -1,13 +1,14 @@
 //! Getting the schema: from a built core library (`dlopen`) or from a JSON file.
 //!
 //! The schema is the only truth (constitution R1): everything `undra bindgen` writes derives from
-//! it. `docs/SPEC.md` section 13 says how to get it: build the core as a cdylib, `dlopen` it, and
-//! call `undra_schema_json`. This is the only module of the CLI that uses `unsafe`: calling into a
-//! library loaded at run time cannot be checked by the compiler, so each call says why it is sound.
+//! it. `docs/SPEC.md` section 13 says how to get it: build the core as a cdylib, `dlopen` it, look
+//! up its one export `<namespace>_undra_api` (C ABI version 2, ADR-044), and call the table's
+//! `schema_json`. This is the only module of the CLI that uses `unsafe`: calling into a library
+//! loaded at run time cannot be checked by the compiler, so each call says why it is sound.
 //!
 //! The library returns the whole schema, doc comments and labels included (`Schema::to_json`,
 //! ADR-050), so `undra bindgen --docs` needs no second build. The hash does not cover docs, so the
-//! loader checks the library's own `undra_schema_hash` against the hash of the JSON it parsed.
+//! loader checks the table's own `schema_hash` against the hash of the JSON it parsed.
 //! [`parse_schema_json`] accepts that, the full JSON of `Schema::to_json_pretty` (what a
 //! `schema.json` file holds) and the label-free canonical form (a core built before the export
 //! carried docs), adding the labels the canonical form leaves out. A core of that age still loads,
@@ -16,16 +17,17 @@
 
 #![allow(unsafe_code)]
 
+use std::ffi::{CStr, c_char};
 use std::path::Path;
 
 use undra_meta::Schema;
 
 use crate::error::{CliError, Code, Result};
 
-/// The C ABI version this CLI speaks (`undra_abi_version`).
-pub const ABI_VERSION: u32 = 1;
+/// The C ABI version this CLI speaks (the `abi_version` of a core's `UndraApi` table).
+pub const ABI_VERSION: u32 = 2;
 
-/// The `UndraBuf` of SPEC 6: a buffer the core owns, freed with `undra_buf_free`.
+/// The `UndraBuf` of SPEC 6: a buffer the core owns, freed with the table's `buf_free`.
 #[repr(C)]
 struct UndraBuf {
     ptr: *mut u8,
@@ -33,22 +35,136 @@ struct UndraBuf {
     cap: u32,
 }
 
-type AbiVersionFn = unsafe extern "C" fn() -> u32;
-type SchemaHashFn = unsafe extern "C" fn() -> u64;
-type SchemaJsonFn = unsafe extern "C" fn() -> UndraBuf;
-type BufFreeFn = unsafe extern "C" fn(UndraBuf);
+/// The head of the `UndraApi` table of `undra.h` (version 2), as far as the loader reads it: the
+/// two constants, the namespace and the first entry, then the rest of the 17 entries, whose
+/// layout is pinned by `undra-ffi`'s tests. Only `schema_json` and `buf_free` are called. The two
+/// are `Option`s (a null function pointer is `None`, the layout is the C one), so a damaged table
+/// is refused instead of being an invalid Rust value.
+#[repr(C)]
+struct UndraApi {
+    abi_version: u32,
+    size: u32,
+    schema_hash: u64,
+    name_space: *const c_char,
+    schema_json: Option<unsafe extern "C" fn() -> UndraBuf>,
+    /// `init` .. `stats_json`: never called here.
+    _entries: [*const (); 15],
+    buf_free: Option<unsafe extern "C" fn(UndraBuf)>,
+}
 
-/// Loads the core library at `library` and reads its schema. `crate_name` labels the result: the
-/// library only knows itself as `undra-core`. With `docs` the schema keeps the doc comments the
-/// library exports; without, they are dropped (generated bindings carry none by default).
+/// The table `api` that `symbol` of `library` returned, checked the way `undra.h` asks a host to:
+/// not null, `abi_version` first (nothing else of a table of another version is read), then a
+/// `size` of at least this loader's view, then a namespace equal to `namespace` and the two entries
+/// the loader calls.
+///
+/// # Safety
+///
+/// `api` is null or points to at least 8 readable bytes, and to `size` readable bytes when they
+/// start with `abi_version == 2`, valid for the call (a core's static table, in a library that is
+/// never unloaded); a non-null `name_space` of such a table points to a NUL-terminated string.
+unsafe fn checked_table(
+    api: *const UndraApi,
+    namespace: &str,
+    symbol: &str,
+    library: &Path,
+) -> Result<Table> {
+    let fail = |what: String, why: &str, fix: &str| CliError::new(Code::Schema, what, why, fix);
+    let rebuild = "rebuild the core with `undra build --platform host`";
+    if api.is_null() {
+        return Err(fail(
+            format!("`{symbol}` of {} returned no table", library.display()),
+            "a core's entry returns its C ABI table, never null",
+            rebuild,
+        ));
+    }
+    // SAFETY: `abi_version` is the first field of every version of the table, and the caller
+    // promises those bytes; read it before trusting any other field.
+    let abi = unsafe { (*api).abi_version };
+    if abi != ABI_VERSION {
+        return Err(fail(
+            format!(
+                "the core library speaks C ABI version {abi}; this undra-cli speaks {ABI_VERSION}"
+            ),
+            "the two were built from different Undra releases and cannot talk to each other",
+            "use the undra-cli that matches the `undra` version of the core (`cargo install undra-cli --version <undra version>`)",
+        ));
+    }
+    // SAFETY: a version 2 table: `size` is its second field, within the first 8 bytes.
+    let size = unsafe { (*api).size } as usize;
+    if size < std::mem::size_of::<UndraApi>() {
+        return Err(fail(
+            format!(
+                "the C ABI table of {} is {size} bytes, too small for version 2",
+                library.display()
+            ),
+            "the library's table does not have the layout undra.h version 2 declares",
+            "rebuild the core with the `undra` version of this undra-cli",
+        ));
+    }
+    // SAFETY: the table has at least the bytes of `UndraApi` (checked above) and outlives this
+    // call; every bit pattern of its fields is a valid value (integers, raw pointers, `Option<fn>`).
+    let api = unsafe { &*api };
+    if api.name_space.is_null() {
+        return Err(fail(
+            format!("`{symbol}` of {} has no namespace", library.display()),
+            "a core's table names its namespace (undra.h)",
+            rebuild,
+        ));
+    }
+    // SAFETY: a non-null `name_space` is a static NUL-terminated string (undra.h; the caller).
+    let own = unsafe { CStr::from_ptr(api.name_space) }.to_string_lossy();
+    if own != namespace {
+        return Err(fail(
+            format!(
+                "`{symbol}` of {} says its namespace is `{own}`",
+                library.display()
+            ),
+            "the exported entry and the table must name the same core",
+            rebuild,
+        ));
+    }
+    let missing = |name: &str| {
+        fail(
+            format!("the table of {} has no `{name}` entry", library.display()),
+            "every entry of a version 2 table is a function (undra.h)",
+            rebuild,
+        )
+    };
+    Ok(Table {
+        schema_hash: api.schema_hash,
+        schema_json: api.schema_json.ok_or_else(|| missing("schema_json"))?,
+        buf_free: api.buf_free.ok_or_else(|| missing("buf_free"))?,
+    })
+}
+
+/// What the loader takes from a checked table.
+struct Table {
+    schema_hash: u64,
+    schema_json: unsafe extern "C" fn() -> UndraBuf,
+    buf_free: unsafe extern "C" fn(UndraBuf),
+}
+
+/// `const UndraApi *<namespace>_undra_api(void)`.
+type ApiFn = unsafe extern "C" fn() -> *const UndraApi;
+
+/// Loads the core library at `library` and reads its schema through `<namespace>_undra_api`.
+/// `crate_name` labels the result: the library only knows itself as `undra-core`. With `docs` the
+/// schema keeps the doc comments the library exports; without, they are dropped (generated bindings
+/// carry none by default).
 ///
 /// # Errors
 ///
-/// `C0006` when the library cannot be loaded, is not an Undra core of this ABI version, reports
-/// JSON that is not UTF-8 or does not parse, reports a schema whose hash does not match its own,
-/// or, with `docs`, exports the docless canonical form of a core built before
-/// `undra_schema_json` carried the doc comments.
-pub fn load_from_library(library: &Path, crate_name: &str, docs: bool) -> Result<Schema> {
+/// `C0006` when the library cannot be loaded, does not export `<namespace>_undra_api` (another
+/// namespace, or a core of C ABI version 1), its table is of another ABI version or names another
+/// namespace, it reports JSON that is not UTF-8 or does not parse, its schema's hash does not match
+/// the table's, or, with `docs`, it exports the docless canonical form of a core built before
+/// `schema_json` carried the doc comments.
+pub fn load_from_library(
+    library: &Path,
+    namespace: &str,
+    crate_name: &str,
+    docs: bool,
+) -> Result<Schema> {
     let fail = |what: String, why: &str, fix: &str| CliError::new(Code::Schema, what, why, fix);
 
     // SAFETY: loading a library runs its initialisers. The library is the one this process just
@@ -62,47 +178,44 @@ pub fn load_from_library(library: &Path, crate_name: &str, docs: bool) -> Result
         )
     })?;
 
-    let missing = |symbol: &str| {
-        fail(
-            format!("{} has no `{symbol}`", library.display()),
-            "it is not an Undra core library: the C ABI of docs/SPEC.md 6 is what `undra-ffi` exports, and the library was not linked with it",
-            "build it with `undra build` (which links `undra-ffi` into a library named undra_core), or pass a schema file with `undra bindgen --schema`",
-        )
-    };
+    let symbol = format!("{namespace}_undra_api");
+    let mut name = symbol.clone().into_bytes();
+    name.push(0);
+    // SAFETY: `<namespace>_undra_api` is the one export of a core (C ABI version 2, docs/SPEC.md
+    // 6, `undra_ffi::export_core!`), `extern "C" fn() -> const UndraApi *`; the function pointer
+    // does not outlive `lib`, which is intentionally leaked below.
+    let entry: libloading::Symbol<'_, ApiFn> = unsafe { lib.get(&name) }.map_err(|_| {
+        let v1 = {
+            // SAFETY: only resolves a symbol to learn whether it exists; nothing is called.
+            unsafe { lib.get::<*const ()>(b"undra_abi_version\0") }.is_ok()
+        };
+        if v1 {
+            fail(
+                format!("{} is an Undra core of C ABI version 1", library.display()),
+                "it exports the global `undra_*` functions; this undra-cli reads a core's table (C ABI version 2, ADR-044)",
+                "rebuild the core with the `undra` version of this undra-cli (`undra build --platform host`)",
+            )
+        } else {
+            fail(
+                format!("{} has no `{symbol}`", library.display()),
+                "an Undra core exports one function named after its namespace (`[core] namespace` in undra.toml, default the core's package name); this library is not the core of that namespace",
+                "build it with `undra build` (which links `undra-ffi` and exports the core under its namespace), or pass a schema file with `undra bindgen --schema`",
+            )
+        }
+    })?;
+    // SAFETY: the entry takes no arguments and returns a pointer to the core's immutable table,
+    // valid for the life of the library (which is never unloaded).
+    let api = unsafe { entry() };
+    // SAFETY: the pointer is what a core's entry returns (or null): its static table, read as
+    // `checked_table` requires, in a library this process never unloads.
+    let Table {
+        schema_hash: hash,
+        schema_json,
+        buf_free,
+    } = unsafe { checked_table(api, namespace, &symbol, library) }?;
 
-    // SAFETY (the four `get` calls below): the symbol names and signatures are those of the C ABI
-    // in docs/SPEC.md 6 (`undra_abi_version`, `undra_schema_hash`, `undra_schema_json`,
-    // `undra_buf_free`), which `undra-ffi` implements and its tests pin; the function pointers do
-    // not outlive `lib`, which is intentionally leaked below.
-    // SAFETY: see above; `undra_abi_version` is `extern "C" fn() -> u32`.
-    let abi_version: libloading::Symbol<'_, AbiVersionFn> =
-        unsafe { lib.get(b"undra_abi_version\0") }.map_err(|_| missing("undra_abi_version"))?;
-    // SAFETY: see above; `undra_schema_hash` is `extern "C" fn() -> u64`.
-    let schema_hash: libloading::Symbol<'_, SchemaHashFn> =
-        unsafe { lib.get(b"undra_schema_hash\0") }.map_err(|_| missing("undra_schema_hash"))?;
-    // SAFETY: see above; `undra_schema_json` is `extern "C" fn() -> UndraBuf`.
-    let schema_json: libloading::Symbol<'_, SchemaJsonFn> =
-        unsafe { lib.get(b"undra_schema_json\0") }.map_err(|_| missing("undra_schema_json"))?;
-    // SAFETY: see above; `undra_buf_free` is `extern "C" fn(UndraBuf)`.
-    let buf_free: libloading::Symbol<'_, BufFreeFn> =
-        unsafe { lib.get(b"undra_buf_free\0") }.map_err(|_| missing("undra_buf_free"))?;
-
-    // SAFETY: `undra_abi_version` takes no arguments and returns an integer.
-    let abi = unsafe { abi_version() };
-    if abi != ABI_VERSION {
-        return Err(fail(
-            format!(
-                "the core library speaks C ABI version {abi}; this undra-cli speaks {ABI_VERSION}"
-            ),
-            "the two were built from different Undra releases and cannot talk to each other",
-            "use the undra-cli that matches the `undra` version of the core (`cargo install undra-cli --version <undra version>`)",
-        ));
-    }
-
-    // SAFETY: `undra_schema_hash` takes no arguments and returns an integer.
-    let hash = unsafe { schema_hash() };
-    // SAFETY: `undra_schema_json` takes no arguments and returns an owned `UndraBuf`; its bytes are
-    // valid for `len` bytes until `undra_buf_free`, which is called below on the same buffer.
+    // SAFETY: `schema_json` takes no arguments and returns an owned `UndraBuf`; its bytes are
+    // valid for `len` bytes until `buf_free`, which is called below on the same buffer.
     let buf = unsafe { schema_json() };
     // Copied out (strictly decoded: the docs are not covered by the hash, so a damaged byte in one
     // would pass the check below) before the buffer goes back to the core.
@@ -113,7 +226,7 @@ pub fn load_from_library(library: &Path, crate_name: &str, docs: bool) -> Result
         let bytes = unsafe { std::slice::from_raw_parts(buf.ptr, buf.len as usize) };
         std::str::from_utf8(bytes).map(str::to_owned)
     };
-    // SAFETY: `buf` came from `undra_schema_json` of this library and is freed exactly once.
+    // SAFETY: `buf` came from `schema_json` of this table and is freed exactly once.
     unsafe { buf_free(buf) };
 
     // A Rust cdylib that has started threads or thread-locals does not always survive `dlclose`;
@@ -123,14 +236,14 @@ pub fn load_from_library(library: &Path, crate_name: &str, docs: bool) -> Result
     let text = text.map_err(|e| {
         fail(
             format!("the core library's schema is not UTF-8: {e}"),
-            "`undra_schema_json` returns UTF-8 JSON (docs/SPEC.md 6); the library is damaged or is not what `undra build` wrote",
+            "the table's `schema_json` returns UTF-8 JSON (docs/SPEC.md 6); the library is damaged or is not what `undra build` wrote",
             "rebuild the core with `undra build --platform host` and run `undra bindgen` again",
         )
     })?;
     let (schema, export) = from_library_json(&text, crate_name).map_err(|e| {
         fail(
             format!("the core library's schema cannot be read: {}", e.what),
-            "`undra_schema_json` returned JSON this undra-cli does not understand (a newer `undra-meta`?)",
+            "the table's `schema_json` returned JSON this undra-cli does not understand (a newer `undra-meta`?)",
             "update undra-cli to the version of Undra the core uses",
         )
     })?;
@@ -200,10 +313,9 @@ fn from_library_json(text: &str, crate_name: &str) -> Result<(Schema, Export)> {
 /// Whether each of `symbols` is an exported, resolvable symbol of the core library at `library`.
 ///
 /// Loads the library the way a platform runtime does (`dlopen`) and looks each name up
-/// (`dlsym`), returning one bool per input name in order. Used to check that a built cdylib kept
-/// undra-ffi's `#[no_mangle]` exports across the link — the JNI natives the Kotlin runtime binds
-/// through `System.loadLibrary` (`JNI_OnLoad`, `Java_dev_undra_runtime_UndraNative_*`, SPEC 6.1),
-/// which an incremental macOS build would otherwise dead-strip (ADR-029).
+/// (`dlsym`), returning one bool per input name in order. Used to check what a built cdylib
+/// exports: its table entry `<namespace>_undra_api` and `JNI_OnLoad` (ADR-044), and none of the
+/// global `undra_*` functions of C ABI version 1.
 ///
 /// # Errors
 ///
@@ -316,6 +428,74 @@ mod tests {
         schema
     }
 
+    /// A table as a library could hand it over, for [`checked_table`].
+    fn table(abi_version: u32, size: usize, name_space: *const c_char) -> UndraApi {
+        unsafe extern "C" fn schema_json() -> UndraBuf {
+            UndraBuf {
+                ptr: std::ptr::null_mut(),
+                len: 0,
+                cap: 0,
+            }
+        }
+        unsafe extern "C" fn buf_free(_: UndraBuf) {}
+        UndraApi {
+            abi_version,
+            size: u32::try_from(size).unwrap(),
+            schema_hash: 7,
+            name_space,
+            schema_json: Some(schema_json),
+            _entries: [std::ptr::null(); 15],
+            buf_free: Some(buf_free),
+        }
+    }
+
+    /// Review (abi-table): the loader reads `abi_version` first, then the size, and refuses a null
+    /// namespace or a null entry it calls instead of dereferencing it.
+    #[test]
+    fn the_loader_checks_a_table_before_it_trusts_a_pointer_in_it() {
+        let lib = Path::new("libx.dylib");
+        let full = std::mem::size_of::<UndraApi>();
+        let check = |api: &UndraApi| {
+            // SAFETY: `api` is a live table of this test, valid for the call.
+            unsafe { checked_table(std::ptr::from_ref(api), "acme", "acme_undra_api", lib) }
+                .map(|api| api.schema_hash)
+        };
+        assert_eq!(check(&table(2, full, c"acme".as_ptr())).ok(), Some(7));
+        let larger = check(&table(2, full + 64, c"acme".as_ptr()));
+        assert_eq!(
+            larger.ok(),
+            Some(7),
+            "fields are appended: a larger table is fine"
+        );
+        for (api, says) in [
+            (table(3, full, c"acme".as_ptr()), "C ABI version 3"),
+            (table(1, 8, std::ptr::null()), "C ABI version 1"),
+            (table(2, full - 8, c"acme".as_ptr()), "too small"),
+            (table(2, full, std::ptr::null()), "no namespace"),
+            (table(2, full, c"other".as_ptr()), "`other`"),
+            (
+                UndraApi {
+                    schema_json: None,
+                    ..table(2, full, c"acme".as_ptr())
+                },
+                "`schema_json`",
+            ),
+            (
+                UndraApi {
+                    buf_free: None,
+                    ..table(2, full, c"acme".as_ptr())
+                },
+                "`buf_free`",
+            ),
+        ] {
+            let error = check(&api).expect_err(says);
+            assert!(error.what.contains(says), "{says}: {}", error.what);
+        }
+        // SAFETY: a null pointer is checked before anything is read.
+        let null = unsafe { checked_table(std::ptr::null(), "acme", "acme_undra_api", lib) };
+        assert!(null.is_err());
+    }
+
     #[test]
     fn full_json_round_trips() {
         let schema = sample();
@@ -355,7 +535,7 @@ mod tests {
 
     #[test]
     fn docs_are_kept_only_when_asked_for_and_refused_when_the_library_has_none() {
-        let library = Path::new("/build/host/libundra_core.dylib");
+        let library = Path::new("/build/host/libtodo_core.dylib");
         let kept = with_docs_or_without(sample(), Export::Whole, true, library).unwrap();
         assert_eq!(kept.records[0].docs, "An item.");
         let dropped = with_docs_or_without(sample(), Export::Whole, false, library).unwrap();
@@ -371,7 +551,7 @@ mod tests {
         let e = with_docs_or_without(old, Export::Canonical, true, library).unwrap_err();
         assert_eq!(e.code, Code::Schema);
         assert!(
-            e.what.contains("--docs") && e.what.contains("libundra_core"),
+            e.what.contains("--docs") && e.what.contains("libtodo_core"),
             "{e}"
         );
         assert!(e.why.contains("older"), "{e}");
@@ -439,7 +619,8 @@ mod tests {
 
     #[test]
     fn a_library_that_is_not_there_is_explained() {
-        let e = load_from_library(Path::new("/definitely/not/here.dylib"), "x", false).unwrap_err();
+        let e = load_from_library(Path::new("/definitely/not/here.dylib"), "x", "x", false)
+            .unwrap_err();
         assert_eq!(e.code, Code::Schema);
         assert!(e.what.contains("cannot load"), "{e}");
         assert!(e.fix.contains("undra build --platform host"), "{e}");

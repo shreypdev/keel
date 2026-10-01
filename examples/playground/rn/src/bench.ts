@@ -8,7 +8,8 @@ import {
   type DrainStats,
   type UndraCore,
 } from '@undra/runtime';
-import { Bench, BigList, ItemCodec, Stress, UndraIds } from '@playground/core';
+import { installNative } from '@undra/react-native';
+import { Bench, BigList, ItemCodec, Stress, UndraIds, UndraPlaygroundCore } from '@playground/core';
 import { nativeCounters, type Log } from './undra';
 
 /** One measurement. */
@@ -110,8 +111,7 @@ export async function runBench(core: UndraCore, log: Log): Promise<BenchRow[]> {
   }
   // Where the time of a sync call goes: a JSI host function that does nothing (the floor), the
   // transport alone (a prebuilt payload: JSI, the core, the reply ArrayBuffer), and UndraCore.
-  const native = (globalThis as { __undraNative?: { abiVersion(): number; callSync(b: ArrayBuffer, o: number, l: number): ArrayBuffer } })
-    .__undraNative;
+  const native = core.mode === 'native' ? installNative(UndraPlaygroundCore.namespace) : undefined;
   if (native !== undefined) {
     record('jsi_host_function_floor', perCallNs(20_000, 5, () => native.abiVersion()), 'ns', 'a JSI host function that returns a number');
     const call = new UndraWriter(32);
@@ -125,7 +125,7 @@ export async function runBench(core: UndraCore, log: Log): Promise<BenchRow[]> {
       'sync_call_native_only',
       perCallNs(10_000, 5, () => native.callSync(prebuilt.buffer, 0, prebuilt.byteLength)),
       'ns',
-      'the same call with a prebuilt payload straight to __undraNative.callSync: JSI, the core, the reply ArrayBuffer',
+      'the same call with a prebuilt payload straight to __undraNative.playground_core.callSync: JSI, the core, the reply ArrayBuffer',
     );
   }
   record(
@@ -279,7 +279,7 @@ export async function runBench(core: UndraCore, log: Log): Promise<BenchRow[]> {
     requestAnimationFrame(step);
   });
   record('raf_interval', median(rafIntervals), 'ms', 'median interval of 60 chained requestAnimationFrame callbacks');
-  const vsync = (globalThis as { __undraNative?: { requestFrame(): boolean } }).__undraNative?.requestFrame() === true;
+  const vsync = core.mode === 'native' && installNative(UndraPlaygroundCore.namespace).requestFrame();
   log(`UNDRA-RN frame source: ${vsync ? 'native vsync (CADisplayLink / AChoreographer)' : 'timer fallback'}`);
 
   const stress = await Stress.create(core);

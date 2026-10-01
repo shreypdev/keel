@@ -4,10 +4,11 @@ package dev.undra.playground.core
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
     const val SCHEMA_HASH: ULong = 0xc5f05c376fde398cuL
+    const val NAMESPACE: String = "playground_core"
 
     object Objects {
         object Probe {

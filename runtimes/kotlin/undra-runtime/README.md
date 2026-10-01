@@ -6,9 +6,11 @@ kotlinx-coroutines, nothing else. Group `dev.undra`, package root `dev.undra.run
 It has two layers:
 
 * the **wire layer** (`dev.undra.runtime.wire`): everything needed to speak the binary format of SPEC §3;
-* the **runtime core** (`dev.undra.runtime`): `UndraCore` and what generated code calls (SPEC §17.2), the JNI
-  facade `UndraNative` (§6.1), the in-process and WebSocket transports, the mirror that applies change-sets on
-  the main thread, the port registry, and the default JVM adapters (`dev.undra.runtime.adapters`, §8, §11).
+* the **runtime core** (`dev.undra.runtime`): `UndraCore` and what generated code calls (SPEC §17.2), `CoreEntry`
+  (what each core's generated `Undra<Namespace>` delegates to), the JNI surface a core's generated `UndraCoreNative`
+  implements (`NativeApi`, `NativeCallbacks`, `NativeLibrary`; §6.1, ADR-044), the in-process and WebSocket transports,
+  the mirror that applies change-sets on the main thread, the port registry, and the default JVM adapters
+  (`dev.undra.runtime.adapters`, §8, §11).
 
 ## Layout
 
@@ -21,14 +23,17 @@ undra-runtime/
   runtime/                   the library
     src/main/kotlin/dev/undra/runtime/
       UndraCore.kt LoadOptions.kt ConnectedCore.kt   the core: load / shared / call / stream / observe ...
-      UndraNative.kt                                 JNI facade (static natives + Callbacks)
+      CoreEntry.kt                                   one core's entry: what the generated Undra<Namespace> delegates to
+      NativeApi.kt NativeCallbacks.kt NativeLibrary.kt   the JNI surface of a core (its generated UndraCoreNative)
       Transport.kt InprocTransport.kt RemoteTransport.kt
       Mirror.kt UndraStore.kt UndraObject.kt HandleCleaner.kt UndraDispatchers.kt
       PortRegistry.kt Markers.kt Errors.kt UndraStats.kt UndraLog.kt
       adapters/                                     default JVM port adapters + standard port records
       wire/                                         the wire layer
+    src/main/resources/META-INF/proguard/            undra-runtime.pro: R8 consumer rules (keep NativeCallbacks)
     src/test/kotlin/dev/undra/runtime/               suites (see "Building and testing")
       support/                                      FakeTransport, FakeNative (JNI contract), WsTestServer, ...
+    src/test/kotlin/dev/undra/fixture/               UndraCoreNative of undra-ffi's fixture core, as bindgen generates one
   android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
   scripts/
     test-local.sh            build + test without Gradle or JUnit
@@ -44,10 +49,11 @@ compile time (Android is detected by reflection).
 ## Using it
 
 ```kotlin
-// Once, at startup. UndraIds comes from the generated bindings.
-UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH))
+// Once, at startup, through the generated entry of the core's bindings: `Undra<Namespace>`, here the playground's
+// (namespace `playground_core`). It knows the core's library and schema hash.
+UndraPlaygroundCore.load()                // or load(LoadOptions(Mode.REMOTE, remoteUrl = "ws://10.0.2.2:7878"))
 
-val todos = TodoStore()                   // generated; uses UndraCore.shared
+val todos = TodoStore()                   // generated; uses UndraPlaygroundCore.core
 todos.todos.collectAsState()              // Compose: plain StateFlows, updated on the main thread
 todos.add("Milk")                         // suspend; cancelling the caller cancels the call in the core
 todos.close()                             // or let the cleaner release it if you forget
@@ -55,8 +61,10 @@ todos.close()                             // or let the cleaner release it if yo
 
 | Type | What it is |
 |---|---|
-| `UndraCore` | `load(LoadOptions)`, `shared`, `callSync`, `call` (suspend, cancellable), `stream` (`Flow`, credit 16 / top-up 8), `construct`, `observe`, `release`, `event`, `timerFired`, `mirror`, `registerPort`, `stats`, `snapshot` / `restore`, `close`. Open with a protected constructor, so tests can subclass it as a fake core |
-| `LoadOptions` | `mode` (`INPROC` or `REMOTE`), `remoteUrl`, `adapters` (port id to `PortImpl`), `expectedSchemaHash`, `defaultAdapters`, `remoteTimeout` |
+| `Undra<Namespace>` (generated) | `load(LoadOptions = LoadOptions())`, `core` (the loaded core, or a closed placeholder whose calls fail `Unavailable`), `NAMESPACE`. Delegates to `CoreEntry(namespace, schemaHash) { UndraCoreNative }`, which fills in the schema hash, refuses a second load while its core is open, and loads the library only for an in-process core |
+| `UndraCore` | `load(LoadOptions)` (`Mode.REMOTE` only: an in-process core is loaded through its generated entry), `load(LoadOptions, NativeApi)` (what the entry calls), `shared` (the first core loaded, for app code; generated code never reads it), `callSync`, `call` (suspend, cancellable), `stream` (`Flow`, credit 16 / top-up 8), `construct`, `observe`, `release`, `event`, `timerFired`, `mirror`, `registerPort`, `stats`, `snapshot` / `restore`, `close`. Open with a protected constructor, so tests can subclass it as a fake core |
+| `LoadOptions` | `mode` (`INPROC` or `REMOTE`), `remoteUrl`, `adapters` (port id to `PortImpl`), `expectedSchemaHash` (optional: the generated entry fills it in; `UndraCore.load` refuses options without it), `defaultAdapters`, `remoteTimeout`, `mirror`, `reconnect`, `onConnectionChange`, `onError` |
+| `NativeApi`, `NativeCallbacks`, `NativeLibrary` | The JNI surface of one core: implemented by its generated `UndraCoreNative`, whose library `NativeLibrary.load(namespace)` loads (`lib<namespace>`, or the file in `-Dundra.native.<namespace>.path`; a missing library is reported, not thrown). Apps do not use them |
 | `UndraObject`, `UndraStore` | `AutoCloseable` handles; a `java.lang.ref.Cleaner` (or a phantom-reference fallback where it does not exist, Android below API 33) releases leaked ones. `UndraStore.signal(initial)` makes the `MutableStateFlow` that `apply(signalId, op, reader)` updates. The mirror holds stores weakly: keep a reference to the store while you use its flows |
 | `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing of superseded full values; a throwing callback is logged and skipped, a malformed change-set is dropped whole |
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
@@ -75,13 +83,14 @@ waiting (up to 5 s) for the main thread from anywhere else.
 
 ### Modes
 
-* `INPROC` (production): the core is loaded through JNI. `System.loadLibrary` uses the name in the system property
-  `undra.native.name` (default `undra_core`); `undra.native.path` is an absolute path that wins over the name. If the library
-  cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global,
-  so there is one `INPROC` core at a time per process. `close()` ends its work (ADR-034: `UndraNative.shutdown()` stops its
-  tasks, timers and port calls; in-flight calls fail as closed), **and waits for it**: it returns after the core's threads are
-  joined and the port callbacks running on other threads have returned, so it must not run under a lock a synchronous port
-  implementation needs. A later `load` starts a fresh core.
+* `INPROC` (production): the core is loaded through JNI, by its generated entry (`Undra<Namespace>.load()`). Its generated
+  `UndraCoreNative` loads `lib<namespace>` with `System.loadLibrary` (Android: from `jniLibs/<abi>/`); the system property
+  `undra.native.<namespace>.path`, an absolute path, wins over the search. If the library cannot be loaded, the load says how
+  to fix it. Each core's native runtime is global to its library, so there is one `INPROC` core per namespace at a time;
+  cores with different namespaces (an SDK's core next to the app's) run side by side (ADR-044). `close()` ends its work
+  (ADR-034: `NativeApi.shutdown()` stops its tasks, timers and port calls; in-flight calls fail as closed), **and waits for
+  it**: it returns after the core's threads are joined and the port callbacks running on other threads have returned, so it
+  must not run under a lock a synchronous port implementation needs. A later load starts a fresh core.
 * `REMOTE` (**development only**): a WebSocket to `undra dev` on the runtime's own client (RFC 6455 over `java.net.Socket`:
   the same code runs on a JVM and on Android; `java.net.http` is not used), envelope framing of SPEC §3.2, `Hello` handshake
   with the schema check. `callSync` and `construct` block the calling thread for a network round trip (up to
@@ -95,24 +104,33 @@ waiting (up to 5 s) for the main thread from anywhere else.
 
 ### JNI surface for `undra-ffi`
 
-`dev.undra.runtime.UndraNative` is a Kotlin `object` whose `@JvmStatic external` functions compile to `public static native`
-methods, so the symbols are `Java_dev_undra_runtime_UndraNative_<name>`. `NativeShapeTests` pins these descriptors:
+Every core has a class of its own for its natives (ADR-044): the generated `<kotlin package>.UndraCoreNative`, an
+`object` implementing `NativeApi` with `override external fun`s. The core's `JNI_OnLoad` (exported by
+`undra_ffi::export_core!(<namespace>, jni_class = "<package path>/UndraCoreNative")`) registers the natives on it with
+`RegisterNatives`, so nothing is bound by a `Java_*` symbol name and two cores in one process never bind one another's
+natives. They are instance methods of the object; the shim ignores the receiver. The ABI version is 2. `NativeShapeTests`
+pins these descriptors (on the fixture's `dev.undra.fixture.UndraCoreNative` and on the golden bindings' one):
 
 ```
-abiVersion ()I      schemaHash ()J        schemaJson ()[B        init ([BLdev/undra/runtime/UndraNative$Callbacks;)I
+abiVersion ()I      schemaHash ()J        schemaJson ()[B        init ([BLdev/undra/runtime/NativeCallbacks;)I
 call ([B)I          callSync ([B)[B       cancel (I)V            streamCredit (II)V
 observe (JIZ)V      release (J)V          portReply ([B)V        event (II[B)V
 timerFired (I)V     snapshot ()[B         restore ([B)I          statsJson ()Ljava/lang/String;
 shutdown ()V        (UndraCore.close() of an in-process core ends its work through it, ADR-034)
 
-UndraNative$Callbacks:  onReply (ILjava/nio/ByteBuffer;)V     onChangeSet (Ljava/nio/ByteBuffer;)V
-                       onStream (ILjava/nio/ByteBuffer;)V     onPortCall (IIILjava/nio/ByteBuffer;)I     portSyncReply ()[B
+dev.undra.runtime.NativeCallbacks (shared by every core, no natives):
+                    onReply (ILjava/nio/ByteBuffer;)V     onChangeSet (Ljava/nio/ByteBuffer;)V
+                    onStream (ILjava/nio/ByteBuffer;)V    onPortCall (IIILjava/nio/ByteBuffer;)I     portSyncReply ()[B
 ```
 
 `onReply` and `onStream` receive the **whole** `Reply` / `StreamItem` payload (SPEC 3.4 / 3.7, including the call id and status
 or flag); `onPortCall` receives the encoded arguments only, and after returning `0` the shim reads the whole `PortReply`
 payload from `portSyncReply()` on the same thread. `observe` uses `-1` for "all signals" (`u32::MAX`). A port the host has not
 registered is answered `2` (unavailable), so the shim should route every port id it does not bind natively to `onPortCall`.
+
+R8 keeps what JNI finds by name: the runtime jar ships `META-INF/proguard/undra-runtime.pro` (`NativeCallbacks` and the
+methods of its implementations), and each core's generated bindings ship `META-INF/proguard/undra-<namespace>.pro` (its
+`UndraCoreNative` and its natives).
 
 ### Default JVM adapters
 
@@ -204,7 +222,13 @@ Each phase is incremental (`scripts/test-local.sh check|main|test|run`), so a sl
 limit can run them one at a time.
 Knobs: `UNDRA_FUZZ_ITERATIONS=50000`, `UNDRA_FUZZ_SEED=123`, `UNDRA_WERROR=0`, `UNDRA_FORCE=1`, `UNDRA_BUILD_DIR=<dir>`
 (default `build/local`), `UNDRA_SKIP_GOLDEN=1`, `UNDRA_KOTLINX_COROUTINES`, `UNDRA_KOTLIN_STDLIB`, and for the JNI smoke
-test `UNDRA_NATIVE_LIB_DIR`, `UNDRA_NATIVE_NAME`, `UNDRA_NATIVE_PATH`.
+test `UNDRA_NATIVE_LIB_DIR` (`-Djava.library.path`) or `UNDRA_NATIVE_PATHS="undra_fixture=/abs/libundra_fixture.dylib"`
+(space-separated `namespace=file` pairs, each `-Dundra.native.<namespace>.path`). To run the smoke test for real:
+
+```sh
+cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml
+UNDRA_NATIVE_LIB_DIR=$PWD/crates/undra-ffi/tests/fixture/target/debug runtimes/kotlin/undra-runtime/scripts/test-local.sh
+```
 
 What runs (see `TestMain.kt`): the wire suites, then
 
@@ -214,11 +238,12 @@ What runs (see `TestMain.kt`): the wire suites, then
 | `CoreCallTests`, `StreamTests` | call / callSync / cancellation / call ids / errors / construct / close / blocking waits; stream ordering, credit 16 and top-up 8, back-pressure, cancellation, failures |
 | `MirrorTests`, `StoreTests` | batching, coalescing, ordering, isolation, awaiting the initial values; real `UndraStore` subclasses driven by a fake core, keyed patches, resync, cleaner release |
 | `PortTests` | sync and async ports, typed errors, timeouts, closing, default adapters, timers, the re-entrancy guard |
-| `InprocTransportTests` | the transport against `FakeNative`, an in-memory JNI shim that recycles direct buffers on return and flags native calls made from callbacks |
+| `InprocTransportTests` | the transport against `FakeNative`, an in-memory JNI shim that recycles direct buffers on return and flags native calls made from callbacks; ABI 2; the per-namespace claim (two namespaces side by side, one namespace twice refused) |
+| `CoreEntryTests` | `CoreEntry` (what generated `Undra<Namespace>` objects delegate to): the placeholder before a load and after close, the hash it fills in, a second load refused, two cores side by side, a remote load that never touches the natives; `UndraCore.load` refusing `INPROC` and a missing hash |
 | `RemoteTransportTests` | the WebSocket transport against `WsTestServer`, a small RFC 6455 server: handshake, schema mismatch, framing and fragmentation, streams, ports, logs, drops and protocol errors |
 | `AdapterTests`, `FileAdapterTests`, `HttpAdapterTests` | port ids, record codecs, Clock / Rng / Log / Timer, Kv / SecureStore / Fs (traversal and symlink escapes), Http against a JDK `HttpServer` |
 | `ErrorTests`, `StatsTests`, `CleanerTests`, `DispatcherTests` | exception shapes, the statistics parser, both cleaner backends, main-thread and delivery dispatchers |
-| `NativeShapeTests`, `NativeSmokeTests` | the JNI descriptors of SPEC 6.1; a smoke test against the real `undra_core`, skipped until it is loadable |
+| `NativeShapeTests`, `NativeSmokeTests` | the JNI descriptors of SPEC 6.1 on a core's `UndraCoreNative` (the fixture's and the golden bindings'), `NativeCallbacks`, the R8 rules, `NativeLibrary` reporting a missing library; a smoke test against `undra-ffi`'s fixture core (`libundra_fixture`), skipped unless it is loadable |
 
 ### 2. With Gradle and JUnit 5
 
@@ -234,8 +259,8 @@ assertPassed()`, and registering it in `TestMain.kt` (`test-local.sh` fails if a
 calls `skip(reason)` when the environment lacks something it needs.
 
 The Gradle build adds the bindgen `full` golden sources and `FullTest.kt` to the test source set when the repository
-layout is present, and `-Pundra.native.dir=<dir>` / `-Pundra.native.name=<name>` point the JNI smoke test at the native
-library.
+layout is present, and `-Pundra.native.dir=<dir>` (`java.library.path`) or `-Pundra.native.<namespace>.path=<file>` point the
+JNI smoke test at the fixture library.
 
 The Gradle build was written on a machine without network access to plugin repositories, so it has not been
 executed end to end; the settings script, the version catalog and the root build script were confirmed to

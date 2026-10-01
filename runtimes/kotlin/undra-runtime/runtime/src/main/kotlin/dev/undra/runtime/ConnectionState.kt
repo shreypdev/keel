@@ -30,7 +30,7 @@ public sealed interface ConnectionState {
      */
     public data class Reconnecting(public val attempt: Int, public val cause: Throwable?) : ConnectionState
 
-    /** The core is closed for good ([reason]); a new `UndraCore.load` is the way back. [cause] says why, unless the app closed it. */
+    /** The core is closed for good ([reason]); a new load (`Undra<Namespace>.load`) is the way back. [cause] says why, unless the app closed it. */
     public data class Closed(public val reason: ClosedReason, public val cause: Throwable? = null) : ConnectionState
 }
 

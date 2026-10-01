@@ -2,10 +2,11 @@
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
   schemaHash: 0xbfc1afa630b0b63dn,
+  namespace: "golden_queries",
   Objects: {
     TodoByIdQueryHandle: {
       typeId: 0x2bb5eff3,

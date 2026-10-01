@@ -15,7 +15,7 @@ import dev.undra.runtime.wire.decodeAll
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun evaluate(expr: Expr, ctx: UndraCore = UndraCore.shared): Double {
+suspend fun evaluate(expr: Expr, ctx: UndraCore = UndraGoldenRecursive.core): Double {
     val w = UndraWriter()
     Expr.encode(w, expr)
     try {
@@ -34,7 +34,7 @@ suspend fun evaluate(expr: Expr, ctx: UndraCore = UndraCore.shared): Double {
  * Reverses a list.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun reverse(list: ListNode, ctx: UndraCore = UndraCore.shared): ListNode {
+fun reverse(list: ListNode, ctx: UndraCore = UndraGoldenRecursive.core): ListNode {
     val w = UndraWriter()
     ListNode.encode(w, list)
     try {

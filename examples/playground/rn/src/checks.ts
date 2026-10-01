@@ -5,12 +5,13 @@ import {
   PortIds,
   UndraCallError,
   UndraSchemaMismatchError,
+  UndraTransportError,
   UndraWriter,
   codecs,
   decodeValue,
   type UndraCore,
 } from '@undra/runtime';
-import { NativeTransport, nativePlatformDefaults } from '@undra/react-native';
+import { NativeTransport, installNative, nativePlatformDefaults } from '@undra/react-native';
 import {
   BigList,
   Counter,
@@ -18,6 +19,7 @@ import {
   Probe,
   Stress,
   UndraIds,
+  UndraPlaygroundCore,
   add,
   addLater,
   explode,
@@ -74,7 +76,7 @@ const LOOPBACK = 'http://127.0.0.1:8737';
 
 /** Whether the module answers `portId` natively on this device (ADR-038 amendment B). */
 function native(portId: number): boolean {
-  return nativePlatformDefaults().ports.includes(portId);
+  return nativePlatformDefaults(UndraPlaygroundCore.namespace).ports.includes(portId);
 }
 
 /** Waits up to `ms` for `condition`. */
@@ -102,8 +104,11 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       const body = core.callSync(CallTarget.FreeFunction, UndraIds.Functions.add, w.finish());
       expect(decodeValue(codecs.i32, body) === 42, `callSync add = ${decodeValue(codecs.i32, body)}`);
       expect((await add(2, 3, core)) === 5, 'add(2, 3) === 5');
+      // loadNative attached through the generated entry: its core is the bindings' default (ADR-044).
+      expect(UndraPlaygroundCore.core === core, 'UndraPlaygroundCore.core is the native core');
+      expect((await add(3, 4)) === 7, 'add(3, 4) on the default core === 7');
       expect((await greet('Hermes', core)).includes('Hermes'), 'greet');
-      return 'add(20, 22) = 42 synchronously; add(2, 3) = 5';
+      return 'add(20, 22) = 42 synchronously; add(2, 3) = 5; add(3, 4) = 7 on UndraPlaygroundCore.core';
     },
   ],
   [
@@ -219,9 +224,9 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
     'RN10',
     'schema gate refuses another schema before undra_init',
     async core => {
-      const native = (globalThis as { __undraNative?: ConstructorParameters<typeof NativeTransport>[0]['native'] }).__undraNative;
-      expect(native !== undefined, 'the module is installed');
-      const transport = new NativeTransport({ native: native!, expectedSchemaHash: 0x1234n });
+      const native = installNative(UndraPlaygroundCore.namespace);
+      expect(native.namespace === UndraPlaygroundCore.namespace, `the module is the core ${native.namespace}`);
+      const transport = new NativeTransport({ namespace: native.namespace, native, expectedSchemaHash: 0x1234n });
       const error = await rejects(() =>
         transport.start({
           reply() {},
@@ -234,7 +239,18 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       );
       expect(error instanceof UndraSchemaMismatchError, `UndraSchemaMismatchError, got ${String(error)}`);
       expect((await add(3, 4, core)) === 7, 'the running core is untouched');
-      return 'expected 0x1234, refused; the running core still answers';
+      // A namespace the app has no core of: the module's lookup (the class on iOS, lib<ns>.so on Android) says so.
+      let unknown: unknown;
+      try {
+        installNative('no_such_core');
+      } catch (failure) {
+        unknown = failure;
+      }
+      expect(
+        unknown instanceof UndraTransportError && unknown.reason === 'unsupported' && unknown.message.includes('no_such_core'),
+        `an unknown core is refused, got ${String(unknown)}`,
+      );
+      return 'expected 0x1234, refused; the running core still answers; no_such_core refused by the module';
     },
   ],
   [
@@ -275,7 +291,7 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       await secretRemove(nul, core);
       expect((await secretGet(nul, core)) === null, 'and secret_remove removes it');
       // Kept: the device script checks that this value is not readable in the app's files.
-      return `stored and read back (marker nonce ${playground.nonce}); ${nativePlatformDefaults().secureStore ?? ''}`;
+      return `stored and read back (marker nonce ${playground.nonce}); ${nativePlatformDefaults(UndraPlaygroundCore.namespace).secureStore ?? ''}`;
     },
   ],
   [
@@ -295,7 +311,7 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       await fileDelete('rn-checks', core);
       const gone = await rejects(() => fileRead('rn-checks/notes/hello.txt', core));
       expect(gone instanceof FsError.NotFound, `deleted with its directory: FsError.NotFound, got ${String(gone)}`);
-      return `write/read/list/delete under ${nativePlatformDefaults().fs ?? '?'}; ../ Denied`;
+      return `write/read/list/delete under ${nativePlatformDefaults(UndraPlaygroundCore.namespace).fs ?? '?'}; ../ Denied`;
     },
   ],
   [

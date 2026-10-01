@@ -2,10 +2,10 @@ package dev.undra.contract
 
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.Counter
+import dev.undra.playground.core.UndraCoreNative
 import dev.undra.playground.core.add
 import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraNative
 import dev.undra.runtime.UndraTransportException
 import dev.undra.runtime.UndraSchemaMismatchException
 import dev.undra.runtime.LoadOptions
@@ -19,7 +19,7 @@ fun s16SchemaMismatch(boot: Bootstrap) {
 
     // 1. A wrong expected hash fails with the runtime's error, naming both hashes, before the core is initialised.
     val mismatch = expectFails<UndraSchemaMismatchException>("a load with a schema hash that is off by one") {
-        UndraCore.load(LoadOptions(expectedSchemaHash = generated xor 1uL))
+        UndraCore.load(LoadOptions(expectedSchemaHash = generated xor 1uL), UndraCoreNative)
     }
     expectEq("UndraSchemaMismatchException.expected", generated xor 1uL, mismatch.expected)
     expectEq("UndraSchemaMismatchException.got", generated, mismatch.got)
@@ -35,10 +35,10 @@ fun s16SchemaMismatch(boot: Bootstrap) {
 
     // 3. The hash in the bindings, the hash the core reports in its statistics and the one it exports agree.
     expectEq("stats().schema_hash", generated, world.stats().schemaHash)
-    expectEq("undra_schema_hash", generated, UndraNative.schemaHash().toULong())
+    expectEq("the natives' schemaHash", generated, UndraCoreNative.schemaHash().toULong())
 
     // 4. The exported schema names what the playground declares, and the standard ports.
-    val schema = Json.parseObject(String(UndraNative.schemaJson(), Charsets.UTF_8))
+    val schema = Json.parseObject(String(UndraCoreNative.schemaJson(), Charsets.UTF_8))
     val names = { section: String -> (schema[section] as? List<*> ?: fail("the schema has no \"$section\"")).map { (it as Map<*, *>)["name"] } }
     val objects = names("objects")
     for (type in listOf("Todos", "Counter", "BigList", "Bench", "Probe")) check(type in objects) { "the schema has no object $type: $objects" }
@@ -60,7 +60,7 @@ private fun expectNoCoreLoaded() {
     check(UndraCore.current == null) { "UndraCore.shared became a loaded core" }
     val call = expectFails<UndraCallError.Unavailable>("add(1, 2) with no core loaded") { add(1, 2) }
     expectEq("the transport reason of add(1, 2) with no core loaded", UndraTransportException.Reason.CLOSED, call.transport.reason)
-    check("UndraCore.load" in (call.message ?: "")) { "the failure does not say to load a core: ${call.message}" }
+    check("load it at app startup" in (call.message ?: "")) { "the failure does not say to load the core: ${call.message}" }
     val constructor = expectFails<UndraCallError.Unavailable>("Counter.create() with no core loaded") { Counter.create() }
     expectEq("the transport reason of Counter.create() with no core loaded", UndraTransportException.Reason.CLOSED, constructor.transport.reason)
     shared.report(call, "Counter.increment")

@@ -10,7 +10,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenObjects.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -25,7 +25,10 @@ public final class Calculator: UndraObject, @unchecked Sendable {
     }
 
     /// - Throws: ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public static func withPrecision(digits: UInt8, ctx: UndraCore = .shared) throws -> Calculator {
+    public static func withPrecision(
+        digits: UInt8,
+        ctx: UndraCore = UndraGoldenObjects.core
+    ) throws -> Calculator {
         var w = UndraWriter()
         digits.undraEncode(&w)
         let handle: UndraHandle
@@ -45,7 +48,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
     public static func `open`(
         path: String,
         mode: Mode,
-        ctx: UndraCore = .shared
+        ctx: UndraCore = UndraGoldenObjects.core
     ) async throws -> Calculator {
         var w = UndraWriter()
         path.undraEncode(&w)
@@ -248,7 +251,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
 
 /// Says hello.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
+public func greet(name: String, ctx: UndraCore = UndraGoldenObjects.core) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -264,7 +267,10 @@ public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
 }
 
 /// - Note: Iterating throws ``UndraCallError`` if the call fails in the core or cannot reach it; cancelling the iterating task ends the loop quietly.
-public func numbers(upto: UInt32, ctx: UndraCore = .shared) -> AsyncThrowingStream<UInt32, Error> {
+public func numbers(
+    upto: UInt32,
+    ctx: UndraCore = UndraGoldenObjects.core
+) -> AsyncThrowingStream<UInt32, Error> {
     var w = UndraWriter()
     upto.undraEncode(&w)
     return ctx.stream(
@@ -277,7 +283,7 @@ public func numbers(upto: UInt32, ctx: UndraCore = .shared) -> AsyncThrowingStre
 }
 
 /// - Throws: ``CalcError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func ping(ctx: UndraCore = .shared) async throws {
+public func ping(ctx: UndraCore = UndraGoldenObjects.core) async throws {
     do {
         _ = try await ctx.call(
             .freeFunction(methodId: UndraIds.Functions.ping),

@@ -46,7 +46,7 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenStdlib.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0)),
     )
@@ -130,7 +130,7 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): LatestResponseQueryHandle {
+        fun create(ctx: UndraCore = UndraGoldenStdlib.core): LatestResponseQueryHandle {
             val handle = ctx.constructObject(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0))
             return LatestResponseQueryHandle(ctx, handle)
         }
@@ -143,7 +143,7 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun retry(request: HttpRequest, ctx: UndraCore = UndraCore.shared): HttpResponse {
+suspend fun retry(request: HttpRequest, ctx: UndraCore = UndraGoldenStdlib.core): HttpResponse {
     val w = UndraWriter()
     HttpRequest.encode(w, request)
     try {

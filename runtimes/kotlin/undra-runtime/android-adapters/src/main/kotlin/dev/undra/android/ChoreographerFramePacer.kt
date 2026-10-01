@@ -12,11 +12,8 @@ import dev.undra.runtime.FramePacer
  * Install it when the core is loaded:
  *
  * ```kotlin
- * UndraCore.load(
- *     LoadOptions(
- *         expectedSchemaHash = UndraIds.SCHEMA_HASH,
- *         mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
- *     ),
+ * UndraPlaygroundCore.load( // the generated entry of the core's bindings, Undra<Namespace>
+ *     LoadOptions(mirror = MirrorOptions(framePacer = ChoreographerFramePacer())),
  * )
  * ```
  *

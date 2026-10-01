@@ -8,9 +8,14 @@ let package = Package(
     products: [.library(name: "PlaygroundCore", targets: ["PlaygroundCore"])],
     dependencies: [.package(path: "../../../../runtimes/swift/UndraRuntime")],
     targets: [
+        // Declares the core's entry point; the core itself is linked into the app.
+        .target(name: "PlaygroundCoreFFI", path: "Sources/PlaygroundCoreFFI"),
         .target(
             name: "PlaygroundCore",
-            dependencies: [.product(name: "UndraRuntime", package: "UndraRuntime")],
+            dependencies: [
+                "PlaygroundCoreFFI",
+                .product(name: "UndraRuntime", package: "UndraRuntime"),
+            ],
             path: "Sources/PlaygroundCore"
         ),
     ],

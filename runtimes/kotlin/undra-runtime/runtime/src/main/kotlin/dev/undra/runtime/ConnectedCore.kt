@@ -36,7 +36,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
- * The [UndraCore] that [UndraCore.load] returns: call ids, the table of in-flight calls, streams, the
+ * The [UndraCore] a load returns ([UndraCore.load], [CoreEntry.load]): call ids, the table of in-flight calls, streams, the
  * port registry and the mirror on top of one [Transport].
  *
  * Invariants:

@@ -445,6 +445,12 @@ describe("UndraCore.shared with no core loaded", () => {
     }).not.toThrow();
   });
 
+  it("is UndraCore.unloaded, the placeholder of every generated entry whose core is not loaded (ADR-044)", () => {
+    expect(UndraCore.unloaded).toBe(UndraCore.shared);
+    expect(UndraCore.unloaded.closed).toBe(true);
+    expect(UndraCore.current).toBeNull();
+  });
+
   it("a command on it only logs", async () => {
     // The placeholder has no log adapter and no handler of its own: the report goes to the console's error level.
     // (Its first use logs the teaching message once, so take it before counting.)

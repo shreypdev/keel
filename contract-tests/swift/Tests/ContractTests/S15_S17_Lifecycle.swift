@@ -2,6 +2,7 @@ import Foundation
 import UndraFFI
 @testable import UndraRuntime
 import PlaygroundCore
+import PlaygroundCoreFFI
 import XCTest
 
 extension ContractScenarios {
@@ -145,7 +146,7 @@ extension ContractScenarios {
     func testS16_schemaMismatchRejection() async {
         await scenario("S16", "schema mismatch rejection") {
             // The one core of this process is shut down first: the scenario needs a process in which
-            // no core is initialised (`undra_init` is once per process).
+            // the playground core is not initialised (its `init` is once per core).
             Fixture.shared.shutDown()
             try check(UndraCore.current == nil, "a core is still loaded after shutdown")
             let generated = UndraIds.schemaHash
@@ -153,7 +154,7 @@ extension ContractScenarios {
 
             // 1. A load that expects another schema fails with the runtime's mismatch error.
             do {
-                _ = try UndraCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
+                _ = try UndraCore.load(.inproc(api: playground_core_undra_api(), adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
                 throw ScenarioFailure(description: "a load with the wrong schema hash succeeded")
             } catch let error as UndraSchemaMismatchError {
                 try checkEqual(error.expected, wrong, "the expected hash in the error")
@@ -175,15 +176,15 @@ extension ContractScenarios {
             try check(UndraCore.current == nil, "the placeholder became the loaded core after a report")
 
             // 1b. "Before the core is initialised" is what the error type shows when something else
-            // already initialised it: `undra_init` would be refused, and a runtime that called it
+            // already initialised it: the table's `init` would be refused, and a runtime that called it
             // before comparing the hashes would fail with `coreInitFailed` and never report the
             // mismatch. The check comes first, so the answer is the same.
             do {
                 let foreignInit = ContractScenarios.initialiseCoreElsewhere()
-                try checkEqual(foreignInit, 0, "undra_init by another embedder")
-                defer { undra_shutdown() }
+                try checkEqual(foreignInit, 0, "init by another embedder")
+                defer { playgroundTable().shutdown!() }
                 do {
-                    _ = try UndraCore.load(.inproc(adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
+                    _ = try UndraCore.load(.inproc(api: playground_core_undra_api(), adapters: Fixture.shared.makeAdapters(), expectedSchemaHash: wrong))
                     throw ScenarioFailure(description: "a load with the wrong schema hash succeeded on an initialised core")
                 } catch let error as UndraSchemaMismatchError {
                     try checkEqual(error.got, generated, "the core's hash in the error, core initialised elsewhere")
@@ -199,12 +200,13 @@ extension ContractScenarios {
             let statistics = try JSONSerialization.jsonObject(with: Data(core.stats().json.utf8)) as? [String: Any]
             let reported = try require(statistics?["schema_hash"] as? String, "schema_hash in the statistics")
             try checkEqual(UInt64(reported.dropFirst(2), radix: 16), generated, "stats().schema_hash")
-            try checkEqual(undra_schema_hash(), generated, "undra_schema_hash()")
+            try checkEqual(playgroundTable().schema_hash, generated, "the table's schema_hash")
 
             // 4. The exported schema lists the playground's types and the standard ports.
-            let exported = undra_schema_json()
-            defer { undra_buf_free(exported) }
-            let json = Data(bytes: try require(exported.ptr, "undra_schema_json output"), count: Int(exported.len))
+            let table = playgroundTable()
+            let exported = table.schema_json!()
+            defer { table.buf_free!(exported) }
+            let json = Data(bytes: try require(exported.ptr, "schema_json output"), count: Int(exported.len))
             let names = ContractScenarios.names(in: try JSONSerialization.jsonObject(with: json))
             for expected in ["Todos", "Counter", "BigList", "Bench", "Probe", "remote_todos", "post_remote_todo", "patch_remote_todo",
                              "Clock", "Rng", "Log", "Http", "Kv", "SecureStore", "Fs", "Timer", "Connectivity", "Lifecycle"] {
@@ -213,12 +215,13 @@ extension ContractScenarios {
         }
     }
 
-    /// `undra_init` as another embedder of the core would call it, without the runtime; returns its
-    /// status code (0 when the core is running).
+    /// The table's `init` as another embedder of the core would call it, without the runtime; returns
+    /// its status code (0 when the core is running).
     private static func initialiseCoreElsewhere() -> UInt32 {
         let config = RuntimeConfigRecord(platform: "macos", mode: "inproc", coreThreads: 1, blockingThreads: 0, logLevel: 2).undraEncoded()
+        let initialise = playgroundTable().`init`!
         return config.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> UInt32 in
-            return undra_init(bytes.baseAddress, UInt32(bytes.count), { _, _, _, _ in }, { _, _, _ in }, { _, _, _, _ in }, nil)
+            return initialise(bytes.baseAddress, UInt32(bytes.count), { _, _, _, _ in }, { _, _, _ in }, { _, _, _, _ in }, nil)
         }
     }
 
@@ -386,7 +389,7 @@ extension ContractScenarios {
             // A new load in the same process starts a fresh core: no live handles, calls answered,
             // and it closes cleanly. (S18 runs after this scenario and loads the core once more.)
             try check(UndraCore.current == nil, "a core is still the shared one after the shutdown")
-            let fresh = try UndraCore.load(Fixture.shared.loadOptions())
+            let fresh = try UndraPlaygroundCore.load(Fixture.shared.loadOptions())
             try check(UndraCore.current === fresh, "the new core is not the shared one")
             try checkEqual(fresh.stat("live_handles"), 0, "live_handles of the new core")
             try checkEqual(fresh.stats().hostLiveHandles, 0, "handles the runtime holds for the new core")
@@ -404,12 +407,13 @@ extension ContractScenarios {
     }
 }
 
-/// The threads `undra-runtime` started that still run in this process, as `undra_stats_json`
-/// reports them while no core is loaded (`runtime_threads`); throws if a core is loaded.
+/// The threads the playground core's `undra-runtime` started that still run, as its table's
+/// `stats_json` reports them while it is not loaded (`runtime_threads`); throws if it is loaded.
 private func runtimeThreadsLeft() throws -> Int {
-    let buffer = undra_stats_json()
-    defer { undra_buf_free(buffer) }
-    let bytes = Data(bytes: try require(buffer.ptr, "undra_stats_json output"), count: Int(buffer.len))
+    let table = playgroundTable()
+    let buffer = table.stats_json!()
+    defer { table.buf_free!(buffer) }
+    let bytes = Data(bytes: try require(buffer.ptr, "stats_json output"), count: Int(buffer.len))
     let doc = try require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any], "a stats object")
     try check((doc["initialized"] as? Bool) == false, "a core is still loaded after the shutdown: \(doc)")
     return try require((doc["runtime_threads"] as? NSNumber)?.intValue, "runtime_threads in \(doc)")

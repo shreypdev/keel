@@ -20,7 +20,7 @@
 //! A project is a directory with an `undra.toml` ([`config`]). Its core is an ordinary library crate
 //! that depends on `undra`. Everything that ships to a platform is built from two crates the CLI
 //! generates under `target/undra/` (`shim`): the *shim*, which links the core and the C ABI
-//! (`undra-ffi`) into a library named `undra_core`, and the *dev runner*, which links the core and
+//! (`undra-ffi`) into one library that exports the core under its namespace (ADR-044), and the *dev runner*, which links the core and
 //! `undra-transport` into an executable. Keeping them out of the core means the core does not name
 //! crate types, profiles or platform features, and `undra` can change them without touching user
 //! code.

@@ -39,7 +39,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0)),
     )
@@ -163,7 +163,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): TodoStore {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): TodoStore {
             val handle = ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0))
             return TodoStore(ctx, handle)
         }
@@ -173,7 +173,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          * @throws CancellationException if the calling coroutine is cancelled.
          */
-        suspend fun open(path: String, ctx: UndraCore = UndraCore.shared): TodoStore {
+        suspend fun open(path: String, ctx: UndraCore = UndraPlaygroundCore.core): TodoStore {
             val w = UndraWriter()
             w.writeStr(path)
             val handle = try {

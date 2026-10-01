@@ -40,7 +40,7 @@ public func clockPortImpl(_ impl: any Clock) -> PortImpl {
 public struct ConnectivityEvents: Sendable {
     private let core: UndraCore
 
-    public init(ctx: UndraCore = .shared) {
+    public init(ctx: UndraCore = UndraGoldenPorts.core) {
         self.core = ctx
     }
 

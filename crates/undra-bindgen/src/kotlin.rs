@@ -1,8 +1,11 @@
 //! The Kotlin generator (SPEC section 10.2).
 //!
-//! Output: `src/main/kotlin/<package path>/{Types,Errors,Objects,Stores,Ports,Queries,Ids}.kt`.
+//! Output: `src/main/kotlin/<package path>/{Types,Errors,Objects,Stores,Ports,Queries,Ids,Core}.kt`
+//! and the R8 consumer rules of the core, `src/main/resources/META-INF/proguard/undra-<namespace>.pro`.
 //! Generated code depends only on `dev.undra.runtime` and `dev.undra.runtime.wire`
-//! (SPEC section 17.2) and kotlinx-coroutines.
+//! (SPEC section 17.2) and kotlinx-coroutines. `Core.kt` declares the core's JNI natives
+//! (`UndraCoreNative`, whose `JNI_OnLoad` registration the core makes, ADR-044) and its entry
+//! point `Undra<Namespace>`, the default core of every generated API.
 //!
 //! Codec composition is hoisted: a `List<String>` field does not build
 //! `Codecs.vec(Codecs.string)` on every call, the file declares one private
@@ -59,8 +62,8 @@ fn stream_doc(err: Option<&str>) -> String {
     }
 }
 
-const FILES: [&str; 7] = [
-    "Types", "Errors", "Objects", "Stores", "Ports", "Queries", "Ids",
+const FILES: [&str; 8] = [
+    "Types", "Errors", "Objects", "Stores", "Ports", "Queries", "Ids", "Core",
 ];
 
 pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
@@ -74,6 +77,7 @@ pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
         kt.ports_file(),
         kt.queries_file(),
         kt.ids_file(),
+        kt.core_file(),
     ];
     FILES
         .iter()
@@ -82,8 +86,35 @@ pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
             path: format!("{dir}/{name}.kt"),
             contents,
         })
+        .chain(std::iter::once(kt.proguard_file()))
         .collect()
 }
+
+/// The JNI natives of a core, in `NativeApi` order: name, parameters, return type (`None` for
+/// `Unit`). `JNI_OnLoad` registers exactly these names and descriptors (SPEC 6.1).
+const NATIVES: &[(&str, &str, Option<&str>)] = &[
+    ("abiVersion", "", Some("Int")),
+    ("schemaHash", "", Some("Long")),
+    ("schemaJson", "", Some("ByteArray")),
+    ("init", "cfg: ByteArray, cb: NativeCallbacks", Some("Int")),
+    ("call", "payload: ByteArray", Some("Int")),
+    ("callSync", "payload: ByteArray", Some("ByteArray")),
+    ("cancel", "callId: Int", None),
+    ("streamCredit", "callId: Int, credit: Int", None),
+    ("observe", "handle: Long, signalId: Int, on: Boolean", None),
+    ("release", "handle: Long", None),
+    ("portReply", "payload: ByteArray", None),
+    (
+        "event",
+        "portId: Int, methodId: Int, payload: ByteArray",
+        None,
+    ),
+    ("timerFired", "timerId: Int", None),
+    ("snapshot", "", Some("ByteArray")),
+    ("restore", "snapshot: ByteArray", Some("Int")),
+    ("statsJson", "", Some("String")),
+    ("shutdown", "", None),
+];
 
 /// Names of Kotlin standard-library types the generated code writes and their
 /// fully qualified spelling.
@@ -740,17 +771,127 @@ impl KtGen<'_> {
         self.assemble(cx)
     }
 
+    /// The default core of every generated API: this package's own (ADR-044).
+    fn default_core(&self) -> String {
+        format!("{}.core", self.cfg.core_names().entry())
+    }
+
+    fn core_file(&self) -> String {
+        let names = self.cfg.core_names();
+        let entry = names.entry();
+        let namespace = names.namespace();
+        let imports: BTreeSet<String> = [
+            "CoreEntry",
+            "LoadOptions",
+            "NativeApi",
+            "NativeCallbacks",
+            "NativeLibrary",
+            "UndraCore",
+        ]
+        .iter()
+        .map(|name| format!("dev.undra.runtime.{name}"))
+        .collect();
+        let mut w = CodeWriter::new("    ");
+        w.line("/**");
+        w.line(format!(
+            " * The JNI natives of the core `{namespace}`: `lib{namespace}.so`, whose `JNI_OnLoad` registers"
+        ));
+        w.line(" * them on this class (ADR-044). Loading the library is what makes them callable; while it");
+        w.line(" * cannot be loaded, [isAvailable] is `false` and [unavailableReason] says why.");
+        w.line(" */");
+        w.block("internal object UndraCoreNative : NativeApi", |w| {
+            w.line(format!("override val namespace: String = \"{namespace}\""));
+            w.blank();
+            w.line("private val loadFailure: Throwable? = NativeLibrary.load(namespace)");
+            w.blank();
+            w.line("override val isAvailable: Boolean get() = loadFailure == null");
+            w.line("override val unavailableReason: Throwable? get() = loadFailure");
+            w.blank();
+            for (name, params, ret) in NATIVES {
+                match ret {
+                    Some(ret) => w.line(format!("override external fun {name}({params}): {ret}")),
+                    None => w.line(format!("override external fun {name}({params})")),
+                }
+            }
+        });
+        w.blank();
+        w.line("/**");
+        w.line(format!(
+            " * The core these bindings belong to, `{namespace}` (`[core] namespace` in undra.toml): [load]"
+        ));
+        w.line(" * starts it, and [core] is the core every generated class and function of this package uses");
+        w.line(" * unless it is given another one (`ctx`).");
+        w.line(" *");
+        w.line(" * ```kotlin");
+        w.line(format!(" * val core = {entry}.load() // in this process"));
+        w.line(format!(
+            " * val dev = {entry}.load(LoadOptions(Mode.REMOTE, remoteUrl = \"ws://10.0.2.2:7878\")) // `undra dev`"
+        ));
+        w.line(" * ```");
+        w.line(" */");
+        w.block(format!("object {entry}"), |w| {
+            w.line(format!(
+                "/** The core's namespace: its library is `lib{namespace}.so`. */"
+            ));
+            w.line(format!("const val NAMESPACE: String = \"{namespace}\""));
+            w.blank();
+            w.line("private val entry = CoreEntry(NAMESPACE, UndraIds.SCHEMA_HASH) { UndraCoreNative }");
+            w.blank();
+            w.line("/**");
+            w.line(" * Loads the core (in this process unless [options] say otherwise) and makes it [core].");
+            w.line(" *");
+            w.line(" * @throws UndraSchemaMismatchException if the core was built from another schema.");
+            w.line(" * @throws UndraException if it cannot start, or this core is already loaded.");
+            w.line(" */");
+            w.line("fun load(options: LoadOptions = LoadOptions()): UndraCore = entry.load(options)");
+            w.blank();
+            w.line("/**");
+            w.line(" * The loaded core, or, while none is loaded (or after it was closed), a closed placeholder");
+            w.line(" * whose calls fail with `UndraCallError.Unavailable`.");
+            w.line(" */");
+            w.line("val core: UndraCore get() = entry.core");
+        });
+        let mut out = CodeWriter::new("    ");
+        out.line(self.header(&imports));
+        out.blank();
+        out.line(w.finish());
+        out.finish()
+    }
+
+    /// The R8 rules of the core, shipped in the module's resources so every app that depends on it
+    /// applies them: `JNI_OnLoad` registers the natives of `UndraCoreNative` by name.
+    fn proguard_file(&self) -> GeneratedFile {
+        let names = self.cfg.core_names();
+        GeneratedFile {
+            path: format!(
+                "src/main/resources/META-INF/proguard/undra-{}.pro",
+                names.namespace()
+            ),
+            contents: format!(
+                "# Generated by undra-bindgen: R8 rules of the Undra core `{ns}`. Do not edit.\n\
+                 # Its JNI_OnLoad registers the natives of this class by name (ADR-044): keep both.\n\
+                 -keep class {pkg}.UndraCoreNative {{\n    native <methods>;\n}}\n",
+                ns = names.namespace(),
+                pkg = self.cfg.kotlin_package,
+            ),
+        }
+    }
+
     fn ids_file(&self) -> String {
         let m = self.model;
         let mut w = CodeWriter::new("    ");
         w.line("/**");
         w.line(" * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema");
-        w.line(" * hash to pass to `UndraCore.load` as `expectedSchemaHash`.");
+        w.line(" * hash and the namespace of the core these bindings belong to.");
         w.line(" */");
         w.block("object UndraIds", |w| {
             w.line(format!(
                 "const val SCHEMA_HASH: ULong = 0x{:016x}uL",
                 m.schema_hash
+            ));
+            w.line(format!(
+                "const val NAMESPACE: String = \"{}\"",
+                self.cfg.namespace
             ));
             w.blank();
             w.block("object Objects", |w| {
@@ -1325,7 +1466,7 @@ impl<'a> Ctx<'a> {
                     kdoc(w, &c.docs, &[THROWS_CALL.to_owned()]);
                     let ids = format!("UndraIds.Objects.{}", o.name);
                     w.call(
-                        "constructor(ctx: UndraCore = UndraCore.shared) : this",
+                        format!("constructor(ctx: UndraCore = {}) : this", self.g.default_core()),
                         &[
                             "ctx".to_owned(),
                             format!("ctx.constructObject({ids}.TYPE_ID, {ids}.NEW, ByteArray(0))"),
@@ -1398,7 +1539,7 @@ impl<'a> Ctx<'a> {
         let handle = naming::avoid("handle", &taken_refs);
         let failure = naming::avoid("e", &taken_refs);
         let mut params = self.param_list(&c.params);
-        params.push(format!("{ctx}: UndraCore = UndraCore.shared"));
+        params.push(format!("{ctx}: UndraCore = {}", self.g.default_core()));
         let mut extra = Vec::new();
         if let Some(err) = &err {
             extra.push(format!("@throws {err}"));
@@ -1491,7 +1632,7 @@ impl<'a> Ctx<'a> {
         let mut params = self.param_list(c.params);
         if is_function {
             self.import("dev.undra.runtime.UndraCore");
-            params.push(format!("{core}: UndraCore = UndraCore.shared"));
+            params.push(format!("{core}: UndraCore = {}", self.g.default_core()));
         }
         let err = ret.error().map(str::to_owned);
         let is_unit_ok = matches!(
@@ -1816,8 +1957,9 @@ impl<'a> Ctx<'a> {
         );
         w.block(
             format!(
-                "class {}Events(private val core: UndraCore = UndraCore.shared)",
-                p.name
+                "class {}Events(private val core: UndraCore = {})",
+                p.name,
+                self.g.default_core()
             ),
             |w| {
                 for (i, m) in p.methods.iter().enumerate() {

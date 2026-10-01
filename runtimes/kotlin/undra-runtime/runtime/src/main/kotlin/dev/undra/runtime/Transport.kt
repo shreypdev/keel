@@ -10,7 +10,7 @@ import dev.undra.runtime.wire.Payloads.StreamFlag
  * A transport speaks the payloads of SPEC section 3 and knows nothing about call ids, continuations or
  * ports: [UndraCore] owns those. Host-to-core methods may be called from any thread except from inside a
  * [TransportEvents] callback. Core-to-host traffic arrives through the [TransportEvents] given to
- * [connect], on threads the transport owns (see [UndraNative] for what that means in process).
+ * [connect], on threads the transport owns (see [NativeCallbacks] for what that means in process).
  */
 internal interface Transport : AutoCloseable {
     /** Which [Mode] this transport implements. */

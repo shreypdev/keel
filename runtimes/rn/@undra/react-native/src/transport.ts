@@ -24,16 +24,25 @@ import {
 } from "@undra/runtime";
 import { type NativeHostCounters, RecordKind, type UndraNativeModule, portPlan, startFailure } from "./native.js";
 
-/** The C ABI version this transport speaks (`undra_abi_version`, docs/SPEC.md section 6). */
-const ABI_VERSION = 1;
+/** The C ABI version this transport speaks: the `abi_version` of a core's `UndraApi` table (docs/SPEC.md section 6, ADR-044). */
+const ABI_VERSION = 2;
 /** Bytes of an inbox record header: `kind u8, len u32`. */
 const RECORD_HEADER = 5;
 const NO_BYTES = new Uint8Array(0);
 
 /** Options of {@link NativeTransport}. */
 export interface NativeTransportOptions {
-  /** The installed native module (`globalThis.__undraNative`), or a stand-in for tests. */
-  readonly native: UndraNativeModule;
+  /**
+   * The core's namespace (`[core] namespace` of its undra.toml; the generated entry's `namespace`, e.g.
+   * `UndraPlaygroundCore.namespace`). The transport talks to that core's module and refuses a module of
+   * another core.
+   */
+  readonly namespace: string;
+  /**
+   * The core's native module. Default: the one installed for `namespace`, `globalThis.__undraNative[namespace]`
+   * (`installNative(namespace)` or `loadNative` installs it). Tests pass a stand-in.
+   */
+  readonly native?: UndraNativeModule;
   /** The schema hash of the generated bindings; a core built from another schema is refused before `undra_init`. */
   readonly expectedSchemaHash: bigint;
   /** Platform name for the core's `RuntimeConfig`. Default `"react-native"`. */
@@ -59,12 +68,12 @@ function bufferOf(bytes: Uint8Array): ArrayBuffer {
 
 /**
  * The module answered as if there were no core: this runtime's core was stopped under the transport
- * (a reloaded runtime of the same process started its own, ADR-038 decision 11).
+ * (a reloaded runtime of the same process started it again, ADR-038 decision 11).
  */
 function notRunning(): UndraTransportError {
   return new UndraTransportError(
     "closed",
-    "the native core of this JavaScript runtime is not running (another runtime of this process started one)",
+    "the native core of this JavaScript runtime is not running (another runtime of this process started it again)",
   );
 }
 
@@ -74,9 +83,15 @@ function exactBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer;
 }
 
+/** The module installed for `namespace` in this runtime, if any. */
+function installedModule(namespace: string): UndraNativeModule | undefined {
+  return (globalThis as { __undraNative?: Record<string, UndraNativeModule | undefined> }).__undraNative?.[namespace];
+}
+
 /**
- * The React Native transport (ADR-038): the TypeScript runtime's {@link Transport} over the
- * native core, reached through the JSI object of `@undra/react-native`'s TurboModule.
+ * The React Native transport (ADR-038): the TypeScript runtime's {@link Transport} over one native
+ * core, reached through the JSI object `@undra/react-native`'s TurboModule installed for the core's
+ * namespace (ADR-044: an app may hold several cores, one transport each).
  *
  * Like `wasm-main` it is `synchronous`: every message runs the core on the JS thread, and before
  * the native call returns to JavaScript the module hands over everything the core queued
@@ -96,7 +111,7 @@ export class NativeTransport implements Transport {
   readonly mode = "native";
   readonly synchronous = true;
 
-  readonly #native: UndraNativeModule;
+  #native: UndraNativeModule | undefined;
   readonly #options: NativeTransportOptions;
   #handler: TransportHandler | null = null;
   #started = false;
@@ -114,6 +129,11 @@ export class NativeTransport implements Transport {
     this.#options = options;
   }
 
+  /** The core's namespace. */
+  get namespace(): string {
+    return this.#options.namespace;
+  }
+
   start(handler: TransportHandler): Promise<HelloPayload> {
     try {
       return Promise.resolve(this.#start(handler));
@@ -125,7 +145,21 @@ export class NativeTransport implements Transport {
   #start(handler: TransportHandler): HelloPayload {
     if (this.#closed) throw new UndraTransportError("closed", "the transport is closed");
     if (this.#started) throw new UndraTransportError("handshake", "the transport is already started");
-    const native = this.#native;
+    const namespace = this.#options.namespace;
+    const native = this.#native ?? installedModule(namespace);
+    if (native === undefined) {
+      throw new UndraTransportError(
+        "unsupported",
+        `the native module of the core \`${namespace}\` is not installed: load it with loadNative (or installNative("${namespace}")) first`,
+      );
+    }
+    if (native.namespace !== namespace) {
+      throw new UndraTransportError(
+        "handshake",
+        `the native module is the core \`${native.namespace}\`, not \`${namespace}\` (undra.toml, [core] namespace)`,
+      );
+    }
+    this.#native = native;
     const abi = native.abiVersion();
     if (abi !== ABI_VERSION) {
       throw new UndraTransportError("handshake", `the core speaks C ABI ${abi}, this runtime speaks ${ABI_VERSION}`);
@@ -147,7 +181,7 @@ export class NativeTransport implements Transport {
     const bytes = config.finish();
     this.#handler = handler;
     // Installed before `start`, which delivers what `undra_init` produced. A start that fails
-    // (another core of this process is running) puts back what was there: the running core's
+    // (this core is running for another transport) puts back what was there: the running core's
     // transport keeps its sink, or every batch of that core would be dropped from now on.
     const previous = { sink: native.sink, portSync: native.portSync };
     native.sink = this.#sink;
@@ -225,9 +259,10 @@ export class NativeTransport implements Transport {
   }
 
   stats(): Promise<string | null> {
-    if (this.#closed || !this.#started) return Promise.resolve(null);
+    const native = this.#native;
+    if (this.#closed || !this.#started || native === undefined) return Promise.resolve(null);
     try {
-      return Promise.resolve(this.#native.statsJson());
+      return Promise.resolve(native.statsJson());
     } catch (error) {
       return Promise.reject(error);
     }
@@ -263,9 +298,16 @@ export class NativeTransport implements Transport {
     }
   }
 
-  /** The native host's counters: inbox records and bytes, wakes, native and JavaScript port calls. */
+  /**
+   * The native host's counters: inbox records and bytes, wakes, native and JavaScript port calls. Throws
+   * `UndraTransportError("unsupported")` while the core's module is not installed.
+   */
   counters(): NativeHostCounters {
-    return this.#native.hostCounters();
+    const native = this.#native ?? installedModule(this.#options.namespace);
+    if (native === undefined) {
+      throw new UndraTransportError("unsupported", `the native module of the core \`${this.#options.namespace}\` is not installed`);
+    }
+    return native.hostCounters();
   }
 
   close(): void {
@@ -275,7 +317,7 @@ export class NativeTransport implements Transport {
     if (this.#started) {
       this.#started = false;
       try {
-        this.#native.shutdown();
+        this.#native?.shutdown();
       } catch (error) {
         this.#report(error);
       }
@@ -292,8 +334,9 @@ export class NativeTransport implements Transport {
 
   #live(): UndraNativeModule {
     if (this.#closed) throw new UndraTransportError("closed", "the core is closed");
-    if (!this.#started) throw new UndraTransportError("closed", "the core is not started");
-    return this.#native;
+    const native = this.#native;
+    if (!this.#started || native === undefined) throw new UndraTransportError("closed", "the core is not started");
+    return native;
   }
 
   /**
@@ -304,6 +347,7 @@ export class NativeTransport implements Transport {
   #detach(restore: { sink?: UndraNativeModule["sink"]; portSync?: UndraNativeModule["portSync"] } = {}): void {
     this.#handler = null;
     const native = this.#native;
+    if (native === undefined) return;
     if (native.sink === this.#sink) native.sink = restore.sink;
     if (native.portSync === this.#portSyncFn) native.portSync = restore.portSync;
   }
@@ -389,7 +433,7 @@ export class NativeTransport implements Transport {
   #portReply(reply: Uint8Array): void {
     if (this.#closed) return;
     try {
-      this.#native.portReply(bufferOf(reply), reply.byteOffset, reply.byteLength);
+      this.#native?.portReply(bufferOf(reply), reply.byteOffset, reply.byteLength);
     } catch (error) {
       this.#report(error);
     }

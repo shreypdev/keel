@@ -25,7 +25,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(page: UInt32, ctx: UndraCore = .shared) throws {
+    public convenience init(page: UInt32, ctx: UndraCore = UndraPlaygroundCore.core) throws {
         var w = UndraWriter()
         page.undraEncode(&w)
         let handle: UndraHandle
@@ -142,7 +142,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
 
 /// Runs the `add_todo` mutation.
 /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func addTodo(title: String, ctx: UndraCore = .shared) async throws -> Todo {
+public func addTodo(title: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws -> Todo {
     var w = UndraWriter()
     title.undraEncode(&w)
     do {

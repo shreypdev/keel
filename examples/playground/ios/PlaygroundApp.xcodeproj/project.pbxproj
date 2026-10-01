@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		A0A0A0A0A0A0A0A000000001 /* PlaygroundCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000010 /* PlaygroundCore */; };
 		A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000011 /* UndraRuntime */; };
-		A0A0A0A0A0A0A0A000000003 /* UndraCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */; };
+		A0A0A0A0A0A0A0A000000003 /* PlaygroundCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* PlaygroundCore.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,7 +24,7 @@
 
 /* Begin PBXFileReference section */
 		A0A0A0A0A0A0A0A00000200 /* PlaygroundAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlaygroundAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = UndraCore.xcframework; path = "../build/ios/UndraCore.xcframework"; sourceTree = SOURCE_ROOT; };
+		A0A0A0A0A0A0A0A000000020 /* PlaygroundCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = PlaygroundCore.xcframework; path = "../build/ios/PlaygroundCore.xcframework"; sourceTree = SOURCE_ROOT; };
 		A0A0A0A0A0A0A0A000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0A0A0A0A0A0A0A000000030 /* PlaygroundApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "PlaygroundApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -56,7 +56,7 @@
 			files = (
 				A0A0A0A0A0A0A0A000000001 /* PlaygroundCore in Frameworks */,
 				A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */,
-				A0A0A0A0A0A0A0A000000003 /* UndraCore.xcframework in Frameworks */,
+				A0A0A0A0A0A0A0A000000003 /* PlaygroundCore.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,7 +85,7 @@
 		A0A0A0A0A0A0A0A000000062 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */,
+				A0A0A0A0A0A0A0A000000020 /* PlaygroundCore.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -290,16 +290,6 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
-					"$(inherited)",
-					"-force_load",
-					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a",
-				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"$(inherited)",
-					"-force_load",
-					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64-simulator/libundra_core.a",
-				);
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 			};
 			name = Debug;
@@ -327,16 +317,6 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
-					"$(inherited)",
-					"-force_load",
-					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a",
-				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"$(inherited)",
-					"-force_load",
-					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64-simulator/libundra_core.a",
-				);
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 			};
 			name = Release;

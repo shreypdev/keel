@@ -101,10 +101,12 @@ DOC COMMENTS
     #[command(
         long_about = "Builds the core for each platform and puts the result where the app shells look for it (below \
 `build/`):\n\
-  ios       build/ios/UndraCore.xcframework            device + simulator slices (no header: the Swift runtime declares the C ABI)\n\
-  android   build/android/jniLibs/<abi>/libundra_core.so   arm64-v8a and x86_64, 16 KB page aligned\n\
-  web       build/web/undra_core.wasm                  release profile, then wasm-opt -Oz if installed\n\
-  host      build/host/libundra_core.{dylib,so}        for the JVM tests and undra bindgen\n\n\
+  ios       build/ios/<Namespace>Core.xcframework       device + simulator slices, each one prelinked lib<namespace>.a, and the core's header\n\
+  android   build/android/jniLibs/<abi>/lib<namespace>.so   arm64-v8a and x86_64, 16 KB page aligned\n\
+  web       build/web/<namespace>.wasm                  release profile, then wasm-opt -Oz if installed\n\
+  host      build/host/lib<namespace>.{dylib,so}        for the JVM tests and undra bindgen\n\n\
+Every name comes from the core's namespace (`[core] namespace` in undra.toml, default the core's package name in snake \
+case): a core exports one symbol, `<namespace>_undra_api`, so several cores can sit in one app (ADR-044).\n\n\
 The library is the core plus the Undra C ABI, built from a small crate generated below `target/undra/` \
 of Cargo's target directory (the workspace's, when the core is a member of one; you never write the crate). \
 Sizes are printed at the end next to the budgets of the design. A debug Android core is tens of megabytes per \
@@ -116,9 +118,9 @@ EXAMPLES
     undra build --platform web --release
     undra build --platform android,host
 
-iOS DEBUG BUILDS
-    Link the library with -force_load (the generated Xcode project already does), or the core's
-    registrations are dropped by the linker and the schema is empty. Release builds need no flag.
+iOS
+    Each slice is one prelinked object whose only global symbol is the core's entry, which the generated
+    Swift package calls: link it like any other library (no -force_load), next to other cores if you have them.
 
 NOT A MANUAL STEP
     In a project made by `undra init` the app builds run this for you, each only when the core changed:

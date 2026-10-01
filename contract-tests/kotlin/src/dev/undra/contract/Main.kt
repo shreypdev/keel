@@ -1,6 +1,6 @@
 package dev.undra.contract
 
-import dev.undra.runtime.UndraNative
+import dev.undra.playground.core.UndraCoreNative
 import java.nio.file.Files
 import kotlin.system.exitProcess
 
@@ -8,15 +8,16 @@ import kotlin.system.exitProcess
 private const val SCENARIO_LIMIT_MS: Long = 120_000L
 
 /**
- * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S19 on the JVM
- * over JNI against the real `libundra_core` of the playground core and prints one line per scenario,
+ * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S19 and S26 on the JVM
+ * over JNI against the real `libplayground_core` of the playground core (and, for S26, `libplayground_a` and
+ * `libplayground_b`) and prints one line per scenario,
  * `SCENARIO S07 PASS|FAIL <title>`, which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.
  */
 fun main() {
     // The default file-backed adapters (Fs, SecureStore) stay in a throwaway directory.
     System.setProperty("undra.data.dir", Files.createTempDirectory("undra-contract-kotlin").toString())
-    if (!UndraNative.isAvailable) {
-        println("the native core library could not be loaded: ${UndraNative.unavailableReason}")
+    if (!UndraCoreNative.isAvailable) {
+        println("the native core library could not be loaded: ${UndraCoreNative.unavailableReason}")
         SCENARIOS.forEach { println("SCENARIO ${it.id} FAIL ${it.title}: native library not loaded") }
         exitProcess(2)
     }

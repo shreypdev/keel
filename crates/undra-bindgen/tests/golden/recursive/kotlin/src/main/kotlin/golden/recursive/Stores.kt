@@ -40,7 +40,7 @@ class Outline private constructor(core: UndraCore, handle: Long) : UndraStore(co
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenRecursive.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Outline.TYPE_ID, UndraIds.Objects.Outline.NEW, ByteArray(0)),
     )
@@ -172,7 +172,7 @@ class Outline private constructor(core: UndraCore, handle: Long) : UndraStore(co
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): Outline {
+        fun create(ctx: UndraCore = UndraGoldenRecursive.core): Outline {
             val handle = ctx.constructObject(UndraIds.Objects.Outline.TYPE_ID, UndraIds.Objects.Outline.NEW, ByteArray(0))
             return Outline(ctx, handle)
         }
