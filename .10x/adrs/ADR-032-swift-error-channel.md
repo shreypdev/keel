@@ -1,9 +1,9 @@
 # ADR-032: generated Swift never stops the process: calls throw, commands report
 
 Status: proposed (2026-09-30). Touches SPEC 10.1 (generated Swift shapes) and 17.3 (Swift runtime API:
-`KeelCallError`, `KeelUnhandledError`, `LoadOptions.onError`, `KeelCore.report`, `KeelCore.shared`),
+`UndraCallError`, `UndraUnhandledError`, `LoadOptions.onError`, `UndraCore.report`, `UndraCore.shared`),
 `contract-tests/scenarios.md` (new steps in S05, S06, S15 and S17), the Swift golden files of
-`keel-bindgen`, the playground's generated Swift and its iOS app, and the pages that describe Swift
+`undra-bindgen`, the playground's generated Swift and its iOS app, and the pages that describe Swift
 errors. No wire change, no C ABI change, no schema change, no Kotlin or TypeScript generated change
 (their goldens stay byte-identical). Constitution: R6 is violated today; R3 decides the shape; R11
 applies because a generated public shape changes. Origin: the blog fact-check
@@ -13,87 +13,87 @@ applies because a generated public shape changes. Origin: the blog fact-check
 ## Context
 
 R6 has two halves. The boundary half holds: every entry is guarded, a panic is caught
-(`crates/keel-ffi/src/guard.rs:36`) and the core answers with a status (SPEC 3.4, `docs/SPEC.md:237`).
+(`crates/undra-ffi/src/guard.rs:36`) and the core answers with a status (SPEC 3.4, `docs/SPEC.md:237`).
 The second half, "every error is a typed value", does not hold for the Swift host: the generated
 wrappers turn most of those statuses into `fatalError`. The policy is deliberate and documented
-(`crates/keel-bindgen/src/swift.rs:9-16`, `crates/keel-bindgen/README.md:62`,
-`runtimes/swift/KeelRuntime/README.md:74`, `site/docs/api-swift.html:92`): typed throws cannot express
+(`crates/undra-bindgen/src/swift.rs:9-16`, `crates/undra-bindgen/README.md:62`,
+`runtimes/swift/UndraRuntime/README.md:74`, `site/docs/api-swift.html:92`): typed throws cannot express
 anything but `E`, so anything else was declared "the core and the bindings disagree". That premise is
 wrong for most of what actually reaches the trap. Cancellation, a call refused after `close()` or
-`shutdown()`, a call refused on re-entry and a call cancelled by `keel_restore` are outcomes the SPEC
+`shutdown()`, a call refused on re-entry and a call cancelled by `undra_restore` are outcomes the SPEC
 defines (`docs/SPEC.md:347`, `:348`, `:411`, `:462`), not disagreements, and a core panic is exactly
 what R6 promises the app survives (S17: "The process is alive").
 
 ### 1. What reaches `fatalError` today
 
 Paths are under `examples/playground/generated/swift/Sources/PlaygroundCore/Generated/` unless they
-name another root; "golden objects" is `crates/keel-bindgen/tests/golden/objects/swift/Sources/GoldenObjects/Generated/`.
-`keelUnexpected` is `Errors.swift:327-332` (`-> Never`, `fatalError`); `E.keelFromReply`
-(`Errors.swift:319-324`) accepts only a `KeelReplyError` with `status == .error` whose body decodes
+name another root; "golden objects" is `crates/undra-bindgen/tests/golden/objects/swift/Sources/GoldenObjects/Generated/`.
+`undraUnexpected` is `Errors.swift:327-332` (`-> Never`, `fatalError`); `E.undraFromReply`
+(`Errors.swift:319-324`) accepts only an `UndraReplyError` with `status == .error` whose body decodes
 as `E`.
 
 | # | Generated shape (Rust signature) | Example, abort site | What reaches `fatalError` | What propagates |
 |---|---|---|---|---|
-| a | sync, no error channel, returns a value (`fn f() -> T`) | `Probe.counters()` `Objects.swift:22-33` (`:31`); `add(a:b:)` `:86-100` (`:98`) | **every failure**: status 2 panic; status 5 (stale handle after `close()` or `restore`, `E_REENTRANT`, undecodable args, refused after a foreign shutdown); `KeelTransportError` (host `shutdown()`, remote timeout or disconnect); `KeelProtocolError` (malformed reply); `WireError` (result does not decode) | nothing |
+| a | sync, no error channel, returns a value (`fn f() -> T`) | `Probe.counters()` `Objects.swift:22-33` (`:31`); `add(a:b:)` `:86-100` (`:98`) | **every failure**: status 2 panic; status 5 (stale handle after `close()` or `restore`, `E_REENTRANT`, undecodable args, refused after a foreign shutdown); `UndraTransportError` (host `shutdown()`, remote timeout or disconnect); `UndraProtocolError` (malformed reply); `WireError` (result does not decode) | nothing |
 | b | sync, no error channel, `()` (`fn f()`) | `Todos.clearDone()` `Stores.swift:1862-1872` (`:1870`); `Counter.increment()` `:1747-1756` (`:1755`); `RemoteTodosQueryHandle.refetch()` `Queries.swift:39-49` (`:47`) | same as (a) | nothing |
 | c | sync, `Result<T, E>` | `area(_:)` `Objects.swift:124-138` (`:135`); `BigList.insertAt` `Stores.swift:1570-1585` (`:1582`) | everything except a status-1 reply that decodes as `E`; a status-1 body that does **not** decode as `E` also aborts | `E` |
-| d | async, `Result<T, E>` | `Todos.add` `Stores.swift:1845-1859` (`:1856`); `failLater` `Objects.swift:271-290` (`:287`); mutations `Queries.swift:132-153` (`:150`) | everything in (c), plus `CancellationError` (task cancelled: `runtimes/swift/KeelRuntime/Sources/KeelRuntime/Core/KeelCore.swift:236`, `CallSlot.swift:35-37`, `:87-88`), status 3 (restore, `docs/SPEC.md:411`; shutdown, `:347`), and the `keel_call` rejection (`KeelCore.swift:249-252`, `:624-629`) | `E` |
-| e | async, no error channel (`async fn f() -> T`) | `Probe.hang()` `Objects.swift:36-43`; `explodeLater` `:252-266` | nothing | the raw runtime errors: `CancellationError`, `KeelReplyError` (2, 3, 5), `KeelTransportError`, `KeelProtocolError`, `WireError` |
-| f | stream, with or without `E` | `Probe.ticks` `Objects.swift:61-70`; golden objects `Calculator.watch` `Objects.swift:176-190` | nothing | `E` (via `mapError`) or `KeelReplyError(.error, body)`, including the `"cancelled: ..."` String body of a stream ended by restore or shutdown (`KeelCore.swift:714-721`); consumer cancellation ends the iteration quietly (`StreamChannel.swift:149-167`) |
+| d | async, `Result<T, E>` | `Todos.add` `Stores.swift:1845-1859` (`:1856`); `failLater` `Objects.swift:271-290` (`:287`); mutations `Queries.swift:132-153` (`:150`) | everything in (c), plus `CancellationError` (task cancelled: `runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraCore.swift:236`, `CallSlot.swift:35-37`, `:87-88`), status 3 (restore, `docs/SPEC.md:411`; shutdown, `:347`), and the `undra_call` rejection (`UndraCore.swift:249-252`, `:624-629`) | `E` |
+| e | async, no error channel (`async fn f() -> T`) | `Probe.hang()` `Objects.swift:36-43`; `explodeLater` `:252-266` | nothing | the raw runtime errors: `CancellationError`, `UndraReplyError` (2, 3, 5), `UndraTransportError`, `UndraProtocolError`, `WireError` |
+| f | stream, with or without `E` | `Probe.ticks` `Objects.swift:61-70`; golden objects `Calculator.watch` `Objects.swift:176-190` | nothing | `E` (via `mapError`) or `UndraReplyError(.error, body)`, including the `"cancelled: ..."` String body of a stream ended by restore or shutdown (`UndraCore.swift:714-721`); consumer cancellation ends the iteration quietly (`StreamChannel.swift:149-167`) |
 | g | constructor, no error channel (`init(ctx:) throws`) | `Todos.init` `Stores.swift:1834-1841` | nothing | the raw runtime errors |
 | h | constructor, `Result<Self, E>` | golden objects `Calculator.withPrecision` `Objects.swift:21-40` (`:36`), async `open` `:42-64` (`:59`) | as (c) and (d) | `E` |
 | i | store `apply` (mirror, not a call) | `Stores.swift:1967-1973` | `assertionFailure` on an undecodable change: a trap in debug builds, a silent drop in release | n/a |
-| j | default argument `ctx: KeelCore = .shared` of every constructor and free function | `KeelCore.swift:96-101` | `fatalError` when no core is loaded: before `load` succeeds or after `shutdown()` (`:465-469` clears the slot) | n/a |
-| k | port adapters (the host implements the port) | `KeelCore.swift:740-745`, `:756-760` | nothing: an error that is not `E` answers port status 2 (unavailable) | n/a |
+| j | default argument `ctx: UndraCore = .shared` of every constructor and free function | `UndraCore.swift:96-101` | `fatalError` when no core is loaded: before `load` succeeds or after `shutdown()` (`:465-469` clears the slot) | n/a |
+| k | port adapters (the host implements the port) | `UndraCore.swift:740-745`, `:756-760` | nothing: an error that is not `E` answers port status 2 (unavailable) | n/a |
 
 The generator decides this in three places: `swift.rs:1086-1093` (async without `E` gets plain
 `throws`, sync without `E` gets nothing), `:1108` and `:1127-1134` (every sync call and every call
-with `E` is wrapped, and the wrapper without `E` calls `keelUnexpected`), and `:831-845`
+with `E` is wrapped, and the wrapper without `E` calls `undraUnexpected`), and `:831-845`
 (`catch_typed`). With `swift_typed_throws = false` shapes (c), (d) and (h) rethrow
 (`swift.rs:841`), but (a) and (b) still abort, so the documented escape hatch does not fix the
 finding.
 
 The contract suite never takes these paths on Swift: S06 cancels the untyped `probe.hang()`
 (`contract-tests/swift/Tests/ContractTests/S04_S06_Async.swift:168-177`), S05.4 and S15.7 use the raw
-`core.callSync`, and S17.1 calls `KeelCore.callSync` directly because the generated `explode(reason:)`
+`core.callSync`, and S17.1 calls `UndraCore.callSync` directly because the generated `explode(reason:)`
 "stops the process on purpose" (`contract-tests/swift/NOTES.md:45-47`,
 `S15_S17_Lifecycle.swift:205-214`). The Kotlin runner calls the generated `explode` and gets an
-exception (`contract-tests/kotlin/src/dev/keel/contract/S17Panic.kt:16-17`).
+exception (`contract-tests/kotlin/src/dev/undra/contract/S17Panic.kt:16-17`).
 
 How realistic each trigger is in an app:
 
 * **Cancellation.** A SwiftUI `.task` that awaits `todos.add(title:)` is cancelled when its view
   disappears. Today that is a crash.
 * **Closed object.** A view that still holds a store after `close()` and calls `todos.toggle(id:)`:
-  `KeelObject.close()` itself documents that later calls "fail" with a bad request
-  (`runtimes/swift/KeelRuntime/Sources/KeelRuntime/Core/KeelObject.swift:34-35`); they abort.
-* **Shutdown.** `KeelCore.shutdown()` fails every pending call with `KeelTransportError.closed`
-  (`KeelCore.swift:463`) and refuses later ones (`:508-510`, `InprocTransport.swift:192-195`); in-flight
+  `UndraObject.close()` itself documents that later calls "fail" with a bad request
+  (`runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/UndraObject.swift:34-35`); they abort.
+* **Shutdown.** `UndraCore.shutdown()` fails every pending call with `UndraTransportError.closed`
+  (`UndraCore.swift:463`) and refuses later ones (`:508-510`, `InprocTransport.swift:192-195`); in-flight
   typed calls and every later sync call abort. After shutdown, `Todos()` with the default `ctx` hits
-  `KeelCore.shared`'s `fatalError` (row j).
+  `UndraCore.shared`'s `fatalError` (row j).
 * **Restore.** Every non-store object handle becomes stale (status 5) and every call in flight on a
   replaced or invalidated receiver ends with status 3 (`docs/SPEC.md:411`).
 * **Re-entry.** A synchronous port implementation (the app's own `Log`, `Kv` or `Clock`) runs inside
-  the core's callback (`KeelCore.swift:731-746`); a generated sync call made from it is refused with
+  the core's callback (`UndraCore.swift:731-746`); a generated sync call made from it is refused with
   `E_REENTRANT` (status 5, `docs/SPEC.md:348`, `:462`) and aborts.
 * **Remote dev core.** `callSync` over the WebSocket blocks and can time out or lose the connection
-  (`KeelCore.swift:532-545`, `:785-787`); every sync call then aborts the app under development.
+  (`UndraCore.swift:532-545`, `:785-787`); every sync call then aborts the app under development.
 * **Panic.** The core contains it and keeps working (S17); the Swift app does not.
 
 ### 2. What Kotlin and TypeScript do in the same situations
 
-| Failure | Kotlin (generated + `dev.keel.runtime`) | TypeScript (generated + `@keel/runtime`) | Swift today |
+| Failure | Kotlin (generated + `dev.undra.runtime`) | TypeScript (generated + `@undra/runtime`) | Swift today |
 |---|---|---|---|
-| typed error (status 1) | throws `E`, a `KeelException` subclass: `generated/kotlin/.../Errors.kt:164-166` (`fromReply`), `Objects.kt:123-136` | rejects with `E`, a `KeelError` subclass: `generated/ts/src/errors.ts:21-26`, `objects.ts:145-155` | throws `E` |
-| calling task cancelled | `CancellationException` (`runtimes/kotlin/.../ConnectedCore.kt:132-137`, `suspendCancellableCoroutine`) | rejects with the signal's reason, an `AbortError` by default (`runtimes/ts/@keel/runtime/src/core.ts:146-151`, `:359-360`) | (d), (h): abort; (e): `CancellationError` |
-| core cancelled the call (status 3) | `KeelReplyException(CANCELLED)` (`ConnectedCore.kt:319-331`) | `KeelReplyError`, status 3 (`core.ts:690-691`) | (c), (d), (h): abort; (e): `KeelReplyError(.cancelled)` |
-| panic (status 2) | `KeelReplyException(PANIC)`, through the generated `explode` (`S17Panic.kt:16-17`) | wasm traps (`panic=abort`, SPEC 7): the call rejects with `KeelTransportError("trap")`, the core closes, the page lives (`contract-tests/ts/test/s17-panic-containment.test.ts:42-54`) | (a)-(d), (h): abort |
-| refused (status 5: stale handle, `E_REENTRANT`, bad args) | `KeelReplyException(BAD_REQUEST)` (`ConnectedCore.kt:211-218`, `:319-320`) | `KeelReplyError`, status 5 (`core.ts:690-691`) | (a)-(d), (h): abort |
-| host closed or shut the core down | `KeelException("this KeelCore is closed")` (`ConnectedCore.kt:236-238`, `:300-315`) | `KeelTransportError("closed")` (`core.ts:482`, `:512`) | (a)-(d), (h): abort |
-| remote timeout, disconnect | `KeelException` (`ConnectedCore.kt:196-207`) | `KeelTransportError("timeout" / "closed")` (`errors.ts:155-168`) | (a)-(d), (h): abort |
-| malformed reply, undecodable result or `E` | `KeelException("malformed reply")` (`ConnectedCore.kt:116-120`) or `WireException` from `decodeAll` | `KeelTransportError("protocol")` (`core.ts:345`, `:641`) or `WireError` from `decodeValue` | (a)-(d), (h): abort |
+| typed error (status 1) | throws `E`, an `UndraException` subclass: `generated/kotlin/.../Errors.kt:164-166` (`fromReply`), `Objects.kt:123-136` | rejects with `E`, an `UndraError` subclass: `generated/ts/src/errors.ts:21-26`, `objects.ts:145-155` | throws `E` |
+| calling task cancelled | `CancellationException` (`runtimes/kotlin/.../ConnectedCore.kt:132-137`, `suspendCancellableCoroutine`) | rejects with the signal's reason, an `AbortError` by default (`runtimes/ts/@undra/runtime/src/core.ts:146-151`, `:359-360`) | (d), (h): abort; (e): `CancellationError` |
+| core cancelled the call (status 3) | `UndraReplyException(CANCELLED)` (`ConnectedCore.kt:319-331`) | `UndraReplyError`, status 3 (`core.ts:690-691`) | (c), (d), (h): abort; (e): `UndraReplyError(.cancelled)` |
+| panic (status 2) | `UndraReplyException(PANIC)`, through the generated `explode` (`S17Panic.kt:16-17`) | wasm traps (`panic=abort`, SPEC 7): the call rejects with `UndraTransportError("trap")`, the core closes, the page lives (`contract-tests/ts/test/s17-panic-containment.test.ts:42-54`) | (a)-(d), (h): abort |
+| refused (status 5: stale handle, `E_REENTRANT`, bad args) | `UndraReplyException(BAD_REQUEST)` (`ConnectedCore.kt:211-218`, `:319-320`) | `UndraReplyError`, status 5 (`core.ts:690-691`) | (a)-(d), (h): abort |
+| host closed or shut the core down | `UndraException("this UndraCore is closed")` (`ConnectedCore.kt:236-238`, `:300-315`) | `UndraTransportError("closed")` (`core.ts:482`, `:512`) | (a)-(d), (h): abort |
+| remote timeout, disconnect | `UndraException` (`ConnectedCore.kt:196-207`) | `UndraTransportError("timeout" / "closed")` (`errors.ts:155-168`) | (a)-(d), (h): abort |
+| malformed reply, undecodable result or `E` | `UndraException("malformed reply")` (`ConnectedCore.kt:116-120`) or `WireException` from `decodeAll` | `UndraTransportError("protocol")` (`core.ts:345`, `:641`) or `WireError` from `decodeValue` | (a)-(d), (h): abort |
 | undecodable change-set entry | logged at warn, entry skipped (`Mirror.kt:188-200`) | logged at level 4 and passed to `LoadOptions.onError` (`core.ts:313`, `:771-778`) | trap in debug, drop in release |
-| no core loaded (default `ctx`) | `KeelCore.shared` throws `KeelException` (`KeelCore.kt:43-45`) | `KeelCore.shared` throws (`core.ts:201`) | `fatalError` |
+| no core loaded (default `ctx`) | `UndraCore.shared` throws `UndraException` (`UndraCore.kt:43-45`) | `UndraCore.shared` throws (`core.ts:201`) | `fatalError` |
 
 Kotlin and TypeScript have one channel for every call failure (an exception, a rejection) with typed
 classes on it; TypeScript adds a hook (`LoadOptions.onError`, `core.ts:95`) for failures nobody awaits.
@@ -109,7 +109,7 @@ No. Searched the generated trees and the runtimes for `fatalError`, `preconditio
 * `examples/playground/generated/kotlin`: no match. `examples/playground/generated/ts/src`: only doc
   comments (`objects.ts:251`, `types.ts:51`).
 * Kotlin runtime: `require`/`check` validate arguments in the codecs and the stats JSON parser
-  (`wire/KeelReader.kt`, `wire/KeelWriter.kt:212`, `KeelStats.kt:109-218`) and the method id of a call
+  (`wire/UndraReader.kt`, `wire/UndraWriter.kt:212`, `UndraStats.kt:109-218`) and the method id of a call
   (`ConnectedCore.kt:453`, always equal in generated code). They throw catchable exceptions and none
   depends on a reply status.
 * TypeScript runtime: `throw new Error` only while loading the wasm module (`transport/wasm-main.ts:106`,
@@ -120,10 +120,10 @@ No. Searched the generated trees and the runtimes for `fatalError`, `preconditio
   unhandled rejection. Both are the app's unhandled typed value, catchable at the call site; neither
   is generated code choosing to stop. R6 holds there.
 * The Swift runtime has argument preconditions of the same kind as Kotlin's `require`
-  (`Wire/KeelWriter.swift:144`, `Wire/KeelReader.swift:254-290`, `Wire/KeelTypes.swift:209`): host
+  (`Wire/UndraWriter.swift:144`, `Wire/UndraReader.swift:254-290`, `Wire/UndraTypes.swift:209`): host
   misuse of the codec API, not reachable from a reply, and Swift's convention for that. They stay. Its
-  `assert` in `KeelCore.swift:581` is debug-only and unreachable from generated code. Its
-  `fatalError` in `KeelCore.shared` (`:100`) is reachable from generated defaults: row (j), decided
+  `assert` in `UndraCore.swift:581` is debug-only and unreachable from generated code. Its
+  `fatalError` in `UndraCore.shared` (`:100`) is reachable from generated defaults: row (j), decided
   below.
 
 ### 4. Swift facts the decision rests on
@@ -153,7 +153,7 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
 
 ## Decision
 
-1. **No generated Swift traps on the outcome of a call.** `keelUnexpected` is deleted. No reply
+1. **No generated Swift traps on the outcome of a call.** `undraUnexpected` is deleted. No reply
    status, transport failure, cancellation or undecodable byte reaches `fatalError`,
    `preconditionFailure`, `assertionFailure` or `precondition` from generated code, in any build
    configuration. A bindgen test enforces it over every golden case.
@@ -162,21 +162,21 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
    * its own error `E` (reply status 1), thrown as `E` itself, so `catch TodoError.emptyTitle` and
      `catch let error as TodoError` keep working;
    * `CancellationError`, when the calling task was cancelled (async calls only; already what
-     `KeelCore.call` throws);
-   * `KeelCallError`, a new runtime enum, for every failure of the call itself:
+     `UndraCore.call` throws);
+   * `UndraCallError`, a new runtime enum, for every failure of the call itself:
 
-   | `KeelCallError` case | From |
+   | `UndraCallError` case | From |
    |---|---|
    | `.cancelledByCore` | status 3: a restore replaced or invalidated the receiver, or the core shut down while the call ran (a stream ended with a `"cancelled: ..."` error item) |
    | `.panicked(message:backtrace:)` | status 2 (a stream panic carries the message and an empty backtrace) |
-   | `.refused(reason:)` | status 5 and the `keel_call` rejection: closed or stale handle, `E_REENTRANT`, undecodable arguments, unknown method, refused after a foreign shutdown; `reason` is the core's text |
-   | `.unavailable(KeelTransportError)` | this `KeelCore` was shut down, is not loaded, or its remote connection closed or timed out |
-   | `.malformed(String)` | a reply that does not decode, a result or an `E` that does not decode, a typed error on a method without one, a stream where a single reply was expected, the null handle. After a successful schema check this is a Keel bug |
+   | `.refused(reason:)` | status 5 and the `undra_call` rejection: closed or stale handle, `E_REENTRANT`, undecodable arguments, unknown method, refused after a foreign shutdown; `reason` is the core's text |
+   | `.unavailable(UndraTransportError)` | this `UndraCore` was shut down, is not loaded, or its remote connection closed or timed out |
+   | `.malformed(String)` | a reply that does not decode, a result or an `E` that does not decode, a typed error on a method without one, a stream where a single reply was expected, the null handle. After a successful schema check this is an Undra bug |
 
-   `KeelCallError` is `Error, Sendable, Equatable, CustomStringConvertible, LocalizedError`, so
+   `UndraCallError` is `Error, Sendable, Equatable, CustomStringConvertible, LocalizedError`, so
    `error.localizedDescription` (what the playground shows, `TodosScreen.swift:98`) reads well. A core
    cancellation is not a `CancellationError`: the caller's task was not cancelled, Kotlin and TypeScript
-   keep the two apart (`KeelReplyException(CANCELLED)` versus `CancellationException`, status 3 versus
+   keep the two apart (`UndraReplyException(CANCELLED)` versus `CancellationException`, status 3 versus
    `AbortError`), and a call silently swallowed by a `catch is CancellationError` would hide that a
    write never landed.
 
@@ -192,7 +192,7 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
    | `fn f(&self) -> impl Stream<Item = T>` (with or without `E`) | `-> AsyncThrowingStream<T, Error>` | unchanged type; failures mapped |
    | constructor `new` | `init(ctx:) throws` / `async throws` | unchanged signature; errors mapped |
    | constructor `-> Result<Self, E>` | `static func x() throws(E) -> O` | `static func x() throws -> O` |
-   | `#[keel::port]` method returning `Result<T, E>` (the host implements it) | `func m() async throws(E) -> T` | unchanged |
+   | `#[undra::port]` method returning `Result<T, E>` (the host implements it) | `func m() async throws(E) -> T` | unchanged |
 
    Typed throws stay where the host is the implementer: a port requirement `throws(HttpError)` tells
    the implementer exactly which errors the core can understand, and the adapter already maps anything
@@ -201,7 +201,7 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
 
 4. **Commands report instead of throwing.** A synchronous method that returns `()` and has no error
    type stays non-throwing. When it fails, the runtime logs the failure at error level
-   (`KeelLog.error`, unified log subsystem `dev.keel.runtime`), passes a `KeelUnhandledError(operation:
+   (`UndraLog.error`, unified log subsystem `dev.undra.runtime`), passes an `UndraUnhandledError(operation:
    error:)` to `LoadOptions.onError` (new, optional, the TypeScript runtime's `onError` for Swift) and
    returns. It never traps, in debug or release; a team that wants a debug trap installs
    `onError: { assertionFailure("\($0)") }`. This is the one shape where the call site cannot handle a
@@ -217,16 +217,16 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
    Either way the UI is truthful, the failure is logged and reported, and the action returns.
 
    `onError` runs synchronously on the thread that made the call (the main actor for a store) and must
-   not call into Keel; a failure reported while `onError` is running on the same thread is only logged,
+   not call into Undra; a failure reported while `onError` is running on the same thread is only logged,
    so a handler that calls a failing command cannot recurse.
 
 5. **The mapping lives in the runtime, once.** Generated code wraps every call in one
-   `do`/`catch` and hands the error to `KeelCallError.mapped(_:)` or `KeelCallError.mapped(_:domain:)`
+   `do`/`catch` and hands the error to `UndraCallError.mapped(_:)` or `UndraCallError.mapped(_:domain:)`
    (streams: `mapped(streamFailure:)` / `mapped(streamFailure:domain:)`, because a stream's error item
-   carries either `E` or a String, SPEC 3.7 and 5.9). The function returns `E`, `CancellationError` or a
-   `KeelCallError`; generated code throws what it returns. Commands call `core.report(error,
-   operation:)`. The raw byte API of `KeelCore` (`callSync`, `call`, `stream`, `construct`) keeps
-   throwing `KeelReplyError` and friends: it is the API for what bindings do not expose, and the
+   carries either `E` or a String, SPEC 3.7 and 5.9). The function returns `E`, `CancellationError` or an
+   `UndraCallError`; generated code throws what it returns. Commands call `core.report(error,
+   operation:)`. The raw byte API of `UndraCore` (`callSync`, `call`, `stream`, `construct`) keeps
+   throwing `UndraReplyError` and friends: it is the API for what bindings do not expose, and the
    contract runners rely on its statuses. The success path is unchanged (a Swift `do` costs nothing
    until something throws).
 
@@ -235,8 +235,8 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
    and `onError`). A `PatchError` still re-observes the signal as today. No re-observe on an undecodable
    full value: it would decode the same bytes again.
 
-7. **`KeelCore.shared` with no core loaded** returns a permanently shut-down placeholder instead of
-   trapping: constructors given it throw `KeelCallError.unavailable(.closed)`, commands report, and the
+7. **`UndraCore.shared` with no core loaded** returns a permanently shut-down placeholder instead of
+   trapping: constructors given it throw `UndraCallError.unavailable(.closed)`, commands report, and the
    first use logs the existing teaching message once ("Load a core at app startup ..."). `current` still
    returns `nil`. This closes row (j), the only runtime trap reachable from generated code. It is
    separable from 1-6 (open decision 3).
@@ -246,34 +246,34 @@ Checked with Apple Swift 6.3.3, `-swift-version 6 -strict-concurrency=complete`,
 ```swift
 // Generated (Stores.swift): a store with a typed async method, a command, and a query.
 @MainActor @Observable
-public final class Todos: KeelStore, @unchecked Sendable {
+public final class Todos: UndraStore, @unchecked Sendable {
     public private(set) var todos: [Todo] = []
 
     /// Adds an item at the end of the list.
-    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``KeelCallError``.
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func add(title: String) async throws -> Todo {
-        var w = KeelWriter()
-        title.keelEncode(&w)
+        var w = UndraWriter()
+        title.undraEncode(&w)
         do {
             let body = try await self.core.call(
-                .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Todos.add),
-                method: KeelIds.Objects.Todos.add,
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Todos.add),
+                method: UndraIds.Objects.Todos.add,
                 args: w.finish()
             )
-            return try Todo.keelDecoded(from: body)
+            return try Todo.undraDecoded(from: body)
         } catch {
-            throw KeelCallError.mapped(error, domain: TodoError.self)
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
     }
 
     /// Flips the `done` flag of the item with `id`; unknown ids are ignored.
     public func toggle(id: UUID) {
-        var w = KeelWriter()
-        id.keelEncode(&w)
+        var w = UndraWriter()
+        id.undraEncode(&w)
         do {
             _ = try self.core.callSync(
-                .objectMethod(handle: self.handle, methodId: KeelIds.Objects.Todos.toggle),
-                method: KeelIds.Objects.Todos.toggle,
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Todos.toggle),
+                method: UndraIds.Objects.Todos.toggle,
                 args: w.finish()
             )
         } catch {
@@ -292,18 +292,18 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
     } catch is CancellationError {
         // the view went away; nothing to do
     } catch {
-        problem = error.localizedDescription                // a KeelCallError: panicked, refused, ...
+        problem = error.localizedDescription                // an UndraCallError: panicked, refused, ...
     }
 }
 ```
 
 ## Alternatives considered
 
-* **(a) `async throws(KeelCallError<E>)` with `.typed(E)`, `.cancelled`, `.core(...)`** (the
+* **(a) `async throws(UndraCallError<E>)` with `.typed(E)`, `.cancelled`, `.core(...)`** (the
   fact-check's first preference). It keeps a typed channel, but: cancellation stops being a
   `CancellationError`, so `catch is CancellationError`, `Task.isCancelled`-style helpers and every
-  library that special-cases it treat a cancelled Keel call as a real failure; methods without `E`
-  need `KeelCallError<Never>`; every existing `catch TodoError.x` and every `throws(E)` closure breaks
+  library that special-cases it treat a cancelled Undra call as a real failure; methods without `E`
+  need `UndraCallError<Never>`; every existing `catch TodoError.x` and every `throws(E)` closure breaks
   (more than with the decision); and the benefit is smaller than it looks, because Swift 6.3 still
   requires a catch-all after pattern catches (section 4), so the gain is an exhaustive `switch` inside
   that catch-all. A Swift engineer who never saw Rust writes `async throws` for a cancellable call, as
@@ -318,9 +318,9 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
   but every store mutation would need `try?` inside `Button`, `Binding` and `.refreshable` closures,
   and the failures a command can meet are lifecycle misuse and core bugs, not outcomes a call site can
   act on. Recorded as open decision 1 because it is the closest alternative.
-* **(d) Throw the runtime's existing errors (`KeelReplyError`, `KeelTransportError`,
-  `KeelProtocolError`, `WireError`) instead of a new enum.** That is what shape (e) does today. Four
-  unrelated types to catch, and `KeelReplyError` exposes wire status bytes and an undecoded body, which
+* **(d) Throw the runtime's existing errors (`UndraReplyError`, `UndraTransportError`,
+  `UndraProtocolError`, `WireError`) instead of a new enum.** That is what shape (e) does today. Four
+  unrelated types to catch, and `UndraReplyError` exposes wire status bytes and an undecoded body, which
   fails native review. One enum with named reasons is what a Swift engineer would write.
 * **(e) Status 3 as `CancellationError`.** Hides a write that never landed behind the quiet-exit idiom,
   and diverges from Kotlin and TypeScript. Rejected (decision 2).
@@ -337,13 +337,13 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
 ## Consequences
 
 * **SPEC.** 10.1: the shapes table above, the three-outcome rule, the command rule, and "typed throws
-  only on port requirements". 17.3: `KeelCallError` (and its `mapped` functions), `KeelUnhandledError`,
-  `LoadOptions.onError`, `KeelCore.report(_:operation:)`, and `shared`'s placeholder. 3.4 and 5.1 do
+  only on port requirements". 17.3: `UndraCallError` (and its `mapped` functions), `UndraUnhandledError`,
+  `LoadOptions.onError`, `UndraCore.report(_:operation:)`, and `shared`'s placeholder. 3.4 and 5.1 do
   not change.
-* **Goldens.** All nine Swift trees change (`Errors.swift` loses `keelUnexpected` and every
-  `keelFromReply`; calls, constructors, streams and `apply` change). Kotlin and TypeScript trees are
+* **Goldens.** All nine Swift trees change (`Errors.swift` loses `undraUnexpected` and every
+  `undraFromReply`; calls, constructors, streams and `apply` change). Kotlin and TypeScript trees are
   byte-identical, which the review checks with `git diff --stat`.
-* **Swift runtime.** New public API as above; `KeelReplyError` and the raw entry points unchanged; one
+* **Swift runtime.** New public API as above; `UndraReplyError` and the raw entry points unchanged; one
   new internal transport for the placeholder core. Unit tests per status and per error type with the
   existing `FakeTransport`.
 * **Contract suite.** New steps, specified in the brief: S05.6 (calls on a closed object through the
@@ -356,21 +356,21 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
   coverage, not fixes. The Swift runner records `onError` the way the TypeScript harness already records
   `runtimeErrors` (`contract-tests/ts/src/harness.ts:55`, `:126-128`).
 * **Playground iOS app.** One closure type changes (`BigListScreen.swift:115`, `throws(ListError)` to
-  `throws`); `KeelBootstrap` installs an `onError` that logs, so the reference app shows the API (R10).
+  `throws`); `UndraBootstrap` installs an `onError` that logs, so the reference app shows the API (R10).
 * **Docs.** `site/docs/api-swift.html` (Errors, Objects, Stores), `site/docs/cli.html:119`, the
-  `keel.toml` template comment (`crates/keel-cli/src/config.rs:459`), `crates/keel-bindgen/README.md:62`,
-  `runtimes/swift/KeelRuntime/README.md:74`, `contract-tests/swift/NOTES.md`. Blog post 4 (on
+  `undra.toml` template comment (`crates/undra-cli/src/config.rs:459`), `crates/undra-bindgen/README.md:62`,
+  `runtimes/swift/UndraRuntime/README.md:74`, `contract-tests/swift/NOTES.md`. Blog post 4 (on
   `wt/blog`) describes the abort; the integrator updates it when this lands.
 * **Source compatibility of generated Swift.** What breaks, all with a compiler error that points at
   the line: closures annotated `throws(E)` around a call; a `do` with only typed pattern catches in a
   non-throwing context (needs a catch-all); calls to sync methods without `E` that return a value
-  (need `try`); code that caught `KeelReplyError` from an untyped async method (now `KeelCallError`).
+  (need `try`); code that caught `UndraReplyError` from an untyped async method (now `UndraCallError`).
   What keeps compiling: `catch TodoError.x`, `catch let e as TodoError`, `catch { error.localizedDescription }`,
   every command call, every stream loop, every constructor call. Kotlin and TypeScript apps are
   unaffected.
 * **Performance.** No boundary crossing changes; the success path adds nothing; no benchmark is owed
   (R4, R9).
-* **Rename.** This piece uses the Keel identifiers of its branch. Whichever of this piece and
+* **Rename.** This piece uses the Undra identifiers of its branch. Whichever of this piece and
   `wt/rename` merges second crosses the other with `scripts/rename-keel-to-undra.sh` (ADR-030), and
   regenerates the goldens rather than editing them.
 
@@ -387,10 +387,10 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
   mapping tries `E`, then the String; an `E` whose encoding happens to read as a String could be
   misclassified. Recorded as a v2 wire item (distinct flags for "cancelled" and "panicked"); not
   fixed here (R7).
-* **`onError` re-entrancy.** A handler that calls Keel from inside a refused re-entrant call would
+* **`onError` re-entrancy.** A handler that calls Undra from inside a refused re-entrant call would
   recurse; the runtime only logs nested reports on the same thread (task-local flag).
-* **Behaviour change for untyped async methods.** Code that matched `KeelReplyError(.panic)` from
-  `explodeLater` must match `KeelCallError.panicked`. The contract runner is the only known caller.
+* **Behaviour change for untyped async methods.** Code that matched `UndraReplyError(.panic)` from
+  `explodeLater` must match `UndraCallError.panicked`. The contract runner is the only known caller.
 * **The placeholder `shared` core defers a missing `load` to the first call.** Mitigated by the logged
   message and by `.unavailable(.closed)`'s description.
 
@@ -400,10 +400,10 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
    SwiftUI action that calls a store method; reporting keeps the site's headline example as it is.
 2. **Default `onError` in debug builds: log only (recommended) or `assertionFailure`.** The
    recommendation keeps R6 literal and the contract suite runnable in debug.
-3. **Decision 7 (`KeelCore.shared` placeholder) in this piece or a follow-up.** Same constitution
+3. **Decision 7 (`UndraCore.shared` placeholder) in this piece or a follow-up.** Same constitution
    argument, different file; it is small and covered by the same review.
 4. **Version.** The generated Swift shape breaks some app source (consequences). R7 makes only wire
    breaks major. Recommended: ship in the next minor with a migration note, as a fix to an R6
    violation; the alternative is to hold it for 2.0.
-5. **Names.** `KeelCallError.cancelledByCore` (versus `.cancelled`), `KeelUnhandledError`,
-   `LoadOptions.onError` (chosen for parity with TypeScript), `KeelCallError.mapped`.
+5. **Names.** `UndraCallError.cancelledByCore` (versus `.cancelled`), `UndraUnhandledError`,
+   `LoadOptions.onError` (chosen for parity with TypeScript), `UndraCallError.mapped`.

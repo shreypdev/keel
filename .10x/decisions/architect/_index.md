@@ -14,5 +14,5 @@ takeover; treat these notes as [DISCOVERED] context, confirmed by reading the co
 - Lost ADRs: ADR-014 (Kv foreign port), ADR-017 (panic poisoning, no CoW overlay) are
   referenced by the SPEC; re-write them if those decisions are reopened.
 - 2026-09-30 [swift-error-channel.md](swift-error-channel.md): ADR-032 (proposed). Generated
-  Swift never traps; calls throw `E` / `CancellationError` / `KeelCallError`, sync `()` commands
+  Swift never traps; calls throw `E` / `CancellationError` / `UndraCallError`, sync `()` commands
   report to `LoadOptions.onError`; typed throws only on port requirements.
