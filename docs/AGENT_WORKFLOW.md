@@ -152,7 +152,10 @@ before the rename crosses it mechanically, in the same order the rename branch d
 4. **Regenerate, never hand-edit:** lockfiles (`cargo build`; `npm install --package-lock-only`
    in each package), the goldens (`UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test golden`
    and `-p undra-cli --test bindgen_schema`; `UPDATE_SNAPSHOTS=1 cargo test -p undra-macros
-   --lib`; `TRYBUILD=overwrite cargo test -p undra-macros --test compile_fail`;
+   --lib`; `TRYBUILD=overwrite cargo test -p undra-macros --test compile_fail`; the message
+   goldens of the diagnostics catalogue (`UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test
+   diagnostics`, `-p undra-ports --test ports_runtime`, `-p undra-cli --test diagnostics`) and
+   the error-codes page after them (`node site/scripts/build-errors.mjs`);
    `undra bindgen -C examples/playground --docs`), then `cargo fmt`. The regenerated output
    differs from the script's only in import order (the new name sorts later than the old one did),
    line wrapping and caret underlines; read the diff to confirm nothing else

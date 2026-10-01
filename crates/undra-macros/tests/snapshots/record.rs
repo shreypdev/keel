@@ -12,6 +12,16 @@ pub struct Todo {
 impl Todo {
     /// The stable Undra type id: `fnv1a32` of the type name.
     pub const UNDRA_TYPE_ID: u32 = ::undra::meta::ids::type_id("Todo");
+    /// The names of the fields, in declaration order (see `undra_meta::keys`).
+    #[doc(hidden)]
+    pub const __UNDRA_FIELDS: &'static [&'static str] = &[
+        "id",
+        "title",
+        "done",
+        "tags",
+        "due",
+        "scores",
+    ];
 }
 #[automatically_derived]
 impl ::undra::wire::Encode for Todo {

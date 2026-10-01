@@ -175,13 +175,92 @@ fn is_schema_neutral_cfg_attr(attr: &Attribute) -> bool {
     })
 }
 
+/// The candidate closest to `name` (a typo of at most two edits, or one that only differs in
+/// case or underscores), for a "did you mean" help.
+pub(crate) fn closest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    let squash = |s: &str| {
+        s.chars()
+            .filter(|c| *c != '_')
+            .collect::<String>()
+            .to_lowercase()
+    };
+    let wanted = squash(name);
+    candidates
+        .iter()
+        .copied()
+        .filter(|candidate| *candidate != name)
+        .map(|candidate| {
+            let distance = if squash(candidate) == wanted {
+                0
+            } else {
+                edit_distance(&wanted, &squash(candidate))
+            };
+            (distance, candidate)
+        })
+        .filter(|(distance, candidate)| *distance <= if candidate.len() <= 4 { 1 } else { 2 })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, candidate)| candidate)
+}
+
+/// Levenshtein distance, for short option names.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if ca == *cb {
+                diagonal
+            } else {
+                1 + diagonal.min(above).min(row[j])
+            };
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// The option names a description like "`crate = \"path\"`, and `store` on an impl block"
+/// mentions: the leading identifier of every backticked part.
+fn option_names(expected: &str) -> Vec<&str> {
+    expected
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter_map(|part| {
+            let end = part
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(part.len());
+            (end > 0).then(|| &part[..end])
+        })
+        .collect()
+}
+
+/// The help of an unknown option or argument: the nearest name if there is one, else the list.
+fn unknown_help(name: &str, candidates: &[&str]) -> String {
+    match closest(name, candidates) {
+        Some(near) => format!("did you mean `{near}`? Otherwise remove `{name}`"),
+        None if candidates.is_empty() => format!("remove `{name}`"),
+        None => format!(
+            "remove `{name}`, or use one of: {}",
+            candidates
+                .iter()
+                .map(|c| format!("`{c}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
 fn parse_one(attr: &Attribute, site: Site, out: &mut UndraAttr) -> syn::Result<()> {
     if !matches!(attr.meta, Meta::List(_)) {
         return Err(Diag::new(
             code::E0008,
             "`#[undra]` needs arguments",
             "the `undra` helper attribute configures a field or an item: `#[undra(default)]`, `#[undra(key = \"id\")]`, `#[undra(no_coalesce)]`, `#[undra(crate = \"path\")]`",
-            "write one of the supported options",
+            "write the option you meant inside parentheses, for example `#[undra(default)]` on a record field or `#[undra(key = \"id\")]` on a `Signal<Vec<T>>`",
         )
         .on(attr));
     }
@@ -196,7 +275,7 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut UndraAttr) -> syn::Result<(
                 code::E0008,
                 format!("`#[undra({option})]` is not valid on {}", site.name),
                 option_hint(option),
-                "remove the option, or move it to where it applies",
+                option_home(option),
             )
             .on(&meta.path)
         };
@@ -242,11 +321,24 @@ fn parse_one(attr: &Attribute, site: Site, out: &mut UndraAttr) -> syn::Result<(
                 code::E0008,
                 format!("unknown option `{other}` in `#[undra(..)]`"),
                 "the options are `crate = \"path\"` (items), `default` (record fields), `key = \"field\"` and `no_coalesce` (store signal fields)",
-                "remove or correct the option",
+                unknown_help(other, &["crate", "default", "key", "no_coalesce"]),
             )
             .on(&meta.path)),
         }
     })
+}
+
+/// Where an option belongs: the fix for one that sits somewhere else.
+fn option_home(option: &str) -> &'static str {
+    match option {
+        "crate" => {
+            "move it to the item: `#[undra(crate = \"path\")]` on a struct, enum, trait or impl block, or `crate = \"path\"` in the macro's arguments"
+        }
+        "default" => "move it to a field of a `#[undra::api]` record or enum variant, or remove it",
+        "key" => "move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it",
+        "no_coalesce" => "move it to a signal field of a `#[undra::store]` struct, or remove it",
+        _ => "remove the option, or move it to where it applies",
+    }
 }
 
 fn option_hint(option: &str) -> &'static str {
@@ -292,7 +384,7 @@ pub(crate) fn parse_args(
             code::E0008,
             format!("unknown argument `{shown}` for `#[undra::{macro_name}]`"),
             format!("`#[undra::{macro_name}]` accepts: {expected}"),
-            "remove or correct the argument",
+            unknown_help(&shown, &option_names(expected)),
         )
         .on(&meta.path))
     });
@@ -681,5 +773,38 @@ mod tests {
         assert!(!rendered.contains("from"));
         assert!(!rendered.contains("source"));
         assert!(rendered.contains("derive"));
+    }
+
+    #[test]
+    fn the_nearest_name_is_a_typo_or_a_spelling_variant() {
+        let options = ["crate", "default", "key", "no_coalesce"];
+        assert_eq!(closest("defualt", &options), Some("default"));
+        assert_eq!(closest("Default", &options), Some("default"));
+        assert_eq!(closest("nocoalesce", &options), Some("no_coalesce"));
+        assert_eq!(closest("kee", &options), Some("key"));
+        assert_eq!(closest("crates", &options), Some("crate"));
+        // Too far, or the name itself: no suggestion.
+        assert_eq!(closest("frobnicate", &options), None);
+        assert_eq!(closest("key", &options), None);
+        assert_eq!(closest("ke", &["key", "crate"]), Some("key"));
+        assert_eq!(
+            closest("kx", &["key"]),
+            None,
+            "two edits is too far for a short name"
+        );
+        assert_eq!(closest("xyz", &["key"]), None, "short names allow one edit");
+    }
+
+    #[test]
+    fn option_names_are_read_from_the_description() {
+        assert_eq!(
+            option_names("`crate = \"path\"`, and `store` on an impl block"),
+            ["crate", "store"]
+        );
+        assert_eq!(
+            option_names("`key = \"..\"`, `stale = \"30s\"`, `persist`, `retry = N`"),
+            ["key", "stale", "persist", "retry"]
+        );
+        assert!(option_names("nothing on an `impl Trait for Type` block").len() == 1);
     }
 }

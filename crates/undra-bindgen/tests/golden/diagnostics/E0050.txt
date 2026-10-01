@@ -1,0 +1,24 @@
+error[undra::E0050]: duplicate type name `Todo` (declared as record and again as enum)
+  = note: type names must be unique within a core: a type is identified to the platforms by its name (its id is a hash of it), so two declarations cannot share one
+  = help: rename one of the two `Todo` declarations, or remove the duplicate
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0050
+
+error[undra::E0050]: duplicate type name `Storage` at the port `Storage` (the name is already used by a record)
+  = note: names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core
+  = help: rename one of the two, or remove the duplicate
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0050
+
+error[undra::E0050]: record `Signal` has a name the generated code depends on
+  = note: the generated bindings use a type called `Signal` (a standard type of Swift, Kotlin or TypeScript, or one of the Undra runtime's), so a type of the schema with the same name would shadow it
+  = help: rename it, for example `MySignal`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0050
+
+error[undra::E0050]: duplicate type id `0x00000007` at the schema (`Alpha` and `Beta` hash to the same id)
+  = note: names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core
+  = help: rename one of the two items: ids are hashes of the names, so a different name gives a different id
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0050
+
+error[undra::E0050]: duplicate variant index `1` at enum Status
+  = note: names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core
+  = help: give every variant of the enum an index of its own
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0050

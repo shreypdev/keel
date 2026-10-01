@@ -101,7 +101,7 @@ outcomes, not bugs (SPEC 6.3). The proxy of a method returning `Result<T, E>` re
 
 | `PortError` | `HttpError` | `FsError` |
 |---|---|---|
-| `Unavailable` | `Network("the Http port has no adapter registered")` | `Io("the Fs port has no adapter registered")` |
+| `Unavailable` | `Network("the Http port has no adapter registered (E0062: ..)")` | `Io("the Fs port has no adapter registered (E0062: ..)")` |
 | `Cancelled` | `Cancelled` | `Io("the Fs call was cancelled")` |
 | `Decode(e)` | `Network("malformed port reply: <e>")` | `Io("malformed port reply: <e>")` |
 | `Failed(bytes)` | the decoded `HttpError` | the decoded `FsError` |

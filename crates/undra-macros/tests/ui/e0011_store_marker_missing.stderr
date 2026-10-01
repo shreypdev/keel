@@ -5,4 +5,4 @@ error[E0080]: evaluation panicked: error[undra::E0011]: `Todos` is a `#[undra::s
   --> tests/ui/e0011_store_marker_missing.rs:13:1
    |
 13 | #[k::api]
-   | ^^^^^^^^^ evaluation of `_` failed here
+   | ^^^^^^^^^ evaluation of `_::__undra_store_probe::{constant#0}` failed here

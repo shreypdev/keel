@@ -1,0 +1,9 @@
+error[undra::C0007]: the schema cannot be turned into bindings (1 problem)
+  = note: the public surface of the core has to be expressible in Swift, Kotlin and TypeScript, and these items are not
+  = help: change the items named below in the core (each message says what to do), then run `undra bindgen` again
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0007
+
+error[undra::E0050]: duplicate type name `Todo` (declared as record and again as record)
+  = note: type names must be unique within a core: a type is identified to the platforms by its name (its id is a hash of it), so two declarations cannot share one
+  = help: rename one of the two `Todo` declarations, or remove the duplicate
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0050

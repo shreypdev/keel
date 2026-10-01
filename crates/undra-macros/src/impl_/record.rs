@@ -15,6 +15,7 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
+use syn::visit_mut::VisitMut;
 use syn::{Fields, ItemEnum, ItemStruct};
 
 use super::attrs::{Site, take};
@@ -101,6 +102,10 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
         syn::Item::Enum(item) => (item.ident.clone(), item.generics.clone(), true),
         _ => return TokenStream::new(),
     };
+    // A field written `&str` is rejected as E0001 ("use an owned `String`"); left in the item, it
+    // would also be `rustc`'s "missing lifetime specifier", whose advice (introduce a lifetime)
+    // contradicts it. The item only has to type-check here, so the borrow gets one.
+    StaticRefs.visit_item_mut(item);
     let attrs = match item {
         syn::Item::Struct(item) => &mut item.attrs,
         syn::Item::Enum(item) => &mut item.attrs,
@@ -124,6 +129,26 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
     } else {
         TokenStream::new()
     };
+    // The field names of a struct, so a keyed list of it does not add "no such field".
+    let field_names: Vec<String> = match item {
+        syn::Item::Struct(item) => match &item.fields {
+            Fields::Named(named) => named
+                .named
+                .iter()
+                .filter_map(|f| f.ident.as_ref().map(unraw))
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    let fields_stub = if is_enum {
+        TokenStream::new()
+    } else {
+        quote! {
+            #[doc(hidden)]
+            pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
+        }
+    };
     let error_impls = if is_error {
         quote! {
             impl #impl_generics ::core::fmt::Display for #name #type_generics #where_clause {
@@ -142,6 +167,7 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
             #[doc(hidden)]
             pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
             #is_error_const
+            #fields_stub
         }
         impl #impl_generics #wire::Encode for #name #type_generics #where_clause {
             fn encode(&self, __w: &mut #wire::Writer) {}
@@ -157,6 +183,18 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
             }
         }
         #error_impls
+    }
+}
+
+/// Gives every reference without a lifetime `'static` (see [`recover`]).
+struct StaticRefs;
+
+impl syn::visit_mut::VisitMut for StaticRefs {
+    fn visit_type_reference_mut(&mut self, node: &mut syn::TypeReference) {
+        if node.lifetime.is_none() {
+            node.lifetime = Some(syn::parse_quote!('static));
+        }
+        syn::visit_mut::visit_type_reference_mut(self, node);
     }
 }
 
@@ -307,6 +345,11 @@ pub(crate) fn expand_struct(
         let ty = &f.ty;
         quote_spanned! {f.ty.span()=> + <#ty as #wire::Decode>::MIN_ENCODED_LEN }
     });
+    // What a keyed list (`#[undra(key = "..")]` in a store) needs of its item: the field names. The
+    // store looks the key up in this constant, so a key that names no field is a branded error
+    // listing these names, and only then reads the field (`undra_meta::keys`). A constant is
+    // all a record pays for it: nothing is generated per field.
+    let field_names = fields.iter().map(|f| &f.name);
     let field_metas = fields
         .iter()
         .map(|f| field_meta(&meta, &f.name, &f.kty, f.default, &f.docs));
@@ -324,6 +367,9 @@ pub(crate) fn expand_struct(
         impl #name {
             /// The stable Undra type id: `fnv1a32` of the type name.
             pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
+            /// The names of the fields, in declaration order (see `undra_meta::keys`).
+            #[doc(hidden)]
+            pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
         }
 
         #derived

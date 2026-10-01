@@ -1,0 +1,60 @@
+error: macro definition is not supported in `trait`s or `impl`s
+  --> tests/ui/d1_query_in_a_plain_impl.rs:19:5
+   |
+19 |     #[undra::query(key = "todos")]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider moving the macro definition out to a nearby module scope
+   = note: this error originates in the attribute macro `undra::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: implementation is not supported in `trait`s or `impl`s
+  --> tests/ui/d1_query_in_a_plain_impl.rs:19:5
+   |
+19 |     #[undra::query(key = "todos")]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider moving the implementation out to a nearby module scope
+   = note: this error originates in the attribute macro `undra::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: macro definition is not supported in `trait`s or `impl`s
+  --> tests/ui/d1_query_in_a_plain_impl.rs:28:5
+   |
+28 |     #[undra::mutation]
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider moving the macro definition out to a nearby module scope
+   = note: this error originates in the attribute macro `undra::mutation` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: implementation is not supported in `trait`s or `impl`s
+  --> tests/ui/d1_query_in_a_plain_impl.rs:28:5
+   |
+28 |     #[undra::mutation]
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider moving the implementation out to a nearby module scope
+   = note: this error originates in the attribute macro `undra::mutation` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error[undra::E0007]: `#[undra::query]` on `admins`, which is inside an `impl` block: its signature uses `Self`
+         = note: a query is a free function, and the macro generates a struct next to it, which an impl block cannot hold
+         = help: move `admins` out of the impl block, to module level, and spell out the type instead of `Self`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/d1_query_in_a_plain_impl.rs:34:18
+   |
+34 |     pub async fn admins(ctx: &Ctx) -> Result<Vec<Self>, Failure> {
+   |                  ^^^^^^
+
+error: cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block` in this scope
+  --> tests/ui/d1_query_in_a_plain_impl.rs:19:5
+   |
+19 |     #[undra::query(key = "todos")]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `undra::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: cannot find macro `_undra_error_E0007_a_mutation_is_a_free_function_move_it_out_of_the_impl_block` in this scope
+  --> tests/ui/d1_query_in_a_plain_impl.rs:28:5
+   |
+28 |     #[undra::mutation]
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the attribute macro `undra::mutation` (in Nightly builds, run with -Z macro-backtrace for more info)
