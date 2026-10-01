@@ -14,9 +14,9 @@ It has two layers:
 
 ```
 undra-runtime/
-  settings.gradle.kts        includes :runtime  (future: :android-adapters)
+  settings.gradle.kts        includes :runtime, and :android-adapters when an Android SDK is found
   build.gradle.kts           group / version, Kotlin plugin declared once
-  gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3
+  gradle/libs.versions.toml  Kotlin 2.0.21, coroutines 1.6.4, JUnit 5.10.3 (+ AGP 8.7.3, JUnit 4 and AndroidX Test for :android-adapters' tests)
   gradlew, gradle/wrapper/   Gradle 8.14.3 wrapper
   runtime/                   the library
     src/main/kotlin/dev/undra/runtime/
@@ -29,15 +29,17 @@ undra-runtime/
       wire/                                         the wire layer
     src/test/kotlin/dev/undra/runtime/               suites (see "Building and testing")
       support/                                      FakeTransport, FakeNative (JNI contract), WsTestServer, ...
-  android-adapters/README.md what the future Android module will hold (no code yet)
+  android-adapters/          the Android module: the adapters of the ten standard ports + the Choreographer frame pacer
   scripts/
     test-local.sh            build + test without Gradle or JUnit
     gen-vectors.py           regenerates WireVectors.kt from contract-tests/wire-vectors.json
     local/junit-stub/        a stub @Test annotation, used only by test-local.sh
 ```
 
-`:android-adapters` does not exist yet; see [android-adapters/README.md](android-adapters/README.md). `:runtime`
-never depends on it, and never touches an Android API at compile time (Android is detected by reflection).
+`:android-adapters` holds everything Android-specific (the Http, Kv, SecureStore, Fs, Connectivity and Lifecycle adapters,
+installed by `AndroidPlatformDefaults.install(core, context)`, and the Choreographer frame pacer); see
+[android-adapters/README.md](android-adapters/README.md). `:runtime` never depends on it, and never touches an Android API at
+compile time (Android is detected by reflection).
 
 ## Using it
 
@@ -108,7 +110,7 @@ registered is answered `2` (unavailable), so the shim should route every port id
 `<dataDir>/kv` and `<dataDir>/secure` (SHA-256-named, atomic writes; **not** encrypted); `Fs` over `<dataDir>/fs`, confined to its
 root; `Clock`, `Rng` (`SecureRandom`), `Log` (`java.util.logging`) and `Timer` (a scheduled executor). The data directory is the
 system property `undra.data.dir` or `~/.undra/data`; call `JvmAdapters.standard(dir) { core.timerFired(it) }` to choose another. On Android only
-Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters`. Port and method ids are `fnv1a32("port.<Trait>")`
+Clock, Rng, Log and Timer are installed; the rest comes from `android-adapters` (`AndroidPlatformDefaults.install`). Port and method ids are `fnv1a32("port.<Trait>")`
 and `fnv1a32("<Trait>.<method>")` (`StandardPorts`), and the records of SPEC §8 have hand-written codecs
 (`HttpRequest`, `HttpResponse`, `HttpError`, `Header`, `FsError`, `NetKind`, `AppState`, `HttpMethod`).
 

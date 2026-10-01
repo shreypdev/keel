@@ -692,12 +692,14 @@ Handle lifetime: explicit `close()`/`[Symbol.dispose]`; finalizers (`deinit`, `C
 Default adapters:
 | Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) |
 |---|---|---|---|---|---|
-| Http | URLSession | OkHttp (optional dep) or HttpURLConnection | HttpURLConnection | fetch | fetch |
-| Kv / SecureStore | files in Application Support / Keychain | SharedPreferences-backed files / EncryptedFile (Keystore) | files | IndexedDB / IndexedDB + WebCrypto | files |
-| Fs | FileManager | Context.filesDir | java.io | OPFS | fs |
-| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / Log | same | built-in (§7) | built-in |
-| Timer | DispatchQueue | Handler / ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
-| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ProcessLifecycleOwner | stubs | navigator.onLine / visibilitychange | stubs |
+| Http | URLSession | HttpURLConnection | HttpURLConnection | fetch | fetch |
+| Kv / SecureStore | files in Application Support / Keychain | files in `filesDir` / AES-256-GCM under an Android Keystore key (files in `noBackupFilesDir`) | files | IndexedDB / IndexedDB + WebCrypto | files |
+| Fs | FileManager | `filesDir` | java.io | OPFS | fs |
+| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / `android.util.Log` | same | built-in (§7) | built-in |
+| Timer | DispatchQueue | ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
+| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ActivityLifecycleCallbacks | stubs | navigator.onLine / visibilitychange | stubs |
+
+On Android all of it is installed by one call, `AndroidPlatformDefaults.install(core, context)` (module `android-adapters`; `android-adapters/README.md`); the runtime alone installs only Clock, Rng, Log and Timer.
 
 ### 11.1 Delivery: merged per drain, frame-aligned, bounded (ADR-031)
 

@@ -6,7 +6,7 @@ plugins {
 }
 
 // Android consumers get java.time through core-library desugaring; the runtime itself only needs
-// JVM 11 bytecode and never touches Android APIs (those live in the future :android-adapters module).
+// JVM 11 bytecode and never touches Android APIs (those live in the :android-adapters module).
 java {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
