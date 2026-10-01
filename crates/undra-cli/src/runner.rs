@@ -397,7 +397,8 @@ pub struct Running {
 }
 
 /// Starts the runner on `addr` and forwards what it prints as [`RunnerEvent`]s. A `standby` runner
-/// builds its core and waits for `listen` (see the module documentation).
+/// builds its core and waits for `listen` (see the module documentation). With `devtools` (this
+/// run's token) it also serves the devtools page (ADR-054).
 ///
 /// # Errors
 ///
@@ -408,6 +409,7 @@ pub fn spawn(
     log_level: u8,
     id: u64,
     standby: bool,
+    devtools: Option<&str>,
     events: Sender<RunnerEvent>,
 ) -> Result<Running> {
     let mut command = Command::new(exe);
@@ -417,6 +419,10 @@ pub fn spawn(
         .arg(log_level.to_string());
     if standby {
         command.arg("--standby");
+    }
+    if let Some(token) = devtools {
+        // The token travels in the environment: arguments are listed by `ps` for every user.
+        command.arg("--devtools").env("UNDRA_DEVTOOLS_TOKEN", token);
     }
     let mut child = command
         .stdin(Stdio::piped())
@@ -736,7 +742,7 @@ mod tests {
             .unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let mut running =
-            spawn(&script, "127.0.0.1:0", 1, 9, false, tx).expect("the fake runner starts");
+            spawn(&script, "127.0.0.1:0", 1, 9, false, None, tx).expect("the fake runner starts");
         let wait = |rx: &std::sync::mpsc::Receiver<RunnerEvent>| {
             rx.recv_timeout(Duration::from_secs(60))
                 .expect("an answer in time")

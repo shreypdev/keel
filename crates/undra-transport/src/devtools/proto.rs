@@ -733,4 +733,151 @@ mod tests {
             let _ = ClientMsg::decode(&bytes);
         }
     }
+
+    // ----- vectors shared with the page (runtimes/ts/devtools/test/vectors.json) --------------
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn server_vectors() -> Vec<(&'static str, ServerMsg)> {
+        vec![
+            (
+                "welcome",
+                ServerMsg::Welcome(Welcome {
+                    protocol: PROTOCOL,
+                    undra_version: "1.2.0".into(),
+                    schema_hash: 0x0123_4567_89ab_cdef,
+                    platform: "rust".into(),
+                    mode: "dev".into(),
+                    core_epoch: 77,
+                    started_unix_ms: 1_790_000_000_000,
+                    ring_steps: 200,
+                    ring_bytes: 32 << 20,
+                    ring_step_bytes: 4 << 20,
+                    schema_json: "{\"records\":[]}".into(),
+                }),
+            ),
+            (
+                "stores",
+                ServerMsg::Stores(vec![
+                    StoreRef { handle: 0x0000_0002_0000_0001, type_id: 7 },
+                    StoreRef { handle: 5, type_id: 9 },
+                ]),
+            ),
+            (
+                "change_set_commit_call",
+                ServerMsg::ChangeSet {
+                    seq: 12,
+                    at_ms: 3456,
+                    delivery: Delivery::Commit,
+                    cause: Cause::Call(0xdead_beef),
+                    payload: vec![1, 2, 3, 4],
+                },
+            ),
+            (
+                "change_set_initial_restore",
+                ServerMsg::ChangeSet {
+                    seq: 13,
+                    at_ms: 4000,
+                    delivery: Delivery::Initial,
+                    cause: Cause::Restore(3),
+                    payload: vec![],
+                },
+            ),
+            (
+                "step",
+                ServerMsg::Step(StepInfo {
+                    step: 4,
+                    through_seq: 13,
+                    txn: 99,
+                    at_ms: 4001,
+                    bytes: 2048,
+                    stores: 3,
+                    restorable: true,
+                    restored_from: 2,
+                }),
+            ),
+            ("evicted", ServerMsg::Evicted { below_step: 3 }),
+            (
+                "port_start",
+                ServerMsg::Port(PortRecord::Start {
+                    id: 8,
+                    port_id: 0xaabb_ccdd,
+                    method_id: 0x1122_3344,
+                    at_ms: 5000,
+                    args: vec![9, 8, 7],
+                }),
+            ),
+            (
+                "port_end",
+                ServerMsg::Port(PortRecord::End {
+                    id: 8,
+                    port_id: 0xaabb_ccdd,
+                    method_id: 0x1122_3344,
+                    at_ms: 5042,
+                    status: 1,
+                    latency_us: 42_000,
+                    reply: vec![5],
+                }),
+            ),
+            ("stats", ServerMsg::Stats("{\"at_ms\":1}".into())),
+            ("queries", ServerMsg::Queries { at_ms: 6000, json: "{\"entries\":[]}".into() }),
+            (
+                "traveled",
+                ServerMsg::Traveled(Traveled {
+                    request_id: 7,
+                    ok: true,
+                    step: 3,
+                    dropped: 1,
+                    message: "restored step 3".into(),
+                }),
+            ),
+            ("app", ServerMsg::App { connected: true, platform: "web".into() }),
+        ]
+    }
+
+    /// The bytes the Rust server writes are the bytes the page's decoder is tested against, and
+    /// the bytes the page writes are the ones the Rust server's decoder is tested against.
+    #[test]
+    fn the_vectors_the_page_is_tested_with_are_the_ones_the_server_writes() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../runtimes/ts/devtools/test/vectors.json");
+        let server: Vec<serde_json::Value> = server_vectors()
+            .iter()
+            .map(|(name, msg)| {
+                let mut w = Writer::new();
+                msg.encode(&mut w);
+                serde_json::json!({ "name": name, "hex": hex(w.as_slice()) })
+            })
+            .collect();
+        let mut client = Vec::new();
+        for (name, msg) in [
+            ("restore", ClientMsg::Restore { request_id: 7, step: 3 }),
+            ("resync", ClientMsg::Resync),
+        ] {
+            let mut w = Writer::new();
+            msg.encode(&mut w);
+            client.push(serde_json::json!({ "name": name, "hex": hex(w.as_slice()) }));
+        }
+        let doc = serde_json::to_string_pretty(&serde_json::json!({ "server": server, "client": client })).unwrap() + "\n";
+        if std::env::var_os("UNDRA_UPDATE_VECTORS").is_some() {
+            std::fs::write(path, &doc).unwrap();
+        }
+        let Ok(on_disk) = std::fs::read_to_string(path) else {
+            return; // a packaged crate has no page beside it
+        };
+        assert_eq!(on_disk, doc, "run with UNDRA_UPDATE_VECTORS=1 to rewrite {path}");
+        // And the other way: what the page encodes decodes here.
+        let parsed: serde_json::Value = serde_json::from_str(&on_disk).unwrap();
+        for entry in parsed["client"].as_array().unwrap() {
+            let bytes: Vec<u8> = (0..entry["hex"].as_str().unwrap().len() / 2)
+                .map(|i| u8::from_str_radix(&entry["hex"].as_str().unwrap()[2 * i..2 * i + 2], 16).unwrap())
+                .collect();
+            let expected = match entry["name"].as_str().unwrap() {
+                "restore" => ClientMsg::Restore { request_id: 7, step: 3 },
+                _ => ClientMsg::Resync,
+            };
+            assert_eq!(ClientMsg::decode(&bytes), Ok(expected));
+        }
+    }
 }

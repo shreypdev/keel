@@ -63,6 +63,8 @@ pub(crate) fn run(
         }
     };
     let token = devtools.map(|c| c.token.clone()).unwrap_or_default();
+    // The upgrade callback's error type (`http::Response`) is fixed by tungstenite.
+    #[allow(clippy::result_large_err)]
     let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
         let token_ok = query_param(request.uri().query().unwrap_or(""), "token")
             .is_some_and(|given| token_matches(&token, given));

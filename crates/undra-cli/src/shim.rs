@@ -229,6 +229,8 @@ pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> 
     write_if_changed(&dir.join("Cargo.toml"), &render(RUNNER_MANIFEST, &vars)?)?;
     let main = strip_block(RUNNER_MAIN, "ports", core.links_ports);
     write_if_changed(&dir.join("src/main.rs"), &render(&main, &vars)?)?;
+    // The devtools page, which the runner compiles in (ADR-054).
+    crate::devtools::write_assets(&dir.join("src"))?;
     seed_lockfile(&dir, project_root, core);
     Ok(dir.join("Cargo.toml"))
 }

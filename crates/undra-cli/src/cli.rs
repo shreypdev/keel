@@ -336,6 +336,21 @@ pub struct DevArgs {
     /// Start every rebuilt core from fresh state instead of carrying the running core's state over (the escape hatch for "my logic changed under the restored state").
     #[arg(long)]
     pub no_keep_state: bool,
+
+    /// Serve the devtools page (store viewer, change-set timeline with time travel, port and query logs, counters) at /devtools: `auto` on a loopback address only, `on` always, `off` never. Every request needs the token in the printed address.
+    #[arg(long, value_enum, value_name = "MODE", default_value = "auto")]
+    pub devtools: DevtoolsMode,
+}
+
+/// When `undra dev` serves its devtools page (`--devtools`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum DevtoolsMode {
+    /// On a loopback address only.
+    Auto,
+    /// Always, whatever the address: the token is still required.
+    On,
+    /// Never.
+    Off,
 }
 
 /// Arguments of `undra doctor`.

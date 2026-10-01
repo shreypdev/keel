@@ -2,7 +2,7 @@
 //! `remote` transport.
 //!
 //! ```text
-//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--print-schema]
+//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--devtools] [--print-schema]
 //! ```
 //!
 //! It talks to `undra dev` over its stdin and stdout, in lines (docs/DEV_LOOP.md has the table; the
@@ -22,10 +22,30 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use undra_runtime::undra_wire::payload::Snapshot;
 use undra_runtime::undra_wire::Reader;
 use undra_runtime::{Runtime, RuntimeConfig};
-use undra_transport::{AttachNotices, Bridge, KeptSession, Server, ServerConfig};
+use undra_transport::{Asset, AttachNotices, Bridge, DevtoolsConfig, KeptSession, Server, ServerConfig};
 
 // Links the core, whose `#[undra::api]` items register themselves with the runtime at load time.
 extern crate app_core;
+
+/// The devtools page `undra dev` embeds (ADR-054): served at `/devtools` when `--devtools` is given, behind
+/// the per-run token in `UNDRA_DEVTOOLS_TOKEN`.
+static DEVTOOLS_PAGE: [Asset; 3] = [
+    Asset {
+        path: "index.html",
+        content_type: "text/html; charset=utf-8",
+        bytes: include_bytes!("devtools/index.html"),
+    },
+    Asset {
+        path: "app.js",
+        content_type: "text/javascript; charset=utf-8",
+        bytes: include_bytes!("devtools/app.js"),
+    },
+    Asset {
+        path: "app.css",
+        content_type: "text/css; charset=utf-8",
+        bytes: include_bytes!("devtools/app.css"),
+    },
+];
 
 const LEVELS: [&str; 6] = ["TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"];
 
@@ -259,13 +279,20 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
 
 /// Binds `addr` and serves `runtime`, holding the handed-over session and telling the clients what
 /// became of their state. Exits the process when the address cannot be bound.
-fn listen(addr: &str, runtime: &std::sync::Arc<Runtime>, bridge: &std::sync::Arc<Bridge>, handover: Handover) -> Server {
+fn listen(
+    addr: &str,
+    runtime: &std::sync::Arc<Runtime>,
+    bridge: &std::sync::Arc<Bridge>,
+    handover: Handover,
+    devtools: Option<&DevtoolsConfig>,
+) -> Server {
     // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
     // for ten minutes if it comes back with its session token (ADR-051).
     let config = ServerConfig {
         resume_grace: Duration::from_secs(600),
         inherited_session: handover.session,
         attach_notices: handover.notices,
+        devtools: devtools.cloned(),
         ..ServerConfig::default()
     };
     match Server::bind(addr, runtime.clone(), bridge.clone(), config) {
@@ -310,11 +337,13 @@ fn main() {
     let mut log_level = 1_u8;
     let mut print_schema = false;
     let mut standby = false;
+    let mut with_devtools = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--print-schema" => print_schema = true,
             "--standby" => standby = true,
+            "--devtools" => with_devtools = true,
             "--log-level" => {
                 log_level = args.next().and_then(|v| v.parse().ok()).unwrap_or(log_level);
             }
@@ -352,12 +381,19 @@ fn main() {
     bind_native_ports(&runtime);
     // @ports:end
 
+    // The devtools page is served only when `undra dev` asked for it and gave this run's token (an
+    // environment variable, not an argument: arguments show in the process list).
+    let devtools = with_devtools
+        .then(|| std::env::var("UNDRA_DEVTOOLS_TOKEN").ok())
+        .flatten()
+        .map(|token| DevtoolsConfig::new(token, &DEVTOOLS_PAGE));
+
     let mut handover = Handover::default();
     let mut server = None;
     if standby {
         say(&format!("standby {:#018x}", runtime.schema_hash()));
     } else {
-        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover)));
+        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), devtools.as_ref()));
     }
 
     // Commands until stdin closes: `undra dev` holds the other end, so this process ends when it does.
@@ -369,7 +405,7 @@ fn main() {
             ("state", None) => restore_state(&runtime, rest, &mut handover),
             ("reset", None) => handover.reset(rest),
             ("listen", None) => {
-                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover)));
+                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), devtools.as_ref()));
             }
             _ => print_log(3, "undra-dev-runner", &format!("ignoring a command it cannot run now: {verb}")),
         }

@@ -532,10 +532,7 @@ impl Hub {
             held.retain(|h| now.contains(h));
             stores.iter().map(|s| s.handle).filter(|h| held.insert(*h)).collect()
         };
-        for handle in fresh {
-            let _initial = RouteGuard::set(Route::Initial { only: None });
-            self.rt.observe(handle, u32::MAX, true);
-        }
+        // The pages learn what the stores are before they get the stores' values.
         let changed = {
             let mut announced = self.announced.lock();
             if announced.as_slice() == stores {
@@ -547,6 +544,10 @@ impl Hub {
         };
         if changed {
             self.broadcast(&ServerMsg::Stores(stores.to_vec()));
+        }
+        for handle in fresh {
+            let _initial = RouteGuard::set(Route::Initial { only: None });
+            self.rt.observe(handle, u32::MAX, true);
         }
     }
 

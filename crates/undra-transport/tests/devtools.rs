@@ -69,6 +69,7 @@ struct Page {
 }
 
 impl Page {
+    #[allow(clippy::result_large_err)]
     fn try_connect(
         fx: &Fixture,
         query: &str,
@@ -233,7 +234,7 @@ fn without_devtools_configured_every_devtools_path_is_a_404() {
     assert!(Page::try_connect(&fx, &format!("?token={TOKEN}"), None).is_err());
     // An app client is untouched.
     let mut app = fx.client();
-    assert_eq!(app.new_counter(1) > 0, true);
+    assert!(app.new_counter(1) > 0);
 }
 
 #[test]
