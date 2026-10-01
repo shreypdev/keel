@@ -157,15 +157,23 @@ fn is_undra_crate(name: &str) -> bool {
     UNDRA_CRATES.contains(&name)
 }
 
-/// Whether `url` is Undra's repository (with or without `.git`, a trailing slash, any case).
+/// Whether `url` is Undra's repository: with or without `.git` or a trailing slash, in any case,
+/// over https, http or ssh (`git@github.com:shreypdev/undra.git`, `ssh://git@github.com/...`).
 fn is_undra_repo(url: &str) -> bool {
-    let wanted = UNDRA_REPO_URL.trim_end_matches('/').to_ascii_lowercase();
-    let given = url
-        .trim()
+    let wanted = UNDRA_REPO_URL
         .trim_end_matches('/')
-        .trim_end_matches(".git")
+        .trim_start_matches("https://")
         .to_ascii_lowercase();
-    given == wanted || given == wanted.replace("https://", "http://")
+    let given = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let given = given
+        .strip_prefix("https://")
+        .or_else(|| given.strip_prefix("http://"))
+        .or_else(|| given.strip_prefix("ssh://git@"))
+        .or_else(|| given.strip_prefix("git@"))
+        .unwrap_or(given)
+        .replacen(':', "/", 1)
+        .to_ascii_lowercase();
+    given == wanted
 }
 
 /// The pieces of `line` around the quoted value of `key = "value"`: the text before the value, the
@@ -1263,6 +1271,9 @@ mod tests {
             "https://github.com/shreypdev/undra.git",
             "https://github.com/shreypdev/undra/",
             "https://GitHub.com/ShreyPDev/Undra",
+            "http://github.com/shreypdev/undra",
+            "git@github.com:shreypdev/undra.git",
+            "ssh://git@github.com/shreypdev/undra",
         ] {
             assert!(is_undra_repo(url), "{url}");
         }
