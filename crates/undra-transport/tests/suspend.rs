@@ -91,12 +91,7 @@ fn successor(
 
 /// The `undra::dev` sentences a client receives within a short while.
 fn notices_of(client: &mut TestClient) -> Vec<String> {
-    loop {
-        match client.recv_within(Duration::from_millis(300)) {
-            Received::Frame(_) => {}
-            Received::Closed(_) | Received::Silence => break,
-        }
-    }
+    while let Received::Frame(_) = client.recv_within(Duration::from_millis(300)) {}
     client
         .seen
         .iter()
@@ -107,7 +102,6 @@ fn notices_of(client: &mut TestClient) -> Vec<String> {
         })
         .collect()
 }
-
 
 #[test]
 fn suspend_stops_listening_closes_the_client_and_hands_over_its_session_unreleased() {
@@ -141,7 +135,11 @@ fn suspend_stops_listening_closes_the_client_and_hands_over_its_session_unreleas
     let again = f.server.suspend(SETTLE);
     assert_eq!(again.session, None);
     f.server.shutdown();
-    assert_eq!(stat(&f.rt, "live_handles"), 1, "a later shutdown does not release what was handed over");
+    assert_eq!(
+        stat(&f.rt, "live_handles"),
+        1,
+        "a later shutdown does not release what was handed over"
+    );
 }
 
 #[test]
@@ -171,10 +169,17 @@ fn the_state_of_the_old_core_and_the_client_session_carry_over_to_the_new_one() 
     // The client comes back the way ADR-051 has it: same token, resume.
     let mut back = second.session_client("tok-carry", true);
     let (status, body) = back.method(counter, GET, &[]);
-    assert_eq!((status, dec::<i32>(&body)), (ReplyStatus::Ok, 7), "same handle, same state");
+    assert_eq!(
+        (status, dec::<i32>(&body)),
+        (ReplyStatus::Ok, 7),
+        "same handle, same state"
+    );
     back.observe(counter, u32::MAX, true);
     let initial = back.recv_kind(Kind::ChangeSet);
-    assert!(!initial.payload.is_empty(), "the restored values are the first change-set");
+    assert!(
+        !initial.payload.is_empty(),
+        "the restored values are the first change-set"
+    );
     assert_eq!(notices_of(&mut back), ["Reloaded, state kept"]);
 
     // Its objects are its own again: a release releases for real.
@@ -198,7 +203,9 @@ fn a_call_that_is_open_when_the_server_is_suspended_finishes_first() {
         id,
         &enc(&5_i32),
     );
-    f.eventually("the call is open in the core", |f| stat(&f.rt, "active_calls") == 1);
+    f.eventually("the call is open in the core", |f| {
+        stat(&f.rt, "active_calls") == 1
+    });
 
     let suspended = f.server.suspend(SETTLE);
     assert!(suspended.settled, "{suspended:?}");
@@ -229,14 +236,22 @@ fn a_call_that_does_not_finish_within_the_settle_is_cancelled_and_counted() {
         &[],
     );
     let dropped_before = DROPPED.load(std::sync::atomic::Ordering::SeqCst);
-    f.eventually("the call is open in the core", |f| stat(&f.rt, "active_calls") == 1);
+    f.eventually("the call is open in the core", |f| {
+        stat(&f.rt, "active_calls") == 1
+    });
 
     let started = std::time::Instant::now();
     let suspended = f.server.suspend(Duration::from_millis(150));
-    assert!(started.elapsed() >= Duration::from_millis(150), "it waited for the settle");
+    assert!(
+        started.elapsed() >= Duration::from_millis(150),
+        "it waited for the settle"
+    );
     assert!(!suspended.settled);
     assert_eq!(suspended.cancelled_calls, 1);
-    assert!(suspended.session.is_some(), "the session is handed over all the same");
+    assert!(
+        suspended.session.is_some(),
+        "the session is handed over all the same"
+    );
     f.eventually("the core dropped the future", |_| {
         DROPPED.load(std::sync::atomic::Ordering::SeqCst) > dropped_before
     });
@@ -261,7 +276,10 @@ fn a_streaming_call_is_not_waited_for() {
     assert_eq!(status, ReplyStatus::StreamOpened);
     let started = std::time::Instant::now();
     let suspended = f.server.suspend(Duration::from_secs(5));
-    assert!(started.elapsed() < Duration::from_secs(4), "a stream does not hold the swap");
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "a stream does not hold the swap"
+    );
     assert!(suspended.settled);
 }
 
@@ -272,7 +290,9 @@ fn without_resume_grace_there_is_nothing_to_hand_over_and_the_objects_are_releas
     client.new_counter(1);
     let suspended = f.server.suspend(SETTLE);
     assert_eq!(suspended.session, None);
-    f.eventually("the objects were released", |f| stat(&f.rt, "live_handles") == 0);
+    f.eventually("the objects were released", |f| {
+        stat(&f.rt, "live_handles") == 0
+    });
 }
 
 #[test]
@@ -300,7 +320,13 @@ fn a_session_that_cannot_be_held_is_released_and_said() {
                     ..quick() // resume_grace: zero
                 },
                 move |host| {
-                    let rt = Runtime::new(RuntimeConfig { log_level: 0, ..RuntimeConfig::default() }, host)?;
+                    let rt = Runtime::new(
+                        RuntimeConfig {
+                            log_level: 0,
+                            ..RuntimeConfig::default()
+                        },
+                        host,
+                    )?;
                     rt.restore(&snapshot).unwrap();
                     Ok(rt)
                 },
@@ -314,7 +340,11 @@ fn a_session_that_cannot_be_held_is_released_and_said() {
         server.expect("bound")
     };
     let _ = counter;
-    assert_eq!(stat(second.runtime(), "live_handles"), 0, "released, not leaked");
+    assert_eq!(
+        stat(second.runtime(), "live_handles"),
+        0,
+        "released, not leaked"
+    );
     second.shutdown();
     second.runtime().shutdown();
 }
@@ -374,13 +404,17 @@ fn a_resumed_client_is_told_the_resumed_sentence_and_a_refused_one_nothing() {
         },
     );
     // Asking to resume a session the core does not hold: 4001, and no notice (it is not attached).
-    let mut stranger = TestClient::connect_raw(&session_url(&second.url(), "someone-else", true), second.schema());
+    let mut stranger = TestClient::connect_raw(
+        &session_url(&second.url(), "someone-else", true),
+        second.schema(),
+    );
     stranger.send_hello(second.schema(), "test", "dev");
     stranger.expect_frame(Kind::Hello);
     let (code, _) = stranger.expect_close().expect("a Close frame");
     assert_eq!(code, close::SESSION_LOST);
     assert!(stranger.frames_of(Kind::Log).iter().all(|frame| {
-        Log::decode(&mut Reader::new(&frame.payload)).map_or(true, |log| log.target != NOTICE_TARGET)
+        Log::decode(&mut Reader::new(&frame.payload))
+            .map_or(true, |log| log.target != NOTICE_TARGET)
     }));
     second.eventually("the slot is free", |f| !f.bridge.is_connected());
 

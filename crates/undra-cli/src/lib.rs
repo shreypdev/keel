@@ -52,6 +52,7 @@ pub mod error;
 mod fsutil;
 mod names;
 mod project;
+mod reload;
 mod render;
 mod runner;
 mod runtimes;

@@ -2,8 +2,9 @@
 //!
 //! The core runs in the dev runner (a child process, see [`crate::runner`]); this command builds
 //! it, starts it, watches the core's sources and, on a change, rebuilds and swaps the running
-//! runner for the new one on the same address; the clients reconnect by themselves (ADR-051).
-//! While a rebuild is failing the old core keeps serving: a typo does not take the app down.
+//! runner for the new one on the same address; the clients reconnect by themselves (ADR-051), and
+//! the core's state is carried across the swap (ADR-053, see [`crate::reload`]). While a rebuild
+//! is failing the old core keeps serving: a typo does not take the app down.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -15,6 +16,7 @@ use crate::adb;
 use crate::cli::DevArgs;
 use crate::config::Platform;
 use crate::error::{CliError, Code, Result};
+use crate::reload::{self, Outcome, Restored, Snapshot, Swap};
 use crate::runner::{self, RunnerEvent, Running};
 use crate::session::Session;
 
@@ -98,29 +100,49 @@ pub fn run(env: &Env<'_>, args: &DevArgs) -> Result<()> {
                     Ok(new_exe) => {
                         exe = new_exe;
                         ui.detail(&format!("built in {:.1}s", started.elapsed().as_secs_f32()));
-                        // Stop the old core first: the new one takes its address.
+                        let mut ops = ProcOps {
+                            exe: &exe,
+                            addr: &addr,
+                            log_level: args.log_level,
+                            run_id: &mut run_id,
+                            runner_tx: &runner_tx,
+                            rx: &rx,
+                            changed: false,
+                        };
                         let (old, _) = running;
-                        old.stop();
-                        drain_closed(&rx);
-                        let (next, ready, changed) =
-                            start(&exe, &addr, args.log_level, &mut run_id, &runner_tx, &rx)?;
-                        running = (next, ready);
+                        let swapped = reload::swap(&mut ops, old, &hash, !args.no_keep_state)?;
+                        let changed = ops.changed;
+                        match swapped {
+                            Swap::StillServing { old, why } => {
+                                running = (old, (url.clone(), hash.clone()));
+                                ui.warn(&format!(
+                                    "the rebuilt core did not start; still serving the previous build at {url}\n{why}"
+                                ));
+                            }
+                            Swap::Swapped {
+                                new,
+                                url: new_url,
+                                hash: new_hash,
+                                outcome,
+                            } => {
+                                running = (new, (new_url.clone(), new_hash.clone()));
+                                url = new_url;
+                                announce(
+                                    &session,
+                                    &url,
+                                    &new_hash,
+                                    args,
+                                    &core.local_dirs,
+                                    Some((&hash, &outcome)),
+                                );
+                                hash = new_hash;
+                                if args.android {
+                                    reverse_android(&session, &url);
+                                }
+                            }
+                        }
                         if changed {
                             let _ = tx.send(Event::Changed);
-                        }
-                        let (new_url, new_hash) = running.1.clone();
-                        url = new_url;
-                        announce(
-                            &session,
-                            &url,
-                            &new_hash,
-                            args,
-                            &core.local_dirs,
-                            Some(&hash),
-                        );
-                        hash = new_hash;
-                        if args.android {
-                            reverse_android(&session, &url);
                         }
                     }
                     Err(e) => {
@@ -171,7 +193,7 @@ fn start(
 ) -> Result<(Running, (String, String), bool)> {
     *run_id += 1;
     let id = *run_id;
-    let running = runner::spawn(exe, addr, log_level, id, runner_tx.clone())?;
+    let running = runner::spawn(exe, addr, log_level, id, false, runner_tx.clone())?;
     let deadline = Instant::now() + READY_TIMEOUT;
     let mut changed = false;
     loop {
@@ -209,10 +231,185 @@ fn start(
     }
 }
 
-/// Discards the `Closed` event of a runner that was stopped on purpose.
-fn drain_closed(rx: &Receiver<Event>) {
-    while let Ok(event) = rx.try_recv() {
-        let _ = event;
+/// Why [`ProcOps::wait`] gave up.
+enum Wait {
+    /// The runner exited.
+    Closed,
+    /// It did not answer in time.
+    Timeout,
+}
+
+/// The swap of [`crate::reload`] over real runner processes.
+struct ProcOps<'a> {
+    exe: &'a Path,
+    addr: &'a str,
+    log_level: u8,
+    run_id: &'a mut u64,
+    runner_tx: &'a Sender<RunnerEvent>,
+    rx: &'a Receiver<Event>,
+    /// A source changed while the swap ran: the caller queues the change again (it may not be in
+    /// the build that was just swapped in).
+    changed: bool,
+}
+
+impl ProcOps<'_> {
+    /// Waits up to `limit` for the first event of run `id` that `pick` takes. Lines the run prints
+    /// meanwhile are shown; a change of the sources is noted; events of other runs are dropped
+    /// (the old runner closing after it was stopped on purpose).
+    fn wait<T>(
+        &mut self,
+        id: u64,
+        limit: Duration,
+        mut pick: impl FnMut(RunnerEvent) -> std::result::Result<T, RunnerEvent>,
+    ) -> std::result::Result<T, Wait> {
+        let deadline = Instant::now() + limit;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.rx.recv_timeout(left) {
+                Ok(Event::Changed) => self.changed = true,
+                Ok(Event::Runner(event)) if event.id() == id => match pick(event) {
+                    Ok(done) => return Ok(done),
+                    Err(RunnerEvent::Closed { .. }) => return Err(Wait::Closed),
+                    Err(RunnerEvent::Line { text, .. }) => println!("{text}"),
+                    Err(_) => {}
+                },
+                Ok(Event::Runner(_)) => {}
+                Err(_) => return Err(Wait::Timeout),
+            }
+        }
+    }
+
+    /// Takes what is queued: changes of the sources are noted, lines shown, the rest dropped.
+    fn drain(&mut self) {
+        while let Ok(event) = self.rx.try_recv() {
+            match event {
+                Event::Changed => self.changed = true,
+                Event::Runner(RunnerEvent::Line { text, .. }) => println!("{text}"),
+                Event::Runner(_) => {}
+            }
+        }
+    }
+}
+
+impl reload::Ops for ProcOps<'_> {
+    type Old = Running;
+    type New = Running;
+
+    fn standby(&mut self) -> std::result::Result<(Running, String), String> {
+        *self.run_id += 1;
+        let id = *self.run_id;
+        let running = runner::spawn(
+            self.exe,
+            self.addr,
+            self.log_level,
+            id,
+            true,
+            self.runner_tx.clone(),
+        )
+        .map_err(|e| e.what)?;
+        let waited = self.wait(id, READY_TIMEOUT, |event| match event {
+            RunnerEvent::Standby { hash, .. } => Ok(hash),
+            other => Err(other),
+        });
+        match waited {
+            Ok(hash) => Ok((running, hash)),
+            Err(why) => {
+                running.stop();
+                Err(match why {
+                    Wait::Closed => "the process that runs the core exited before it was ready (its message is above)".to_owned(),
+                    Wait::Timeout => format!(
+                        "it did not get ready within {} seconds: the core's startup (a constructor, a hydration hook) is taking too long or is stuck",
+                        READY_TIMEOUT.as_secs()
+                    ),
+                })
+            }
+        }
+    }
+
+    fn snapshot(&mut self, old: &mut Running) -> std::result::Result<Snapshot, String> {
+        old.send("snapshot")?;
+        let waited = self.wait(old.id, reload::SNAPSHOT_TIMEOUT, |event| match event {
+            RunnerEvent::Snapshot { result, .. } => Ok(result),
+            other => Err(other),
+        });
+        match waited {
+            Ok(result) => result,
+            Err(Wait::Closed) => {
+                Err("the previous core exited while it was asked for its state".to_owned())
+            }
+            Err(Wait::Timeout) => Err(format!(
+                "the previous core did not answer in {} seconds",
+                reload::SNAPSHOT_TIMEOUT.as_secs()
+            )),
+        }
+    }
+
+    fn stop(&mut self, old: Running) {
+        old.stop();
+        self.drain();
+    }
+
+    fn restore(
+        &mut self,
+        new: &mut Running,
+        old_hash: &str,
+        snapshot: &Snapshot,
+    ) -> std::result::Result<Restored, String> {
+        new.send(&runner::state_command(old_hash, snapshot))?;
+        let waited = self.wait(new.id, Duration::from_secs(30), |event| match event {
+            RunnerEvent::Restored { restored, .. } => Ok(Ok(restored)),
+            RunnerEvent::Reset { reason, .. } => Ok(Err(reason)),
+            other => Err(other),
+        });
+        match waited {
+            Ok(answer) => answer,
+            Err(Wait::Closed) => Err("the new core exited while it restored the state".to_owned()),
+            Err(Wait::Timeout) => {
+                Err("the new core did not restore the state in 30 seconds".to_owned())
+            }
+        }
+    }
+
+    fn reset(&mut self, new: &mut Running, reason: &str) {
+        // A runner that cannot be written to fails `listen` next, loudly.
+        let _ = new.send(&format!("reset {reason}"));
+    }
+
+    fn listen(&mut self, new: &mut Running) -> Result<String> {
+        let id = new.id;
+        let addr = self.addr.to_owned();
+        let not_listening = |what: String, why: &str| {
+            CliError::new(
+                Code::Dev,
+                what,
+                why,
+                "stop the other server, or choose another port: `undra dev --addr 127.0.0.1:0` picks a free one",
+            )
+        };
+        if let Err(why) = new.send("listen") {
+            return Err(not_listening(
+                format!("the dev server could not start on {addr}"),
+                &why,
+            ));
+        }
+        let waited = self.wait(id, READY_TIMEOUT, |event| match event {
+            RunnerEvent::Ready { url, .. } => Ok(url),
+            other => Err(other),
+        });
+        match waited {
+            Ok(url) => Ok(url),
+            Err(Wait::Closed) => Err(not_listening(
+                format!("the dev server could not start on {addr}"),
+                "the process that runs the core exited before it listened (its message is above); the usual cause is that the address is already in use, often by another `undra dev`",
+            )),
+            Err(Wait::Timeout) => Err(not_listening(
+                format!(
+                    "the dev server did not start listening within {} seconds",
+                    READY_TIMEOUT.as_secs()
+                ),
+                "the core's startup (a constructor, a hydration hook) is taking too long or is stuck",
+            )),
+        }
     }
 }
 
@@ -315,20 +512,21 @@ fn emulator_url(url: &str) -> Option<String> {
 }
 
 /// Prints the banner: where to connect and how. `previous` is the schema hash of the core that
-/// ran before, on a restart.
+/// ran before, on a restart, and what became of its state.
 fn announce(
     session: &Session<'_>,
     url: &str,
     hash: &str,
     args: &DevArgs,
     watched: &[PathBuf],
-    previous: Option<&str>,
+    previous: Option<(&str, &Outcome)>,
 ) {
     let say = |s: &str| println!("{s}");
-    if let Some(before) = previous {
+    if let Some((before, outcome)) = previous {
         say("");
         say(&format!(
-            "Restarted: {url}  (schema hash {hash}); connected apps reconnect by themselves"
+            "Restarted: {url}  (schema hash {hash}); {}; connected apps reconnect by themselves",
+            outcome.describe()
         ));
         if before != hash {
             say(&format!(

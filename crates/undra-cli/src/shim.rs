@@ -199,7 +199,16 @@ pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> 
             "UNDRA_TRANSPORT",
             core.undra.dependency("undra-transport", &[]),
         )
-        .with("PORTS_DEP", ports_dep);
+        .with("PORTS_DEP", ports_dep)
+        .with(
+            "STATE_LIMIT_BYTES",
+            crate::reload::state_limit().to_string(),
+        )
+        .with("SETTLE_MS", crate::reload::SETTLE.as_millis().to_string())
+        .with(
+            "NOTICE_WINDOW_SECS",
+            crate::reload::NOTICE_WINDOW.as_secs().to_string(),
+        );
     write_if_changed(&dir.join("Cargo.toml"), &render(RUNNER_MANIFEST, &vars)?)?;
     let main = strip_block(RUNNER_MAIN, "ports", core.links_ports);
     write_if_changed(&dir.join("src/main.rs"), &render(&main, &vars)?)?;
