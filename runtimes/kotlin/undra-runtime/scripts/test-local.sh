@@ -24,7 +24,9 @@
 #                                        (also UNDRA_NATIVE_NAME -> -Dundra.native.name, UNDRA_NATIVE_PATH -> -Dundra.native.path)
 #
 # Environment: UNDRA_KOTLINX_COROUTINES (kotlinx-coroutines-core-jvm jar; scripts/env.sh sets it),
-# UNDRA_KOTLIN_STDLIB (kotlin-stdlib jar; default: the one inside the kotlinc install).
+# UNDRA_KOTLIN_STDLIB (kotlin-stdlib jar; default: the one inside the kotlinc install), UNDRA_SQLITE_JDBC (the SQLite JDBC
+# driver jar, put on the class path of the test run only: :runtime itself depends on nothing; JdbcDbAdapterTests skips
+# without it, or fails with UNDRA_REQUIRE_TOOLCHAINS=1).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # runtimes/kotlin/undra-runtime
@@ -155,7 +157,12 @@ phase_run() {
   if [ -n "${UNDRA_NATIVE_LIB_DIR:-}" ]; then jflags+=("-Djava.library.path=$UNDRA_NATIVE_LIB_DIR"); fi
   if [ -n "${UNDRA_NATIVE_NAME:-}" ]; then jflags+=("-Dundra.native.name=$UNDRA_NATIVE_NAME"); fi
   if [ -n "${UNDRA_NATIVE_PATH:-}" ]; then jflags+=("-Dundra.native.path=$UNDRA_NATIVE_PATH"); fi
-  java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$OUT/test" "$STDLIB" "$COROUTINES")" dev.undra.runtime.TestMainKt
+  local driver="${UNDRA_SQLITE_JDBC:-}"
+  if [ -n "$driver" ] && [ ! -f "$driver" ]; then
+    echo "error: UNDRA_SQLITE_JDBC=$driver is not a file" >&2
+    exit 2
+  fi
+  java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$OUT/test" "$STDLIB" "$COROUTINES" "$driver")" dev.undra.runtime.TestMainKt
 }
 
 case "$PHASE" in

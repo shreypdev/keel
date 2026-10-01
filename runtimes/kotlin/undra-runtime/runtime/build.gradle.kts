@@ -33,6 +33,10 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    // The SQLite JDBC driver of JdbcDbAdapterTests (ADR-048): the local jar UNDRA_SQLITE_JDBC names (scripts/env.sh sets it),
+    // on the test class path only. :runtime itself depends on no driver; without the variable those tests are skipped.
+    System.getenv("UNDRA_SQLITE_JDBC")?.takeIf { File(it).isFile }?.let { testRuntimeOnly(files(it)) }
 }
 
 // The generated Kotlin of bindgen's `full` golden case and its execution test are compiled and run against this

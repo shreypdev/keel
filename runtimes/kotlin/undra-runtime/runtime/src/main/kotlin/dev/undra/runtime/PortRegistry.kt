@@ -34,8 +34,26 @@ internal class PortRegistry(
 ) {
     private val ports = ConcurrentHashMap<Int, PortImpl>()
 
+    /** Registers [impl] for [portId]; an implementation it replaces is detached ([PortImpl.detach]). */
     fun register(portId: UInt, impl: PortImpl) {
-        ports[portId.toInt()] = impl
+        val previous = ports.put(portId.toInt(), impl)
+        if (previous != null && previous !== impl) detach(portId, previous)
+    }
+
+    /** Detaches every registered implementation (the core is closing); they stay registered but answer nothing new. */
+    fun detachAll() {
+        for ((id, impl) in ports) detach(id.toUInt(), impl)
+    }
+
+    private fun detach(portId: UInt, impl: PortImpl) {
+        val hook = impl.detach ?: return
+        try {
+            hook()
+        } catch (e: OutOfMemoryError) {
+            throw e
+        } catch (e: Throwable) {
+            UndraLog.warn("detaching the implementation of port $portId failed", e)
+        }
     }
 
     fun dispatch(portId: UInt, methodId: UInt, portCallId: UInt, args: ByteArray): PortOutcome {

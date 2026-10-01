@@ -22,7 +22,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** `AndroidPlatformDefaults.install` on a device: all ten ports are there and each one works through its port methods. */
+/**
+ * `AndroidPlatformDefaults.install` on a device: all ten ports and the three opt-in ones are there and each of the ten works
+ * through its port methods (the opt-in ones have suites of their own: `DbOnDeviceTest`, and the runtime's realtime suite).
+ */
 class PlatformDefaultsOnDeviceTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private lateinit var server: TestHttpServer
@@ -47,15 +50,20 @@ class PlatformDefaultsOnDeviceTest {
     private fun install(): AndroidPlatform = AndroidPlatformDefaults.install(core, context).also { platform = it }
 
     @Test
-    fun install_registers_the_eight_method_ports_and_starts_the_two_event_sources() {
+    fun install_registers_the_eleven_method_ports_and_starts_the_two_event_sources() {
         install()
         assertEquals(
             setOf(
                 StandardPorts.Kv.PORT_ID, StandardPorts.SecureStore.PORT_ID, StandardPorts.Fs.PORT_ID, StandardPorts.Http.PORT_ID,
                 StandardPorts.Clock.PORT_ID, StandardPorts.Rng.PORT_ID, StandardPorts.Log.PORT_ID, StandardPorts.Timer.PORT_ID,
+                StandardPorts.WebSocket.PORT_ID, StandardPorts.Sse.PORT_ID, StandardPorts.Db.PORT_ID,
             ),
             core.ports.keys,
         )
+        for (id in listOf(StandardPorts.WebSocket.PORT_ID, StandardPorts.Sse.PORT_ID, StandardPorts.Db.PORT_ID)) {
+            assertFalse(core.ports.getValue(id).sync)
+            assertNotNull("port $id releases what it holds when the core closes", core.ports.getValue(id).detach)
+        }
         assertTrue(core.ports.getValue(StandardPorts.Clock.PORT_ID).sync)
         assertTrue(core.ports.getValue(StandardPorts.Rng.PORT_ID).sync)
         assertTrue(core.ports.getValue(StandardPorts.Log.PORT_ID).sync)
@@ -149,7 +157,7 @@ class PlatformDefaultsOnDeviceTest {
         assertTrue(first !== second)
         val after = core.awaitEvents { list -> list.count { it.portId == StandardPorts.Connectivity.PORT_ID } > before }
         assertTrue("the second install reported the state again", after.count { it.portId == StandardPorts.Connectivity.PORT_ID } > before)
-        assertEquals("still one registration per port", 8, core.ports.size)
+        assertEquals("still one registration per port", 11, core.ports.size)
     }
 
     @Test
@@ -160,6 +168,6 @@ class PlatformDefaultsOnDeviceTest {
         val lifecycleEvents = core.events.count { it.portId == StandardPorts.Lifecycle.PORT_ID }
         ActivityScenario.launch(TestActivity::class.java).use { Thread.sleep(1_200) }
         assertEquals("no Lifecycle events after close", lifecycleEvents, core.events.count { it.portId == StandardPorts.Lifecycle.PORT_ID })
-        assertEquals(8, core.ports.size)
+        assertEquals(11, core.ports.size)
     }
 }

@@ -8,9 +8,9 @@ import kotlin.system.exitProcess
 private const val SCENARIO_LIMIT_MS: Long = 120_000L
 
 /**
- * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S18 on the JVM
+ * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S18 and S23 to S25 on the JVM
  * over JNI against the real `libundra_core` of the playground core and prints one line per scenario,
- * `SCENARIO S07 PASS|FAIL <title>`, which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.
+ * `SCENARIO S07 PASS|FAIL <title>` (or `SKIP <reason>`), which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.
  */
 fun main() {
     // The default file-backed adapters (Fs, SecureStore) stay in a throwaway directory.
@@ -28,6 +28,8 @@ fun main() {
         val ms = (System.nanoTime() - started) / 1_000_000L
         if (problem == null) {
             println("SCENARIO ${scenario.id} PASS ${scenario.title}")
+        } else if (problem is Skipped) {
+            println("SCENARIO ${scenario.id} SKIP ${problem.reason}")
         } else {
             failures++
             println("SCENARIO ${scenario.id} FAIL ${scenario.title}: ${problem.message?.lineSequence()?.firstOrNull() ?: problem.toString()}")
@@ -35,7 +37,8 @@ fun main() {
         }
         println("note ${scenario.id} took $ms ms")
     }
-    println("---- ${SCENARIOS.size - failures} of ${SCENARIOS.size} scenarios passed")
+    println("---- ${SCENARIOS.size - failures} of ${SCENARIOS.size} scenarios passed or were skipped")
+    RealtimeServer.stop()
     // Exit explicitly: the core's threads are daemons, but a scenario that timed out may leave a worker behind.
     exitProcess(if (failures == 0) 0 else 1)
 }

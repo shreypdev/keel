@@ -17,6 +17,12 @@ import java.nio.file.Paths
  * | `Clock`, `Rng`, `Log` | [ClockAdapter], [RngAdapter] (`SecureRandom`), [LogAdapter] (`java.util.logging`) |
  * | `Timer` | [TimerAdapter] over a scheduled executor |
  * | `Connectivity`, `Lifecycle` | none: they are event ports; see [ConnectivityEvents] and [LifecycleEvents] |
+ * | `WebSocket` (opt-in, ADR-047) | [WebSocketPortAdapter] over [ClientWebSocketAdapter], the runtime's own RFC 6455 client |
+ * | `Sse` (opt-in, ADR-047) | [SsePortAdapter] over [JdkHttpSseAdapter] (`java.net.http`) |
+ * | `Db` (opt-in, ADR-048) | [DbPortAdapter] over [JdbcDbAdapter] in `<dataDir>/db` (needs `org.xerial:sqlite-jdbc` on the class path) |
+ *
+ * The three opt-in ports are registered whether or not the core enables them (cargo features `websocket`, `sse`, `db`); a
+ * core that does not declare a port never calls it.
  *
  * `UndraCore.load` installs these itself unless `LoadOptions.defaultAdapters` is `false`; use this object to
  * pick another data directory or to mix them with your own.
@@ -43,6 +49,9 @@ public object JvmAdapters {
         all[StandardPorts.Kv.PORT_ID] = FileKv(dataDir.resolve("kv")).portImpl("Kv")
         all[StandardPorts.SecureStore.PORT_ID] = FileKv(dataDir.resolve("secure")).portImpl("SecureStore")
         all[StandardPorts.Fs.PORT_ID] = FsAdapter(dataDir.resolve("fs")).portImpl()
+        all[StandardPorts.WebSocket.PORT_ID] = webSocketPort(ClientWebSocketAdapter())
+        all[StandardPorts.Sse.PORT_ID] = ssePort(JdkHttpSseAdapter())
+        all[StandardPorts.Db.PORT_ID] = dbPort(JdbcDbAdapter(dataDir.resolve("db")))
         return all
     }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S18 of contract-tests/scenarios.md on the JVM over
-# JNI against the real libundra_core of the playground core, then checks all eighteen passed.
+# The Kotlin column of the contract tests: runs S01..S18 and S23..S25 of contract-tests/scenarios.md on the JVM
+# over JNI against the real libundra_core of the playground core, then checks every one passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -13,7 +13,10 @@
 #      through contract-tests/check.sh kotlin
 #
 # Output goes under contract-tests/kotlin/build (git-ignored); UNDRA_BUILD_DIR moves it. Needs the toolchain
-# scripts/env.sh sets up (JDK 17, kotlinc, UNDRA_KOTLINX_COROUTINES, UNDRA_KOTLIN_STDLIB) and cargo.
+# scripts/env.sh sets up (JDK 17, kotlinc, UNDRA_KOTLINX_COROUTINES, UNDRA_KOTLIN_STDLIB), cargo, and Node for the
+# local server of S23 and S24 (contract-tests/servers/realtime-server.mjs). S25 needs the SQLite JDBC driver
+# (org.xerial:sqlite-jdbc, which the runtime does not depend on): UNDRA_SQLITE_JDBC=/path/to/sqlite-jdbc.jar puts it on
+# the class path; without it S25 reports `SKIP no SQLite JDBC driver on the class path`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"            # contract-tests/kotlin
@@ -70,11 +73,16 @@ if [ ! -f "$STAMP" ] || [ "$OUT/runtime/main.stamp" -nt "$STAMP" ] \
 fi
 
 # --- 4. run, then check the verdicts ------------------------------------------------------------------------
-echo "==> running S01..S18 against ${LIB#"$REPO"/}"
+echo "==> running S01..S18, S23..S25 against ${LIB#"$REPO"/}"
 mkdir -p "$OUT"
 status=0
+DRIVER=""
+if [ -n "${UNDRA_SQLITE_JDBC:-}" ]; then
+  [ -f "$UNDRA_SQLITE_JDBC" ] || { echo "error: UNDRA_SQLITE_JDBC=$UNDRA_SQLITE_JDBC is not a file" >&2; exit 2; }
+  DRIVER=":$UNDRA_SQLITE_JDBC"
+fi
 java -Xmx1g -Djava.library.path="$LIB_DIR" \
-  -cp "$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" \
+  -cp "$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES$DRIVER" \
   dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?
 "$REPO/contract-tests/check.sh" kotlin "$OUT/run.log" || status=1
 exit "$status"

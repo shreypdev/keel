@@ -126,4 +126,70 @@ public object StandardPorts {
         /** `fnv1a32("Lifecycle.changed")`. */
         public const val CHANGED: UInt = 0x0bc82569u
     }
+
+    /**
+     * `WebSocket` (async, opt-in: cargo feature `websocket`, ADR-047): `connect`, `send`, `receive`, `close`. Served by
+     * [WebSocketPortAdapter] over a [WebSocketAdapter].
+     */
+    public object WebSocket {
+        /** `fnv1a32("port.WebSocket")`. */
+        public const val PORT_ID: UInt = 0x7388b95fu
+
+        /** `fnv1a32("WebSocket.connect")`: `connect(url, protocols, headers) -> Result<WsOpened, WsError>`. */
+        public const val CONNECT: UInt = 0x83477638u
+
+        /** `fnv1a32("WebSocket.send")`: `send(conn, message) -> Result<(), WsError>`. */
+        public const val SEND: UInt = 0x117b2158u
+
+        /** `fnv1a32("WebSocket.receive")`: `receive(conn, max) -> Result<Vec<WsMessage>, WsError>`. */
+        public const val RECEIVE: UInt = 0x8f31f08fu
+
+        /** `fnv1a32("WebSocket.close")`: `close(conn, code, reason) -> Result<(), WsError>`. */
+        public const val CLOSE: UInt = 0x60154b86u
+    }
+
+    /** `Sse` (async, opt-in: cargo feature `sse`, ADR-047): `open`, `next`, `close`. Served by [SsePortAdapter] over an [SseAdapter]. */
+    public object Sse {
+        /** `fnv1a32("port.Sse")`. */
+        public const val PORT_ID: UInt = 0x75d2ef19u
+
+        /** `fnv1a32("Sse.open")`: `open(url, headers, last_event_id) -> Result<u32, SseError>`. */
+        public const val OPEN: UInt = 0xc0033c14u
+
+        /** `fnv1a32("Sse.next")`: `next(stream, max) -> Result<Vec<SseEvent>, SseError>`. */
+        public const val NEXT: UInt = 0x4035cbedu
+
+        /** `fnv1a32("Sse.close")`: `close(stream) -> Result<(), SseError>`. */
+        public const val CLOSE: UInt = 0x5bfe2c88u
+    }
+
+    /**
+     * `Db` (async, opt-in: cargo feature `db`, ADR-048): `open`, `execute`, `query`, `begin`, `commit`, `rollback`,
+     * `close`. Served by [DbPortAdapter] over a [DbAdapter].
+     */
+    public object Db {
+        /** `fnv1a32("port.Db")`. */
+        public const val PORT_ID: UInt = 0x559eda82u
+
+        /** `fnv1a32("Db.open")`: `open(name, migrations) -> Result<DbOpened, DbError>`. */
+        public const val OPEN: UInt = 0xee6f26dbu
+
+        /** `fnv1a32("Db.execute")`: `execute(db, sql, params) -> Result<DbExecuted, DbError>`. */
+        public const val EXECUTE: UInt = 0xffac2f0au
+
+        /** `fnv1a32("Db.query")`: `query(db, sql, params) -> Result<DbRows, DbError>`. */
+        public const val QUERY: UInt = 0x3a4deefdu
+
+        /** `fnv1a32("Db.begin")`: `begin(db) -> Result<u32, DbError>`. */
+        public const val BEGIN: UInt = 0xae2ba428u
+
+        /** `fnv1a32("Db.commit")`: `commit(tx) -> Result<(), DbError>`. */
+        public const val COMMIT: UInt = 0xf866d5aeu
+
+        /** `fnv1a32("Db.rollback")`: `rollback(tx) -> Result<(), DbError>`. */
+        public const val ROLLBACK: UInt = 0x3e7b24b3u
+
+        /** `fnv1a32("Db.close")`: `close(db) -> Result<(), DbError>`. */
+        public const val CLOSE: UInt = 0xde3dc7edu
+    }
 }
