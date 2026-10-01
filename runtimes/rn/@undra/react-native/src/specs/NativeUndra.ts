@@ -9,10 +9,12 @@ import { TurboModuleRegistry } from "react-native";
  */
 export interface Spec extends TurboModule {
   /**
-   * Installs `globalThis.__undraNative[namespace]` in this runtime (idempotent per namespace). Throws
-   * when the app has no core of that namespace, or its table is refused (another ABI version).
+   * Installs `globalThis.__undraNative[coreNamespace]` in this runtime (idempotent per namespace).
+   * Throws when the app has no core of that namespace, or its table is refused (another ABI
+   * version). (Not `namespace`: codegen writes the parameter into Objective-C++, where that is a
+   * keyword.)
    */
-  install(namespace: string): boolean;
+  install(coreNamespace: string): boolean;
 }
 
 export default TurboModuleRegistry.get<Spec>("UndraNative");
