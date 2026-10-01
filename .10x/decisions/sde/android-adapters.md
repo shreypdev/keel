@@ -190,26 +190,26 @@ ADR-049's `StorageError` is not adopted (that is `persistence-v2`).
   `*.tmp`), F5 (Http on its own dispatcher slice when coroutines is bumped), F6 (the `installed` registry retains cores), I3, I4,
   I11.
 
-### Verification on the merged tree (`main` = `c186665`)
+### Verification on the merged tree (`main` = `e518653`, merged in three steps: `c186665`, `18cf0b8`, `e518653`)
 
 | Check | Result |
 |---|---|
 | `cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| `cargo test --workspace` (with `tsc` on `PATH` and `UNDRA_REQUIRE_TOOLCHAINS=1`) | 2,349 passed, 0 failed, 11 ignored (= main's 2,349) |
-| `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 588 cases in 36 suites, 0 failed, 2 skipped (JNI smoke; no native library): main's 585 + the three new |
+| `cargo test --workspace` (with `tsc` on `PATH` and `UNDRA_REQUIRE_TOOLCHAINS=1`) | 2,351 passed, 0 failed, 11 ignored after the last merge (2,349 before the React Native merge, = main's then; the two more are its CLI tests) |
+| `runtimes/kotlin/undra-runtime/scripts/test-local.sh`, brew's kotlinc 2.4.20 | 588 cases in 36 suites, 0 failed, 2 skipped (JNI smoke; no native library): main's 585 + the three new |
+| the same under CI's compiler, kotlinc 2.0.21 first on `PATH` (own build dir, `UNDRA_FORCE=1`, the stdlib of that distribution) | 588 cases, 0 failed, 2 skipped; and with the real JNI library (`cargo build -p undra-ffi --features jni`, `UNDRA_NATIVE_LIB_DIR=target/debug UNDRA_NATIVE_NAME=undra_ffi`, as CI runs it) 588 cases, 0 failed, 1 skipped. The android-adapters module and the runtime's main sources are compiled by Gradle's Kotlin 2.0.21 in `:android-adapters:test`, so both Kotlin versions have built them |
 | `./gradlew :android-adapters:test` | 131 tests per variant (debug and release), 130 pass, 1 skipped (PATCH on the desktop JVM) |
 | `./gradlew :android-adapters:connectedAndroidTest` on `emulator-5554` (`undra` AVD, Android 15) | 113 tests, 112 pass, 0 failed, 1 skipped (the gated network toggle); the Gradle log says `Starting 113 tests on undra(AVD) - 15` and ends `undra(AVD) - 15 Tests 110/113 completed. (1 skipped) (0 failed)`, `Finished 114 tests on undra(AVD) - 15`; per class: Fs 14, Http 41, Kv 13, SecureStore 10 + 9 on the real Keystore, Connectivity 6, Lifecycle 7, `install` 5, Http on device 5, locations 3 |
 | `examples/playground/android`: `./gradlew :app:assembleDebug` | `BUILD SUCCESSFUL`, 15 MB debug APK, on a core built by `undra build --platform android --release` |
 | `smoke.sh` (`SKIP_CORE=1`) on a **private AVD** (`undra-aamerge`, `emulator-5562`), because it uninstalls the app and switches airplane mode | `SMOKE PASSED`: four tabs alive, `AndroidPlatformDefaults: registered Kv, SecureStore, Fs, Http, Clock, Rng, Log and Timer; reporting Connectivity and Lifecycle`, one file in `files/undra/kv` after the fetch and two after queueing, the cached list shown from `Kv` offline with the time of the fetch before the kill, 0 POSTs while offline, the replay with the original Idempotency-Key, 0 crash markers. `.proof/android-adapters-smoke.log` is the new log; the PNGs are the earlier run's. |
 | launch of the merged playground, in process and against `undra dev` (`undra dev --addr 127.0.0.1:7471 --no-watch`, `--es undra_dev_url ws://10.0.2.2:7471`) | in process: Remote tab `Success`, the three inbox items through the real `Http` adapter and the loopback server. Remote: the **green dev bar** "Dev server: ws://10.0.2.2:7471" over the same screen (`.proof/android-adapters-merged-devbar.png`); `undra dev`'s log shows the core's port calls going out to the device and the commits coming back. Killing the dev server: `Reconnecting(attempt=1..5, ECONNREFUSED)`; starting it again: `Connected`, then `Closed(SESSION_LOST)`, `Connecting`, `Connected` and a **second** `AndroidPlatformDefaults` line (the first platform closed), the same pid, no crash, the Remote tab back on `Success` |
-| `bash contract-tests/run-all.sh` | 54/54 (18 scenarios x ts, kotlin, swift) |
+| `bash contract-tests/run-all.sh` | 54/54 (18 scenarios x ts, kotlin, swift), run again after the React Native merge changed two TS scenarios |
 | `undra bindgen -C examples/playground --check --docs`; `node site/scripts/check-links.mjs` | up to date (hash `0x04d2adf769c58b9f`); 20 pages OK |
 
 ### Open items found while merging
 
-* `./gradlew :runtime:test` does not compile under Gradle's Kotlin 2.0.21: `CallErrorTests.kt:321` (parity) writes
-  `mapOf(method to { _: ByteArray -> throw IllegalStateException("boom") })`, which K2 2.0 cannot type as a `suspend` lambda; the
-  local `kotlinc` 2.4.20 and CI (`test-local.sh` only) accept it. Not touched here; an explicit `suspend` lambda type fixes it.
+* `./gradlew :runtime:test` did not compile under Gradle's Kotlin 2.0.21 (`CallErrorTests.kt:321`, a `throw`-only lambda): main fixed it
+  in `7c8d2d8` while this merge was in progress; the merge carries the fix.
 * A remote core loses `Connectivity` and `Lifecycle` reports made while its connection is down, and nothing reports them again
   when it returns: after airplane mode in a dev session the laptop's core can believe the device is still offline until the next
   change. A re-report on `Connected` (`AndroidPlatform.resync()`, called from `onConnectionChange`) would close it; dev-mode only.
