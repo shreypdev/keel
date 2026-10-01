@@ -14,9 +14,10 @@
 //! * [`fakes`] holds the deterministic fakes and [`fakes::install`].
 //! * Opt-in ports, each behind a cargo feature of this crate and of `undra` (off by default, so a
 //!   core that does not ask for them keeps its schema, hash and size; ADR-047, ADR-048):
-//!   [`ws`] (`websocket`: the `WebSocket` port, [`ws::WsConnection`]), [`sse`] (`sse`: the
-//!   `Sse` port, [`sse::subscribe`]) and [`db`] (`db`: the `Db` port over SQLite,
-//!   [`db::Database`]). [`Backoff`] and [`next`] serve the cores that reconnect and read them.
+//!   the module `ws` (feature `websocket`: the `WebSocket` port, `ws::WsConnection`), the module
+//!   `sse` (feature `sse`: the `Sse` port, `sse::subscribe`) and the module `db` (feature `db`:
+//!   the `Db` port over SQLite, `db::Database`). [`Backoff`] and [`next()`] serve the cores that
+//!   reconnect and read them.
 //!
 //! # Calling a port from core code
 //!
