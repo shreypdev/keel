@@ -39,6 +39,12 @@ fn check_diagnostic_only(code: &str, stderr: &str, dir: &Path) {
 }
 
 fn check_text(code: &str, text: String) {
+    check_golden(code, code, text);
+}
+
+/// Like [`check_text`], for a second message of `code` kept in `tests/golden/diagnostics/<name>.txt`
+/// (the error-codes page shows every golden of a code).
+fn check_golden(code: &str, name: &str, text: String) {
     let lines: Vec<&str> = text.lines().collect();
     assert!(
         lines[0].starts_with(&format!("error[undra::{code}]: ")),
@@ -53,7 +59,7 @@ fn check_text(code: &str, text: String) {
     );
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden/diagnostics")
-        .join(format!("{code}.txt"));
+        .join(format!("{name}.txt"));
     if std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1") {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, &text).unwrap();
@@ -176,6 +182,27 @@ fn c0007_a_schema_that_cannot_become_bindings() {
             .arg(dir.path()),
     );
     check("C0007", &stderr, dir.path());
+}
+
+#[test]
+fn c0014_a_project_on_a_newer_undra_than_this_one() {
+    // `undra upgrade` moves a project forward only: a core pinned past this CLI is refused.
+    let dir = TempDir::new("c0014-ahead");
+    let root = dir.path().join("ahead");
+    std::fs::create_dir_all(root.join("core/src")).unwrap();
+    std::fs::write(
+        root.join("undra.toml"),
+        "[project]\nname = \"ahead\"\nid = \"com.example.ahead\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("core/Cargo.toml"),
+        "[package]\nname = \"ahead-core\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nundra = { git = \"https://github.com/shreypdev/undra\", tag = \"v999.0.0\" }\n",
+    )
+    .unwrap();
+    let (_, stderr) = run_err(undra().arg("-C").arg(&root).arg("upgrade"));
+    let text = shown(&stderr, dir.path()).replace(env!("CARGO_PKG_VERSION"), "<version>");
+    check_golden("C0014", "C0014-upgrade", text);
 }
 
 #[test]

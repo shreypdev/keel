@@ -16,7 +16,7 @@ mod common;
 use std::path::Path;
 use std::process::Command;
 
-use common::{flag, has_rust_target, has_tool, init_project, run_ok};
+use common::{flag, has_rust_target, has_tool, init_project, path_with_undra, run_ok};
 
 fn skipped(variable: &str) -> bool {
     if flag(variable) {
@@ -88,6 +88,8 @@ fn ios_builds_an_xcframework_with_device_and_simulator_slices() {
             .arg("build")
             // The runtime package ships link-time stand-ins for the core; this switches them off.
             .env("UNDRA_LINK_CORE", "1")
+            // The build phase of the project runs `undra build` (it finds `undra` on PATH).
+            .env("PATH", path_with_undra())
             .output()
             .expect("xcodebuild runs");
         assert!(
@@ -159,7 +161,9 @@ fn android_builds_a_16kb_aligned_library_per_abi() {
         let mut gradle = Command::new(&gradlew);
         gradle
             .args([":app:assembleDebug", "--console=plain"])
-            .current_dir(project.root.join("android"));
+            .current_dir(project.root.join("android"))
+            // The `undraBuild` task runs `undra build` (it finds `undra` on PATH).
+            .env("PATH", path_with_undra());
         for var in ["JAVA_HOME", "ANDROID_HOME"] {
             if let Ok(value) = std::env::var(var) {
                 gradle.env(var, value);
@@ -265,7 +269,13 @@ fn the_web_app_shell_type_checks_and_bundles() {
             .args(["install", "--no-audit", "--no-fund"])
             .current_dir(&web),
     );
-    run_ok(Command::new("npm").args(["run", "build"]).current_dir(&web));
+    // The `undra()` Vite plugin runs `undra build` (it finds `undra` on PATH).
+    run_ok(
+        Command::new("npm")
+            .args(["run", "build"])
+            .current_dir(&web)
+            .env("PATH", path_with_undra()),
+    );
     let assets = std::fs::read_dir(web.join("dist/assets")).unwrap();
     assert!(
         assets

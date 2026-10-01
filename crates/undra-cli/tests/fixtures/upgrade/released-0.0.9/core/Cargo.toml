@@ -1,0 +1,13 @@
+[package]
+name = "demo-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+description = "The Undra core of demo"
+
+# A plain library. `undra build` links it with the Undra C ABI into libundra_core (an XCFramework, a
+# .so per ABI, a wasm module) and `undra dev` serves it over a WebSocket, so the core itself names
+# no crate type and depends on nothing but `undra`.
+[dependencies]
+undra = { git = "https://github.com/shreypdev/undra", tag = "v0.0.9" }

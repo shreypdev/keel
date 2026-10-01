@@ -82,9 +82,15 @@ impl Todos {
     // Used by `new` and, through `restore = ".."`, to rebuild the store from a snapshot.
     fn assemble(_ctx: Ctx, todos: Signal<Vec<Todo>>, filter: Signal<Filter>) -> Self {
         let visible = Computed::new((&todos, &filter), |(todos, filter)| {
-            todos.iter().filter(|todo| filter.matches(todo)).cloned().collect()
+            todos
+                .iter()
+                .filter(|todo| filter.matches(todo))
+                .cloned()
+                .collect()
         });
-        let remaining = Computed::new(&todos, |todos| todos.iter().filter(|todo| !todo.done).count() as u32);
+        let remaining = Computed::new(&todos, |todos| {
+            todos.iter().filter(|todo| !todo.done).count() as u32
+        });
         let next = AtomicU64::new(todos.with(|list| list.len() as u64) + 1);
         Self {
             next,

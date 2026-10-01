@@ -1,0 +1,26 @@
+
+  ios:
+    name: iOS (xcodebuild)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          # The generated project needs Xcode 16 or newer.
+          xcode-version: latest-stable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: @@IOS_TARGETS@@
+      - uses: Swatinem/rust-cache@v2
+@@INSTALL_UNDRA@@      - name: Build (the "Build the Undra core" Xcode phase builds the core first)
+        env:
+          # The Swift runtime package ships link-time stand-ins for the core; this switches them off.
+          UNDRA_LINK_CORE: "1"
+        run: >
+          xcodebuild
+          -project ios/@@APP@@.xcodeproj
+          -scheme @@APP@@
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build

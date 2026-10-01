@@ -208,7 +208,10 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
   that is trusted and names the host.
 * The playground and the template show the state in a thin bar (green, amber while reconnecting, red when it is
   over) and a screen with the reason and a Retry button when the dev server cannot be reached at launch.
-* No native library is needed in remote mode: you can skip `undra build --platform android`.
+* No native library is needed in remote mode. The generated Gradle app builds the core itself (its `undraBuild` task runs
+  `undra build --platform android` before every build, and is skipped while the core is unchanged); a build that will
+  only run against `undra dev` can skip it with `./gradlew -PundraSkipBuild=true -PundraDevUrl=... :app:installDebug`
+  (or `UNDRA_SKIP_BUILD=1`).
 
 ## Troubleshooting
 
@@ -226,5 +229,27 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
 | `1 object not carried over`, and `refetch` is refused with a stale handle | A query handle (or another object that is not a store) does not survive a reload. Run the query again: construct the query handle again, for example by re-mounting its screen. |
 | A spinner or a `loading` flag stays on after a save | A call that was still running when the core was replaced was cancelled and left its store at the value it had written; trigger the action again. |
 
-`undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode); `undra dev --help` has
-the command reference.
+`undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode, `adb` and whether a device is
+attached, `undra` on `PATH`), with the fix command for each gap; `undra dev --help` has the command reference.
+
+## Production builds are not a separate step
+
+The dev loop above is `undra dev`. The other half, the build of what you ship, needs no command either: a project made by
+`undra init` builds its core from the app's own build system, each time only when the core changed.
+
+| App | What runs `undra build` | When | Skipped by |
+|---|---|---|---|
+| Android | the `undraBuild` Gradle task, `preBuild` depends on it | every Gradle build; `assembleRelease` and `bundleRelease` build a release core, anything else a debug one (`-PundraRelease=true\|false` overrides; a build that asks for both variants at once, `./gradlew build`, gets a release core in both) | Gradle's up-to-date check over `core/src/**`, the Cargo manifests, `Cargo.lock` and `build/android/jniLibs` (a path dependency outside `core/` is an input only once added with `undraBuild { sources.from(...) }`); `-PundraSkipBuild=true`, `UNDRA_SKIP_BUILD=1` |
+| iOS | the **Build the Undra core** Run Script phase, before Compile Sources, with `undra build --platform ios --configuration $CONFIGURATION` | every Xcode build | Xcode's input/output analysis over `ios/Config/undra-core-inputs.xcfilelist` (every file of the core and of its path dependencies, the Cargo manifests and `Cargo.lock`, kept in step by `undra build`) and `undra-core-outputs.xcfilelist` (the XCFramework and a stamp per configuration) |
+| Web | the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) | `vite build` and `vite dev`; under `vite dev` also on every change of the core's `src/**`, its manifests or `Cargo.lock` (one build at a time, the first included), followed by a full reload; never under Vitest (mode `test`) unless `inTests: true` | `UNDRA_SKIP_BUILD=1`, the `skip` option |
+
+All three find `undra` on `PATH` and in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories, because an app launched
+from the Dock or an IDE has a short `PATH`; the Gradle task and the Vite plugin take `UNDRA_BIN` first (the Xcode phase
+does not: Xcode's environment is the project's build settings, not your shell's). When it is
+missing they say how to install it, in the shape of the CLI's own errors (`error[undra::C0003]`). A build that fails keeps
+its own output (`C0004`); under `vite dev` it shows in the page's error overlay, the page keeps the core it had, and the
+next save retries.
+
+What none of the three sees: `.cargo/config.toml`, `rust-toolchain.toml`, a new Rust compiler and a new `undra`. After
+changing one of those, build once with `undra build` (or `./gradlew :app:undraBuild --rerun`, or Xcode's Clean Build
+Folder).

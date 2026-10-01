@@ -180,12 +180,6 @@ html:not(.js) .live-fallback > span { display: none; }
 .how-card .n { grid-row: span 2; font: 600 2.4rem/1 var(--font-body); letter-spacing: -.04em; color: var(--accent); }
 .how-card h3 { font-size: 1.1rem; }
 .how-card p { margin: 0; font-size: .92rem; color: var(--text-2); }
-.reveal-code { margin-top: 18px; }
-.reveal-code > summary { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; padding: 10px 16px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--text); font-weight: 500; font-size: .95rem; transition: border-color .15s, background .15s; }
-.reveal-code > summary::-webkit-details-marker { display: none; }
-.reveal-code > summary::before { content: ""; width: 7px; height: 7px; border-right: 1.6px solid var(--accent); border-bottom: 1.6px solid var(--accent); transform: rotate(-45deg); transition: transform .2s; }
-.reveal-code[open] > summary::before { transform: rotate(45deg); }
-.reveal-code > summary:hover { border-color: var(--accent-line); background: var(--surface-2); }
 .panel { margin-top: 16px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
 .panel .tabs-head { display: flex; padding: 10px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .panel .code { margin: 0; border: 0; border-radius: 0; }

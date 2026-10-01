@@ -195,3 +195,17 @@ pub fn has_tool(program: &str, version_arg: &str) -> bool {
 pub fn flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v == "1")
 }
+
+/// `PATH` with the directory of the `undra` under test in front: what the build systems of a generated
+/// project (the Gradle task, the Xcode build phase, the Vite plugin) find `undra` through.
+pub fn path_with_undra() -> std::ffi::OsString {
+    let dir = Path::new(env!("CARGO_BIN_EXE_undra"))
+        .parent()
+        .expect("the binary has a directory")
+        .to_path_buf();
+    let mut dirs = vec![dir];
+    dirs.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(dirs).expect("a PATH")
+}

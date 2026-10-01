@@ -6,58 +6,204 @@ minutes. Time to the full five-language matrix: ~30 minutes including downloads.
 
 ## 1. Install the toolchain
 
-### Required for the Rust workspace (everything in `crates/`)
+`undra doctor` checks everything in this section and prints the exact command for each gap. Every finding
+links to the heading below that explains it: `undra doctor --fix` prints all the commands as one block to
+read and paste (it never runs them), and `undra doctor --json` gives the same report to tools (state,
+observed value, fix and anchor per finding). Rows marked *contributors* matter only if you work on Undra
+itself; building an app never needs them.
+
+On macOS the fixes install with Homebrew, and they are written for the shell you run doctor in: when `brew` is
+not on that shell's `PATH` but Homebrew is installed, a fix starts with `eval "$(/opt/homebrew/bin/brew shellenv)"`
+(Apple silicon's `/opt/homebrew` is not on the default `PATH`); when Homebrew is not installed, it starts with
+Homebrew's own installer. A tool Homebrew already installed out of `PATH`'s reach is reported as such, with only
+the `shellenv` line as its fix. The paths below are Apple silicon's; on an Intel Mac Homebrew is `/usr/local`
+(`brew --prefix` says which).
+
+### Rust and its targets
+
+#### Rust
+
+`rustup` with the stable channel, 1.85 or newer (the MSRV of the workspace, edition 2024). Doctor checks
+`rustup`, the active channel, `rustc` and `cargo`.
 
 ```bash
-# Rust — stable, plus the cross targets Undra ships to
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+rustup update stable              # when doctor says the version is too old
+rustup default stable             # when a nightly or beta channel is active
+```
+
+#### Rust targets
+
+Doctor checks the targets of the platforms in scope: `wasm32-unknown-unknown` for the web;
+`aarch64-apple-ios` (devices) and `aarch64-apple-ios-sim` (the simulator on Apple silicon) for iOS, plus
+`x86_64-apple-ios` when `[ios] simulator_archs` in `undra.toml` lists `x86_64`; and the target of every ABI in
+`[android] abis` (`aarch64-linux-android` for `arm64-v8a`, `x86_64-linux-android` for `x86_64`).
+
+```bash
 rustup target add wasm32-unknown-unknown \
   aarch64-apple-ios aarch64-apple-ios-sim \
   aarch64-linux-android x86_64-linux-android
 ```
 
-### Required for the platform runtimes and apps
+### The web app and the TypeScript runtime
+
+#### Node and npm
+
+Node 20 or newer (the TypeScript runtime's `engines`; 22 or newer is what CI uses) and the npm that comes with it.
 
 ```bash
-# Node 22+ (TypeScript runtime, web app, wasm acceptance tests)
-brew install node
+brew install node                 # or: fnm install --lts
+```
 
-# JDK 17 + Kotlin + Gradle (Kotlin runtime, Android app)
-brew install openjdk@17 kotlin gradle
+#### wasm-opt
 
-# binaryen (wasm-opt, used by `undra build --platform web`)
-brew install binaryen
+Optional. `undra build --platform web` works without it; with binaryen's `wasm-opt -Oz` the wasm core is
+10-20% smaller.
 
+```bash
+brew install binaryen             # Linux: sudo apt-get install -y binaryen
+```
+
+### iOS (macOS only)
+
+#### Xcode
+
+Install **Xcode from the App Store** (16 or newer; the Command Line Tools alone have no XCTest, no
+`xcodebuild` and no simulators), then point the system at it and accept the license. Doctor reports where
+`xcode-select` points, and says so when it points at the command line tools although Xcode is installed.
+
+```bash
+open macappstore://apps.apple.com/app/xcode/id497799835
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -license accept
+```
+
+If you cannot run `sudo`, `undra` and `scripts/env.sh` fall back to setting `DEVELOPER_DIR` for their own
+builds (they do not change what `xcodebuild` does when you run it yourself).
+
+#### iOS simulator runtime
+
+At least one iOS simulator runtime, to run the app (building does not need it).
+
+```bash
+xcodebuild -downloadPlatform iOS        # one-time, large
+```
+
+### Android
+
+#### Android SDK
+
+The SDK with `platform-tools` (`adb`) and platform 35, and `ANDROID_HOME` pointing at it (Gradle and Android
+Studio read it; `undra` finds the usual locations without it).
+
+```bash
+brew install --cask android-commandlinetools
+export ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
+SDKM=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
+yes | $SDKM --licenses
+$SDKM "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+```
+
+On Linux download the command line tools from <https://developer.android.com/studio#command-line-tools-only>
+into `$HOME/Android/Sdk/cmdline-tools/latest` and use the same `sdkmanager` lines.
+
+#### Android NDK
+
+NDK r27 or newer (16 KB page alignment, which Google Play requires), and `ANDROID_NDK_HOME` (cargo-ndk and
+Gradle read it; `undra` finds `$ANDROID_HOME/ndk/<version>` without it).
+
+```bash
+$SDKM "ndk;27.2.12479018"
+export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018
+```
+
+#### cargo-ndk
+
+`undra build --platform android` runs `cargo ndk`. 3.5 or newer, which aligns libraries to 16 KB pages.
+
+```bash
+cargo install cargo-ndk
+```
+
+#### JDK 17
+
+Gradle and the Android Gradle plugin need JDK 17 or newer (Android Studio bundles one). A missing JDK is a
+failure inside a project with an Android app and advice elsewhere; `undra build` itself does not use Java.
+
+```bash
+brew install openjdk@17               # Linux: sudo apt-get install -y openjdk-17-jdk
+export JAVA_HOME="$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"    # Homebrew's openjdk@17 is keg-only: not on PATH by itself
+```
+
+#### Gradle wrapper
+
+A generated project's `android/` has `./gradlew` (`undra init` copies it from a checkout or creates it with
+`gradle wrapper`). Doctor checks for it inside a project.
+
+```bash
+brew install gradle
+(cd android && gradle wrapper --gradle-version 8.14.3)
+```
+
+#### adb and a device
+
+`adb` (from `platform-tools`) and, to run the app, an attached device or a running emulator. Neither is
+needed to build. `adb devices` says `device`, not `unauthorized` or `offline`.
+
+```bash
+adb devices
+$ANDROID_HOME/emulator/emulator -avd undra &      # an emulator, when no phone is attached
+```
+
+#### The undra emulator (contributors)
+
+The device tests and benchmarks of this repository boot the AVD named `undra`.
+
+```bash
+$SDKM "emulator" "system-images;android-35;google_apis;arm64-v8a"
+$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n undra \
+      -k "system-images;android-35;google_apis;arm64-v8a" -d pixel_7
+```
+
+(`x86_64` instead of `arm64-v8a` on Intel and Linux hosts.)
+
+### Tools for contributors
+
+#### Kotlin compiler (contributors)
+
+Only the Kotlin runtime tests of this repository compile with `kotlinc`; an app never does. They also need the
+kotlinx-coroutines jar below.
+
+```bash
+brew install kotlin
 # The Kotlin local test runner needs one jar (any location; env.sh looks in ../.tools/lib)
 mkdir -p ../.tools/lib && curl -sSfLo ../.tools/lib/kotlinx-coroutines-core-jvm-1.6.4.jar \
   https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.6.4/kotlinx-coroutines-core-jvm-1.6.4.jar
 ```
 
-### Required for iOS (macOS only)
+### The machine
 
-Install **Xcode from the App Store** (the Command Line Tools alone have no XCTest and no
-simulators), then:
+#### Disk space
+
+Rust, Xcode (DerivedData, simulators) and Gradle keep several gigabytes of caches each. Doctor warns under
+10 GB free on the disk of the project (or your home directory).
 
 ```bash
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-sudo xcodebuild -license accept
-xcodebuild -downloadPlatform iOS        # simulator runtime (one-time, large)
+cargo clean
+xcrun simctl delete unavailable
 ```
 
-If you cannot run `sudo`, `scripts/env.sh` falls back to setting `DEVELOPER_DIR` for you.
+#### undra on PATH
 
-### Required for Android
+A generated project builds its core by itself: the Gradle task, the Xcode build phase and the Vite plugin
+run `undra build` and look for `undra` on `PATH` (the Xcode phase and Gradle also look in `~/.undra/bin`,
+`~/.cargo/bin` and Homebrew's directories, since a GUI-launched build has a short `PATH`). Doctor checks
+that one is found and that it is the version that is running.
 
 ```bash
-brew install --cask android-commandlinetools
-export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-SDKM=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
-yes | $SDKM --licenses
-$SDKM "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
-      "ndk;27.2.12479018" "emulator" "system-images;android-35;google_apis;arm64-v8a"
-$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd -n undra \
-      -k "system-images;android-35;google_apis;arm64-v8a" -d pixel_7
-cargo install cargo-ndk
+curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
+export PATH="$HOME/.undra/bin:$PATH"
 ```
 
 ### One command wires it all up per shell
@@ -65,6 +211,7 @@ cargo install cargo-ndk
 ```bash
 source scripts/env.sh    # PATH, UNDRA_KOTLIN_* jars, DEVELOPER_DIR fallback
 undra doctor              # (after `cargo install --path crates/undra-cli`) prints what's missing, with the fix
+undra doctor --fix        # the fixes as one block you can read and paste
 ```
 
 ## 2. Run the suites
@@ -86,6 +233,8 @@ Every suite is local; nothing needs the network after install.
 | wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
 | C host harness | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | ok |
 | Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 54/54 pass |
+| Build systems of a generated project: Gradle, `xcodebuild` and `npm run build` each build the core with no earlier `undra build` (a clean project, then up-to-date, then a change, then the other variant and back; the app links the new core) | `UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- --nocapture` (`UNDRA_REQUIRE_TOOLCHAINS=1` makes a missing toolchain a failure; needs `java` on PATH, which `scripts/env.sh` puts there) | 6 pass; skips, saying why, where a toolchain is missing |
+| `undra upgrade` end to end (regenerates the bindings against a local clone standing in for GitHub) | `UNDRA_TEST_UPGRADE_E2E=1 cargo test -p undra-cli --test upgrade` | 15 pass |
 | Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
@@ -115,6 +264,11 @@ cd examples/playground/web && npm install && npm run dev       # Chrome
 bash examples/playground/ios/smoke.sh                          # boots a simulator, installs, screenshots
 # Android: bash examples/playground/android/smoke.sh, or see examples/playground/android/README.md (gradlew assembleDebug + the `undra` AVD)
 ```
+
+The playground is wired by hand, so it still takes the explicit `undra build` above. A project made by `undra init` does not:
+its Gradle task, Xcode build phase and Vite plugin run `undra build` themselves before each app builds
+([`docs/DEV_LOOP.md`](DEV_LOOP.md#production-builds-are-not-a-separate-step)), `undra init` writes its CI workflow
+(`.github/workflows/undra.yml`), and `undra upgrade` moves it to a newer Undra in one command.
 
 The live loop (edit Rust, every app picks up the new core, a dropped connection heals itself) is `undra dev`:
 [`docs/DEV_LOOP.md`](DEV_LOOP.md) has the URL of each platform (the Android emulator is `ws://10.0.2.2:<port>`),

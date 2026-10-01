@@ -13,6 +13,7 @@
 //! | `undra dev` | serves the core over a WebSocket to running apps and rebuilds it when the code changes |
 //! | `undra doctor` | checks the toolchains and SDKs, with the fix for each gap |
 //! | `undra adopt` | adds a core to an existing app without touching the app's project files |
+//! | `undra upgrade` | moves a project to this `undra`'s version: every pin in step, the bindings regenerated, the migration notes of each release crossed |
 //!
 //! # How a project is put together
 //!
@@ -44,12 +45,14 @@ mod binary;
 mod bindgen;
 mod builds;
 mod cargo;
+mod ci;
 mod cli;
 mod commands;
 pub mod config;
 mod detect;
 pub mod error;
 mod fsutil;
+mod migrations;
 mod names;
 mod project;
 mod reload;
@@ -57,6 +60,7 @@ mod render;
 mod runner;
 mod runtimes;
 pub mod schema;
+mod semver;
 mod session;
 mod shim;
 mod sys;
@@ -64,6 +68,7 @@ mod templates;
 mod toml_lite;
 mod toolchain;
 mod ui;
+mod upgrade;
 mod version;
 
 use std::ffi::OsString;
@@ -118,7 +123,8 @@ fn dispatch(cli: &Cli, sys: &dyn sys::Sys, ui: Ui) -> Result<bool> {
         Command::Bindgen(args) => commands::bindgen::run(&env, args).map(|()| true),
         Command::Build(args) => commands::build::run(&env, args).map(|()| true),
         Command::Dev(args) => commands::dev::run(&env, args).map(|()| true),
-        Command::Doctor(args) => commands::doctor::run(&env, args.platform.as_deref()),
+        Command::Doctor(args) => commands::doctor::run(&env, args),
         Command::Adopt(args) => commands::adopt::run(&env, args).map(|()| true),
+        Command::Upgrade(args) => commands::upgrade::run(&env, args).map(|()| true),
     }
 }

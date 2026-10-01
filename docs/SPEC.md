@@ -845,7 +845,7 @@ The command line has its own codes, `C0001` to `C0014`, in the same shape and wi
 | C0011 | `undra` | the Rust toolchain lacks a compilation target the build needs |
 | C0012 | `undra` | the platform is not available on this machine |
 | C0013 | `undra` | the dev server failed to start or crashed |
-| C0014 | `undra` | the core and the project disagree about where Undra comes from |
+| C0014 | `undra` | the core and the project disagree about where Undra comes from, or the project is on a newer Undra than this `undra` (`undra upgrade` moves a project forward only) |
 
 ---
 
@@ -867,7 +867,7 @@ crates/undra-cli         deps: undra-bindgen, clap, notify, libloading (loads th
 crates/undra             facade: re-exports prelude, macros, runtime, ports, query; `dev::serve()`
 runtimes/swift/UndraRuntime          Package.swift, Sources/UndraRuntime, Sources/UndraFFI (module map), Tests
 runtimes/kotlin/undra-runtime        settings.gradle.kts; modules: runtime (JVM+Android), android-adapters
-runtimes/ts/@undra/runtime           package.json (ESM, exports: ., ./react, ./vue, ./svelte, ./solid, ./worker, ./node), src/, test/
+runtimes/ts/@undra/runtime           package.json (ESM, exports: ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite, ./node), src/, test/
 runtimes/rn/@undra/react-native      package.json (ESM; peers @undra/runtime, react-native), src/ (NativeTransport, loadNative), cpp/ (the C++ TurboModule over undra.h, ADR-038), ios/, android/CMakeLists.txt, UndraReactNative.podspec, react-native.config.cjs, babel-plugin.cjs, test/
 examples/playground/core            the Rust core used by every playground app and by the contract tests
 examples/playground/{ios,android,web}
@@ -877,6 +877,10 @@ bench/                              criterion (Rust), node bench, JVM bench, iOS
 
 Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `undra_schema_json` (the whole schema, doc comments included, §2.3), checks its hash against `undra_schema_hash`, and runs bindgen; the generated code carries the doc comments with `undra bindgen --docs` and none without. A core built before ADR-050 exports the canonical form: it still loads, and `--docs` on it is `C0006` rather than docless bindings. Fallback: `undra bindgen --schema schema.json`.
 
+
+Build-system integration (a project made by `undra init`; `undra build` is never a manual step): the Android app's `app/build.gradle.kts` has an `undraBuild` task (`undra build --platform android`, `--release` when a release variant is built; `preBuild` depends on it; inputs `core/src/**`, the Cargo manifests and `Cargo.lock`, output `build/android/jniLibs`); the Xcode project has a Run Script phase **Build the Undra core**, before Compile Sources, running `undra build --platform ios --configuration $CONFIGURATION` with input and output file lists (`ios/Config/undra-core-{inputs,outputs}.xcfilelist`; the XCFramework is linked with `-force_load`, not as a framework, because Xcode reads an XCFramework while planning the build); the web app's `vite.config.ts` uses `undra()` from `@undra/runtime/vite`, which runs `undra build --platform web` on start and, under `vite dev`, on every change of the core's `src/**`, manifests or `Cargo.lock` followed by a full reload (one build at a time; nothing under Vitest's mode `test` unless `inTests`). `undra build --configuration <NAME>` builds release for a name that contains `Release` and debug otherwise, and after an iOS build writes `build/ios/.undra-configuration-<NAME>` (removing the other configurations' stamps) so that Xcode re-runs the phase when the configuration changes. Each integration finds `undra` on `PATH` and in the install directories (the Gradle task and the Vite plugin take `UNDRA_BIN` first), and fails with `error[undra::C0003]` when it is not there. The shim's `Cargo.lock` is seeded from the project's again whenever the project's changes, so the platform libraries are built from the versions the project's lock file names.
+
+`undra doctor` reports one finding per prerequisite: a stable id, a state (`ok`, `missing`, `wrong-version`, `not-applicable`), a severity, the observed value, the fix commands and the heading of `docs/ONBOARDING.md` that explains it; `--fix` prints the commands as one block and runs nothing, `--json` prints the report. `undra upgrade` moves every pin of the Undra version (the core's dependency, `undra.toml`, `@undra/runtime` and `@undra/react-native`, `dev.undra:*`, the `undra-swift` package requirement, `UNDRA_VERSION` of the CI workflow) to the CLI's version in the shapes `undra init` writes, all files or none (a version held in a Gradle variable is left and named), regenerates the bindings and prints the migration notes (`crates/undra-cli/src/migrations.rs`) of each release crossed; a `path` dependency is left alone and a project newer than the CLI is `C0014`. `undra init` writes `.github/workflows/undra.yml` (a job for the core and one per app) unless the project uses a checkout of the repository.
 ---
 
 ## 14. Quality gates
