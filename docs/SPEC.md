@@ -218,6 +218,8 @@ Header size is 23 bytes.
 | 15 | Snapshot | core→host | §5.9 |
 | 16 | Restore | host→core | §5.9 |
 
+**The WebSocket URL (ADR-034).** The upgrade request of a `remote` connection may carry `?undra_session=<token>` (1 to 64 characters of `A-Z a-z 0-9 . _ -`, the same on every connection of one host runtime) and, on a reconnect by a host that holds constructed objects, `&undra_resume=1`. They are transport material, not envelope material: nothing above changes, and a server or client that ignores them behaves as before. A server that keeps a dropped host's objects (`undra dev`) hands them back to a connection that presents the token and asks to resume; one that does not hold the session answers the `Hello` and closes with WebSocket code **4001** (`session lost`).
+
 ### 3.3 Call payload
 
 ```
@@ -699,6 +701,10 @@ Default adapters:
 | Timer | DispatchQueue | Handler / ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
 | Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ProcessLifecycleOwner | stubs | navigator.onLine / visibilitychange | stubs |
 
+### 11.0 The remote transport reconnects (ADR-034)
+
+A `remote` transport reconnects by itself unless told not to. Attempt `n` (from 1) waits `min(maxDelay, initialDelay * 2^(n-1))` less a random share of up to `jitter` of that (defaults 250 ms, 5 s, 0.5; each attempt takes at most 5 s). The core exposes the state `connecting`, `connected`, `reconnecting(attempt)` or `closed(reason)` (reason: `requested`, `schemaMismatch`, `sessionLost`, `failed`), per platform as in section 17. When the connection drops, every call, stream and pending `observe` fails at once with the platform's existing unavailable outcome, and so does anything started while it is down; the core is not closed. After the next successful handshake the host sends `Observe` for every signal it had observed and `Release` for every handle released meanwhile, and only then reports `connected`: the core answers each `Observe` with the current values (5.5), so every mirror converges. The app closing the core, a schema-hash mismatch on the server's `Hello` (reported once, as `UndraSchemaMismatch`) and a lost session (close code 4001, section 3.2) are final: no retry. The first connection of `load` is not retried.
+
 ### 11.1 Delivery: merged per drain, frame-aligned, bounded (ADR-031)
 
 The core hands the host one change-set per transaction per store, in commit order, on the committing thread (§3.5, §5.5). The mirror decides when and how the main thread applies them; none of this changes the wire, the C ABI or the wasm ABI.
@@ -1056,6 +1062,7 @@ export class UndraCore {
   construct(typeId: number, methodId: number, args: Uint8Array): Promise<bigint>;     // returns handle
   observe(handle: bigint, signalId: number, on: boolean): void;
   release(handle: bigint): void;
+  readonly connection: Signal<ConnectionState>;               // ADR-034: { kind: "connecting" } | { kind: "connected" } | { kind: "reconnecting", attempt, error } | { kind: "closed", reason: "requested" | "schemaMismatch" | "sessionLost" | "failed", error? }; LoadOptions.reconnect (false | { initialDelayMs, maxDelayMs, jitter, maxAttempts }), onConnectionChange; UndraSessionLostError
   mirror: Mirror;      // mirror.register(handle, applyFn: (signalId, op, value: Uint8Array) => void, options?: { noCoalesce?: Iterable<number> }); mirror.unregister(handle)
                        // mirror.stats(): MirrorStats; mirror.addDrainListener(fn: (s: DrainStats) => void): () => void  (§11.1)
   registerPort(portId: number, impl: PortImpl): void;          // PortImpl = { methods: Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>, sync: boolean }
@@ -1085,6 +1092,7 @@ class UndraCore private constructor(...) {
   fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>
   fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long                        // sync in INPROC
   fun observe(handle: Long, signalId: UInt, on: Boolean); fun release(handle: Long)
+  val connectionState: StateFlow<ConnectionState>                                           // ADR-034: Connecting | Connected | Reconnecting(attempt, cause) | Closed(reason: REQUESTED | SCHEMA_MISMATCH | SESSION_LOST | FAILED, cause); LoadOptions(reconnect = ReconnectPolicy(), onConnectionChange); UndraSessionLostException
   val mirror: Mirror                                                                        // register(handle) { signalId, op, reader -> }; register(handle, noCoalesce: Set<UInt>) { ... }
                                                                                             // stats(): MirrorStats; addDrainListener { s: DrainStats -> }: AutoCloseable; flush()  (§11.1)
   fun registerPort(portId: UInt, impl: PortImpl)
@@ -1115,6 +1123,7 @@ public final class UndraCore: @unchecked Sendable {
                                      mapError: @escaping @Sendable (Error) -> Error = { $0 }) -> AsyncThrowingStream<Item, Error>   // what generated stream methods return; decodes on demand so credit follows the consumer (§3.7)
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> UndraHandle
   public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool); public func release(_ handle: UndraHandle)
+  public var connectionState: UndraConnectionState { get }   // ADR-034: .connecting | .connected | .reconnecting(attempt:) | .closed(UndraClosedReason: .requested | .schemaMismatch | .sessionLost | .failed); also `connection` (@MainActor @Observable, `.state`) and `connectionStates() -> AsyncStream`; LoadOptions.reconnect (UndraReconnectPolicy), onConnectionChange; UndraSessionLostError
   public let mirror: Mirror        // register(handle, noCoalesce: Set<UInt32> = []) { @MainActor (signalId, op, reader) in … }; stats() -> MirrorStats;
                                    // addDrainListener { @MainActor (DrainStats) in … } -> DrainListenerRegistration (remove()); @MainActor flush()  (§11.1)
   public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning

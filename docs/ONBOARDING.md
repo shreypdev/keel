@@ -102,6 +102,10 @@ bash examples/playground/ios/smoke.sh                          # boots a simulat
 # Android: see examples/playground/android/README.md (gradlew assembleDebug + the `undra` AVD)
 ```
 
+The live loop (edit Rust, every app picks up the new core, a dropped connection heals itself) is `undra dev`:
+[`docs/DEV_LOOP.md`](DEV_LOOP.md) has the URL of each platform (the Android emulator is `ws://10.0.2.2:<port>`),
+`undra dev --android`, how reconnecting works and a troubleshooting table.
+
 ## 4. Read before you write code
 
 1. [`CLAUDE.md`](../CLAUDE.md) — the constitution (R1–R12) and engineering standards.

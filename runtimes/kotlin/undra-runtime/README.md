@@ -77,9 +77,14 @@ waiting (up to 5 s) for the main thread from anywhere else.
   `undra.native.name` (default `undra_core`); `undra.native.path` is an absolute path that wins over the name. If the library
   cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global and
   cannot be shut down over JNI, so there is one `INPROC` core per process and `close()` only detaches the host.
-* `REMOTE` (**development only**): `java.net.http.WebSocket` to `undra dev`, envelope framing of SPEC §3.2, `Hello` handshake
+* `REMOTE` (**development only**): a WebSocket to `undra dev` on the runtime's own client (RFC 6455 over `java.net.Socket`:
+  the same code runs on a JVM and on Android; `java.net.http` is not used), envelope framing of SPEC §3.2, `Hello` handshake
   with the schema check. `callSync` and `construct` block the calling thread for a network round trip (up to
-  `remoteTimeout`). No snapshots, no statistics. Not available on Android (no `java.net.http`).
+  `remoteTimeout`). No snapshots, no statistics. No call into the runtime does network I/O on the calling thread, so
+  `load` and the rest may be called from Android's main thread. A dropped connection is reconnected with backoff and
+  jitter (`LoadOptions.reconnect`, a `ReconnectPolicy`; `null` turns it off), what was in flight fails at once, the
+  stores are observed again, and `core.connectionState` (a `StateFlow<ConnectionState>`) says what it is doing; a schema
+  change or a session the dev server lost closes the core for good (ADR-034, `docs/DEV_LOOP.md`).
 
 ### JNI surface for `undra-ffi`
 

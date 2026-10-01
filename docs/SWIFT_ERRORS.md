@@ -23,7 +23,7 @@ A generated method that can fail uses plain `throws` (or `async throws`). What i
 | `.cancelledByCore` | the core cancelled the call: a restore replaced or invalidated the object it ran on, or the core shut down while it ran. Not a `CancellationError`: your task was not cancelled, and a write that never landed must not look like a quiet exit |
 | `.panicked(message:backtrace:)` | the core panicked while running the call. The core caught the panic and keeps working |
 | `.refused(reason:)` | the core would not run the call: the object was closed or replaced by a restore, the call was made from inside one of the core's own callbacks (`E_REENTRANT`), or its arguments could not be decoded |
-| `.unavailable(UndraTransportError)` | the core cannot be reached: it was shut down or never loaded, or the remote connection closed or timed out (including an `undra dev` core that came back with another schema) |
+| `.unavailable(UndraTransportError)` | the core cannot be reached: it was shut down or never loaded, or the remote connection closed or timed out (including an `undra dev` core that came back with another schema, or one that restarted without this core's objects: `UndraSessionLostError`). While a remote core is reconnecting (ADR-034) every call, and every call in flight when the connection dropped, fails with `.unavailable(.connectionLost)` at once |
 | `.malformed(String)` | the core answered with something the bindings cannot read. After a successful schema check this is a bug in Undra: please report it with the text |
 
 ```swift

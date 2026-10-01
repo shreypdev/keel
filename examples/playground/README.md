@@ -62,9 +62,22 @@ or TypeScript") that answers for `https://playground.undra.test`, and an Offline
 it fail every request and tells the core through the `Connectivity` port, so you can watch the offline queue
 hold an optimistic add and replay it.
 
-`undra dev -C examples/playground` serves the core over a WebSocket: start an app against it (web:
-`?undra=ws://127.0.0.1:7443`; iOS: the `UNDRA_DEV_URL` environment variable) and edit `core/` to see the
-change without rebuilding the app.
+`undra dev -C examples/playground` serves the core over a WebSocket: start an app against it and edit `core/` to see
+the change without rebuilding the app (`docs/DEV_LOOP.md` is the whole story; `undra dev` prints these with the
+real port):
+
+| App | Against `undra dev` |
+|---|---|
+| web | `?undra=ws://127.0.0.1:7443` in the page URL (or `VITE_UNDRA_DEV_URL`) |
+| iOS simulator | `SIMCTL_CHILD_UNDRA_DEV_URL=ws://127.0.0.1:7443 xcrun simctl launch booted dev.undra.playground`, or `UNDRA_DEV_URL` in the scheme |
+| Android emulator | `adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://10.0.2.2:7443` |
+| Android USB device | `undra dev --android` (it runs `adb reverse tcp:7443 tcp:7443`), then `--es undra_dev_url ws://127.0.0.1:7443` |
+
+Edit a Rust function, save, and each app reconnects by itself and starts over on the rebuilt core (the web page
+reloads; the native apps load the new core and rebuild their screens). A thin bar at the top shows what the
+connection is doing: green connected, amber reconnecting, red over. A dropped connection (the laptop slept, adb
+restarted) resumes the same objects with their state; `.proof/dev-loop/` has screenshots of the Android app doing
+both. State is not kept across a *rebuild* yet.
 
 ## The stress screen
 
