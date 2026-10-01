@@ -205,6 +205,19 @@ holding session 356b33fa (1 object(s)) for its client
 a client (ios) asked to resume session 319c2156, which this core does not hold (it was restarted, ...)
 ```
 
+## Recording a session: `undra dev --record FILE`
+
+`undra dev --record session.json` writes what happened in the session as an `undra.recording` (the format and what to do with it are in
+`docs/TESTING.md`): every call, reply, change-set, stream item, port call and its answer, event, timer report and observe the dev server relays, with
+the time since the session started, and the readings of the dev core's own `Clock` and `Rng` (native bindings that never cross the socket). It works for
+iOS, Android and web alike, because the server sees the same envelopes from all of them. Play the file back under the generated stores
+(`RecordedCore`) to preview a state that is costly to reach, or feed its port calls to a `Replayer` in a test.
+
+* The file is rewritten twice a second while it grows, and once more when `undra dev` stops.
+* A recording belongs to one core and so to one schema hash: a rebuild starts a new core, and its session goes to `NAME-2.EXT` (`session-2.json`, `session-3.json`, ...);
+  the first file keeps what the first core did.
+* A core that polls the clock a lot writes a lot: record a session you want to keep, not a benchmark.
+
 ## Android notes
 
 * The Kotlin runtime's WebSocket client is its own, over `java.net.Socket`, because `java.net.http` (what the

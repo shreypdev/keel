@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testing your app · Undra docs</title>
+<meta name="description" content="Preview and test your app on its real core with fakes and a manual clock, play a recorded session as a screen state, and replay port traffic.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/testing.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Testing your app · Undra docs">
+<meta property="og:description" content="Preview and test your app on its real core with fakes and a manual clock, play a recorded session as a screen state, and replay port traffic.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/testing.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Testing your app · Undra docs">
+<meta name="twitter:description" content="Preview and test your app on its real core with fakes and a manual clock, play a recorded session as a screen state, and replay port traffic.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/testing.html#article","headline":"Testing your app · Undra docs","description":"Preview and test your app on its real core with fakes and a manual clock, play a recorded session as a screen state, and replay port traffic.","url":"https://shreypdev.github.io/undra/docs/testing.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"Testing your app","item":"https://shreypdev.github.io/undra/docs/testing.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="testing.html" aria-current="page">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="testing.html" aria-current="page">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>Testing your app</h1>
+<p class="lede">The kit runs your real core on fakes and a manual clock, plays a recorded session as a screen state, and replays what a session asked of the platform.</p>
+<h2 id="pick-one">Pick one<a class="anchor" href="#pick-one" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>You want</th><th>Use</th></tr></thead><tbody><tr><td>a screen that reacts, or a cache that goes stale</td><td><code>PreviewCore</code>: the real core, its ports faked, time in your hands</td></tr><tr><td>a state that is slow to reach</td><td><code>RecordedCore</code>: a recorded session under the generated stores, no core</td></tr><tr><td>a test that fails when the core makes another request</td><td><code>Replayer</code>: a recording as the script for the ports</td></tr></tbody></table></div>
+<p>The same three exist in Swift (<code>UndraTestKit</code>, a product of the <code>UndraRuntime</code> package), Kotlin (<code>dev.undra:testkit</code>), TypeScript (<code>@undra/testkit</code>, no runtime dependencies) and, for tests of the core itself, Rust (<code>undra::testing</code>). They sit beside the runtimes: no generated file, wire frame or C entry point changes.</p>
+<h2 id="preview-a-screen">Preview a screen<a class="anchor" href="#preview-a-screen" aria-label="Link to this section">#</a></h2>
+<p><code>PreviewCore.load</code> starts your app&rsquo;s own core in the process with a deterministic fake behind every standard port. A seed fills them; <code>advance</code> moves the clock one deadline at a time and lets the core settle between.</p>
+<details class="reveal-code"><summary>Show Swift, Kotlin and TypeScript <span>3 snippets</span></summary>
+<div class="code"><div class="code-bar"><span>SwiftUI preview</span></div><pre><code data-lang="swift">#Preview("Todos, three items") {
+    let preview = try! PreviewCore.load(expectedSchemaHash: UndraIds.schemaHash, seed: seed)
+    let todos = try! Todos(ctx: preview.core)
+    return TodosScreen(todos: todos)
+        .task { for title in ["Buy milk", "Walk the dog"] { _ = try? await todos.add(title: title) } }
+}</code></pre></div>
+<div class="code"><div class="code-bar"><span>Kotlin test</span></div><pre><code data-lang="kotlin">val preview = PreviewCore.load(UndraIds.SCHEMA_HASH, Seed.fromJson(seedJson))
+val todos = Todos(preview.core)
+preview.fakes.http.respond("https://api.test/todos", httpResponse(200, "[]"))
+preview.advance(31_000)       // the cached list goes stale; the core refetches</code></pre></div>
+<div class="code"><div class="code-bar"><span>Story or Vitest test</span></div><pre><code data-lang="ts">const preview = await PreviewCore.load({ wasm: "/undra_core.wasm", expectedSchemaHash: UndraIds.schemaHash, seed });
+const inbox = await RemoteTodosQueryHandle.create("inbox", preview.core);
+await preview.advance(31_000);</code></pre></div>
+</details>
+<details class="reveal-code"><summary>Show a seed <span>one JSON document for every kit</span></summary>
+<div class="code"><div class="code-bar"><span>seed.json</span></div><pre><code data-lang="json">{
+  "version": 1,
+  "now_ms": 1700000000000,
+  "rng_seed": 42,
+  "kv": { "greeting": "hello" },
+  "http": [
+    { "url": "https://api.test/lists/inbox/todos", "status": 200,
+      "headers": [["content-type", "application/json"]], "body": "[]" }
+  ]
+}</code></pre></div>
+</details>
+<div class="callout"><p><strong>Sleeps in a native core run in real time.</strong> The manual clock moves what the core reads (<code>Clock</code>, staleness, timestamps) and timers armed through the <code>Timer</code> port. A native core&rsquo;s <code>ctx.sleep</code> is waited for, as the C ABI never hands sleeps to the host. On the web, sleeps follow the clock.</p></div>
+<h2 id="play-a-recording">Play a recording<a class="anchor" href="#play-a-recording" aria-label="Link to this section">#</a></h2>
+<p><code>RecordedCore</code> loads a recording and releases its change-sets with a playhead you move. Calls are answered by the next recorded reply for the same target; a call the recording has no reply for is a typed refusal that names it.</p>
+<details class="reveal-code"><summary>Show Swift <span>3 lines</span></summary>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">let recorded = try RecordedCore.load(Recording(json: text), expectedSchemaHash: UndraIds.schemaHash)
+let todos = try Todos(ctx: recorded.core)      // the recorded constructor reply
+recorded.advance(ms: 300)                      // the change-sets up to 300 ms into the session</code></pre></div>
+</details>
+<h2 id="record-a-session">Record a session<a class="anchor" href="#record-a-session" aria-label="Link to this section">#</a></h2>
+<p>The dev server sees every call, reply, change-set and port call, on iOS, Android and the web alike, so one flag captures a session. A reload starts a new core, so a new file (<code>session-2.json</code>).</p>
+<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">undra dev --record session.json</code></pre></div>
+<p>A recording is one canonical JSON document, <code>undra.recording</code> version 1: payloads in hex, handles as strings, times in milliseconds. A recording made on one platform is read by all of them.</p>
+<details class="reveal-code"><summary>Show the format <span>an excerpt</span></summary>
+<div class="code"><div class="code-bar"><span>session.json</span></div><pre><code data-lang="json">{
+  "format": "undra.recording",
+  "version": 1,
+  "schema_hash": "0xefd907be3070520a",
+  "source": "dev-server",
+  "platform": "ios",
+  "events": [
+    {"t":100,"kind":"call","target":"constructor","type":4125302698,"method":898850282,"call":1,"args":""},
+    {"t":100,"kind":"reply","call":1,"status":"ok","body":"0000000001000000"},
+    {"t":100,"kind":"change_set","txn":1,"entries":[{"handle":"0x0000000100000000","signal":0,"op":"full","value":"00000000"}]},
+    {"t":120,"kind":"port_call","port":515815688,"method":1796529958,"call":3,"args":"..","name":"Http.request"},
+    {"t":160,"kind":"port_reply","call":3,"status":"ok","body":".."}
+  ]
+}</code></pre></div>
+</details>
+<h2 id="replay-port-traffic">Replay port traffic<a class="anchor" href="#replay-port-traffic" aria-label="Link to this section">#</a></h2>
+<p>A <code>Replayer</code> answers a core&rsquo;s port calls from a recording, in order per port. A call that differs is a typed <code>mismatch</code>, an extra one is <code>exhausted</code>, and a recorded call never made is <code>unconsumed</code>. A deviation consumes nothing, so one wrong call does not shift every later answer.</p>
+<details class="reveal-code"><summary>Show Swift and Rust <span>2 snippets</span></summary>
+<div class="code"><div class="code-bar"><span>Swift</span></div><pre><code data-lang="swift">let replayer = Replayer(try Recording(json: text))
+let core = try UndraCore.load(.inproc(adapters: replayer.adapters(), expectedSchemaHash: UndraIds.schemaHash))
+// ... run the flow ...
+try replayer.finish()    // throws each mismatch, and each recorded call the core never made</code></pre></div>
+<div class="code"><div class="code-bar"><span>Rust</span></div><pre><code data-lang="rust">let replayer = Arc::new(Replayer::new(&amp;Recording::from_json(&amp;text)?));
+replayer.install(t.host());
+// ... run the core ...
+replayer.finish().expect("the core made the calls it made when it was recorded");</code></pre></div>
+</details>
+<h2 id="in-the-playground">In the playground<a class="anchor" href="#in-the-playground" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>iOS:</strong> three SwiftUI <code>#Preview</code>s, built with the app.</li><li><strong>Android:</strong> two Compose <code>@Preview</code>s over <code>RecordedCore</code> (the preview pane cannot load a native core); the kit is a debug-only dependency.</li><li><strong>Web:</strong> four stories in Component Story Format, rendered by Vite alone. Storybook loads them unchanged and is not a dependency.</li></ul>
+<p>The kit uses only public APIs, and CI builds all three. <a href="https://github.com/shreypdev/undra/blob/main/docs/TESTING.md" rel="noopener">docs/TESTING.md</a> has the full reference: the seed and recording formats, the fakes&rsquo; conformance file, and the limits.</p>
+  
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/testing.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="ports.html"><span>Previous</span><b>Ports &amp; adapters</b></a>
+    <a class="next" href="cli.html"><span>Next</span><b>The CLI</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#pick-one">Pick one</a></li><li><a href="#preview-a-screen">Preview a screen</a></li><li><a href="#play-a-recording">Play a recording</a></li><li><a href="#record-a-session">Record a session</a></li><li><a href="#replay-port-traffic">Replay port traffic</a></li><li><a href="#in-the-playground">In the playground</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

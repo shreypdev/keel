@@ -7,7 +7,8 @@
     { "title": "Guides", "pages": [
       { "file": "concepts.html", "title": "Core concepts" },
       { "file": "queries.html", "title": "Queries & mutations" },
-      { "file": "ports.html", "title": "Ports & adapters" }
+      { "file": "ports.html", "title": "Ports & adapters" },
+      { "file": "testing.html", "title": "Testing your app" }
     ] },
     { "title": "Reference", "pages": [
       { "file": "cli.html", "title": "The CLI" },

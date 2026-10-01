@@ -39,7 +39,10 @@ conventions (lower-case hex, deterministic order, a `note`-style informational f
    states that are costly to reach; interaction belongs to the real core.
 5. **The manual clock in previews**: `preview.clock.nowMs`, `set(nowMs:)`, `advance(ms)`; `advance` fires due timers in deadline order
    with the clock reading each deadline (same as `Fakes::advance`), then waits until the core is quiet (stats `polls` stable, no
-   pending port call; microtask flush on TS wasm-main). Real timers are off, so `ctx.sleep` follows the preview clock.
+   pending port call; microtask flush on TS wasm-main). **Corrected during implementation:** `ctx.sleep` follows the preview clock on
+   the web only. A native core's runtime runs its own sleeps on its timer thread in real time (`Host::timer_set` is false except for
+   the wasm host; the C ABI never hands sleeps to the host, SPEC 5.8), so on Swift and Kotlin the manual clock moves what the core
+   reads (`Clock`) and timers armed through the `Timer` port, and a native sleep is waited for. Documented in `docs/TESTING.md`.
 6. **Runtime seams**: Swift `UndraTransport`/`UndraInbound` and the `connect` entry become `package` (same SwiftPM package, still
    hidden from apps); Kotlin gets a documented opt-in public seam (`@UndraEmbeddingApi`: `Transport`, `TransportEvents`,
    `PortOutcome`, `UndraCore.attach`); TypeScript already exports `Transport` and `UndraCore.attach`. Additive, SPEC section 17 pointer.
