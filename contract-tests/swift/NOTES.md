@@ -76,3 +76,8 @@ Still open:
 1. Generated bindings and runtime: the standard-port records (`HttpRequest`, `HttpResponse`,
    `Header`, `NetKind`) are internal in `UndraRuntime` and not generated, so an app that supplies its own
    `Http` adapter has to write their wire layout by hand (`@testable` here, a small codec in the app).
+* **S15.10 and S16.5 (ADR-032 amendment A) are new coverage of Swift behaviour that did not change.** S15.10 opens
+  `probe.ticks(count: 1_000_000)`, reads one item, restores, and expects the loop to end with `.cancelledByCore` (not a
+  `CancellationError`). S16.5 runs right after S16's failing load, with no core loaded: `UndraCore.shared` is the closed
+  placeholder, so `PlaygroundCore.add` and `Counter()` with the default `ctx` fail `.unavailable(.closed)`, a report on it only
+  logs, and `UndraCore.current` stays `nil`; S17.6 ends by checking the same after `shutdown()`.

@@ -2,8 +2,8 @@
 
 package golden.stdlib
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.UndraStore
 import dev.undra.runtime.adapters.HttpError
 import dev.undra.runtime.adapters.HttpRequest
@@ -12,7 +12,6 @@ import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ChangeOp
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.Timestamp
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
@@ -43,71 +42,96 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     constructor(ctx: UndraCore = UndraCore.shared) : this(
         ctx,
-        ctx.construct(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0)),
+        ctx.constructObject(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0)),
     )
 
-    /** Fetches again now, even if the data is fresh. */
+    /**
+     * Fetches again now, even if the data is fresh.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun refetch() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.LatestResponseQueryHandle.REFETCH),
-            UndraIds.Objects.LatestResponseQueryHandle.REFETCH,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.LatestResponseQueryHandle.REFETCH),
+                UndraIds.Objects.LatestResponseQueryHandle.REFETCH,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "LatestResponseQueryHandle.refetch")
+        }
     }
 
-    /** Marks the cached entry stale; it refetches while observed. */
+    /**
+     * Marks the cached entry stale; it refetches while observed.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun invalidate() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.LatestResponseQueryHandle.INVALIDATE),
-            UndraIds.Objects.LatestResponseQueryHandle.INVALIDATE,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.LatestResponseQueryHandle.INVALIDATE),
+                UndraIds.Objects.LatestResponseQueryHandle.INVALIDATE,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "LatestResponseQueryHandle.invalidate")
+        }
     }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _data.value = codecOptionHttpResponse.decode(reader)
-                    reader.finish()
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionHttpResponse.decode(reader)
+                        reader.finish()
+                        _data.value = value
+                    }
                 }
-            }
-            1u -> {
-                if (op == ChangeOp.FULL) {
-                    _status.value = QueryStatus.decode(reader)
-                    reader.finish()
+                1u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = QueryStatus.decode(reader)
+                        reader.finish()
+                        _status.value = value
+                    }
                 }
-            }
-            2u -> {
-                if (op == ChangeOp.FULL) {
-                    _error.value = codecOptionHttpError.decode(reader)
-                    reader.finish()
+                2u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionHttpError.decode(reader)
+                        reader.finish()
+                        _error.value = value
+                    }
                 }
-            }
-            3u -> {
-                if (op == ChangeOp.FULL) {
-                    _fetching.value = Codecs.bool.decode(reader)
-                    reader.finish()
+                3u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.bool.decode(reader)
+                        reader.finish()
+                        _fetching.value = value
+                    }
                 }
-            }
-            4u -> {
-                if (op == ChangeOp.FULL) {
-                    _updatedAt.value = codecOptionTimestamp.decode(reader)
-                    reader.finish()
+                4u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTimestamp.decode(reader)
+                        reader.finish()
+                        _updatedAt.value = value
+                    }
                 }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "LatestResponseQueryHandle.apply(signal: $signalId)")
         }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraCore.shared): LatestResponseQueryHandle {
-            val handle = ctx.construct(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0))
+            val handle = ctx.constructObject(UndraIds.Objects.LatestResponseQueryHandle.TYPE_ID, UndraIds.Objects.LatestResponseQueryHandle.NEW, ByteArray(0))
             return LatestResponseQueryHandle(ctx, handle)
         }
     }
@@ -116,20 +140,22 @@ class LatestResponseQueryHandle private constructor(core: UndraCore, handle: Lon
 /**
  * Runs the `retry` mutation.
  * @throws HttpError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
  */
 suspend fun retry(request: HttpRequest, ctx: UndraCore = UndraCore.shared): HttpResponse {
     val w = UndraWriter()
     HttpRequest.encode(w, request)
-    val body = try {
-        ctx.call(
+    try {
+        val body = ctx.call(
             CallTarget.FreeFunction(UndraIds.Queries.RETRY),
             UndraIds.Queries.RETRY,
             w.toByteArray(),
         )
-    } catch (e: UndraReplyException) {
-        throw if (e.status == ReplyStatus.ERROR) HttpError.decodeAll(e.body) else e
+        return HttpResponse.decodeAll(body)
+    } catch (e: Exception) {
+        throw UndraCallError.mapped(e, HttpError)
     }
-    return HttpResponse.decodeAll(body)
 }
 
 private val codecOptionHttpResponse = Codecs.option(HttpResponse)

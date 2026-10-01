@@ -57,7 +57,7 @@ fn parse_targets(list: &str) -> Result<Vec<Target>> {
         return Err(crate::error::CliError::bad_argument(
             "the platform list is empty",
             "there is nothing to build",
-            "name at least one of: host, ios, android, web",
+            "name at least one of: host, ios, android, web, rn",
         ));
     }
     Ok(out)

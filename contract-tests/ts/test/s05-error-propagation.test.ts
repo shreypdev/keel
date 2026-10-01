@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { CallTarget, UndraReplyError, ReplyStatus } from "@undra/runtime";
-import { BigList, Counter, UndraIds, LabError, ListError, TodoError, Todos, add, failLater, parseCount } from "@playground/core";
+import { CallTarget, UndraCallError, UndraReplyError, UndraUnhandledError, ReplyStatus } from "@undra/runtime";
+import { BigList, Counter, UndraIds, LabError, LabErrorCodec, ListError, TodoError, Todos, add, failLater, parseCount } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step } from "../src/wait.js";
@@ -21,7 +21,14 @@ async function failure(run: () => Promise<unknown>): Promise<unknown> {
   throw new Error("expected the call to fail, but it succeeded");
 }
 
-/** Expects `error` to be a bad-request reply that says why. */
+/** Expects `error` to be a refusal (a bad request) that says why, as the generated bindings report it. */
+function expectRefused(error: unknown): void {
+  expect(error).toBeInstanceOf(UndraCallError.Refused);
+  expect((error as UndraCallError.Refused).kind).toBe("refused");
+  expect((error as UndraCallError.Refused).reason, "the refusal carries a reason").toBeTruthy();
+}
+
+/** Expects `error` to be a bad-request reply that says why: the raw reply of `UndraCore.call` and `callSync`. */
 function expectBadRequest(error: unknown): void {
   expect(error).toBeInstanceOf(UndraReplyError);
   expect((error as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
@@ -29,7 +36,7 @@ function expectBadRequest(error: unknown): void {
 }
 
 test("S05 error propagation", async () => {
-  const { core } = await boot();
+  const { core, runtimeErrors } = await boot();
   const start = await counters(core);
 
   await step("1. a sync typed error is delivered on the failure path", async () => {
@@ -46,7 +53,7 @@ test("S05 error propagation", async () => {
     }
     expect(thrown).toBeInstanceOf(UndraReplyError);
     expect((thrown as UndraReplyError).status).toBe(ReplyStatus.Error);
-    expect(LabError.fromReply(thrown)).toBeInstanceOf(LabError.NotANumber);
+    expect(UndraCallError.mapped(thrown, LabErrorCodec)).toBeInstanceOf(LabError.NotANumber);
   });
 
   await step("2. an async typed error", async () => {
@@ -91,6 +98,7 @@ test("S05 error propagation", async () => {
       await failure(() => core.call({ target: CallTarget.ObjectMethod, handle: released }, UndraIds.Objects.Todos.clearDone, NO_ARGS)),
     );
 
+
     // A constructor given arguments it cannot decode: RemoteTodosQueryHandle needs a list name; it gets nothing.
     expectBadRequest(
       await failure(() => core.construct(UndraIds.Objects.RemoteTodosQueryHandle.typeId, UndraIds.Objects.RemoteTodosQueryHandle.new, NO_ARGS)),
@@ -103,15 +111,20 @@ test("S05 error propagation", async () => {
     expect(end.badRequests - start.badRequests).toBe(3);
   });
 
-  await step("6. through the generated bindings, closed objects refuse as bad requests", async () => {
-    // TypeScript rejects from every shape (Swift's command `Counter.increment()` reports to `onError`, ADR-032).
+  await step("6. through the generated bindings, a closed object refuses a call and a command reports", async () => {
+    // ADR-032, amendment A: the call rejects with `UndraCallError.Refused`; the command resolves and reports to `onError`.
     const beforeClosed = await counters(core);
+    runtimeErrors.length = 0;
     const list = await BigList.create(core);
     list.close();
-    expectBadRequest(await failure(() => list.removeAt(0)));
+    expectRefused(await failure(() => list.removeAt(0)));
     const counter = await Counter.create(core);
     counter.close();
-    expectBadRequest(await failure(() => counter.increment()));
+    await counter.increment();
+    const reports = runtimeErrors.splice(0) as UndraUnhandledError[];
+    expect(reports.map((r) => r.operation)).toEqual(["Counter.increment"]);
+    expect(reports[0]).toBeInstanceOf(UndraUnhandledError);
+    expect(reports[0]?.error).toBeInstanceOf(UndraCallError.Refused);
     const afterClosed = await counters(core);
     expect(afterClosed.badRequests - beforeClosed.badRequests, "the two closed calls were counted as bad requests").toBe(2);
     expect(await add(1, 2, core)).toBe(3);

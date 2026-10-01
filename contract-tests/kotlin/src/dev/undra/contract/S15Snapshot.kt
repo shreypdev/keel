@@ -7,8 +7,9 @@ import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.Parity
 import dev.undra.playground.core.Probe
 import dev.undra.playground.core.Todos
-import dev.undra.runtime.UndraException
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraReplyException
+import dev.undra.runtime.UndraRestoreException
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ReplyStatus
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
 
 /** S15: a snapshot of every store restores them in place: the handles the app holds stay valid. */
@@ -72,7 +74,7 @@ fun s15Snapshot(w: World) {
 
     // 6. A snapshot that is not one is rejected and leaves every store as it was.
     val noise = ByteArray(16).also { Random(7).nextBytes(it) }
-    expectFails<UndraException>("restore of 16 random bytes") { core.restore(noise) }
+    expectFails<UndraRestoreException>("restore of 16 random bytes") { core.restore(noise) }
     holdsFor("the stores after a rejected restore", 200) {
         todos.todos.value == listOf(a, b.copy(done = true), d) && counter.count.value == 5 && list.items.value.size == 10_000
     }
@@ -106,12 +108,33 @@ fun s15Snapshot(w: World) {
     awaitEq("probe.counters().started", 1u) { probe.counters().started }
     core.restore(core.snapshot())
     val hangOutcome = hangEnded.get(WAIT_MS, TimeUnit.MILLISECONDS)
-    check(hangOutcome is UndraReplyException && hangOutcome.status == ReplyStatus.CANCELLED) {
-        "hang() across a restore ended with $hangOutcome, not UndraReplyException(CANCELLED)"
-    }
-    expectBadRequest("probe.counters() after the restore", expectFails("probe.counters() after the restore") { probe.counters() })
-    expectBadRequest("probe.reset() after the restore", expectFails("probe.reset() after the restore") { probe.reset() })
+    check(hangOutcome is UndraCallError.CancelledByCore) { "hang() across a restore ended with $hangOutcome, not UndraCallError.CancelledByCore" }
+    expectRefused("probe.counters() after the restore", expectFails("probe.counters() after the restore") { probe.counters() })
+    w.takeUnhandled()
+    probe.reset()
+    val resetReports = w.takeUnhandled()
+    expectEq("the reports of probe.reset() after the restore", listOf("Probe.reset"), resetReports.map { it.operation })
+    check(resetReports.single().error is UndraCallError.Refused) { "probe.reset() was reported as ${resetReports.single().error}, not Refused" }
     probe.close()
+
+    // 10. A stream in flight across a restore ends as cancelled by the core: the core's own "cancelled: ..." String is
+    // not read as a typed error, and the collector's iteration is not a platform cancellation.
+    val streamed = Probe.create()
+    val firstItem = CompletableFuture<UInt>()
+    val streamEnded = CompletableFuture<Throwable?>()
+    CoroutineScope(Dispatchers.Default).async {
+        try {
+            streamed.ticks(1_000_000u).collect { if (!firstItem.isDone) firstItem.complete(it) }
+            streamEnded.complete(null)
+        } catch (e: Throwable) {
+            streamEnded.complete(e)
+        }
+    }
+    firstItem.get(WAIT_MS, TimeUnit.MILLISECONDS)
+    core.restore(core.snapshot())
+    val streamOutcome = streamEnded.get(WAIT_MS, TimeUnit.MILLISECONDS)
+    check(streamOutcome is UndraCallError.CancelledByCore) { "ticks() across a restore ended with $streamOutcome, not UndraCallError.CancelledByCore" }
+    streamed.close()
 
     todos.close()
     counter.close()

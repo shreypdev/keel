@@ -81,6 +81,26 @@
         {
           "title": "The name (ADR-030) and the wire magic (ADR-033)",
           "text": "Keel became Undra before anything was published; the envelope's magic bytes read UNDR."
+        },
+        {
+          "title": "Measured on devices",
+          "text": "The benchmark rows come from the playground's bench hooks on the iPhone simulator, the Android emulator and Chromium, labelled as such; real-device rows the moment hardware is attached."
+        },
+        {
+          "title": "Android remote mode and auto-reconnect (ADR-051)",
+          "text": "The Kotlin runtime has the WebSocket transport; all three runtimes reconnect with backoff and resume a session after a rebuild, with the status visible in the app."
+        },
+        {
+          "title": "Every macro error teaches",
+          "text": "44 codes, each with what, why, fix and a link, each with a compile-fail test; the error-codes page regenerates from the catalogue."
+        },
+        {
+          "title": "The whole schema in undra_schema_json (ADR-050)",
+          "text": "The dlopen route keeps doc comments, and the Swift Port types are public, so custom ports need no fallback."
+        },
+        {
+          "title": "One error channel on every platform (ADR-032)",
+          "text": "Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event."
         }
       ]
     },
@@ -96,32 +116,32 @@
           "text": "brew, npm, a curl installer and cargo-from-git. The release pipeline is built, security-reviewed and proved by a green dry run; the three package channels go live with the v1.0.0 tag."
         },
         {
-          "title": "Device-measured benchmark rows",
-          "text": "The same benchmarks on an iPhone, an Android phone and Chromium, replacing host proxies."
+          "title": "A runtime ends when its owner lets go (ADR-034)",
+          "text": "Tasks hold a WeakCtx; off-core writes are refused in every build (ADR-035); a panicking computed poisons only itself; stream errors are typed on the wire (ADR-036)."
         },
         {
-          "title": "Android undra dev remote mode",
-          "text": "The Kotlin runtime gains the WebSocket transport the web and iOS already have."
+          "title": "Real Android adapters",
+          "text": "Kv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call."
         },
         {
-          "title": "Dev-client auto-reconnect",
-          "text": "After a rebuild, a running app reconnects to undra dev on its own instead of needing a reload."
+          "title": "React Native (ADR-038)",
+          "text": "@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI."
         },
         {
-          "title": "WeakCtx",
-          "text": "Long-lived tasks stop pinning a runtime that was dropped."
+          "title": "No manual build step",
+          "text": "A Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project; undra doctor names every fix."
         },
         {
-          "title": "Macro diagnostic polish",
-          "text": "Better wording for the query-in-impl and split-impl cases."
+          "title": "The web bundle under its budget (ADR-052)",
+          "text": "135 KB gzipped today against a 120 KB budget; the levers, and a size gate so it never creeps back."
         },
         {
-          "title": "Swift Port types public",
-          "text": "Custom ports in Swift without the bindgen fallback."
+          "title": "Persisted-state migrations (ADR-037)",
+          "text": "A schema that changes shape still loads what the last version stored."
         },
         {
-          "title": "Full-JSON undra_schema_json",
-          "text": "So the dlopen-based bindgen keeps doc comments."
+          "title": "State-preserving reload",
+          "text": "undra dev snapshots before a rebuild and restores after, so editing Rust never loses the screen you were on."
         }
       ]
     },
@@ -133,28 +153,44 @@
       "intro": "Planned for the releases after v1.0. The order may change with what the benchmarks show.",
       "items": [
         {
-          "title": "crates.io publishing",
-          "text": "Publish the crates under a registry-safe prefix; needs its own ADR for the renames."
+          "title": "Devtools",
+          "text": "A page served by undra dev: store state, a change-set timeline with time travel, port and query logs, perf counters."
         },
         {
-          "title": "Maven Central for the Kotlin runtime",
-          "text": "Depend on it from Gradle without a local build."
+          "title": "Derived keyed lists (ADR-039)",
+          "text": "Incremental filter, sort and map over a keyed list, so a view over 10,000 rows costs what changed."
+        },
+        {
+          "title": "Db and WebSocket ports",
+          "text": "SQL over SQLite on every platform with the same deterministic fake; bidirectional backpressured streams."
+        },
+        {
+          "title": "Objects as parameters, host callbacks, generics and Decimal (ADR-040 to 042)",
+          "text": "The boundary types a production app reaches for, each with a schema description and generated code that reads as native."
+        },
+        {
+          "title": "A testing kit for apps",
+          "text": "Previews against an in-memory core; port traffic recorded once and replayed in tests."
+        },
+        {
+          "title": "crates.io and Maven Central",
+          "text": "Publish the crates under a registry-safe prefix (its own ADR) and the Kotlin runtime without a local build."
         },
         {
           "title": "Windows CLI",
           "text": "Release binaries and docs for the undra command on Windows."
         },
         {
-          "title": "undra upgrade",
-          "text": "Move a project to a newer Undra version."
-        },
-        {
           "title": "Migration guides",
-          "text": "From Kotlin Multiplatform and from UniFFI."
+          "text": "From Kotlin Multiplatform and from UniFFI; a production-shaped sample beyond the playground."
         },
         {
           "title": "A custom domain",
           "text": "A home for the site and docs that is ours."
+        },
+        {
+          "title": "Flutter and Dart",
+          "text": "Decided after React Native ships."
         }
       ]
     },

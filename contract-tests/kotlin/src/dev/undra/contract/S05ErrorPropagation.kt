@@ -11,6 +11,7 @@ import dev.undra.playground.core.Todos
 import dev.undra.playground.core.add
 import dev.undra.playground.core.failLater
 import dev.undra.playground.core.parseCount
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.wire.Payloads.CallTarget
 import dev.undra.runtime.wire.Payloads.ReplyStatus
@@ -53,7 +54,7 @@ fun s05ErrorPropagation(w: World) {
 
     val released = Probe.create()
     released.close()
-    expectBadRequest("a call on a released handle", expectFails("a call on a released handle") { released.counters() })
+    expectRefused("a call on a released handle", expectFails("a call on a released handle") { released.counters() })
 
     val undecodable = expectFails<UndraReplyException>("a constructor with undecodable arguments") {
         w.core.construct(UndraIds.Objects.RemoteTodosQueryHandle.TYPE_ID, UndraIds.Objects.RemoteTodosQueryHandle.NEW, ByteArray(0))
@@ -64,20 +65,29 @@ fun s05ErrorPropagation(w: World) {
     expectEq("add(1, 2) afterwards", 3, add(1, 2))
     expectEq("bad_requests grown by the three bad requests", 3L, w.stats().badRequests - badRequestsAtStart)
 
-    // 6. Through the generated bindings, on closed objects: both calls throw a bad request (Kotlin throws from
-    // every shape; Swift's command `Counter.increment()` reports to `onError` instead, ADR-032).
+    // 6. Through the generated bindings, on closed objects (ADR-032, amendment A): the call fails as `Refused`; the
+    // command `Counter.increment()` returns normally and reports to `onError`.
     val badRequestsBeforeClosed = w.stats().badRequests
+    w.takeUnhandled()
     val closedList = BigList.create()
     closedList.close()
-    expectBadRequest("BigList.remove_at(0) on a closed list", expectFails("BigList.remove_at(0) on a closed list") { closedList.removeAt(0u) })
+    expectRefused("BigList.remove_at(0) on a closed list", expectFails("BigList.remove_at(0) on a closed list") { closedList.removeAt(0u) })
     val closedCounter = Counter.create()
     closedCounter.close()
-    expectBadRequest("Counter.increment() on a closed counter", expectFails("Counter.increment() on a closed counter") { closedCounter.increment() })
+    closedCounter.increment()
+    val reports = w.takeUnhandled()
+    expectEq("the reports of the closed command", listOf("Counter.increment"), reports.map { it.operation })
+    check(reports.single().error is UndraCallError.Refused) { "the closed command was reported as ${reports.single().error}, not Refused" }
     expectEq("bad_requests grown by the two closed calls", 2L, w.stats().badRequests - badRequestsBeforeClosed)
     expectEq("add(1, 2) after the closed calls", 3, add(1, 2))
 }
 
-/** Checks that [e] is a bad-request reply that says why. */
+/** Checks that [e] is a refusal (a bad request) that says why. */
+internal fun expectRefused(what: String, e: UndraCallError.Refused) {
+    check(e.reason.isNotBlank()) { "$what: the refusal carries no reason" }
+}
+
+/** Checks that [e] is a bad-request reply that says why: the raw reply of `UndraCore.callSync` and friends. */
 internal fun expectBadRequest(what: String, e: UndraReplyException) {
     expectEq("$what: the reply status", ReplyStatus.BAD_REQUEST, e.status)
     check(!e.badRequestReason.isNullOrBlank()) { "$what: the bad request carries no reason" }

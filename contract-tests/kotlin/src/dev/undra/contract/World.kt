@@ -6,8 +6,10 @@ import dev.undra.playground.core.configureRemote
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.LoadOptions
 import dev.undra.runtime.PortImpl
+import dev.undra.runtime.UndraUnhandledError
 import dev.undra.runtime.adapters.ConnectivityEvents
 import dev.undra.runtime.adapters.StandardPorts
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * What a scenario runs against: the one core of this process and the adapters it was loaded with.
@@ -20,6 +22,8 @@ import dev.undra.runtime.adapters.StandardPorts
  * @property server the `Http` port: the routes and the requests it saw.
  * @property kv the `Kv` port: the writes the core made.
  * @property log the `Log` port: the records the core emitted.
+ * @property unhandled what `LoadOptions.onError` received: the failures of commands and of changes that could not be
+ *   applied (ADR-032, amendment A). A scenario that causes one asserts it and then calls [takeUnhandled].
  */
 class World(
     val core: UndraCore,
@@ -27,7 +31,11 @@ class World(
     val server: FakeServer,
     val kv: MemoryKv,
     val log: CapturingLog,
+    val unhandled: CopyOnWriteArrayList<UndraUnhandledError> = CopyOnWriteArrayList(),
 ) {
+    /** What `onError` received since the last call, oldest first; the list is empty afterwards. */
+    fun takeUnhandled(): List<UndraUnhandledError> = unhandled.toList().also { unhandled.clear() }
+
     /** The port the test emits `Connectivity.changed` through. */
     val connectivity = ConnectivityEvents(core)
 
@@ -68,6 +76,9 @@ class Bootstrap {
     /** The capturing `Log` port the core is loaded with. */
     val log = CapturingLog()
 
+    /** What `LoadOptions.onError` received. */
+    val unhandled = CopyOnWriteArrayList<UndraUnhandledError>()
+
     /** The loaded core, or `null` while S16 has not loaded it (yet, or successfully). */
     var world: World? = null
         private set
@@ -82,7 +93,9 @@ class Bootstrap {
 
     /** Loads the core with the bindings' schema hash and the harness adapters. */
     fun load(): World {
-        val core = UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, adapters = adapters()))
-        return World(core, clock, server, kv, log).also { world = it }
+        val core = UndraCore.load(
+            LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, adapters = adapters(), onError = { unhandled.add(it) }),
+        )
+        return World(core, clock, server, kv, log, unhandled).also { world = it }
     }
 }

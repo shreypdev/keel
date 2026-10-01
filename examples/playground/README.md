@@ -13,6 +13,7 @@ examples/playground/
   web/             React + Vite app         -> build/web/undra_core.wasm
   ios/             SwiftUI app (Xcode)      -> build/ios/UndraCore.xcframework
   android/         Compose app (Gradle)     -> build/android/jniLibs/<abi>/libundra_core.so
+  rn/              React Native app         -> build/ios/UndraCore.podspec + jniLibs (undra build --platform rn)
   build/           what `undra build` writes (not committed)
   .proof/          screenshots and logs of the apps running on Chromium, the iOS simulator and an Android emulator
 ```

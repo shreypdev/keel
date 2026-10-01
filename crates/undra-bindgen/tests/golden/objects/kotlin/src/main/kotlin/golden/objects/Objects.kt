@@ -2,9 +2,9 @@
 
 package golden.objects
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraObject
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
@@ -17,53 +17,70 @@ import kotlinx.coroutines.flow.map
 
 /** Adds numbers. */
 class Calculator private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     constructor(ctx: UndraCore = UndraCore.shared) : this(
         ctx,
-        ctx.construct(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0)),
+        ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0)),
     )
 
-    /** Adds two numbers. */
+    /**
+     * Adds two numbers.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun add(a: Int, b: Int): Int {
         val w = UndraWriter()
         w.writeI32(a)
         w.writeI32(b)
-        val body = this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.ADD),
-            UndraIds.Objects.Calculator.ADD,
-            w.toByteArray(),
-        )
-        return Codecs.i32.decodeAll(body)
+        try {
+            val body = this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.ADD),
+                UndraIds.Objects.Calculator.ADD,
+                w.toByteArray(),
+            )
+            return Codecs.i32.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
     }
 
+    /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
     fun reset() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.RESET),
-            UndraIds.Objects.Calculator.RESET,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.RESET),
+                UndraIds.Objects.Calculator.RESET,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "Calculator.reset")
+        }
     }
 
     /**
      * Divides, failing on zero.
      * @throws CalcError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
     fun divide(a: Long, b: Long): Long {
         val w = UndraWriter()
         w.writeI64(a)
         w.writeI64(b)
-        val body = try {
-            this.core.callSync(
+        try {
+            val body = this.core.callSync(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.DIVIDE),
                 UndraIds.Objects.Calculator.DIVIDE,
                 w.toByteArray(),
             )
-        } catch (e: UndraReplyException) {
-            throw CalcError.fromReply(e)
+            return Codecs.i64.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, CalcError)
         }
-        return Codecs.i64.decodeAll(body)
     }
 
-    /** @throws CalcError */
+    /**
+     * @throws CalcError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
     fun check() {
         try {
             this.core.callSync(
@@ -71,51 +88,72 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
                 UndraIds.Objects.Calculator.CHECK,
                 ByteArray(0),
             )
-        } catch (e: UndraReplyException) {
-            throw CalcError.fromReply(e)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, CalcError)
         }
     }
 
     /**
      * Fetches a todo.
      * @throws CalcError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
      */
     suspend fun lookup(id: UUID): Todo {
         val w = UndraWriter()
         Codecs.uuid.encode(w, id)
-        val body = try {
-            this.core.call(
+        try {
+            val body = this.core.call(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.LOOKUP),
                 UndraIds.Objects.Calculator.LOOKUP,
                 w.toByteArray(),
             )
-        } catch (e: UndraReplyException) {
-            throw CalcError.fromReply(e)
+            return Todo.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, CalcError)
         }
-        return Todo.decodeAll(body)
     }
 
-    /** An async method without an error type. */
+    /**
+     * An async method without an error type.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
     suspend fun compute(input: Double?): Double {
         val w = UndraWriter()
         codecOptionF64.encode(w, input)
-        val body = this.core.call(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.COMPUTE),
-            UndraIds.Objects.Calculator.COMPUTE,
-            w.toByteArray(),
-        )
-        return Codecs.f64.decodeAll(body)
+        try {
+            val body = this.core.call(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.COMPUTE),
+                UndraIds.Objects.Calculator.COMPUTE,
+                w.toByteArray(),
+            )
+            return Codecs.f64.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
     }
 
+    /**
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
     suspend fun warmUp() {
-        this.core.call(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.WARM_UP),
-            UndraIds.Objects.Calculator.WARM_UP,
-            ByteArray(0),
-        )
+        try {
+            this.core.call(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.WARM_UP),
+                UndraIds.Objects.Calculator.WARM_UP,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
     }
 
-    /** Counts up. */
+    /**
+     * Counts up.
+     * Collecting throws UndraCallError; cancelling the collector ends it quietly.
+     */
     fun ticks(n: UInt): Flow<UInt> {
         val w = UndraWriter()
         w.writeU32(n)
@@ -124,12 +162,16 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
             UndraIds.Objects.Calculator.TICKS,
             w.toByteArray(),
         )
-        return stream.map { bytes -> Codecs.u32.decodeAll(bytes) }
+        return stream
+            .map { bytes -> Codecs.u32.decodeAll(bytes) }
+            .catch { error ->
+                throw UndraCallError.mappedStream(error)
+            }
     }
 
     /**
      * Streams todos, failing to open with a typed error.
-     * @throws CalcError
+     * Collecting throws CalcError or UndraCallError; cancelling the collector ends it quietly.
      */
     fun watch(mode: Mode): Flow<Todo> {
         val w = UndraWriter()
@@ -142,20 +184,29 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
         return stream
             .map { bytes -> Todo.decodeAll(bytes) }
             .catch { error ->
-                throw if (error is UndraReplyException) CalcError.fromReply(error) else error
+                throw UndraCallError.mappedStream(error, CalcError)
             }
     }
 
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     fun stats(): Stats {
-        val body = this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.STATS),
-            UndraIds.Objects.Calculator.STATS,
-            ByteArray(0),
-        )
-        return Stats.decodeAll(body)
+        try {
+            val body = this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.STATS),
+                UndraIds.Objects.Calculator.STATS,
+                ByteArray(0),
+            )
+            return Stats.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
     }
 
-    /** A method named like a keyword. */
+    /**
+     * A method named like a keyword.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
     suspend fun delete(w: Int, body: Int, core: Int, default: Int, signal: Int): Int {
         val w_ = UndraWriter()
         w_.writeI32(w)
@@ -163,59 +214,80 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
         w_.writeI32(core)
         w_.writeI32(default)
         w_.writeI32(signal)
-        val body_ = this.core.call(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.DELETE),
-            UndraIds.Objects.Calculator.DELETE,
-            w_.toByteArray(),
-        )
-        return Codecs.i32.decodeAll(body_)
+        try {
+            val body_ = this.core.call(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Calculator.DELETE),
+                UndraIds.Objects.Calculator.DELETE,
+                w_.toByteArray(),
+            )
+            return Codecs.i32.decodeAll(body_)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraCore.shared): Calculator {
-            val handle = ctx.construct(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0))
+            val handle = ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0))
             return Calculator(ctx, handle)
         }
 
-        /** @throws CalcError */
+        /**
+         * @throws CalcError
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
         fun withPrecision(digits: UByte, ctx: UndraCore = UndraCore.shared): Calculator {
             val w = UndraWriter()
             w.writeU8(digits)
             val handle = try {
                 ctx.construct(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.WITH_PRECISION, w.toByteArray())
-            } catch (e: UndraReplyException) {
-                throw CalcError.fromReply(e)
+            } catch (e: Exception) {
+                throw UndraCallError.mapped(e, CalcError)
             }
             return Calculator(ctx, handle)
         }
 
-        /** @throws CalcError */
+        /**
+         * @throws CalcError
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         * @throws CancellationException if the calling coroutine is cancelled.
+         */
         suspend fun open(path: String, mode: Mode, ctx: UndraCore = UndraCore.shared): Calculator {
             val w = UndraWriter()
             w.writeStr(path)
             Mode.encode(w, mode)
             val handle = try {
                 Codecs.handle.decodeAll(ctx.call(CallTarget.Constructor(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.OPEN), UndraIds.Objects.Calculator.OPEN, w.toByteArray()))
-            } catch (e: UndraReplyException) {
-                throw CalcError.fromReply(e)
+            } catch (e: Exception) {
+                throw UndraCallError.mapped(e, CalcError)
             }
+            if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
             return Calculator(ctx, handle)
         }
     }
 }
 
-/** Says hello. */
+/**
+ * Says hello.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ */
 fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
     val w = UndraWriter()
     w.writeStr(name)
-    val body = ctx.callSync(
-        CallTarget.FreeFunction(UndraIds.Functions.GREET),
-        UndraIds.Functions.GREET,
-        w.toByteArray(),
-    )
-    return Codecs.string.decodeAll(body)
+    try {
+        val body = ctx.callSync(
+            CallTarget.FreeFunction(UndraIds.Functions.GREET),
+            UndraIds.Functions.GREET,
+            w.toByteArray(),
+        )
+        return Codecs.string.decodeAll(body)
+    } catch (e: Exception) {
+        throw UndraCallError.mapped(e)
+    }
 }
 
+/** Collecting throws UndraCallError; cancelling the collector ends it quietly. */
 fun numbers(upto: UInt, ctx: UndraCore = UndraCore.shared): Flow<UInt> {
     val w = UndraWriter()
     w.writeU32(upto)
@@ -224,10 +296,18 @@ fun numbers(upto: UInt, ctx: UndraCore = UndraCore.shared): Flow<UInt> {
         UndraIds.Functions.NUMBERS,
         w.toByteArray(),
     )
-    return stream.map { bytes -> Codecs.u32.decodeAll(bytes) }
+    return stream
+        .map { bytes -> Codecs.u32.decodeAll(bytes) }
+        .catch { error ->
+            throw UndraCallError.mappedStream(error)
+        }
 }
 
-/** @throws CalcError */
+/**
+ * @throws CalcError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
 suspend fun ping(ctx: UndraCore = UndraCore.shared) {
     try {
         ctx.call(
@@ -235,8 +315,8 @@ suspend fun ping(ctx: UndraCore = UndraCore.shared) {
             UndraIds.Functions.PING,
             ByteArray(0),
         )
-    } catch (e: UndraReplyException) {
-        throw CalcError.fromReply(e)
+    } catch (e: Exception) {
+        throw UndraCallError.mapped(e, CalcError)
     }
 }
 

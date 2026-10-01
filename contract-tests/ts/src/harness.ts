@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
-import { type AdapterOverrides, UndraCore, type LoadOptions, WasmMainTransport } from "@undra/runtime";
+import { type AdapterOverrides, UndraCore, type LoadOptions, WasmMainTransport, type WorkerLike } from "@undra/runtime";
+import { runWorker, type WorkerScope } from "@undra/runtime/worker";
 import { UndraIds } from "@playground/core";
 import { CapturingLog } from "./capturing-log.js";
 import { FakeServer } from "./fake-server.js";
@@ -48,7 +49,7 @@ export interface World {
 
 /** A loaded core and the world it runs in. */
 export interface Booted extends World {
-  /** The core, loaded in `wasm-main` mode. */
+  /** The core: loaded in `wasm-main` mode by {@link boot}, in `wasm-worker` mode by {@link bootWorker}. */
   readonly core: UndraCore;
   /** What the runtime reported through `onClose`: one entry when the channel to the core was lost. */
   readonly closed: Error[];
@@ -69,6 +70,8 @@ export interface BootOptions extends Partial<World> {
 }
 
 const booted: Booted[] = [];
+/** What a boot that owns more than a core (a worker) closes after the scenario. */
+const cleanups: Array<() => void> = [];
 
 // A scenario never closes its cores itself: whatever it booted is closed after it, pass or fail. And a
 // failure the runtime could not hand to any caller (a change-set that did not decode, a store that threw
@@ -76,6 +79,7 @@ const booted: Booted[] = [];
 afterEach(() => {
   const all = booted.splice(0);
   for (const { core } of all) core.close();
+  for (const cleanup of cleanups.splice(0)) cleanup();
   const reported = all.flatMap((b) => b.runtimeErrors);
   if (reported.length > 0) {
     throw new Error(`the runtime reported ${reported.length} failure(s) with no caller to reject: ${reported.map(String).join("; ")}`);
@@ -163,6 +167,64 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
     },
   });
   const loaded: BootedRaw = { ...world, core, closed, runtimeErrors, transport };
+  booted.push(loaded);
+  return loaded;
+}
+
+/**
+ * Like {@link boot}, but in `wasm-worker` mode: `UndraCore.load({ mode: "wasm-worker" })` over the playground's
+ * wasm, with the core running behind a worker. The worker is `runWorker` (the code of `@undra/runtime/worker`)
+ * served on one end of a `MessageChannel` in this thread, because the harness cannot load TypeScript in a real
+ * worker thread; the messages cross the channel exactly as they would cross to a worker (structured clone,
+ * transferred buffers). The real thread is covered by crates/undra-ffi/tests/wasm/ts-runtime.test.mjs.
+ *
+ * What changes with the mode: `callSync` does not exist, and the core answers `Clock`, `Rng` and `Log`
+ * itself (inside the worker), so the world's `clock` is not used; the `Http` and `Kv` ports and the `Log`
+ * records still reach the world's adapters, through the main thread.
+ */
+export async function bootWorker(options: BootOptions = {}): Promise<Booted> {
+  const world = worldOf(options);
+  const closed: Error[] = [];
+  const runtimeErrors: unknown[] = [];
+  const channel = new MessageChannel();
+  channel.port1.start();
+  channel.port2.start();
+  const host: WorkerLike = {
+    addEventListener: (type, listener) => {
+      channel.port2.addEventListener(type as "message", listener as (event: MessageEvent) => void);
+    },
+    removeEventListener: (type, listener) => {
+      channel.port2.removeEventListener(type as "message", listener as (event: MessageEvent) => void);
+    },
+    postMessage: (message, transfer) => {
+      channel.port2.postMessage(message, transfer ?? []);
+    },
+    close: () => {
+      channel.port2.close();
+    },
+  };
+  const stop = runWorker(channel.port1 as unknown as WorkerScope);
+  cleanups.push(() => {
+    stop();
+    channel.port1.close();
+    channel.port2.close();
+  });
+  const load: LoadOptions = {
+    mode: "wasm-worker",
+    worker: host,
+    wasm: await playgroundModule(),
+    expectedSchemaHash: options.expectedSchemaHash ?? UndraIds.schemaHash,
+    shared: false,
+    adapters: adaptersOf(world),
+    onClose: (error) => {
+      closed.push(error);
+    },
+    onError: (error) => {
+      runtimeErrors.push(error);
+    },
+  };
+  const core = await UndraCore.load(load);
+  const loaded: Booted = { ...world, core, closed, runtimeErrors };
   booted.push(loaded);
   return loaded;
 }

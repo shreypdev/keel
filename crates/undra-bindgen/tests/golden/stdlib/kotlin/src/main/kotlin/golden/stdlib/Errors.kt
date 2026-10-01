@@ -3,15 +3,12 @@
 package golden.stdlib
 
 import dev.undra.runtime.UndraException
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.adapters.FsError
 import dev.undra.runtime.adapters.HttpError
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
-import dev.undra.runtime.wire.decodeAll
 
 /** Why a sync failed. */
 sealed class SyncError(message: String) : UndraException(message) {
@@ -49,11 +46,6 @@ sealed class SyncError(message: String) : UndraException(message) {
                 3 -> Rejected(status = r.readU16())
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "SyncError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }

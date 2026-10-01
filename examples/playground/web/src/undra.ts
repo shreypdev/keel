@@ -1,4 +1,4 @@
-import { UndraCore, UndraSessionLostError, emitConnectivity } from "@undra/runtime";
+import { UndraCore, UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
 import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/undra_core.wasm?url";
@@ -19,6 +19,15 @@ export interface Playground {
   readonly inbox: RemoteTodosQueryHandle;
   /** The app's own in-memory server: the Remote tab's offline switch is its `offline` flag. */
   readonly server: PlaygroundServer;
+}
+
+/**
+ * What a command that failed (`todos.toggle(id)`, `inbox.refetch()`) and a change the page could not apply are handed
+ * to (ADR-032): a command never rejects into a click handler, so this is where an app would send the failure to its
+ * error reporter. The runtime has already logged it at error level.
+ */
+function onError(unhandled: UndraUnhandledError): void {
+  console.warn(`${unhandled.operation} failed: ${unhandled.error.message}`);
 }
 
 /**
@@ -48,6 +57,7 @@ export async function startUndra(): Promise<Playground> {
       url: devUrl,
       expectedSchemaHash: UndraIds.schemaHash,
       adapters,
+      onError,
       // A rebuild restarts the core, and the stores of this page belong to the old one: the runtime reconnects,
       // finds a new core and says so. Reload the page onto it.
       onClose: (error) => {
@@ -61,6 +71,7 @@ export async function startUndra(): Promise<Playground> {
       wasm: new URL(wasmUrl, location.href),
       expectedSchemaHash: UndraIds.schemaHash,
       adapters,
+      onError,
     });
   }
   // Tell the core where the server is before anything observes the query.

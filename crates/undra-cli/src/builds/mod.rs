@@ -6,6 +6,7 @@
 //! | `ios` | `ios/UndraCore.xcframework` | the shim as a staticlib for device and simulator, `xcodebuild -create-xcframework` |
 //! | `android` | `android/jniLibs/<abi>/libundra_core.so` | `cargo ndk`, 16 KB page aligned |
 //! | `web` | `web/undra_core.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present |
+//! | `rn` | `ios/UndraCore.xcframework` + `ios/UndraCore.podspec`, `android/jniLibs/` | the iOS and Android builds and the pod React Native apps link (ADR-038) |
 //!
 //! Every target prints the size of what it made, next to the budget of the blueprint.
 
@@ -13,6 +14,7 @@ pub(crate) mod android;
 pub(crate) mod gradle;
 pub(crate) mod host;
 pub(crate) mod ios;
+pub(crate) mod rn;
 pub(crate) mod web;
 pub(crate) mod xcode;
 
@@ -35,6 +37,8 @@ pub enum Target {
     Android,
     /// The web.
     Web,
+    /// React Native: the iOS and Android cores and the pod that vendors the iOS one (ADR-038).
+    ReactNative,
 }
 
 impl Target {
@@ -46,6 +50,7 @@ impl Target {
             Target::Ios => "ios",
             Target::Android => "android",
             Target::Web => "web",
+            Target::ReactNative => "rn",
         }
     }
 
@@ -60,10 +65,11 @@ impl Target {
             "ios" => Ok(Target::Ios),
             "android" => Ok(Target::Android),
             "web" | "wasm" => Ok(Target::Web),
+            "rn" | "react-native" => Ok(Target::ReactNative),
             other => Err(CliError::bad_argument(
                 format!("`{other}` is not a build target"),
                 "a target decides which toolchain builds the core and what is produced",
-                "use one of: host, ios, android, web",
+                "use one of: host, ios, android, web, rn",
             )),
         }
     }
@@ -125,6 +131,7 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
             Target::Ios => ios::build(session, options.release)?,
             Target::Android => android::build(session, options.release)?,
             Target::Web => web::build(session)?,
+            Target::ReactNative => rn::build(session, options.release)?,
         };
         all.extend(produced);
     }
@@ -136,7 +143,10 @@ pub fn run(session: &Session<'_>, options: &Options) -> Result<Vec<Artifact>> {
 #[must_use]
 pub fn hints(session: &Session<'_>, options: &Options, artifacts: &[Artifact]) -> Vec<String> {
     let mut out = Vec::new();
-    if !options.release && options.targets.contains(&Target::Android) {
+    if !options.release
+        && (options.targets.contains(&Target::Android)
+            || options.targets.contains(&Target::ReactNative))
+    {
         out.extend(android::hint(session, artifacts));
     }
     out
@@ -182,11 +192,14 @@ mod tests {
     fn targets_parse_and_map_from_platforms() {
         assert_eq!(Target::parse("Host").unwrap(), Target::Host);
         assert_eq!(Target::parse("wasm").unwrap(), Target::Web);
+        assert_eq!(Target::parse("rn").unwrap(), Target::ReactNative);
+        assert_eq!(Target::parse("React-Native").unwrap(), Target::ReactNative);
+        assert_eq!(Target::ReactNative.name(), "rn");
         assert!(
             Target::parse("tv")
                 .unwrap_err()
                 .fix
-                .contains("host, ios, android, web")
+                .contains("host, ios, android, web, rn")
         );
         assert_eq!(Target::of(Platform::Android), Target::Android);
     }

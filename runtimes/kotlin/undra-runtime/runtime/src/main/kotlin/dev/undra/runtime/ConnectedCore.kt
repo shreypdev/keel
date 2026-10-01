@@ -55,6 +55,7 @@ internal class ConnectedCore(
     mirrorOptions: MirrorOptions = MirrorOptions(),
     main: MainThread = UndraDispatchers.mainThread(),
     private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
+    private val onError: ((UndraUnhandledError) -> Unit)? = null,
 ) : UndraCore(), TransportEvents {
 
     private sealed interface Pending {
@@ -82,16 +83,16 @@ internal class ConnectedCore(
     @Volatile
     private var closeCause: Throwable? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("undra-ports"))
-    private val ports = PortRegistry(scope) { payload ->
+    private val ports = PortRegistry(scope, ::reportFromCore) { payload ->
         if (!closed.get()) {
             try {
                 transport.portReply(payload)
             } catch (e: Exception) {
-                UndraLog.warn("answering a port call failed", e)
+                reportFromCore(e, "port reply")
             }
         }
     }
-    private val liveMirror = Mirror(main, mirrorOptions, ::resync)
+    private val liveMirror = Mirror(main, mirrorOptions, ::resync, ::report)
 
     // What a reconnect needs to put the core back where the app left it (ADR-051).
 
@@ -165,12 +166,12 @@ internal class ConnectedCore(
             try {
                 Payloads.Reply.decode(bytes)
             } catch (e: WireException) {
-                throw UndraException("the core sent a malformed reply: ${e.message}", e)
+                throw UndraProtocolException("the core sent a malformed reply: ${e.message}", e)
             }
         } else {
             blockingCall(callId, payload).also { liveMirror.drainIfOnMainThread() }
         }
-        if (reply.callId != callId) throw UndraException("protocol error: the reply is for call ${reply.callId}, not $callId")
+        if (reply.callId != callId) throw UndraProtocolException("protocol error: the reply is for call ${reply.callId}, not $callId")
         return replyBody(reply.status, reply.body)
     }
 
@@ -235,9 +236,9 @@ internal class ConnectedCore(
         val handle = try {
             Codecs.handle.decodeAll(body)
         } catch (e: WireException) {
-            throw UndraException("the core returned a malformed handle: ${e.message}", e)
+            throw UndraProtocolException("the core returned a malformed handle: ${e.message}", e)
         }
-        if (handle == 0L) throw UndraException("the core returned the null handle for a constructor")
+        if (handle == 0L) throw UndraProtocolException("the core returned the null handle for a constructor")
         constructed.add(handle)
         return handle
     }
@@ -251,13 +252,14 @@ internal class ConnectedCore(
             return future.get(blockingTimeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
             if (pending.remove(callId.toInt(), entry)) cancelQuietly(callId)
-            throw UndraException("the remote core did not answer within $blockingTimeout", e)
+            throw UndraTransportException(UndraTransportException.Reason.TIMEOUT, "the remote core did not answer within $blockingTimeout", e)
         } catch (e: ExecutionException) {
-            throw (e.cause as? UndraException) ?: UndraException("the call failed: ${e.cause?.message}", e.cause)
+            throw (e.cause as? UndraException)
+                ?: UndraTransportException(UndraTransportException.Reason.CONNECTION_LOST, "the call failed: ${e.cause?.message}", e.cause)
         } catch (e: InterruptedException) {
             if (pending.remove(callId.toInt(), entry)) cancelQuietly(callId)
             Thread.currentThread().interrupt()
-            throw UndraException("interrupted while waiting for the remote core", e)
+            throw UndraTransportException(UndraTransportException.Reason.INTERRUPTED, "interrupted while waiting for the remote core", e)
         } catch (e: UndraException) {
             pending.remove(callId.toInt(), entry)
             throw e
@@ -289,8 +291,16 @@ internal class ConnectedCore(
         }
     }
 
+    /** What every call on a closed core fails with: the host closed it, or the connection to it was lost. */
+    private fun closedException(cause: Throwable?): UndraTransportException =
+        if (cause == null) {
+            UndraTransportException(UndraTransportException.Reason.CLOSED, "this UndraCore is closed")
+        } else {
+            UndraTransportException(UndraTransportException.Reason.CONNECTION_LOST, "this UndraCore is closed: ${cause.message}", cause)
+        }
+
     private fun ensureOpen() {
-        if (closed.get()) throw UndraException("this UndraCore is closed", closeCause)
+        if (closed.get()) throw closedException(closeCause)
     }
 
     // ---- objects, stores, ports ----------------------------------------------------------------------
@@ -355,6 +365,48 @@ internal class ConnectedCore(
         ports.register(portId, impl)
     }
 
+    // ---- reporting (ADR-032, amendment A) -----------------------------------------------------------
+
+    /** True while `onError` runs on this thread, so a handler that makes a failing call is only logged, never reported again. */
+    private val reporting: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+
+    override fun report(error: Throwable, operation: String) {
+        val unhandled = UndraUnhandledError(operation, UndraCallError.asCallError(error))
+        if (isLostConnection(unhandled.error)) {
+            // The connection state says it (Reconnecting, or Closed with the cause) and `onConnectionChange` heard it once:
+            // a command tapped while `undra dev` is away is not a second failure to hand to the crash reporter.
+            UndraLog.warn("${unhandled.message} (the connection to the core was lost: see connectionState)")
+            return
+        }
+        UndraLog.error(unhandled.message.orEmpty(), error)
+        val handler = onError ?: return
+        if (reporting.get()) return
+        reporting.set(true)
+        try {
+            handler(unhandled)
+        } catch (e: Exception) {
+            UndraLog.warn("the onError handler threw while handling \"${unhandled.message}\"", e)
+        } finally {
+            reporting.set(false)
+        }
+    }
+
+    /**
+     * Whether [error] is the connection to the core being down, which [connectionState] already reports: every call on a
+     * [Mode.REMOTE] core that is [ConnectionState.Reconnecting] or [ConnectionState.Closed] after a failure fails this way.
+     * A core the app closed itself ([UndraTransportException.Reason.CLOSED]) and a call that timed out are not.
+     */
+    private fun isLostConnection(error: UndraCallError): Boolean =
+        error is UndraCallError.Unavailable && error.transport.reason == UndraTransportException.Reason.CONNECTION_LOST
+
+    /**
+     * [report] for a failure found on a thread the core may be holding its lock on (a core callback: a malformed
+     * change-set, a failed port) or by the mirror: the handler runs on the delivery thread, never inside the callback.
+     */
+    private fun reportFromCore(error: Throwable, operation: String) {
+        UndraDispatchers.delivery.execute { report(error, operation) }
+    }
+
     override fun stats(): UndraStats {
         val hostPending = pending.size
         val mirrored = liveMirror.registeredCount
@@ -391,7 +443,7 @@ internal class ConnectedCore(
         val code = transport.restore(snapshot)
         // Like any synchronous call made on the main thread, the restored values are applied before it returns.
         liveMirror.drainIfOnMainThread()
-        if (code != 0) throw UndraException("the core rejected the snapshot (code $code)")
+        if (code != 0) throw UndraRestoreException(code)
     }
 
     override fun close() {
@@ -407,7 +459,7 @@ internal class ConnectedCore(
         }
         UndraCore.forget(this)
         setConnection(ConnectionState.Closed(reason, cause))
-        failAll(UndraException("this UndraCore was closed", cause))
+        failAll(closedException(cause))
         scope.cancel()
         try {
             transport.close()
@@ -495,7 +547,7 @@ internal class ConnectedCore(
         }
         pending.remove(callId.toInt())
         val error: Throwable = if (status == ReplyStatus.OK) {
-            UndraException("call $callId answered with a single value, but it was called as a stream")
+            UndraProtocolException("call $callId answered with a single value, but it was called as a stream")
         } else {
             UndraReplyException(status, body)
         }
@@ -519,6 +571,12 @@ internal class ConnectedCore(
                 failStream(stream, UndraReplyException(ReplyStatus.ERROR, body))
             }
         }
+    }
+
+    override fun onMalformed(callId: UInt, error: UndraProtocolException) {
+        val entry = pending.remove(callId.toInt()) ?: return
+        if (entry !is Pending.Streaming) liveMirror.drainSoon()
+        fail(entry, error)
     }
 
     override fun onChangeSet(changeSet: ByteArray) {
@@ -546,7 +604,15 @@ internal class ConnectedCore(
         if (closed.get()) return
         if (attempt == 1) {
             lossEpoch.incrementAndGet()
-            failAll(UndraException("the connection to the Undra dev server was lost (${cause?.message}); reconnecting", cause))
+            // What was in flight fails with the same typed value every later call gets while the connection is down:
+            // `UndraCallError.Unavailable` for a generated call (ADR-032 amendment A, ADR-051).
+            failAll(
+                UndraTransportException(
+                    UndraTransportException.Reason.CONNECTION_LOST,
+                    "the connection to the Undra dev server was lost (${cause?.message}); reconnecting",
+                    cause,
+                ),
+            )
         }
         setConnection(ConnectionState.Reconnecting(attempt, cause))
     }

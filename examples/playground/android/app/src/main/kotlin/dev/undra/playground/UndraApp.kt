@@ -45,6 +45,11 @@ import kotlinx.coroutines.flow.StateFlow
  * connection (the laptop slept, `adb` restarted) is reconnected by the runtime; [connection] says what it is doing.
  * When the dev server comes back with a new core (a rebuild) the old core's objects are gone: the runtime reports
  * `Closed(SESSION_LOST)`, this class loads the new core and bumps [epoch], and the activity starts over on it.
+ *
+ * A *command* (`store.toggle(...)`, `query.refetch()`) never throws into a click handler (ADR-032): the runtime logs a
+ * failure at error level and hands it to `onError`, which is where an app would send it to its crash reporter. A
+ * command tapped while the dev server is away is not such a failure: [connection] already says so, and the runtime only
+ * logs it.
  */
 class UndraApp : Application() {
     /** The server behind the `Http` port; the Remote tab switches it offline. */
@@ -121,6 +126,7 @@ class UndraApp : Application() {
                     mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
                     remoteTimeout = 5.seconds,
                     onConnectionChange = ::onConnection,
+                    onError = { unhandled -> Log.w(TAG, "${unhandled.operation} failed: ${unhandled.error.message}") },
                 ),
             )
             if (coreLoadNanos == 0L) coreLoadNanos = System.nanoTime() - loadStarted

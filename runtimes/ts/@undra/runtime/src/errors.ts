@@ -1,3 +1,4 @@
+import { UndraError } from "./base-error.js";
 import { UndraReader, ReplyStatus } from "./wire/index.js";
 
 /*
@@ -8,26 +9,7 @@ import { UndraReader, ReplyStatus } from "./wire/index.js";
  * the typed errors of a core (`TodoError` ...).
  */
 
-/**
- * Base class of every Undra error. `kind` is a short, stable, camelCase
- * discriminant; the runtime's own errors use `"reply"`, `"mode"`,
- * `"schemaMismatch"`, `"sessionLost"`, `"port"`, `"transport"`, `"observe"` and `"state"`.
- */
-export class UndraError extends Error {
-  override readonly name: string = "UndraError";
-  /** Stable discriminant of this error. */
-  readonly kind: string;
-
-  /**
-   * @param kind Stable discriminant.
-   * @param message Human-readable description.
-   * @param options Standard `Error` options (`cause`).
-   */
-  constructor(kind: string, message?: string, options?: ErrorOptions) {
-    super(message, options);
-    this.kind = kind;
-  }
-}
+export { UndraError };
 
 /** Reads the `String` fields a panic or bad-request body carries; `undefined` when the body does not decode. */
 function readStrings(body: Uint8Array, count: number): string[] | undefined {
@@ -192,5 +174,25 @@ export class UndraTransportError extends UndraError {
   constructor(reason: TransportFailure, message: string, options?: ErrorOptions) {
     super("transport", message, options);
     this.reason = reason;
+  }
+}
+
+/**
+ * `UndraCore.restore` was refused: the core rejected the snapshot and is unchanged (SPEC 5.9, the
+ * `undra_restore` code of SPEC 7). A refused restore changes nothing, so the core and every handle
+ * keep working. The Swift runtime has the same error (`UndraRestoreError`).
+ */
+export class UndraRestoreError extends UndraError {
+  override readonly name: string = "UndraRestoreError";
+  /** The non-zero code `undra_restore` returned: 2 a store's restore panicked, 5 the snapshot is malformed or names something the core does not have, 6 the core is shut down or was called from inside a callback. */
+  readonly code: number;
+
+  /** @param code The non-zero code `undra_restore` returned. */
+  constructor(code: number) {
+    super(
+      "restore",
+      `the Undra core rejected the snapshot (code ${String(code)}); a rejected restore leaves the core unchanged`,
+    );
+    this.code = code;
   }
 }

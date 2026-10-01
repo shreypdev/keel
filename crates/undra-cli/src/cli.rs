@@ -292,8 +292,8 @@ pub struct BindgenArgs {
 /// Arguments of `undra build`.
 #[derive(Args, Debug)]
 pub struct BuildArgs {
-    /// What to build for: ios, android, web, host (comma separated; default every platform in
-    /// undra.toml).
+    /// What to build for: ios, android, web, host, rn (React Native: ios and android plus the
+    /// UndraCore pod) (comma separated; default every platform in undra.toml).
     #[arg(long, visible_alias = "platforms", value_name = "LIST")]
     pub platform: Option<String>,
 

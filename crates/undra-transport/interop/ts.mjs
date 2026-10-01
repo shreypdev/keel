@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 const bin = process.argv[2];
 const dist = process.argv[3];
 const {
-  ALL_SIGNALS, CallTarget, ChangeOp, UndraCore, UndraSchemaMismatchError, UndraSessionLostError, UndraStore, Signal,
+  ALL_SIGNALS, CallTarget, ChangeOp, UndraCallError, UndraCore, UndraSchemaMismatchError, UndraSessionLostError, UndraStore, Signal,
   codecs, decodeValue, encodeValue,
 } = await import(pathToFileURL(join(dist, "index.js")).href);
 
@@ -143,6 +143,8 @@ for (let i = 0; i < 50 && pstore.count.peek() !== 8; i++) await new Promise((r) 
 const hang = pc.call(ptarget, info.ask, i32(1)).then(() => "answered", (e) => e); // the port answers; make it race the drop
 dropAll();
 const hangOutcome = await hang;
+// What a generated method throws for a call that was in flight when the connection dropped (ADR-032 amendment A).
+if (hangOutcome !== "answered") assert.ok(UndraCallError.mapped(hangOutcome) instanceof UndraCallError.Unavailable, String(hangOutcome));
 for (let i = 0; i < 200 && states.at(-1) !== "connected"; i++) await new Promise((r) => setTimeout(r, 20));
 assert.deepEqual(states.slice(0, 3), ["connecting", "connected", "reconnecting 1"]);
 assert.equal(states.at(-1), "connected", JSON.stringify(states));

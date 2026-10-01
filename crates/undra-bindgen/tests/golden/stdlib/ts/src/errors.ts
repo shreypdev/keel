@@ -6,11 +6,8 @@ import {
   FsErrorCodec,
   type HttpError,
   HttpErrorCodec,
-  ReplyStatus,
   UndraError,
-  UndraReplyError,
   WireError,
-  decodeValue,
 } from "@undra/runtime";
 
 export type SyncErrorKind = "offline" | "http" | "disk" | "rejected";
@@ -18,14 +15,6 @@ export type SyncErrorKind = "offline" | "http" | "disk" | "rejected";
 /** Why a sync failed. */
 export abstract class SyncError extends UndraError {
   declare readonly kind: SyncErrorKind;
-
-  /** The typed error a failed call carries; any other failure is returned unchanged. */
-  static fromReply(error: unknown): unknown {
-    if (error instanceof UndraReplyError && error.status === ReplyStatus.Error) {
-      return decodeValue(SyncErrorCodec, error.body);
-    }
-    return error;
-  }
 }
 
 export namespace SyncError {
