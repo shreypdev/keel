@@ -256,7 +256,7 @@ fn stress() {
     };
     let mut failures = Vec::new();
     let mut retried: Vec<String> = Vec::new();
-    let mut final_reports: Vec<(StressReport, usize)> = Vec::new();
+    let mut final_reports: Vec<Finished> = Vec::new();
     let mut recorded = Baseline::default();
     eprintln!(
         "{} s per scenario after a warm-up of {} ms (UNDRA_STRESS_WARMUP_MS), scale {scale}; RSS is sampled {}",
@@ -293,10 +293,16 @@ fn stress() {
             let broken = report.broken();
             if !broken.is_empty() {
                 row(&report, "INVARIANT BROKEN");
-                for invariant in &broken {
-                    eprintln!("    x {}", invariant.what);
-                    failures.push(format!("{name}: {}", invariant.what));
+                let whats: Vec<String> = broken.iter().map(|i| i.what.clone()).collect();
+                for what in &whats {
+                    eprintln!("    x {what}");
+                    failures.push(format!("{name}: {what}"));
                 }
+                final_reports.push(Finished {
+                    report,
+                    attempt,
+                    failures: whats,
+                });
                 break;
             }
             let observed = observed(&report);
@@ -352,7 +358,11 @@ fn stress() {
                 };
                 row(&report, &tag);
                 if !passed {
-                    final_reports.push((report, attempt));
+                    final_reports.push(Finished {
+                        report,
+                        attempt,
+                        failures: Vec::new(),
+                    });
                 }
                 passed = true;
                 if recording.is_none() {
@@ -368,9 +378,15 @@ fn stress() {
                 eprintln!("    x {problem}");
             }
             if attempt == ATTEMPTS && !passed {
-                for problem in verdict.failures {
+                for problem in &verdict.failures {
                     failures.push(format!("{name}: {problem}"));
                 }
+                // The result file of a scenario that failed says so, and why: it is evidence too.
+                final_reports.push(Finished {
+                    report,
+                    attempt,
+                    failures: verdict.failures,
+                });
             }
         }
         if let Some(best) = best {
@@ -384,7 +400,11 @@ fn stress() {
         );
     }
     if let Some(path) = std::env::var_os("UNDRA_STRESS_JSON") {
-        let reports: Vec<&StressReport> = final_reports.iter().map(|(r, _)| r).collect();
+        let reports: Vec<&StressReport> = final_reports
+            .iter()
+            .filter(|f| f.failures.is_empty())
+            .map(|f| &f.report)
+            .collect();
         write_json(&PathBuf::from(path), &reports, &budgets);
     }
     if let Some(dir) = undra_bench::results::dir_from_env() {
@@ -407,11 +427,18 @@ fn stress() {
     );
 }
 
+/// A scenario's last report, which attempt it was, and the gates it missed (none: it passed).
+struct Finished {
+    report: StressReport,
+    attempt: usize,
+    failures: Vec<String>,
+}
+
 /// Writes the JSON behind each scenario's numbers: one file per scenario in `dir`, named after the
 /// date, the optional `UNDRA_BENCH_RESULTS_TAG` and the scenario.
 fn write_results(
     dir: &std::path::Path,
-    reports: &[(StressReport, usize)],
+    reports: &[Finished],
     budgets: &Budgets,
     baseline: Option<&Selected>,
     (scale, load_before, load_after): (f64, Option<f64>, Option<f64>),
@@ -433,7 +460,12 @@ fn write_results(
             "UNDRA_BENCH_BASELINE_TOLERANCE",
         ],
     );
-    for (report, attempt) in reports {
+    for Finished {
+        report,
+        attempt,
+        failures,
+    } in reports
+    {
         let at = |p: f64| report.percentile(p).map(|n| n as f64);
         let strings = |items: Vec<String>| items.join(", ");
         let invariants = strings(
@@ -460,7 +492,7 @@ fn write_results(
             "{{\n  \"scenario\": {},\n  \"kind\": \"sustained\",\n  \"date\": {},\n  \"tag\": {},\n  \"command\": {},\n  {},\n  \
              \"run\": {{\"seconds\": {}, \"warmup_ms\": {}, \"elapsed_s\": {}, \"attempt\": {}, \"attempts\": {ATTEMPTS}, \"scale\": {}, \"baseline\": {}}},\n  \
              \"result\": {{\"ops\": {}, \"per_sec\": {}, \"p50_ns\": {}, \"p99_ns\": {}, \"p999_ns\": {}, \"max_ns\": {}, \"bytes_per_op\": {}, \"rss_growth_pct\": {}, \"rss_baseline_bytes\": {}, \"rss_final_bytes\": {}}},\n  \
-             \"gate\": {},\n  \"invariants\": [{}],\n  \"notes\": [{}]\n}}\n",
+             \"gate\": {{\"budget\": {}, \"passed\": {}, \"failures\": [{}]}},\n  \"invariants\": [{}],\n  \"notes\": [{}]\n}}\n",
             json_string(report.name),
             json_string(&date),
             tag.as_deref()
@@ -487,6 +519,8 @@ fn write_results(
             json_opt(report.rss.map(|g| g.baseline_bytes as f64)),
             json_opt(report.rss.map(|g| g.final_bytes as f64)),
             json_string(&gate),
+            failures.is_empty(),
+            strings(failures.iter().map(|f| json_string(f)).collect()),
             invariants,
             notes,
         );

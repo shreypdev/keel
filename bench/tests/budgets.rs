@@ -270,6 +270,7 @@ fn budgets() {
             budget_ns: limit,
             baseline_ns: gate.map(|g| g.baseline_ns),
             iterations: stats.iterations,
+            failed: stats.p50_ns > limit || gate.is_some_and(|g| stats.p50_ns > g.limit_ns),
         });
         let margin = limit / stats.p50_ns;
         let blueprint = match (budget.blueprint_ns, &budget.blueprint) {
@@ -356,6 +357,7 @@ fn budgets() {
             value,
             max: ratio.max,
             attempts: attempt,
+            holds: ratio.holds(value),
         });
         eprintln!(
             "{:<26} {:>8.2} {:>8.2} {:>6.2}x  {} / {}{}",
@@ -409,6 +411,8 @@ struct RowResult {
     budget_ns: f64,
     baseline_ns: Option<f64>,
     iterations: u64,
+    /// Over its absolute budget or over its baseline's gate.
+    failed: bool,
 }
 
 /// One ratio gate of a run, for the results file.
@@ -419,6 +423,7 @@ struct RatioResult {
     value: f64,
     max: f64,
     attempts: usize,
+    holds: bool,
 }
 
 /// Writes the JSON behind the run: `<dir>/<date>[-<tag>]-layer-a.json`.
@@ -447,13 +452,14 @@ fn write_results(
         .iter()
         .map(|r| {
             format!(
-                "    {{\"name\": {}, \"p50_ns\": {}, \"p90_ns\": {}, \"budget_ns\": {}, \"baseline_p50_ns\": {}, \"iterations\": {}}}",
+                "    {{\"name\": {}, \"p50_ns\": {}, \"p90_ns\": {}, \"budget_ns\": {}, \"baseline_p50_ns\": {}, \"iterations\": {}, \"failed\": {}}}",
                 json_string(&r.name),
                 json_number(r.p50_ns),
                 json_number(r.p90_ns),
                 json_number(r.budget_ns),
                 json_opt(r.baseline_ns),
-                r.iterations
+                r.iterations,
+                r.failed
             )
         })
         .collect();
@@ -461,13 +467,14 @@ fn write_results(
         .iter()
         .map(|r| {
             format!(
-                "    {{\"name\": {}, \"num\": {}, \"den\": {}, \"value\": {}, \"max\": {}, \"attempts\": {}}}",
+                "    {{\"name\": {}, \"num\": {}, \"den\": {}, \"value\": {}, \"max\": {}, \"attempts\": {}, \"holds\": {}}}",
                 json_string(&r.name),
                 json_string(&r.num),
                 json_string(&r.den),
                 json_number(r.value),
                 json_number(r.max),
-                r.attempts
+                r.attempts,
+                r.holds
             )
         })
         .collect();
