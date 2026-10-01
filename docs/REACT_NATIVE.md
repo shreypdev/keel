@@ -171,7 +171,8 @@ make its methods `async`.
   until ADR-044's per-core function table lands. That includes two React Native instances in one
   process (a brownfield app with two `ReactHost`s): the module cannot tell a second instance from a
   reloaded one, so the second `loadNative` stops the first instance's core, whose calls then fail
-  with `UndraTransportError("closed")`; they never reach the other instance's core.
+  with `UndraTransportError("closed")` (`UndraCallError.Unavailable` through the generated bindings, whose
+  `transport.reason` is `closed`); they never reach the other instance's core.
 * JavaScript-implemented synchronous ports: see "Adapters".
 * `Clock`, `Rng` and `Timer` are native and cannot be replaced from JavaScript.
 
@@ -228,4 +229,4 @@ pending states in a table that the source's destructor empties.
 | `found architecture 'arm64', required architecture 'x86_64'` for `libundra_core.a`, then undefined `_undra_*` symbols, in a Release build for the simulator | the Release configuration builds every simulator architecture and the core's simulator slice has only `[ios] simulator_archs` (`arm64` by default): build for the active architecture (`ONLY_ACTIVE_ARCH=YES ARCHS=arm64`, as Xcode's Run does) or add `x86_64` to `simulator_archs` |
 | `UndraSchemaMismatchError` | the linked core and the generated bindings come from different schemas: run `undra bindgen` and `undra build --platform rn` again |
 | `another Undra core is running in this process` | `loadNative` (or `NativeTransport.start`) was called while a core is open; use `UndraCore.shared`. The running core is not disturbed. (After a reload, a core whose old runtime is still shutting it down is waited for, up to 5 s, before this is reported.) |
-| `UndraTransportError("closed")` in a runtime that did not close its core | another React Native instance of the process (or the reloaded runtime) started a core, which stops this one (Limits) |
+| `UndraTransportError("closed")`, or `UndraCallError.Unavailable` with `transport.reason` `closed`, in a runtime that did not close its core | another React Native instance of the process (or the reloaded runtime) started a core, which stops this one (Limits) |

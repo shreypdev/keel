@@ -14,7 +14,7 @@ function native(transport: NativeTransport) {
 }
 
 /** The core's snapshot (`undra_snapshot`), through the transport. */
-export function snapshot(transport: NativeTransport): Uint8Array {
+export function snapshot(transport: NativeTransport): Promise<Uint8Array> {
   return transport.snapshot();
 }
 

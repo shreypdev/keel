@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import { UndraCore, UndraTransportError } from "@undra/runtime";
+import { UndraCallError, UndraCore, UndraTransportError, UndraUnhandledError } from "@undra/runtime";
 import { loadNative } from "../src/index.js";
 import { lifecycleState } from "../src/adapters.js";
+import { RecordKind } from "../src/native.js";
 import { setAppState, setTurboModule } from "./support/react-native-stub.js";
 import { FakeNative } from "./support/fake-native.js";
 
@@ -38,6 +39,30 @@ describe("loadNative", () => {
     const again = await loadNative({ expectedSchemaHash: native.hash });
     expect(again).not.toBe(core);
     again.close();
+  });
+
+  test("a failure of the native module that no caller can see reaches onError as an UndraUnhandledError", async () => {
+    const native = new FakeNative();
+    setTurboModule("UndraNative", {
+      install() {
+        g.__undraNative = native;
+        return true;
+      },
+    });
+    const reported: UndraUnhandledError[] = [];
+    const core = await loadNative({
+      expectedSchemaHash: native.hash,
+      adapters: { http: null },
+      onError: (error) => reported.push(error),
+    });
+    // An inbox record of a kind nobody sends: the transport cannot hand it to a caller.
+    native.queue(99 as (typeof RecordKind)[keyof typeof RecordKind], new Uint8Array(0), "core");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toBeInstanceOf(UndraUnhandledError);
+    expect(reported[0]?.operation).toBe("the native module");
+    expect(reported[0]?.error).toBeInstanceOf(UndraCallError.Malformed);
+    core.close();
   });
 
   test("rejects with a clear error when the TurboModule is not linked", async () => {

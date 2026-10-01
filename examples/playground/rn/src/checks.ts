@@ -1,7 +1,6 @@
 import {
   CallTarget,
-  ReplyStatus,
-  UndraReplyError,
+  UndraCallError,
   UndraSchemaMismatchError,
   UndraWriter,
   codecs,
@@ -96,12 +95,10 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
     'panic containment: status 2, the core keeps working',
     async core => {
       const error = await rejects(() => explode('on purpose', core));
-      expect(
-        error instanceof UndraReplyError && error.status === ReplyStatus.Panic,
-        `status 2, got ${String(error)}`,
-      );
+      // The core answers status 2 on the wire; the generated binding maps it onto the closed set (ADR-032, amendment A).
+      expect(error instanceof UndraCallError.Panicked, `UndraCallError.Panicked (status 2), got ${String(error)}`);
       expect((await add(1, 1, core)) === 2, 'the core still answers');
-      return 'explode() -> status 2; add(1, 1) = 2 afterwards';
+      return 'explode() -> UndraCallError.Panicked (status 2); add(1, 1) = 2 afterwards';
     },
   ],
   [

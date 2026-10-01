@@ -7,6 +7,7 @@ import {
   type TransportHandler,
   UndraReader,
   UndraReplyError,
+  UndraRestoreError,
   UndraSchemaMismatchError,
   UndraTransportError,
   UndraWriter,
@@ -201,11 +202,9 @@ export class NativeTransport implements Transport {
       case Kind.TimerFired:
         native.timerFired(decodeTimerFired(payload).timerId);
         return;
-      case Kind.Restore: {
-        const code = native.restore(bufferOf(payload), payload.byteOffset, payload.byteLength);
-        if (code !== 0) throw new UndraTransportError("protocol", `undra_restore failed with code ${code}`);
+      case Kind.Restore:
+        this.#restore(payload);
         return;
-      }
       default:
         throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a native core`);
     }
@@ -226,11 +225,34 @@ export class NativeTransport implements Transport {
     }
   }
 
-  /** Every store as a `Snapshot` payload (docs/SPEC.md section 5.9), to hand back with `Kind.Restore`. */
-  snapshot(): Uint8Array {
-    const snapshot = this.#live().snapshot();
-    if (snapshot === undefined) throw notRunning();
-    return new Uint8Array(snapshot);
+  /**
+   * Every store as a `Snapshot` payload (`undra_snapshot`, docs/SPEC.md section 5.9), to hand back to
+   * {@link NativeTransport.restore}. Rejects with `UndraTransportError("closed")` when the core is closed, not
+   * started, or was stopped under this runtime by another one.
+   */
+  snapshot(): Promise<Uint8Array> {
+    try {
+      const snapshot = this.#live().snapshot();
+      if (snapshot === undefined) throw notRunning();
+      return Promise.resolve(new Uint8Array(snapshot));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  /**
+   * Rebuilds the stores from `bytes` (`undra_restore`). The module drains the inbox before the call returns,
+   * so every change-set the restore produced has reached the handler when this resolves. Rejects with
+   * `UndraRestoreError` when the core refuses the bytes (it is unchanged; code 6 when this runtime's core was
+   * stopped under it) and with `UndraTransportError("closed")` when the transport is closed.
+   */
+  restore(bytes: Uint8Array): Promise<void> {
+    try {
+      this.#restore(bytes);
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /** The native host's counters: inbox records and bytes, wakes, native and JavaScript port calls. */
@@ -253,6 +275,12 @@ export class NativeTransport implements Transport {
   }
 
   // ----- internals -------------------------------------------------------------------
+
+  /** `undra_restore`; throws `UndraRestoreError` for a non-zero code, as the wasm transports do. */
+  #restore(bytes: Uint8Array): void {
+    const code = this.#live().restore(bufferOf(bytes), bytes.byteOffset, bytes.byteLength);
+    if (code !== 0) throw new UndraRestoreError(code);
+  }
 
   #live(): UndraNativeModule {
     if (this.#closed) throw new UndraTransportError("closed", "the core is closed");

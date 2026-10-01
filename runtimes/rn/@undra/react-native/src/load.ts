@@ -71,6 +71,10 @@ export function loadNative(options: NativeLoadOptions): Promise<UndraCore> {
 
 let current: Promise<UndraCore> | null = null;
 
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function start(options: NativeLoadOptions): Promise<UndraCore> {
   let native: UndraNativeModule;
   try {
@@ -78,24 +82,41 @@ function start(options: NativeLoadOptions): Promise<UndraCore> {
   } catch (error) {
     return Promise.reject(error);
   }
+  const adapters = { ...reactNativeAdapters(), ...options.adapters };
+  let core: UndraCore | undefined;
+  // What the module and the frame scheduler find wrong has no caller to reject: it is the runtime's to report
+  // (ADR-032, amendment A), which logs it at error level and hands `onError` an `UndraUnhandledError`. Before
+  // the core exists (the handshake is still running) it is only logged.
+  const report =
+    (operation: string) =>
+    (error: unknown): void => {
+      if (core !== undefined) {
+        core.report(error, operation);
+      } else {
+        adapters.log?.log(4, "undra::react-native", `${operation} failed before the core was up: ${messageOf(error)}`);
+      }
+    };
   const transport = new NativeTransport({
     native,
     expectedSchemaHash: options.expectedSchemaHash,
     platform: options.platform ?? `react-native-${Platform.OS}`,
     ...(options.devtools !== undefined && { devtools: options.devtools }),
     ...(options.logLevel !== undefined && { logLevel: options.logLevel }),
-    ...(options.onError !== undefined && { onError: options.onError }),
+    onError: report("the native module"),
   });
   const schedule = nativeFrameScheduler(native, {
     isActive: () => AppState.currentState === "active",
-    ...(options.onError !== undefined && { onError: options.onError }),
+    onError: report("the frame scheduler"),
   });
   const attach: AttachOptions = {
     ...options,
-    adapters: { ...reactNativeAdapters(), ...options.adapters },
+    adapters,
     mirror: { schedule, ...options.mirror },
   };
-  const loading = UndraCore.attach(transport, attach);
+  const loading = UndraCore.attach(transport, attach).then((attached) => {
+    core = attached;
+    return attached;
+  });
   current = loading;
   loading.catch(() => {
     if (current === loading) current = null;

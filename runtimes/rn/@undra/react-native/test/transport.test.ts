@@ -3,11 +3,13 @@ import {
   CallTarget,
   ChangeOp,
   type Handle,
+  Kind,
   PortStatus,
   ReplyStatus,
   UndraCore,
   UndraReader,
   UndraReplyError,
+  UndraRestoreError,
   UndraSchemaMismatchError,
   UndraTransportError,
   UndraWriter,
@@ -146,7 +148,8 @@ describe("one module, several transports", () => {
     const { native, transport } = await attach();
     native.coreGone = true;
     expect(() => transport.callSync(new Uint8Array(17))).toThrow(expect.objectContaining({ reason: "closed" }));
-    expect(() => transport.snapshot()).toThrow(UndraTransportError);
+    await expect(transport.snapshot()).rejects.toBeInstanceOf(UndraTransportError);
+    await expect(transport.restore(new Uint8Array(8))).rejects.toBeInstanceOf(UndraRestoreError);
   });
 });
 
@@ -299,12 +302,29 @@ describe("robustness", () => {
     await expect(core.call(CallTarget.FreeFunction, 1, new Uint8Array(0))).rejects.toBeInstanceOf(UndraTransportError);
   });
 
+  test("snapshot and restore are the transport's own (UndraCore.snapshot and restore reach them)", async () => {
+    const { core, native, transport } = await attach();
+    const bytes = await core.snapshot();
+    expect(bytes.length).toBe(8);
+    await core.restore(bytes);
+    expect(native.restored).toEqual(bytes);
+    // A core that refuses the bytes is a typed, coded error, on both paths, as on the wasm transports.
+    native.restoreCode = 5;
+    await expect(core.restore(bytes)).rejects.toMatchObject({ name: "UndraRestoreError", code: 5 });
+    expect(() => transport.send(Kind.Restore, bytes)).toThrow(UndraRestoreError);
+    native.restoreCode = 0;
+    await core.restore(bytes);
+    core.close();
+    await expect(transport.snapshot()).rejects.toBeInstanceOf(UndraTransportError);
+    await expect(transport.restore(bytes)).rejects.toBeInstanceOf(UndraTransportError);
+  });
+
   test("stats read the core's JSON and the host counters", async () => {
     const { core, transport } = await attach();
     const stats = await core.stats();
     expect(stats.liveHandles).toBe(3);
     expect(transport.counters().records).toBeGreaterThanOrEqual(0);
-    expect(transport.snapshot().length).toBe(8);
+    expect((await transport.snapshot()).length).toBe(8);
   });
 
   test("a sink that throws inside a handler keeps delivering the rest of the batch", async () => {

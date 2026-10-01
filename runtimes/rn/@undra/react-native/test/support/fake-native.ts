@@ -24,6 +24,10 @@ export class FakeNative implements UndraNativeModule {
   frames = true;
   /** As the module answers when this runtime's core was stopped under it (a reload's takeover). */
   coreGone = false;
+  /** What `restore` answers while this runtime's core runs: 0, or a `restore_code` (5 malformed, 2 a store panicked). */
+  restoreCode = 0;
+  /** The bytes the last `restore` was given. */
+  restored: Uint8Array | undefined;
 
   /** What the scripted core does with a `Call` payload; returns the `undra_call` code. */
   onCall: (payload: Uint8Array) => number = () => 0;
@@ -156,8 +160,10 @@ export class FakeNative implements UndraNativeModule {
     if (this.coreGone) return undefined;
     return new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0]).buffer;
   }
-  restore(_buffer: ArrayBuffer, _byteOffset: number, _byteLength: number): number {
-    return this.#enter(() => 0);
+  restore(buffer: ArrayBuffer, byteOffset: number, byteLength: number): number {
+    if (this.coreGone) return 6;
+    this.restored = new Uint8Array(buffer, byteOffset, byteLength).slice();
+    return this.#enter(() => this.restoreCode);
   }
   statsJson(): string {
     return JSON.stringify({ live_handles: 3 });
