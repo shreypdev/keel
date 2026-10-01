@@ -6,7 +6,9 @@
 # Downloads the `undra` release binary for this machine from GitHub Releases, checks its sha256
 # against the release's checksums.txt, and installs it to $UNDRA_HOME/bin (default ~/.undra/bin).
 # It never uses sudo, never evaluates downloaded text and stops before installing anything it
-# could not verify. Read it before you run it.
+# could not verify. The checksum shows the download is whole and is the file the release lists;
+# who built the release is the trust you already place in github.com/shreypdev/undra over TLS.
+# Read it before you run it.
 #
 # The whole script is one function that runs on the last line, so a download that is cut off
 # part-way runs nothing.
@@ -158,9 +160,9 @@ need() {
 # curl with the transport pinned: https only, TLS 1.2 or newer, also across redirects.
 fetch() {
   if [ "$allow_http" = 1 ]; then
-    curl -fsSL --retry 3 --connect-timeout 20 --proto '=http,https' --proto-redir '=http,https' -o "$2" "$1"
+    curl -fsSL --retry 3 --connect-timeout 20 --max-time 600 --proto '=http,https' --proto-redir '=http,https' -o "$2" "$1"
   else
-    curl -fsSL --retry 3 --connect-timeout 20 --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" "$1"
+    curl -fsSL --retry 3 --connect-timeout 20 --max-time 600 --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" "$1"
   fi
 }
 
@@ -226,6 +228,7 @@ path_hint() {
     *":$bin_dir:"*) return 0 ;;
   esac
   shown=$bin_dir
+  # shellcheck disable=SC2016 # the literal text $HOME is what the user's shell should see
   [ "$bin_dir" != "${HOME:-}/.undra/bin" ] || shown='$HOME/.undra/bin'
   shell_name=${SHELL:-}
   shell_name=${shell_name##*/}

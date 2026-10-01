@@ -267,6 +267,9 @@ jobs:
     if: needs.verify.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # An environment is where the two secrets can be restricted to v* tags (docs/RELEASING.md,
+    # hardening); with the secrets at repository level it changes nothing.
+    environment: release
     permissions:
       contents: write # the GitHub Release
       id-token: write # npm provenance (an OIDC token for the attestation)

@@ -48,6 +48,10 @@ channels. Runbook: `docs/RELEASING.md`.
   run fails (immutable); npm packages already at the version are skipped (prereleases publish
   with `--tag next` and leave the tap alone); the tap commit is skipped when the formula is
   unchanged. A half-made release is finished by re-running.
+* **The publish job runs in the GitHub environment `release`.** With the secrets at repository
+  level it changes nothing; moved into the environment with a `v*` tag restriction (documented
+  in `RELEASING.md`), a manual run on a branch cannot read them. Recommended hardening, not a
+  prerequisite.
 * **Tap token** is passed as an `http.extraheader` for the clone and push (masked), never in a
   URL or `.git/config`.
 * **musl and Windows** are refused with a one-line pointer to `cargo install` by both `install.sh`

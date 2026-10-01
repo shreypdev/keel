@@ -34,6 +34,13 @@ run. Windows and Alpine (musl) are not supported (roadmap).
 The workflow's first publishing step checks that both secrets exist and that the npm token
 works, before anything is published.
 
+**Hardening (recommended).** The publish job runs in the GitHub environment `release`. Create
+it (Settings, Environments), restrict *Deployment branches and tags* to the tag pattern `v*`, and
+move `NPM_TOKEN` and `HOMEBREW_TAP_TOKEN` from the repository secrets into that environment.
+Then only a run on a version tag can read them, and a manual run of the workflow on some
+branch cannot. Add required reviewers there if a second pair of eyes should approve each
+release.
+
 ## The dry run
 
 Run it on any branch, any time (GitHub offers manual runs of a workflow only once its file is on
