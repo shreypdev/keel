@@ -54,8 +54,11 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Proposed; the founder accepts it by
   scratch directory, the record on the one `scripts/wasm-size.sh` creates under `target/wasm-size/` (panic
   locations embed the build path: 70 bytes), and after the short-list insertion sort (another 56). On `main` (a different checkout path) and
   on the runner the number will move by tens of bytes again; well inside the 5%.
-* **No roadmap entry said 135 KB.** The brief expected one; the v1.x section gains "Web core under its size
-  budget" instead (no number in it, so it cannot go stale).
+* **The roadmap entry is left to the merge.** On this branch's base no roadmap entry said 135 KB; `main` has
+  since rewritten `site/data/roadmap.json` (afa4bfd) with a v1.x item "The web bundle under its budget
+  (ADR-052): 135 KB gzipped today against a 120 KB budget; the levers, and a size gate so it never creeps
+  back." Any edit here would conflict with that rewrite, so this branch does not touch the roadmap (open
+  item 3 has the replacement text).
 * **`doctor.rs` untouched.** Nothing in this piece needs a new diagnosis: the gate's own error names the
   missing `wasm-opt`.
 
@@ -66,10 +69,18 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Proposed; the founder accepts it by
 2. `--remap-path-prefix` for web builds: removes the builder's home directory from shipped binaries (privacy)
    and makes the size identical across machines; worth about 1-2 KB raw. Needs RUSTFLAGS for every crate of
    the web build, which `Build.rustc_args` (shim only) cannot do.
-3. Merge note for the integrator: `wt/runtime-lifecycle` edits the body of `undra_query::init` right above
-   the removed `inventory::submit!` and touches `undra-runtime/src/runtime.rs`; keep its `init` body and this
-   branch's `__private` module, and `run_init_hooks`'s once-per-name loop. The size record may need
-   `scripts/wasm-size.sh --record` after both land.
+3. Merge notes for the integrator. (a) `git merge-tree` of this branch with `main` (7f1080c) conflicts only
+   in the generated `site/llms-full.txt`: take either side and run `node site/scripts/build-all.mjs`.
+   (b) Then move the roadmap item to shipped (or reword it in place), for example: "The web bundle under its
+   budget (ADR-052): the hello-world wasm is down from 136 KB to 96 KB gzipped against its 120 KB budget,
+   and CI measures it on every change so it stays there." (c) `wt/runtime-lifecycle` edits the body of
+   `undra_query::init` right above the removed `inventory::submit!` and touches
+   `undra-runtime/src/runtime.rs`: keep its `init` body, this branch's `__private` module and
+   `run_init_hooks`'s once-per-name loop. (d) After each merge that touches the core, `scripts/wasm-size.sh`
+   (the checkout path moves the number by tens of bytes; re-record with `--record` only if the gate asks).
+   (e) The size job pins Rust 1.98.1 like the rest of CI on `main`; the deliberate bump re-records the size.
+   (f) `crates/undra-cli/tests/schema_docs.rs` pinned a stale playground hash on this branch's base (it fails
+   on a0d638f too); `main` fixed it independently in 3a2ff1f, so nothing to do.
 4. `undra build` prints its gzip size with the system `gzip -9` (GNU on Linux, filename in the header), so its
    line can differ from the record by up to 1%; left as is (a CLI dependency on a deflate crate is not worth
    it).

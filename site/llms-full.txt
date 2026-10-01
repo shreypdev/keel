@@ -2404,7 +2404,6 @@ In flight for the v1.x releases.
 - Macro diagnostic polishBetter wording for the query-in-impl and split-impl cases.
 - Swift Port types publicCustom ports in Swift without the bindgen fallback.
 - Full-JSON undra_schema_jsonSo the dlopen-based bindgen keeps doc comments.
-- Web core under its size budgetThe hello-world wasm drops under its 120 KB gzipped budget, and CI measures it on every change so it stays there (ADR-052).
 
 Next
 

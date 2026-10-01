@@ -191,12 +191,13 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
 * `bench/budgets.toml` gets a `[size."web/hello-wasm"]` table: `budget_gzip_bytes = 120000`,
   `measured_gzip_bytes` (the record) and `tolerance = 0.05`. The gate fails when the gzipped size is over the
   budget **or** more than 5% over the record: `min(120,000, floor(record × 1.05))`, 100,497 bytes today. The
-  tolerance absorbs a toolchain update (rustc stable on the runner, a different zlib) and makes any real
-  growth a decision: the change that adds 5 KB re-records the number in the same commit, where a reviewer
-  sees it. The budgets parser (`bench/src/budget.rs`) reads the table strictly like the others, and rejects
+  tolerance absorbs what the runner does differently (its checkout path in panic locations, its libz) and
+  makes any real growth a decision: the change that adds 5 KB re-records the number in the same commit,
+  where a reviewer sees it. The budgets parser (`bench/src/budget.rs`) reads the table strictly like the others, and rejects
   a record already over its own gate.
-* CI: a `size` job in `bench.yml` (Rust stable with the wasm target, binaryen `version_133` pinned from its
-  GitHub release, Node for the runtime line) runs the script and uploads the JSON as an artifact.
+* CI: a `size` job in `bench.yml` (Rust 1.98.1 with the wasm target, as every CI job pins it; binaryen
+  `version_133` pinned from its GitHub release; Node for the runtime line) runs the script and uploads the
+  JSON as an artifact.
 * The published number is generated: `site/scripts/build-numbers.mjs` reads `bench/results/web-size.jsonl`,
   writes the value of the `web-size` row of `site/data/bench.json` (the row keeps its shape and points at the
   record), and fills every `<!--measured:web-size-->` slot of the site and the README. The site workflow's
@@ -254,8 +255,9 @@ script, not twiggy's shallow bytes (gzip is not additive).
 ## Risks
 
 * **A toolchain update moves the number by more than 5%.** Then the gate fails on a commit that changed no
-  code; the fix is to re-record (and to look at why). The runner uses stable Rust, so a new release can do
-  it on any day; binaryen is pinned.
+  code; the fix is to re-record (and to look at why). CI pins Rust (1.98.1, the version the record was
+  measured with) and binaryen, so this happens only at a deliberate toolchain bump, which re-records in the
+  same commit.
 * **The runtime-JS measurement depends on Vite's chunking options.** It is recorded, not gated, and the
   script records `"gzipped": null` with the reason when it cannot measure, without failing the gate.
 
