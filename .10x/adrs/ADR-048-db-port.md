@@ -77,8 +77,8 @@ uses the SQLite every platform already ships (iOS, Android) or a vetted build (J
    | Node | `node:sqlite` (`DatabaseSync`, Node 22.5+) | built in |
    | web | **wa-sqlite** (MIT) sync build in a dedicated worker with OPFS `AccessHandlePoolVFS` (no COOP/COEP needed) | opt-in entry `@undra/runtime/db` + `db-worker` |
    | React Native | the binding in portable C++, the `UndraStores` pattern (one worker thread per database, JS never involved), over the system `libsqlite3` on iOS and JNI to `android.database.sqlite` on Android (the file `android-adapters` uses, so either shell reads the other's database) | none |
-   **Size:** wa-sqlite's sync wasm is about 0.6 MB raw, ~0.28 MB gzipped (recorded in `bench/results/web-size.jsonl`
-   as `web/db-adapter`, informational); it is a separate opt-in bundle loaded by its own worker, never part of the
+   **Size:** wa-sqlite's sync wasm is 558,343 bytes, 272,993 gzipped; with its worker script 299,165 bytes gzipped
+   (`bench/RESULTS.md`, "Opt-in ports"; informational, not a gate); it is a separate opt-in bundle loaded by its own worker, never part of the
    core's wasm or the hello-world JS, so ADR-052's two gates are untouched. sql.js was rejected: in-memory only, a
    persisted database is the whole file re-exported per commit. The official `@sqlite.org/sqlite-wasm` is larger.
 8. **The Rust fake.** `fakes::MemDb` is an in-memory SQLite (`rusqlite` with `bundled`, behind `undra-ports`'
