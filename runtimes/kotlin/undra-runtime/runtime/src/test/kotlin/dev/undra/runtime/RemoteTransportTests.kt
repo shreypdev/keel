@@ -421,7 +421,9 @@ class RemoteTransportTests : Suite() {
                 } finally {
                     core.close()
                 }
-                assertThrows<UndraException> { UndraCore.shared }
+                assertEq(null, UndraCore.current, "closing the shared core clears it")
+                val failure = assertThrows<UndraTransportException> { UndraCore.shared.callSync(TARGET, METHOD, NO_BYTES) }
+                assertEq(UndraTransportException.Reason.CLOSED, failure.reason)
             }
         }
 

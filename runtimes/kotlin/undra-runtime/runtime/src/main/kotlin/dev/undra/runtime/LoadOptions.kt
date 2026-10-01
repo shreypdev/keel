@@ -33,6 +33,15 @@ public enum class Mode {
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
+ * @property onError called with every failure that has no caller to throw to (ADR-032, amendment A): a generated
+ *   command (a synchronous method that returns nothing and has no error type) that failed, a store change that
+ *   could not be applied, a malformed change-set, a port implementation that failed. The failure is also logged at
+ *   error level, whether or not a handler is set. The handler runs synchronously on the thread that made the call
+ *   (the main thread for a store's `apply` and for a command called from a click handler); keep it short and do not
+ *   call into Undra from it: a failure reported while a handler runs on the same thread is only logged. An
+ *   `Exception` it throws is logged and dropped; an `Error` propagates, so a debug build can crash on purpose with
+ *   `onError = { throw AssertionError(it) }`. Failures that originate in a core callback (a malformed change-set, a
+ *   failed port) are delivered from the runtime's delivery thread instead.
  */
 public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
@@ -42,11 +51,12 @@ public class LoadOptions(
     public val defaultAdapters: Boolean = true,
     public val remoteTimeout: Duration = 30.seconds,
     public val mirror: MirrorOptions = MirrorOptions(),
+    public val onError: ((UndraUnhandledError) -> Unit)? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
             "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
-            "mirror=$mirror)"
+            "mirror=$mirror, onError=${if (onError == null) "none" else "set"})"
 }
 
 /**

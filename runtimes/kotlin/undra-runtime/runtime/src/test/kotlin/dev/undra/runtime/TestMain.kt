@@ -35,6 +35,7 @@ fun main() {
         FuzzTests(),
         GoldenFullTests(),
         CoreCallTests(),
+        CallErrorTests(),
         StreamTests(),
         MirrorTests(),
         CoalesceTests(),

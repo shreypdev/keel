@@ -60,7 +60,8 @@ internal object JniNativeApi : NativeApi {
  * The callbacks arrive on the core thread, a blocking-pool thread or the calling thread, possibly with
  * the core lock held, and hand out direct buffers that die when the callback returns. So each callback
  * **copies** what it needs into a fresh array, passes it to [TransportEvents] and returns; it never calls
- * a native method (a thread-local flag turns an attempt into an [UndraException] instead of a deadlock),
+ * a native method (a thread-local flag turns an attempt into an [UndraReplyException] with status `BAD_REQUEST` and the core's own
+ * `E_REENTRANT` reason instead of a deadlock),
  * and it never lets an exception escape into native code.
  *
  * The native runtime is process-global and cannot be shut down through JNI, so the transport claims it
@@ -177,9 +178,14 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
 
     private fun checkNotInCallback(what: String) {
         if (insideCallback.get()) {
-            throw UndraException(
-                "$what was called from inside a core callback (a sync port implementation?); " +
-                    "the core lock may be held, so this would deadlock. Hand the work to another thread.",
+            // The refusal the core itself makes (status 5, E_REENTRANT, SPEC 6), so a generated call reports it as
+            // UndraCallError.Refused like every other platform does.
+            throw UndraReplyException(
+                ReplyStatus.BAD_REQUEST,
+                reasonBody(
+                    "E_REENTRANT: $what was called from inside a core callback (a sync port implementation?); " +
+                        "the core lock may be held, so this would deadlock. Hand the work to another thread.",
+                ),
             )
         }
     }

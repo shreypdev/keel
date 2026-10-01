@@ -34,8 +34,9 @@ import kotlin.time.Duration.Companion.nanoseconds
  *    folded in place on the thread that passed the bound. A signal whose merged patch grows past 4,096
  *    operations or 1 MiB is dropped and re-observed at the next drain, so a main thread that falls far
  *    behind (or an app in the background) catches up in one drain with bounded memory.
- *  - **Isolated.** A callback that throws is logged and skipped; the other signals are still applied. A
- *    malformed change-set is dropped as a whole.
+ *  - **Isolated.** A callback that throws is reported ([UndraCore.report]: logged and passed to
+ *    [LoadOptions.onError]) and skipped; the other signals are still applied. A malformed change-set is
+ *    reported and dropped as a whole.
  *
  * Entries for a handle that is not registered (a store closed meanwhile) are dropped and counted
  * ([MirrorStats.droppedEntries]).
@@ -47,10 +48,11 @@ public open class Mirror internal constructor(
     private val main: MainThread,
     options: MirrorOptions,
     private val resync: ((handle: Long, signalId: UInt) -> Unit)?,
+    private val report: ((error: Throwable, operation: String) -> Unit)? = null,
 ) {
 
     /** A mirror that applies change-sets on [UndraDispatchers.main], paced by the runtime's default frame grid. */
-    public constructor() : this(UndraDispatchers.mainThread(), MirrorOptions(), null)
+    public constructor() : this(UndraDispatchers.mainThread(), MirrorOptions(), null, null)
 
     private class Registration(val apply: (UInt, ChangeOp, UndraReader) -> Unit, val noCoalesce: IntArray?)
 
@@ -220,7 +222,13 @@ public open class Mirror internal constructor(
             }
         }
         malformed?.let {
-            UndraLog.warn("dropping a malformed change-set (${changeSet.size} bytes)", it)
+            // Dropped as a whole; reported (and logged) through the core, which hands it to LoadOptions.onError.
+            if (report != null) {
+                // This runs on the thread the core delivered on, which may hold the core lock: the handler must not.
+                UndraDispatchers.delivery.execute { report.invoke(it, "change-set (${changeSet.size} bytes)") }
+            } else {
+                UndraLog.warn("dropping a malformed change-set (${changeSet.size} bytes)", it)
+            }
             return
         }
         if (request) requestFrame()
@@ -537,7 +545,12 @@ public open class Mirror internal constructor(
         } catch (e: OutOfMemoryError) {
             throw e
         } catch (e: Throwable) {
-            UndraLog.warn("applying a change to signal ${signal.toUInt()} of ${Handle(handle)} failed; the change is skipped", e)
+            // Generated stores report their own failures (named) and never get here; this covers a store written by hand.
+            if (report != null) {
+                report.invoke(e, "apply(signal: ${signal.toUInt()}) of ${Handle(handle)}")
+            } else {
+                UndraLog.warn("applying a change to signal ${signal.toUInt()} of ${Handle(handle)} failed; the change is skipped", e)
+            }
         }
     }
 
