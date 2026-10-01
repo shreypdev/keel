@@ -1,12 +1,23 @@
-// The real JNI shim driven by the real Kotlin runtime (UndraCore over UndraNative), against the
-// fixture core (crates/undra-ffi/tests/fixture). It complements the runtime's own
-// NativeSmokeTests, which only use unknown method ids: this one crosses every callback (reply,
-// change-set, stream, sync and async ports, logs) with real payloads. Run through run.sh.
-import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraNative
-import dev.undra.runtime.UndraReplyException
+// The real JNI shim driven by the real Kotlin runtime, against the fixture core
+// (crates/undra-ffi/tests/fixture, namespace `undra_fixture`). Its JNI_OnLoad registers the natives on
+// this file's UndraCoreNative, declared exactly as bindgen generates one for every core (ADR-044), and
+// the core is loaded through a CoreEntry, as the generated Undra<Namespace> object does. It complements
+// the runtime's own NativeSmokeTests, which only use unknown method ids: this one crosses every callback
+// (reply, change-set, stream, sync and async ports, logs) with real payloads. Run through run.sh.
+package dev.undra.fixture
+
+import dev.undra.runtime.CoreEntry
 import dev.undra.runtime.LoadOptions
+import dev.undra.runtime.Mode
+import dev.undra.runtime.NativeApi
+import dev.undra.runtime.NativeCallbacks
+import dev.undra.runtime.NativeLibrary
 import dev.undra.runtime.PortImpl
+import dev.undra.runtime.UndraCore
+import dev.undra.runtime.UndraException
+import dev.undra.runtime.UndraModeException
+import dev.undra.runtime.UndraReplyException
+import dev.undra.runtime.UndraSchemaMismatchException
 import dev.undra.runtime.adapters.StandardPorts
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
@@ -22,6 +33,34 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+
+/** The fixture core's natives: what bindgen generates for a core whose namespace is `undra_fixture`. */
+internal object UndraCoreNative : NativeApi {
+    override val namespace: String = "undra_fixture"
+
+    private val loadFailure: Throwable? = NativeLibrary.load(namespace)
+
+    override val isAvailable: Boolean get() = loadFailure == null
+    override val unavailableReason: Throwable? get() = loadFailure
+
+    override external fun abiVersion(): Int
+    override external fun schemaHash(): Long
+    override external fun schemaJson(): ByteArray
+    override external fun init(cfg: ByteArray, cb: NativeCallbacks): Int
+    override external fun call(payload: ByteArray): Int
+    override external fun callSync(payload: ByteArray): ByteArray
+    override external fun cancel(callId: Int)
+    override external fun streamCredit(callId: Int, credit: Int)
+    override external fun observe(handle: Long, signalId: Int, on: Boolean)
+    override external fun release(handle: Long)
+    override external fun portReply(payload: ByteArray)
+    override external fun event(portId: Int, methodId: Int, payload: ByteArray)
+    override external fun timerFired(timerId: Int)
+    override external fun snapshot(): ByteArray
+    override external fun restore(snapshot: ByteArray): Int
+    override external fun statsJson(): String
+    override external fun shutdown()
+}
 
 private var failures = 0
 private var passed = 0
@@ -69,10 +108,13 @@ private fun le32(bytes: ByteArray, at: Int): UInt =
 
 fun main() {
     System.setProperty("undra.data.dir", java.nio.file.Files.createTempDirectory("undra-jni-e2e").toString())
-    if (!UndraNative.isAvailable) {
-        println("FAIL native library not loaded: ${UndraNative.unavailableReason}")
+    if (!UndraCoreNative.isAvailable) {
+        println("FAIL native library not loaded: ${UndraCoreNative.unavailableReason}")
         System.exit(2)
     }
+    val hash = UndraCoreNative.schemaHash().toULong()
+    // What the generated `UndraUndraFixture` object holds: the namespace, the bindings' hash, the natives.
+    val entry = CoreEntry(UndraCoreNative.namespace, hash) { UndraCoreNative }
     val logs = CopyOnWriteArrayList<Triple<Int, String, String>>()
     val sumPort = PortImpl(
         true,
@@ -92,20 +134,39 @@ fun main() {
             },
         ),
     )
-    val core = UndraCore.load(
-        LoadOptions(
-            expectedSchemaHash = UndraNative.schemaHash().toULong(),
-            adapters = mapOf(port("Sum") to sumPort, port("Echo") to echoPort, StandardPorts.Log.PORT_ID to logPort),
-        ),
+    // No expectedSchemaHash: the entry fills it in, as the generated `load()` does.
+    val core = entry.load(
+        LoadOptions(adapters = mapOf(port("Sum") to sumPort, port("Echo") to echoPort, StandardPorts.Log.PORT_ID to logPort)),
     )
     fun calc(base: Long): Long = core.construct(Fnv.fnv1a32("Calculator"), method("Calculator", "new"), i64(base))
     fun on(handle: Long, name: String, type: String = "Calculator") = CallTarget.ObjectMethod(Handle(handle), method(type, name))
     val calculator = calc(100)
 
+    check("the natives were registered on this core's own class: ABI 2, and the entry holds the loaded core") {
+        expectEq(2, UndraCoreNative.abiVersion(), "ABI version")
+        expect(entry.core === core) { "the entry's core is not the loaded one" }
+        expect(UndraCore.shared === core) { "the first core loaded is also shared" }
+    }
+
     check("schema hash and JSON come from the fixture core") {
-        expect(UndraNative.schemaHash() != 0L) { "empty schema" }
-        val json = String(UndraNative.schemaJson(), Charsets.UTF_8)
+        expect(UndraCoreNative.schemaHash() != 0L) { "empty schema" }
+        val json = String(UndraCoreNative.schemaJson(), Charsets.UTF_8)
         expect(json.contains("Calculator") && json.contains("Counter")) { json.take(200) }
+    }
+
+    check("while the core is loaded: another load of its namespace is refused, a wrong hash never inits, UndraCore.load needs the natives and a hash") {
+        val twice = expectThrows<UndraException> { entry.load(LoadOptions()) }
+        expect(twice.message!!.contains("already loaded")) { twice.message!! }
+        val twin = expectThrows<UndraException> { UndraCore.load(LoadOptions(expectedSchemaHash = hash), UndraCoreNative) }
+        expect(twin.message!!.contains("`undra_fixture` is already loaded")) { twin.message!! }
+        val mismatch = expectThrows<UndraSchemaMismatchException> {
+            UndraCore.load(LoadOptions(expectedSchemaHash = hash xor 1uL), UndraCoreNative)
+        }
+        expectEq(hash, mismatch.got, "the core's hash")
+        expectThrows<UndraModeException> { UndraCore.load(LoadOptions(expectedSchemaHash = hash)) }
+        expectThrows<UndraModeException> { UndraCore.load(LoadOptions(mode = Mode.INPROC), UndraCoreNative) }
+        // None of that touched the running core.
+        expectEq(105L, Codecs.i64.decodeAll(core.callSync(on(calculator, "add"), method("Calculator", "add"), i64(2) + i64(3))))
     }
 
     check("a sync free function replies through callSync") {
@@ -250,10 +311,12 @@ fun main() {
         workers.forEach { it.join(10_000) }
         expect(unexpected.isEmpty()) { "unexpected failures: $unexpected" }
         expect(workers.none { it.isAlive } && !closer.isAlive) { "a thread is stuck after close" }
-        val stats = UndraNative.statsJson()
+        val stats = UndraCoreNative.statsJson()
         expect("\"initialized\":false" in stats && "\"runtime_threads\":0" in stats) { "after close: $stats" }
-        val again = UndraCore.load(LoadOptions(expectedSchemaHash = UndraNative.schemaHash().toULong()))
+        expect(entry.core !== core) { "after close the entry's core is the closed placeholder" }
+        val again = entry.load()
         try {
+            expect(entry.core === again) { "the entry holds the fresh core" }
             val fresh = again.construct(Fnv.fnv1a32("Calculator"), method("Calculator", "new"), i64(7))
             val sum = again.callSync(CallTarget.ObjectMethod(Handle(fresh), method("Calculator", "add")), method("Calculator", "add"), i64(1) + i64(2))
             expectEq(10L, Codecs.i64.decodeAll(sum), "add on the fresh core")
