@@ -36,7 +36,7 @@ a device has to reach you, and then only on a network you trust.
 
 | Platform | How | URL |
 |---|---|---|
-| Web | `?undra=<url>` in the page URL, or `VITE_UNDRA_DEV_URL` | `ws://127.0.0.1:7443` |
+| Web | `?undra=<url>` in the page URL, or `VITE_UNDRA_DEV_URL` (under `vite dev`) | `ws://127.0.0.1:7443` |
 | iOS simulator | `UNDRA_DEV_URL=<url>` in the scheme's Run environment, or `SIMCTL_CHILD_UNDRA_DEV_URL=<url> xcrun simctl launch ...` | `ws://127.0.0.1:7443` |
 | iOS device | `UNDRA_DEV_URL=<url>`, with `undra dev --addr 0.0.0.0:7443` | `ws://<your Mac>:7443` |
 | Android emulator | `adb shell am start -n <id>/.MainActivity --es undra_dev_url <url>`, or `./gradlew -PundraDevUrl=<url> :app:installDebug` | `ws://10.0.2.2:7443` |
@@ -51,7 +51,9 @@ a device has to reach you, and then only on a network you trust.
 * Debug builds only. The Android dev URL, the `INTERNET` permission the playground needs for it and
   `usesCleartextTraffic` live in the debug build type (`app/src/debug/AndroidManifest.xml`, a `BuildConfig` field);
   a release build has none of them. On iOS the URL is read under `#if DEBUG`, and the app needs
-  `NSAllowsLocalNetworking` in its Info.plist for a `ws://` address.
+  `NSAllowsLocalNetworking` in its Info.plist for a `ws://` address. On the web `?undra=` is read only by a
+  development build (`import.meta.env.DEV`): a production page that took its core's address from a link would give
+  whoever wrote the link its ports and its screen.
 * The schema hash still gates every connection: an app built from other bindings than the core's is told so
   (`UndraSchemaMismatch`) and does not run.
 
@@ -111,6 +113,10 @@ a dev core holds at most one launch's objects. A client that asks to resume some
 (it was restarted) is answered with close code 4001. A client back on a new socket under its own token replaces
 its stale one at once: a phone that changed network does not wait for the keepalive.
 
+The token is not a password. The dev server has no authentication: whoever can reach its port can use the core,
+token or not; the token only lets a client that comes back be recognised (ADR-051 has the threat model). The
+server logs its first eight characters, never the whole token.
+
 The server prints every step:
 
 ```
@@ -129,6 +135,9 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
   (`NetworkOnMainThreadException`).
 * It pings a server that has been quiet and gives up on one that stays quiet, so a laptop that went to sleep is
   noticed in seconds, not minutes.
+* It checks what it is sent: a server that breaks RFC 6455, or a message over 64 MiB, ends the core
+  (`closed(failed)`, after a close frame 1002 or 1009) instead of looping on reconnects. `wss://` needs a certificate
+  that is trusted and names the host.
 * The playground and the template show the state in a thin bar (green, amber while reconnecting, red when it is
   over) and a screen with the reason and a Retry button when the dev server cannot be reached at launch.
 * No native library is needed in remote mode: you can skip `undra build --platform android`.

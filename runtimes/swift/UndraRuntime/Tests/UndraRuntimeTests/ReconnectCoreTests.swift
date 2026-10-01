@@ -370,6 +370,12 @@ final class ReconnectCoreTests: XCTestCase {
         XCTAssertEqual(log.names, ["connecting", "connected", "closed:requested"])
     }
 
+    func testAPolicyNeverWaitsNothingAndALongOutageStaysAtTheCap() {
+        let zero = UndraReconnectPolicy(initialDelay: 0, maxDelay: 0, jitter: 0)
+        XCTAssertEqual(zero.delay(forAttempt: 1), 0.001, accuracy: 1e-9)
+        XCTAssertEqual(UndraReconnectPolicy(jitter: 0).delay(forAttempt: 5_000), 5, accuracy: 1e-9)
+    }
+
     func testTheReconnectPolicySchedule() {
         let longest = UndraReconnectPolicy(random: { 0 })
         XCTAssertEqual((1...8).map { longest.delay(forAttempt: $0) }, [0.25, 0.5, 1, 2, 4, 5, 5, 5])

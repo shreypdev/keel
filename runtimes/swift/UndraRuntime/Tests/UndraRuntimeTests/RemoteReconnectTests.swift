@@ -298,6 +298,8 @@ final class ReconnectRecorder: UndraInbound, @unchecked Sendable {
     private let errors = Guarded<[String]>([])
     private let disconnects = Guarded<[any Error]>([])
     var holds = false
+    /// Runs when the transport asks whether objects are held: at the start of a reconnect attempt.
+    var onHoldsObjects: (@Sendable () -> Void)? = nil
 
     var events: [String] {
         return log.withLock { (list: inout [String]) -> [String] in return list }
@@ -342,6 +344,7 @@ final class ReconnectRecorder: UndraInbound, @unchecked Sendable {
     }
 
     func holdsObjects() -> Bool {
+        onHoldsObjects?()
         return holds
     }
 }
@@ -555,6 +558,23 @@ final class RemoteReconnectTests: XCTestCase {
         XCTAssertFalse(rig.scheduler.fire())
         XCTAssertEqual(rig.server.sockets.count, 1)
         XCTAssertEqual(rig.inbound.disconnectCount, 0)
+    }
+
+    func testShutdownThatRacesAStartingAttemptDoesNotBringTheTransportBack() throws {
+        // `shutdown()` lands after the attempt checked that the transport is live and before it connects: the
+        // attempt must not reopen a transport that was shut down (a socket nobody closes would hold the dev
+        // server's one client slot).
+        let rig = try started()
+        rig.server.current.serverClose(code: nil)
+        eventually("scheduled") { rig.scheduler.hasPending }
+        let transport = rig.transport
+        rig.inbound.onHoldsObjects = { transport.shutdown() }
+        XCTAssertTrue(rig.scheduler.fire())
+        XCTAssertEqual(rig.server.sockets.count, 1, "no new connection after shutdown()")
+        Thread.sleep(forTimeInterval: 0.1)
+        XCTAssertFalse(rig.inbound.events.contains("reconnected"), "\(rig.inbound.events)")
+        XCTAssertFalse(rig.scheduler.hasPending, "and no further attempt")
+        XCTAssertFalse(transport.sendFrame(kind: .call, payload: []), "still shut down")
     }
 
     func testAnInitialConnectionThatFailsStillThrowsFromStartAndIsNotRetried() throws {

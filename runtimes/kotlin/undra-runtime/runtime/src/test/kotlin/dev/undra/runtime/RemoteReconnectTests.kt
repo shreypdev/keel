@@ -263,6 +263,23 @@ class RemoteReconnectTests : Suite() {
             }
         }
 
+        case("a server that breaks RFC 6455 (a masked frame) is a protocol error: final, not retried") {
+            WsTestServer().use { server ->
+                serve(server)
+                val sleeper = RecordingSleeper()
+                load(server.url, sleeper).use { loaded ->
+                    server.awaitConnection().sendRaw(byteArrayOf(0x82.toByte(), 0x81.toByte(), 1, 2, 3, 4, 5))
+                    eventually("closed") { loaded.states.last() is ConnectionState.Closed }
+                    val closed = loaded.states.last() as ConnectionState.Closed
+                    assertEq(ClosedReason.FAILED, closed.reason)
+                    val why = closed.cause!!.message!!
+                    assertTrue(why.contains("masked frame"), why)
+                    assertEq(0, sleeper.waits.size, "no reconnect loop against a broken server")
+                    assertEq(1, server.connections.size)
+                }
+            }
+        }
+
         case("a server that vanished without a FIN is noticed by the client's own ping, and reconnected") {
             WsTestServer().use { server ->
                 serve(server)

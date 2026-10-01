@@ -26,7 +26,7 @@ start_server() {
   exec 9> "$WORK/stdin"
   for _ in $(seq 50); do [ -s "$WORK/server.json" ] && break; sleep 0.1; done
 }
-stop_server() { exec 9>&-; wait "$SERVER_PID" 2>/dev/null || true; rm -f "$WORK/stdin"; }
+stop_server() { exec 9>&-; wait "$SERVER_PID" 2>/dev/null || true; SERVER_PID=; rm -f "$WORK/stdin"; }
 
 if [ "$WHICH" = all ] || [ "$WHICH" = ts ]; then
   cp -R runtimes/ts/@undra/runtime "$WORK/ts"

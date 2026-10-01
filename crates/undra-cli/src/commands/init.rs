@@ -474,7 +474,8 @@ cd web && npm install && npm run dev          # http://localhost:5173
 The page loads the wasm core and runs it on the main thread. Add `?undra=ws://127.0.0.1:7443` to the URL
 (with `undra dev` running) to use the core that `undra dev` serves instead: edit the Rust, save, and the page
 reloads onto the rebuilt core (a dropped connection is reconnected by the runtime; a bar at the top shows what
-it is doing, and `core.connection` is the signal behind it). `npm run build` type-checks and bundles.
+it is doing, and `core.connection` is the signal behind it). Only `npm run dev` reads `?undra=`: a production
+build ignores it. `npm run build` type-checks and bundles.
 ";
 
 /// What `init` generated from the embedded schema.

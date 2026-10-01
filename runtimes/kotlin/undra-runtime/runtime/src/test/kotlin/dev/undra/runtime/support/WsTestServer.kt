@@ -219,6 +219,14 @@ class WsTestServer(port: Int = 0) : AutoCloseable {
         /** Closes the WebSocket with [code]. */
         fun sendClose(code: Int) = frame(8, byteArrayOf((code shr 8).toByte(), code.toByte()))
 
+        /** Writes [bytes] as they are, framing or not (a server that breaks RFC 6455). */
+        fun sendRaw(bytes: ByteArray) {
+            synchronized(writeLock) {
+                out.write(bytes)
+                out.flush()
+            }
+        }
+
         /** Drops the TCP connection without a close handshake. */
         fun drop() = socket.close()
 

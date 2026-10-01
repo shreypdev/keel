@@ -35,7 +35,7 @@ export type WebSocketFactory = new (url: string) => WebSocketLike;
  * many clients of one server do not retry in step.
  */
 export interface ReconnectOptions {
-  /** The wait before the first retry, in ms. Default 250. */
+  /** The wait before the first retry, in ms (at least 1). Default 250. */
   readonly initialDelayMs?: number;
   /** The longest wait, in ms. Default 5000. */
   readonly maxDelayMs?: number;
@@ -88,9 +88,11 @@ interface ResolvedPolicy {
 function resolvePolicy(option: boolean | ReconnectOptions | undefined): ResolvedPolicy | null {
   if (option === false) return null;
   const given = typeof option === "object" ? option : {};
+  // A wait of at least 1 ms, as Kotlin requires: zero would retry a server that is down in a hot loop.
+  const initialDelayMs = Math.max(1, given.initialDelayMs ?? 250);
   return {
-    initialDelayMs: given.initialDelayMs ?? 250,
-    maxDelayMs: given.maxDelayMs ?? 5_000,
+    initialDelayMs,
+    maxDelayMs: Math.max(initialDelayMs, given.maxDelayMs ?? 5_000),
     jitter: Math.min(1, Math.max(0, given.jitter ?? 0.5)),
     maxAttempts: given.maxAttempts ?? Number.POSITIVE_INFINITY,
     random: given.random ?? Math.random,
@@ -103,7 +105,8 @@ function resolvePolicy(option: boolean | ReconnectOptions | undefined): Resolved
  */
 export function reconnectDelayMs(attempt: number, options: ReconnectOptions = {}): number {
   const policy = resolvePolicy(options) as ResolvedPolicy;
-  const base = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** Math.max(0, attempt - 1));
+  // At most 30 doublings (as in Kotlin and Swift): a long outage must not overflow to Infinity or NaN.
+  const base = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** Math.min(30, Math.max(0, attempt - 1)));
   return Math.round(base * (1 - policy.jitter * policy.random()));
 }
 

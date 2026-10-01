@@ -106,6 +106,12 @@ describe("the reconnect schedule", () => {
     }
   });
 
+  it("never waits nothing, and a long outage stays at the cap instead of overflowing", () => {
+    expect(reconnectDelayMs(1, { initialDelayMs: 0, jitter: 0 })).toBe(1);
+    expect(reconnectDelayMs(5_000, { jitter: 0 })).toBe(5_000);
+    expect(reconnectDelayMs(5_000, { initialDelayMs: 0, maxDelayMs: 0, jitter: 0 })).toBe(1);
+  });
+
   it("follows the options", () => {
     const tuned = { initialDelayMs: 100, maxDelayMs: 300, jitter: 0, random: () => 0.7 };
     expect([1, 2, 3, 4].map((n) => reconnectDelayMs(n, tuned))).toEqual([100, 200, 300, 300]);
@@ -471,6 +477,29 @@ describe("UndraCore over a reconnecting remote transport", () => {
     ]);
     await vi.advanceTimersByTimeAsync(200);
     expect([a.count.peek(), b.count.peek()]).toEqual([50, 60]);
+  });
+
+  it("a replay that fails (the socket broke under it) does not announce connected; the next loss retries", async () => {
+    const server = new FakeServer();
+    const { core, states } = await loaded(server);
+    await observedStore(core, server, 0x1_0000_0001n, 5);
+    server.current.serverClose(1006);
+    server.behaviour = "silent";
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+    const broken = server.current;
+    broken.send = (data: Uint8Array): void => {
+      throw new Error(`the socket broke under the replay (${String(data.length)} bytes)`);
+    };
+    broken.sendHello();
+    await settle();
+    expect(kinds(states).slice(-1), "not connected: the replay did not reach the core").toEqual(["reconnecting 1"]);
+    server.behaviour = "answer";
+    broken.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+    expect(kinds(states).slice(-2)).toEqual(["reconnecting 1", "connected"]);
+    expect(server.current.sent(Kind.Observe)).toHaveLength(1);
   });
 
   it("does not observe again what the app stopped observing, or released", async () => {

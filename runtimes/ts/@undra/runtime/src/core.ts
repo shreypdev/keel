@@ -664,8 +664,10 @@ export class UndraCore {
         for (const signalId of signals) this.#transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
       }
     } catch (error) {
-      // The connection dropped again already; the transport reports it and the next reconnect replays.
+      // The connection dropped again already: not connected after all. The transport reports the loss and the
+      // next reconnect replays.
       this.#reportError("reconnect", error);
+      return;
     }
     this.#setConnection({ kind: "connected" });
   }

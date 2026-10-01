@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.ConnectException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -16,8 +17,17 @@ import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
+
+/**
+ * The server broke RFC 6455 (a masked frame, a reserved bit, a malformed control frame, a message over the size
+ * cap, a malformed close): retrying would meet the same server. [code] is the close code the client sent it
+ * (1002, or 1009 for a message that is too big) before dropping the connection.
+ */
+internal class WebSocketProtocolException(val code: Int, message: String) : IOException(message)
 
 /**
  * A small WebSocket client (RFC 6455) over `java.net.Socket`: the handshake, masked client frames,
@@ -43,7 +53,11 @@ internal class WebSocketClient private constructor(
     private val maxMessageBytes: Int,
     private val pingAfterMillis: Long,
 ) {
-    /** What the connection tells its owner. Called on the reader thread, never after [close] or [abort]. */
+    /**
+     * What the connection tells its owner. Called on the reader thread (an [onError] for a failed write on the
+     * writer thread), once for the end of the connection, and never after [close] or [abort]. A callback that throws
+     * ends the connection with [onError].
+     */
     interface Listener {
         /** A whole binary message. */
         fun onBinary(message: ByteArray)
@@ -54,7 +68,10 @@ internal class WebSocketClient private constructor(
         /** The server closed the connection (the client has echoed the close). */
         fun onClose(code: Int, reason: String)
 
-        /** The connection failed: an I/O error, a protocol violation, a server that stopped answering. It is over. */
+        /**
+         * The connection failed: an I/O error, a server that stopped answering, or (a [WebSocketProtocolException]) a
+         * server that broke RFC 6455. It is over.
+         */
         fun onError(cause: Throwable)
     }
 
@@ -108,20 +125,34 @@ internal class WebSocketClient private constructor(
         queue.add(Outgoing.Stop)
     }
 
-    /** Drops the connection without a closing handshake. */
+    /**
+     * Drops the connection without a closing handshake. The socket is released on a thread of the client's own:
+     * closing a TLS socket writes (`close_notify`), and the caller may be Android's main thread.
+     */
     fun abort() {
         closedByUs.set(true)
-        finish()
+        finish(onOwnThread = true)
     }
 
     private fun sendCloseFrame(code: Int, reason: String) {
         if (!closeSent.compareAndSet(false, true)) return
-        val text = reason.toByteArray(StandardCharsets.UTF_8)
-        val payload = ByteArray(2 + minOf(text.size, MAX_CONTROL_PAYLOAD - 2))
+        val text = utf8Prefix(reason, MAX_CONTROL_PAYLOAD - 2)
+        val payload = ByteArray(2 + text.size)
         payload[0] = (code shr 8).toByte()
         payload[1] = code.toByte()
-        System.arraycopy(text, 0, payload, 2, payload.size - 2)
+        System.arraycopy(text, 0, payload, 2, text.size)
         queue.add(Outgoing.Frame(frame(OP_CLOSE, payload)))
+    }
+
+    /** Waits a moment for the writer to put out what is queued (a close frame) before the socket goes. */
+    private fun letWriterFinish() {
+        val w = writer ?: return
+        if (w === Thread.currentThread()) return
+        try {
+            w.join(CLOSE_ECHO_MILLIS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
     }
 
     private fun writeLoop() {
@@ -157,6 +188,7 @@ internal class WebSocketClient private constructor(
     // ---- receiving -------------------------------------------------------------------------------------
 
     private fun readLoop() {
+        // The fragments of a message in progress; a message in one frame (the usual case) never goes through it.
         val message = ByteArrayOutputStream()
         var messageOpcode = -1
         try {
@@ -165,6 +197,7 @@ internal class WebSocketClient private constructor(
                 val fin = b0 and 0x80 != 0
                 if (b0 and 0x70 != 0) throw ProtocolViolation("the server set a reserved bit")
                 val opcode = b0 and 0x0F
+                if (opcode !in KNOWN_OPCODES) throw ProtocolViolation("the server sent a frame with the unknown opcode $opcode")
                 val b1 = readByte()
                 if (b1 and 0x80 != 0) throw ProtocolViolation("the server sent a masked frame")
                 var length = (b1 and 0x7F).toLong()
@@ -177,10 +210,16 @@ internal class WebSocketClient private constructor(
                 }
                 val control = opcode >= 8
                 if (control && (!fin || length > MAX_CONTROL_PAYLOAD)) throw ProtocolViolation("the server sent a malformed control frame")
-                if (length > maxMessageBytes || message.size() + length > maxMessageBytes) {
-                    throw ProtocolViolation("the server sent a message larger than $maxMessageBytes bytes")
+                // Checked before anything is allocated: a hostile length costs nothing.
+                if (!control && (length > maxMessageBytes || message.size() + length > maxMessageBytes)) {
+                    throw ProtocolViolation("the server sent a message larger than $maxMessageBytes bytes", MESSAGE_TOO_BIG)
                 }
-                val payload = ByteArray(length.toInt())
+                val payload = try {
+                    ByteArray(length.toInt())
+                } catch (e: OutOfMemoryError) {
+                    // A message under the cap that this heap cannot hold (a small Android heap): a typed failure, not a dead app.
+                    throw ProtocolViolation("the server sent a message of $length bytes, more than this process can hold", MESSAGE_TOO_BIG)
+                }
                 readExactly(payload)
                 when (opcode) {
                     OP_CONTINUATION, OP_BINARY, OP_TEXT -> {
@@ -190,42 +229,60 @@ internal class WebSocketClient private constructor(
                             if (messageOpcode >= 0) throw ProtocolViolation("the server started a message inside another")
                             messageOpcode = opcode
                         }
-                        message.write(payload, 0, payload.size)
-                        if (fin) {
-                            val whole = message.toByteArray()
+                        val whole = if (fin && message.size() == 0) {
+                            payload
+                        } else {
+                            message.write(payload, 0, payload.size)
+                            if (fin) message.toByteArray().also { message.reset() } else null
+                        }
+                        if (whole != null) {
                             val kind = messageOpcode
-                            message.reset()
                             messageOpcode = -1
                             if (closedByUs.get()) continue
-                            if (kind == OP_BINARY) listener.onBinary(whole) else listener.onText()
+                            tell { if (kind == OP_BINARY) listener.onBinary(whole) else listener.onText() }
                         }
                     }
                     OP_CLOSE -> {
+                        if (payload.size == 1) throw ProtocolViolation("the server sent a close frame with a one-byte payload")
                         val code = if (payload.size >= 2) ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF) else NO_STATUS
+                        if (payload.size >= 2 && !isValidCloseCode(code)) throw ProtocolViolation("the server sent the close code $code, which may not be sent")
                         val reason = if (payload.size > 2) String(payload, 2, payload.size - 2, StandardCharsets.UTF_8) else ""
-                        val byUs = closedByUs.get()
-                        sendCloseFrame(code.takeIf { it != NO_STATUS } ?: NORMAL_CLOSURE, "")
+                        val byUs = closedByUs.getAndSet(true)
+                        sendCloseFrame(if (payload.size >= 2) code else NORMAL_CLOSURE, "")
                         queue.add(Outgoing.Stop)
-                        if (!byUs) {
-                            closedByUs.set(true)
-                            listener.onClose(code, reason)
-                        }
-                        // Let the echo of the close reach the server before the socket goes.
-                        writer?.let { if (it !== Thread.currentThread()) it.join(CLOSE_ECHO_MILLIS) }
+                        // The echo reaches the server before the owner hears of the close (and may abort the socket).
+                        letWriterFinish()
+                        if (!byUs) tell { listener.onClose(code, reason) }
                         finish()
                         return
                     }
                     OP_PING -> if (!closedByUs.get()) queue.add(Outgoing.Frame(frame(OP_PONG, payload)))
-                    OP_PONG -> Unit
-                    else -> throw ProtocolViolation("the server sent a frame with the unknown opcode $opcode")
+                    else -> Unit // OP_PONG
                 }
             }
+        } catch (e: ListenerFailed) {
+            fail(IOException("the WebSocket's listener failed: ${e.cause?.message}", e.cause))
         } catch (e: IOException) {
             fail(e)
         } catch (e: ProtocolViolation) {
-            fail(IOException("protocol error: ${e.message}", e))
+            // RFC 6455 section 7.1.7: say why before dropping the connection (best effort, briefly).
+            sendCloseFrame(e.code, e.message ?: "")
+            queue.add(Outgoing.Stop)
+            letWriterFinish()
+            fail(WebSocketProtocolException(e.code, "protocol error: ${e.message}"))
         }
     }
+
+    /** Runs a listener callback; one that throws ends the connection (the reader must not die silently). */
+    private inline fun tell(callback: () -> Unit) {
+        try {
+            callback()
+        } catch (e: RuntimeException) {
+            throw ListenerFailed(e)
+        }
+    }
+
+    private class ListenerFailed(cause: RuntimeException) : Exception(cause)
 
     /** Reads one byte, polling: a quiet server is pinged, and one that stays quiet is given up on. */
     private fun readByte(): Int {
@@ -279,26 +336,43 @@ internal class WebSocketClient private constructor(
         queue.add(Outgoing.Frame(frame(OP_PING, ByteArray(0))))
     }
 
-    private class ProtocolViolation(message: String) : Exception(message)
+    private class ProtocolViolation(message: String, val code: Int = PROTOCOL_ERROR) : Exception(message)
 
     // ---- ending ----------------------------------------------------------------------------------------
 
     private fun fail(cause: Throwable) {
         val expected = closedByUs.get()
         val first = finish()
-        if (first && !expected) listener.onError(cause)
+        if (first && !expected) {
+            try {
+                listener.onError(cause)
+            } catch (e: RuntimeException) {
+                UndraLog.warn("the WebSocket's listener failed while hearing of an error", e)
+            }
+        }
     }
 
     /** Releases the socket and the threads. `true` for the call that did it. */
-    private fun finish(): Boolean {
+    private fun finish(onOwnThread: Boolean = false): Boolean {
         if (!finished.compareAndSet(false, true)) return false
         queue.add(Outgoing.Stop)
+        if (onOwnThread) {
+            Thread(::closeSocket, "undra-ws-close").also { it.isDaemon = true }.start()
+        } else {
+            closeSocket()
+        }
+        return true
+    }
+
+    private fun closeSocket() {
         try {
             socket.close()
         } catch (e: IOException) {
             // nothing left to release
+        } catch (e: RuntimeException) {
+            // Android refuses network I/O (a TLS close) on its main thread; the reader's own failure releases it
+            UndraLog.debug("closing the WebSocket failed: $e")
         }
-        return true
     }
 
     // ---- framing ---------------------------------------------------------------------------------------
@@ -340,8 +414,11 @@ internal class WebSocketClient private constructor(
         private const val OP_PING = 9
         private const val OP_PONG = 10
         private const val MAX_CONTROL_PAYLOAD = 125
+        private val KNOWN_OPCODES = setOf(OP_CONTINUATION, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG)
         private const val NORMAL_CLOSURE = 1000
+        private const val PROTOCOL_ERROR = 1002
         private const val NO_STATUS = 1005
+        private const val MESSAGE_TOO_BIG = 1009
         private const val NANOS_PER_MILLI = 1_000_000L
         private const val CLOSE_GRACE_MILLIS = 2_000L
         private const val CLOSE_ECHO_MILLIS = 500L
@@ -351,8 +428,11 @@ internal class WebSocketClient private constructor(
 
         /**
          * Connects to [uri] (`ws://` or `wss://`), performs the opening handshake and starts the reader and
-         * writer threads. Blocks for at most about [timeoutMillis] and does network I/O on the calling thread:
-         * call it from a thread of your own.
+         * writer threads. Blocks for at most about twice [timeoutMillis] (the connect, then the handshake, each
+         * bounded by it) and does network I/O on the calling thread: call it from a thread of your own.
+         *
+         * `wss` uses [sslSocketFactory] (the platform's default when `null`) with host name verification on: a
+         * certificate that does not name the host is refused like an untrusted one.
          *
          * @throws IOException if the server cannot be reached or does not complete the handshake.
          */
@@ -362,20 +442,22 @@ internal class WebSocketClient private constructor(
             timeoutMillis: Int,
             maxMessageBytes: Int = 64 * 1024 * 1024,
             pingAfterMillis: Long = 10_000L,
+            sslSocketFactory: SSLSocketFactory? = null,
         ): WebSocketClient {
             val secure = uri.scheme.equals("wss", ignoreCase = true)
-            val host = uri.host ?: throw IOException("the URL $uri has no host")
+            val host = uri.host ?: throw IOException("the URL has no host")
             val port = if (uri.port >= 0) uri.port else if (secure) 443 else 80
-            val socket = openSocket(host, port, secure, timeoutMillis)
+            val socket = openSocket(host, port, secure, timeoutMillis, sslSocketFactory)
             try {
                 val pollMillis = maxOf(10L, minOf(1_000L, pingAfterMillis / 4)).toInt()
                 socket.soTimeout = timeoutMillis.coerceAtLeast(1)
+                val handshakeDeadline = System.nanoTime() + timeoutMillis.coerceAtLeast(1) * NANOS_PER_MILLI
                 val key = Base64.getEncoder().encodeToString(ByteArray(16).also { RANDOM.nextBytes(it) })
                 val output = socket.getOutputStream()
                 output.write(request(uri, host, port, secure, key).toByteArray(StandardCharsets.US_ASCII))
                 output.flush()
                 val input = BufferedInputStream(socket.getInputStream(), 16 * 1024)
-                val head = readHead(input)
+                val head = readHead(input, handshakeDeadline)
                 checkResponse(head, key)
                 // The handshake is done; from now on reads poll, so a quiet server can be pinged.
                 socket.soTimeout = pollMillis
@@ -392,7 +474,7 @@ internal class WebSocketClient private constructor(
             }
         }
 
-        private fun openSocket(host: String, port: Int, secure: Boolean, timeoutMillis: Int): Socket {
+        private fun openSocket(host: String, port: Int, secure: Boolean, timeoutMillis: Int, sslSocketFactory: SSLSocketFactory?): Socket {
             val addresses = try {
                 InetAddress.getAllByName(host)
             } catch (e: IOException) {
@@ -409,14 +491,31 @@ internal class WebSocketClient private constructor(
                     plain.keepAlive = true
                     plain.connect(InetSocketAddress(address, port), left)
                     if (!secure) return plain
-                    val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                    val factory = sslSocketFactory ?: SSLSocketFactory.getDefault() as SSLSocketFactory
                     val tls = factory.createSocket(plain, host, port, true) as SSLSocket
+                    // Host name verification during the handshake (the JDK and Conscrypt honour it) ...
                     tls.sslParameters = tls.sslParameters.also { it.endpointIdentificationAlgorithm = "HTTPS" }
                     tls.soTimeout = left
-                    tls.startHandshake()
+                    try {
+                        tls.startHandshake()
+                        // ... and, on Android, once more with the platform's verifier: an `SSLSocket` there is not
+                        // documented to check the name by itself on every release. (The JDK's default verifier
+                        // refuses everything, so it is not asked.)
+                        if (Platform.isAndroid && !HttpsURLConnection.getDefaultHostnameVerifier().verify(host, tls.session)) {
+                            throw SSLPeerUnverifiedException("the certificate of $host does not name it")
+                        }
+                    } catch (e: IOException) {
+                        try {
+                            tls.close()
+                        } catch (closing: IOException) {
+                            // the handshake failure is the one to report
+                        }
+                        throw e
+                    }
                     return tls
                 } catch (e: IOException) {
-                    failure = e
+                    // A server that was reached and refused (TLS) says more than an address nobody listens on.
+                    if (failure == null || e !is ConnectException) failure = e
                     try {
                         plain.close()
                     } catch (closing: IOException) {
@@ -440,10 +539,14 @@ internal class WebSocketClient private constructor(
                 "Sec-WebSocket-Version: 13\r\n\r\n"
         }
 
-        /** The response head, up to and including the blank line; nothing after it is consumed. */
-        private fun readHead(input: InputStream): String {
+        /**
+         * The response head, up to and including the blank line; nothing after it is consumed. A server that
+         * trickles it is given up on at [deadlineNanos] (each read is also bounded by the socket's timeout).
+         */
+        private fun readHead(input: InputStream, deadlineNanos: Long): String {
             val head = StringBuilder()
             while (!head.endsWith("\r\n\r\n")) {
+                if (System.nanoTime() - deadlineNanos > 0) throw IOException("the server did not complete the handshake in time")
                 val b = input.read()
                 if (b < 0) throw IOException("the server closed the connection during the handshake")
                 head.append(b.toChar())
@@ -452,13 +555,35 @@ internal class WebSocketClient private constructor(
             return head.toString()
         }
 
+        /** RFC 6455 section 4.1: the checks a client must make of the server's answer to its upgrade request. */
         private fun checkResponse(head: String, key: String) {
             val lines = head.split("\r\n")
             val status = lines.first()
             if (!status.startsWith("HTTP/1.1 101")) throw IOException("the server did not upgrade the connection: ${status.take(80)}")
-            val accept = lines.drop(1).firstOrNull { it.startsWith("Sec-WebSocket-Accept:", ignoreCase = true) }?.substringAfter(':')?.trim()
+            fun header(name: String): String? =
+                lines.drop(1).firstOrNull { it.startsWith("$name:", ignoreCase = true) }?.substringAfter(':')?.trim()
+            if (!header("Upgrade").equals("websocket", ignoreCase = true)) throw IOException("the server's upgrade response has no Upgrade: websocket")
+            val connection = header("Connection")?.split(',')?.map { it.trim() }.orEmpty()
+            if (connection.none { it.equals("upgrade", ignoreCase = true) }) throw IOException("the server's upgrade response has no Connection: Upgrade")
             val expected = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1").digest((key + GUID).toByteArray(StandardCharsets.US_ASCII)))
-            if (accept != expected) throw IOException("the server's Sec-WebSocket-Accept is wrong")
+            if (header("Sec-WebSocket-Accept") != expected) throw IOException("the server's Sec-WebSocket-Accept is wrong")
+            // This client asks for no extension and no subprotocol, so the server may not pick one.
+            if (!header("Sec-WebSocket-Extensions").isNullOrEmpty()) throw IOException("the server chose a WebSocket extension this client did not offer")
+            if (!header("Sec-WebSocket-Protocol").isNullOrEmpty()) throw IOException("the server chose a WebSocket subprotocol this client did not offer")
+        }
+
+        /** Whether a close frame may carry [code] (RFC 6455 section 7.4 and the IANA registry). */
+        private fun isValidCloseCode(code: Int): Boolean =
+            code in 1000..1003 || code in 1007..1014 || code in 3000..4999
+
+        /** The UTF-8 bytes of [text], cut to at most [max] bytes without splitting a character. */
+        private fun utf8Prefix(text: String, max: Int): ByteArray {
+            val bytes = text.toByteArray(StandardCharsets.UTF_8)
+            if (bytes.size <= max) return bytes
+            var end = max
+            // Back off continuation bytes (10xxxxxx) so the cut falls on a character boundary.
+            while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
+            return bytes.copyOf(end)
         }
     }
 }

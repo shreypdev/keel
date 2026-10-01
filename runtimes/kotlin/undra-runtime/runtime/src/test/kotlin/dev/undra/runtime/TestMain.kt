@@ -44,6 +44,7 @@ fun main() {
         InprocTransportTests(),
         RemoteTransportTests(),
         WebSocketClientTests(),
+        WebSocketHostileServerTests(),
         ReconnectCoreTests(),
         RemoteReconnectTests(),
         AdapterTests(),

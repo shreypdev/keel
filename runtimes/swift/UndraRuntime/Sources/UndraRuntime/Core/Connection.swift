@@ -119,11 +119,14 @@ public struct UndraReconnectPolicy: Sendable {
         self.random = random
     }
 
-    /// How long reconnect attempt `attempt` (from 1) waits, in seconds.
+    /// How long reconnect attempt `attempt` (from 1) waits, in seconds. Never less than a millisecond
+    /// before the jitter (as in Kotlin, which refuses a zero `initialDelay`): zero would retry a server that
+    /// is down in a hot loop.
     public func delay(forAttempt attempt: Int) -> Double {
+        let first = max(0.001, initialDelay)
         let doublings = Double(min(30, max(0, attempt - 1)))
-        let base = min(maxDelay, initialDelay * pow2(doublings))
-        return base * (1 - jitter * random())
+        let base = min(max(first, maxDelay), first * pow2(doublings))
+        return base * (1 - min(1, max(0, jitter)) * random())
     }
 
     private func pow2(_ exponent: Double) -> Double {

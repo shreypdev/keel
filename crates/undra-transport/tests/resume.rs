@@ -7,8 +7,9 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use undra::wire::Kind;
+use undra::wire::payload::Hello;
 use undra::wire::payload::ReplyStatus;
+use undra::wire::{Kind, Writer};
 use undra_transport::{ServerConfig, close};
 
 /// A server that keeps a dropped client's objects for `grace`.
@@ -346,4 +347,198 @@ fn client_churn_never_wedges_the_server_or_leaks_objects() {
         0,
         "shutting down gives everything back"
     );
+}
+
+/// What a client that asked to resume found: its object (and the value in it), or a close.
+enum Resumed {
+    Object(i32),
+    Closed(u16),
+}
+
+/// Connects under `token` asking to resume, and asks `handle` for its value: the reply, or the
+/// close the server answered the resume with. Dev-mode chatter (logs, port calls) is skipped.
+fn try_resume(f: &Fixture, token: &str, handle: u64) -> (TestClient, Resumed) {
+    let mut client = TestClient::connect_raw(&session_url(&f.url(), token, true), f.schema());
+    client.send_hello(f.schema(), "test", "dev");
+    client.expect_frame(Kind::Hello);
+    let call_id = client.next_call_id();
+    client.send_call(
+        undra::wire::payload::CallTarget::Method {
+            handle: undra::wire::Handle(handle),
+            method_id: GET,
+        },
+        call_id,
+        &[],
+    );
+    loop {
+        match client.recv() {
+            common::Received::Frame(frame) if frame.kind == Kind::Reply => {
+                let reply = undra::wire::payload::Reply::decode(&mut undra::wire::Reader::new(
+                    &frame.payload,
+                ))
+                .expect("a Reply payload");
+                assert_eq!(
+                    reply.status,
+                    ReplyStatus::Ok,
+                    "a resumed session's object is alive: never a released handle"
+                );
+                return (client, Resumed::Object(dec::<i32>(reply.body)));
+            }
+            common::Received::Frame(_) => {}
+            common::Received::Closed(close) => {
+                let code = close.map_or(0, |(code, _)| code);
+                return (client, Resumed::Closed(code));
+            }
+            common::Received::Silence => panic!("neither a reply nor a close"),
+        }
+    }
+}
+
+#[test]
+fn an_expiry_racing_a_resume_either_hands_the_object_back_alive_or_says_session_lost() {
+    // The grace ends around the moment the client comes back. Whoever wins (the reaper or the
+    // resume) owns the objects: the client finds its object alive, or is told 4001 and the
+    // object is released. Never a resumed session with a dead handle, never a leak.
+    let f = resuming(Duration::from_millis(25));
+    let (mut resumed, mut lost) = (0, 0);
+    for round in 0..40_i32 {
+        let token = format!("race-{round}");
+        let mut app = f.session_client(&token, false);
+        let handle = app.new_counter(round);
+        drop(app);
+        f.eventually("the slot is free", |f| !f.bridge.is_connected());
+        std::thread::sleep(Duration::from_millis(u64::try_from(round % 8).unwrap() * 5));
+        let (client, outcome) = try_resume(&f, &token, handle);
+        match outcome {
+            Resumed::Object(value) => {
+                assert_eq!(value, round, "round {round}: its own object");
+                resumed += 1;
+            }
+            Resumed::Closed(code) => {
+                assert_eq!(code, close::SESSION_LOST, "round {round}");
+                lost += 1;
+            }
+        }
+        drop(client);
+        f.eventually("everything is released once the grace has passed", |f| {
+            stat(&f.rt, "live_handles") == 0
+        });
+    }
+    eprintln!("resumed {resumed} time(s), told session lost {lost} time(s)");
+    assert_eq!(resumed + lost, 40);
+}
+
+#[test]
+fn a_resume_and_a_new_client_racing_for_the_slot_settle_on_one_owner() {
+    // A dropped client comes back while another app launches: one of them gets the core, the
+    // other is told to try again later, and the objects follow whoever won.
+    for _ in 0..8 {
+        let f = resuming(minutes(10));
+        let mut app = f.session_client("old", false);
+        let handle = app.new_counter(7);
+        drop(app);
+        f.eventually("the slot is free", |f| !f.bridge.is_connected());
+
+        let url = f.url();
+        let schema = f.schema();
+        let fresh = std::thread::spawn(move || {
+            let mut client = TestClient::connect_raw(&session_url(&url, "new", false), schema);
+            client.send_hello(schema, "test", "dev");
+            client.expect_frame(Kind::Hello);
+            let busy = match client.recv_within(Duration::from_millis(900)) {
+                common::Received::Closed(close) => close.map(|(code, _)| code),
+                _ => None,
+            };
+            (client, busy)
+        });
+        let (back, outcome) = try_resume(&f, "old", handle);
+        let (other, other_busy) = fresh.join().expect("the new client's thread");
+        match outcome {
+            Resumed::Object(value) => {
+                assert_eq!(value, 7);
+                assert_eq!(
+                    other_busy,
+                    Some(close::TRY_AGAIN_LATER),
+                    "the resumed client holds the slot"
+                );
+                assert_eq!(
+                    stat(&f.rt, "live_handles"),
+                    1,
+                    "the object is the resumed client's"
+                );
+            }
+            Resumed::Closed(code) => {
+                assert_eq!(
+                    code,
+                    close::TRY_AGAIN_LATER,
+                    "the new client won the slot; the old one waits its turn"
+                );
+                assert_eq!(other_busy, None, "the new client is attached");
+                assert_eq!(
+                    stat(&f.rt, "live_handles"),
+                    0,
+                    "a new client released what the old one left"
+                );
+            }
+        }
+        drop((back, other));
+        f.server.shutdown();
+        assert_eq!(stat(&f.rt, "live_handles"), 0);
+    }
+}
+
+#[test]
+fn shutting_down_while_a_client_resumes_releases_everything() {
+    // Whichever comes first (the resume adopting the objects, or the shutdown), nothing is
+    // left in the core: the resumed connection is closed, its teardown keeps the objects, and
+    // the shutdown releases what is kept after it has joined every connection.
+    for round in 0..8_u64 {
+        let f = resuming(minutes(10));
+        let mut app = f.session_client("tok", false);
+        let handle = app.new_counter(1);
+        app.new_counter(2);
+        drop(app);
+        f.eventually("the slot is free", |f| !f.bridge.is_connected());
+        assert_eq!(stat(&f.rt, "live_handles"), 2);
+
+        let url = f.url();
+        let schema = f.schema();
+        let racer = std::thread::spawn(move || {
+            // The server may be gone before or during the attempt: any outcome is fine here.
+            let Some(mut client) =
+                TestClient::try_connect_raw(&session_url(&url, "tok", true), schema)
+            else {
+                return;
+            };
+            let mut hello = Writer::new();
+            Hello {
+                undra_version: "0.0.0-test",
+                schema_hash: schema,
+                platform: "test",
+                mode: "dev",
+            }
+            .encode(&mut hello);
+            if client.try_send(Kind::Hello, hello.as_slice()) {
+                let _ = client.recv();
+                let target = undra::wire::payload::CallTarget::Method {
+                    handle: undra::wire::Handle(handle),
+                    method_id: GET,
+                };
+                if client.try_send(
+                    Kind::Call,
+                    &undra::runtime::testing::call_payload(target, 1, &[]),
+                ) {
+                    let _ = client.recv();
+                }
+            }
+        });
+        std::thread::sleep(Duration::from_millis(round));
+        f.server.shutdown();
+        let _ = racer.join();
+        assert_eq!(
+            stat(&f.rt, "live_handles"),
+            0,
+            "round {round}: shutting down gives back what was kept, resumed or not"
+        );
+    }
 }

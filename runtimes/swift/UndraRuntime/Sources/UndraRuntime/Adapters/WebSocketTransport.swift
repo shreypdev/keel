@@ -33,6 +33,13 @@ protocol SocketConnection: AnyObject, Sendable {
 /// Opens connections.
 protocol SocketConnector: Sendable {
     func makeConnection(url: URL) -> any SocketConnection
+    /// The transport is done for good: let go of what the connector holds. A later
+    /// `makeConnection` starts afresh.
+    func finish()
+}
+
+extension SocketConnector {
+    func finish() {}
 }
 
 /// The real thing: `URLSessionWebSocketTask`.
@@ -40,17 +47,23 @@ protocol SocketConnector: Sendable {
 /// Its session has a delegate for one reason: the close code and reason of the server's Close frame are reported
 /// there (`didCloseWith`), reliably, while the task's own `closeCode` is only a placeholder (1005) until Foundation has
 /// read the frame, which can be after the failed `receive` that tells the app the connection is over.
+///
+/// A `URLSession` keeps its delegate (this object) until it is invalidated, so the transport calls `finish()` when it
+/// is done for good; without it every core a dev loop loads would leave a session and its connector behind.
 final class URLSessionSocketConnector: NSObject, SocketConnector, URLSessionWebSocketDelegate, @unchecked Sendable {
-    private var session: URLSession!
+    private let session = Guarded<URLSession?>(nil)
     private let connections = Guarded<[Int: TaskConnection]>([:])
 
-    override init() {
-        super.init()
-        session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-    }
-
     func makeConnection(url: URL) -> any SocketConnection {
-        let task = session.webSocketTask(with: url)
+        let current = session.withLock { (value: inout URLSession?) -> URLSession in
+            if let existing = value {
+                return existing
+            }
+            let made = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+            value = made
+            return made
+        }
+        let task = current.webSocketTask(with: url)
         let connection = TaskConnection(task: task)
         connections.withLock { (list: inout [Int: TaskConnection]) -> Void in
             list[task.taskIdentifier] = connection
@@ -74,6 +87,16 @@ final class URLSessionSocketConnector: NSObject, SocketConnector, URLSessionWebS
         connections.withLock { (list: inout [Int: TaskConnection]) -> Void in
             list[task.taskIdentifier] = nil
         }
+    }
+
+    func finish() {
+        let ending = session.withLock { (value: inout URLSession?) -> URLSession? in
+            let existing = value
+            value = nil
+            return existing
+        }
+        // Lets the cancelled tasks complete, then releases the delegate.
+        ending?.finishTasksAndInvalidate()
     }
 }
 
@@ -285,6 +308,7 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
             current.schemaHash = options.expectedSchemaHash
             current.platform = options.platform
             current.connectTimeout = options.connectTimeout
+            current.isShutDown = false
         }
         switch openConnection(resume: false, timeout: options.connectTimeout) {
         case .success(let info):
@@ -297,20 +321,26 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
 
     /// Opens a connection, sends `Hello` and waits for the core's. Blocks for up to `timeout`
     /// seconds: call it from a thread that may wait (`start` is one; so is a reconnect attempt).
-    /// A failure leaves no connection open.
+    /// A failure leaves no connection open, and a transport that was shut down (even a moment
+    /// ago, by a `shutdown()` that raced a reconnect attempt) opens nothing.
     private func openConnection(resume: Bool, timeout: Double) -> Result<TransportInfo, any Error> {
         let waiter = OneShot<Result<TransportInfo, any Error>>()
-        let opened = state.withLock { (current: inout State) -> (connection: (any SocketConnection)?, generation: Int, platform: String, hash: UInt64) in
+        let opening = state.withLock { (current: inout State) -> (connection: (any SocketConnection)?, generation: Int, platform: String, hash: UInt64)? in
+            if current.isShutDown {
+                return nil
+            }
             current.generation += 1
             current.handshake = waiter
             current.handshakeDone = false
-            current.isShutDown = false
             current.nextSeq = 0
             let connection = self.url.flatMap { target in
                 self.connector?.makeConnection(url: self.urlFor(target, resume: resume))
             }
             current.connection = connection
             return (connection, current.generation, current.platform, current.schemaHash)
+        }
+        guard let opened = opening else {
+            return .failure(UndraTransportError.closed)
         }
         if let connection = opened.connection {
             connection.resume()
@@ -367,6 +397,7 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
         }
         pending?.cancel()
         connection?.cancel()
+        connector?.finish()
     }
 
     /// Lets go of connection `generation` (a failed attempt) without closing the transport.
@@ -722,6 +753,9 @@ final class WebSocketTransport: UndraTransport, @unchecked Sendable {
         }
         pending?.cancel()
         connection?.cancel()
+        if inbound != nil {
+            connector?.finish()
+        }
         // Inline, not through `events`: a reconnect notice still queued there is ignored by a core that
         // is closed by then.
         inbound?.onDisconnect(error)

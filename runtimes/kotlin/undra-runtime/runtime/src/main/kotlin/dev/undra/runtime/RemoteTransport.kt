@@ -101,7 +101,11 @@ internal class RemoteTransport(
 
         override fun onClose(code: Int, reason: String) = lost(this, closeCause(code, reason))
 
-        override fun onError(cause: Throwable) = lost(this, wrap(cause))
+        override fun onError(cause: Throwable) = lost(
+            this,
+            // A server that breaks RFC 6455 would break it again: final, like a malformed envelope.
+            if (cause is WebSocketProtocolException) ProtocolError("${cause.message} (the dev server at $uri)", cause) else wrap(cause),
+        )
     }
 
     /** A malformed or forbidden message from the server: retrying would meet the same bug. */

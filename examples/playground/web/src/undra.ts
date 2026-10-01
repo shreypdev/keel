@@ -25,7 +25,8 @@ export interface Playground {
  * Attaches the page to its Rust core and creates the three long-lived stores.
  *
  * By default the core runs in the browser (wasm, on this thread). With `?undra=ws://127.0.0.1:7443`
- * in the page URL (or `VITE_UNDRA_DEV_URL` in the environment) it is the core that `undra dev`
+ * in the page URL (or `VITE_UNDRA_DEV_URL` in the environment) of a development build (`vite dev`; a production
+ * build ignores both) it is the core that `undra dev`
  * serves instead: edit the Rust, save, and the page reloads onto the rebuilt core, no rebuild of the page. A
  * dropped connection is reconnected by the runtime; a bar at the top of the page shows what it is doing.
  *
@@ -36,7 +37,11 @@ export interface Playground {
 export async function startUndra(): Promise<Playground> {
   const server = new PlaygroundServer();
   const adapters = { http: server, kv: memoryKv() };
-  const devUrl = new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"];
+  // Development builds only (`vite dev`): a production page that took its core's address from a link would hand
+  // whoever wrote the link its ports (Kv, Http, SecureStore) and its screen. Android and iOS gate it the same way.
+  const devUrl = import.meta.env.DEV
+    ? (new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"])
+    : undefined;
   if (typeof devUrl === "string" && devUrl.length > 0) {
     const core = await UndraCore.load({
       mode: "remote",

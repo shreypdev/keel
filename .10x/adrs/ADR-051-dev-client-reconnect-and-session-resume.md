@@ -85,6 +85,33 @@ changes what teardown does for an attached client that sent a token:
 `undra dev` stops the old runner with a Close frame (1001) before it starts the new one; a client
 treats that like any other drop.
 
+### Threat model of the session token (added at review)
+
+`undra dev` is an unauthenticated development server: it binds `127.0.0.1` by default, `--addr 0.0.0.0` exposes
+it to the LAN (the help says "no authentication!"), and browser pages are limited to local-network origins by
+`OriginPolicy`. Anything that can open a socket to it can already attach when no client is attached, construct
+objects, and call methods on any handle it can name. The session token does not change that boundary and is **not
+a credential**: it is an identifier that lets a returning client be recognised.
+
+* **What the token grants.** A peer that presents a client's token can (a) adopt that client's retained objects
+  after it dropped, which it could already reach by handle, and (b) evict the client's live connection (the
+  "stale socket" takeover), which a peer without the token cannot (it is told 1013). So a leaked token is a
+  denial-of-service on one developer's dev session, nothing more.
+* **How it is made.** 128 random bits from the platform CSPRNG: Kotlin `SecureRandom` (32 hex characters), Swift
+  `UUID()` (122 random bits from the system CSPRNG), TypeScript `crypto.getRandomValues` (falling back to
+  `Math.random` only on a platform without WebCrypto, where the token is still unique but guessable). R12 is about
+  the core; the token is host-side.
+* **Where it shows.** In the upgrade URL (plaintext `ws://` on the loopback or the LAN). The dev server logs only
+  its first eight characters, never the URL. The TypeScript and Kotlin clients' errors name the configured URL, not
+  the one with the token; Swift's Foundation error descriptions can carry the failing URL, token included, into
+  the device log. Comparison is not constant-time; on a local dev server that is not a concern.
+* **Debug builds only.** The Android dev URL is honoured only when `BuildConfig.DEBUG`; another app on the device
+  can launch a debug build with `--es undra_dev_url ws://<its own server>` and that server would then serve the core
+  and receive the app's port calls (`Kv`, `SecureStore`, `Http`). This is the usual property of a debuggable dev
+  build (any React Native or Flutter dev-server URL has it) and is why release builds ignore both the extra and the
+  build property.
+* **`resume_grace` defaults to zero** in `ServerConfig`; only the dev runner (and the `serve` example) set it.
+
 ### 3. Android
 
 The Kotlin runtime's WebSocket client is its own, over `java.net.Socket` (RFC 6455: the handshake,
