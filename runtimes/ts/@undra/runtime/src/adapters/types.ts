@@ -250,21 +250,14 @@ function describe(error: unknown): string {
  */
 export function fsErrorFrom(error: unknown): FsError {
   if (error instanceof FsError) return error;
-  switch (nameOf(error)) {
-    case "QuotaExceededError":
-    case "ENOSPC":
-      return new FsError.Full();
-    case "NotFoundError":
-    case "ENOENT":
-      return new FsError.NotFound();
-    case "NotAllowedError":
-    case "SecurityError":
-    case "EACCES":
-    case "EPERM":
-      return new FsError.Denied();
-    default:
-      return new FsError.Io(describe(error));
-  }
+  const name = nameOf(error);
+  return name === "QuotaExceededError" || name === "ENOSPC"
+    ? new FsError.Full()
+    : name === "NotFoundError" || name === "ENOENT"
+      ? new FsError.NotFound()
+      : name === "NotAllowedError" || name === "SecurityError" || name === "EACCES" || name === "EPERM"
+        ? new FsError.Denied()
+        : new FsError.Io(describe(error));
 }
 
 // ---------------------------------------------------------------------------

@@ -368,7 +368,7 @@ export interface RecoveryHost {
   /** The signals observed, per handle. */
   readonly observed: Map<Handle, Set<number>>;
   /** Fails every call, stream and `observe` in flight with `error`; returns how many calls and streams. */
-  failInFlight(error: Error): number;
+  fail(error: Error): number;
   /** Ends the core: the channel is lost for good (`onClose`). */
   lose(error: Error): void;
   /** Hands `error` to `onError`, guarded as the core's own reports are. */
@@ -659,7 +659,7 @@ class Recovering implements Transport {
     let trap = firstTrap;
     let report = firstReport;
     this.#setRestarting(true);
-    const rejectedCalls = host.failInFlight(restartedError(trap));
+    const rejectedCalls = host.fail(restartedError(trap));
     let result: RestartResult;
     for (;;) {
       this.#times.push(Date.now());

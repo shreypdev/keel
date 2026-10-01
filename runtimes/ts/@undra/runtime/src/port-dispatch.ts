@@ -72,7 +72,10 @@ export function portOperation(call: Pick<PortCallPayload, "portId" | "methodId">
   return `${portName(call.portId, impl)} method 0x${call.methodId.toString(16)}`;
 }
 
-/** The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049): the port and the fix. */
+/**
+ * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049):
+ * the port and the fix (the other fix, mode `"wasm-main"`, is in the docs of `registerPort`).
+ */
 export function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
-  return `${portName(portId, impl)} is synchronous, and a wasm-worker core cannot wait for this thread: register it in LoadOptions.worker.ports, or use mode "wasm-main"`;
+  return `${portName(portId, impl)} is synchronous: in wasm-worker mode, register it in LoadOptions.worker.ports`;
 }

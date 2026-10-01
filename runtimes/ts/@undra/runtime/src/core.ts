@@ -478,7 +478,7 @@ export class UndraCore {
           core: this,
           handles: this.#handles,
           observed: this.#observed,
-          failInFlight: (error) => this.#failInFlight(error),
+          fail: (error) => this.#failInFlight(error),
           lose: (error) => {
             this.#lostForGood(error);
           },
@@ -679,8 +679,9 @@ export class UndraCore {
    * In `wasm-worker` mode a synchronous port (`impl.sync`) cannot be served from
    * this thread, because the core cannot wait for it: registering one throws
    * `UndraError("options")` naming the port and the fix (register it in the
-   * worker, in the module of `LoadOptions.worker.ports`, ADR-049). An
-   * asynchronous port registered after load is announced to the worker.
+   * worker, in the module of `LoadOptions.worker.ports`, ADR-049; or load the
+   * core in mode `"wasm-main"`). An asynchronous port registered after load is
+   * announced to the worker.
    */
   registerPort(portId: number, impl: PortImpl): void {
     this.#transport.portAdded?.(portId, impl);

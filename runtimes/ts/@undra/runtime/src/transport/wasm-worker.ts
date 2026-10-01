@@ -414,7 +414,7 @@ export class WasmWorkerTransport implements Transport {
     return new Promise<ControlAnswer>((resolve, reject) => {
       const worker = this.#worker;
       if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
-      if (!can) throw new UndraTransportError("unsupported", `the worker script cannot ${operation}: rebuild it from the same @undra/runtime as the host`);
+      if (!can) throw new UndraTransportError("unsupported", `the worker script cannot ${operation}: rebuild it with this @undra/runtime`);
       const id = this.#nextControlId++;
       this.#control.set(id, { resolve, reject });
       try {
