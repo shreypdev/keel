@@ -12,7 +12,8 @@ end-to-end core with its queries in a dependency crate (built for the web and th
 observed in Node), the gate run twice, from a fresh target directory, over its record and without the JavaScript
 toolchain, cold start measured in four alternating rounds against the base and against the branch with `sort_by`
 restored · **Fixes:** `fee57a5`, `07923c3`, `2d6156d`, `619c956`, `1b5b302` and the ADR/record update before this file;
-`main` (`38ea11d`) merged at `52342d2`.
+`main` merged twice: `38ea11d` at `52342d2`, then `fcbe221` (the API reference; site and workflows only) at
+`5267c21`.
 
 ## Verdict
 
@@ -153,6 +154,9 @@ panic logs at level 5 through the host, then traps" and the transport's typed `"
 * `scripts/wasm-size.sh`: at `cd298b2` twice (identical), from a fresh target directory (identical to the record),
   over the record (exit 1), without `node_modules` (exit 2, record untouched); after the fixes, recorded 95,684 /
   22,521; on the merged tree, **fails** (D1).
+* The second merge (`5267c21`) changed no code: `bash site/scripts/build-rustdoc.sh` (main's rustdoc with `-D
+  warnings`), `node --test site/scripts/decls.test.mjs` (10 passed), `build-all.mjs` (nothing to regenerate) and
+  `check-links.mjs --words` pass on it; the suites above stand.
 * Kotlin and Swift runtime suites were not run separately (the contract columns ran both over the playground core);
   Miri and ASan were not run (no `unsafe` and no FFI change here).
 
