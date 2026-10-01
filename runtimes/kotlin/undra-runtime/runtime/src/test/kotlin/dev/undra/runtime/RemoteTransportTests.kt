@@ -173,6 +173,40 @@ class RemoteTransportTests : Suite() {
             }
         }
 
+        case("streams: a STREAM_ITEM with flag 3 (cancelled by the core) ends the flow with UndraReplyException CANCELLED") {
+            withServer(configure = { conn ->
+                val previous = conn.onMessage
+                conn.onMessage = { bytes ->
+                    previous(bytes)
+                    val env = Envelope.decode(bytes)
+                    when (env.kind) {
+                        Envelope.Kind.CALL -> {
+                            val call = Payloads.Call.decode(env.payload)
+                            conn.send(Envelope.Kind.REPLY, Payloads.Reply(call.callId, ReplyStatus.STREAM_OPENED, NO_BYTES).toByteArray())
+                        }
+                        Envelope.Kind.STREAM_CREDIT -> {
+                            val credit = Payloads.StreamCredit.decode(env.payload)
+                            conn.send(Envelope.Kind.STREAM_ITEM, Payloads.StreamItem(credit.callId, StreamFlag.ITEM, Codecs.u32.encodeToByteArray(7u)).toByteArray())
+                            val failure = Payloads.StreamFailure(ReplyStatus.CANCELLED, "a restore replaced the receiver", "")
+                            conn.send(Envelope.Kind.STREAM_ITEM, Payloads.StreamItem(credit.callId, StreamFlag.FAILED, failure.toByteArray()).toByteArray())
+                        }
+                        else -> Unit
+                    }
+                }
+            }) { server ->
+                load(server).use { core ->
+                    val seen = CopyOnWriteArrayList<UInt>()
+                    val e = assertThrows<UndraReplyException> {
+                        runBlocking { core.stream(TARGET, METHOD, NO_BYTES).collect { seen.add(Codecs.u32.decodeAll(it)) } }
+                    }
+                    assertEq(listOf(7u), seen.toList())
+                    assertEq(ReplyStatus.CANCELLED, e.status)
+                    assertEq(0, e.body.size)
+                    assertEq(0, core.stats().hostPendingCalls)
+                }
+            }
+        }
+
         case("change-sets reach the mirror; observe and release go out as envelopes") {
             withServer { server ->
                 load(server).use { core ->

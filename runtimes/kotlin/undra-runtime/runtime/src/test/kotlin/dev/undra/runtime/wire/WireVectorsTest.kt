@@ -93,6 +93,7 @@ class WireVectorsTest : Suite() {
             "call payload" -> callPayload(v)
             "reply payload" -> replyPayload(v)
             "changeset payload" -> changeSetPayload(v)
+            "stream item payload" -> streamItemPayload(v)
             "keyed patch (item i32)" -> keyedPatch(v)
             else -> fnv(v)
         }
@@ -215,6 +216,55 @@ class WireVectorsTest : Suite() {
             }
             assertEq(expected.txnId, txn, "forEachEntry txn id")
             assertEq(expected.entries, seen, "forEachEntry entries")
+        }
+    }
+
+    /**
+     * A `StreamItem` payload (ADR-036). Flag 2 carries the stream's own `E` as raw bytes (`body_hex`), passed
+     * through untouched; flag 3 carries a [Payloads.StreamFailure] given field by field.
+     */
+    private fun streamItemPayload(v: WireVector) {
+        val o = v.value.asObj()
+        val callId = o["call_id"].asLong().toUInt()
+        val flag = Payloads.StreamFlag.fromByte(o["flag"].asInt().toUByte())
+        val failure = if (flag == Payloads.StreamFlag.FAILED) {
+            Payloads.StreamFailure(
+                Payloads.ReplyStatus.fromByte(o["status"].asInt().toUByte()),
+                o["message"].asString(),
+                o["detail"].asString(),
+            )
+        } else {
+            null
+        }
+        val body = failure?.toByteArray() ?: unhex(o["body_hex"].asString())
+        val expected = Payloads.StreamItem(callId, flag, body)
+        verify(v, expected, { expected.encode(it) }, { Payloads.StreamItem.decode(it) }, { Payloads.StreamItem.decode(it) },
+            selfDelimiting = false, minLen = 5)
+        if (failure == null) return
+
+        // The body is a whole, self-delimiting StreamFailure: it decodes back from every backing, and nothing
+        // shorter or longer does.
+        for (reader in listOf(UndraReader(unhex(v.hex)), UndraReader(directBuffer(unhex(v.hex))))) {
+            assertEq(callId, reader.readU32(), "${v.name}: call id")
+            assertEq(flag.code, reader.readU8(), "${v.name}: flag")
+            assertEq(failure, Payloads.StreamFailure.decode(reader), "${v.name}: failure from a reader")
+            reader.finish()
+        }
+        val decodedBody = Payloads.StreamItem.decode(unhex(v.hex)).body
+        assertEq(failure, Payloads.StreamFailure.decode(decodedBody), "${v.name}: failure from the item's body")
+        assertWire<WireException.TrailingBytes>("${v.name}: failure with a trailing byte") { Payloads.StreamFailure.decode(decodedBody + 0) }
+        for (n in decodedBody.indices) {
+            assertWire<WireException>("${v.name}: failure prefix of $n bytes") { Payloads.StreamFailure.decode(decodedBody.copyOf(n)) }
+        }
+        // It maps to the SPEC 3.4 body of a failed reply with its status.
+        val reply = Payloads.Reply(callId, failure.status, failure.replyBody())
+        when (failure.status) {
+            Payloads.ReplyStatus.PANIC -> {
+                assertTrue(reply.body.contentEquals(decodedBody.copyOfRange(1, decodedBody.size)), "${v.name}: a panic's body is the failure's strings")
+                assertEq(Payloads.PanicInfo(failure.message, failure.detail), reply.readPanic())
+            }
+            Payloads.ReplyStatus.CANCELLED -> assertEq(0, reply.body.size, "${v.name}: a cancellation's body is empty")
+            else -> assertEq(failure.message, reply.readBadRequestReason())
         }
     }
 

@@ -20,10 +20,26 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         case timerFired(UInt32)
     }
 
-    /// One scripted stream: items sent only as far as credit allows, then an end or error marker.
+    /// How a scripted stream ends once its items are sent. Like the core, the fake sends the last
+    /// item without credit (docs/SPEC.md section 3.7).
+    enum Ending: Equatable {
+        /// Flag 1: the stream ended.
+        case end
+        /// Flag 2 with this body: the stream's own typed error `E`.
+        case error([UInt8])
+        /// Flag 3 with this body: the call failed (normally an encoded `Wire.StreamFailure`).
+        case failed([UInt8])
+
+        /// Flag 3 carrying `failure`.
+        static func failure(_ failure: Wire.StreamFailure) -> Ending {
+            return .failed(failure.encode())
+        }
+    }
+
+    /// One scripted stream: items sent only as far as credit allows, then its ending.
     struct FakeStream {
         var items: [[UInt8]]
-        var failureBody: [UInt8]?
+        var ending: Ending
         /// Keeps the stream open after the last item (no end marker).
         var holdOpen = false
         var credit: UInt32 = 0
@@ -35,8 +51,7 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     private enum PumpAction {
         case idle
         case item([UInt8])
-        case end
-        case failure([UInt8])
+        case finish(Ending)
     }
 
     private struct State {
@@ -322,10 +337,10 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     }
 
     /// Opens a scripted stream for `callId`: replies "stream opened" and then delivers items as
-    /// credit arrives, followed by the end marker (or an error marker with `failureBody`).
-    func openStream(_ callId: UInt32, items: [[UInt8]], failureBody: [UInt8]? = nil, holdOpen: Bool = false) {
+    /// credit arrives, followed by `ending`.
+    func openStream(_ callId: UInt32, items: [[UInt8]], ending: Ending = .end, holdOpen: Bool = false) {
         state.withLock { (current: inout State) -> Void in
-            current.streams[callId] = FakeStream(items: items, failureBody: failureBody, holdOpen: holdOpen)
+            current.streams[callId] = FakeStream(items: items, ending: ending, holdOpen: holdOpen)
         }
         deliver(Wire.Reply(callId: callId, status: .streamOpened))
         pump(callId)
@@ -355,21 +370,21 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
                 }
                 stream.finished = true
                 current.streams[callId] = stream
-                if let body = stream.failureBody {
-                    return .failure(body)
-                }
-                return .end
+                return .finish(stream.ending)
             }
             switch action {
             case .idle:
                 return
             case .item(let item):
                 deliverStreamItem(Wire.StreamItem(callId: callId, flag: .item, body: ArraySlice(item)))
-            case .end:
+            case .finish(.end):
                 deliverStreamItem(Wire.StreamItem(callId: callId, flag: .end))
                 return
-            case .failure(let body):
+            case .finish(.error(let body)):
                 deliverStreamItem(Wire.StreamItem(callId: callId, flag: .error, body: ArraySlice(body)))
+                return
+            case .finish(.failed(let body)):
+                deliverStreamItem(Wire.StreamItem(callId: callId, flag: .failed, body: ArraySlice(body)))
                 return
             }
         }

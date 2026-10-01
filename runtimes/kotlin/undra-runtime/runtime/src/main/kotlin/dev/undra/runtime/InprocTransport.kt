@@ -3,6 +3,7 @@ package dev.undra.runtime
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.Payloads.ReplyStatus
+import dev.undra.runtime.wire.Payloads.StreamFailure
 import dev.undra.runtime.wire.Payloads.StreamFlag
 import dev.undra.runtime.wire.WireException
 import java.nio.ByteBuffer
@@ -248,7 +249,9 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
                 val flag = StreamFlag.fromByte(r.readU8(), at)
                 target.onStreamItem(id, flag, r.readRemaining())
             } catch (e: WireException) {
-                target.onStreamItem(callId.toUInt(), StreamFlag.ERROR, reasonBody("the core sent a malformed stream item: ${e.message}"))
+                // A failure, not flag 2: that one carries the stream's own typed error E (ADR-036).
+                val failure = StreamFailure(ReplyStatus.BAD_REQUEST, "the core sent a malformed stream item: ${e.message}", "")
+                target.onStreamItem(callId.toUInt(), StreamFlag.FAILED, failure.toByteArray())
             }
         }
 

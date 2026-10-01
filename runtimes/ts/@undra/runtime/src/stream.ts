@@ -83,7 +83,7 @@ export class StreamCall implements AsyncIterableIterator<Uint8Array> {
     this.#settle();
   }
 
-  /** The stream failed (an error item, a rejected open, a lost channel); buffered items are still delivered first. */
+  /** The stream failed (an error or failure item, a rejected open, a lost channel); buffered items are still delivered first. */
   fail(error: unknown): void {
     if (this.#state === "failed" || this.#state === "closed" || this.#state === "ended") return;
     this.#state = "failed";

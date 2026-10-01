@@ -572,7 +572,7 @@ public object Payloads {
         }
     }
 
-    /** What a [StreamItem] carries; the `flag` byte of SPEC §3.7. */
+    /** What a [StreamItem] carries; the `flag` byte of SPEC §3.7 (ADR-036). */
     public enum class StreamFlag(
         /** The `u8` written on the wire. */
         public val code: UByte,
@@ -583,15 +583,26 @@ public object Payloads {
         /** The stream ended normally; the body is empty. */
         END(1u),
 
-        /** The stream failed; the body is the error `E` (or a `String` if the stream has no error type). */
-        ERROR(2u);
+        /**
+         * The stream ended with **its own** typed error; the body is the encoded `E`. Only a method whose
+         * schema return is `Result<Stream<T>, E>` sends it: a failed asynchronous opening, or an `Err(e)`
+         * item of an `impl Stream<Item = Result<T, E>>`. Never a core-made string.
+         */
+        ERROR(2u),
+
+        /**
+         * The call failed, in the reply-failure vocabulary: the body is a [StreamFailure]. Sent by the core
+         * for a stream it ended itself (a restore that replaced the receiver, shutdown) or that panicked.
+         * Ends the stream and needs no credit, like [END] and [ERROR].
+         */
+        FAILED(3u);
 
         public companion object {
             /**
              * The flag with wire code [b].
              *
              * @param at offset of the byte for the error report; `-1` when it is not known.
-             * @throws WireException.InvalidTag if [b] is not 0 to 2.
+             * @throws WireException.InvalidTag if [b] is not 0 to 3.
              */
             public fun fromByte(b: UByte, at: Int = -1): StreamFlag =
                 entries.getOrNull(b.toInt()) ?: throw WireException.InvalidTag(b.toUInt(), at, "StreamFlag")
@@ -599,11 +610,88 @@ public object Payloads {
     }
 
     /**
-     * core to host (envelope kind STREAM_ITEM): `call_id u32, flag u8, body`.
+     * The body of a [StreamFlag.FAILED] stream item (SPEC §3.7, ADR-036): the call failed, with the
+     * status codes of a failed [Reply], so the runtime maps it exactly as it maps a failed reply with
+     * that status (see [replyBody]). Layout: `status u8, message String, detail String`.
+     *
+     * The status is one of [ReplyStatus.PANIC] (the stream panicked: [message] is the panic message,
+     * [detail] its backtrace), [ReplyStatus.CANCELLED] (the core ended the stream itself, after a restore
+     * that replaced its receiver or at shutdown: [message] is the reason, [detail] is empty) or
+     * [ReplyStatus.BAD_REQUEST] (refused: [message] is the reason, [detail] is empty).
+     *
+     * ```kotlin
+     * val failure = Payloads.StreamFailure.decode(item.body)  // item.flag == StreamFlag.FAILED
+     * throw UndraReplyException(failure.status, failure.replyBody())
+     * ```
+     *
+     * @property status how the call failed: [ReplyStatus.PANIC], [ReplyStatus.CANCELLED] or
+     *   [ReplyStatus.BAD_REQUEST].
+     * @property message the panic message, the cancellation reason or the refusal reason.
+     * @property detail the backtrace of a panic; empty otherwise.
+     * @throws IllegalArgumentException on construction if [status] is not one of the three above.
+     */
+    public data class StreamFailure(val status: ReplyStatus, val message: String, val detail: String) : Payload {
+        init {
+            require(allows(status)) { "a stream failure has status PANIC, CANCELLED or BAD_REQUEST, not $status" }
+        }
+
+        override fun encode(w: UndraWriter) {
+            w.writeU8(status.code)
+            w.writeStr(message)
+            w.writeStr(detail)
+        }
+
+        /**
+         * The body of the failed [Reply] this failure stands for (SPEC §3.4): `String message, String
+         * backtrace` for [ReplyStatus.PANIC] (this failure's encoding without its status byte), empty for
+         * [ReplyStatus.CANCELLED], `String reason` for [ReplyStatus.BAD_REQUEST]. [Reply.readPanic] and
+         * [Reply.readBadRequestReason] read it back.
+         */
+        public fun replyBody(): ByteArray = when (status) {
+            ReplyStatus.PANIC -> UndraWriter().also {
+                it.writeStr(message)
+                it.writeStr(detail)
+            }.toByteArray()
+            ReplyStatus.BAD_REQUEST -> UndraWriter().also { it.writeStr(message) }.toByteArray()
+            else -> EMPTY // CANCELLED, the only other status the init block admits: a §3.4 status 3 body is empty
+        }
+
+        public companion object {
+            /**
+             * Whether [status] can end a stream as a failure: [ReplyStatus.PANIC], [ReplyStatus.CANCELLED]
+             * or [ReplyStatus.BAD_REQUEST].
+             */
+            public fun allows(status: ReplyStatus): Boolean =
+                status == ReplyStatus.PANIC || status == ReplyStatus.CANCELLED || status == ReplyStatus.BAD_REQUEST
+
+            /**
+             * Reads a stream failure from [r].
+             *
+             * @throws WireException.InvalidTag with type `"StreamFailure.status"` and the offset of the status
+             *   byte if the status is not 2, 3 or 5.
+             */
+            public fun decode(r: UndraReader): StreamFailure {
+                val at = r.position
+                val code = r.readU8()
+                val status = ReplyStatus.entries.getOrNull(code.toInt())?.takeIf { allows(it) }
+                    ?: throw WireException.InvalidTag(code.toUInt(), at, "StreamFailure.status")
+                val message = r.readStr()
+                return StreamFailure(status, message, r.readStr())
+            }
+
+            /** Decodes the whole body of a [StreamFlag.FAILED] item; rejects trailing bytes. */
+            public fun decode(bytes: ByteArray): StreamFailure = decodeWhole(bytes) { decode(it) }
+        }
+    }
+
+    /**
+     * core to host (envelope kind STREAM_ITEM): `call_id u32, flag u8, body`, where the body is the rest
+     * of the payload: the item `T` ([StreamFlag.ITEM]), nothing ([StreamFlag.END]), the stream's own `E`
+     * ([StreamFlag.ERROR]) or a [StreamFailure] ([StreamFlag.FAILED]).
      *
      * @property callId the stream's call id.
      * @property flag what [body] holds.
-     * @property body the encoded item or error (empty for [StreamFlag.END]).
+     * @property body the encoded item, error or failure (empty for [StreamFlag.END]).
      */
     public data class StreamItem(val callId: UInt, val flag: StreamFlag, val body: ByteArray) : Payload {
         override fun encode(w: UndraWriter) {

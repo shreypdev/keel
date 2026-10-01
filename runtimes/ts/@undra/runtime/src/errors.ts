@@ -67,7 +67,10 @@ function describeReply(status: ReplyStatus, body: Uint8Array): string {
  * {@link ReplyStatus.Panic} the encoded `message` and `backtrace` strings, for
  * {@link ReplyStatus.BadRequest} the encoded reason string, and empty for
  * {@link ReplyStatus.Cancelled}. A failed stream reports its error the same
- * way, with status {@link ReplyStatus.Error}.
+ * way: status {@link ReplyStatus.Error} with the encoded `E` when it ends with
+ * its own typed error, and the status and body of the matching failed reply
+ * when the core reports that the stream panicked, was cancelled by the core or
+ * was refused (`StreamFlag.Failed`, ADR-036).
  */
 export class UndraReplyError extends UndraError {
   override readonly name: string = "UndraReplyError";

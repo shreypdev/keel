@@ -44,6 +44,22 @@ The error a method can throw is named in its `- Throws:` documentation. Construc
 is `async throws`), and a stream (`AsyncThrowingStream<T, Error>`) ends with them; cancelling the task that consumes a
 stream still ends the loop quietly.
 
+## How a stream ends
+
+A stream's loop ends quietly when the stream is finished, and otherwise throws one of the same three
+(`docs/SPEC.md` 3.7, ADR-036):
+
+| The core ends the stream with | The loop throws |
+|---|---|
+| the stream's own error, from a method whose Rust signature returns `Result<impl Stream<Item = T>, E>` (a failed opening) or `impl Stream<Item = Result<T, E>>` (an `Err(e)` item) | `E`, for example `catch FeedError.unauthorised` |
+| a failure, because a restore replaced the stream's object or the core shut down | `UndraCallError.cancelledByCore` |
+| a failure, because the stream panicked | `UndraCallError.panicked(message:backtrace:)`, with the backtrace |
+| a failure, because the core refused the call | `UndraCallError.refused(reason:)` |
+
+The core says which one it is on the wire: a typed error and a failure are different stream items, and a failure carries
+the same status as a failed call. Nothing is read from the text of a message. An error item on a stream without an error
+type, or one that does not decode as `E`, is `UndraCallError.malformed`.
+
 ## Commands report instead of throwing
 
 A synchronous method that returns nothing and has no error type, such as `todos.toggle(id:)` or `counter.increment()`, is a

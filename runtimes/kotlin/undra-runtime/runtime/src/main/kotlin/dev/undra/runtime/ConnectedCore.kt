@@ -444,10 +444,32 @@ internal class ConnectedCore(
                 }
             }
             StreamFlag.ERROR -> {
+                // The stream's own typed error E: generated code decodes it from the ERROR body.
                 pending.remove(callId.toInt())
                 failStream(stream, UndraReplyException(ReplyStatus.ERROR, body))
             }
+            StreamFlag.FAILED -> {
+                pending.remove(callId.toInt())
+                failStream(stream, streamFailure(callId, body))
+            }
         }
+    }
+
+    /**
+     * What a [StreamFlag.FAILED] item ends its stream with: exactly the failed reply with the same status and
+     * the SPEC 3.4 body (ADR-036), so generated `fromReply` passes it through and [UndraReplyException.panicInfo]
+     * and [UndraReplyException.badRequestReason] read it. A body that does not decode is still an
+     * [UndraReplyException], never a [WireException].
+     */
+    private fun streamFailure(callId: UInt, body: ByteArray): UndraReplyException {
+        val failure = try {
+            Payloads.StreamFailure.decode(body)
+        } catch (e: WireException) {
+            return UndraReplyException(ReplyStatus.BAD_REQUEST, badRequestBody("the core sent a malformed stream failure: ${e.message}"))
+        }
+        // A status 3 body is empty (SPEC 3.4), so the reason would be lost without this.
+        if (failure.status == ReplyStatus.CANCELLED) UndraLog.debug("the core cancelled stream $callId: ${failure.message}")
+        return UndraReplyException(failure.status, failure.replyBody())
     }
 
     override fun onChangeSet(changeSet: ByteArray) {

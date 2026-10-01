@@ -91,20 +91,40 @@ internal class FakeTransport(
 
     fun endOnCore(callId: UInt) = onCore { events.onStreamItem(callId, StreamFlag.END, NO_BYTES) }
 
+    /** Ends a stream with flag 2: [body] is the stream's own typed error `E`. */
     fun errorOnCore(callId: UInt, body: ByteArray) = onCore { events.onStreamItem(callId, StreamFlag.ERROR, body) }
+
+    /** Ends a stream with flag 3 and a raw [body] (well-formed or not). */
+    fun failedOnCore(callId: UInt, body: ByteArray) = onCore { events.onStreamItem(callId, StreamFlag.FAILED, body) }
+
+    /** Ends a stream with flag 3: the core panicked, cancelled it or refused it (ADR-036). */
+    fun failedOnCore(callId: UInt, failure: Payloads.StreamFailure) = failedOnCore(callId, failure.toByteArray())
 
     // ---- streams that honour credit, like the real core ----
     private val producers = java.util.concurrent.ConcurrentHashMap<UInt, StreamProducer>()
 
-    /** Answers [call] as an opened stream that will produce [items], obeying the credit the host grants, then end (or fail with [failure]). */
-    fun serveStream(call: Payloads.Call, items: List<ByteArray>, failure: ByteArray? = null): StreamProducer {
-        val producer = StreamProducer(call.callId, ArrayDeque(items), failure)
+    /**
+     * Answers [call] as an opened stream that will produce [items], obeying the credit the host grants, then end:
+     * with flag 3 and [failed] if given, else with flag 2 and [failure] if given, else normally.
+     */
+    fun serveStream(
+        call: Payloads.Call,
+        items: List<ByteArray>,
+        failure: ByteArray? = null,
+        failed: Payloads.StreamFailure? = null,
+    ): StreamProducer {
+        val producer = StreamProducer(call.callId, ArrayDeque(items), failure, failed)
         producers[call.callId] = producer
         replyOnCore(call.callId, ReplyStatus.STREAM_OPENED)
         return producer
     }
 
-    inner class StreamProducer(val callId: UInt, private val items: ArrayDeque<ByteArray>, private val failure: ByteArray?) {
+    inner class StreamProducer(
+        val callId: UInt,
+        private val items: ArrayDeque<ByteArray>,
+        private val failure: ByteArray?,
+        private val failed: Payloads.StreamFailure?,
+    ) {
         @Volatile var sent = 0
         @Volatile var totalCredit = 0L
         @Volatile var finished = false
@@ -121,7 +141,11 @@ internal class FakeTransport(
                 }
                 if (items.isEmpty() && !finished) {
                     finished = true
-                    if (failure != null) events.onStreamItem(callId, StreamFlag.ERROR, failure) else events.onStreamItem(callId, StreamFlag.END, NO_BYTES)
+                    when {
+                        failed != null -> events.onStreamItem(callId, StreamFlag.FAILED, failed.toByteArray())
+                        failure != null -> events.onStreamItem(callId, StreamFlag.ERROR, failure)
+                        else -> events.onStreamItem(callId, StreamFlag.END, NO_BYTES)
+                    }
                 }
             }
         }

@@ -59,7 +59,7 @@ todos.close()                             // or let the cleaner release it if yo
 | `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing of superseded full values; a throwing callback is logged and skipped, a malformed change-set is dropped whole |
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
 | `PortImpl(sync, methods)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply` |
-| Errors | `UndraException` (base of generated errors too), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)` |
+| Errors | `UndraException` (base of generated errors too), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`. A stream that fails ends with `UndraReplyException` too: status `ERROR` for its own typed error (flag 2), or the failure's own status and SPEC 3.4 body (flag 3: `PANIC`, `CANCELLED` by the core, `BAD_REQUEST`; ADR-036) |
 
 ### Threading, in one paragraph
 
