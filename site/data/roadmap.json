@@ -122,6 +122,10 @@
         {
           "title": "Full-JSON undra_schema_json",
           "text": "So the dlopen-based bindgen keeps doc comments."
+        },
+        {
+          "title": "Web core under its size budget",
+          "text": "The hello-world wasm drops under its 120 KB gzipped budget, and CI measures it on every change so it stays there (ADR-052)."
         }
       ]
     },

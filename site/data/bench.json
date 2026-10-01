@@ -56,13 +56,17 @@
     },
     {
       "id": "web-size",
-      "operation": "Web core, gzipped wasm — over budget, tracked as E5",
-      "value": 135,
+      "operation": "Web core, hello world, gzipped wasm",
+      "value": 95.8,
       "unit": "KB",
       "budget": 120,
       "budgetUnit": "KB",
-      "gate": null,
-      "source": "https://github.com/shreypdev/undra/blob/main/README.md#why-its-fast"
+      "gate": "scripts/wasm-size.sh: ≤ 120 KB and ≤ 5% over the record",
+      "source": "https://github.com/shreypdev/undra/blob/main/bench/results/web-size.jsonl",
+      "measured": {
+        "file": "bench/results/web-size.jsonl",
+        "artifact": "web/hello-wasm"
+      }
     },
     {
       "id": "android-size",

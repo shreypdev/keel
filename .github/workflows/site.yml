@@ -17,12 +17,16 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "bench/results/web-size.jsonl"
+      - "README.md"
       - ".github/workflows/site.yml"
   pull_request:
     paths:
       - "site/**"
       - "examples/playground/**"
       - "runtimes/ts/**"
+      - "bench/results/web-size.jsonl"
+      - "README.md"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -72,13 +76,15 @@ jobs:
 
       # 2. The site's generated files (benchmark table, roadmap, blog index, feed, sitemap, search
       #    index, llms.txt) must be what is committed. If this fails, run
-      #    `node site/scripts/build-all.mjs` locally and commit the result.
+      #    `node site/scripts/build-all.mjs` locally and commit the result. The measured numbers in
+      #    README.md come from the same records (bench/results/web-size.jsonl, ADR-052), so it is
+      #    checked with them.
       - name: Generated files are up to date
         run: |
           node site/scripts/build-all.mjs
-          if [ -n "$(git status --porcelain site/)" ]; then
-            git --no-pager diff --stat site/
-            echo "::error::site/ is stale. Run 'node site/scripts/build-all.mjs' and commit the result."
+          if [ -n "$(git status --porcelain site/ README.md)" ]; then
+            git --no-pager diff --stat site/ README.md
+            echo "::error::site/ or README.md is stale. Run 'node site/scripts/build-all.mjs' and commit the result."
             exit 1
           fi
 
