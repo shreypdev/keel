@@ -485,7 +485,7 @@ fn a_closure_that_reads_its_own_derived_list_panics_with_the_cycle_message() {
     let handle = Arc::clone(&me);
     let view = list
         .derive()
-        .filter(move |n: &u32| handle.get().is_none_or(|v| v.len() > 0) && *n > 0)
+        .filter(move |n: &u32| handle.get().is_none_or(|v| !v.is_empty()) && *n > 0)
         .build();
     me.set(view.clone()).ok().unwrap();
     let text = panic_text(|| {
@@ -507,13 +507,19 @@ fn reading_a_view_inside_its_sources_update_closure_panics_instead_of_deadlockin
             let _ = view.len();
         });
     });
-    assert!(text.contains("the closure passed to Signal::update read"), "{text}");
+    assert!(
+        text.contains("the closure passed to Signal::update read"),
+        "{text}"
+    );
     let text = panic_text(|| {
         list.update(|_| {
             let _ = view.get();
         });
     });
-    assert!(text.contains("the closure passed to Signal::update read"), "{text}");
+    assert!(
+        text.contains("the closure passed to Signal::update read"),
+        "{text}"
+    );
     list.push(3);
     assert_eq!(view.get(), [2, 3], "nothing was left locked");
 }
@@ -525,9 +531,13 @@ fn debug_builds_panic_when_a_pipeline_closure_reads_or_writes_a_signal() {
     let other = Signal::new(1_u32);
     let reader = {
         let other = other.clone();
-        list.derive().filter(move |n: &u32| *n > other.get()).build()
+        list.derive()
+            .filter(move |n: &u32| *n > other.get())
+            .build()
     };
-    let text = panic_text(|| drop(reader.len()));
+    let text = panic_text(|| {
+        let _ = reader.len();
+    });
     assert!(
         text.contains("a derived list's closure read a signal")
             && text.contains("Pass the value as a parameter"),
@@ -543,14 +553,33 @@ fn debug_builds_panic_when_a_pipeline_closure_reads_or_writes_a_signal() {
             .build()
     };
     let text = panic_text(|| drop(writer.get()));
-    assert!(text.contains("a derived list's closure wrote a signal"), "{text}");
+    assert!(
+        text.contains("a derived list's closure wrote a signal"),
+        "{text}"
+    );
     // Reading the source itself, a computed or another derived list is the same violation.
     let doubled = Computed::new(&other, |n| n * 2);
-    let via_computed = list.derive().filter(move |_: &u32| doubled.get() > 0).build();
-    assert!(panic_text(|| drop(via_computed.len())).contains("read a signal"));
+    let via_computed = list
+        .derive()
+        .filter(move |_: &u32| doubled.get() > 0)
+        .build();
+    assert!(
+        panic_text(|| {
+            let _ = via_computed.len();
+        })
+        .contains("read a signal")
+    );
     let first = list.derive().build();
-    let via_view = list.derive().filter(move |_: &u32| !first.is_empty()).build();
-    assert!(panic_text(|| drop(via_view.len())).contains("read a signal"));
+    let via_view = list
+        .derive()
+        .filter(move |_: &u32| !first.is_empty())
+        .build();
+    assert!(
+        panic_text(|| {
+            let _ = via_view.len();
+        })
+        .contains("read a signal")
+    );
     // The thread is left clean: ordinary reads work.
     assert_eq!(other.get(), 1);
 }
@@ -562,7 +591,9 @@ fn release_builds_do_not_check_purity_and_do_not_hang() {
     let other = Signal::new(1_u32);
     let reader = {
         let other = other.clone();
-        list.derive().filter(move |n: &u32| *n > other.get()).build()
+        list.derive()
+            .filter(move |n: &u32| *n > other.get())
+            .build()
     };
     assert_eq!(reader.get(), [2]);
     // A closure that captures its own source reads it without a hang (documented as unsupported:
