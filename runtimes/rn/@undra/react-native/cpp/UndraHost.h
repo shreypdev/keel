@@ -136,8 +136,9 @@ struct StartOptions {
   /// The standard ports the module answers natively (ADR-038 amendment B): ids of `Kv`,
   /// `SecureStore`, `Fs` and `Connectivity` that `platform` supports. The others stay JavaScript's.
   std::vector<uint32_t> nativePorts;
-  /// The phone's platform; null for none (every port is then JavaScript's, as before).
-  Platform *platform = nullptr;
+  /// The phone's platform; null for none (every port is then JavaScript's, as before). Shared: the
+  /// native defaults keep it until they are destroyed.
+  std::shared_ptr<Platform> platform;
 };
 
 /// Counters for `stats()` and the tests.

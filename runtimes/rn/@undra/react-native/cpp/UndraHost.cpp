@@ -171,7 +171,7 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
   }
   if (options.platform != nullptr && !options.nativePorts.empty()) {
     try {
-      defaults_ = std::make_unique<NativeDefaults>(api_, *options.platform, options.nativePorts, [this](uint8_t level, const std::string &message) {
+      defaults_ = std::make_unique<NativeDefaults>(api_, options.platform, options.nativePorts, [this](uint8_t level, const std::string &message) {
         log(level, message.c_str());
       });
     } catch (...) {

@@ -136,7 +136,7 @@ class NativeDefaults {
   using Log = std::function<void(uint8_t level, const std::string &message)>;
 
   /// `ports` are the ports to answer natively (a subset of `nativePortsOf(platform)`).
-  NativeDefaults(const Api &api, Platform &platform, const std::vector<uint32_t> &ports, Log log);
+  NativeDefaults(const Api &api, std::shared_ptr<Platform> platform, const std::vector<uint32_t> &ports, Log log);
   ~NativeDefaults();
   NativeDefaults(const NativeDefaults &) = delete;
   NativeDefaults &operator=(const NativeDefaults &) = delete;
@@ -162,6 +162,8 @@ class NativeDefaults {
   void report(bool online, NetKind kind) noexcept;
 
   const Api &api_;
+  /// Kept alive while anything made from it (stores, the monitor, the workers) may run.
+  std::shared_ptr<Platform> platform_;
   Log log_;
   bool kv_ = false;
   bool secureStore_ = false;

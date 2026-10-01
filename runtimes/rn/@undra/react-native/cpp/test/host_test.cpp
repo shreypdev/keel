@@ -736,14 +736,15 @@ void testsWithNativeDefaults(const Api *api) {
   char pattern[] = "/tmp/undra-rn-defaults.XXXXXX";
   const char *base = ::mkdtemp(pattern);
   check(base != nullptr, "a temporary directory");
-  TestPlatform platform(std::string(base) + "/kv", std::string(base) + "/fs");
+  auto shared = std::make_shared<TestPlatform>(std::string(base) + "/kv", std::string(base) + "/fs");
+  TestPlatform &platform = *shared;
   const std::vector<uint32_t> native = nativePortsOf(platform);
   check(native.size() == 4, "the test platform offers Kv, SecureStore, Fs and Connectivity");
 
   Fixture f(api);
   StartOptions options;
   options.nativePorts = native;
-  options.platform = &platform;
+  options.platform = shared;
   const std::vector<uint8_t> cfg = config();
   {
     CallScope scope(*f.host, nullptr);

@@ -304,7 +304,15 @@ jobs:
           CXX: clang++-18
           UNDRA_RN_REQUIRE_JSI: "1"
         run: runtimes/rn/@undra/react-native/cpp/test/run.sh
-      - name: Unit tests (NativeTransport, frame scheduler, polyfills, loadNative)
+      # The pure Java of the package's Android library (the secure-store seal against an AES-GCM vector, the
+      # network classification), with the runner's JDK; the Keystore and ConnectivityManager are device-checked.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: The Android library's pure Java (javac, no SDK)
+        run: runtimes/rn/@undra/react-native/android/test/run.sh
+      - name: Unit tests (NativeTransport, frame scheduler, polyfills, loadNative, the default adapters)
         working-directory: runtimes/rn/@undra/react-native
         run: npm test
       - name: Typecheck (sources and the build config)

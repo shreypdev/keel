@@ -128,12 +128,14 @@ void Worker::stop() noexcept {
 
 // ----- NativeDefaults ---------------------------------------------------------------------------
 
-NativeDefaults::NativeDefaults(const Api &api, Platform &platform, const std::vector<uint32_t> &ports, Log log)
+NativeDefaults::NativeDefaults(const Api &api, std::shared_ptr<Platform> shared, const std::vector<uint32_t> &ports, Log log)
     : api_(api),
+      platform_(std::move(shared)),
       log_(std::move(log)),
-      kvWorker_(&platform, "undra-kv"),
-      secureWorker_(&platform, "undra-securestore"),
-      fsWorker_(&platform, "undra-fs") {
+      kvWorker_(platform_.get(), "undra-kv"),
+      secureWorker_(platform_.get(), "undra-securestore"),
+      fsWorker_(platform_.get(), "undra-fs") {
+  Platform &platform = *platform_;
   for (uint32_t id : ports) {
     if (id == ports::kKv) {
       const std::string dir = platform.kvDirectory();

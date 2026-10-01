@@ -13,7 +13,7 @@
     "./src/polyfills.ts",
     "./dist/polyfills.js"
   ],
-  "//": "Metro reads the `react-native` condition and field (the TypeScript sources, so an app needs no build step of this package); everything else reads `dist`. The native module is a pure C++ TurboModule: `UndraReactNative.podspec` for iOS, `android/CMakeLists.txt` through `react-native.config.js` for Android (a pure C++ dependency, no Gradle project), and `codegenConfig` for both.",
+  "//": "Metro reads the `react-native` condition and field (the TypeScript sources, so an app needs no build step of this package); everything else reads `dist`. The native module is a C++ TurboModule: `UndraReactNative.podspec` for iOS, `android/CMakeLists.txt` through `react-native.config.cjs` for Android, and `codegenConfig` for both; on Android the package is also a Java library (`android/build.gradle`: the Keystore, ConnectivityManager and the app's directories for the default ports, ADR-038 amendment B).",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -33,6 +33,9 @@
     "!cpp/test",
     "ios",
     "android/CMakeLists.txt",
+    "android/build.gradle",
+    "android/proguard-rules.pro",
+    "android/src",
     "UndraReactNative.podspec",
     "react-native.config.cjs",
     "babel-plugin.cjs"
@@ -63,7 +66,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:contract": "vitest run --config vitest.contract.config.ts",
-    "test:native": "cpp/test/run.sh",
+    "test:native": "cpp/test/run.sh && android/test/run.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json --noEmit"
   },
   "devDependencies": {

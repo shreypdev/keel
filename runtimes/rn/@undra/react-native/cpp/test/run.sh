@@ -73,3 +73,14 @@ elif [ "${UNDRA_RN_REQUIRE_JSI:-}" = 1 ]; then
 else
   echo "# skipped the JSI compile check: npm install in examples/playground/rn first"
 fi
+
+# 4. The Apple platform of the default ports (ios/UndraPlatformApple.mm: the Keychain, nw_path_monitor)
+#    runs only on a device, but it must compile against the iOS SDK: checked on macOS with Xcode.
+if [ "$(uname -s)" = Darwin ] && xcrun --sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
+  echo "# the Apple platform against the iOS SDK"
+  xcrun --sdk iphonesimulator clang++ -std=c++20 -fobjc-arc -x objective-c++ -fsyntax-only -Wall -Wextra -Werror \
+    -target arm64-apple-ios17.0-simulator -I "$pkg/cpp" "$pkg/ios/UndraPlatformApple.mm"
+  echo "ok - UndraPlatformApple.mm compiles"
+else
+  echo "# skipped the Apple platform compile check: no iOS SDK on this machine"
+fi
