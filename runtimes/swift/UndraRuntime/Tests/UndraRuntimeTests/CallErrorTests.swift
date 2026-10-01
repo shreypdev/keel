@@ -751,3 +751,87 @@ final class ReportTests: XCTestCase {
         XCTAssertNotNil(LoadOptions(mode: .inproc, expectedSchemaHash: 1, onError: handler).onError)
     }
 }
+
+// MARK: - UndraCore.shared without a loaded core
+
+/// ADR-032, decision 7. No test in this target loads a real core (`UndraCore.connect` never sets the
+/// shared slot), so nothing is loaded here and `shared` is the placeholder.
+@MainActor
+final class SharedPlaceholderTests: XCTestCase {
+    func testSharedWithNothingLoadedIsAShutDownPlaceholderAndCurrentStaysNil() {
+        XCTAssertNil(UndraCore.current)
+        let shared = UndraCore.shared
+        XCTAssertTrue(shared.isShutDown)
+        XCTAssertEqual(shared.mode, .inproc)
+        XCTAssertNil(UndraCore.current, "the placeholder never becomes the loaded core")
+        XCTAssertTrue(UndraCore.shared === shared, "one placeholder, not one per use")
+    }
+
+    func testSyncCallsOnThePlaceholderThrowClosed() {
+        let shared = UndraCore.shared
+        XCTAssertThrowsError(try shared.callSync(.freeFunction(methodId: 1), method: 1, args: [])) { error in
+            XCTAssertEqual(error as? UndraTransportError, .closed)
+            XCTAssertEqual(UndraCallError.mapped(error) as? UndraCallError, .unavailable(.closed))
+        }
+        XCTAssertThrowsError(try shared.construct(type: 1, method: 2, args: [])) { error in
+            XCTAssertEqual(UndraCallError.mapped(error) as? UndraCallError, .unavailable(.closed))
+        }
+        XCTAssertThrowsError(try shared.snapshot()) { error in
+            XCTAssertEqual(error as? UndraTransportError, .closed)
+        }
+        XCTAssertThrowsError(try shared.restore([1])) { error in
+            XCTAssertEqual(error as? UndraTransportError, .closed)
+        }
+    }
+
+    func testAsyncCallsAndStreamsOnThePlaceholderFailClosed() async {
+        let shared = UndraCore.shared
+        let error = await captureError {
+            _ = try await shared.call(.freeFunction(methodId: 1), method: 1, args: [])
+        }
+        guard let failure = error else {
+            return XCTFail("a call on the placeholder must fail")
+        }
+        XCTAssertEqual(UndraCallError.mapped(failure) as? UndraCallError, .unavailable(.closed))
+        let stream = shared.stream(
+            .freeFunction(methodId: 1),
+            method: 1,
+            args: [],
+            decode: { (body: [UInt8]) throws -> UInt8 in return body[0] },
+            mapError: { UndraCallError.mapped(streamFailure: $0) }
+        )
+        let streamError = await captureError {
+            for try await _ in stream {}
+        }
+        XCTAssertEqual(streamError as? UndraCallError, .unavailable(.closed))
+    }
+
+    func testEverythingElseOnThePlaceholderIsAHarmlessNoOp() {
+        let shared = UndraCore.shared
+        shared.report(UndraTransportError.closed, operation: "Todos.toggle")
+        shared.release(UndraHandle(rawValue: 5))
+        shared.event(port: 1, method: 2, payload: [3])
+        shared.timerFired(4)
+        shared.observe(UndraHandle(rawValue: 5), signal: 0, on: true)
+        shared.registerPort(0xAB, .sync([:]))
+        shared.shutdown()
+        XCTAssertEqual(shared.stats().hostRegisteredPorts, 0, "nothing registers on the placeholder")
+        XCTAssertEqual(shared.stats().hostPendingCalls, 0)
+        XCTAssertEqual(shared.stats().hostLiveHandles, 0)
+        XCTAssertEqual(shared.stats().hostMirroredStores, 0)
+        XCTAssertNil(UndraCore.current)
+    }
+
+    func testTheLifecycleReporterDefaultsToTheSharedCoreAndDoesNotTrap() {
+        UndraLifecycle().changed(.active)
+    }
+
+    func testARealShutDownCoreIgnoresPortRegistration() throws {
+        let transport = FakeTransport()
+        let core = try makeCore(transport)
+        core.shutdown()
+        core.registerPort(0xCD, .sync([:]))
+        XCTAssertEqual(core.stats().hostRegisteredPorts, 0)
+        XCTAssertEqual(transport.sent, [])
+    }
+}

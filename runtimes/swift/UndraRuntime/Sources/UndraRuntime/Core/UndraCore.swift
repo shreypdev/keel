@@ -45,12 +45,19 @@ public final class UndraCore: @unchecked Sendable {
 
     private static let sharedSlot = Guarded<UndraCore?>(nil)
 
+    /// What `shared` returns when no core is loaded: shut down from the start, over a transport
+    /// that reaches nothing.
+    private static let unloaded = UndraCore(transport: UnloadedTransport(), isShutDown: true)
+
+    /// Whether the placeholder's "load a core" message has been logged.
+    private static let unloadedWarning = Guarded<Bool>(false)
+
     /// The change-set mirror: stores register with it and it applies the core's updates on the
     /// main actor. `register(handle) { signal, op, reader in ... }`.
     public let mirror: Mirror
 
     let transport: any UndraTransport
-    private let state = Guarded<State>(State())
+    private let state: Guarded<State>
     private let blockingTimeout: Double
     private let onError: (@Sendable (UndraUnhandledError) -> Void)?
     private let deferredQueue = DispatchQueue(label: "dev.undra.runtime.deferred")
@@ -62,12 +69,14 @@ public final class UndraCore: @unchecked Sendable {
     init(
         transport: any UndraTransport,
         blockingCallTimeout: Double = 30,
-        onError: (@Sendable (UndraUnhandledError) -> Void)? = nil
+        onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
+        isShutDown: Bool = false
     ) {
         self.transport = transport
         self.mirror = Mirror()
         self.blockingTimeout = blockingCallTimeout
         self.onError = onError
+        self.state = Guarded<State>(State(isShutDown: isShutDown))
     }
 
     // MARK: Loading
@@ -99,15 +108,32 @@ public final class UndraCore: @unchecked Sendable {
         return core
     }
 
-    /// The core that `UndraCore.load(_:)` attached first, and which is not shut down.
+    /// The core that `UndraCore.load(_:)` attached first and which is not shut down, or, when there
+    /// is none, a permanently shut-down placeholder.
     ///
-    /// Generated code uses it as the default `ctx`. Using it before a successful `load` is a
-    /// programming error and stops the process with a message that says so.
+    /// Generated code uses it as the default `ctx`. Using it before a successful `load`, or after
+    /// `shutdown()`, is a programming error but not a crash: calls on the placeholder fail with
+    /// ``UndraCallError/unavailable(_:)`` (`.closed`), constructors throw it, commands only log
+    /// (the placeholder has no `LoadOptions.onError`), and the first use logs what to do.
+    /// ``current`` still returns `nil` in that state, and the placeholder never becomes the shared
+    /// core.
     public static var shared: UndraCore {
         if let core = current {
             return core
         }
-        fatalError("UndraCore.shared was used before UndraCore.load(_:) succeeded. Load a core at app startup, before creating any Undra object.")
+        let first = unloadedWarning.withLock { (warned: inout Bool) -> Bool in
+            if warned {
+                return false
+            }
+            warned = true
+            return true
+        }
+        if first {
+            UndraLog.error(
+                "UndraCore.shared was used while no core is loaded (before UndraCore.load(_:) succeeds, or after shutdown()); calls on it fail with UndraCallError.unavailable(.closed). Load a core at app startup, before creating any Undra object."
+            )
+        }
+        return unloaded
     }
 
     /// The shared core, or `nil` if none is loaded.
@@ -456,8 +482,12 @@ public final class UndraCore: @unchecked Sendable {
     /// Registers the host implementation of port `id`, replacing any earlier one.
     ///
     /// `impl` usually comes from a generated `<name>PortImpl(_:)` function. The standard ports
-    /// have default adapters (`LoadOptions.adapters`); registering one afterwards overrides it.
+    /// have default adapters (`LoadOptions.adapters`); registering one afterwards overrides it. A
+    /// shut-down core ignores the call.
     public func registerPort(_ id: UInt32, _ impl: PortImpl) {
+        if isShutDown {
+            return
+        }
         state.withLock { (current: inout State) -> Void in
             current.ports[id] = impl
         }
