@@ -488,18 +488,46 @@ fn upgrade_regenerates_the_bindings_for_real() {
         eprintln!("skipped: git is not installed");
         return;
     }
-    // A clone of this repository stands in for GitHub: git is told to fetch it instead (`insteadOf`),
-    // and Cargo to use git's own fetch, which honours that; the tags v0.0.9 and v<current> are its HEAD.
+    // A repository built from this checkout's tree stands in for GitHub: git is told to fetch it
+    // instead (`insteadOf`), and Cargo to use git's own fetch, which honours that; the tags v0.0.9
+    // and v<current> are its one commit. It is a fresh repository rather than a clone because CI
+    // checks out shallowly, and Cargo refuses to fetch a tag whose root is shallow.
     let dir = TempDir::new("upgrade-e2e");
     let clone = dir.path().join("undra-source");
+    std::fs::create_dir_all(&clone).unwrap();
     run_ok(
         Command::new("git")
-            .args(["clone", "--quiet", "--local"])
-            .arg(common::repo_root())
-            .arg(&clone),
+            .args(["init", "--quiet"])
+            .current_dir(&clone),
     );
+    run_ok(Command::new("sh").arg("-c").arg(format!(
+        "git -C '{}' archive --format=tar HEAD | tar -x -C '{}'",
+        common::repo_root().display(),
+        clone.display()
+    )));
+    let git = |args: &[&str]| {
+        let mut c = Command::new("git");
+        c.args([
+            "-c",
+            "user.name=undra-test",
+            "-c",
+            "user.email=undra-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(&clone);
+        c
+    };
+    run_ok(&mut git(&["add", "-A"]));
+    run_ok(&mut git(&[
+        "commit",
+        "--quiet",
+        "-m",
+        "the tree under test",
+    ]));
     for tag in ["v0.0.9", &format!("v{CURRENT}")] {
-        run_ok(Command::new("git").args(["tag", tag]).current_dir(&clone));
+        run_ok(&mut git(&["tag", tag]));
     }
     let root = dir.path().join("regen");
     run_ok(
