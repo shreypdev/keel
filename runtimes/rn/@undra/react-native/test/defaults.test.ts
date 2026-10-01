@@ -172,6 +172,58 @@ describe("loadNative and the native defaults", () => {
     core.close();
   });
 
+  test("a native default is the only one: a JavaScript adapter the web defaults would add is dropped", async () => {
+    // Review (2026-10-02): `UndraCore.attach` merges `browserAdapters()` under the options, and an app that polyfills
+    // `navigator.onLine` and a global `addEventListener` gets `browserConnectivity()` from it: a second Connectivity
+    // source next to the native one, reporting `online` whatever the device says.
+    const target = globalThis as { navigator?: unknown; addEventListener?: unknown; removeEventListener?: unknown };
+    const navigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", { value: { onLine: true }, configurable: true, writable: true });
+    target.addEventListener = () => {};
+    target.removeEventListener = () => {};
+    try {
+      const native = new FakeNative();
+      native.defaults = { ports: ALL };
+      installFake(native);
+      const core = await loadNative({ expectedSchemaHash: native.hash });
+      await tick(5);
+      expect(native.started?.nativePorts).toEqual(ALL);
+      expect(native.log.filter((l) => l.startsWith(`event ${PortIds.Connectivity.portId} `))).toEqual([]);
+      core.close();
+
+      // Overridden, the app's own source is the one that reports.
+      delete g.__undraNative;
+      const again = new FakeNative();
+      again.defaults = { ports: ALL };
+      installFake(again);
+      const reports: boolean[] = [];
+      const second = await loadNative({
+        expectedSchemaHash: again.hash,
+        adapters: {
+          connectivity: {
+            subscribe: (emit) => {
+              queueMicrotask(() => {
+                reports.push(true);
+                emit(false, "none");
+              });
+              return () => {};
+            },
+          },
+        },
+      });
+      await tick(5);
+      expect(again.started?.nativePorts).not.toContain(PortIds.Connectivity.portId);
+      expect(again.log.filter((l) => l.startsWith(`event ${PortIds.Connectivity.portId} `))).toHaveLength(1);
+      expect(reports).toEqual([true]);
+      second.close();
+    } finally {
+      delete target.addEventListener;
+      delete target.removeEventListener;
+      if (navigator !== undefined) Object.defineProperty(globalThis, "navigator", navigator);
+      else delete target.navigator;
+    }
+  });
+
   test("the default Lifecycle reports AppState to the core", async () => {
     const native = new FakeNative();
     installFake(native);

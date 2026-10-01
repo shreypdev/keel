@@ -1,6 +1,6 @@
-import { type AttachOptions, UndraCore, UndraTransportError } from "@undra/runtime";
+import { type AdapterOverrides, type AttachOptions, UndraCore, UndraTransportError } from "@undra/runtime";
 import { AppState, Platform, TurboModuleRegistry } from "react-native";
-import { nativeDefaultPorts, reactNativeAdapters } from "./adapters.js";
+import { nativeAdapterNames, nativeDefaultPorts, reactNativeAdapters } from "./adapters.js";
 import { nativeFrameScheduler } from "./frame.js";
 import type { NativePlatformDefaults, UndraNativeModule } from "./native.js";
 import type { Spec } from "./specs/NativeUndra.js";
@@ -126,9 +126,15 @@ function start(options: NativeLoadOptions): Promise<UndraCore> {
   if (offered.error !== undefined && offered.error !== "") {
     adapters.log?.log(3, "undra::react-native", `the native default ports are off on this device: ${offered.error}`);
   }
+  const nativePorts = nativeDefaultPorts(offered, options);
+  // A port the module answers natively has no JavaScript adapter: `UndraCore.attach` would otherwise fill it from
+  // the web's defaults where an app polyfills what they look for (`navigator.onLine` and a global
+  // `addEventListener` give a second Connectivity source, reporting next to the native one).
+  const attachAdapters: AdapterOverrides = { ...adapters };
+  for (const name of nativeAdapterNames(nativePorts)) Object.assign(attachAdapters, { [name]: null });
   const transport = new NativeTransport({
     native,
-    nativePorts: nativeDefaultPorts(offered, options),
+    nativePorts,
     expectedSchemaHash: options.expectedSchemaHash,
     platform: options.platform ?? `react-native-${Platform.OS}`,
     ...(options.devtools !== undefined && { devtools: options.devtools }),
@@ -141,7 +147,7 @@ function start(options: NativeLoadOptions): Promise<UndraCore> {
   });
   const attach: AttachOptions = {
     ...options,
-    adapters,
+    adapters: attachAdapters,
     mirror: { schedule, ...options.mirror },
   };
   const loading = UndraCore.attach(transport, attach).then((attached) => {

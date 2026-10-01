@@ -83,3 +83,8 @@ export function nativeDefaultPorts(
   }
   return chosen;
 }
+
+/** The adapter names (in `AttachOptions.adapters`) of `portIds`, the standard ports the module answers natively. */
+export function nativeAdapterNames(portIds: readonly number[]): Array<keyof AdapterOverrides> {
+  return NATIVE_DEFAULTS.filter(([portId]) => portIds.includes(portId)).map(([, name]) => name);
+}
