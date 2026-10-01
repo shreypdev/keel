@@ -341,6 +341,28 @@ fn a_single_dropped_update_fails_the_mirror_invariants() {
 }
 
 #[test]
+fn the_completions_scenario_stops_near_its_deadline() {
+    // The issuer once looked at the clock only when its window of calls in flight filled; when the
+    // completer threads kept pace it never did, and a run of 200 ms lasted up to 154 s (debug,
+    // a loaded machine). A run is its duration plus the time to answer what is in flight.
+    let _serial = serial();
+    let cfg = StressConfig {
+        duration: Duration::from_millis(100),
+        rss: false,
+        fault: Fault::None,
+    };
+    for _ in 0..4 {
+        let report = common::stress::completions(&cfg);
+        assert!(
+            report.elapsed < Duration::from_secs(5),
+            "a 100 ms run took {:?}: the issuer ignored its deadline",
+            report.elapsed
+        );
+        assert!(report.broken().is_empty());
+    }
+}
+
+#[test]
 fn swapped_change_sets_fail_the_order_invariant() {
     let _serial = serial();
     let cfg = StressConfig {

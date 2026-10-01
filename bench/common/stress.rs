@@ -52,6 +52,8 @@ pub const CHURN_ROWS: u32 = if cfg!(debug_assertions) { 500 } else { 10_000 };
 pub const WINDOW: u64 = 256;
 /// Host threads answering port calls in the completions scenario.
 pub const COMPLETERS: usize = 8;
+/// Calls the completions issuer makes between two looks at the clock.
+const CLOCK_EVERY: usize = 32;
 /// Bytes of a change-set holding one `u64` entry: 12 header, 17 entry header, 8 value.
 pub const TICK_BYTES: u64 = 37;
 /// Bytes of a change-set holding `n` entries of a `u32` each: 12 header plus 21 per entry.
@@ -1027,7 +1029,14 @@ pub fn completions(cfg: &StressConfig) -> StressReport {
     let mut rejected = 0_u64;
     let mut call_id = 10_u32;
     while Instant::now() < deadline {
-        while issued + rejected - host.counts.replies() < WINDOW {
+        // The clock is read every `CLOCK_EVERY` calls, not once the window fills: when the
+        // completers keep pace the window never fills, and a loop that looks at the clock only
+        // then runs as long as it likes (a 200 ms debug run took 154 s under load).
+        for _ in 0..CLOCK_EVERY {
+            if issued + rejected - host.counts.replies() >= WINDOW {
+                std::thread::yield_now();
+                break;
+            }
             call_id += 1;
             host.stamp(call_id);
             let payload = method_call(fetcher, "Fetcher", "fetch", call_id, &enc(&(issued as u32)));
@@ -1037,7 +1046,6 @@ pub fn completions(cfg: &StressConfig) -> StressReport {
                 rejected += 1;
             }
         }
-        std::thread::yield_now();
     }
     // Let the calls in flight finish.
     let patience = Instant::now() + Duration::from_secs(30);
