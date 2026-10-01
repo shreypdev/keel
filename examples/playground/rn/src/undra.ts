@@ -1,6 +1,6 @@
-import { loadNative, type NativeTransport } from '@undra/react-native';
+import { installNative, loadNative, type NativeTransport } from '@undra/react-native';
 import type { KvAdapter, UndraCore } from '@undra/runtime';
-import { BigList, Todos, UndraIds } from '@playground/core';
+import { BigList, Todos, UndraPlaygroundCore } from '@playground/core';
 
 /** What the screens share: the core and its two long-lived stores. */
 export interface Playground {
@@ -38,16 +38,19 @@ export function memoryKv(): KvAdapter {
   };
 }
 
-/** Loads the native core (it is linked into the app) and creates the stores the screens show. */
+/**
+ * Loads the native core `playground_core` (its pod, PlaygroundCore, on iOS; libplayground_core.so on
+ * Android) through the generated entry, so it is `UndraPlaygroundCore.core`, and creates the stores
+ * the screens show.
+ */
 export async function startUndra(log: Log): Promise<Playground> {
   const started = performance.now();
-  const core = await loadNative({
-    expectedSchemaHash: UndraIds.schemaHash,
+  const core = await loadNative(UndraPlaygroundCore, {
     adapters: { kv: memoryKv() },
     onError: error => log(`UNDRA-RN error ${String(error)}`),
   });
   log(
-    `UNDRA-RN loaded mode=${core.mode} platform=${core.hello.platform} schema=0x${core.hello.schemaHash.toString(16)} hermes=${String(
+    `UNDRA-RN loaded core=${UndraPlaygroundCore.namespace} mode=${core.mode} platform=${core.hello.platform} schema=0x${core.hello.schemaHash.toString(16)} abi=${core.hello.undraVersion} hermes=${String(
       typeof (globalThis as { HermesInternal?: unknown }).HermesInternal === 'object',
     )}`,
   );
@@ -61,6 +64,5 @@ export async function startUndra(log: Log): Promise<Playground> {
 
 /** The transport's native counters, when the core is the native one. */
 export function nativeCounters(core: UndraCore): ReturnType<NativeTransport['counters']> | null {
-  const native = (globalThis as { __undraNative?: { hostCounters(): ReturnType<NativeTransport['counters']> } }).__undraNative;
-  return core.mode === 'native' && native !== undefined ? native.hostCounters() : null;
+  return core.mode === 'native' ? installNative(UndraPlaygroundCore.namespace).hostCounters() : null;
 }
