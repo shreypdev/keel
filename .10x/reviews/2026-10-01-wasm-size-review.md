@@ -12,10 +12,14 @@ end-to-end core with its queries in a dependency crate (built for the web and th
 observed in Node), the gate run twice, from a fresh target directory, over its record and without the JavaScript
 toolchain, cold start measured in four alternating rounds against the base and against the branch with `sort_by`
 restored · **Fixes:** `fee57a5`, `07923c3`, `2d6156d`, `619c956`, `1b5b302` and the ADR/record update before this file;
-`main` merged twice: `38ea11d` at `52342d2`, then `fcbe221` (the API reference; site and workflows only) at
-`5267c21`.
+`main` merged three times: `38ea11d` at `52342d2`, `fcbe221` (the API reference; site and workflows only) at
+`5267c21`, `7d5b73c` (tooling) at `fd0b93a`; D1 decided and re-recorded at `37f3f88`.
 
 ## Verdict
+
+*Update, after the integrator's decision on D1:* the JavaScript runtime's budget is restated at 26 KB, the record
+is re-taken on the merged tree (wasm 102,722, JavaScript 24,841; both gates pass, also from a fresh target
+directory), and the README and site publish 102.7 KB. **Merge.** The verdict as first written:
 
 **Merge after fixes and one integrator decision.** The fixes are on the branch and `main` is merged; every suite
 passes on the merged tree **except the size gate this piece adds, which fails on it, correctly** (D1): `main`'s
@@ -44,7 +48,7 @@ blocking is open besides D1.
 
 | # | Sev | Where (at `cd298b2`) | Finding | Status |
 |---|---|---|---|---|
-| D1 | **Blocking (decision)** | the merged tree; `bench/budgets.toml` `[size.*]` | After merging `main` (`38ea11d`), `scripts/wasm-size.sh` fails: `web/hello-wasm` 244,382 / **102,722** bytes gzipped, 2,254 over its ceiling (5% over the pre-merge record 95,684; still 86% of 120 KB), and `web/hello-runtime-js` 81,048 / **24,841**, 841 over decision 2's 24,000 budget. Not this piece's code: `main` alone (no levers) builds the hello world at 372,540 / 143,384 (136,243 at `a0d638f`; its README still says 135 KB), the merged wasm links no `undra-query` (no `undra-query` string in it), and the TypeScript runtime is `main`'s byte for byte (parity's closed `UndraCallError` set, `report`/`onError`, snapshot/restore, worker sync ports: +900 lines). | **Open (integrator).** Restate the JavaScript budget (25 KB leaves 159 bytes of headroom; at 26 KB the ceiling is the budget, 1,159 above the record) or land `ts-runtime-size` first; then `scripts/wasm-size.sh --record` records both, `node site/scripts/build-all.mjs` moves the README and site to 102.7 KB, and the ADR's numbers follow. The record and the published numbers stay at the pre-merge values until then, and the size job says why. |
+| D1 | **Blocking (decision)** | the merged tree; `bench/budgets.toml` `[size.*]` | After merging `main` (`38ea11d`), `scripts/wasm-size.sh` fails: `web/hello-wasm` 244,382 / **102,722** bytes gzipped, 2,254 over its ceiling (5% over the pre-merge record 95,684; still 86% of 120 KB), and `web/hello-runtime-js` 81,048 / **24,841**, 841 over decision 2's 24,000 budget. Not this piece's code: `main` alone (no levers) builds the hello world at 372,540 / 143,384 (136,243 at `a0d638f`; its README still says 135 KB), the merged wasm links no `undra-query` (no `undra-query` string in it), and the TypeScript runtime is `main`'s byte for byte (parity's closed `UndraCallError` set, `report`/`onError`, snapshot/restore, worker sync ports: +900 lines). | **Decided** (integrator, 2026-10-01): budget 26 KB, the ceiling is the budget; dated note in ADR-052's decisions. **Re-recorded** (`37f3f88`, measured at `fd0b93a` with `main` at `7d5b73c`): 102,722 (ceiling 107,858) and 24,841 (ceiling 26,000); `build-all` moved the README, the landing card, getting-started and the two posts to 102.7 KB. |
 | M1 | Medium | `bench/benches/query.rs:35` | The bench's `Count` query is built by hand (`QueryDef` + `inventory::submit! { QueryRegistration::of::<Count>() }`). Lever B moved the dispatch layer into the macros' expansion, so this binary links no layer: `cargo bench -p undra-bench --bench query -- --test` panics in `query/platform_construct_and_release` with `the constructor answers a handle: TrailingBytes { count: 26 }` (the reply is the runtime's "unknown object type"). `bench.yml` says criterion is not run in CI, so nothing noticed. | **Fixed** (`fee57a5`): the bench submits `__private::{HYDRATE, LAYER}` as the macros do (all four benches `Success`); the bench workflow runs `cargo bench -p undra-bench --benches -- --test` (each bench once, untimed). |
 | M2 | Medium | `crates/undra-query/src/shared.rs:748` (`Shared::start`), `lib.rs:73-75` | A core whose only queries are `QueryDef`s written by hand links no start-up hook, and nothing else hydrates: `ctx.query().observe::<Q>(..)` of a `persist` query never sees what the last run stored, and an idempotent mutation's offline queue is never replayed. No error, no log. The crate docs told hand-writers to submit `__private::HYDRATE`, a `#[doc(hidden)]` item documented as "not a stable API". | **Fixed** (`fee57a5`, `1b5b302`): `Shared::start` (every `ctx.query()`, `ctx.mutate(..)`, a platform's handle constructor) hydrates when the hook is not linked, once per runtime, holding the runtime weakly like the hook; nothing changes when it is linked. `crates/undra-query/tests/hand_built.rs` (3 tests; 2 fail before the fix: zero `Kv` listings). Docs: crate docs, `QueryRegistration`, SPEC 9, ADR-052. |
 | M3 | Medium | `crates/undra-cli/src/cargo.rs:520` (`build_library`) | Every release binary `undra build` ships names the builder's home directory: the hello-world wasm contains `/Users/<name>/...` 24 times (panic locations of the Undra crates of a checkout and of `~/.cargo/registry`), and the iOS and Android builds are built the same way. Pre-existing; the architect recorded it as a follow-up. | **Fixed** (`2d6156d`): non-dev builds pass `--remap-path-prefix=$HOME=~` (and a `CARGO_HOME` outside it `=/cargo`) to every crate through `--config build.rustflags=[..]`, merged by Cargo with the project's own; when `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS` is set (Cargo then ignores `build.rustflags`) the flags are appended to it; `--remap-path-scope=object` when rustc accepts it (1.98 does), so compiler messages keep real paths. Unit tests on a `FakeSys`; `tests/build_web.rs` asserts the module has no `$HOME` (fails with 24 hits when the remapping is disabled); the gate fails on it too. SPEC 7. |
@@ -157,18 +161,22 @@ panic logs at level 5 through the host, then traps" and the transport's typed `"
 * The second merge (`5267c21`) changed no code: `bash site/scripts/build-rustdoc.sh` (main's rustdoc with `-D
   warnings`), `node --test site/scripts/decls.test.mjs` (10 passed), `build-all.mjs` (nothing to regenerate) and
   `check-links.mjs --words` pass on it; the suites above stand.
+* After the third merge (`7d5b73c`, tooling, which also edits `crates/undra-cli/src/cargo.rs`: both its changes and
+  the remapping stand) and the restated budget, at `37f3f88`: `scripts/wasm-size.sh` from a fresh target directory
+  passes and equals the record (102,722 / 24,841); `cargo clippy --workspace --all-targets -- -D warnings` clean;
+  `cargo test --workspace --no-fail-fast` **2,556 passed**, 0 failed, 11 ignored (142 suites; the tooling piece
+  added its own); `undra bindgen -C examples/playground --check --docs` up to date at `0xddcdea47fa95a8d4`;
+  `build-all.mjs` twice, nothing left; `check-links.mjs --words` 342 words.
 * Kotlin and Swift runtime suites were not run separately (the contract columns ran both over the playground core);
   Miri and ASan were not run (no `unsafe` and no FFI change here).
 
 ## Open items for the integrator
 
-0. **D1 (blocking):** restate `[size."web/hello-runtime-js"]` (or land `ts-runtime-size`), then `scripts/wasm-size.sh
-   --record`, `node site/scripts/build-all.mjs`, and the ADR's "after the merge" numbers become the record.
+0. ~~D1~~: decided (26 KB) and re-recorded.
 1. L3: pin the binaryen `version_133` tarball's sha256 in the `size` job.
 2. Piece `ts-runtime-size`: what a hello app ships of `@undra/runtime` from 22.5 KB to 16 KB gzipped, lowering
    `[size."web/hello-runtime-js"]` in the same commit (levers in ADR-052's decision 2).
 3. The roadmap item "The web bundle under its budget (ADR-052)" is reworded in place without numbers (they move with
-   D1); moving it to Shipped is the integrator's call at merge. If D1 restates the JavaScript budget, the README's
-   "against a 24 KB budget" sentence follows it.
+   D1); moving it to Shipped is the integrator's call at merge.
 4. `.10x/status.md` / `handoff.md`: release builds now remap the home directory (SPEC 7); the criterion benches run
-   once in the bench workflow; the JS runtime is gated at 24 KB.
+   once in the bench workflow; the JS runtime is gated at 26 KB; the published web size is 102.7 KB.
