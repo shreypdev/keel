@@ -18,12 +18,17 @@ const HASHES_BEFORE_NO_COALESCE: &[(&str, u64)] = &[
     ("stdlib", 0x6b46_38c4_a5e3_4313),
 ];
 
+/// The cases written after ADR-031: they never had a hash without the field, so there is nothing
+/// to compare them with.
+const CASES_AFTER_NO_COALESCE: &[&str] = &["recursive"];
+
 #[test]
 fn every_golden_case_is_listed() {
-    let listed: Vec<&str> = HASHES_BEFORE_NO_COALESCE
+    let mut listed: Vec<&str> = HASHES_BEFORE_NO_COALESCE
         .iter()
         .map(|(case, _)| *case)
         .collect();
+    listed.extend(CASES_AFTER_NO_COALESCE);
     assert_eq!(listed, common::CASES);
 }
 

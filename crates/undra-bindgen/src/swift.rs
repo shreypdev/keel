@@ -18,11 +18,11 @@
 //! ([`Generator::swift_typed_throws`]), where the host is the implementer.
 //! Nothing generated traps.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use undra_meta::{
-    EnumDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, RecordDef, SignalDef,
-    TypeRef, VariantDef,
+    EnumDef, FieldDef, FunctionDef, MethodDef, ObjectDef, ParamDef, PortDef, PortKind, RecordDef,
+    SignalDef, TypeRef, VariantDef,
 };
 
 use crate::emit::CodeWriter;
@@ -35,7 +35,11 @@ const FILES: [&str; 7] = [
 ];
 
 pub(crate) fn generate(model: &Model, cfg: &Generator) -> Vec<GeneratedFile> {
-    let sw = SwiftGen { model, cfg };
+    let sw = SwiftGen {
+        model,
+        cfg,
+        cycles: Cycles::new(model),
+    };
     let dir = format!("Sources/{}/Generated", cfg.swift_module);
     let bodies = [
         sw.types_file(),
@@ -108,9 +112,128 @@ fn stored_id(name: &str) -> String {
     naming::swift_stored_property(&naming::camel(name))
 }
 
+/// The placeholder of a type that has no finite value (every way to build it needs itself). No
+/// Rust type that crosses can be like this, so the text is never part of a working core; it is
+/// the one place the generator has nothing to write.
+const UNINHABITED: &str = "fatalError(\"recursive default\")";
+
+/// How many named types [`Types::zero`] visits before it gives up on a type.
+const ZERO_STEPS: usize = 10_000;
+
+/// The state of one search for a placeholder value.
+struct ZeroState {
+    /// The types being built, outermost first.
+    path: Vec<String>,
+    /// The placeholder of every type built so far.
+    built: HashMap<String, String>,
+    steps: usize,
+}
+
+impl ZeroState {
+    fn new() -> ZeroState {
+        ZeroState {
+            path: Vec::new(),
+            built: HashMap::new(),
+            steps: ZERO_STEPS,
+        }
+    }
+}
+
+/// The inline containment graph of the schema's records, data enums and errors: type `A` holds
+/// type `B` inline when a field of `A` (a payload field, for an enum) is a `B` or an optional
+/// `B`. An array, a dictionary and bytes keep their elements on the heap, so they do not hold
+/// anything inline.
+///
+/// A Swift value type cannot contain itself inline, so a field whose type is on a cycle of this
+/// graph (`B` holds `A` again, `A == B` included) goes behind a reference: a record keeps it in
+/// an `UndraIndirect`, an enum is `indirect`.
+struct Cycles {
+    /// For every type, the types it reaches by one or more inline edges.
+    reach: HashMap<String, HashSet<String>>,
+}
+
+impl Cycles {
+    fn new(model: &Model) -> Cycles {
+        fn target(t: &TypeRef) -> Option<&str> {
+            match t {
+                TypeRef::Option(inner) => target(inner),
+                TypeRef::Named(name) => Some(name),
+                _ => None,
+            }
+        }
+        let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
+        for r in &model.records {
+            edges
+                .entry(&r.name)
+                .or_default()
+                .extend(r.fields.iter().filter_map(|f| target(&f.ty)));
+        }
+        for en in model.enums.iter().chain(&model.errors) {
+            edges.entry(&en.name).or_default().extend(
+                en.variants
+                    .iter()
+                    .flat_map(|v| &v.fields)
+                    .filter_map(|f| target(&f.ty)),
+            );
+        }
+        let mut reach = HashMap::new();
+        for &from in edges.keys() {
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut todo = vec![from];
+            while let Some(next) = todo.pop() {
+                for &to in edges.get(next).into_iter().flatten() {
+                    if seen.insert(to.to_owned()) {
+                        todo.push(to);
+                    }
+                }
+            }
+            reach.insert(from.to_owned(), seen);
+        }
+        Cycles { reach }
+    }
+
+    /// Whether a field of type `ty` of the type `owner` lies on a cycle: it is `owner` or an
+    /// optional `owner`, or a type that reaches `owner` again.
+    fn on_cycle(&self, owner: &str, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Option(inner) => self.on_cycle(owner, inner),
+            TypeRef::Named(held) => {
+                held == owner || self.reach.get(held).is_some_and(|r| r.contains(owner))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether some payload of `en` lies on a cycle, which Swift only allows in an `indirect`
+    /// enum.
+    fn indirect_enum(&self, en: &EnumDef) -> bool {
+        en.variants
+            .iter()
+            .flat_map(|v| &v.fields)
+            .any(|f| self.on_cycle(&en.name, &f.ty))
+    }
+}
+
+/// How a record keeps a field that holds the record again.
+struct Storage {
+    /// The private property that holds the box.
+    name: String,
+    /// Its type: `UndraIndirect<Node>?`.
+    ty: String,
+    /// The expression that reads the field out of the box.
+    read: String,
+    /// The expression that puts a value into a box; `%` stands for the value.
+    write: String,
+}
+
+fn refs(names: &[String]) -> Vec<&str> {
+    names.iter().map(String::as_str).collect()
+}
+
 struct SwiftGen<'a> {
     model: &'a Model,
     cfg: &'a Generator,
+    cycles: Cycles,
 }
 
 /// The generation helpers that need the model.
@@ -204,8 +327,15 @@ impl Types<'_> {
 
     /// The zero value used as a signal's placeholder until the initial
     /// change-set arrives.
-    fn zero(&self, t: &TypeRef, depth: usize) -> String {
-        match t {
+    fn zero(&self, t: &TypeRef) -> String {
+        self.zero_in(t, &mut ZeroState::new())
+            .unwrap_or_else(|| UNINHABITED.to_owned())
+    }
+
+    /// The zero value of `t`, or `None` when every way to build it needs a type that is already
+    /// being built (a type with no finite value).
+    fn zero_in(&self, t: &TypeRef, state: &mut ZeroState) -> Option<String> {
+        Some(match t {
             TypeRef::Bool => "false".to_owned(),
             TypeRef::I8
             | TypeRef::I16
@@ -220,70 +350,91 @@ impl Types<'_> {
             TypeRef::String => "\"\"".to_owned(),
             TypeRef::Bytes | TypeRef::Vec(_) => "[]".to_owned(),
             TypeRef::Map(..) => "[:]".to_owned(),
+            // An optional, an array and a dictionary are empty: a recursive type stops here.
             TypeRef::Option(_) => "nil".to_owned(),
             TypeRef::Duration => ".zero".to_owned(),
             TypeRef::Timestamp => "Date(timeIntervalSince1970: 0)".to_owned(),
             TypeRef::Uuid => {
                 "UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))".to_owned()
             }
-            TypeRef::Named(name) => self.zero_named(name, depth),
+            TypeRef::Named(name) => return self.zero_named(name, state),
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "()".to_owned()
             }
-        }
+        })
     }
 
-    fn zero_named(&self, name: &str, depth: usize) -> String {
-        if depth > 8 {
-            return "fatalError(\"recursive default\")".to_owned();
+    fn zero_named(&self, name: &str, state: &mut ZeroState) -> Option<String> {
+        if let Some(built) = state.built.get(name) {
+            return Some(built.clone());
         }
+        // A type that is being built further up cannot be part of its own placeholder; the
+        // step budget bounds the search through a schema of types that have no finite value.
+        if state.path.iter().any(|p| p == name) || state.steps == 0 {
+            return None;
+        }
+        state.steps -= 1;
+        state.path.push(name.to_owned());
+        let built = self.zero_declared(name, state);
+        state.path.pop();
+        if let Some(built) = &built {
+            state.built.insert(name.to_owned(), built.clone());
+        }
+        built
+    }
+
+    fn zero_declared(&self, name: &str, state: &mut ZeroState) -> Option<String> {
         let shown = self.model.spelled(name);
         match self.model.kind(name) {
             Some(NamedKind::Record) => {
                 let Some(record) = self.model.record(name) else {
-                    return String::new();
+                    return Some(String::new());
                 };
-                let args: Vec<String> = record
-                    .fields
-                    .iter()
-                    .map(|f| format!("{}: {}", id(&f.name), self.zero(&f.ty, depth + 1)))
-                    .collect();
-                format!("{shown}({})", args.join(", "))
+                let mut args = Vec::new();
+                for f in &record.fields {
+                    args.push(format!("{}: {}", id(&f.name), self.zero_in(&f.ty, state)?));
+                }
+                Some(format!("{shown}({})", args.join(", ")))
             }
-            Some(NamedKind::UnitEnum) => self
-                .model
-                .enum_def(name)
-                .and_then(|e| e.variants.first())
-                .map(|v| format!(".{}", id(&v.name)))
-                .unwrap_or_default(),
+            Some(NamedKind::UnitEnum) => Some(
+                self.model
+                    .enum_def(name)
+                    .and_then(|e| e.variants.first())
+                    .map(|v| format!(".{}", id(&v.name)))
+                    .unwrap_or_default(),
+            ),
             Some(NamedKind::DataEnum | NamedKind::Error) => {
                 let en = self
                     .model
                     .enum_def(name)
                     .or_else(|| self.model.error_def(name));
-                let Some(variant) = en.and_then(|e| e.variants.first()) else {
-                    return String::new();
+                let Some(en) = en.filter(|e| !e.variants.is_empty()) else {
+                    return Some(String::new());
                 };
-                if variant.fields.is_empty() {
-                    format!("{shown}.{}", id(&variant.name))
-                } else if variant.tuple {
-                    let args: Vec<String> = variant
-                        .fields
-                        .iter()
-                        .map(|f| self.zero(&f.ty, depth + 1))
-                        .collect();
-                    format!("{shown}.{}({})", id(&variant.name), args.join(", "))
-                } else {
-                    let args: Vec<String> = variant
-                        .fields
-                        .iter()
-                        .map(|f| format!("{}: {}", id(&f.name), self.zero(&f.ty, depth + 1)))
-                        .collect();
-                    format!("{shown}.{}({})", id(&variant.name), args.join(", "))
-                }
+                // The first variant that can be built without the enum itself: a recursive
+                // enum's placeholder is its base case, wherever the schema lists it.
+                en.variants
+                    .iter()
+                    .find_map(|variant| self.zero_variant(shown, variant, state))
             }
-            Some(NamedKind::Object) | None => String::new(),
+            Some(NamedKind::Object) | None => Some(String::new()),
         }
+    }
+
+    fn zero_variant(&self, shown: &str, v: &VariantDef, state: &mut ZeroState) -> Option<String> {
+        if v.fields.is_empty() {
+            return Some(format!("{shown}.{}", id(&v.name)));
+        }
+        let mut args = Vec::new();
+        for f in &v.fields {
+            let zero = self.zero_in(&f.ty, state)?;
+            args.push(if v.tuple {
+                zero
+            } else {
+                format!("{}: {zero}", id(&f.name))
+            });
+        }
+        Some(format!("{shown}.{}({})", id(&v.name), args.join(", ")))
     }
 
     /// The value of a `#[undra(default)]` field, for the types whose default is
@@ -295,7 +446,7 @@ impl Types<'_> {
             | TypeRef::Lazy(_)
             | TypeRef::Result(..)
             | TypeRef::Stream(_) => None,
-            other => Some(self.zero(other, 0)),
+            other => Some(self.zero(other)),
         }
     }
 
@@ -326,21 +477,6 @@ impl Types<'_> {
             }
             _ => true,
         }
-    }
-
-    /// Whether some payload of `en` holds `en` itself without going through
-    /// an array or dictionary, which Swift only allows in an `indirect` enum.
-    fn recursive_payload(en: &EnumDef) -> bool {
-        fn holds(t: &TypeRef, name: &str) -> bool {
-            match t {
-                TypeRef::Named(n) => n == name,
-                TypeRef::Option(i) => holds(i, name),
-                _ => false,
-            }
-        }
-        en.variants
-            .iter()
-            .any(|v| v.fields.iter().any(|f| holds(&f.ty, &en.name)))
     }
 }
 
@@ -386,7 +522,111 @@ impl SwiftGen<'_> {
             }
             w.blank();
         }
+        // The box exists only when a record has a field that needs it, so a schema without a
+        // recursive record generates exactly what it did before.
+        if self.model.records.iter().any(|r| {
+            r.fields
+                .iter()
+                .any(|f| self.cycles.on_cycle(&r.name, &f.ty))
+        }) {
+            self.indirect_box(&mut w);
+        }
         w.finish()
+    }
+
+    /// `UndraIndirect`: the box a record keeps a field that holds the record again in.
+    ///
+    /// It is a `final class` around a `let`, so the box is immutable and `Sendable`, and a record
+    /// that replaces it on every mutation keeps the value semantics of the plain property it
+    /// stands for. The conformances forward to the value, so a record synthesizes `Hashable` and
+    /// `Codable` over its private storage exactly as it would over the value.
+    fn indirect_box(&self, w: &mut CodeWriter) {
+        w.line("/// A value kept behind a reference, so that a record can hold itself, directly or through");
+        w.line(
+            "/// other records, without an infinitely sized layout. The box is immutable: a record",
+        );
+        w.line("/// replaces it when the value changes, which keeps the value semantics of the property.");
+        w.block(
+            "final class UndraIndirect<Value: Sendable>: Sendable",
+            |w| {
+                w.line("let value: Value");
+                w.blank();
+                w.block("init(_ value: Value)", |w| {
+                    w.line("self.value = value");
+                });
+            },
+        );
+        w.blank();
+        w.block(
+            "extension UndraIndirect: Equatable where Value: Equatable",
+            |w| {
+                w.block(
+                    "static func == (lhs: UndraIndirect<Value>, rhs: UndraIndirect<Value>) -> Bool",
+                    |w| {
+                        w.line("return lhs.value == rhs.value");
+                    },
+                );
+            },
+        );
+        w.blank();
+        w.block(
+            "extension UndraIndirect: Hashable where Value: Hashable",
+            |w| {
+                w.block("func hash(into hasher: inout Hasher)", |w| {
+                    w.line("hasher.combine(value)");
+                });
+            },
+        );
+        w.blank();
+        w.block(
+            "extension UndraIndirect: Encodable where Value: Encodable",
+            |w| {
+                w.block("func encode(to encoder: any Encoder) throws", |w| {
+                    w.line("var container = encoder.singleValueContainer()");
+                    w.line("try container.encode(value)");
+                });
+            },
+        );
+        w.blank();
+        w.block(
+            "extension UndraIndirect: Decodable where Value: Decodable",
+            |w| {
+                w.block("convenience init(from decoder: any Decoder) throws", |w| {
+                    w.line("let container = try decoder.singleValueContainer()");
+                    w.line("self.init(try container.decode(Value.self))");
+                });
+            },
+        );
+        w.blank();
+    }
+
+    /// How the record field `f` of `owner` is stored, when it goes behind an `UndraIndirect`.
+    fn indirect_storage(&self, owner: &str, f: &FieldDef, siblings: &[String]) -> Option<Storage> {
+        if !self.cycles.on_cycle(owner, &f.ty) {
+            return None;
+        }
+        let t = self.types();
+        let name = naming::avoid(&format!("_{}", naming::camel(&f.name)), &refs(siblings));
+        // An optional field keeps an optional box, so an absent child costs no allocation. (An
+        // `Option<Option<T>>` never gets here: validation rejects it.)
+        let (ty, read, write) = match &f.ty {
+            TypeRef::Option(inner) => (
+                format!("UndraIndirect<{}>?", t.ty(inner)),
+                format!("{name}?.value"),
+                "%.map(UndraIndirect.init)".to_owned(),
+            ),
+            other => (
+                format!("UndraIndirect<{}>", t.ty(other)),
+                format!("{name}.value"),
+                "UndraIndirect(%)".to_owned(),
+            ),
+        };
+        Some(Storage {
+            name,
+            ty,
+            read,
+            write,
+        })
     }
 
     fn record(&self, w: &mut CodeWriter, r: &RecordDef) {
@@ -400,11 +640,35 @@ impl SwiftGen<'_> {
         } else {
             "UndraRecord, Sendable, Hashable"
         };
+        // The names the storage of an indirect field must not take.
+        let siblings: Vec<String> = r.fields.iter().map(|f| id(&f.name)).collect();
+        let storage: Vec<Option<Storage>> = r
+            .fields
+            .iter()
+            .map(|f| self.indirect_storage(&r.name, f, &siblings))
+            .collect();
         doc(w, &r.docs, &[]);
         w.block(format!("public struct {}: {conformances}", r.name), |w| {
-            for f in &r.fields {
+            for (f, stored) in r.fields.iter().zip(&storage) {
                 doc(w, &f.docs, &[]);
-                w.line(format!("public var {}: {}", id(&f.name), t.ty(&f.ty)));
+                match stored {
+                    None => w.line(format!("public var {}: {}", id(&f.name), t.ty(&f.ty))),
+                    // The public property reads as the plain type; the box is private.
+                    Some(s) => {
+                        w.block(
+                            format!("public var {}: {}", id(&f.name), t.ty(&f.ty)),
+                            |w| {
+                                w.line(format!("get {{ {} }}", s.read));
+                                w.line(format!(
+                                    "set {{ {} = {} }}",
+                                    s.name,
+                                    s.write.replace('%', "newValue")
+                                ));
+                            },
+                        );
+                        w.line(format!("private var {}: {}", s.name, s.ty));
+                    }
+                }
             }
             if !r.fields.is_empty() {
                 w.blank();
@@ -424,10 +688,34 @@ impl SwiftGen<'_> {
                 })
                 .collect();
             w.call_block("public init", &params, "", false, |w| {
-                for f in &r.fields {
-                    w.line(format!("self.{0} = {0}", id(&f.name)));
+                for (f, stored) in r.fields.iter().zip(&storage) {
+                    match stored {
+                        None => w.line(format!("self.{0} = {0}", id(&f.name))),
+                        Some(s) => w.line(format!(
+                            "self.{} = {}",
+                            s.name,
+                            s.write.replace('%', &id(&f.name))
+                        )),
+                    }
                 }
             });
+            // The synthesized `Codable` writes a field under the name of its property; the
+            // private storage is named differently, so the key says which name goes on the wire.
+            if codable && storage.iter().any(Option::is_some) {
+                w.blank();
+                w.block("private enum CodingKeys: String, CodingKey", |w| {
+                    for (f, stored) in r.fields.iter().zip(&storage) {
+                        match stored {
+                            None => w.line(format!("case {}", id(&f.name))),
+                            Some(s) => w.line(format!(
+                                "case {} = {}",
+                                s.name,
+                                swift_string(&naming::camel(&f.name))
+                            )),
+                        }
+                    }
+                });
+            }
             w.blank();
             w.block(
                 format!(
@@ -539,7 +827,7 @@ impl SwiftGen<'_> {
     fn data_enum(&self, w: &mut CodeWriter, en: &EnumDef) {
         let t = self.types();
         doc(w, &en.docs, &[]);
-        let indirect = if Types::recursive_payload(en) {
+        let indirect = if self.cycles.indirect_enum(en) {
             "indirect "
         } else {
             ""
@@ -695,7 +983,7 @@ impl SwiftGen<'_> {
     fn error(&self, w: &mut CodeWriter, en: &EnumDef) {
         let t = self.types();
         doc(w, &en.docs, &[]);
-        let indirect = if Types::recursive_payload(en) {
+        let indirect = if self.cycles.indirect_enum(en) {
             "indirect "
         } else {
             ""
@@ -874,7 +1162,7 @@ impl SwiftGen<'_> {
                     "public private(set) var {}: {} = {}",
                     stored_id(&g.name),
                     t.ty(&g.ty),
-                    t.zero(&g.ty, 0)
+                    t.zero(&g.ty)
                 ));
             }
             if !signals.is_empty() {

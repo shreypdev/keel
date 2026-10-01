@@ -1,0 +1,476 @@
+{
+  "undra_version": "1.0.0",
+  "crate_name": "golden-recursive",
+  "records": [
+    {
+      "name": "ListNode",
+      "type_id": 1080336105,
+      "fields": [
+        {
+          "name": "value",
+          "ty": {
+            "kind": "i32"
+          },
+          "default": false
+        },
+        {
+          "name": "next",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "ListNode"
+            }
+          },
+          "default": false,
+          "docs": "The rest of the list; `None` at the end."
+        }
+      ],
+      "docs": "A singly linked list: each node holds the rest of the list."
+    },
+    {
+      "name": "Tree",
+      "type_id": 3988226293,
+      "fields": [
+        {
+          "name": "label",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "children",
+          "ty": {
+            "kind": "vec",
+            "of": {
+              "kind": "named",
+              "of": "Tree"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A tree: the children are in an array, which needs no indirection."
+    },
+    {
+      "name": "Parent",
+      "type_id": 3243699741,
+      "fields": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "child",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Child"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "Holds a `Child` that holds a `Parent`."
+    },
+    {
+      "name": "Child",
+      "type_id": 2379610877,
+      "fields": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "parent",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Parent"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "Holds a `Parent` that holds a `Child`."
+    },
+    {
+      "name": "Group",
+      "type_id": 91525164,
+      "fields": [
+        {
+          "name": "label",
+          "ty": {
+            "kind": "string"
+          },
+          "default": false
+        },
+        {
+          "name": "inner",
+          "ty": {
+            "kind": "option",
+            "of": {
+              "kind": "named",
+              "of": "Expr"
+            }
+          },
+          "default": false
+        }
+      ],
+      "docs": "A record that holds an expression, which holds the record again."
+    }
+  ],
+  "enums": [
+    {
+      "name": "Expr",
+      "type_id": 1023846862,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Num",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "f64"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Grouped",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "Group"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        }
+      ],
+      "docs": "An expression that holds a group, which holds an expression."
+    },
+    {
+      "name": "Path",
+      "type_id": 3949388886,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "End",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        },
+        {
+          "name": "Step",
+          "index": 1,
+          "fields": [
+            {
+              "name": "label",
+              "ty": {
+                "kind": "string"
+              },
+              "default": false
+            },
+            {
+              "name": "rest",
+              "ty": {
+                "kind": "named",
+                "of": "Path"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": null
+        }
+      ],
+      "docs": "A path whose steps hold the rest of it."
+    },
+    {
+      "name": "ParseError",
+      "type_id": 2448244154,
+      "is_error": true,
+      "variants": [
+        {
+          "name": "Eof",
+          "index": 0,
+          "fields": [],
+          "tuple": false,
+          "message": "unexpected end of input"
+        },
+        {
+          "name": "Nested",
+          "index": 1,
+          "fields": [
+            {
+              "name": "depth",
+              "ty": {
+                "kind": "u32"
+              },
+              "default": false
+            },
+            {
+              "name": "inner",
+              "ty": {
+                "kind": "named",
+                "of": "ParseError"
+              },
+              "default": false
+            }
+          ],
+          "tuple": false,
+          "message": "failed at depth {depth}"
+        }
+      ],
+      "docs": "A parse failure that can wrap the failure it came from."
+    }
+  ],
+  "objects": [
+    {
+      "name": "Outline",
+      "type_id": 277209181,
+      "constructors": [
+        {
+          "name": "new",
+          "method_id": 2698831125,
+          "params": [],
+          "returns": {
+            "kind": "named",
+            "of": "Outline"
+          },
+          "is_async": false,
+          "takes_ctx": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "push_front",
+          "method_id": 940374149,
+          "params": [
+            {
+              "name": "list",
+              "ty": {
+                "kind": "named",
+                "of": "ListNode"
+              }
+            },
+            {
+              "name": "value",
+              "ty": {
+                "kind": "i32"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "named",
+            "of": "ListNode"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Returns `list` with a new first node."
+        },
+        {
+          "name": "replace_tree",
+          "method_id": 3634257808,
+          "params": [
+            {
+              "name": "tree",
+              "ty": {
+                "kind": "named",
+                "of": "Tree"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "unit"
+          },
+          "is_async": false,
+          "takes_ctx": false,
+          "docs": "Shows `tree`."
+        },
+        {
+          "name": "parse",
+          "method_id": 3360239936,
+          "params": [
+            {
+              "name": "text",
+              "ty": {
+                "kind": "string"
+              }
+            }
+          ],
+          "returns": {
+            "kind": "result",
+            "of": [
+              {
+                "kind": "named",
+                "of": "Expr"
+              },
+              {
+                "kind": "named",
+                "of": "ParseError"
+              }
+            ]
+          },
+          "is_async": true,
+          "takes_ctx": false,
+          "docs": "Parses `text`."
+        }
+      ],
+      "store": {
+        "signals": [
+          {
+            "name": "head",
+            "signal_id": 0,
+            "ty": {
+              "kind": "named",
+              "of": "ListNode"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "maybe_head",
+            "signal_id": 1,
+            "ty": {
+              "kind": "option",
+              "of": {
+                "kind": "named",
+                "of": "ListNode"
+              }
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "tree",
+            "signal_id": 2,
+            "ty": {
+              "kind": "named",
+              "of": "Tree"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "family",
+            "signal_id": 3,
+            "ty": {
+              "kind": "named",
+              "of": "Parent"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "expr",
+            "signal_id": 4,
+            "ty": {
+              "kind": "named",
+              "of": "Expr"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "path",
+            "signal_id": 5,
+            "ty": {
+              "kind": "named",
+              "of": "Path"
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "last_error",
+            "signal_id": 6,
+            "ty": {
+              "kind": "option",
+              "of": {
+                "kind": "named",
+                "of": "ParseError"
+              }
+            },
+            "computed": false,
+            "key": null
+          }
+        ]
+      },
+      "docs": "A store whose signals are recursive types."
+    }
+  ],
+  "functions": [
+    {
+      "name": "reverse",
+      "method_id": 3291743369,
+      "params": [
+        {
+          "name": "list",
+          "ty": {
+            "kind": "named",
+            "of": "ListNode"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "named",
+        "of": "ListNode"
+      },
+      "is_async": false,
+      "takes_ctx": false,
+      "docs": "Reverses a list."
+    },
+    {
+      "name": "evaluate",
+      "method_id": 261896054,
+      "params": [
+        {
+          "name": "expr",
+          "ty": {
+            "kind": "named",
+            "of": "Expr"
+          }
+        }
+      ],
+      "returns": {
+        "kind": "result",
+        "of": [
+          {
+            "kind": "f64"
+          },
+          {
+            "kind": "named",
+            "of": "ParseError"
+          }
+        ]
+      },
+      "is_async": true,
+      "takes_ctx": false,
+      "docs": "Evaluates an expression."
+    }
+  ],
+  "ports": [],
+  "queries": []
+}

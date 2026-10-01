@@ -1,7 +1,7 @@
 //! Golden-file tests: every case under `tests/golden/<case>/` holds a
 //! `schema.json` and the exact output of the three generators. Run with
 //! `UPDATE_GOLDEN=1` to regenerate the schemas from `tests/common` and every
-//! expected file.
+//! expected file (`UPDATE_GOLDEN_LANG=kotlin,ts` limits that to some languages).
 
 mod common;
 
@@ -18,6 +18,14 @@ fn golden_root() -> PathBuf {
 
 fn updating() -> bool {
     std::env::var("UPDATE_GOLDEN").is_ok_and(|v| v == "1")
+}
+
+/// With `UPDATE_GOLDEN=1`, `UPDATE_GOLDEN_LANG=kotlin,ts` limits the regeneration to those languages
+/// (`swift`, `kotlin`, `ts`); the others are neither written nor checked. Unset: all three.
+fn skipped_while_updating(language: &str) -> bool {
+    updating()
+        && std::env::var("UPDATE_GOLDEN_LANG")
+            .is_ok_and(|only| !only.split(',').any(|l| l.trim() == language))
 }
 
 fn read_tree(dir: &Path) -> BTreeMap<String, String> {
@@ -59,6 +67,9 @@ fn first_difference(expected: &str, actual: &str) -> String {
 
 fn check_tree(case: &str, language: &str, files: &[GeneratedFile]) {
     let dir = golden_root().join(case).join(language);
+    if skipped_while_updating(language) {
+        return;
+    }
     if updating() {
         let _ = fs::remove_dir_all(&dir);
         GeneratedFile::write_all(files, &dir).unwrap();
@@ -143,7 +154,7 @@ macro_rules! golden_cases {
 }
 
 golden_cases!(
-    records, enums, errors, objects, stores, ports, queries, full, stdlib
+    records, enums, errors, objects, stores, ports, queries, full, stdlib, recursive
 );
 
 #[test]
@@ -153,7 +164,16 @@ fn every_case_has_a_test() {
     assert_eq!(
         listed,
         [
-            "records", "enums", "errors", "objects", "stores", "ports", "queries", "full", "stdlib"
+            "records",
+            "enums",
+            "errors",
+            "objects",
+            "stores",
+            "ports",
+            "queries",
+            "full",
+            "stdlib",
+            "recursive"
         ]
     );
 }

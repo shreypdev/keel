@@ -47,12 +47,14 @@ pub fn skip(what: &str) {
     eprintln!("skipping: {what}");
 }
 
-/// Whether `program --version` runs.
+/// Whether `program --version` runs (`kotlinc` 2.x only knows `-version`).
 pub fn on_path(program: &str) -> bool {
-    Command::new(program)
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
+    ["--version", "-version"].iter().any(|flag| {
+        Command::new(program)
+            .arg(flag)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    })
 }
 
 /// A `tsc` invocation: `tsc` on the path, else a locally installed one.
@@ -125,7 +127,14 @@ pub fn install_ts_runtime(root: &Path, declarations: &Path, js: Option<&Path>) {
     fs::copy(declarations.join("fnv.d.ts"), module.join("fnv.d.ts")).unwrap();
     // The standard types and their codecs, which generated code imports from the runtime
     // instead of declaring them (ADR-024), and the error base class they extend.
-    fs::copy(declarations.join("errors.d.ts"), module.join("errors.d.ts")).unwrap();
+    for name in [
+        "errors.d.ts",
+        "base-error.d.ts",
+        "call-error.d.ts",
+        "platform.d.ts",
+    ] {
+        fs::copy(declarations.join(name), module.join(name)).unwrap();
+    }
     fs::create_dir_all(module.join("adapters")).unwrap();
     for name in ["types.d.ts", "codecs.d.ts"] {
         fs::copy(
@@ -163,7 +172,16 @@ pub fn copy_dir(from: &Path, to: &Path) {
 
 /// The names of the golden cases, in the order they are documented.
 pub const CASES: &[&str] = &[
-    "records", "enums", "errors", "objects", "stores", "ports", "queries", "full", "stdlib",
+    "records",
+    "enums",
+    "errors",
+    "objects",
+    "stores",
+    "ports",
+    "queries",
+    "full",
+    "stdlib",
+    "recursive",
 ];
 
 /// The generator configuration of a case: default names, and a Kotlin package
@@ -186,6 +204,7 @@ pub fn case(name: &str) -> Schema {
         "queries" => queries(),
         "full" => full(),
         "stdlib" => stdlib(),
+        "recursive" => recursive(),
         other => panic!("unknown golden case {other}"),
     }
 }
@@ -1568,6 +1587,157 @@ fn full() -> Schema {
         vec![param("title", TypeRef::String)],
         err_result(named("Todo"), "TodoError"),
         None,
+    ));
+    s
+}
+
+/// Types that hold themselves: a linked record, a tree, two records that hold each other, a record
+/// and an enum that hold each other, an enum and an error enum that hold themselves, and a store,
+/// a method and a function that take and return them (SPEC section 10.1, recursive types).
+fn recursive() -> Schema {
+    let mut s = Schema::new("golden-recursive");
+    s.records.push(record(
+        "ListNode",
+        "A singly linked list: each node holds the rest of the list.",
+        vec![
+            field("value", TypeRef::I32),
+            documented(
+                field("next", opt(named("ListNode"))),
+                "The rest of the list; `None` at the end.",
+            ),
+        ],
+    ));
+    s.records.push(record(
+        "Tree",
+        "A tree: the children are in an array, which needs no indirection.",
+        vec![
+            field("label", TypeRef::String),
+            field("children", vec_of(named("Tree"))),
+        ],
+    ));
+    s.records.push(record(
+        "Parent",
+        "Holds a `Child` that holds a `Parent`.",
+        vec![
+            field("name", TypeRef::String),
+            field("child", opt(named("Child"))),
+        ],
+    ));
+    s.records.push(record(
+        "Child",
+        "Holds a `Parent` that holds a `Child`.",
+        vec![
+            field("name", TypeRef::String),
+            field("parent", opt(named("Parent"))),
+        ],
+    ));
+    s.records.push(record(
+        "Group",
+        "A record that holds an expression, which holds the record again.",
+        vec![
+            field("label", TypeRef::String),
+            field("inner", opt(named("Expr"))),
+        ],
+    ));
+    s.enums.push(enum_def(
+        "Expr",
+        "An expression that holds a group, which holds an expression.",
+        vec![
+            tuple_variant("Num", 0, vec![TypeRef::F64]),
+            tuple_variant("Grouped", 1, vec![named("Group")]),
+        ],
+    ));
+    s.enums.push(enum_def(
+        "Path",
+        "A path whose steps hold the rest of it.",
+        vec![
+            unit_variant("End", 0),
+            struct_variant(
+                "Step",
+                1,
+                vec![
+                    field("label", TypeRef::String),
+                    field("rest", named("Path")),
+                ],
+            ),
+        ],
+    ));
+    s.enums.push(error_def(
+        "ParseError",
+        "A parse failure that can wrap the failure it came from.",
+        vec![
+            with_message(unit_variant("Eof", 0), "unexpected end of input"),
+            with_message(
+                struct_variant(
+                    "Nested",
+                    1,
+                    vec![
+                        field("depth", TypeRef::U32),
+                        field("inner", named("ParseError")),
+                    ],
+                ),
+                "failed at depth {depth}",
+            ),
+        ],
+    ));
+    s.objects.push(store(
+        object(
+            "Outline",
+            "A store whose signals are recursive types.",
+            vec![ctor("Outline", "new", vec![], false)],
+            vec![
+                method(
+                    "Outline",
+                    "push_front",
+                    "Returns `list` with a new first node.",
+                    vec![
+                        param("list", named("ListNode")),
+                        param("value", TypeRef::I32),
+                    ],
+                    named("ListNode"),
+                    false,
+                ),
+                method(
+                    "Outline",
+                    "replace_tree",
+                    "Shows `tree`.",
+                    vec![param("tree", named("Tree"))],
+                    TypeRef::Unit,
+                    false,
+                ),
+                method(
+                    "Outline",
+                    "parse",
+                    "Parses `text`.",
+                    vec![param("text", TypeRef::String)],
+                    err_result(named("Expr"), "ParseError"),
+                    true,
+                ),
+            ],
+        ),
+        vec![
+            ("head", named("ListNode"), false, None),
+            ("maybe_head", opt(named("ListNode")), false, None),
+            ("tree", named("Tree"), false, None),
+            ("family", named("Parent"), false, None),
+            ("expr", named("Expr"), false, None),
+            ("path", named("Path"), false, None),
+            ("last_error", opt(named("ParseError")), false, None),
+        ],
+    ));
+    s.functions.push(function(
+        "reverse",
+        "Reverses a list.",
+        vec![param("list", named("ListNode"))],
+        named("ListNode"),
+        false,
+    ));
+    s.functions.push(function(
+        "evaluate",
+        "Evaluates an expression.",
+        vec![param("expr", named("Expr"))],
+        err_result(TypeRef::F64, "ParseError"),
+        true,
     ));
     s
 }
