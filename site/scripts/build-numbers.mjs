@@ -6,9 +6,35 @@
 //   node site/scripts/build-numbers.mjs
 //
 // bench.json: { machine, method, source, stressScreen, rows: [Row], harsh: [Row] } where a Row is
-// { id, operation, value, unit, budget, budgetUnit, gate|null, source, floor? }. Units: ns, µs, ms, KB, MB, % for ceilings; /s, k/s, M/s for floor rows (throughput gates, `floor: true`).
+// { id, operation, value, unit, budget, budgetUnit, gate|null, source, floor?, measured? }. Units: ns, µs, ms, KB, MB, % for ceilings; /s, k/s, M/s for floor rows (throughput gates, `floor: true`).
+//
+// MEASURED ROWS. A row with `measured: { file, artifact }` is not typed by hand: its `value` is the
+// `gzipped` size (KB = 1,000 bytes, one decimal) of the JSON line whose `artifact` matches in `file`
+// (relative to the repository root; `scripts/wasm-size.sh --record` writes it, ADR-052), and this
+// script writes it back into bench.json. The record's `budget` must be the row's. The same numbers
+// fill every `<!--measured:NAME-->..<!--/measured-->` slot of the site's pages and of README.md
+// (NAME is a key of SLOTS below), so a hand edit of any copy is undone here and fails CI's
+// "generated files are up to date" check.
 import { join } from "node:path";
-import { SITE, read, writeIfChanged, replaceRegion, esc } from "./lib.mjs";
+import { SITE, read, writeIfChanged, replaceRegion, esc, htmlFiles } from "./lib.mjs";
+
+const ROOT = join(SITE, "..");
+/** Slot name -> the record file and artefact whose gzipped size it shows. */
+const SLOTS = {
+  "web-size": { file: "bench/results/web-size.jsonl", artifact: "web/hello-wasm" },
+  "web-runtime-js": { file: "bench/results/web-size.jsonl", artifact: "web/hello-runtime-js" },
+};
+
+/** The JSON line of `artifact` in the record `file` (one JSON object per line). */
+function recordOf({ file, artifact }) {
+  const lines = read(join(ROOT, file)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  const line = lines.find((l) => l.artifact === artifact);
+  if (!line) throw new Error(`${file} has no line for ${artifact}; run scripts/wasm-size.sh --record`);
+  if (typeof line.gzipped !== "number") throw new Error(`${file}: ${artifact} was not measured (${line.error ?? "no gzipped size"}); run scripts/wasm-size.sh --record with the TypeScript runtime's node_modules installed`);
+  return line;
+}
+/** A gzipped size in KB, one decimal, as the cards and the prose print it. */
+const kb = (bytes) => Math.round(bytes / 100) / 10;
 
 const FACTOR = { ns: 1, "µs": 1e3, ms: 1e6, KB: 1, MB: 1e3, "%": 1 };
 // Throughput gates are floors: the measured rate must stay above them.
@@ -50,8 +76,39 @@ function grid(rows, label) {
   return [`<div class="stats" role="group" aria-label="${esc(label)}">`, ...rows.map((row, i) => card(row, sp[i])), "</div>"].join("\n");
 }
 
-const bench = JSON.parse(read(join(SITE, "data", "bench.json")));
+const benchPath = join(SITE, "data", "bench.json");
+const bench = JSON.parse(read(benchPath));
 if (!Array.isArray(bench.rows) || !Array.isArray(bench.harsh)) throw new Error("bench.json needs rows[] and harsh[]");
+
+for (const row of [...bench.rows, ...bench.harsh].filter((r) => r.measured)) {
+  const line = recordOf(row.measured);
+  if (row.unit !== "KB" || row.budgetUnit !== "KB") throw new Error(`bench row ${row.id}: a measured row is in KB`);
+  if (line.budget !== row.budget * 1000) throw new Error(`bench row ${row.id}: budget ${row.budget} KB, but ${row.measured.file} says ${line.budget} bytes`);
+  row.value = kb(line.gzipped);
+}
+if (writeIfChanged(benchPath, JSON.stringify(bench, null, 2) + "\n")) console.log("build-numbers: updated site/data/bench.json from the measured records");
+
+// The prose copies of the measured numbers.
+const slotText = Object.fromEntries(Object.entries(SLOTS).map(([name, at]) => [name, `${kb(recordOf(at).gzipped)} KB`]));
+const SLOT = /<!--measured:([a-z0-9-]+)-->[^<]*<!--\/measured-->/g;
+for (const file of [...htmlFiles(SITE), join(ROOT, "README.md")]) {
+  const text = read(file);
+  if (!text.includes("<!--measured:") && !text.includes("<!--/measured-->")) continue;
+  // Every opener and closer must belong to a whole slot with plain text inside: a slot whose
+  // number was edited into markup, or whose closer was mistyped, would otherwise be skipped by the
+  // pattern and keep its hand-written number past CI's "generated files are up to date" check.
+  const whole = [...text.matchAll(SLOT)].length;
+  const openers = text.split("<!--measured:").length - 1;
+  const closers = text.split("<!--/measured-->").length - 1;
+  if (openers !== whole || closers !== whole) {
+    throw new Error(`${file}: ${openers} <!--measured:NAME--> and ${closers} <!--/measured--> markers, but only ${whole} whole slots; a slot holds plain text only: <!--measured:NAME-->95.7 KB<!--/measured-->`);
+  }
+  const filled = text.replace(SLOT, (_, name) => {
+    if (!(name in slotText)) throw new Error(`${file}: unknown measured slot ${name}`);
+    return `<!--measured:${name}-->${slotText[name]}<!--/measured-->`;
+  });
+  if (writeIfChanged(file, filled)) console.log(`build-numbers: updated ${file.slice(ROOT.length + 1)}`);
+}
 
 const parts = [grid(bench.rows, `Benchmark results, measured on ${bench.machine}`)];
 if (bench.harsh.length) parts.push('<h3 class="stats-h">Harsh conditions</h3>', grid(bench.harsh, "Harsh-conditions benchmark results"));

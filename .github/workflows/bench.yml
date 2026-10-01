@@ -45,6 +45,15 @@ name: Bench
 # platform (`bench/RESULTS.md`, "Harsh conditions").
 #
 # Every run uploads the JSON behind its numbers (UNDRA_BENCH_RESULTS_DIR) as an artifact.
+#
+# Size (the `size` job, ADR-052): scripts/wasm-size.sh builds the `undra init` template for the web
+# exactly as an app does (release-wasm, then wasm-opt -Oz from a pinned binaryen, so every run
+# measures the optimised module with the same optimiser) and fails when the gzipped wasm is over
+# `[size."web/hello-wasm"]` in bench/budgets.toml: the 120 KB budget, or 5% over the recorded size,
+# whichever is lower. What the hello app ships of the JavaScript runtime is gated the same way by
+# `[size."web/hello-runtime-js"]` (26 KB), and a run that cannot measure either fails. A change that
+# grows one on purpose re-records with `scripts/wasm-size.sh --record` in the same commit; CI never
+# records. Sizes do not depend on the runner's speed, so there is no scale and no baseline here.
 
 on:
   push:
@@ -115,10 +124,59 @@ jobs:
         run: cargo test -p undra-bench --test stress --release -- --nocapture
       - name: Soak (10 s)
         run: cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2
+      # The criterion benches are for humans and are not timed here, but they must still run:
+      # `--test` runs each once. (The query bench's platform calls broke unnoticed once, when the
+      # query layer stopped linking itself, ADR-052.)
+      - name: Criterion benches run (each once, untimed)
+        run: cargo bench -p undra-bench --benches -- --test
       - name: The JSON behind the numbers
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bench-results
           path: bench-results
+          if-no-files-found: ignore
+
+  size:
+    name: Web size (hello-world wasm and JS runtime, gzip -9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # The Rust that CI pins (main pins 1.98.1 in every workflow; the deliberate bump re-records the
+      # size with `scripts/wasm-size.sh --record` in the same commit, since codegen moves the bytes).
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The template's build lives in target/wasm-size/target; a key of its own keeps it apart
+          # from the budgets job's cache.
+          key: wasm-size
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: runtimes/ts/@undra/runtime/package-lock.json
+      # Pinned: wasm-opt's output size moves between binaryen releases, and Ubuntu's package is
+      # years behind the version the record was measured with.
+      - name: Install binaryen version_133
+        run: |
+          curl -sSfL https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      - name: The TypeScript runtime's dependencies (its share is gated next to the wasm)
+        working-directory: runtimes/ts/@undra/runtime
+        run: npm ci
+      - name: Size gate
+        run: |
+          # The optimiser on PATH must be the pinned one, not one the runner image happens to have.
+          wasm-opt --version | tee /dev/stderr | grep -q "version 133"
+          bash scripts/wasm-size.sh
+      - name: The JSON behind the number
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-size
+          path: bench-results/web-size.jsonl
           if-no-files-found: ignore

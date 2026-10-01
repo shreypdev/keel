@@ -100,12 +100,12 @@ pub fn schema_from_registrations<'a>(
             Registration::Query(m) => schema.queries.push(QueryDef::from(*m)),
         }
     }
-    schema.records.sort_by(|a, b| a.name.cmp(&b.name));
-    schema.enums.sort_by(|a, b| a.name.cmp(&b.name));
-    schema.objects.sort_by(|a, b| a.name.cmp(&b.name));
-    schema.functions.sort_by(|a, b| a.name.cmp(&b.name));
-    schema.ports.sort_by(|a, b| a.name.cmp(&b.name));
-    schema.queries.sort_by(|a, b| a.name.cmp(&b.name));
+    crate::sort::by_name(&mut schema.records, |d| &d.name);
+    crate::sort::by_name(&mut schema.enums, |d| &d.name);
+    crate::sort::by_name(&mut schema.objects, |d| &d.name);
+    crate::sort::by_name(&mut schema.functions, |d| &d.name);
+    crate::sort::by_name(&mut schema.ports, |d| &d.name);
+    crate::sort::by_name(&mut schema.queries, |d| &d.name);
     schema
 }
 

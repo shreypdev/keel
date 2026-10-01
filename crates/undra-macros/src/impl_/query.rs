@@ -482,15 +482,19 @@ pub(crate) fn expand(flavor: Flavor, args: Args, mut item: ItemFn) -> syn::Resul
     let registration = submit(&root, "Query", &meta_static);
     // The type-erased half, so the client finds the definition by id: a platform constructs a
     // query handle (or calls a mutation) knowing only the id, and the offline queue replays
-    // a mutation by id after a restart.
+    // a mutation by id after a restart. With it, the query runtime's init hook (hydration) and
+    // dispatch layer: submitted here rather than by `undra-query` itself, so a core that declares
+    // no query and no mutation does not link the query runtime (ADR-052). The runtime keeps one
+    // hook and one layer per name, however many definitions submit them.
     let inventory = quote!(#meta::inventory);
-    let erased_registration = match flavor {
-        Flavor::Query => quote! {
-            #inventory::submit! { #query::QueryRegistration::of::<#struct_name>() }
-        },
-        Flavor::Mutation => quote! {
-            #inventory::submit! { #query::MutationRegistration::of::<#struct_name>() }
-        },
+    let erased = match flavor {
+        Flavor::Query => quote!(#query::QueryRegistration::of::<#struct_name>()),
+        Flavor::Mutation => quote!(#query::MutationRegistration::of::<#struct_name>()),
+    };
+    let erased_registration = quote! {
+        #inventory::submit! { #erased }
+        #inventory::submit! { #query::__private::HYDRATE }
+        #inventory::submit! { #query::__private::LAYER }
     };
 
     let items = quote! {
@@ -659,6 +663,9 @@ mod tests {
             "kind: ::undra::meta::QueryKind::Query",
             "::undra::meta::Registration::Query",
             "::undra::query::QueryRegistration::of::<TodosQuery>()",
+            // The query runtime is linked by the definitions that need it (ADR-052).
+            "::undra::meta::inventory::submit! { ::undra::query::__private::HYDRATE }",
+            "::undra::meta::inventory::submit! { ::undra::query::__private::LAYER }",
         ] {
             assert!(has(&out, needle), "missing `{needle}` in {out}");
         }
@@ -683,6 +690,8 @@ mod tests {
             "add_todo(__ctx, __undra_a0)",
             "kind: ::undra::meta::QueryKind::Mutation",
             "::undra::query::MutationRegistration::of::<AddTodoMutation>()",
+            "::undra::meta::inventory::submit! { ::undra::query::__private::HYDRATE }",
+            "::undra::meta::inventory::submit! { ::undra::query::__private::LAYER }",
         ] {
             assert!(has(&out, needle), "missing `{needle}` in {out}");
         }
