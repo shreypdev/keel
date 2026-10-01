@@ -10,6 +10,11 @@
 #define _POSIX_C_SOURCE 200809L
 #include "undra.h"
 
+/* The fixture core's one export (C ABI v2, ADR-044); a core's own `<namespace>_undra.h` declares it. */
+const void *undra_fixture_undra_api(void);
+/* Its table, read once in main() before anything else runs. */
+static const UndraApi *api;
+
 #include <assert.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -67,7 +72,7 @@ static uint8_t on_port(void *user, uint32_t port, uint32_t method, uint32_t call
 static void *provoke_a_log_record(void *arg) {
     (void)arg;
     const uint8_t junk[2] = {1, 2};
-    undra_port_reply(junk, 2);
+    api->port_reply(junk, 2);
     return NULL;
 }
 
@@ -81,8 +86,8 @@ enum { UNREGISTER, REPLACE, SHUTDOWN };
 /* H1: the removal must not return while the callback runs; the host frees `user` right after. */
 static void host_may_free_user(int how) {
     Host *h = new_host(200, 2);
-    undra_port_register(PORT_LOG, on_port, h);
-    assert(undra_init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
+    api->port_register(PORT_LOG, on_port, h);
+    assert(api->init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
 
     pthread_t t;
     pthread_create(&t, NULL, provoke_a_log_record, NULL);
@@ -90,33 +95,33 @@ static void host_may_free_user(int how) {
 
     Host *other = NULL;
     if (how == UNREGISTER) {
-        undra_port_register(PORT_LOG, NULL, NULL);
+        api->port_register(PORT_LOG, NULL, NULL);
     } else if (how == REPLACE) {
         other = new_host(0, 2);
-        undra_port_register(PORT_LOG, on_port, other);
+        api->port_register(PORT_LOG, on_port, other);
     } else {
-        undra_shutdown();
+        api->shutdown();
     }
     int finished = atomic_load(&h->finished), running = atomic_load(&h->running);
     free(h); /* what undra.h allows once the call has returned */
     pthread_join(t, NULL);
     assert(finished == 1 && running == 0); /* ...and the callback had indeed finished */
 
-    undra_shutdown();
+    api->shutdown();
     free(other);
 }
 
 /* M2: callbacks run concurrently (the header says so); hold four of them at once. */
 static void callbacks_run_concurrently(void) {
     Host *h = new_host(150, 2);
-    undra_port_register(PORT_LOG, on_port, h);
-    assert(undra_init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
+    api->port_register(PORT_LOG, on_port, h);
+    assert(api->init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
     pthread_t t[4];
     for (int i = 0; i < 4; i++) pthread_create(&t[i], NULL, provoke_a_log_record, NULL);
     for (int i = 0; i < 4; i++) pthread_join(t[i], NULL);
     assert(atomic_load(&h->finished) == 4);
     assert(atomic_load(&h->max_running) >= 2);
-    undra_shutdown();
+    api->shutdown();
     free(h);
 }
 
@@ -128,7 +133,7 @@ static void *reply_later(void *arg) {
     uint32_t id = (uint32_t)(uintptr_t)arg;
     uint8_t reply[5] = {0};
     memcpy(reply, &id, 4);
-    undra_port_reply(reply, sizeof reply);
+    api->port_reply(reply, sizeof reply);
     return NULL;
 }
 
@@ -144,16 +149,20 @@ static uint8_t on_async_log(void *user, uint32_t port, uint32_t method, uint32_t
 }
 
 static void a_late_log_answer_does_not_loop(void) {
-    undra_port_register(PORT_LOG, on_async_log, NULL);
-    assert(undra_init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
+    api->port_register(PORT_LOG, on_async_log, NULL);
+    assert(api->init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
     provoke_a_log_record(NULL); /* one warning; its call id is 0 and is answered "later" */
     sleep_ms(300);
     int calls = atomic_load(&pingpong_calls);
     assert(calls >= 1 && calls < 10); /* the old core made ~100,000 calls per second here */
-    undra_shutdown();
+    api->shutdown();
 }
 
 int main(void) {
+    api = (const UndraApi *)undra_fixture_undra_api();
+    assert(api != NULL && api->abi_version == UNDRA_ABI_VERSION && api->size == sizeof(UndraApi));
+    assert(strcmp(api->name_space, "undra_fixture") == 0);
+    assert(api == undra_fixture_undra_api()); /* immutable: the same table every time */
     host_may_free_user(UNREGISTER);
     host_may_free_user(REPLACE);
     host_may_free_user(SHUTDOWN);

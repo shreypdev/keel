@@ -368,6 +368,33 @@ pub fn signals() -> Vec<Workload> {
         // One write and its commit, nobody observing: pins the cost of the write check that
         // every build runs since ADR-035.
         Workload::new("signals/set_attached", set_attached),
+        Workload::new("signals/derived_10k/update_visible", || {
+            derived(10_000, DerivedOp::UpdateVisible)
+        }),
+        Workload::new("signals/derived_10k/toggle_membership", || {
+            derived(10_000, DerivedOp::ToggleMembership)
+        }),
+        Workload::new("signals/derived_10k/sort_key_change", || {
+            derived(10_000, DerivedOp::SortKeyChange)
+        }),
+        Workload::new("signals/derived_100k/update_visible", || {
+            derived(100_000, DerivedOp::UpdateVisible)
+        }),
+        Workload::new("signals/derived_100k/sort_key_change", || {
+            derived(100_000, DerivedOp::SortKeyChange)
+        }),
+        Workload::new("signals/derived_10k/insert_sorted", || {
+            derived(10_000, DerivedOp::InsertSorted)
+        }),
+        Workload::new("signals/derived_10k/param_flip", || {
+            derived(10_000, DerivedOp::ParamFlip)
+        }),
+        Workload::new("signals/derived_10k/rebuild_after_replace", || {
+            derived(10_000, DerivedOp::RebuildAfterReplace)
+        }),
+        Workload::new("signals/derived_10k/count_toggle", || {
+            derived(10_000, DerivedOp::CountToggle)
+        }),
         Workload::new("signals/computed/recompute_1", computed_recompute_1),
         Workload::new(
             "signals/computed/recompute_chain_10",
@@ -626,6 +653,261 @@ fn keyed(rows: u32, op: KeyedOp) -> Box<dyn Bench> {
         )
     } else {
         // Alternate between the two calls: every iteration is one real change of the same size.
+        let mut flip = false;
+        plain(move || {
+            flip = !flip;
+            let payload = if flip { &first } else { &second };
+            black_box(rt.call_sync(black_box(payload)));
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// signals: derived lists (ADR-039)
+// ---------------------------------------------------------------------------------------------
+
+/// A [`CountingHost`] that can keep the last change-set, so a workload can check what it ships
+/// before it is timed (and keeps nothing while it is: one relaxed load per change-set).
+#[derive(Default)]
+struct InspectingHost {
+    counts: CountingHost,
+    keep: std::sync::atomic::AtomicBool,
+    last: std::sync::Mutex<Vec<u8>>,
+}
+
+impl InspectingHost {
+    fn keeping(&self, on: bool) {
+        self.keep.store(on, Ordering::Relaxed);
+    }
+
+    /// The entries of the last change-set kept: `(signal_id, op, value)`.
+    fn last_entries(&self) -> Vec<(u32, undra::wire::payload::ChangeOp, Vec<u8>)> {
+        let bytes = std::mem::take(&mut *self.last.lock().expect("not poisoned"));
+        let set = ChangeSetRef::decode(&mut Reader::new(&bytes)).expect("a change-set");
+        set.into_iter()
+            .map(|e| (e.signal_id, e.op, e.value.to_vec()))
+            .collect()
+    }
+}
+
+impl undra::runtime::Host for InspectingHost {
+    fn reply(&self, call_id: u32, payload: &[u8]) {
+        self.counts.reply(call_id, payload);
+    }
+
+    fn change_set(&self, payload: &[u8]) {
+        self.counts.change_set(payload);
+        if self.keep.load(Ordering::Relaxed) {
+            *self.last.lock().expect("not poisoned") = payload.to_vec();
+        }
+    }
+
+    fn stream_item(&self, call_id: u32, payload: &[u8]) {
+        self.counts.stream_item(call_id, payload);
+    }
+
+    fn port_call(&self, p: u32, m: u32, id: u32, args: &[u8]) -> undra::runtime::PortCallOutcome {
+        self.counts.port_call(p, m, id, args)
+    }
+
+    fn log(&self, level: u8, target: &str, message: &str) {
+        self.counts.log(level, target, message);
+    }
+}
+
+/// The signals of `fixtures::Views`.
+const VIEWS_ROWS: u32 = 0;
+const VIEWS_OPEN: u32 = 2;
+const VIEWS_BY_TITLE: u32 = 3;
+const VIEWS_SHOWN: u32 = 4;
+const VIEWS_OPEN_COUNT: u32 = 5;
+
+#[derive(Clone, Copy, PartialEq)]
+enum DerivedOp {
+    /// `update_at` of a row the unsorted view shows: `rows` and `open` observed, one change-set of
+    /// two one-op entries (`Update`, `Update`).
+    UpdateVisible,
+    /// `update_at` that moves a row out of the filter and back: `Remove` / `Insert`.
+    ToggleMembership,
+    /// A title change on the sorted view: `Move` + `Update`, across the whole view and back.
+    SortKeyChange,
+    /// An insert in the middle of the source and its removal, the sorted view observed: one
+    /// `Insert` / `Remove` each.
+    InsertSorted,
+    /// The parameter flipped: 2,500 rows enter or leave, sent as the full value (past 256 ops).
+    ParamFlip,
+    /// `replace` of the source: the view rebuilds and is sent whole.
+    RebuildAfterReplace,
+    /// A membership toggle with `count()` observed as a `Computed<u32>` beside the source.
+    CountToggle,
+}
+
+/// The ops of a keyed-patch entry.
+fn ops_of(value: &[u8]) -> Vec<undra::wire::PatchOp<Item>> {
+    KeyedPatch::<Item>::decode(&mut Reader::new(value))
+        .expect("a keyed patch")
+        .ops
+}
+
+/// The shape check of one change-set: per expected signal, `Some(ops)` for a patch of exactly
+/// those op kinds (`'i'`, `'r'`, `'u'`, `'m'`), `None` for a full value.
+fn expect_entries(
+    host: &InspectingHost,
+    expected: &[(u32, Option<&str>)],
+    what: &str,
+) -> Vec<(u32, undra::wire::payload::ChangeOp, Vec<u8>)> {
+    use undra::wire::PatchOp;
+    use undra::wire::payload::ChangeOp;
+    let entries = host.last_entries();
+    let ids: Vec<u32> = entries.iter().map(|(id, ..)| *id).collect();
+    let want: Vec<u32> = expected.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ids, want, "{what}: the entries of the change-set");
+    for ((id, op, value), (_, kinds)) in entries.iter().zip(expected) {
+        match kinds {
+            None => assert_eq!(*op, ChangeOp::Full, "{what}: signal {id} is a full value"),
+            Some(kinds) => {
+                assert_eq!(*op, ChangeOp::KeyedPatch, "{what}: signal {id} is a patch");
+                let got: String = ops_of(value)
+                    .iter()
+                    .map(|op| match op {
+                        PatchOp::Insert { .. } => 'i',
+                        PatchOp::Remove { .. } => 'r',
+                        PatchOp::Update { .. } => 'u',
+                        PatchOp::Move { .. } => 'm',
+                        PatchOp::Clear => 'c',
+                    })
+                    .collect();
+                assert_eq!(got, *kinds, "{what}: the ops of signal {id}");
+                assert!(
+                    value.len() < 200,
+                    "{what}: signal {id} ships {} bytes",
+                    value.len()
+                );
+            }
+        }
+    }
+    entries
+}
+
+/// `fixtures::Views` seeded with `rows` rows (every fourth done), observing only what `op`
+/// measures, and the two calls the iterations alternate (or run and undo). Each call's change-set
+/// is checked before anything is timed. Through the runtime, as `keyed` is: dispatch, argument
+/// decode, the write, the drain of the views, the change-set, the host callback.
+fn derived(rows: u32, op: DerivedOp) -> Box<dyn Bench> {
+    let host = Arc::new(InspectingHost::default());
+    let rt = super::host::runtime_with(host.clone(), 0);
+    let views = construct(&rt, "Views", &[]);
+    call_ok(&rt, &method_call(views, "Views", "seed", 2, &enc(&rows)));
+    let middle = rows / 2; // an open row: `middle % 4 != 3` for the sizes used
+    assert_ne!(middle % 4, 3, "the middle row is open");
+    let observed: &[u32] = match op {
+        DerivedOp::UpdateVisible | DerivedOp::ToggleMembership => &[VIEWS_ROWS, VIEWS_OPEN],
+        DerivedOp::SortKeyChange | DerivedOp::InsertSorted => &[VIEWS_ROWS, VIEWS_BY_TITLE],
+        DerivedOp::ParamFlip => &[VIEWS_SHOWN],
+        DerivedOp::RebuildAfterReplace => &[VIEWS_OPEN],
+        DerivedOp::CountToggle => &[VIEWS_ROWS, VIEWS_OPEN_COUNT],
+    };
+    for id in observed {
+        rt.observe(views.0, *id, true);
+    }
+    let at = |method: &str, id: u32, args: Vec<u8>| method_call(views, "Views", method, id, &args);
+    let rename = |id: u32, title: &str| {
+        at(
+            "rename",
+            id,
+            [enc(&middle), enc(&title.to_owned())].concat(),
+        )
+    };
+    let toggle = |id: u32| at("toggle", id, enc(&middle));
+    let (first, second, resets) = match op {
+        DerivedOp::UpdateVisible => (rename(3, "first title"), rename(4, "second title"), false),
+        // Titles sort before and after every seeded one ("item n xx.."): the row crosses the view.
+        DerivedOp::SortKeyChange => (
+            rename(3, "a first title"),
+            rename(4, "z second title"),
+            false,
+        ),
+        DerivedOp::ToggleMembership | DerivedOp::CountToggle => (toggle(3), toggle(4), false),
+        DerivedOp::InsertSorted => {
+            let row = Item {
+                id: 10_000_000,
+                title: "m inserted".to_owned(),
+                done: false,
+            };
+            (
+                at("insert_at", 3, [enc(&middle), enc(&row)].concat()),
+                at("remove_at", 4, enc(&middle)),
+                true,
+            )
+        }
+        DerivedOp::ParamFlip => (at("flip", 3, Vec::new()), at("flip", 4, Vec::new()), false),
+        DerivedOp::RebuildAfterReplace => (
+            at("reset", 3, Vec::new()),
+            at("reset", 4, Vec::new()),
+            false,
+        ),
+    };
+
+    // Prove what ships: the ops of the view, never the view, unless the row says so.
+    let sets = host.counts.change_sets();
+    host.keeping(true);
+    call_ok(&rt, &first);
+    let what_first = match op {
+        DerivedOp::UpdateVisible => vec![(VIEWS_ROWS, Some("u")), (VIEWS_OPEN, Some("u"))],
+        DerivedOp::ToggleMembership => vec![(VIEWS_ROWS, Some("u")), (VIEWS_OPEN, Some("r"))],
+        DerivedOp::SortKeyChange => vec![(VIEWS_ROWS, Some("u")), (VIEWS_BY_TITLE, Some("mu"))],
+        DerivedOp::InsertSorted => vec![(VIEWS_ROWS, Some("i")), (VIEWS_BY_TITLE, Some("i"))],
+        DerivedOp::ParamFlip | DerivedOp::RebuildAfterReplace => {
+            vec![(observed[0], None)]
+        }
+        DerivedOp::CountToggle => vec![(VIEWS_ROWS, Some("u")), (VIEWS_OPEN_COUNT, None)],
+    };
+    let entries = expect_entries(&host, &what_first, "the first call");
+    call_ok(&rt, &second);
+    let what_second = match op {
+        DerivedOp::ToggleMembership => vec![(VIEWS_ROWS, Some("u")), (VIEWS_OPEN, Some("i"))],
+        DerivedOp::InsertSorted => vec![(VIEWS_ROWS, Some("r")), (VIEWS_BY_TITLE, Some("r"))],
+        _ => what_first.clone(),
+    };
+    expect_entries(&host, &what_second, "the second call");
+    host.keeping(false);
+    assert_eq!(
+        host.counts.change_sets() - sets,
+        2,
+        "one change-set per call"
+    );
+    match op {
+        DerivedOp::ParamFlip => {
+            // `show` went from true to false: the 2,500 done rows left the view.
+            let shown: Vec<Item> = Decode::decode_exact(&entries[0].2).expect("the view");
+            assert_eq!(
+                shown.len(),
+                rows as usize / 4 * 3,
+                "2,500 rows left a 10,000-row view"
+            );
+        }
+        DerivedOp::RebuildAfterReplace => {
+            let open: Vec<Item> = Decode::decode_exact(&entries[0].2).expect("the view");
+            assert_eq!(open.len(), rows as usize / 4 * 3, "the open rows");
+        }
+        DerivedOp::CountToggle => {
+            let count = u32::decode_exact(&entries[1].2).expect("the count");
+            assert_eq!(count, rows / 4 * 3 - 1, "one row fewer is open");
+        }
+        _ => {}
+    }
+
+    if resets {
+        let rt2 = rt.clone();
+        with_reset(
+            move || {
+                black_box(rt.call_sync(black_box(&first)));
+            },
+            move || {
+                black_box(rt2.call_sync(&second));
+            },
+        )
+    } else {
         let mut flip = false;
         plain(move || {
             flip = !flip;

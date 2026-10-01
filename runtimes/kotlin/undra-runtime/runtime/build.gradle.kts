@@ -53,10 +53,13 @@ if (goldenFull.isDirectory && goldenFullRun.isDirectory) {
 
 tasks.test {
     useJUnitPlatform()
-    // For the JNI smoke test: -Pundra.native.dir=target/debug [-Pundra.native.name=undra_ffi]
+    // For the JNI smoke test (NativeSmokeTests, against undra-ffi's fixture core):
+    // -Pundra.native.dir=../../../crates/undra-ffi/tests/fixture/target/debug, or
+    // -Pundra.native.undra_fixture.path=/abs/libundra_fixture.dylib (any -Pundra.native.<namespace>.path is forwarded).
     (findProperty("undra.native.dir") as String?)?.let { systemProperty("java.library.path", it) }
-    (findProperty("undra.native.name") as String?)?.let { systemProperty("undra.native.name", it) }
-    (findProperty("undra.native.path") as String?)?.let { systemProperty("undra.native.path", it) }
+    project.properties
+        .filterKeys { it.startsWith("undra.native.") && it.endsWith(".path") }
+        .forEach { (key, value) -> systemProperty(key, value.toString()) }
     testLogging {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

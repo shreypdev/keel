@@ -113,6 +113,10 @@
         {
           "title": "State-preserving reload (ADR-053)",
           "text": "undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not."
+        },
+        {
+          "title": "Derived keyed lists (ADR-039)",
+          "text": "A filtered, sorted view over a 10,000-row list costs what changed: one row edit is 158 bytes on the wire where it was 353 KB."
         }
       ]
     },
@@ -155,10 +159,6 @@
         {
           "title": "Devtools",
           "text": "A page served by undra dev: store state, a change-set timeline with time travel, port and query logs, perf counters."
-        },
-        {
-          "title": "Derived keyed lists (ADR-039)",
-          "text": "Incremental filter, sort and map over a keyed list, so a view over 10,000 rows costs what changed."
         },
         {
           "title": "Db and WebSocket ports",

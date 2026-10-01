@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One core or several · Undra docs</title>
+<meta name="description" content="When an app should carry one Undra core and when several, how a core's namespace keeps them apart, and how to load two side by side.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/several-cores.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="One core or several · Undra docs">
+<meta property="og:description" content="When an app should carry one Undra core and when several, how a core's namespace keeps them apart, and how to load two side by side.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/several-cores.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="One core or several · Undra docs">
+<meta name="twitter:description" content="When an app should carry one Undra core and when several, how a core's namespace keeps them apart, and how to load two side by side.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/several-cores.html#article","headline":"One core or several · Undra docs","description":"When an app should carry one Undra core and when several, how a core's namespace keeps them apart, and how to load two side by side.","url":"https://shreypdev.github.io/undra/docs/several-cores.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"One core or several","item":"https://shreypdev.github.io/undra/docs/several-cores.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="realtime.html">WebSocket &amp; SSE</a></li><li><a href="db.html">Local database</a></li><li><a href="several-cores.html" aria-current="page">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="realtime.html">WebSocket &amp; SSE</a></li><li><a href="db.html">Local database</a></li><li><a href="several-cores.html" aria-current="page">One core or several</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>One core or several</h1>
+    <p class="lede">Most apps need one core. When a second one arrives, a vendor's SDK or a module another team ships, the two load into the same app side by side, each under its own namespace.</p>
+<h2 id="one-core-first">One core first<a class="anchor" href="#one-core-first" aria-label="Link to this section">#</a></h2>
+<p>Put the app's domain in one core and split it into crates inside it. Add a second core only for code that ships on its own.</p>
+<div class="table-wrap"><table><thead><tr><th></th><th>One core, several crates</th><th>Several cores</th></tr></thead><tbody><tr><td>State and transactions</td><td>shared: one store graph, one order of writes</td><td>separate: each core has its own</td></tr><tr><td>Releases</td><td>together</td><td>each on its own schedule</td></tr><tr><td>Cost</td><td>one runtime</td><td>a runtime, its threads and a copy of Undra per core</td></tr></tbody></table></div>
+<h2 id="the-namespace">The namespace<a class="anchor" href="#the-namespace" aria-label="Link to this section">#</a></h2>
+<p>A core's namespace names everything it exports, so two cores never collide. By default it is the core's package name in snake case; set it in <code>undra.toml</code> (lowercase letters, digits and <code>_</code>, at most 32 characters).</p>
+<div class="code"><div class="code-bar"><span>undra.toml</span></div><pre><code data-lang="toml">[core]
+path = "core"
+namespace = "acme_pay"</code></pre></div>
+<div class="table-wrap"><table><thead><tr><th>What</th><th>Named</th></tr></thead><tbody><tr><td>The C symbol, which returns the core's table</td><td><code>acme_pay_undra_api</code></td></tr><tr><td>iOS</td><td><code>AcmePayCore.xcframework</code>, one prelinked <code>libacme_pay.a</code> per slice</td></tr><tr><td>Android</td><td><code>libacme_pay.so</code></td></tr><tr><td>Web</td><td><code>acme_pay.wasm</code></td></tr><tr><td>The bindings' entry, in Swift, Kotlin and TypeScript</td><td><code>UndraAcmePay</code></td></tr></tbody></table></div>
+<p><code>undra build</code> refuses a namespace that a sibling project already uses, and every runtime refuses to load two cores with one.</p>
+<h2 id="loading-two-cores">Loading two cores<a class="anchor" href="#loading-two-cores" aria-label="Link to this section">#</a></h2>
+<p>Load each core once, through its own entry. Every generated type defaults to the core of its own package, so a call never reaches the wrong one.</p>
+<details class="reveal-code"><summary>Show the code for Swift, Kotlin and TypeScript</summary>
+<div class="code"><div class="code-bar"><span><span class="lang">swift</span></span></div><pre><code data-lang="swift">try UndraShopCore.load()
+try UndraAcmePay.load()
+
+let cart = try Cart()            // Shop's core
+let quote = try Quote()          // AcmePay's core</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">kotlin</span></span></div><pre><code data-lang="kotlin">val shop = UndraShopCore.load()
+UndraAcmePay.load()
+AndroidPlatformDefaults.install(shop, this)   // the ports, per core</code></pre></div>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">await UndraShopCore.load({ mode: "wasm-main", wasm: new URL(shopWasm, location.href) });
+await UndraAcmePay.load({ mode: "wasm-main", wasm: new URL(payWasm, location.href), shared: false });</code></pre></div>
+</details>
+<p>On iOS each slice exports one symbol, so the two libraries link next to each other with no <code>-force_load</code>. On Android each core registers its natives on its bindings' own class. In React Native, <code>loadNative(UndraAcmePay)</code> installs one module per namespace.</p>
+<h2 id="good-to-know">Good to know<a class="anchor" href="#good-to-know" aria-label="Link to this section">#</a></h2>
+<ul><li><strong>Pass values between cores, not objects.</strong> An object belongs to the core that made it, and two cores can issue the same handle numbers.</li><li><strong>Each core closes on its own.</strong> Shutting one down leaves the other running; a closed core can load again.</li><li><strong>Two local Swift packages need two directory names.</strong> SwiftPM names a local package after its directory.</li></ul>
+<p>The <a href="https://github.com/shreypdev/undra/tree/main/examples/two-cores" rel="noopener">two-core test apps</a> load one core under two namespaces on iOS, Android, the JVM and Node, and CI runs them on every change.</p>
+
+<p class="edit"><a href="https://github.com/shreypdev/undra/edit/main/site/docs/several-cores.html" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13.5h3l7-7a2.1 2.1 0 0 0-3-3l-7 7zM8.5 4.5l3 3"/></svg> Edit this page on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="db.html"><span>Previous</span><b>Local database</b></a>
+    <a class="next" href="cli.html"><span>Next</span><b>The CLI</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#one-core-first">One core first</a></li><li><a href="#the-namespace">The namespace</a></li><li><a href="#loading-two-cores">Loading two cores</a></li><li><a href="#good-to-know">Good to know</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/queries.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

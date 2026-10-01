@@ -58,6 +58,7 @@ impl GeneratedFile {
 /// use undra_bindgen::Generator;
 ///
 /// let mut generator = Generator::for_crate("playground-core");
+/// assert_eq!(generator.namespace, "playground_core");
 /// assert_eq!(generator.swift_module, "PlaygroundCore");
 /// assert_eq!(generator.kotlin_package, "dev.undra.generated.playground_core");
 /// assert_eq!(generator.ts_package_name(), "@app/playground-core");
@@ -67,6 +68,11 @@ impl GeneratedFile {
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Generator {
+    /// The core's namespace (`[core] namespace` of `undra.toml`, ADR-044): it names the core's
+    /// one C export (`<namespace>_undra_api`), its libraries and the generated entry point of every
+    /// language (`Undra<Namespace>`, see [`naming::CoreNames`]), which loads this core and is the
+    /// default core of every generated API. Default: the crate name in snake case.
+    pub namespace: String,
     /// Name of the SwiftPM module the Swift files belong to; also the
     /// directory below `Sources/`.
     pub swift_module: String,
@@ -105,6 +111,7 @@ impl Generator {
     pub fn for_crate(crate_name: &str) -> Generator {
         let snake = crate_name.replace(['-', '.'], "_").to_ascii_lowercase();
         Generator {
+            namespace: naming::CoreNames::default_namespace(crate_name),
             swift_module: naming::pascal(crate_name),
             swift_typed_throws: true,
             kotlin_package: format!("dev.undra.generated.{snake}"),
@@ -114,6 +121,12 @@ impl Generator {
             package_version: "0.1.0".to_owned(),
             emit_standard_library: false,
         }
+    }
+
+    /// The names derived from [`namespace`](Self::namespace) (entry point, artefacts, C symbol).
+    #[must_use]
+    pub fn core_names(&self) -> naming::CoreNames {
+        naming::CoreNames::new(&self.namespace)
     }
 
     /// The npm name of the generated package, `@scope/name` or `name`.

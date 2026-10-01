@@ -26,7 +26,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
     private val _filter: MutableStateFlow<Filter> = signal(Filter.ALL)
     val filter: StateFlow<Filter> = _filter.asStateFlow()
     private val _visible: MutableStateFlow<List<Todo>> = signal(emptyList())
-    /** Computed by the core; read-only. */
+    /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
     val visible: StateFlow<List<Todo>> = _visible.asStateFlow()
     private val _remaining: MutableStateFlow<UInt> = signal(0u)
     /** Computed by the core; read-only. */
@@ -39,7 +39,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0)),
     )
@@ -163,7 +163,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): TodoStore {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): TodoStore {
             val handle = ctx.constructObject(UndraIds.Objects.TodoStore.TYPE_ID, UndraIds.Objects.TodoStore.NEW, ByteArray(0))
             return TodoStore(ctx, handle)
         }
@@ -173,7 +173,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          * @throws CancellationException if the calling coroutine is cancelled.
          */
-        suspend fun open(path: String, ctx: UndraCore = UndraCore.shared): TodoStore {
+        suspend fun open(path: String, ctx: UndraCore = UndraPlaygroundCore.core): TodoStore {
             val w = UndraWriter()
             w.writeStr(path)
             val handle = try {

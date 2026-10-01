@@ -400,9 +400,13 @@ impl Model {
                 _ => "When `data` was last updated.",
             });
         }
-        signal
-            .computed
-            .then_some("Computed by the core; read-only.")
+        signal.computed.then_some(if signal.key.is_some() {
+            // `computed` with a key is a derived keyed list (ADR-039): the same declaration as a
+            // computed list, maintained from its source as keyed patches.
+            "Derived by the core from another list; read-only. Changes arrive as keyed patches."
+        } else {
+            "Computed by the core; read-only."
+        })
     }
 }
 

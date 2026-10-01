@@ -21,7 +21,7 @@ import { FakeNative, le } from "./support/fake-native.js";
  * (cpp/test/run.sh), the Java on the JVM (android/test/run.sh), both on the devices (scripts/rn-device-checks.sh).
  */
 
-const g = globalThis as { __undraNative?: unknown; fetch?: unknown };
+const g = globalThis as { __undraNative?: Record<string, FakeNative>; fetch?: unknown };
 const ALL = [PortIds.Kv.portId, PortIds.SecureStore.portId, PortIds.Fs.portId, PortIds.Connectivity.portId];
 const originalFetch = g.fetch;
 
@@ -70,14 +70,19 @@ function request(overrides: Partial<HttpRequest> = {}): HttpRequest {
   return { method: "get", url: "http://127.0.0.1:8737/check", headers: [], body: null, timeoutMs: null, ...overrides };
 }
 
+/** Links `native` as the app's core of its namespace (ADR-044: one module object per namespace). */
 function installFake(native: FakeNative): void {
   setTurboModule("UndraNative", {
-    install() {
-      g.__undraNative = native;
+    install(namespace: string) {
+      if (namespace !== native.namespace) throw new Error(`no Undra core \`${namespace}\` is linked into this app`);
+      g.__undraNative = { ...g.__undraNative, [namespace]: native };
       return true;
     },
   });
 }
+
+/** The entry `loadNative` takes: the fake's namespace and schema hash, as a generated entry has them. */
+const entryOf = (native: FakeNative) => ({ namespace: native.namespace, schemaHash: native.hash });
 
 describe("which ports the module answers natively", () => {
   test("every port the platform offers, when the app overrides none", () => {
@@ -110,8 +115,8 @@ describe("loadNative and the native defaults", () => {
     const native = new FakeNative();
     native.defaults = { ports: ALL, kv: "/data/kv", fs: "/data/fs", secureStore: "Keychain service dev.undra.securestore" };
     installFake(native);
-    expect(nativePlatformDefaults()).toEqual(native.defaults);
-    const core = await loadNative({ expectedSchemaHash: native.hash });
+    expect(nativePlatformDefaults(native.namespace)).toEqual(native.defaults);
+    const core = await loadNative(entryOf(native));
     expect(native.started?.nativePorts).toEqual(ALL);
     core.close();
   });
@@ -123,7 +128,7 @@ describe("loadNative and the native defaults", () => {
     installFake(native);
     const kv = memoryKv();
     kv.entries.set("k", new Uint8Array([7]));
-    const core = await loadNative({ expectedSchemaHash: native.hash, adapters: { kv } });
+    const core = await loadNative(entryOf(native), { adapters: { kv } });
     expect(native.started?.nativePorts).toEqual([PortIds.SecureStore.portId, PortIds.Fs.portId, PortIds.Connectivity.portId]);
     expect(native.started?.ports).toContain(PortIds.Kv.portId);
     // The core asks Kv.get("k") from one of its threads: the override answers Some([7]).
@@ -143,7 +148,7 @@ describe("loadNative and the native defaults", () => {
     native.defaults = { ports: [], error: "the Android library of @undra/react-native is not in the app" };
     installFake(native);
     const lines: string[] = [];
-    const core = await loadNative({ expectedSchemaHash: native.hash, adapters: { log: { log: (level, _t, m) => lines.push(`${level} ${m}`) } } });
+    const core = await loadNative(entryOf(native), { adapters: { log: { log: (level, _t, m) => lines.push(`${level} ${m}`) } } });
     expect(native.started?.nativePorts).toEqual([]);
     expect(lines.filter((l) => l.includes("native default ports are off"))).toHaveLength(1);
     core.close();
@@ -155,7 +160,7 @@ describe("loadNative and the native defaults", () => {
     installFake(native);
     const scripted = scriptedFetch(() => Promise.resolve(response(200, "pong", { "x-echo": "1" })));
     g.fetch = scripted.fetch;
-    const core = await loadNative({ expectedSchemaHash: native.hash });
+    const core = await loadNative(entryOf(native));
     const w = new UndraWriter(64);
     w.writeU16(0); // get
     w.writeStr("http://127.0.0.1:8737/ping");
@@ -185,7 +190,7 @@ describe("loadNative and the native defaults", () => {
       const native = new FakeNative();
       native.defaults = { ports: ALL };
       installFake(native);
-      const core = await loadNative({ expectedSchemaHash: native.hash });
+      const core = await loadNative(entryOf(native));
       await tick(5);
       expect(native.started?.nativePorts).toEqual(ALL);
       expect(native.log.filter((l) => l.startsWith(`event ${PortIds.Connectivity.portId} `))).toEqual([]);
@@ -197,8 +202,7 @@ describe("loadNative and the native defaults", () => {
       again.defaults = { ports: ALL };
       installFake(again);
       const reports: boolean[] = [];
-      const second = await loadNative({
-        expectedSchemaHash: again.hash,
+      const second = await loadNative(entryOf(again), {
         adapters: {
           connectivity: {
             subscribe: (emit) => {
@@ -227,7 +231,7 @@ describe("loadNative and the native defaults", () => {
   test("the default Lifecycle reports AppState to the core", async () => {
     const native = new FakeNative();
     installFake(native);
-    const core = await loadNative({ expectedSchemaHash: native.hash });
+    const core = await loadNative(entryOf(native));
     await tick();
     setAppState("background");
     setAppState("background"); // the same state again is not a report

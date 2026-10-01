@@ -195,7 +195,7 @@ total() {
   [ "$passed" = "$all" ] && [ "$APP_TOTAL" -ge "$EXPECT" ]
 }
 
-# build_core: the core for both phones (the iOS half only on macOS) and the UndraCore pod.
+# build_core: the core for both phones (the iOS half only on macOS) and its pod (PlaygroundCore, ADR-044).
 build_core() {
   UNDRA="${UNDRA:-$REPO/target/debug/undra}"
   if [ ! -x "$UNDRA" ]; then
@@ -276,9 +276,10 @@ ios() {
     # CocoaPods stops on a non-UTF-8 locale (an agent's or a cron job's shell often has none).
     case "${LC_ALL:-${LANG:-}}" in *UTF-8*|*utf8*) ;; *) export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ;; esac
     (cd "$APP/ios" && pod install)
-    # The pod links the core with -force_load, which Xcode does not track as an input of the link step: a rebuilt
-    # core would leave an up-to-date-looking app that still carries the old one. Dropping the app and its own
-    # intermediates (not the Pods') makes the linker run again; the compile of a few app files is all it costs.
+    # The core is a vendored static library that a script phase copies into the build directory, and a rebuilt
+    # core has been seen to leave an up-to-date-looking app that still carries the old one. Dropping the app and
+    # its own intermediates (not the Pods') makes the linker run again; the compile of a few app files is all it
+    # costs.
     rm -rf "$app" "$derived/Build/Intermediates.noindex/UndraPlayground.build"
     echo "== app: Release, for the simulator ($udid), active architecture only"
     # ONLY_ACTIVE_ARCH: the core's simulator slice has [ios] simulator_archs only (arm64 by default); a Release

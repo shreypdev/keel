@@ -1,7 +1,8 @@
 // The React Native host of the C ABI, without JSI (ADR-038, decisions 3, 4 and 7).
 //
 // `Host` owns one running core: it registers the port callbacks, calls `undra_init` with its three
-// callbacks, and turns everything the core says into records in one inbox. It knows nothing about
+// callbacks, and turns everything the core says into records in one inbox. A process may hold several
+// cores (ADR-044), each with its own table and its own hosts; at most one host of each core runs. It knows nothing about
 // JavaScript, so its ownership and threading rules are tested against the real core on the host
 // (`cpp/test/host_test.cpp`); `UndraJsi.cpp` puts JSI on top.
 //
@@ -20,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -68,10 +70,10 @@ inline constexpr std::size_t kRecordHeader = 5;
 
 /// Start codes of `Host::start` beyond those of `undra_init` (0 ok, 1..5 its `init_code`s).
 namespace start_code {
-/// Another `Host` of this process is running (one core per process). One that is shutting down
-/// on another thread is waited for (at most 5 s) instead.
+/// Another `Host` of the same core (namespace) is running in this process: one running host per
+/// core. One that is shutting down on another thread is waited for (at most 5 s) instead.
 inline constexpr uint32_t kBusy = 0x100;
-/// The linked core speaks another C ABI version.
+/// The core speaks another C ABI version.
 inline constexpr uint32_t kAbiMismatch = 0x101;
 /// `start` was called on a host that is already running.
 inline constexpr uint32_t kAlreadyStarted = 0x102;
@@ -188,8 +190,8 @@ class Host {
   /// The C ABI this host calls.
   const Api &api() const noexcept { return api_; }
 
-  /// The process's running host, if any (one core per process).
-  static Host *runningHost() noexcept;
+  /// The running host of the core `name_space` in this process, if any (one per core).
+  static Host *runningHost(const std::string &name_space) noexcept;
 
  private:
   friend class CallScope;

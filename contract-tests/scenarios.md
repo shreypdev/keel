@@ -1,18 +1,19 @@
 # Contract scenarios
 
 This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): the
-scenarios below (S01 to S18, then S23 to S25 for the opt-in ports of ADR-047 and ADR-048), each run by every platform runtime against the **real playground core**
+scenarios below (S01 to S19; S23 to S25 for the opt-in ports of ADR-047 and ADR-048; S26), each run by every platform runtime against the **real playground core**
 (`examples/playground/core`, the same Rust crate the apps run), through the real boundary:
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
-| TypeScript | `contract-tests/ts` (vitest) | `@undra/runtime` `WasmMainTransport` over the real `undra_core.wasm` |
-| Kotlin | `contract-tests/kotlin` (kotlinc + JVM) | `dev.undra.runtime` `UndraCore` over JNI and the real `libundra_core` |
-| Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI and the real static core |
+| TypeScript | `contract-tests/ts` (vitest) | `@undra/runtime` `WasmMainTransport` over the real `playground_core.wasm` |
+| Kotlin | `contract-tests/kotlin` (kotlinc + JVM) | `dev.undra.runtime` `UndraCore` over JNI and the real `libplayground_core` |
+| Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
 `contract-tests/check.sh` fails unless every id is `PASS` (a `SKIP` needs its reason here,
-in the platform notes of the scenario).
+in the platform notes of the scenario). S20 to S22 are held by another ADR (the boundary-surface plan
+numbers them); S23 to S25 are ADR-047's and ADR-048's; S26 is ADR-044's.
 
 ## The harness (the same on every platform)
 
@@ -21,8 +22,8 @@ The core is built by the `undra` CLI (`undra build --platform web|host|ios`) and
 everything a UI would use and the runtime's own API (`UndraCore`) for what bindings do not expose
 (raw signal updates, statistics, snapshots, cancellation, schema checks).
 
-* **One core per process** on the native platforms (`undra_init` is once per process), so scenarios
-  create their own stores and objects, and the state they share (the query cache, the offline queue,
+* **One playground core** per process on the native platforms (a core's `init` is once per core, and
+  the runner loads the playground's once), so scenarios create their own stores and objects, and the state they share (the query cache, the offline queue,
   the Clock) is isolated by **list names** (`s12`, `s13`, `s14`) and left clean.
 * **Adapters** the runner supplies at load time:
   * `Clock`: a **manual clock**, settable and advanceable by the test, starting at
@@ -233,8 +234,9 @@ waiting for an event loop.
 
 1. `Todos` observed. `add("a")`, `add("b")`, `add("c")` (ids counting up); `toggle(b)`.
    `remaining == 2`, `visible == [a, b(done), c]`.
-2. `set_filter(Done)`: the **one** change-set carries `filter = done` and `visible = [b]` (the computed
-   was recomputed in the core), `remaining` does not change.
+2. `set_filter(Done)`: the **one** change-set carries `filter = done` and `visible = [b]` (computed in
+   the core; since ADR-039 `visible` is a derived list, so a raw mirror receives it as the keyed patch
+   that leaves `[b]`), `remaining` does not change.
 3. `set_filter(Active)`: `visible == [a, c]`. `set_filter(All)` restores all three.
 4. `remove(a)`, `clear_done()`: `visible`/`remaining` follow.
 5. `Counter.parity`: after `add(3)` odd, after `add(1)` even, after `add(-1)` odd, after `add(0)`
@@ -381,11 +383,11 @@ List `s14`; the server serves `[]`. A handle observes it.
    step 6's shutdown a timer-paced core task is running (`Stress.start`); for 200 ms after the shutdown
    no port call reaches the runner's adapters (the runner counts the calls its Clock, Log, Http and Kv
    adapters receive). Then `UndraCore.load` with the same options succeeds again in the same process
-   (Kotlin: `close()` reached the JNI `UndraNative.shutdown`; Swift: `undra_shutdown`), `stats()` of the
+   (Kotlin: `close()` reached the JNI `shutdown` of the bindings' `UndraCoreNative`; Swift: the table's `shutdown`), `stats()` of the
    new core reports no live handles, the generated `add(1, 2) == 3` runs on it, for 200 ms its Clock
    adapter receives no call (the new core runs no timer-paced task), and it closes cleanly. After each
    close, the native core reports no thread of its own still running: with no core loaded,
-   `undra_stats_json` (Kotlin `UndraNative.statsJson()`) says `runtime_threads == 0`. That is the check
+   the core's `stats_json` (Kotlin `UndraCoreNative.statsJson()`) says `runtime_threads == 0`. That is the check
    that sees a task which survived the shutdown: its port calls never reach the runner's adapters (Kotlin
    detaches the transport first; the native shutdown retires the port registrations and the Swift
    adapters are detached), so the windows alone cannot.
@@ -433,6 +435,36 @@ returns; TypeScript awaits them.
    generated store registered `progress` as `no_coalesce`. (TypeScript also checks that a subscriber
    heard `1, 2, ..., 10`; a Kotlin `StateFlow` conflates and SwiftUI renders once per frame, so they
    check the mirror's counter only.)
+
+### S19 derived keyed list
+
+`Todos.visible` is a derived list (ADR-039): it reaches the platform as keyed patches, never as a whole
+list after the first; a derived list's patches are ordinary SPEC 3.8 patches, so every runtime's decoder,
+applier and mirror (ADR-031) apply them unchanged.
+
+1. `Todos` observed through a raw mirror: the initial `visible` (signal 2) entry is a full value
+   (`op = 0`), `[]`.
+2. `add("a")`, `add("b")`, `add("c")`: each change-set's `visible` entry is `op = 1` with exactly one
+   `Insert` at index 0, 1, 2; `remaining` is 1, 2, 3.
+3. `toggle(b)` with filter `All`: `visible` is one `Update{index=1}` (b, done); `remaining == 2`.
+4. `set_filter(Active)`: the change-set's `visible` entry is one `Remove{index=1}`; `set_filter(All)`: one
+   `Insert{index=1, b}`.
+5. Under `Active`, `toggle(a)`: one `Remove{index=0}`; `toggle(a)` again: one `Insert{index=0, a}`.
+6. `fill(10000)` (one full value or one patch for `visible`: either is allowed), then `toggle` of a visible
+   item: the `visible` entry is `op = 1`, one op, **under 100 bytes**.
+7. Through the generated class (`Todos.create()` / `Todos()`), the same steps and `fill`, `remove` and
+   `clear_done`: `visible` equals the model (a local list mutated by the same steps) after every step,
+   read-your-writes as in S18.
+8. Reads never cross: reading `visible` 1,000 times leaves `crossings.calls` unchanged.
+9. **Recorded patches.** `contract-tests/derived-vectors.sh` writes (with
+   `cargo run -p undra-signals --example derived_vectors`) a recording of 60,000 seeded operations over
+   three derived views (a filter; a parameter filter and a sort with heavy ties; a map and a sort on a
+   `String`), which the Rust side checks against `filter + stable sort` after every operation: the
+   change-sets a host received (about 24,000) and each view's FNV-1a 64 hash after each of them. The
+   runner decodes and applies every change-set with its runtime's own change-set decoder, `decodePatch`
+   and `applyPatch`, and after **every** change-set the hash of each view's encoding equals the recorded
+   one. (TypeScript also feeds the change-sets through a `Mirror`, drained at seeded points, and checks
+   at every drain: what ADR-031 merges per drain applies to the same views.)
 
 ### S23 WebSocket (ADR-047)
 
@@ -502,6 +534,40 @@ JVM, TypeScript `node:sqlite`), each rooted in a fresh temporary directory; the 
    holds the four notes, note 1 done.
 8. `open("../escape")` on a third store fails with `DbError.Unavailable`.
 
+### S26 two cores
+
+ADR-044: a process can hold several cores, each its own image reached through its own table
+(`<namespace>_undra_api`), with nothing shared between them. The core under test is the playground core
+built twice under two namespaces, `playground_a` and `playground_b` (`examples/two-cores/a` and `b`: the
+same source, two libraries, two generated packages, `UndraPlaygroundA` and `UndraPlaygroundB`), loaded
+next to each other (and next to the runner's playground core on the native platforms) with the
+harness adapters.
+
+1. Both load through their generated entries (`UndraPlaygroundA.load(..)`, `UndraPlaygroundB.load(..)`),
+   with the bindings' schema hash and no `expectedSchemaHash` written by the runner: two open cores, two
+   different objects; each entry's `core` is its own; each core's `schema_hash` statistic is the bindings'
+   hash, and the bindings say their namespace (`UndraIds` namespace `playground_a` / `playground_b`).
+   (Native: the C ABI version is 2, the same image is never loaded twice.)
+2. A call on each: `add(2, 3)` is `5` through either core; the generated function's default core is its
+   package's own (`add(2, 3)` with no core argument goes to `A` for package A, to `B` for package B,
+   which their `calls` counters show).
+3. An observed change on each, independent: a `Counter` created in each core (`Counter.create()` /
+   `Counter()` with no core: the package's own); `add(2)` on A's, `add(5)` on B's: A's `count` is `2`
+   and B's is `5` as soon as the calls return, each core delivered its change-set to its own mirror
+   only (A's mirror counted one more change-set, B's did not move for A's write).
+4. Independent statistics: A's `live_handles` grew by the counter A made and B's by the one B made;
+   each generated object carries its own core; releasing A's counter takes A's count back and leaves
+   B's (and B's counter keeps its value). Two cores with the same history issue the **same handle
+   numbers** (a handle is a slot and a generation of one core's table), so a handle means something only
+   with the core that issued it; the bindings never pass one core's handle to another.
+5. One shut down while the other keeps working: close A. B's counter takes `add(1)` (`count == 6`) and
+   `add(2, 3)` through B is still `5`; a call through A's (closed) core fails as unavailable
+   (`UndraCallError.Unavailable` / `.unavailable`); A's entry's `core` is the closed placeholder.
+   (Native: A's image reports no running core and `runtime_threads == 0`, while B's still runs.)
+6. A namespace loads once: loading B again while it is loaded is refused (TypeScript: an `UndraError`
+   of kind `state`; native: the runtime's in-process claim), and A, closed, loads again and answers
+   `add(2, 3) == 5`. Both are closed at the end.
+
 ## Platform notes
 
 * TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only
@@ -520,6 +586,9 @@ JVM, TypeScript `node:sqlite`), each rooted in a fresh temporary directory; the 
   Kotlin and TypeScript); each runner records those reports (`UndraUnhandledError`: operation, error), and
   S05.6, S15.9 and S17.6 assert them. A generated call fails with its own `E`, the caller's cancellation
   (`CancellationException`, `AbortError`, `CancellationError`) or `UndraCallError`, on all three.
+* S19 step 9 reads `examples/playground/build/derived-vectors.bin` (`UNDRA_DERIVED_VECTORS` overrides it),
+  which each `run.sh` writes through `contract-tests/derived-vectors.sh` when it is missing or older than the
+  signals crate. Only TypeScript's mirror is public; Kotlin and Swift apply change-set by change-set.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.
 * S23 and S24 start `contract-tests/servers/realtime-server.mjs` with Node (every runner's machine has Node:

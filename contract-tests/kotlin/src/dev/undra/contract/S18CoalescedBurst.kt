@@ -86,8 +86,8 @@ private fun burstArgs(mode: StressMode, transactions: UInt): ByteArray {
     return w.toByteArray()
 }
 
-/** Runs [block] on the main thread ([UndraDispatchers.main]) and returns what it returned. */
-private fun <T> onMain(block: () -> T): T {
+/** Runs [block] on the main thread ([UndraDispatchers.main]) and returns what it returned, within [timeoutMs]. */
+internal fun <T> onMain(timeoutMs: Long = WAIT_MS, block: () -> T): T {
     val result = CompletableFuture<T>()
     UndraDispatchers.main.dispatch(
         EmptyCoroutineContext,
@@ -100,10 +100,10 @@ private fun <T> onMain(block: () -> T): T {
         },
     )
     try {
-        return result.get(WAIT_MS, TimeUnit.MILLISECONDS)
+        return result.get(timeoutMs, TimeUnit.MILLISECONDS)
     } catch (e: ExecutionException) {
         throw e.cause ?: e
     } catch (e: java.util.concurrent.TimeoutException) {
-        fail("the main thread did not run the scenario's block within $WAIT_MS ms")
+        fail("the main thread did not run the scenario's block within $timeoutMs ms")
     }
 }

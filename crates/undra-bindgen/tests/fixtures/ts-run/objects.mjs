@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 
 import { bytes, fakeCoreClass, setup } from "./lib.mjs";
 
-const { rt, types, errors, objects, UndraIds } = await setup(process.argv[2]);
+const { rt, types, errors, objects, UndraIds, core: core_ } = await setup(process.argv[2]);
 const { encodeValue, codecs, CallTarget, ReplyStatus } = rt;
 const FakeCore = fakeCoreClass(rt);
 const replyError = (codec, value) => new rt.UndraReplyError(ReplyStatus.Error, encodeValue(codec, value));
@@ -72,5 +72,30 @@ assert.deepEqual(none, []);
 
 // Releasing a handle goes through the base class.
 plain.close();
+
+// The generated entry (ADR-044): while its core is not loaded it is the closed placeholder; `attach` passes
+// this package's schema hash and makes the attached core the default of every generated API; a second
+// attach while it is open is refused; once it is closed the placeholder is back.
+const { UndraGoldenObjects } = core_;
+const placeholder = new FakeCore();
+Object.defineProperty(rt.UndraCore, "unloaded", { get: () => placeholder });
+assert.equal(UndraGoldenObjects.core, placeholder);
+assert.equal(UndraGoldenObjects.namespace, "golden_objects");
+assert.equal(UndraIds.namespace, "golden_objects");
+const attached = new FakeCore();
+let seen;
+rt.UndraCore.attach = async (transport, options) => {
+  seen = { transport, options };
+  return attached;
+};
+const transport = { mode: "test" };
+assert.equal(await UndraGoldenObjects.attach(transport, { shared: false }), attached);
+assert.deepEqual(seen, { transport, options: { shared: false, expectedSchemaHash: UndraIds.schemaHash } });
+assert.equal(UndraGoldenObjects.core, attached);
+await assert.rejects(UndraGoldenObjects.attach(transport), (e) => e instanceof rt.UndraError && e.kind === "state");
+await objects.Calculator.create();
+assert.equal(attached.constructed.length, 1, "a generated constructor without a core uses the entry's");
+Object.defineProperty(attached, "closed", { get: () => true });
+assert.equal(UndraGoldenObjects.core, placeholder);
 
 console.log("ok");

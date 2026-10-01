@@ -21,7 +21,11 @@ use undra::runtime::testing::{TestRuntime, call_payload, call_sync_reference, de
 use undra::runtime::{Runtime, RuntimeConfig};
 use undra::wire::payload::{CallTarget, ReplyStatus};
 use undra::wire::{Decode, Encode, Reader};
-use undra_ffi::{UndraBuf, undra_buf_free, undra_call_sync, undra_init, undra_shutdown};
+use undra_ffi::UndraBuf;
+
+#[path = "common/table.rs"]
+mod table;
+use table::{undra_buf_free, undra_call_sync, undra_init, undra_shutdown};
 
 #[path = "common/core.rs"]
 mod test_core;
@@ -181,7 +185,7 @@ fn call_sync_allocates_exactly_the_returned_vec() {
     assert_eq!(replies[0], [2, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0]);
 }
 
-/// The C ABI, end to end: one allocation per call, the buffer handed to the caller.
+/// The C ABI, end to end through the table: one allocation per call, the buffer handed to the caller.
 #[test]
 fn undra_call_sync_allocates_exactly_the_buffer_it_hands_out() {
     extern "C" fn on_reply(_: *mut c_void, _: u32, _: *const u8, _: u32) {}

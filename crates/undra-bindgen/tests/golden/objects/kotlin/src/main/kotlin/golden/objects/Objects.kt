@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.map
 /** Adds numbers. */
 class Calculator private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenObjects.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0)),
     )
@@ -228,7 +228,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): Calculator {
+        fun create(ctx: UndraCore = UndraGoldenObjects.core): Calculator {
             val handle = ctx.constructObject(UndraIds.Objects.Calculator.TYPE_ID, UndraIds.Objects.Calculator.NEW, ByteArray(0))
             return Calculator(ctx, handle)
         }
@@ -237,7 +237,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
          * @throws CalcError
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun withPrecision(digits: UByte, ctx: UndraCore = UndraCore.shared): Calculator {
+        fun withPrecision(digits: UByte, ctx: UndraCore = UndraGoldenObjects.core): Calculator {
             val w = UndraWriter()
             w.writeU8(digits)
             val handle = try {
@@ -253,7 +253,11 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          * @throws CancellationException if the calling coroutine is cancelled.
          */
-        suspend fun open(path: String, mode: Mode, ctx: UndraCore = UndraCore.shared): Calculator {
+        suspend fun open(
+            path: String,
+            mode: Mode,
+            ctx: UndraCore = UndraGoldenObjects.core,
+        ): Calculator {
             val w = UndraWriter()
             w.writeStr(path)
             Mode.encode(w, mode)
@@ -272,7 +276,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
  * Says hello.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
+fun greet(name: String, ctx: UndraCore = UndraGoldenObjects.core): String {
     val w = UndraWriter()
     w.writeStr(name)
     try {
@@ -288,7 +292,7 @@ fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
 }
 
 /** Collecting throws UndraCallError; cancelling the collector ends it quietly. */
-fun numbers(upto: UInt, ctx: UndraCore = UndraCore.shared): Flow<UInt> {
+fun numbers(upto: UInt, ctx: UndraCore = UndraGoldenObjects.core): Flow<UInt> {
     val w = UndraWriter()
     w.writeU32(upto)
     val stream = ctx.stream(
@@ -308,7 +312,7 @@ fun numbers(upto: UInt, ctx: UndraCore = UndraCore.shared): Flow<UInt> {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun ping(ctx: UndraCore = UndraCore.shared) {
+suspend fun ping(ctx: UndraCore = UndraGoldenObjects.core) {
     try {
         ctx.call(
             CallTarget.FreeFunction(UndraIds.Functions.PING),

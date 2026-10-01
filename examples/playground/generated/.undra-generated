@@ -1,5 +1,6 @@
 kotlin/.gitignore
 kotlin/build.gradle.kts
+kotlin/src/main/kotlin/dev/undra/playground/core/Core.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Errors.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt
@@ -7,7 +8,9 @@ kotlin/src/main/kotlin/dev/undra/playground/core/Ports.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Queries.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Stores.kt
 kotlin/src/main/kotlin/dev/undra/playground/core/Types.kt
+kotlin/src/main/resources/META-INF/proguard/undra-playground_core.pro
 swift/Package.swift
+swift/Sources/PlaygroundCore/Generated/Core.swift
 swift/Sources/PlaygroundCore/Generated/Errors.swift
 swift/Sources/PlaygroundCore/Generated/Ids.swift
 swift/Sources/PlaygroundCore/Generated/Objects.swift
@@ -15,7 +18,11 @@ swift/Sources/PlaygroundCore/Generated/Ports.swift
 swift/Sources/PlaygroundCore/Generated/Queries.swift
 swift/Sources/PlaygroundCore/Generated/Stores.swift
 swift/Sources/PlaygroundCore/Generated/Types.swift
+swift/Sources/PlaygroundCoreFFI/include/module.modulemap
+swift/Sources/PlaygroundCoreFFI/include/playground_core_undra.h
+swift/Sources/PlaygroundCoreFFI/playground_core_undra.c
 ts/package.json
+ts/src/core.ts
 ts/src/errors.ts
 ts/src/ids.ts
 ts/src/index.ts

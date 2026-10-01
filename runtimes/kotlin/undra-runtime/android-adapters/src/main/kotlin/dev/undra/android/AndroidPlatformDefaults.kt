@@ -67,7 +67,8 @@ public class AndroidPlatform internal constructor(
  * class MyApp : Application() {
  *     override fun onCreate() {
  *         super.onCreate()
- *         val core = UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, mirror = MirrorOptions(framePacer = ChoreographerFramePacer())))
+ *         // The generated entry of the core's bindings, Undra<Namespace> (ADR-044).
+ *         val core = UndraPlaygroundCore.load(LoadOptions(mirror = MirrorOptions(framePacer = ChoreographerFramePacer())))
  *         AndroidPlatformDefaults.install(core, this)
  *     }
  * }
@@ -90,7 +91,7 @@ public class AndroidPlatform internal constructor(
  * The three opt-in ports are registered whatever the core enables (cargo features `websocket`, `sse`, `db`): a core that
  * does not declare one never calls it. When the core closes, their connections and databases are closed.
  *
- * Call it once, right after [UndraCore.load] and before any store is created. The core reads its persisted query cache
+ * Call it once, right after the core is loaded (`Undra<Namespace>.load`) and before any store is created. The core reads its persisted query cache
  * and offline queue through `Kv` while it starts and waits up to five seconds for the adapter to appear, which is why
  * installing after `load` is enough. To change one port, register another implementation afterwards:
  * `core.registerPort(StandardPorts.Http.PORT_ID, impl)` replaces what this installed.
@@ -107,7 +108,7 @@ public object AndroidPlatformDefaults {
      * starts reporting `Connectivity` and `Lifecycle`.
      * Installing again on the same core stops the earlier event sources first.
      *
-     * @param core the core that [UndraCore.load] returned.
+     * @param core the core its load (`Undra<Namespace>.load`) returned.
      * @param context any context of the app; only its application context is kept.
      * @param http the `Http` adapter, to change its timeouts or size limit.
      * @param requireValidatedNetwork whether a network must pass Android's own reachability check to count as online;

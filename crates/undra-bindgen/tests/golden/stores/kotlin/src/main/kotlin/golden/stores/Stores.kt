@@ -52,7 +52,7 @@ class Clock private constructor(core: UndraCore, handle: Long) : UndraStore(core
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(zone: String, ctx: UndraCore = UndraCore.shared): Clock {
+        fun create(zone: String, ctx: UndraCore = UndraGoldenStores.core): Clock {
             val w = UndraWriter()
             w.writeStr(zone)
             val handle = ctx.constructObject(UndraIds.Objects.Clock.TYPE_ID, UndraIds.Objects.Clock.NEW, w.toByteArray())
@@ -68,7 +68,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
     private val _filter: MutableStateFlow<Filter> = signal(Filter.ALL)
     val filter: StateFlow<Filter> = _filter.asStateFlow()
     private val _visible: MutableStateFlow<List<Todo>> = signal(emptyList())
-    /** Computed by the core; read-only. */
+    /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
     val visible: StateFlow<List<Todo>> = _visible.asStateFlow()
     private val _remaining: MutableStateFlow<UInt> = signal(0u)
     /** Computed by the core; read-only. */
@@ -101,7 +101,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenStores.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0)),
     )
@@ -314,7 +314,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): Todos {
+        fun create(ctx: UndraCore = UndraGoldenStores.core): Todos {
             val handle = ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0))
             return Todos(ctx, handle)
         }
@@ -324,7 +324,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          * @throws CancellationException if the calling coroutine is cancelled.
          */
-        suspend fun open(path: String, ctx: UndraCore = UndraCore.shared): Todos {
+        suspend fun open(path: String, ctx: UndraCore = UndraGoldenStores.core): Todos {
             val w = UndraWriter()
             w.writeStr(path)
             val handle = try {

@@ -94,8 +94,9 @@ android {
         }
     }
     sourceSets {
-        // The Undra core, built by `undra build -C examples/playground --platform rn` (or android):
-        // one libundra_core.so per ABI, which @undra/react-native opens at start (docs/REACT_NATIVE.md).
+        // The Undra core `playground_core`, built by `undra build -C examples/playground --platform rn`
+        // (or android): one libplayground_core.so per ABI, which @undra/react-native opens by its
+        // namespace when JavaScript loads it (docs/REACT_NATIVE.md, ADR-044).
         main.jniLibs.srcDirs += ["../../../build/android/jniLibs"]
     }
     buildTypes {

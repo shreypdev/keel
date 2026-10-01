@@ -9,7 +9,8 @@
       { "file": "queries.html", "title": "Queries & mutations" },
       { "file": "ports.html", "title": "Ports & adapters" },
       { "file": "realtime.html", "title": "WebSocket & SSE" },
-      { "file": "db.html", "title": "Local database" }
+      { "file": "db.html", "title": "Local database" },
+      { "file": "several-cores.html", "title": "One core or several" }
     ] },
     { "title": "Reference", "pages": [
       { "file": "cli.html", "title": "The CLI" },

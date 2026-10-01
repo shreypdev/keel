@@ -1,6 +1,6 @@
-//! The Gradle app's side of the Android build: where does it look for `libundra_core.so`?
+//! The Gradle app's side of the Android build: where does it look for the core's `lib<namespace>.so`?
 //!
-//! `undra build --platform android` writes `build/android/jniLibs/<abi>/libundra_core.so`; the app
+//! `undra build --platform android` writes `build/android/jniLibs/<abi>/lib<namespace>.so`; the app
 //! packages whatever its module's `sourceSets { ... jniLibs.srcDir(...) }` names. The two are
 //! written in different places (undra.toml's `[paths] build`, a path in `app/build.gradle.kts`
 //! that is relative to the *module*, not the project), and they drift: when they do, Gradle
@@ -75,7 +75,7 @@ impl Outcome {
                 to.iter().map(|d| shown(d)).collect::<Vec<_>>().join(", "),
             )),
             Outcome::NotPackaged { script, fix } => Some(format!(
-                "{} does not package {built}, so the app would ship without libundra_core.so (Gradle ignores a missing jniLibs directory and the app fails at start with UnsatisfiedLinkError). Inside `android {{ }}` add: {fix}",
+                "{} does not package {built}, so the app would ship without the core's native library (Gradle ignores a missing jniLibs directory and the app fails at start with UnsatisfiedLinkError). Inside `android {{ }}` add: {fix}",
                 shown(script),
             )),
             Outcome::Elsewhere {
@@ -206,13 +206,18 @@ fn fix_line(script: &Path, module: &Path, expected: &Path) -> String {
 }
 
 /// Checks the project's Gradle app against the directory `expected` (`build/android/jniLibs`),
-/// which holds `<abi>/libundra_core.so` for each of `abis`, and puts the libraries where the app
-/// looks when that is another directory inside the project.
+/// which holds `<abi>/<library>` (the core's `lib<namespace>.so`) for each of `abis`, and puts the
+/// libraries where the app looks when that is another directory inside the project.
 ///
 /// # Errors
 ///
 /// `C0010` when a library cannot be copied.
-pub fn reconcile(project_root: &Path, expected: &Path, abis: &[String]) -> Result<Outcome> {
+pub fn reconcile(
+    project_root: &Path,
+    expected: &Path,
+    abis: &[String],
+    library: &str,
+) -> Result<Outcome> {
     let Some(app) = detect::detect(project_root).android else {
         return Ok(Outcome::NoApp);
     };
@@ -247,8 +252,8 @@ pub fn reconcile(project_root: &Path, expected: &Path, abis: &[String]) -> Resul
         for dir in &inside {
             for abi in abis {
                 copy_file(
-                    &expected.join(abi).join("libundra_core.so"),
-                    &dir.join(abi).join("libundra_core.so"),
+                    &expected.join(abi).join(library),
+                    &dir.join(abi).join(library),
                 )?;
             }
         }
@@ -351,13 +356,13 @@ mod tests {
         );
         let expected = root.join("build/android/jniLibs");
         for abi in ["arm64-v8a", "x86_64"] {
-            write(
-                &format!("build/android/jniLibs/{abi}/libundra_core.so"),
-                abi,
-            );
+            write(&format!("build/android/jniLibs/{abi}/libtodo_core.so"), abi);
         }
         (root, expected)
     }
+
+    /// The core's library in these projects (namespace `todo_core`).
+    const LIB: &str = "libtodo_core.so";
 
     fn abis() -> Vec<String> {
         vec!["arm64-v8a".into(), "x86_64".into()]
@@ -368,7 +373,7 @@ mod tests {
         let (root, expected) = project(
             "sourceSets { getByName(\"main\").jniLibs.srcDir(\"../../build/android/jniLibs\") }",
         );
-        let outcome = reconcile(&root, &expected, &abis()).unwrap();
+        let outcome = reconcile(&root, &expected, &abis(), LIB).unwrap();
         assert_eq!(outcome, Outcome::Packaged);
         assert_eq!(outcome.message(&root, &expected), None);
         let _ = std::fs::remove_dir_all(root);
@@ -381,7 +386,7 @@ mod tests {
         let (root, expected) = project(
             "sourceSets { getByName(\"main\").jniLibs.srcDir(\"../build/android/jniLibs\") }",
         );
-        let outcome = reconcile(&root, &expected, &abis()).unwrap();
+        let outcome = reconcile(&root, &expected, &abis(), LIB).unwrap();
         let Outcome::Copied { to, fix, .. } = &outcome else {
             panic!("{outcome:?}");
         };
@@ -395,7 +400,7 @@ mod tests {
             "{fix}"
         );
         for abi in ["arm64-v8a", "x86_64"] {
-            let copied = std::fs::read_to_string(to[0].join(abi).join("libundra_core.so")).unwrap();
+            let copied = std::fs::read_to_string(to[0].join(abi).join("libtodo_core.so")).unwrap();
             assert_eq!(copied, abi);
         }
         let message = outcome.message(&root, &expected).unwrap();
@@ -411,7 +416,7 @@ mod tests {
     #[test]
     fn an_app_that_names_no_directory_is_told_what_to_add() {
         let (root, expected) = project("namespace = \"x\"");
-        let outcome = reconcile(&root, &expected, &abis()).unwrap();
+        let outcome = reconcile(&root, &expected, &abis(), LIB).unwrap();
         assert!(
             matches!(outcome, Outcome::NotPackaged { .. }),
             "{outcome:?}"
@@ -434,7 +439,7 @@ mod tests {
         let (root, expected) = project(
             "sourceSets { getByName(\"main\").jniLibs.srcDir(\"../../../somewhere/else\") }",
         );
-        let outcome = reconcile(&root, &expected, &abis()).unwrap();
+        let outcome = reconcile(&root, &expected, &abis(), LIB).unwrap();
         assert!(matches!(outcome, Outcome::Elsewhere { .. }), "{outcome:?}");
         assert!(
             outcome
@@ -450,7 +455,7 @@ mod tests {
         let (root, expected) =
             project("sourceSets { getByName(\"main\").jniLibs.srcDir(undraLibs) }");
         assert_eq!(
-            reconcile(&root, &expected, &abis()).unwrap(),
+            reconcile(&root, &expected, &abis(), LIB).unwrap(),
             Outcome::Unknown
         );
         let _ = std::fs::remove_dir_all(root);
@@ -461,7 +466,7 @@ mod tests {
         let root = unique_temp_dir("gradle-none");
         std::fs::create_dir_all(&root).unwrap();
         assert_eq!(
-            reconcile(&root, &root.join("build/android/jniLibs"), &abis()).unwrap(),
+            reconcile(&root, &root.join("build/android/jniLibs"), &abis(), LIB).unwrap(),
             Outcome::NoApp
         );
         let _ = std::fs::remove_dir_all(root);

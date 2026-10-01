@@ -8,9 +8,6 @@ repository.workspace = true
 authors.workspace = true
 description = "Undra: the C ABI, JNI shim and wasm ABI over undra-runtime"
 
-[lib]
-crate-type = ["rlib", "cdylib", "staticlib"]
-
 [features]
 default = []
 jni = ["dep:jni"]

@@ -4,10 +4,11 @@ package golden.stdlib
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
     const val SCHEMA_HASH: ULong = 0x68d664b4fa4eea2fuL
+    const val NAMESPACE: String = "golden_stdlib"
 
     object Objects {
         object Syncer {

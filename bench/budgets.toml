@@ -281,6 +281,53 @@ measured_ns = 333.0
 budget_ns = 65
 measured_ns = 12.7
 
+# Derived keyed lists (ADR-039): a view of a keyed list kept from the list's recorded operations.
+# Through the runtime, as the `signals/keyed_10k/*` rows: dispatch, the write, the drain of the view
+# (O(log n) per source op), the change-set, the host callback. Each row observes only what it names
+# and checks the shape of what ships before it is timed. ADR-039 section 11 targets, all met on this
+# host (measured on a host at load 6-10, best of three): update_visible <= 1 us at 10,000 rows and
+# <= 2 us at 100,000; toggle_membership <= 1.5 us; sort_key_change <= 2 us / <= 4 us; insert_sorted
+# <= 1.5x `signals/keyed_10k/insert`; param_flip <= 300 us; rebuild_after_replace <= 1 ms;
+# count_toggle <= 1 us. `rebuild_after_replace` swaps in a prebuilt copy of the rows (a raw write
+# that allocates nothing), so it measures the views' rebuild, not 10,000 freshly formatted titles.
+[bench."signals/derived_10k/update_visible"]
+budget_ns = 2000
+measured_ns = 391.9
+
+[bench."signals/derived_10k/toggle_membership"]
+budget_ns = 1900
+measured_ns = 378.5
+
+[bench."signals/derived_10k/sort_key_change"]
+budget_ns = 2800
+measured_ns = 554.8
+
+[bench."signals/derived_100k/update_visible"]
+budget_ns = 1900
+measured_ns = 378.4
+
+[bench."signals/derived_100k/sort_key_change"]
+budget_ns = 3100
+measured_ns = 606.8
+
+[bench."signals/derived_10k/insert_sorted"]
+budget_ns = 33000
+measured_ns = 6500.0
+
+# 2,500 of 10,000 rows enter or leave: past the 256-op limit, so the full value (7,500 or 10,000
+# rows), encoded straight from the source rows.
+[bench."signals/derived_10k/param_flip"]
+budget_ns = 1100000
+measured_ns = 217645.8
+
+[bench."signals/derived_10k/rebuild_after_replace"]
+budget_ns = 880000
+measured_ns = 174583.2
+
+[bench."signals/derived_10k/count_toggle"]
+budget_ns = 2000
+measured_ns = 387.9
+
 [bench."signals/computed/recompute_1"]
 budget_ns = 250
 measured_ns = 40.3
@@ -346,6 +393,12 @@ measured_ns = 115.5
 [bench."stress/keyed_churn_10k/ops_x1000"]
 budget_ns = 30000000
 measured_ns = 5847000.0
+
+# `keyed_churn`'s cycle on `ChurnViews`: the list and its derived view (rows not done, by title),
+# both observed and applied to host-side lists.
+[bench."stress/derived_churn_10k/ops_x1000"]
+budget_ns = 39000000
+measured_ns = 7763958.0
 
 # One transaction writing 1,000 of 100,000 observed signals of one store cell: one change-set of
 # 21,012 bytes. Cache-bound: 38-42 us across runs on a loaded host. The three fan-out rows get 2x
@@ -429,6 +482,25 @@ measured_per_sec = 169032
 measured_p99_ns = 17919
 measured_p999_ns = 26623
 measured_bytes_per_op = 61
+
+# ADR-039: `keyed_churn`'s list, cycle and host, plus a derived view of the list (rows not done,
+# sorted by title) mirrored on the host. Every `Update` of the cycle toggles `done`, a membership
+# change of the view. Invariants in code: the host's view equals filter + stable sort of the core's
+# rows field for field, every source op produced at most two view ops, every view entry after the
+# observe was a patch (one rebuild, one full value), no patch failed, one change-set per operation.
+# Bytes per operation depend on which operations fall inside the view, so `bytes_per_op` is a
+# ceiling (1.1x the measured 93.0), not exact. Measured on a host at load 8-17, where
+# `keyed_churn_10k/sustained` read 68,000-125,000/s against its 169,032 of record; the best run
+# (112,952/s) is above the ADR's target of half of keyed churn's 169,000/s.
+[stress."derived_churn_10k/sustained"]
+min_per_sec = 22000
+p99_ns = 170000
+p999_ns = 890000
+bytes_per_op = 103
+measured_per_sec = 112952
+measured_p99_ns = 32255
+measured_p999_ns = 88063
+measured_bytes_per_op = 93
 
 # 1,000 of 100,000 observed signals written per transaction (the 10,000-observed companion run
 # is checked against it in code: one change-set and 21,012 bytes either way, cost under 4x). The two
@@ -555,6 +627,29 @@ num_div = 1000
 den = "stress/firehose/call_set"
 max = 54
 measured = 39.5
+
+# A sorted derived view's sort-key change at 100,000 rows against 10,000: O(log n) per change keeps
+# this near 1 through the runtime (healthy 1.04-1.12 on the reference host, loaded and quiet). It is
+# cache-bound (a 2.4 MB index against one in L2), so, as the fan-out ratio, its bound is what it
+# guards rather than 1.15x of a sample: an O(n) step in the drain would put it near 10, and 4 (the
+# ADR-039 bound) sees that on any cache size.
+[ratio."derived_sort_scaling"]
+num = "signals/derived_100k/sort_key_change"
+den = "signals/derived_10k/sort_key_change"
+max = 4
+measured = 1.10
+
+# A derived view's one-row update against the keyed list's own (both one `update_at` through
+# `call_sync` on 10,000 rows): the view costs a small multiple of the source it follows. Healthy
+# 1.36-1.65 on the reference host (quiet and loaded). There are no runner samples of it yet, so
+# instead of 1.15x the largest host sample (1.9) it takes the one-family runner spread (1.5x, see the
+# header): 1.65 x 1.5 = 2.5. ADR-039's design bound was 6; an O(n) step (a materialisation on
+# the commit path) would put it above 100.
+[ratio."derived_vs_keyed_update"]
+num = "signals/derived_10k/update_visible"
+den = "signals/keyed_10k/update"
+max = 2.5
+measured = 1.43
 
 # ---------------------------------------------------------------------------------------------
 # Sizes of shipped artefacts (ADR-052): measured by `scripts/wasm-size.sh`, not by the budgets test,

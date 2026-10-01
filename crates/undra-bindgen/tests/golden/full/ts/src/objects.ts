@@ -10,6 +10,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { HttpErrorCodec, TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Priority, PriorityCodec, type Todo, TodoCodec } from "./types.js";
@@ -21,7 +22,7 @@ export class Calculator extends UndraObject {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Calculator> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<Calculator> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -101,7 +102,10 @@ export class Calculator extends UndraObject {
 }
 
 /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-export async function greet(name: string, core: UndraCore = UndraCore.shared): Promise<string> {
+export async function greet(
+  name: string,
+  core: UndraCore = UndraPlaygroundCore.core,
+): Promise<string> {
   const w = new UndraWriter();
   w.writeStr(name);
   try {
@@ -122,7 +126,7 @@ export async function greet(name: string, core: UndraCore = UndraCore.shared): P
  * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
  */
 export async function ping(
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraPlaygroundCore.core,
   signal?: AbortSignal,
 ): Promise<void> {
   try {

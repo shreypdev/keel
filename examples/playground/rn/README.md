@@ -3,7 +3,8 @@
 The playground's one Rust core (`../core`) under a bare React Native 0.87 app (TypeScript, Hermes,
 New Architecture), through `@undra/react-native` (`runtimes/rn/@undra/react-native`, ADR-038). The
 screens use the generated TypeScript bindings (`../generated/ts`) and `@undra/runtime/react`
-unchanged, exactly as the web app does.
+unchanged, exactly as the web app does: `loadNative(UndraPlaygroundCore)` (`src/undra.ts`) makes the
+native core the generated entry's `core`, the default of every generated API (ADR-044).
 
 | Screen | Shows |
 |---|---|
@@ -17,18 +18,18 @@ log stream`, `adb logcat -s ReactNativeJS`).
 ## Build and run
 
 ```sh
-# 1. The core for both phones and the UndraCore pod (from the repository root):
+# 1. The core `playground_core` for both phones and its pod, PlaygroundCore (from the repository root):
 cargo build -p undra-cli
 target/debug/undra build -C examples/playground --platform rn --release
 
 # 2. JavaScript dependencies (links @undra/react-native and @undra/runtime from this checkout):
 cd examples/playground/rn && npm install
 
-# 3a. iOS (CocoaPods; the UndraCore pod comes from ../build/ios):
+# 3a. iOS (CocoaPods; the PlaygroundCore pod comes from ../build/ios):
 cd ios && pod install && cd ..
 npx react-native run-ios            # or: xcodebuild -workspace ios/UndraPlayground.xcworkspace ...
 
-# 3b. Android (the core's .so files come from ../build/android/jniLibs):
+# 3b. Android (the core's libplayground_core.so files come from ../build/android/jniLibs):
 npx react-native run-android        # or: cd android && ./gradlew :app:assembleRelease
 ```
 

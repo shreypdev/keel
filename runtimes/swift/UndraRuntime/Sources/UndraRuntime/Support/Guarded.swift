@@ -12,7 +12,7 @@ import Glibc
 /// A value protected by a `pthread_mutex_t`.
 ///
 /// `withLock` runs `body` with exclusive access to the value. Keep bodies short and never call
-/// out of them (no callbacks, no `resume` of a continuation, no `undra_*` function): compute what
+/// out of them (no callbacks, no `resume` of a continuation, no entry of a core's table): compute what
 /// to do inside, do it after the lock is released.
 final class Guarded<Value>: @unchecked Sendable {
     private let mutex: UnsafeMutablePointer<pthread_mutex_t>

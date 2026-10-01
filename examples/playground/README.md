@@ -10,10 +10,10 @@ examples/playground/
   undra.toml        the Undra project: core path, names of the generated bindings, platforms
   core/            the Rust core (crate playground-core): todos, counter, 10k list, remote query, lab, bench, stress
   generated/       Swift package, Kotlin module and npm package: written by `undra bindgen`, committed
-  web/             React + Vite app         -> build/web/undra_core.wasm
-  ios/             SwiftUI app (Xcode)      -> build/ios/UndraCore.xcframework
-  android/         Compose app (Gradle)     -> build/android/jniLibs/<abi>/libundra_core.so
-  rn/              React Native app         -> build/ios/UndraCore.podspec + jniLibs (undra build --platform rn)
+  web/             React + Vite app         -> build/web/playground_core.wasm
+  ios/             SwiftUI app (Xcode)      -> build/ios/PlaygroundCore.xcframework
+  android/         Compose app (Gradle)     -> build/android/jniLibs/<abi>/libplayground_core.so
+  rn/              React Native app         -> build/ios/PlaygroundCore.podspec + jniLibs (undra build --platform rn)
   build/           what `undra build` writes (not committed)
   .proof/          screenshots and logs of the apps running on Chromium, the iOS simulator and an Android emulator
 ```
@@ -22,7 +22,7 @@ examples/playground/
 
 | Module | Shows | Where the UIs use it |
 |---|---|---|
-| `todos` | a store with a keyed list, a filter and two computed values (`visible`, `remaining`); an `async` command with a typed error | Todos tab |
+| `todos` | a store with a keyed list, a filter and two values derived from it (`visible`, a `DerivedList` sent as keyed patches; `remaining`, its `count()`); an `async` command with a typed error | Todos tab, contract scenario S19 |
 | `counter` | a store whose commands are transactions: one change-set for `count`, `changes` and the computed `parity` | Counter tab |
 | `biglist` | 10,000 keyed rows; insert, update, move and remove of one row each cross as a **one-operation patch** (R5) | 10k tab |
 | `remote` | a query (`remote_todos`), mutations and optimistic commands over the `Http` port: cached per list, fresh for 30 s, persisted, retried, queued while offline and replayed | Remote tab |
@@ -52,9 +52,8 @@ Then run an app:
 
 * web: `undra build -C examples/playground --platform web`, then `cd web && npm ci && npm run dev`
   (`npm test` runs the fake server's tests, `npm run smoke` builds and drives the app in headless Chromium).
-* iOS: `undra build -C examples/playground --platform ios`, then open `ios/PlaygroundApp.xcodeproj`
-  (`UNDRA_LINK_CORE=1` in the environment of Xcode, see the project settings), or run `ios/smoke.sh` to
-  build, launch every tab on the simulator, screenshot it and run the XCUITest tour.
+* iOS: `undra build -C examples/playground --platform ios`, then open `ios/PlaygroundApp.xcodeproj`,
+  or run `ios/smoke.sh` to build, launch every tab on the simulator, screenshot it and run the XCUITest tour.
 * Android: `undra build -C examples/playground --platform android --release`, then `cd android && ./gradlew
   :app:installDebug` (`android/README.md` has the `adb` commands), or `android/smoke.sh` to build, install, tour the
   tabs and drive the offline story. `--release` is what you package: a debug core is 42 MB per ABI.
@@ -132,5 +131,5 @@ test, `BenchInstrumentedTest`, over a `benchmark` build type: release, not debug
 
 ## Contract tests
 
-`contract-tests/` runs the eighteen scenarios of SPEC section 14 against this core from the TypeScript
+`contract-tests/` runs the nineteen scenarios of SPEC section 14 against this core from the TypeScript
 (wasm), Kotlin (JNI) and Swift (C ABI) runtimes; see `contract-tests/scenarios.md`.

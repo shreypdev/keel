@@ -1,0 +1,40 @@
+# undra.toml: core B of the two-core test apps (ADR-044). The same playground core as
+# examples/playground, built under its own namespace, so two copies of it can share one process and
+# prove that nothing in them is shared: two symbols, two runtimes, two registries, two sets of threads.
+
+[project]
+name = "playground-b"
+id = "dev.undra.twocores.b"
+platforms = ["ios", "android", "web"]
+
+[core]
+# The playground's core, unchanged.
+path = "../../playground/core"
+# The namespace names the core's one export (playground_b_undra_api), its libraries and the
+# generated entry (UndraPlaygroundB). Two cores in one app need two.
+namespace = "playground_b"
+
+[paths]
+generated = "generated"
+build = "build"
+
+[undra]
+version = "0.1"
+path = "../../.."
+
+[bindings]
+swift_module = "PlaygroundB"
+kotlin_package = "dev.undra.twocores.b"
+ts_scope = "two-cores"
+ts_package = "b"
+
+[ios]
+deployment_target = "17.0"
+simulator_archs = ["arm64"]
+
+[android]
+abis = ["arm64-v8a", "x86_64"]
+min_sdk = 26
+
+[web]
+opt_level = "z"

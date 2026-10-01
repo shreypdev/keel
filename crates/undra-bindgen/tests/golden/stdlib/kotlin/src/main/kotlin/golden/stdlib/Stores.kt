@@ -34,7 +34,7 @@ class Link private constructor(core: UndraCore, handle: Long) : UndraStore(core,
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenStdlib.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0)),
     )
@@ -86,7 +86,7 @@ class Link private constructor(core: UndraCore, handle: Long) : UndraStore(core,
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): Link {
+        fun create(ctx: UndraCore = UndraGoldenStdlib.core): Link {
             val handle = ctx.constructObject(UndraIds.Objects.Link.TYPE_ID, UndraIds.Objects.Link.NEW, ByteArray(0))
             return Link(ctx, handle)
         }

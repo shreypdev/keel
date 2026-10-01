@@ -7,6 +7,11 @@
  */
 #include "undra.h"
 
+/* The fixture core's one export (C ABI v2, ADR-044); a core's own `<namespace>_undra.h` declares it. */
+const void *undra_fixture_undra_api(void);
+/* Its table, read once in main() before anything else runs. */
+static const UndraApi *api;
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,55 +66,59 @@ static void call_payload(uint8_t *out, uint32_t method_id, uint32_t call_id) {
 }
 
 int main(void) {
-    assert(undra_abi_version() == UNDRA_ABI_VERSION);
-    uint64_t hash = undra_schema_hash();
-    UndraBuf schema = undra_schema_json();
+    api = (const UndraApi *)undra_fixture_undra_api();
+    assert(api != NULL && api->abi_version == UNDRA_ABI_VERSION && api->size == sizeof(UndraApi));
+    assert(strcmp(api->name_space, "undra_fixture") == 0);
+    assert(api == undra_fixture_undra_api()); /* immutable: the same table every time */
+    assert(api->abi_version == UNDRA_ABI_VERSION);
+    uint64_t hash = api->schema_hash;
+    UndraBuf schema = api->schema_json();
     assert(schema.len > 0 && schema.ptr[0] == '{');
-    undra_buf_free(schema);
+    api->buf_free(schema);
 
     for (int round = 0; round < 2; round++) {
-        assert(undra_init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
-        assert(undra_init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0); /* idempotent */
-        assert(undra_schema_hash() == hash);
-        undra_port_register(PORT_LOG, on_port, NULL);
+        assert(api->init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0);
+        assert(api->init(CFG, sizeof CFG, on_reply, on_changes, on_stream, NULL) == 0); /* idempotent */
+        assert(api->schema_hash == hash);
+        api->port_register(PORT_LOG, on_port, NULL);
 
         uint8_t call[17];
         call_payload(call, 0xDEADBEEFu, 7);
-        UndraBuf r = undra_call_sync(call, sizeof call); /* UndraBuf returned by value */
+        UndraBuf r = api->call_sync(call, sizeof call); /* UndraBuf returned by value */
         assert(r.len >= 5 && rd32(r.ptr) == 7 && r.ptr[4] == 5); /* status 5: no such method */
-        undra_buf_free(r);
+        api->buf_free(r);
 
         replies = 0;
         call_payload(call, 0xDEADBEEFu, 8);
-        assert(undra_call(call, sizeof call) == 0);
+        assert(api->call(call, sizeof call) == 0);
         /* An unknown method is answered inline, on this thread, before undra_call returns. */
         assert(replies == 1 && last_reply_call == 8 && last_reply_status == 5);
-        assert(undra_call(call, 3) == 5); /* truncated payload: refused without a reply */
+        assert(api->call(call, 3) == 5); /* truncated payload: refused without a reply */
 
         log_calls = 0;
-        undra_observe(0x7777777700000001ull, 0, 1); /* unknown handle: a warning goes to the Log port */
+        api->observe(0x7777777700000001ull, 0, 1); /* unknown handle: a warning goes to the Log port */
         assert(log_calls == 1 && last_log_level == 3);
-        undra_release(0x7777777700000001ull);
+        api->release(0x7777777700000001ull);
 
-        UndraBuf snap = undra_snapshot();
+        UndraBuf snap = api->snapshot();
         /* SPEC 5.9 / ADR-022: `count u32, generation_floor u32` then the stores. No stores: 8 bytes.
          * The library is linked without a core, so nothing in this process ever issued a handle:
          * the generation floor is 0. */
         assert(snap.len == 8 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0);
-        assert(undra_restore(snap.ptr, snap.len) == 0);
-        undra_buf_free(snap);
-        UndraBuf stats = undra_stats_json();
+        assert(api->restore(snap.ptr, snap.len) == 0);
+        api->buf_free(snap);
+        UndraBuf stats = api->stats_json();
         assert(stats.len > 0 && memchr(stats.ptr, '{', stats.len) != NULL);
-        undra_buf_free(stats);
-        undra_buf_free((UndraBuf){0}); /* the empty buffer is harmless */
+        api->buf_free(stats);
+        api->buf_free((UndraBuf){0}); /* the empty buffer is harmless */
 
-        undra_shutdown();
-        undra_shutdown(); /* idempotent */
+        api->shutdown();
+        api->shutdown(); /* idempotent */
 
         /* With no runtime the snapshot keeps the same layout and the process-wide floor (L1). */
-        snap = undra_snapshot();
+        snap = api->snapshot();
         assert(snap.len == 8 && rd32(snap.ptr) == 0 && rd32(snap.ptr + 4) == 0);
-        undra_buf_free(snap);
+        api->buf_free(snap);
     }
     puts("c smoke: ok");
     return 0;

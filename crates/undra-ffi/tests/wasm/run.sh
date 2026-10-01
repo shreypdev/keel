@@ -20,7 +20,7 @@ else
 fi
 
 DIR="$PROFILE"; [ "$DIR" = "dev" ] && DIR="debug"
-export UNDRA_FFI_FIXTURE_WASM="${UNDRA_FFI_FIXTURE_WASM:-$HERE/../fixture/target/wasm32-unknown-unknown/$DIR/undra_core.wasm}"
+export UNDRA_FFI_FIXTURE_WASM="${UNDRA_FFI_FIXTURE_WASM:-$HERE/../fixture/target/wasm32-unknown-unknown/$DIR/undra_fixture.wasm}"
 
 node --test "$HERE/raw.test.mjs"
 

@@ -7,7 +7,7 @@ import UndraRuntime
 public struct ConnectivityEvents: Sendable {
     private let core: UndraCore
 
-    public init(ctx: UndraCore = .shared) {
+    public init(ctx: UndraCore = UndraPlaygroundCore.core) {
         self.core = ctx
     }
 

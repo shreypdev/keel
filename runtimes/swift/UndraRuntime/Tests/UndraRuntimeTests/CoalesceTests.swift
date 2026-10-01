@@ -403,6 +403,54 @@ final class CoalesceTests: XCTestCase {
         XCTAssertEqual(log.applied[1].value, patchBytes([PatchOp<UInt32>.insert(index: 1, item: 6), .insert(index: 2, item: 7)]))
     }
 
+    /// ADR-039: a sorted derived list sends a sort-key change as `Move` + `Update` and the row's
+    /// removal as a `Remove` at its new rank; a rebuild sends the full value, then patches resume.
+    /// One drain per change-set and one drain per pair end with the same list; one drain of a full
+    /// value and the patches around it applies the full value once, then one merged patch.
+    func testADerivedListsShapesMergePerDrainLikeAppliedOneByOne() throws {
+        let history: [Wire.ChangeSet] = [
+            changeSet(fullEntry(0, [UInt32(10), 20, 30, 40, 50].undraEncoded())),
+            changeSet(patchEntry(0, patchBytes([PatchOp<UInt32>.move(from: 0, to: 3), .update(index: 3, item: 11)]))),
+            changeSet(patchEntry(0, patchBytes([PatchOp<UInt32>.remove(index: 3)]))),
+            changeSet(fullEntry(0, [UInt32(7), 8, 9].undraEncoded())),
+            changeSet(patchEntry(0, patchBytes([
+                PatchOp<UInt32>.insert(index: 1, item: 12), .move(from: 0, to: 2), .update(index: 2, item: 13),
+            ]))),
+            changeSet(patchEntry(0, patchBytes([PatchOp<UInt32>.remove(index: 2)]))),
+        ]
+        let model = ListModel(handle: storeHandle, lists: [0], scalars: [])
+        for (drains, expected) in [
+            ([1 ... 1, 2 ... 2, 3 ... 3, 4 ... 4, 5 ... 5], [[20, 30, 40, 11, 50], [20, 30, 40, 50], [7, 8, 9], [12, 8, 13, 9], [12, 8, 9]]),
+            ([1 ... 2, 3 ... 5], [[20, 30, 40, 50], [12, 8, 9]]),
+        ] as [([ClosedRange<Int>], [[UInt32]])] {
+            let host = try ListHost(model: model, lists: [0], scalars: [])
+            host.transport.deliverChangeSet(history[0])
+            host.core.mirror.flush()
+            var seen: [[UInt32]] = []
+            for range in drains {
+                for index in range {
+                    host.transport.deliverChangeSet(history[index])
+                }
+                host.core.mirror.flush()
+                seen.append(host.store.lists[0] ?? [])
+            }
+            XCTAssertEqual(seen, expected, "drains \(drains)")
+            XCTAssertEqual(host.store.patchFailures, 0)
+        }
+        let host = try ListHost(model: model, lists: [0], scalars: [])
+        for index in 0 ... 1 {
+            host.transport.deliverChangeSet(history[index])
+        }
+        host.core.mirror.flush()
+        let before = host.store.applies[0] ?? 0
+        for index in 2 ... 5 {
+            host.transport.deliverChangeSet(history[index])
+        }
+        host.core.mirror.flush()
+        XCTAssertEqual(host.store.lists[0], [12, 8, 9])
+        XCTAssertEqual((host.store.applies[0] ?? 0) - before, 2, "the full value, then one merged patch")
+    }
+
     func testALazyInvalidationSupersedesWhatCameBeforeIt() throws {
         let transport = FakeTransport()
         let core = try makeCore(transport, frames: ManualFrameScheduler())

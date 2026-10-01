@@ -10,7 +10,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -83,7 +83,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
 }
 
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
+public func greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -99,7 +99,7 @@ public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
 }
 
 /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func ping(ctx: UndraCore = .shared) async throws {
+public func ping(ctx: UndraCore = UndraPlaygroundCore.core) async throws {
     do {
         _ = try await ctx.call(
             .freeFunction(methodId: UndraIds.Functions.ping),

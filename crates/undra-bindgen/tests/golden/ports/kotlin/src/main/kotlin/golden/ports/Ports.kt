@@ -47,7 +47,7 @@ fun clockPortImpl(impl: Clock): PortImpl {
  * Connectivity changes, sent by the platform.
  * Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `LoadOptions.onError`; the methods do not throw.
  */
-class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) {
+class ConnectivityEvents(private val core: UndraCore = UndraGoldenPorts.core) {
     /** The network changed. */
     fun changed(online: Boolean, kind: NetKind) {
         val w = UndraWriter()

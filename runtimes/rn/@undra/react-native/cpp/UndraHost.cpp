@@ -9,7 +9,9 @@
 #include <cstdlib>
 #include <stdlib.h>
 #include <cstring>
+#include <map>
 #include <new>
+#include <string>
 
 namespace undra::rn {
 
@@ -26,27 +28,33 @@ namespace {
 /// The JS thread's innermost scope.
 thread_local CallScope *t_scope = nullptr;
 
-/// The process's one core slot (one core per process): the host that holds it, and whether that
-/// host is inside `undra_shutdown` right now. Both under `g_slotMutex`; `g_slotFreed` is notified
-/// when the slot is released.
-std::mutex g_slotMutex;
-std::condition_variable g_slotFreed;
-Host *g_slot = nullptr;
-bool g_slotStopping = false;
+/// A core's slot (one running host per core, ADR-044): the host that holds it, and whether that host
+/// is inside `undra_shutdown` right now.
+struct Slot {
+  Host *host = nullptr;
+  bool stopping = false;
+};
 
-/// How long `start` waits for a host that is shutting down on another thread (a reloaded
-/// runtime's old module going away on the old JS thread) to release the slot.
+/// The process's slots, one per namespace that ever had a host, under `g_slotMutex`; `g_slotFreed`
+/// is notified when a slot is released. Never destroyed (a host may shut down while the process
+/// exits).
+std::mutex &g_slotMutex = *new std::mutex;
+std::condition_variable &g_slotFreed = *new std::condition_variable;
+std::map<std::string, Slot> &g_slots = *new std::map<std::string, Slot>;
+
+/// How long `start` waits for a host of the same core that is shutting down on another thread (a
+/// reloaded runtime's old module going away on the old JS thread) to release the slot.
 constexpr auto kSlotWait = std::chrono::seconds(5);
 
-/// Releases the slot if `host` holds it.
+/// Releases `host`'s core's slot if `host` holds it.
 void releaseSlot(const Host *host) noexcept {
   {
     std::lock_guard<std::mutex> lock(g_slotMutex);
-    if (g_slot != host) {
+    auto slot = g_slots.find(host->api().name_space);
+    if (slot == g_slots.end() || slot->second.host != host) {
       return;
     }
-    g_slot = nullptr;
-    g_slotStopping = false;
+    slot->second = Slot{};
   }
   g_slotFreed.notify_all();
 }
@@ -136,28 +144,34 @@ Host::~Host() {
   shutdown();
 }
 
-Host *Host::runningHost() noexcept {
+Host *Host::runningHost(const std::string &name_space) noexcept {
   std::lock_guard<std::mutex> lock(g_slotMutex);
-  return g_slot;
+  auto slot = g_slots.find(name_space);
+  return slot != g_slots.end() ? slot->second.host : nullptr;
 }
 
 uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<PortSpec> &specs, const StartOptions &options) {
   if (started_.exchange(true)) {
     return start_code::kAlreadyStarted;
   }
-  {
+  try {
     std::unique_lock<std::mutex> lock(g_slotMutex);
-    // A host that is already inside `undra_shutdown` on another thread frees the slot when that
-    // returns (a dev reload: the old runtime's module goes away on the old JS thread while the new
-    // runtime starts): wait for it, bounded, rather than refusing. A running host is refused.
-    if (g_slot != nullptr && g_slotStopping) {
-      g_slotFreed.wait_for(lock, kSlotWait, [] { return g_slot == nullptr; });
+    Slot &slot = g_slots[api_.name_space]; // a reference into a map stays valid while others are added
+    // A host of this core that is already inside `undra_shutdown` on another thread frees the slot
+    // when that returns (a dev reload: the old runtime's module goes away on the old JS thread while
+    // the new runtime starts): wait for it, bounded, rather than refusing. A running host of this
+    // core is refused; a host of another core holds another slot.
+    if (slot.host != nullptr && slot.stopping) {
+      g_slotFreed.wait_for(lock, kSlotWait, [&slot] { return slot.host == nullptr; });
     }
-    if (g_slot != nullptr) {
+    if (slot.host != nullptr) {
       started_.store(false);
       return start_code::kBusy;
     }
-    g_slot = this;
+    slot.host = this;
+  } catch (...) {
+    started_.store(false); // out of memory adding the slot
+    throw;
   }
   if (api_.abi_version != kAbiVersion) {
     releaseSlot(this);
@@ -230,8 +244,9 @@ void Host::shutdown() noexcept {
     if (!running_.exchange(false, std::memory_order_acq_rel)) {
       return;
     }
-    if (g_slot == this) {
-      g_slotStopping = true;
+    auto slot = g_slots.find(api_.name_space);
+    if (slot != g_slots.end() && slot->second.host == this) {
+      slot->second.stopping = true;
     }
   }
   // Waits for the callbacks still running (host contract 5): when it returns, `this` is never

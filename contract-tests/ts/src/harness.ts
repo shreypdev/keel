@@ -11,7 +11,7 @@ import { MemoryKv } from "./memory-kv.js";
 
 /** The playground core, built by `undra build -C examples/playground --platform web`. `UNDRA_PLAYGROUND_WASM` overrides the path. */
 export const PLAYGROUND_WASM: string =
-  process.env["UNDRA_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/undra_core.wasm", import.meta.url));
+  process.env["UNDRA_PLAYGROUND_WASM"] ?? fileURLToPath(new URL("../../../examples/playground/build/web/playground_core.wasm", import.meta.url));
 
 /** The base URL every scenario that talks to the server configures (scenarios.md, "Server fixtures"). */
 export const BASE_URL = "https://playground.test";

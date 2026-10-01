@@ -1,35 +1,41 @@
-// The C ABI of docs/SPEC.md section 6 as one struct, resolved once per process.
+// The C ABI of docs/SPEC.md section 6 as one struct per core, resolved once per namespace.
 //
-// Every reference to an `undra_*` symbol lives in one shim file per platform:
-//   * `UndraApiLinked.cpp` (iOS, and the host tests): the core is linked into the app; the struct
-//     holds the linked symbols (taking their addresses also keeps a dead-stripping linker from
-//     dropping them);
-//   * `UndraApiAndroid.cpp`: the core is the APK's `libundra_core.so`, opened with `dlopen` and
-//     resolved with `dlsym` the first time the module starts.
-// Nothing else in the module names a symbol of the core: it calls through `Api`.
-//
-// Transitional (ADR-038, decisions 1, 11 and 13; ADR-044): when ADR-044's `abi-table` piece lands, a
-// core exports one `<namespace>_undra_api()` returning a table of the same operations (C ABI v2).
-// The migration is these shim files alone: `loadApi(namespace)` calls that function (iOS: the core's
-// header; Android: `dlsym` on `lib<namespace>.so`), checks `abi_version` and copies the table's
-// pointers into the same `Api`; `Host` and the JSI binding do not change.
+// A core exports one function, `<namespace>_undra_api()`, returning its `UndraApi` table (C ABI
+// version 2, ADR-044). Every way of reaching that function lives in one shim file per platform:
+//   * `UndraApiLinked.cpp` (iOS, and the macOS host tests): the core is linked into the app, and the
+//     module, which is built once for every core of the app, finds it by its namespace through the
+//     Objective-C class `UndraCoreTable_<namespace>` that the core's pod compiles (`+api` returns the
+//     table; `undra build --platform rn` writes it);
+//   * `UndraApiAndroid.cpp` (Android, and every build with `UNDRA_RN_DLOPEN`): the core is the APK's
+//     `lib<namespace>.so`, opened with `dlopen`, its table found with `dlsym("<namespace>_undra_api")`.
+// A shim only finds the table (`findTable`); `loadApi` (UndraApi.cpp, shared) caches one `Api` per
+// namespace and hands each new table to `copyTable`, which checks it (its `abi_version` first, then
+// its size, its namespace and every entry) and copies its pointers. Nothing else in the module names
+// a core: `Host` and the JSI binding call through `Api`.
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "undra.h"
 
 namespace undra::rn {
 
-/// The C ABI version this module speaks.
-inline constexpr uint32_t kAbiVersion = 1;
+/// The C ABI version this module speaks: the `abi_version` of every table it accepts.
+inline constexpr uint32_t kAbiVersion = UNDRA_ABI_VERSION;
+static_assert(kAbiVersion == 2, "this module is written against the UndraApi table of C ABI version 2");
 
-/// The core's operations (SPEC 6), with the two constants read once when the shim resolved them.
+/// The longest namespace a core may have (ADR-044, decision 1).
+inline constexpr std::size_t kMaxNamespace = 32;
+
+/// One core's operations (SPEC 6), copied out of its table, with the table's constants.
 struct Api {
-  /// `undra_abi_version()`, read at load; `loadApi` refuses a core whose value is not `kAbiVersion`.
+  /// The table's `abi_version`; `loadApi` refuses a table whose value is not `kAbiVersion`.
   uint32_t abi_version = 0;
-  /// `undra_schema_hash()`, read at load (it needs no running core).
+  /// The table's `schema_hash` (it needs no running core).
   uint64_t schema_hash = 0;
+  /// The core's namespace (`[core] namespace` of its undra.toml): the table's `name_space`.
+  std::string name_space;
   UndraBuf (*schema_json)(void) = nullptr;
   uint32_t (*init)(const uint8_t *, uint32_t, undra_reply_cb, undra_changeset_cb, undra_stream_cb, void *) = nullptr;
   void (*shutdown)(void) = nullptr;
@@ -49,8 +55,27 @@ struct Api {
   void (*buf_free)(UndraBuf) = nullptr;
 };
 
-/// The core of this process, resolved once (see the file comment). `nullptr` with `error` set when
-/// the library or one of its symbols cannot be found, or when it speaks another ABI version.
-const Api *loadApi(std::string &error);
+/// The core named `name_space`, resolved the first time it is asked for and then kept for the life
+/// of the process (a core is never unloaded: its threads and every callback it was given live in
+/// it). Thread-safe. `nullptr` with `error` set when the name is not a namespace, when no such core
+/// is in the app, or when its table is refused (another ABI version, another namespace, too short,
+/// an entry missing); a failure is not cached, so a later call tries again.
+const Api *loadApi(const std::string &name_space, std::string &error);
+
+/// The platform's half (UndraApiLinked.cpp or UndraApiAndroid.cpp): the table of the core
+/// `name_space` (already a valid namespace), with what it came from in `where` (the class or the
+/// library, for messages). `nullptr` with `error` set when the app has no such core. Called once
+/// per namespace at a time, under `loadApi`'s lock.
+const void *findTable(const std::string &name_space, std::string &where, std::string &error);
+
+/// Whether `name_space` can name a core: a C identifier (`[A-Za-z_][A-Za-z0-9_]*`) of at most
+/// `kMaxNamespace` characters (ADR-044, decision 1). It becomes part of a class or library name.
+bool validNamespace(const std::string &name_space) noexcept;
+
+/// Checks the table `table` that `where` (the class or the library it came from) returned for the
+/// core `name_space`, and copies it into `out`. Reads `abi_version` first and nothing else of a
+/// table of another version; then requires `size >= sizeof(UndraApi)`, `name_space` equal to the
+/// one asked for, and every entry. `false` with `error` set when it refuses the table.
+bool copyTable(const void *table, const std::string &name_space, const std::string &where, Api &out, std::string &error);
 
 } // namespace undra::rn

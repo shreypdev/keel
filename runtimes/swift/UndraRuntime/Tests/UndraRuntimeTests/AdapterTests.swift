@@ -395,6 +395,136 @@ final class KeyValueAdapterTests: XCTestCase {
         XCTAssertNil(try backend.get("never"))
     }
 
+    /// The bytes of an entry file: `u32 key length, key, value`.
+    private func entryBytes(_ key: String, _ value: [UInt8]) -> Data {
+        var writer = UndraWriter(capacity: 4 + key.utf8.count + value.count)
+        writer.writeString(key)
+        writer.writeRaw(value)
+        return Data(writer.finish())
+    }
+
+    func testKvTemporaryFileNamesAreDefinedOnceAndAreNotEntryNames() {
+        let name = FileKeyValueBackend.fileName(for: "a")
+        let temp = FileKeyValueBackend.temporaryName(for: name)
+        XCTAssertTrue(temp.hasPrefix(name + "."), temp)
+        XCTAssertTrue(temp.hasSuffix(".tmp"), temp)
+        XCTAssertEqual(temp.count, name.count + 1 + 16 + 4, "<name>.<16 hex digits>.tmp, as the C++ store writes it")
+        XCTAssertNotEqual(temp, FileKeyValueBackend.temporaryName(for: name), "each call is a fresh name")
+        XCTAssertFalse(FileKeyValueBackend.isEntryName(temp))
+
+        XCTAssertTrue(FileKeyValueBackend.isEntryName(name))
+        XCTAssertTrue(FileKeyValueBackend.isEntryName("cbf29ce484222325-811c9dc5"))
+        for notAnEntry in [
+            "", ".", "..", ".DS_Store", "junk-short", name + ".tmp", "." + name, name + "0",
+            "AF63DC4C8601EC8C-E40C292C", "af63dc4c8601ec8c_e40c292c", "af63dc4c8601ec8-ce40c292c",
+            "af63dc4c8601ec8c-e40c292g", ".dat.nosync1234.AbCdEf",
+        ] {
+            XCTAssertFalse(FileKeyValueBackend.isEntryName(notAnEntry), notAnEntry)
+        }
+    }
+
+    func testKvSetLeavesOnlyTheSealedEntryWithOwnerOnlyPermissions() throws {
+        let directory = makeDirectory()
+        let backend = FileKeyValueBackend(directory: directory)
+        try backend.set("a", [1])
+        try backend.set("a", [2, 3])
+        try backend.set("b", [])
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(),
+            [FileKeyValueBackend.fileName(for: "a"), FileKeyValueBackend.fileName(for: "b")].sorted(),
+            "no temporary file is left behind"
+        )
+        var info = stat()
+        XCTAssertEqual(stat(directory.appendingPathComponent(FileKeyValueBackend.fileName(for: "a")).path, &info), 0)
+        XCTAssertEqual(info.st_mode & 0o777, 0o600)
+        XCTAssertEqual(try backend.get("a"), [2, 3])
+        XCTAssertEqual(try backend.get("b"), [])
+    }
+
+    func testKvListSkipsTheTemporaryFilesOfAKilledWriter() throws {
+        let directory = makeDirectory()
+        let backend = FileKeyValueBackend(directory: directory)
+        try backend.set("a", [1])
+        let name = FileKeyValueBackend.fileName(for: "a")
+        // A complete copy of the entry (killed between the write and the rename), the same cut
+        // short, an older Foundation-style temporary, and a dot file.
+        let whole = entryBytes("a", [1])
+        try whole.write(to: directory.appendingPathComponent(name + ".0123456789abcdef.tmp"))
+        try whole.prefix(3).write(to: directory.appendingPathComponent(name + ".fedcba9876543210.tmp"))
+        try entryBytes("ghost", [9]).write(to: directory.appendingPathComponent(FileKeyValueBackend.fileName(for: "ghost") + ".00000000000000aa.tmp"))
+        try whole.write(to: directory.appendingPathComponent(".dat.nosync0001.AbCdEf"))
+        try whole.write(to: directory.appendingPathComponent(".hidden"))
+        XCTAssertEqual(try backend.list(prefix: ""), ["a"], "once, and no key that only a temporary file holds")
+        XCTAssertEqual(try backend.list(prefix: "g"), [])
+        XCTAssertNil(try backend.get("ghost"))
+
+        try backend.delete("a")
+        XCTAssertEqual(try backend.list(prefix: ""), [], "a leftover does not bring a deleted key back")
+        XCTAssertNil(try backend.get("a"))
+    }
+
+    func testKvListSkipsAnEntryWhoseNameIsNotItsKeysName() throws {
+        let directory = makeDirectory()
+        let backend = FileKeyValueBackend(directory: directory)
+        try backend.set("real", [1])
+        // A copy of an entry under another entry-shaped name is not a sealed entry of its key.
+        try entryBytes("copy", [2]).write(to: directory.appendingPathComponent("0000000000000000-00000000"))
+        XCTAssertEqual(try backend.list(prefix: ""), ["real"])
+        XCTAssertNil(try backend.get("copy"))
+    }
+
+    func testKvListSkipsAnEntryNamedDirectory() throws {
+        let directory = makeDirectory()
+        let backend = FileKeyValueBackend(directory: directory)
+        try backend.set("real", [1])
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("0000000000000000-00000000"),
+            withIntermediateDirectories: false
+        )
+        XCTAssertEqual(try backend.list(prefix: ""), ["real"])
+    }
+
+    func testKvGetOfAHalfWrittenEntryIsNoValueAndTheKeyCanBeWrittenAgain() throws {
+        let directory = makeDirectory()
+        let backend = FileKeyValueBackend(directory: directory)
+        let file = directory.appendingPathComponent(FileKeyValueBackend.fileName(for: "k"))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let damaged: [(String, Data)] = [
+            ("empty", Data()),
+            ("two bytes", Data([1, 0])),
+            ("header only", Data([1, 0, 0, 0])),
+            ("key cut short", entryBytes("kkkkkkkk", [1, 2, 3]).prefix(7)),
+            ("absurd key length", Data([0xFF, 0xFF, 0xFF, 0x7F, 0x6B, 1])),
+            ("key not UTF-8", Data([1, 0, 0, 0, 0xFF, 7])),
+        ]
+        for (label, bytes) in damaged {
+            try bytes.write(to: file)
+            XCTAssertNil(try backend.get("k"), label)
+            XCTAssertEqual(try backend.list(prefix: ""), [], label)
+            try backend.delete("k") // removes the damaged file or leaves it, never throws
+        }
+        try Data([1, 0]).write(to: file)
+        try backend.set("k", [5])
+        XCTAssertEqual(try backend.get("k"), [5], "a write replaces the damaged file")
+        XCTAssertEqual(try backend.list(prefix: ""), ["k"])
+    }
+
+    func testKvTemporaryAndDamagedFilesAreInvisibleThroughThePort() async throws {
+        let core = try makeCore(FakeTransport())
+        let directory = makeDirectory()
+        let impl = KvAdapter(directory: directory).makePortImpl(core: core)
+        _ = try await PortCaller.callAsync(impl, StandardPorts.Kv.set, setArgs("a", [1]))
+        let name = FileKeyValueBackend.fileName(for: "a")
+        try entryBytes("a", [1]).write(to: directory.appendingPathComponent(name + ".0123456789abcdef.tmp"))
+        try Data([0xFF]).write(to: directory.appendingPathComponent(FileKeyValueBackend.fileName(for: "b")))
+        let keys = try await list(impl, "")
+        XCTAssertEqual(keys, ["a"])
+        let b = try await get(impl, "b")
+        XCTAssertNil(b)
+        let a = try await get(impl, "a")
+        XCTAssertEqual(a, [1])
+    }
+
     func testKvRejectsMalformedArguments() async throws {
         let core = try makeCore(FakeTransport())
         let impl = KvAdapter(directory: makeDirectory()).makePortImpl(core: core)

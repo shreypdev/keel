@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use undra_bindgen::naming::CoreNames;
+
 use crate::bindgen::canonicalize_lenient;
 use crate::cli::AdoptArgs;
 use crate::config::{Platform, ProjectConfig};
@@ -194,8 +196,18 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
     ui.line(&format!(
         "Steps to wire it in are in {rel_undra}/UNDRA_ADOPT.md. In short:"
     ));
+    let core_names = CoreNames::new(
+        &setup
+            .config
+            .core_namespace
+            .clone()
+            .unwrap_or_else(|| CoreNames::default_namespace(&setup.names.core_package)),
+    );
     for platform in &platforms {
-        ui.line(&format!("  {}", summary_line(*platform, &rel_undra)));
+        ui.line(&format!(
+            "  {}",
+            summary_line(*platform, &rel_undra, &core_names)
+        ));
     }
     ui.line(&format!(
         "  cd {rel_undra} && undra doctor && undra build --release"
@@ -203,16 +215,18 @@ pub fn run(env: &Env<'_>, args: &AdoptArgs) -> Result<()> {
     Ok(())
 }
 
-fn summary_line(platform: Platform, undra: &str) -> String {
+fn summary_line(platform: Platform, undra: &str, names: &CoreNames) -> String {
     match platform {
         Platform::Ios => format!(
-            "iOS      add the package {undra}/generated/swift and link {undra}/build/ios/UndraCore.xcframework"
+            "iOS      add the package {undra}/generated/swift and link {undra}/build/ios/{}.xcframework",
+            names.bundle()
         ),
         Platform::Android => format!(
             "Android  include {undra}/generated/kotlin as a Gradle module and package {undra}/build/android/jniLibs"
         ),
         Platform::Web => format!(
-            "web      make @undra/runtime and the bindings in {undra}/generated/ts resolvable, load {undra}/build/web/undra_core.wasm"
+            "web      make @undra/runtime and the bindings in {undra}/generated/ts resolvable, load {undra}/build/web/{}.wasm",
+            names.namespace()
         ),
     }
 }
@@ -322,10 +336,25 @@ impl Steps<'_> {
         self.undra_dir.join(&self.config.build)
     }
 
+    /// The names of the core (ADR-044): its namespace, libraries and generated entry.
+    fn core_names(&self) -> CoreNames {
+        CoreNames::new(
+            &self
+                .config
+                .core_namespace
+                .clone()
+                .unwrap_or_else(|| CoreNames::default_namespace(&self.names.core_package)),
+        )
+    }
+
     fn ios(&self, app: &IosApp) -> String {
         let module = &self.names.swift_module;
         let package = self.rel(&app.dir, &self.generated().join("swift"));
-        let xcframework = self.rel(&app.dir, &self.build().join("ios/UndraCore.xcframework"));
+        let core = self.core_names();
+        let bundle = format!("{}.xcframework", core.bundle());
+        let entry = core.entry();
+        let library = format!("lib{}.a", core.namespace());
+        let xcframework = self.rel(&app.dir, &self.build().join("ios").join(&bundle));
         let mut text = String::from("## iOS\n\n");
         text.push_str(&format!(
             "Xcode project: `{}`\n\n",
@@ -354,16 +383,12 @@ impl Steps<'_> {
             "   It pulls in {runtime}; add the product `UndraRuntime` to the app target too.\n"
         ));
         text.push_str(&format!(
-            "2. **Link the core.** `undra build --platform ios` writes `UndraCore.xcframework`. Add it to the target's\n   *Frameworks, Libraries, and Embedded Content* (Do Not Embed): `{xcframework}`.\n"
+            "2. **Link the core.** `undra build --platform ios` writes `{bundle}` (`{xcframework}`). Add it to the target's\n   *Frameworks, Libraries, and Embedded Content* (Do Not Embed). Each slice is one prelinked object (`{library}`) whose only\n   global symbol is the core's entry, which the generated package calls, so it needs no `-force_load` and other static\n   libraries (another Undra core included) link next to it.\n"
         ));
         text.push_str(&format!(
-            "3. **Keep the core's registrations.** Under *Build Settings > Other Linker Flags* add, for the simulator SDK and the\n   device SDK respectively (a debug static library would otherwise lose the `#[undra::api]` registrations):\n\n   ```\n   Any iOS Simulator SDK:  -force_load $(SRCROOT)/{xcframework}/ios-arm64-simulator/libundra_core.a\n   Any iOS SDK:            -force_load $(SRCROOT)/{xcframework}/ios-arm64/libundra_core.a\n   ```\n"
+            "3. **Load the core at startup**, before any Undra object exists:\n\n   ```swift\n   import UndraRuntime\n   import {module}\n\n   @main struct MyApp: App {{\n       init() {{\n           do {{ try {entry}.load() }}\n           catch {{ fatalError(\"Undra did not start: \\(error)\") }}\n       }}\n       // ...\n   }}\n   ```\n\n   `{entry}` is the generated entry of the core: it checks the core was built from the bindings' schema, and every generated\n   type uses the core it loaded. Then use the generated store wherever a screen needs it: `@State private var todos = try! Todos()`\n   (a `@MainActor @Observable` class; read its properties in a SwiftUI view).\n"
         ));
-        text.push_str("4. **Real core, not the stand-in.** The Swift runtime ships link-time stand-ins for the core so that it builds without one.\n   Switch them off by starting Xcode with `UNDRA_LINK_CORE=1` (`open --env UNDRA_LINK_CORE=1 -a Xcode <project>`), or build with\n   `UNDRA_LINK_CORE=1 xcodebuild ...`.\n");
-        text.push_str(&format!(
-            "5. **Load the core at startup**, before any Undra object exists:\n\n   ```swift\n   import UndraRuntime\n   import {module}\n\n   @main struct MyApp: App {{\n       init() {{\n           do {{ try UndraCore.load(.inproc(expectedSchemaHash: UndraIds.schemaHash)) }}\n           catch {{ fatalError(\"Undra did not start: \\(error)\") }}\n       }}\n       // ...\n   }}\n   ```\n\n   then use the generated store wherever a screen needs it: `@State private var todos = try! Todos()` (a `@MainActor @Observable`\n   class; read its properties in a SwiftUI view).\n"
-        ));
-        text.push_str("6. **Optional, for `undra dev`:** add `NSAppTransportSecurity > NSAllowsLocalNetworking = YES` to the Info.plist so the app may connect to\n   `ws://` on your network, and pass `.remote(url: \"ws://<your Mac>:7443\", ...)` to `UndraCore.load` in debug builds. The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `.closed(.sessionLost)` and the app loads a new core.\n\n");
+        text.push_str(&format!("4. **Optional, for `undra dev`:** add `NSAppTransportSecurity > NSAllowsLocalNetworking = YES` to the Info.plist so the app may connect to\n   `ws://` on your network, and call `{entry}.load(.remote(url: \"ws://<your Mac>:7443\"))` in debug builds. The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `.closed(.sessionLost)` and the app loads a new core.\n\n"));
         text
     }
 
@@ -448,20 +473,26 @@ impl Steps<'_> {
             format!("sourceSets {{ main {{ jniLibs.srcDir '{jni}' }} }}")
         };
         text.push_str(&format!(
-            "2. **Depend on it and package the native libraries** in the app module's `{build}` (inside `android {{ }}` for the\n   source set):\n\n   ```\n   dependencies {{\n   {deps}\n   }}\n   android {{\n       {jni_line}\n   }}\n   ```\n\n   `undra build --platform android --release` writes `libundra_core.so` for the ABIs in undra.toml (arm64-v8a, x86_64) below\n   `build/android/jniLibs`; use `--release` when you package (a debug core is tens of megabytes per ABI).\n   The app needs `minSdk` {} or higher and Kotlin/Java 11 bytecode.\n",
-            self.config.android.min_sdk
+            "2. **Depend on it and package the native libraries** in the app module's `{build}` (inside `android {{ }}` for the\n   source set):\n\n   ```\n   dependencies {{\n   {deps}\n   }}\n   android {{\n       {jni_line}\n   }}\n   ```\n\n   `undra build --platform android --release` writes `lib{namespace}.so` for the ABIs in undra.toml (arm64-v8a, x86_64) below\n   `build/android/jniLibs`; use `--release` when you package (a debug core is tens of megabytes per ABI).\n   The app needs `minSdk` {} or higher and Kotlin/Java 11 bytecode.\n",
+            self.config.android.min_sdk,
+            namespace = self.core_names().namespace(),
         ));
         text.push_str(&format!(
-            "3. **Load the core once per process**, in your `Application` subclass (register it with `android:name` in the manifest):\n\n   ```kotlin\n   import {package}.UndraIds\n   import dev.undra.android.AndroidPlatformDefaults\n   import dev.undra.runtime.UndraCore\n   import dev.undra.runtime.LoadOptions\n\n   class App : Application() {{\n       override fun onCreate() {{\n           super.onCreate()\n           val core = UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH))\n           AndroidPlatformDefaults.install(core, this)\n       }}\n   }}\n   ```\n\n   `install` gives the core every platform port: `Http`, `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Lifecycle` (without it an Android core has no network or\n   storage). It needs the `INTERNET` and `ACCESS_NETWORK_STATE` permissions; `android-adapters` declares both, so they merge into your manifest.\n   Then `val todos = Todos()` (a generated store; its `StateFlow` properties work with `collectAsState()`).\n"
+            "3. **Load the core once per process**, in your `Application` subclass (register it with `android:name` in the manifest):\n\n   ```kotlin\n   import {package}.{entry}\n   import dev.undra.android.AndroidPlatformDefaults\n\n   class App : Application() {{\n       override fun onCreate() {{\n           super.onCreate()\n           val core = {entry}.load()\n           AndroidPlatformDefaults.install(core, this)\n       }}\n   }}\n   ```\n\n   `{entry}` is the generated entry of the core: it loads `lib{namespace}.so`, checks the core was built from the bindings'\n   schema, and every generated class uses the core it loaded.\n   `install` gives the core every platform port: `Http`, `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Lifecycle` (without it an Android core has no network or\n   storage). It needs the `INTERNET` and `ACCESS_NETWORK_STATE` permissions; `android-adapters` declares both, so they merge into your manifest.\n   Then `val todos = Todos()` (a generated store; its `StateFlow` properties work with `collectAsState()`).\n",
+            entry = self.core_names().entry(),
+            namespace = self.core_names().namespace(),
         ));
-        text.push_str("4. **Shrinking.** If you minify, keep the natives the library registers by name: `-keep class dev.undra.runtime.UndraNative { *; }` and\n   `-keep class dev.undra.runtime.UndraNative$Callbacks { *; }`.\n\n");
+        text.push_str("4. **Shrinking.** Nothing to add: the core's `JNI_OnLoad` registers the natives of the generated `UndraCoreNative` by name, and the\n   bindings and the runtime ship the R8 rules that keep them (`META-INF/proguard`).\n\n");
         text.push_str("5. **Optional, for `undra dev`:** in debug builds pass `mode = Mode.REMOTE, remoteUrl = \"ws://10.0.2.2:7443\"` (the emulator's name for your computer; a USB device uses `adb reverse tcp:7443 tcp:7443`\n   and `ws://127.0.0.1:7443`, which `undra dev --android` sets up) to `LoadOptions`, and allow cleartext traffic in a **debug-only** manifest\n   (`app/src/debug/AndroidManifest.xml`: `<application android:usesCleartextTraffic=\"true\" />`; the `INTERNET` permission is already in your manifest through `android-adapters`).\n   The runtime reconnects by itself (`core.connectionState`); when `undra dev` restarts the core it reports `Closed(SESSION_LOST)` and the app loads a new core.\n\n");
         text
     }
 
     fn web(&self, app: &WebApp) -> String {
         let generated = self.rel(&app.dir, &self.generated().join("ts"));
-        let wasm = self.rel(&app.dir, &self.build().join("web/undra_core.wasm"));
+        let core = self.core_names();
+        let entry = core.entry();
+        let wasm_file = format!("{}.wasm", core.namespace());
+        let wasm = self.rel(&app.dir, &self.build().join("web").join(&wasm_file));
         let ts_package = format!("@app/{}", self.names.core_package);
         let mut text = String::from("## Web\n\n");
         text.push_str(&format!(
@@ -486,9 +517,9 @@ impl Steps<'_> {
             }
         }
         text.push_str(&format!(
-            "2. **Load the core before rendering**, in the app's entry point:\n\n   ```ts\n   import {{ UndraCore }} from \"@undra/runtime\";\n   import {{ UndraIds, Todos }} from \"{ts_package}\";\n   import wasmUrl from \"{wasm}?url\"; // a bundler asset: Vite shown; webpack 5: new URL(\"{wasm}\", import.meta.url)\n\n   await UndraCore.load({{\n     mode: \"wasm-main\",\n     wasm: new URL(wasmUrl, location.href),\n     expectedSchemaHash: UndraIds.schemaHash,\n   }});\n   const todos = await Todos.create();\n   ```\n\n   `undra build --platform web` writes `build/web/undra_core.wasm`. Signals are `todos.visible.get()` / `.subscribe(fn)`; in React read them with\n   `useSyncExternalStore` (see the `web/` app of an `undra init` project).\n"
+            "2. **Load the core before rendering**, in the app's entry point:\n\n   ```ts\n   import {{ {entry}, Todos }} from \"{ts_package}\";\n   import wasmUrl from \"{wasm}?url\"; // a bundler asset: Vite shown; webpack 5: new URL(\"{wasm}\", import.meta.url)\n\n   await {entry}.load({{ mode: \"wasm-main\", wasm: new URL(wasmUrl, location.href) }});\n   const todos = await Todos.create();\n   ```\n\n   `undra build --platform web` writes `build/web/{wasm_file}`; `{entry}` checks the core was built from the bindings' schema, and every\n   generated class uses the core it loaded. Signals are `todos.visible.get()` / `.subscribe(fn)`; in React read them with\n   `useSyncExternalStore` (see the `web/` app of an `undra init` project).\n"
         ));
-        text.push_str("3. **Optional, for `undra dev`:** `await UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash: UndraIds.schemaHash })`.\n\n");
+        text.push_str(&format!("3. **Optional, for `undra dev`:** `await {entry}.load({{ mode: \"remote\", url: \"ws://127.0.0.1:7443\" }})`.\n\n"));
         text
     }
 }
@@ -591,7 +622,16 @@ mod tests {
             guide.contains("## iOS") && guide.contains("## Android") && guide.contains("## Web"),
             "{guide}"
         );
-        assert!(guide.contains("MyApp.xcodeproj") && guide.contains("-force_load $(SRCROOT)/../undra/build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a"), "{guide}");
+        assert!(
+            guide.contains("MyApp.xcodeproj")
+                && guide.contains("`../undra/build/ios/MyappCore.xcframework`")
+                && guide.contains("try UndraMyappCore.load()"),
+            "{guide}"
+        );
+        assert!(
+            !guide.contains("-force_load $(") && !guide.contains("UNDRA_LINK_CORE"),
+            "{guide}"
+        );
         assert!(
             guide.contains(
                 "project(\":core-bindings\").projectDir = file(\"../undra/generated/kotlin\")"
@@ -603,7 +643,8 @@ mod tests {
             "{guide}"
         );
         assert!(
-            guide.contains("../undra/build/web/undra_core.wasm"),
+            guide.contains("../undra/build/web/myapp_core.wasm")
+                && guide.contains("await UndraMyappCore.load({ mode: \"wasm-main\""),
             "{guide}"
         );
         let _ = std::fs::remove_dir_all(root.parent().unwrap());

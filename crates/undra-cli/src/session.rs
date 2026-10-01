@@ -4,7 +4,10 @@
 use std::cell::OnceCell;
 use std::path::PathBuf;
 
+use undra_bindgen::naming::CoreNames;
+
 use crate::cargo::{Cargo, CoreInfo, UndraSource};
+use crate::config::{ProjectConfig, check_namespace};
 use crate::error::{CliError, Code, Result};
 use crate::project::Project;
 use crate::shim;
@@ -123,20 +126,134 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// The core's namespace (ADR-044): `[core] namespace`, else the core's package name in snake
+    /// case. It names the core's one C export, its libraries and the generated entry point, so two
+    /// cores in one app need two; a project next to this one (a sibling directory with its own
+    /// `undra.toml` and another `[project] id`) that claims the same namespace is refused here,
+    /// before anything is built with it.
+    ///
+    /// # Errors
+    ///
+    /// `C0002` when the derived default is not a valid namespace (set one), or when a sibling
+    /// project uses the same namespace; what [`Session::core`] returns when the default needs it.
+    pub fn namespace(&self) -> Result<String> {
+        let namespace = match &self.project.config.core_namespace {
+            Some(namespace) => namespace.clone(),
+            None => {
+                let derived = CoreNames::default_namespace(&self.core()?.package);
+                if let Err(why) = check_namespace(&derived) {
+                    return Err(CliError::new(
+                        Code::BadConfig,
+                        format!("the core's default namespace `{derived}` is not usable: {why}"),
+                        "the namespace names the core's C symbol and libraries; by default it is the core's package name in snake case",
+                        "set one in undra.toml: `[core] namespace = \"acme_pay\"` (lowercase letters, digits and `_`, at most 32 characters)",
+                    ));
+                }
+                derived
+            }
+        };
+        if let Some(other) =
+            sibling_with_namespace(&self.project.root, &self.project.config.id, &namespace)
+        {
+            return Err(CliError::new(
+                Code::BadConfig,
+                format!(
+                    "the core namespace `{namespace}` is also the namespace of the project at {}",
+                    other.display()
+                ),
+                "two cores in one app must have different namespaces: the namespace names each core's symbol and libraries, and the runtimes refuse to load two cores with one (ADR-044)",
+                "give one of them its own `[core] namespace` in undra.toml",
+            ));
+        }
+        Ok(namespace)
+    }
+
+    /// The names derived from [`Session::namespace`].
+    ///
+    /// # Errors
+    ///
+    /// See [`Session::namespace`].
+    pub fn core_names(&self) -> Result<CoreNames> {
+        Ok(CoreNames::new(&self.namespace()?))
+    }
+
     /// Writes the shim crate for this project and returns its manifest.
     ///
     /// # Errors
     ///
-    /// See [`Session::core`] and [`shim::write_shim`].
+    /// See [`Session::core`], [`Session::namespace`] and [`shim::write_shim`].
     pub fn shim_manifest(&self) -> Result<PathBuf> {
         let core = self.core()?;
+        let namespace = self.namespace()?;
         shim::write_shim(
             &self.target_dir()?,
             &self.project.root,
             core,
+            &shim::ShimNames {
+                namespace,
+                jni_class: CoreNames::jni_class(&self.project.kotlin_package()),
+            },
             &self.project.config.web.opt_level,
         )
     }
+}
+
+/// A project in a directory next to `root` (another child of its parent) whose `undra.toml` sets
+/// `[core] namespace = namespace`, or derives it from a core whose package is that name. A sibling
+/// with this project's own `[project] id` (`own_id`) is another checkout of the same project (a
+/// `git worktree`, a copy), not a second core of the app, and never counts.
+fn sibling_with_namespace(
+    root: &std::path::Path,
+    own_id: &str,
+    namespace: &str,
+) -> Option<PathBuf> {
+    let parent = root.parent()?;
+    let own = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut siblings: Vec<PathBuf> = std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|dir| dir.join("undra.toml").is_file())
+        .collect();
+    siblings.sort();
+    siblings.into_iter().find(|dir| {
+        if dir.canonicalize().unwrap_or_else(|_| dir.clone()) == own {
+            return false;
+        }
+        let Ok(text) = std::fs::read_to_string(dir.join("undra.toml")) else {
+            return false;
+        };
+        let Ok(config) = ProjectConfig::parse(&text, &dir.join("undra.toml")) else {
+            return false;
+        };
+        if config.id == own_id {
+            return false;
+        }
+        let theirs = config.core_namespace.clone().or_else(|| {
+            package_name(&dir.join(&config.core_path).join("Cargo.toml"))
+                .map(|package| CoreNames::default_namespace(&package))
+        });
+        theirs.as_deref() == Some(namespace)
+    })
+}
+
+/// The `[package] name` of a `Cargo.toml`, read without Cargo (a cheap look at a sibling).
+fn package_name(manifest: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let mut in_package = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if in_package {
+            if let Some(rest) = line.strip_prefix("name") {
+                let value = rest.trim_start().strip_prefix('=')?.trim();
+                return Some(value.trim_matches('"').to_owned());
+            }
+        }
+    }
+    None
 }
 
 fn describe(source: &UndraSource) -> String {
@@ -194,6 +311,97 @@ mod tests {
             root: PathBuf::from("/repo"),
             target_dir: PathBuf::from("/repo/target"),
         }
+    }
+
+    /// Writes `<parent>/<dir>/undra.toml` for project `id`, with `namespace` when given and a core
+    /// whose package is `package`.
+    fn project_at(
+        parent: &std::path::Path,
+        dir: &str,
+        id: &str,
+        namespace: Option<&str>,
+        package: &str,
+    ) {
+        let root = parent.join(dir);
+        std::fs::create_dir_all(root.join("core")).unwrap();
+        let namespace = namespace.map_or(String::new(), |ns| format!("namespace = \"{ns}\"\n"));
+        std::fs::write(
+            root.join("undra.toml"),
+            format!("[project]\nname = \"{dir}\"\nid = \"{id}\"\nplatforms = [\"web\"]\n\n[core]\npath = \"core\"\n{namespace}"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("core/Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n"),
+        )
+        .unwrap();
+    }
+
+    /// ADR-044 (deviation): a project next to this one that claims the same namespace is refused,
+    /// whether it sets the namespace or derives it from its core's package name.
+    #[test]
+    fn a_sibling_project_with_the_same_namespace_is_found() {
+        let parent = crate::fsutil::unique_temp_dir("siblings");
+        project_at(&parent, "app", "com.example.app", Some("acme"), "app-core");
+        project_at(
+            &parent,
+            "vendor",
+            "com.vendor.sdk",
+            Some("acme"),
+            "vendor-core",
+        );
+        project_at(&parent, "other", "com.other.app", None, "acme");
+        project_at(
+            &parent,
+            "unrelated",
+            "com.unrelated",
+            Some("zeta"),
+            "zeta-core",
+        );
+        let found = sibling_with_namespace(&parent.join("app"), "com.example.app", "acme");
+        assert_eq!(
+            found.as_deref(),
+            Some(parent.join("other").as_path()),
+            "derived from `acme`"
+        );
+        std::fs::remove_dir_all(parent.join("other")).unwrap();
+        let found = sibling_with_namespace(&parent.join("app"), "com.example.app", "acme");
+        assert_eq!(found.as_deref(), Some(parent.join("vendor").as_path()));
+        assert_eq!(
+            sibling_with_namespace(&parent.join("app"), "com.example.app", "zeta").as_deref(),
+            Some(parent.join("unrelated").as_path())
+        );
+        assert_eq!(
+            sibling_with_namespace(&parent.join("app"), "com.example.app", "free"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// Review (abi-table): another checkout of the same project (a `git worktree` next to it, a
+    /// copy) has the same namespace by construction and is not a second core of the app; it must
+    /// not stop either from building.
+    #[test]
+    fn another_checkout_of_the_same_project_is_not_a_clash() {
+        let parent = crate::fsutil::unique_temp_dir("worktrees");
+        project_at(&parent, "app", "com.example.app", Some("acme"), "app-core");
+        project_at(
+            &parent,
+            "app-feature",
+            "com.example.app",
+            Some("acme"),
+            "app-core",
+        );
+        project_at(&parent, "app-copy", "com.example.app", None, "acme");
+        assert_eq!(
+            sibling_with_namespace(&parent.join("app"), "com.example.app", "acme"),
+            None
+        );
+        assert_eq!(
+            sibling_with_namespace(&parent.join("app-feature"), "com.example.app", "acme"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&parent);
     }
 
     #[test]

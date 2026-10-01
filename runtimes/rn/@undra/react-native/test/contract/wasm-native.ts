@@ -47,7 +47,16 @@ interface CoreExports {
 export interface WasmNativeOptions {
   /** The clock behind the core's Clock port (native in the real module; manual in the scenarios). */
   readonly clock?: ClockAdapter;
+  /** The core's namespace, which the real module reads from the core's table. Default `playground_core`. */
+  readonly namespace?: string;
 }
+
+/**
+ * The `abi_version` the real module reports: its core's `UndraApi` table's (2, ADR-044). The wasm core
+ * underneath keeps the wasm ABI's own version (`undra_abi_version()` is 1, docs/SPEC.md section 7),
+ * which is not what the module stands in for.
+ */
+const NATIVE_ABI_VERSION = 2;
 
 /** The native module's contract over a wasm core. */
 export class WasmNative implements UndraNativeModule {
@@ -57,6 +66,8 @@ export class WasmNative implements UndraNativeModule {
 
   /** The instance, for what the scenarios read from the wasm exports. */
   instance!: WebAssembly.Instance;
+  /** The core's namespace (the real module's comes from the table). */
+  readonly namespace: string;
 
   readonly #clock: ClockAdapter | undefined;
   #e!: CoreExports;
@@ -79,6 +90,7 @@ export class WasmNative implements UndraNativeModule {
 
   private constructor(options: WasmNativeOptions) {
     this.#clock = options.clock;
+    this.namespace = options.namespace ?? "playground_core";
   }
 
   /** Instantiates the core (`_initialize` included); `start` runs `undra_init`. */
@@ -256,7 +268,7 @@ export class WasmNative implements UndraNativeModule {
   // ----- UndraNativeModule ------------------------------------------------------------
 
   abiVersion(): number {
-    return this.#e.undra_abi_version();
+    return NATIVE_ABI_VERSION;
   }
   schemaHash(): bigint {
     return BigInt.asUintN(64, this.#e.undra_schema_hash());

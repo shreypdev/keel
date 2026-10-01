@@ -125,6 +125,8 @@ pub struct ParamDef { pub name: String, pub ty: TypeRef }
 
 pub struct StoreDef { pub signals: Vec<SignalDef> }
 pub struct SignalDef { pub name: String, pub signal_id: u32, pub ty: TypeRef, pub computed: bool, pub key: Option<String> /* #[undra(key = "id")] */, pub no_coalesce: bool /* #[undra(no_coalesce)]; serialized only when true (ADR-031) */ }
+// `computed: true` with a `key` (and `ty: Vec<T>`) is a derived keyed list (`DerivedList<T>`, ADR-039): read-only on
+// the platforms, delivered as keyed patches (§3.8). No other field describes it, so no existing schema or hash changed.
 
 pub struct FunctionDef { pub name: String, pub method_id: u32, pub params: Vec<ParamDef>, pub returns: TypeRef, pub is_async: bool, pub takes_ctx: bool, pub docs: String }
 
@@ -289,7 +291,7 @@ ops    count × { op u8, ... }
    3 Move    { from u32, to u32 }
    4 Clear   { }
 ```
-Ops are applied sequentially to the host's current list; indices refer to the list state after the previous op. `Move` means remove the item at `from`, then insert it so that it ends at index `to` (both indices valid in the list before the op). A host that hits an out-of-bounds op treats the signal as desynchronised and re-observes it. The core produces a patch one of two ways (§16.1, ADR-027): it sends the list operations a store recorded (`push`, `insert`, `remove`, `update_at`, `move_item`, `clear`) as they were performed, or, for a list written with `set`/`update`/`replace`, it computes the patch by key equality and full-item encoded equality, and a change of that kind that removes more than 50% of items or has no key overlap is sent as `op = 0` (full value) instead. Either way the host applies the ops sequentially by position and the bytes mean the same.
+Ops are applied sequentially to the host's current list; indices refer to the list state after the previous op. `Move` means remove the item at `from`, then insert it so that it ends at index `to` (both indices valid in the list before the op). A host that hits an out-of-bounds op treats the signal as desynchronised and re-observes it. The core produces a patch one of two ways (§16.1, ADR-027): it sends the list operations a store recorded (`push`, `insert`, `remove`, `update_at`, `move_item`, `clear`) as they were performed, or, for a list written with `set`/`update`/`replace`, it computes the patch by key equality and full-item encoded equality, and a change of that kind that removes more than 50% of items or has no key overlap is sent as `op = 0` (full value) instead. Either way the host applies the ops sequentially by position and the bytes mean the same. A **derived keyed list** (`DerivedList<T>`, §4.3, §16.1, ADR-039) is a third way: its ops come from its own index, which replays the source list's recorded operations (at most two derived ops per source op, a sort-key change being `Move` then `Update`; an op that does not change the view sends nothing). A raw write of the source, more than 4,096 operations kept for one commit, or a parameter change that moves more than 256 rows send the derived list as `op = 0` instead. Its patches are ordinary patches: the host applies and merges them (§11.1) exactly as any other.
 
 ### 3.9 Rust API
 
@@ -327,7 +329,7 @@ On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{fie
 
 ### 4.3 `#[undra::store]`
 
-On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (a `WeakCtx`, config; a `Ctx` field works but keeps the runtime alive until shutdown, ADR-034). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
+On a struct. Fields of type `Signal<T>`, `Computed<T>` and `DerivedList<T>` are signals (in declaration order); other fields are private state (a `WeakCtx`, config; a `Ctx` field works but keeps the runtime alive until shutdown, ADR-034). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches, and is **required** on a `DerivedList<T>` (E0008; a derived list is described as `Vec<T>`, `computed: true` with that key, attached with `attach_derived`, left out of snapshots and of the restore hook's parameters, ADR-039); a key on a `Computed<T>` stays E0008, which points at `DerivedList<T>`; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` or `DerivedList` field (E0013).
 
 ### 4.4 `#[undra::port]`
 
@@ -401,6 +403,7 @@ pub enum Gone { ShutDown, Dropped }                           // Copy + Display 
 * Every signal write outside `ctx.txn` is an implicit single-write transaction.
 * A transaction is thread-local depth + a dirty set `(store_handle, signal_id)`. On commit (depth → 0): for each dirty store, recompute observed dirty computeds (dependency order), build the change-set of **observed** signals only (plus `no_coalesce` signals always), assign `txn_id` (monotonic u64), and invoke the sink. Unobserved dirty signals are recorded in the store's `pending_dirty` so that a later `observe` emits the current value.
 * Writes are applied directly to the signal cell (no overlay) **but** are wrapped in a panic guard at the dispatch boundary: on panic the runtime marks the store `poisoned`, emits `Log(error)` and the dispatch returns status 2. A poisoned store keeps working (values are still consistent per write); poisoning is informational in v1 (ADR-017 explains why a copy-on-write overlay is deferred). A **computed** that panics on its current inputs poisons only itself (ADR-019 amendment): the commit (or observe) evaluates each computed under a panic guard, leaves the failing one out of the change-set and delivers every other signal of the store; the write that triggered it succeeds. The failing signal is *held back*: the host keeps the last value it received, it is not re-evaluated by unrelated commits, and it is evaluated again when its inputs change, its full value delivered when that succeeds. The runtime logs the failure once at error level, marks the store poisoned and reports `poisoned_signals` in `stats_json`; `StoreCell::failed_signals()` is the signal's typed poisoned state. A call that reads such a computed panics as before (status 2). A panicking **encoder** of a plain or keyed slot, or a panicking sink, still abandons the store's change-set and resends its slots in full with the next commit (ADR-019). On wasm (`panic=abort`) any panic traps the core.
+* A **derived list** (ADR-039) is committed like a computed that ships keyed patches: the commit drains it (replays the source's recorded operations on its index) and adds its pending derived ops as one keyed patch, its full value when they overflowed or the index was rebuilt, or **no entry** when nothing in the view changed; a change-set left with no entry is not delivered. A derived list whose closures panic is held back exactly as a panicking computed is (listed in `failed_signals`), and sent in full when it next evaluates.
 * `undra_observe(handle, signal_id, 1)` immediately emits a change-set with the current value(s) of the newly observed signal(s) (synchronously, before returning, in-process; asynchronously over a transport).
 
 ### 5.6 Dispatch
@@ -429,7 +432,7 @@ Standard ports and their methods are defined in `undra-ports` (§8).
 
 ### 5.9 Snapshot and restore
 
-`Snapshot` payload (all little-endian): `count u32, generation_floor u32, stores × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value bytes } }` (computed signals excluded; restored by recomputation). `generation_floor` is the highest handle generation the core had issued when the snapshot was taken (`0` if none). Hosts treat a snapshot as opaque bytes and hand it back unchanged.
+`Snapshot` payload (all little-endian): `count u32, generation_floor u32, stores × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value bytes } }` (computed signals and derived lists excluded; restored by recomputation). `generation_floor` is the highest handle generation the core had issued when the snapshot was taken (`0` if none). Hosts treat a snapshot as opaque bytes and hand it back unchanged.
 
 `undra_restore(bytes)` rebuilds each store via its generated `restore(ctx, values)` and re-issues the same handles (the table is rebuilt from the snapshot, so handles held by the host remain valid). It raises the generation counter to `max(current, generation_floor, every generation in the snapshot)` and never lowers it, so a handle issued before the snapshot, or between the snapshot and the restore, can never be issued again to another object, in this process or a fresh one (ADR-022). A snapshot whose floor, or any store handle's generation, is `u32::MAX` is refused (status 5 / `BAD_SNAPSHOT`): it would leave nothing to issue. A snapshot in the layout without the floor fails to decode. Objects that are not stores are not snapshotted; their handles become invalid after restore (status 5 `stale_handle`). **In-flight calls and streams whose receiver the restore replaced or invalidated are cancelled** (ADR-023): every call made on a store is (each store is rebuilt, so a call still running on the old object would finish on a detached store and report success for a write the restored store never saw). A plain call is answered with status 3 (`cancelled`), exactly once; a stream ends with a `StreamItem` flag 3 (failed, status 3 cancelled by the core; §3.7, ADR-036), because the host did not ask for the end and a clean end would read as success; the tasks are dropped. Calls with no receiver (free functions, constructors) carry on. Restore emits change-sets for all observed signals: one per re-observed store, in handle order, each built and delivered under that store's delivery lock through the path `undra_observe` uses (§16.1 `observe_and_deliver`), inside one transaction (ADR-023).
 
@@ -445,48 +448,56 @@ When a transport is attached with `mode = "dev"`, the core additionally emits `L
 
 ## 6. Native C ABI (`undra-ffi`)
 
-Exported with `#[unsafe(no_mangle)] pub extern "C"`, C-compatible types only. All `*const u8, u32` pairs are borrowed for the duration of the call unless stated (a null `ptr` is an empty payload). The functions may be called from any thread, concurrently, subject to the host contract below. `undra-ffi` is the only crate besides the JNI shim allowed to contain `unsafe`, and every block has a `// SAFETY:` comment.
+**Version 2: one table per core (ADR-044).** A core is reached through exactly **one exported function**, named after its namespace (`[core] namespace` of `undra.toml`, §13): `const UndraApi *<namespace>_undra_api(void)`, which returns the core's immutable `UndraApi` table. `undra-ffi` exports no symbol of its own; the crate built as the core's library calls `undra_ffi::export_core!(<namespace>, jni_class = "<pkg>/UndraCoreNative")`, which exports that function and, with the `jni` feature, `JNI_OnLoad`/`JNI_OnUnload` (§6.1). A core image is self-contained (a cdylib, or on iOS a prelinked object, §13), so two cores in one process share no symbol, no registry, no runtime and no thread: each table is its own core. The table carries C-compatible types only; the entries are `extern "C"` functions of `undra-ffi`, and every `*const u8, u32` pair is borrowed for the duration of the call unless stated (a null `ptr` is an empty payload). They may be called from any thread, concurrently, subject to the host contract below. `undra-ffi` is the only crate allowed to contain `unsafe`, and every block has a `// SAFETY:` comment.
 
 ```c
-typedef struct { uint8_t *ptr; uint32_t len; uint32_t cap; } UndraBuf;        // owned by the core; free with undra_buf_free
+typedef struct { uint8_t *ptr; uint32_t len; uint32_t cap; } UndraBuf;        // owned by the core; free with buf_free of the same table
 typedef void (*undra_reply_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);
 typedef void (*undra_changeset_cb)(void *user, const uint8_t *ptr, uint32_t len);
 typedef uint8_t (*undra_port_cb)(void *user, uint32_t port_id, uint32_t method_id, uint32_t port_call_id, const uint8_t *ptr, uint32_t len, UndraBuf *out_reply); // returns 0 = replied synchronously into out_reply, 1 = will reply async, 2 = unavailable
 typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);  // StreamItem payload (§3.7: flag 0 item, 1 end, 2 the stream's E, 3 failed with a reply status)
 
-uint32_t undra_abi_version(void);                       // 1
-uint64_t undra_schema_hash(void);
-UndraBuf  undra_schema_json(void);                       // owned copy of the whole schema as JSON, doc comments included (§2.3); undra_schema_hash covers its canonical form, not these bytes
-uint32_t undra_init(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); // idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok
-void     undra_shutdown(void);                          // answers every in-flight call (status 3) and ends every open stream (§5.1 Shutdown) before stopping the threads; then drops the port registrations, waiting for port callbacks still running (host contract 5)
-uint32_t undra_call(const uint8_t *ptr, uint32_t len);  // Call payload (§3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods.
-UndraBuf  undra_call_sync(const uint8_t *ptr, uint32_t len); // Reply payload (§3.4) returned directly; only for sync methods (async → status 5)
-void     undra_cancel(uint32_t call_id);
-void     undra_stream_credit(uint32_t call_id, uint32_t credit);
-void     undra_observe(uint64_t handle, uint32_t signal_id, uint8_t on);
-void     undra_release(uint64_t handle);
-void     undra_port_register(uint32_t port_id, undra_port_cb cb, void *user); // cb NULL removes; removing or replacing waits for the old registration's running callbacks (host contract 1, 5)
-void     undra_port_reply(const uint8_t *ptr, uint32_t len);   // PortReply payload; allowed from a callback; port_call_id 0 is ignored (host contract 6)
-void     undra_event(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
-void     undra_timer_fired(uint32_t timer_id);
-UndraBuf  undra_snapshot(void);
-uint32_t undra_restore(const uint8_t *ptr, uint32_t len);
-UndraBuf  undra_stats_json(void);                        // live handles, tasks, txn count, crossings, strong_refs (ADR-034); with no runtime: {"initialized":false,"live_handles":0,"runtime_threads":N}
-void     undra_buf_free(UndraBuf buf);
+typedef struct UndraApi {
+    uint32_t abi_version;   // 2; a host reads it first and refuses any other value
+    uint32_t size;          // sizeof(UndraApi) as the core was built; fields are only ever appended
+    uint64_t schema_hash;   // fnv1a64 of the canonical schema (§2.3); a host compares it before init (R7)
+    const char *name_space; // the core's namespace, NUL-terminated, static
+    UndraBuf (*schema_json)(void);                       // owned copy of the whole schema as JSON, doc comments included (§2.3); schema_hash covers its canonical form, not these bytes
+    uint32_t (*init)(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); // idempotent per core; cfg = encoded RuntimeConfig record; returns 0 ok
+    void     (*shutdown)(void);                          // answers every in-flight call (status 3) and ends every open stream (§5.1 Shutdown) before stopping the threads; then drops the port registrations, waiting for port callbacks still running (host contract 5)
+    uint32_t (*call)(const uint8_t *ptr, uint32_t len);  // Call payload (§3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods.
+    UndraBuf (*call_sync)(const uint8_t *ptr, uint32_t len); // Reply payload (§3.4) returned directly; only for sync methods (async → status 5)
+    void     (*cancel)(uint32_t call_id);
+    void     (*stream_credit)(uint32_t call_id, uint32_t credit);
+    void     (*observe)(uint64_t handle, uint32_t signal_id, uint8_t on);
+    void     (*release)(uint64_t handle);
+    void     (*port_register)(uint32_t port_id, undra_port_cb cb, void *user); // cb NULL removes; removing or replacing waits for the old registration's running callbacks (host contract 1, 5)
+    void     (*port_reply)(const uint8_t *ptr, uint32_t len);   // PortReply payload; allowed from a callback; port_call_id 0 is ignored (host contract 6)
+    void     (*event)(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
+    void     (*timer_fired)(uint32_t timer_id);
+    UndraBuf (*snapshot)(void);
+    uint32_t (*restore)(const uint8_t *ptr, uint32_t len);
+    UndraBuf (*stats_json)(void);                        // live handles, tasks, txn count, crossings, strong_refs (ADR-034); with no runtime: {"initialized":false,"live_handles":0,"runtime_threads":N}
+    void     (*buf_free)(UndraBuf buf);
+} UndraApi;
+
+// Each core: const UndraApi *<namespace>_undra_api(void);   (its own <namespace>_undra.h declares it as `const void *`)
 ```
+
+`undra.h` (`runtimes/swift/UndraRuntime/Sources/UndraFFI/include/undra.h`, byte-identical in `@undra/react-native`) declares exactly this: the table, the callbacks and the host contract, and no function. The 19 operations of version 1 are the 17 entries plus the two constants `abi_version` and `schema_hash`, which are data so that a host checks both before it calls anything; every entry keeps version 1's signature and contract. Below, `undra_<name>` names the table's `<name>` entry (`undra_init` is `api->init`). The table is built on the first call of the export (after the image's static constructors ran) and never changes; a call through it is one indirect call (ADR-044 budgets `boundary/call_sync/add` at no more than 2 ns over version 1's direct call). The wasm ABI (§7) is unchanged.
 
 `RuntimeConfig` record: `{ platform: String, mode: String /* "inproc" | "dev" */, core_threads: u8, blocking_threads: u8, log_level: u8 }`.
 
 `undra_snapshot` with no running runtime (before `undra_init`, after `undra_shutdown`) returns an empty snapshot (`count 0`) whose `generation_floor` is the process-wide generation counter, which survives shutdown (§5.9, ADR-022).
 
-Return codes (as implemented): `undra_init` returns 0 ok, or a nonzero `init_code` (bad argument, undecodable config, already initialized with a *different* embedder — a repeat init with the same callbacks and `user` is a no-op returning 0). `undra_restore` returns 0 ok or a nonzero `restore_code`; a failed restore leaves the core unchanged. The native ABI has no `undra_poll`, so `core_threads == 0` is treated as 1. There is no native log callback: core log records reach the host through its registered `Log` port (the JNI `Callbacks` interface likewise has none).
+Return codes (as implemented): `undra_init` returns 0 ok, or a nonzero `init_code` (bad argument, undecodable config, already initialized with a *different* embedder — a repeat init with the same callbacks and `user` is a no-op returning 0). "Once" is per core: two cores in one process are initialised, used and shut down independently. `undra_restore` returns 0 ok or a nonzero `restore_code`; a failed restore leaves the core unchanged. The native ABI has no `undra_poll`, so `core_threads == 0` is treated as 1. There is no native log callback: core log records reach the host through its registered `Log` port (the JNI `Callbacks` interface likewise has none).
 
 **Host contract** (the same text is the header comment of `undra.h`; a host that breaks a rule has undefined behaviour). The *callbacks* are `reply_cb`, `changeset_cb`, `stream_cb` (given to `undra_init`) and every `port_cb` (given to `undra_port_register`).
 
 1. **Lifetime.** The three `undra_init` callbacks and its `user` stay valid until `undra_shutdown` *returns*; none is called afterwards. A `port_cb` and its `user` stay valid until `undra_port_register(id, NULL, ..)` or a replacing `undra_port_register(id, ..)` has returned for that id, or `undra_shutdown` has returned. When one of those calls returns, no invocation of the old registration is running, none will start and its `user` is never read again: the host may free `user` right then (ADR-026; the core waits, see 5).
 2. **Threads.** A callback runs on the thread that produced the event (the `undra-core` thread, a blocking-pool thread, or a host thread inside an `undra_*` call such as `undra_call`), possibly with the core lock or a store's delivery lock held (§5.1). Callbacks run **concurrently** (four simultaneous `port_cb` invocations are measured): they must be thread-safe, short, and must not assume the main thread.
 3. **No unwinding.** A callback must not throw, `longjmp` or otherwise unwind through the core.
-4. **Re-entrancy.** A callback must not call back into the core except the entries that never take the core lock: `undra_buf_free`, `undra_port_reply`, `undra_stream_credit`, `undra_timer_fired`, `undra_stats_json`, and the read-only `undra_abi_version`, `undra_schema_hash`, `undra_schema_json` (§5.1). `undra_call`, `undra_call_sync`, `undra_cancel`, `undra_observe`, `undra_release`, `undra_event` and `undra_restore` take the core lock and are refused with `E_REENTRANT` (status 5, restore code 6, or logged and ignored), never deadlocked; `undra_init`, `undra_shutdown`, `undra_port_register` and `undra_snapshot` must not be called from a callback at all.
+4. **Re-entrancy.** A callback must not call back into the core except the entries that never take the core lock: `undra_buf_free`, `undra_port_reply`, `undra_stream_credit`, `undra_timer_fired`, `undra_stats_json`, and the read-only `undra_schema_json` (the table's `abi_version` and `schema_hash` are plain data) (§5.1). `undra_call`, `undra_call_sync`, `undra_cancel`, `undra_observe`, `undra_release`, `undra_event` and `undra_restore` take the core lock and are refused with `E_REENTRANT` (status 5, restore code 6, or logged and ignored), never deadlocked; `undra_init`, `undra_shutdown`, `undra_port_register` and `undra_snapshot` must not be called from a callback at all.
 5. **Blocking.** Removing or replacing a port registration (`undra_port_register`) and `undra_shutdown` wait for the port callbacks of the registrations they remove that are running on other threads. They must not be called from inside a callback (debug builds assert; release builds skip the wait for the calling thread's own callbacks), not while holding a lock a `port_cb` needs, and a `port_cb` that never returns keeps them from returning. `undra_shutdown` may be called from any thread but a callback, also concurrently with other entries (they complete or fail softly); it removes the port registrations inside the same critical section that serialises `undra_init`, so an init on another thread waits for it and a registration made after that init returns is never lost to it.
 6. **Log.** The core's log records reach the host as `Log.log` calls with `port_call_id 0` (fire and forget). Nothing waits for the answer (0, 1 or 2 are all accepted) and an `undra_port_reply` carrying id 0 is ignored silently: acting on it would log "no port call 0 is pending", which is one more Log call. Real port calls are numbered from 1.
 
@@ -494,32 +505,33 @@ Register ports before the core needs them. `InitHook`s (query hydration reads th
 
 ### 6.1 JNI shim (feature `jni`)
 
-`undra-ffi` with feature `jni` exports `Java_dev_undra_runtime_UndraNative_<name>` natives registered via `JNI_OnLoad` → `RegisterNatives` (no per-call lookup). Java signatures (class `dev.undra.runtime.UndraNative`):
+`export_core!(<namespace>, jni_class = "<pkg>/UndraCoreNative")` with `undra-ffi`'s feature `jni` exports `JNI_OnLoad`, which registers the natives below on **the core's own class** with `RegisterNatives` (no per-call lookup), and `JNI_OnUnload`, which stops the core. Nothing is exported under a `Java_*` name: every core registers its natives on its own class, so two cores in one JVM (each `System.loadLibrary`ed, each running its own `JNI_OnLoad`) never bind one another's. The class is the bindings' `<kotlin package>.UndraCoreNative` (§10.2), an `object` implementing the runtime's public `NativeApi` with `override external` members (the shim ignores the second JNI argument, so a native may be a member or a static). The callbacks interface is `dev.undra.runtime.NativeCallbacks`, shared by every core, with no natives. Java signatures:
 
 ```java
-static native int    abiVersion();
-static native long   schemaHash();
-static native byte[] schemaJson();
-static native int    init(byte[] cfg, UndraNative.Callbacks cb);   // cb.onReply(int callId, ByteBuffer reply), cb.onChangeSet(ByteBuffer), cb.onStream(int callId, ByteBuffer), int cb.onPortCall(int portId, int methodId, int portCallId, ByteBuffer args) returns 0/1/2, byte[] cb.portSyncReply() (read after a 0 return)
-static native int    call(byte[] payload);
-static native byte[] callSync(byte[] payload);
-static native void   cancel(int callId);
-static native void   streamCredit(int callId, int credit);
-static native void   observe(long handle, int signalId, boolean on);
-static native void   release(long handle);
-static native void   portReply(byte[] payload);
-static native void   event(int portId, int methodId, byte[] payload);
-static native void   timerFired(int timerId);
-static native byte[] snapshot();
-static native int    restore(byte[] snapshot);
-static native String statsJson();
-static native void   shutdown();                                  // what undra_shutdown runs; releases the Callbacks global reference (ADR-034). Kotlin's UndraCore.close() of an in-process core calls it (never from a callback) and waits for it (the core's threads are joined and running port callbacks have returned: not under a lock a sync port needs), and a later load starts a fresh core
+int    abiVersion();                                 // 2
+long   schemaHash();
+byte[] schemaJson();
+int    init(byte[] cfg, NativeCallbacks cb);         // cb.onReply(int callId, ByteBuffer reply), cb.onChangeSet(ByteBuffer), cb.onStream(int callId, ByteBuffer), int cb.onPortCall(int portId, int methodId, int portCallId, ByteBuffer args) returns 0/1/2, byte[] cb.portSyncReply() (read after a 0 return)
+int    call(byte[] payload);
+byte[] callSync(byte[] payload);
+void   cancel(int callId);
+void   streamCredit(int callId, int credit);
+void   observe(long handle, int signalId, boolean on);
+void   release(long handle);
+void   portReply(byte[] payload);
+void   event(int portId, int methodId, byte[] payload);
+void   timerFired(int timerId);
+byte[] snapshot();
+int    restore(byte[] snapshot);
+String statsJson();
+void   shutdown();                                   // what undra_shutdown runs; releases the NativeCallbacks global reference (ADR-034). Kotlin's UndraCore.close() of an in-process core calls it (never from a callback) and waits for it (the core's threads are joined and running port callbacks have returned: not under a lock a sync port needs), and a later load starts a fresh core
 ```
+The library is `lib<namespace>.so` (`.dylib` on macOS); the generated `UndraCoreNative` loads it with `NativeLibrary.load(<namespace>)` (`System.loadLibrary`, or `System.load` of `-Dundra.native.<namespace>.path`). The runtime and the bindings must share a class loader (they do on Android and on a plain classpath): `JNI_OnLoad` finds the class through the loader of the library. R8 keeps both by name: the bindings ship `META-INF/proguard/undra-<namespace>.pro` (`UndraCoreNative` and its natives), the runtime `META-INF/proguard/undra-runtime.pro` (`NativeCallbacks` and its implementations).
 `ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`. The JNI callbacks follow the host contract of §6. In particular a synchronous port is a two-call protocol with hidden per-thread state: the shim calls `portSyncReply()` on the same thread, right after `onPortCall` returned 0, and callbacks run concurrently, so an implementation must carry the reply in thread-local state (the shipped `InprocTransport` does, in a `ThreadLocal`), never in a shared field.
 
 ### 6.2 Swift
 
-Swift calls the C ABI through a module map (`UndraFFI` C module inside the XCFramework). `UndraRuntime` wraps it; generated code never touches C.
+`UndraRuntime`'s C target `UndraFFI` declares the types of `undra.h` (the table, no functions), so the runtime links no core symbol and needs no stand-in: `UndraCore.load(.inproc(api:))` takes a core's table (`UnsafeRawPointer`), reads `abi_version` and `size` before it binds it to `UnsafePointer<UndraApi>`, copies the 17 entries out once and calls through them. The in-process claim is per namespace (the table's `name_space`): two cores load side by side, one namespace loads once. Each core's entry is declared by the generated package's own C target, `<Namespace>CoreFFI` (`<namespace>_undra.h`, `const void *<namespace>_undra_api(void)`); the function is linked from the core's XCFramework, whose slices carry the same header without a module map (a second definition of the module would fail the build). Generated code calls only `UndraCoreEntry` with the entry (§10.1); app code loads through `Undra<Namespace>.load(...)`.
 
 ### 6.3 Port callback contract
 
@@ -532,6 +544,8 @@ For **sync** ports the host must fill `out_reply` with a PortReply payload and r
 ## 7. wasm ABI (`undra-ffi`, target `wasm32-unknown-unknown`)
 
 No wasm-bindgen. Exports and imports use only `i32`/`i64`/`f64`. Memory is the module's exported `memory`. `_initialize` is exported when present (reactor); the host calls it once after instantiation.
+
+A wasm module is its own namespace (ADR-044): a core's module is `<namespace>.wasm` (§13), its exports keep the names below, and each core is its own module instance, so several cores share a page by loading several modules (the TypeScript runtime already holds several, each through its generated entry, §10.3). The wasm ABI did not change with the native table: a wasm core's `undra_abi_version()` is still `1`.
 
 Exports:
 ```
@@ -641,7 +655,9 @@ Records: `WsOpened { conn: u32, protocol: String }`, `WsMessage { Text(String), 
 
 ## 10. Generated code shapes (`undra-bindgen`)
 
-`undra-bindgen` takes a `Schema` and emits three trees. Each generator is a Rust module with `write_*` functions and a golden-file test suite (`crates/undra-bindgen/tests/golden/<case>/{schema.json, swift/, kotlin/, ts/}`). Emitted code depends only on the matching runtime package. Naming: Rust `snake_case` → Swift/Kotlin/TS `camelCase` for methods and fields, `PascalCase` for types; enum variants → Swift `lowerCamel` cases, Kotlin `UPPER_SNAKE` for unit enums and `PascalCase` classes for data enums, TS string-literal `"camelCase"` / `kind: "camelCase"`.
+`undra-bindgen` takes a `Schema` and emits three trees. Each generator is a Rust module with `write_*` functions and a golden-file test suite (`crates/undra-bindgen/tests/golden/<case>/{schema.json, swift/, kotlin/, ts/}`). Emitted code depends only on the matching runtime package. A derived list (`computed: true` with a `key`, ADR-039) has no shape of its own: it is generated exactly as a computed list is (read-only, documented "Computed by the core; read-only."), and its apply has the keyed-patch case every keyed list has.
+
+**The core's entry (ADR-044).** Every tree declares one entry point for its core, `Undra<Namespace>` (`UndraPlaygroundCore` for the namespace `playground_core`, `Generator::namespace`), with the core's `namespace`, `load(options)` (the core's table or library and the bindings' schema hash filled in; refused while this core is loaded) and `core` (the loaded core, or a closed placeholder whose calls fail as unavailable while none is). **Every generated default core is the package's own entry's** (`ctx: UndraCore = UndraPlaygroundCore.core`, `core: UndraCore = UndraPlaygroundCore.core`), never `UndraCore.shared`, so two packages of two cores in one app each default to their own; `UndraCore.shared` (the first core loaded) remains for app code. `UndraIds` carries the namespace. Swift: `Generated/Core.swift` (`public enum Undra<Namespace>`, over `UndraCoreEntry`) and the C target `Sources/<Namespace>CoreFFI/` (`<namespace>_undra.h`, its module map, one source file) that declares `<namespace>_undra_api`. Kotlin: `Core.kt` (`internal object UndraCoreNative : NativeApi`, the core's JNI natives as `override external fun`s, which its `JNI_OnLoad` registers, §6.1; `object Undra<Namespace>` over `CoreEntry`) and `src/main/resources/META-INF/proguard/undra-<namespace>.pro`. TypeScript: `src/core.ts` (`export const Undra<Namespace> = { namespace, schemaHash, load, attach, core }`; `attach` is for a transport the app provides, React Native's). Naming: Rust `snake_case` → Swift/Kotlin/TS `camelCase` for methods and fields, `PascalCase` for types; enum variants → Swift `lowerCamel` cases, Kotlin `UPPER_SNAKE` for unit enums and `PascalCase` classes for data enums, TS string-literal `"camelCase"` / `kind: "camelCase"`.
 
 ### 10.1 Swift
 
@@ -661,7 +677,7 @@ public enum Shape: UndraEnum, Sendable, Hashable { case circle(radius: Double); 
 public enum TodoError: UndraError, Error, Sendable, Hashable { case emptyTitle; case http(HttpError) }   // description from #[error]
 // object
 public final class Calculator: UndraObject, @unchecked Sendable {
-    public init(ctx: UndraCore = .shared) throws           // constructor `new`
+    public init(ctx: UndraCore = UndraPlaygroundCore.core) throws   // constructor `new`; the default is the package's own core
     public func add(a: Int32, b: Int32) throws -> Int32    // sync
     public func fetch(url: String) async throws -> String  // async Result; throws HttpError
     public func ticks() -> AsyncThrowingStream<UInt32, Error>          // stream
@@ -670,14 +686,20 @@ public final class Calculator: UndraObject, @unchecked Sendable {
 // store
 @MainActor @Observable public final class Todos: UndraStore {
     public private(set) var todos: [Todo]; public private(set) var filter: Filter; public private(set) var visible: [Todo]
-    public init(ctx: UndraCore = .shared) throws
+    public init(ctx: UndraCore = UndraPlaygroundCore.core) throws
     public func setFilter(_ f: Filter)                       // a command
     public func add(title: String) async throws -> Todo     // throws TodoError
 }
 // port
 public protocol Http: UndraPort { func request(_ req: HttpRequest) async throws(HttpError) -> HttpResponse }
+// the core's entry (Core.swift)
+public enum UndraPlaygroundCore {
+    public static let namespace: String                                        // "playground_core"
+    public static func load(_ options: LoadOptions = .inproc()) throws -> UndraCore   // .inproc(api: playground_core_undra_api()), UndraIds.schemaHash
+    public static var core: UndraCore { get }
+}
 ```
-Sync methods in `inproc` mode call `undra_call_sync`. Store initial values are decoded from the change-set emitted by `undra_observe` during `init`.
+Sync methods in `inproc` mode call the table's `call_sync`. Store initial values are decoded from the change-set emitted by `undra_observe` during `init`.
 
 **Recursive types.** A Swift value type cannot hold itself inline, so bindgen computes the *inline containment graph* of the schema's records, data enums and errors: `A → B` when a field of `A` (a payload field, for an enum) is a `B` or an optional `B`. `Vec`, `Map` and `Bytes` keep their elements on the heap and add no edge. A field whose edge lies on a cycle (`B` reaches `A` again, `A == B` included, so mutual recursion and record/enum cycles are covered) is stored behind a reference; everything else is generated exactly as before.
 * A **record** keeps the public shape `public var next: ListNode?`: a computed property over `private var _next: UndraIndirect<ListNode>?`, whose setter replaces the immutable box, so value semantics, the memberwise `init`, `Hashable`, `Sendable` and the `Codable` JSON shape (a nil child is omitted, a missing key decodes as nil, through a private `CodingKeys` that maps `_next` to `"next"`) are those of a plain optional. `UndraIndirect<Value: Sendable>` is an `internal final class` around a `let`, emitted once into `Types.swift`, and only when some field needs it. (A property wrapper would read better but Swift rejects a public property whose wrapper type is internal, and a public wrapper would put a helper type into every generated module's API.)
@@ -699,18 +721,20 @@ data class Todo(val id: UUID, val title: String, val done: Boolean) : UndraRecor
 enum class Filter(val index: UShort) : UndraEnum { ALL(0u), ACTIVE(1u), DONE(2u) }
 sealed interface Shape : UndraEnum { data class Circle(val radius: Double) : Shape; data class Rect(val w: Double, val h: Double) : Shape }
 sealed class TodoError : UndraException() { data object EmptyTitle : TodoError(); data class Http(val cause: HttpError) : TodoError() }
-class Calculator(ctx: UndraCore = UndraCore.shared) : UndraObject(ctx) {
+class Calculator(ctx: UndraCore = UndraPlaygroundCore.core) : UndraObject(ctx) {
     fun add(a: Int, b: Int): Int                      // throws UndraCallError
     suspend fun fetch(url: String): String            // throws HttpError, CancellationException or UndraCallError
     fun ticks(): Flow<UInt>                           // ends with UndraCallError; collector cancellation is CancellationException
     fun reset()                                       // `fn reset(&self)`: a command, it reports instead of throwing
 }
-class Todos(ctx: UndraCore = UndraCore.shared) : UndraStore(ctx) {
+class Todos(ctx: UndraCore = UndraPlaygroundCore.core) : UndraStore(ctx) {
     val todos: StateFlow<List<Todo>>; val filter: StateFlow<Filter>; val visible: StateFlow<List<Todo>>
     fun setFilter(f: Filter)                            // a command
     suspend fun add(title: String): Todo                // throws TodoError, CancellationException or UndraCallError
 }
 interface Http : UndraPort { suspend fun request(req: HttpRequest): HttpResponse }   // throws HttpError
+internal object UndraCoreNative : NativeApi { /* namespace, NativeLibrary.load(namespace), override external fun abiVersion(): Int ... */ }
+object UndraPlaygroundCore { const val NAMESPACE: String; fun load(options: LoadOptions = LoadOptions()): UndraCore; val core: UndraCore }
 ```
 Compose consumers use `collectAsState()` on the `StateFlow`s (no extra module). `UndraStore` and `UndraObject` implement `AutoCloseable`; a `Cleaner` releases leaked handles.
 
@@ -742,6 +766,12 @@ export class Todos extends UndraStore {
   add(title: string, signal?: AbortSignal): Promise<Todo>;     // rejects with TodoError, the signal's reason or UndraCallError
 }
 export interface Http extends UndraPort { request(req: HttpRequest): Promise<HttpResponse> }
+export const UndraPlaygroundCore: {                       // core.ts; `static create(core = UndraPlaygroundCore.core)` everywhere above
+  readonly namespace: string; readonly schemaHash: bigint;
+  load(options: Omit<LoadOptions, "expectedSchemaHash">): Promise<UndraCore>;
+  attach(transport: Transport, options?: Omit<AttachOptions, "expectedSchemaHash">): Promise<UndraCore>;
+  readonly core: UndraCore;                               // the loaded core, or UndraCore.unloaded
+};
 ```
 All methods return `Promise` (uniform across main-thread, worker and remote modes).
 
@@ -809,6 +839,8 @@ The core hands the host one change-set per transaction per store, in commit orde
   * a full value (`op 0`) or a lazy invalidation (`op 2`) supersedes everything queued earlier for the key;
   * keyed patches (`op 1`) that follow each other for the key are concatenated into one patch: `count` = the sum of their counts, ops = each patch's op bytes in arrival order. §3.8 applies ops sequentially, each index relative to the list the previous op left, so the concatenation is the same change; a single patch is passed as it is. A patch too short to hold its count cannot be merged: the key is dropped and resynchronised as below.
 
+  A derived list's patches (ADR-039) are merged the same way: each is relative to what the host had after the store's previous change-set.
+
   Each key is applied **at most twice per drain** (its last full value, then its merged patch), keys in the order of their first entry in the drain, through the store's generated apply function, which is unchanged: a merged patch that goes out of bounds takes the resynchronisation path of §3.8. A drain's subscribers hear once (TS notifies at the end of the drain, `batch`; Swift `@Observable` and Kotlin `StateFlow` are read at the next frame). Entries for a handle no store registered (a store closed meanwhile) are dropped and counted. Entries queued while a drain runs (a subscriber that makes a synchronous call) are applied by further rounds of the same drain, at most 1000 rounds; the rest goes to the next drain.
 * **`no_coalesce`.** A generated store passes the ids of its `#[undra(no_coalesce)]` signals (`SignalDef.no_coalesce`) to its mirror registration. For those keys a drain applies every entry, in order, at its arrival position, and TS announces each one in a batch of its own. Whether the UI shows every value is up to the platform's reactive primitive (a Kotlin `StateFlow` conflates; SwiftUI renders once per frame).
 * **When.** What the core produced on its own (timers, streams, events, port completions, background tasks) is drained **at most once per display frame**: TS on `requestAnimationFrame` while the document is visible (with a 100 ms timer as a backstop for a frame that never comes), in a zero-delay task while it is not, in a microtask where there is no document (Node, workers); Swift from a `CADisplayLink` on iOS, tvOS and visionOS (paused while the queue is empty) and a main-actor hop elsewhere; Kotlin through its `FramePacer` (`Choreographer` on Android from `android-adapters`; otherwise a paced single thread on a 16.67 ms grid that posts to `UndraDispatchers.main`); TS under React Native at the vsync of `@undra/react-native`'s frame source (`CADisplayLink` on iOS, `AChoreographer` on Android) while `AppState` is active, with the same 100 ms backstop, and in a zero-delay timer while it is not (§11.2).
@@ -820,16 +852,16 @@ The core hands the host one change-set per transaction per store, in commit orde
 
 ### 11.2 React Native (ADR-038)
 
-`@undra/react-native` (`runtimes/rn/@undra/react-native`) is a fourth host of the C ABI of §6, under the TypeScript runtime: a pure C++ TurboModule (`UndraNative`, one method, `install()`) installs `globalThis.__undraNative`, JSI host functions over the C ABI entries, and `NativeTransport` implements §17.1's `Transport` over them (`mode` `"native"`, `synchronous`, `callSync`). `loadNative(options)` is `UndraCore.attach` with that transport; `UndraCore`, the mirror (§11.1), the codecs, the generated TypeScript bindings and the framework adapters are unchanged. The wire, the C ABI and the schema are unchanged.
+`@undra/react-native` (`runtimes/rn/@undra/react-native`) is a fourth host of the C ABI of §6, under the TypeScript runtime: a pure C++ TurboModule (`UndraNative`, one method, `install(coreNamespace)`) installs `globalThis.__undraNative[namespace]`, one object of JSI host functions over one core's table per namespace, and `NativeTransport` implements §17.1's `Transport` over it (`mode` `"native"`, `synchronous`, `callSync`). `loadNative(entry, options)` attaches that transport through the generated entry (`UndraPlaygroundCore.attach`, §10.3), so the entry's `core` is the React Native core; `UndraCore`, the mirror (§11.1), the codecs, the generated TypeScript bindings and the framework adapters are unchanged. The wire and the schema are unchanged.
 
 * **Threads.** A synchronous entry runs the core on the JS thread under the core lock; async work runs on the `undra-core` thread (§5.1), as under Swift and Kotlin.
 * **One inbox.** Every callback appends one record (`kind u8, len u32, payload`; kinds are §3.2's: 2 Reply, 3 ChangeSet, 4 PortCall as `port_id u32, method_id u32, port_call_id u32, args`, 8 StreamItem, 13 Log as `level u8, target String, message String`) to one buffer and returns. The buffer is handed to JavaScript as one `ArrayBuffer` it owns, before a host function that entered the core returns (so a call's reply and change-sets, and `observe`'s initial change-set, are in the mirror when it returns) and through `CallInvoker::invokeAsync` when a record came from another thread. One FIFO keeps commit order across threads (§3.5). Only the outermost drain on the JS thread delivers.
 * **Bytes.** Payloads go in as `(ArrayBuffer, byteOffset, byteLength)`, borrowed by the core for the call; an `UndraBuf` comes back as an `ArrayBuffer` that frees it (`undra_buf_free`, once) when collected. Handles cross as two `u32` halves.
 * **Ports.** Registered before `undra_init` for every non-event port of the schema except `Timer` (the core's own). `Clock`, `Rng` and `Log` are answered natively on any thread (`Log` records are also delivered to JavaScript). Async methods are queued and answered by the registered `PortImpl` with `PortReply` (status 2 when none is registered). A synchronous method implemented in JavaScript is answered only when the core calls it from a host function on the JS thread; from another thread it is unavailable (§6.3), logged once per port.
-* **Default ports (ADR-038, amendment B).** Every standard port of §8 has a default. `Kv`, `SecureStore`, `Fs` and the `Connectivity` source are the module's own native code: each of the first three is registered with a native callback (before `undra_init`, like the others) that copies the call onto that port's serial worker thread and returns 1, and the worker does the I/O and answers with `undra_port_reply`, JavaScript never involved; `Connectivity` is reported with `undra_event` from the platform monitor's thread (`nw_path_monitor`, `ConnectivityManager`) once `undra_init` has returned, the current state first and identical consecutive reports once. Their directories, file layouts, Keychain items and Keystore key are the Swift runtime's on iOS and `android-adapters`' on Android (§8's table), so either shell of an app reads what the other wrote; `Kv` and `SecureStore` failures are "unavailable" and logged, `Fs` failures its typed `FsError` (any `..` or symbolic link on a path is `Denied`). `Http` is `reactNativeHttp()` over React Native's `fetch` (no connection is `HttpError::Network`) and `Lifecycle` is `AppState` (a state reported once until it changes). A value in `adapters` or `ports` replaces a default and `null` removes it; a JavaScript `registerPort` after the load does not reach a native default. Shutdown runs `undra_shutdown`, then stops the event source and joins the workers, and only then releases the process's core slot, so nothing a stopped core asked for reaches the next one.
-* **Gate and lifecycle.** `undra_abi_version` and `undra_schema_hash` are checked before `undra_init` (`UndraSchemaMismatchError`). One core per process (until ADR-044); a JS reload shuts the core down with the runtime, and the next `install()` starts a fresh one.
-* **Every core symbol** is referenced from one shim per platform (`cpp/UndraApiLinked.cpp`: the statically linked iOS core; `cpp/UndraApiAndroid.cpp`: `dlopen("libundra_core.so")`), which becomes the per-core table of ADR-044.
-* **Artefacts.** `undra build --platform rn` builds the iOS and Android cores (§13) and writes `build/ios/UndraCore.podspec`, a pod vendoring the XCFramework (force-loaded per SDK slice until ADR-044 prelinks the core); the app packages `build/android/jniLibs`. `docs/REACT_NATIVE.md` is the guide.
+* **Default ports (ADR-038, amendment B).** Every standard port of §8 has a default. `Kv`, `SecureStore`, `Fs` and the `Connectivity` source are the module's own native code: each of the first three is registered with a native callback (the table's `port_register`, before `init`, like the others) that copies the call onto that port's serial worker thread and returns 1, and the worker does the I/O and answers with `port_reply`, JavaScript never involved; `Connectivity` is reported with `event` from the platform monitor's thread (`nw_path_monitor`, `ConnectivityManager`) once `init` has returned, the current state first and identical consecutive reports once. Their directories, file layouts, Keychain items and Keystore key are the Swift runtime's on iOS and `android-adapters`' on Android (§8's table), so either shell of an app reads what the other wrote; several cores of one app share them. `Kv` and `SecureStore` failures are "unavailable" and logged, `Fs` failures its typed `FsError` (any `..` or symbolic link on a path is `Denied`). `Http` is `reactNativeHttp()` over React Native's `fetch` (no connection is `HttpError::Network`) and `Lifecycle` is `AppState` (a state reported once until it changes). A value in `adapters` or `ports` replaces a default and `null` removes it; a JavaScript `registerPort` after the load does not reach a native default. Shutdown runs the table's `shutdown`, then stops the event source and joins the workers, and only then releases the core's slot, so nothing a stopped core asked for reaches the next one of its namespace.
+* **Gate and lifecycle.** The table's `abi_version` (2) and `schema_hash` are checked before `init` (`UndraSchemaMismatchError`). One `UndraCore` per namespace: several cores (several namespaces) share a process, each with its own host object and inbox; a JS reload shuts each core down with the runtime, and the next `install` starts a fresh one.
+* **Finding a core.** One shim per platform resolves a namespace to its table, once, and copies its entries: on iOS `cpp/UndraApiLinked.cpp` calls `+api` of the Objective-C class `UndraCoreTable_<namespace>` that the core's pod compiles (the module is built once for every core of the app, so it cannot name a core's symbol); on Android `cpp/UndraApiAndroid.cpp` does `dlopen("lib<namespace>.so")` and `dlsym("<namespace>_undra_api")`. A namespace that is not a C identifier, a missing core, a table of another `abi_version`, too short, of another namespace or with a null entry is refused with a typed error.
+* **Artefacts.** `undra build --platform rn` builds the iOS and Android cores (§13) and writes `build/ios/<Namespace>Core.podspec`, a pod vendoring the XCFramework (prelinked, no `-force_load`) and compiling `<Namespace>CoreTable.m`; the app packages `build/android/jniLibs`. `docs/REACT_NATIVE.md` is the guide.
 
 ---
 
@@ -841,14 +873,14 @@ The catalogue is audited by `crates/undra-macros/tests/catalogue.rs`: every row 
 
 | Code | Raised by | Trigger |
 |---|---|---|
-| E0001 | macros, schema validation, the `Encode`/`Decode` bounds | unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`) |
+| E0001 | macros, schema validation, the `Encode`/`Decode` bounds | unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`) |
 | E0002 | macros | generic parameter on a `#[undra::api]` item |
 | E0003 | macros | lifetime in a public signature |
 | E0004 | macros | trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Trait` that is not a stream |
 | E0005 | macros, schema validation | `Result` or `Stream` outside return position; a `Result<impl Stream<Item = Result<T, E1>>, E2>` whose two error types differ (ADR-036) |
 | E0006 | macros, schema validation | map key type not allowed |
 | E0007 | macros | unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block |
-| E0008 | macros | unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted |
+| E0008 | macros | unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>` or a `DerivedList<T>` (a keyed `Computed` is pointed at `DerivedList<T>`), a `DerivedList<T>` without `key` (ADR-039), `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted |
 | E0010 | macros, schema validation | `#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum |
 | E0011 | macros, schema validation | `#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block and a `#[undra::api(store)]` block without a constructor (a type takes one block; a constructor in another block is not seen); a store without a constructor in the schema |
 | E0012 | macros | trait object in a record field (the blueprint example) |
@@ -910,20 +942,33 @@ crates/undra-transport   no unsafe; deps: undra-runtime, tungstenite (feature se
 crates/undra-bindgen     no unsafe; deps: undra-meta, serde_json, heck
 crates/undra-cli         deps: undra-bindgen, clap, notify, libloading (loads the host cdylib to extract the schema)
 crates/undra             facade: re-exports prelude, macros, runtime, ports, query; `dev::serve()`
-runtimes/swift/UndraRuntime          Package.swift, Sources/UndraRuntime, Sources/UndraFFI (module map), Tests
+runtimes/swift/UndraRuntime          Package.swift, Sources/UndraRuntime, Sources/UndraFFI (undra.h: the types of the C ABI table, no functions), Tests
 runtimes/kotlin/undra-runtime        settings.gradle.kts; modules: runtime (JVM+Android), android-adapters
 runtimes/ts/@undra/runtime           package.json (ESM, exports: ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite, ./node), src/, test/
 runtimes/rn/@undra/react-native      package.json (ESM; peers @undra/runtime, react-native), src/ (NativeTransport, loadNative), cpp/ (the C++ TurboModule over undra.h, ADR-038), ios/, android/CMakeLists.txt, UndraReactNative.podspec, react-native.config.cjs, babel-plugin.cjs, test/
 examples/playground/core            the Rust core used by every playground app and by the contract tests
 examples/playground/{ios,android,web}
+examples/two-cores/{a,b,ios,android,jvm,node}   the playground core under two namespaces, and a test app per platform loading both (ADR-044)
 contract-tests/                     schema fixture + per-language runners + the shared scenario list
 bench/                              criterion (Rust), node bench, JVM bench, iOS bench target notes
 ```
 
-Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `undra_schema_json` (the whole schema, doc comments included, §2.3), checks its hash against `undra_schema_hash`, and runs bindgen; the generated code carries the doc comments with `undra bindgen --docs` and none without. A core built before ADR-050 exports the canonical form: it still loads, and `--docs` on it is `C0006` rather than docless bindings. Fallback: `undra bindgen --schema schema.json`.
+Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, looks up `<namespace>_undra_api`, checks the table's `abi_version`, `size` and `name_space`, calls its `schema_json` (the whole schema, doc comments included, §2.3), checks the JSON's hash against the table's `schema_hash`, and runs bindgen (a core of C ABI version 1 is refused with `C0006`, saying so); the generated code carries the doc comments with `undra bindgen --docs` and none without. A core built before ADR-050 exports the canonical form: it still loads, and `--docs` on it is `C0006` rather than docless bindings. Fallback: `undra bindgen --schema schema.json`.
 
 
-Build-system integration (a project made by `undra init`; `undra build` is never a manual step): the Android app's `app/build.gradle.kts` has an `undraBuild` task (`undra build --platform android`, `--release` when a release variant is built; `preBuild` depends on it; inputs `core/src/**`, the Cargo manifests and `Cargo.lock`, output `build/android/jniLibs`); the Xcode project has a Run Script phase **Build the Undra core**, before Compile Sources, running `undra build --platform ios --configuration $CONFIGURATION` with input and output file lists (`ios/Config/undra-core-{inputs,outputs}.xcfilelist`; the XCFramework is linked with `-force_load`, not as a framework, because Xcode reads an XCFramework while planning the build); the web app's `vite.config.ts` uses `undra()` from `@undra/runtime/vite`, which runs `undra build --platform web` on start and, under `vite dev`, on every change of the core's `src/**`, manifests or `Cargo.lock` followed by a full reload (one build at a time; nothing under Vitest's mode `test` unless `inTests`). `undra build --configuration <NAME>` builds release for a name that contains `Release` and debug otherwise, and after an iOS build writes `build/ios/.undra-configuration-<NAME>` (removing the other configurations' stamps) so that Xcode re-runs the phase when the configuration changes. Each integration finds `undra` on `PATH` and in the install directories (the Gradle task and the Vite plugin take `UNDRA_BIN` first), and fails with `error[undra::C0003]` when it is not there. The shim's `Cargo.lock` is seeded from the project's again whenever the project's changes, so the platform libraries are built from the versions the project's lock file names.
+**Namespaces and artefacts (ADR-044).** `undra.toml` `[core] namespace` names a core: a lowercase C identifier of at most 32 bytes, by default the core's package name in snake case (`playground-core` → `playground_core`); a project next to another (a sibling directory with its own `undra.toml` and another `[project] id`; a second checkout of the same project, such as a `git worktree`, does not count) with the same namespace is refused (`C0002`), as is a namespace whose entry `Undra<Namespace>` is a name the runtimes or the generated bindings declare (`core` → `UndraCore`), and the runtimes refuse to load two cores with one namespace. The generated shim exports the core with `undra_ffi::export_core!(<namespace>, jni_class = "<kotlin package>/UndraCoreNative")`. `<Namespace>` is the namespace in `PascalCase` and `<Namespace>Core` its bundle name (`playground_core` → `PlaygroundCore`, not `PlaygroundCoreCore`):
+
+| Target | Artefact | Notes |
+|---|---|---|
+| host | `build/host/lib<namespace>.{dylib,so}` (`<namespace>.dll`) | install name `@rpath/lib<namespace>.dylib`; exports `<namespace>_undra_api`, `JNI_OnLoad`, `JNI_OnUnload` and nothing else |
+| android | `build/android/jniLibs/<abi>/lib<namespace>.so` | the same three exports; two cores sit side by side in one APK |
+| ios | `build/ios/<Namespace>Core.xcframework`, one `lib<namespace>.a` per slice, `Headers/<namespace>_undra.h` (no module map) | each slice **prelinked** (`ld -r -exported_symbol _<namespace>_undra_api`, `-u _<namespace>_undra_api` for a fat-LTO release library, `-all_load` for a debug one) into one object whose only global is the entry: two cores neither collide nor merge, and the app links it like any library, **no `-force_load`** |
+| web | `build/web/<namespace>.wasm` | a wasm module is its own namespace; its exports keep their §7 names |
+| rn | the ios and android artefacts, `build/ios/<Namespace>Core.podspec`, `build/ios/<Namespace>CoreTable.m` | the pod compiles the class `UndraCoreTable_<namespace>` (`+api`) for `@undra/react-native` |
+
+An app with several cores prefers an **umbrella core** when one team owns them (one core crate depending on the feature crates: one namespace, one runtime; `inventory` merges registrations and bindgen's E0050 catches name clashes). Independent cores (an SDK vendor's next to the app's) share nothing: no handles (two cores issue the same handle numbers; a handle means something only to its own core), no types, no threads; values pass between them through app code. Two generated Swift packages of local cores need two directory names (SwiftPM names a local package after its directory).
+
+Build-system integration (a project made by `undra init`; `undra build` is never a manual step): the Android app's `app/build.gradle.kts` has an `undraBuild` task (`undra build --platform android`, `--release` when a release variant is built; `preBuild` depends on it; inputs `core/src/**`, the Cargo manifests and `Cargo.lock`, output `build/android/jniLibs`); the Xcode project has a Run Script phase **Build the Undra core**, before Compile Sources, running `undra build --platform ios --configuration $CONFIGURATION` with input and output file lists (`ios/Config/undra-core-{inputs,outputs}.xcfilelist`; the core's prelinked `lib<namespace>.a` is linked by its path in `OTHER_LDFLAGS`, not as a framework, because Xcode reads an XCFramework while planning the build); the web app's `vite.config.ts` uses `undra()` from `@undra/runtime/vite`, which runs `undra build --platform web` on start and, under `vite dev`, on every change of the core's `src/**`, manifests or `Cargo.lock` followed by a full reload (one build at a time; nothing under Vitest's mode `test` unless `inTests`). `undra build --configuration <NAME>` builds release for a name that contains `Release` and debug otherwise, and after an iOS build writes `build/ios/.undra-configuration-<NAME>` (removing the other configurations' stamps) so that Xcode re-runs the phase when the configuration changes. Each integration finds `undra` on `PATH` and in the install directories (the Gradle task and the Vite plugin take `UNDRA_BIN` first), and fails with `error[undra::C0003]` when it is not there. The shim's `Cargo.lock` is seeded from the project's again whenever the project's changes, so the platform libraries are built from the versions the project's lock file names.
 
 `undra doctor` reports one finding per prerequisite: a stable id, a state (`ok`, `missing`, `wrong-version`, `not-applicable`), a severity, the observed value, the fix commands and the heading of `docs/ONBOARDING.md` that explains it; `--fix` prints the commands as one block and runs nothing, `--json` prints the report. `undra upgrade` moves every pin of the Undra version (the core's dependency, `undra.toml`, `@undra/runtime` and `@undra/react-native`, `dev.undra:*`, the `undra-swift` package requirement, `UNDRA_VERSION` of the CI workflow) to the CLI's version in the shapes `undra init` writes, all files or none (a version held in a Gradle variable is left and named), regenerates the bindings and prints the migration notes (`crates/undra-cli/src/migrations.rs`) of each release crossed; a `path` dependency is left alone and a project newer than the CLI is `C0014`. `undra init` writes `.github/workflows/undra.yml` (a job for the core and one per app) unless the project uses a checkout of the repository.
 ---
@@ -934,7 +979,7 @@ Build-system integration (a project made by `undra init`; `undra build` is never
 * `#![forbid(unsafe_code)]` in every crate except `undra-ffi`.
 * proptest round-trips for every wire type; byte-fuzz on `Reader`, `Envelope::parse`, change-set and patch decoders.
 * Golden tests for bindgen (three languages).
-* Contract scenarios (`contract-tests/scenarios.md`) executed by each runtime's test suite against the playground core: primitives round-trip, records/enums/errors, sync call, async call, error propagation, cancellation, stream with backpressure, store observe → initial change-set, transaction → single change-set, keyed patch, computed, query fetch/stale/refetch, optimistic mutation rollback, offline queue replay, snapshot/restore, schema mismatch rejection, panic containment; and for the opt-in ports of §8.1, WebSocket (S23), server-sent events (S24) and Db (S25), against the platforms' real adapters.
+* Contract scenarios (`contract-tests/scenarios.md`) executed by each runtime's test suite against the playground core: primitives round-trip, records/enums/errors, sync call, async call, error propagation, cancellation, stream with backpressure, store observe → initial change-set, transaction → single change-set, keyed patch, computed, query fetch/stale/refetch, optimistic mutation rollback, offline queue replay, snapshot/restore, schema mismatch rejection, panic containment, coalesced burst, derived keyed list; and for the opt-in ports of §8.1, WebSocket (S23), server-sent events (S24) and Db (S25), against the platforms' real adapters.
 * Size (ADR-052): the hello-world web core (the `undra init` template, `undra build --platform web`, `wasm-opt -Oz`) gzipped with zlib at level 9 is at most 120,000 bytes and at most 5% over its recorded size (`scripts/wasm-size.sh`, `[size."web/hello-wasm"]` in `bench/budgets.toml`, the `size` job of `bench.yml`); what the same app ships of `@undra/runtime` (Vite production build, worker script excluded) is at most 26,000 bytes and 5% over its record (`[size."web/hello-runtime-js"]`); a run that cannot measure either fails. The record, `bench/results/web-size.jsonl`, is the number the README and the site publish, and the shipped module must not contain the builder's home directory.
 * Benchmarks (criterion): wire encode/decode per type, dispatch overhead, change-set build for 100 signals, keyed patch on 10k items. Cross-boundary benchmarks per runtime with the numbers written to `bench/RESULTS.md`.
 * Every `pub` item documented. Every crate has a README with a 30-line example.
@@ -962,11 +1007,12 @@ These are the exact names the macros emit and the runtime consumes, as merged. T
 pub struct StoreCell { .. }                      // one per store instance; Send + Sync
 impl StoreCell {
     pub fn new(type_id: u32) -> Arc<StoreCell>;
-    // Binding. Generated code calls exactly one of the next three per signal field, in
+    // Binding. Generated code calls exactly one of the next four per signal field, in
     // declaration order (ids 0, 1, 2, ..), and every one can fail (see SignalsError).
     pub fn attach<T: SignalValue>(self: &Arc<Self>, signal: &Signal<T>, signal_id: u32) -> Result<(), SignalsError>;
     pub fn attach_keyed<T: SignalValue + ListLike>(self: &Arc<Self>, signal: &Signal<T>, signal_id: u32, key: KeyFn<T>) -> Result<(), SignalsError>;   // #[undra(key = "..")]
     pub fn attach_computed<T: SignalValue>(self: &Arc<Self>, computed: &Computed<T>, signal_id: u32) -> Result<(), SignalsError>;
+    pub fn attach_derived<T: SignalValue>(self: &Arc<Self>, list: &DerivedList<T>, signal_id: u32, key: fn(&T) -> u64) -> Result<(), SignalsError>;   // ADR-039; `key` only checks, in debug builds, that a full value's keys are unique
     pub fn set_no_coalesce(&self, signal_id: u32) -> Result<(), SignalsError>;   // #[undra(no_coalesce)]; called after that signal's attach
     pub fn set_handle(&self, handle: u64);       // the runtime, when the store enters the object table (and restore)
     pub fn handle(&self) -> u64;                 // 0 until published
@@ -1041,6 +1087,27 @@ impl<T: SignalValue> Computed<T> {
     pub fn ptr_eq(&self, other: &Computed<T>) -> bool;
     pub fn is_attached(&self) -> bool;
 }
+// Derived keyed lists (ADR-039): a view of a list signal kept from its recorded operations.
+impl<T: SignalValue> Signal<Vec<T>> { pub fn derive(&self) -> Derive<T>; }
+pub struct Derive<T, U = T, O: Order = Unsorted>;   // #[must_use]; O: Unsorted | Sorted<K> (at most one sort, by type)
+impl<T, U, O> Derive<T, U, O> {
+    pub fn filter(self, f: impl Fn(&U) -> bool + Send + Sync + 'static) -> Self;
+    pub fn filter_with<D: Dep>(self, param: D, f: impl Fn(&D::Value, &U) -> bool + ..) -> Self;   // a Signal / Computed parameter
+    pub fn map<V: SignalValue>(self, f: impl Fn(&U) -> V + ..) -> Derive<T, V, O>;
+    pub fn build(self) -> DerivedList<U>;
+    pub fn count(self) -> Computed<u32>;             // the view's length, O(log n) per changed row, O(1) per read
+}
+impl<T, U> Derive<T, U, Unsorted> {
+    pub fn sort_by_key<K: Ord + Clone + Send + Sync + 'static>(self, f: impl Fn(&U) -> K + ..) -> Derive<T, U, Sorted<K>>;   // stable: ties in source order
+    pub fn sort_by_key_with<D: Dep, K: ..>(self, param: D, f: impl Fn(&D::Value, &U) -> K + ..) -> Derive<T, U, Sorted<K>>;
+}
+pub struct DerivedList<T>;   // Clone = the same list; Send + Sync; Dep (its value is the materialised Vec<T>)
+impl<T: SignalValue> DerivedList<T> {
+    pub fn len(&self) -> usize;  pub fn is_empty(&self) -> bool;   // O(1) once caught up
+    pub fn get(&self) -> Vec<T>;  pub fn with<R>(&self, f: impl FnOnce(&Vec<T>) -> R) -> R;   // materialise, cached until the view changes
+    pub fn ptr_eq(&self, other: &Self) -> bool;  pub fn is_attached(&self) -> bool;  pub fn stats(&self) -> DerivedStats;
+}
+pub struct DerivedStats { pub rebuilds: u64, pub full_values: u64, pub patches: u64, pub ops_emitted: u64 }   // #[non_exhaustive]
 pub struct Effect;         // Effect::new(deps, f) runs f after each commit that dirtied a dep; dropped or `cancel(self)` = cancelled
 pub fn txn<R>(f: impl FnOnce() -> R) -> R;        // batch; nested calls join the outer transaction; exception safe
 pub trait ChangeSink: Send + Sync {
@@ -1065,6 +1132,13 @@ Keyed lists (SPEC 3.8): the cell keeps the list as the host last saw it (the *ba
 
 * **Recorded operations** (`Signal<Vec<I>>::push`, `insert`, `remove`, `update_at`, `move_item`, `clear`) append the op they perform to a per-signal op log, in the same critical section (the value's write lock) that mutates the list. The commit sends the log as the patch and replays it on the baseline: O(ops), independent of the list's length (the `memmove` a `Vec` insertion or removal in the middle costs aside, which the host pays too); no key is hashed and no item is compared. The ops are sent as recorded: no more-than-50%-removed or key-overlap fallback, no key-uniqueness check, and no attempt at minimality (three mutations are three ops). The commit takes the log under the value's read lock, so the ops it takes are exactly the ones the list it sees includes; it checks that the ops' indices fit the baseline's length as they replay and that the result has the list's current length, and diffs instead if not (a safety net, not a code path).
 * **Raw writes** (`set`, `update`, `replace`) mark the log *stale* before they touch the list, and the commit **diffs** the list against the baseline: O(list). It sends the full value instead when the lists share no key (including empty to non-empty and back), a key occurs twice, or more than half of the old items were removed. Items with equal keys are compared by their encoded bytes. A transaction that contains a raw write is diffed as a whole, however many recorded operations it also made.
+
+Derived lists (ADR-039): `list.derive()` then `filter` / `filter_with` / `map` / `sort_by_key` / `sort_by_key_with`, then `build()` (a `DerivedList<U>`, attachable with `attach_derived`) or `count()` (a `Computed<u32>`). Its value is always `stable_sort_by_key([out(t) for t in source if passes(t)])`, the stages fused into one per-row function and at most one stable sort (ties keep source order). It is not recomputed:
+
+* **Taps.** A list signal keeps one *tap* per derived list built on it (by `Weak`; dropping the list drops it). Every recorded operation appends its op to each tap that is recording, inside the value's write lock, after the list changed (a `Clone` of the item that panics there leaves the item in the list and makes every tap stale); every raw write marks every tap stale first. A tap records nothing until its list is first read or observed, and holds at most 4,096 ops: past that it goes stale and frees them.
+* **Index.** Two arena AVL order-statistic trees with parent pointers: one node per source row in source order, counting rows and passing rows per subtree, and (with a sort stage) one node per passing row ordered by `(key, source position)`. A **drain** replays the tap's ops on it, O(log n) each (O(log² n) when many rows share a key), each emitting at most two ops of the view, by ADR-039 section 2's table: a filter transition is an `Insert` or a `Remove`, a sort-key change a `Move` then an `Update`, an op that does not change the view nothing. A stale or unread tap, a raw write or a drain that unwound **rebuilds** the index from the list (O(n log n)). A parameter change (`filter_with`, `sort_by_key_with`; compared by its encoded bytes) replays the ops with the old value, then walks every row with the new one: at most 256 ops are sent, else the full value. Reads (`len`, `get`, `with`, `count()`, a `Computed` over it), commits and `observe(on)` drain first (a read inside a transaction therefore sees the writes the transaction already made, as a signal read does; the host gets them at the commit); a drain that needs the items takes the ops and an `Arc` of the list together under the value's read lock, as the keyed slot does.
+* **Delivery.** The derived slot keeps the ops it emitted while it is observed (at most 4,096; past that the full value). A commit sends them as one keyed patch, the full value when they overflowed, the index was rebuilt or the host has no copy (`no_coalesce` while unobserved: always the full value), or nothing. `observe(on)` sends the full value and keeps ops from that instant; `observe(off)`, an abandoned delivery and an observe rollback drop them. A drain whose closure panics is isolated as a computed is (held back, `failed_signals`), and the next drain rebuilds.
+* **Purity and re-entrancy.** Pipeline closures must be pure functions of their arguments (the list re-evaluates a row only when the row changes). Debug builds panic when one reads or writes a signal, a computed or a derived list; release builds do not check. A closure that reads its own list panics with "derived list cycle detected" in every build; reading a list inside its source's `update` / `update_at` closure panics with the ADR-021 L3 message. Lock order: the store's delivery lock, the list's drain lock (held while its closures run), the source's value lock (read), a tap (a leaf); a drain runs inside a transaction, so a write some closure makes commits after the drain lock is released.
 
 The log lives while the baseline does: it starts empty whenever a baseline is taken (`observe(on)`, the full value an abandoned or first commit sends) and is dropped with it (`observe(off)`, an abandoned commit, ADR-019), so nothing is recorded for a slot nobody observes and a delivery that may not have reached the host never leaves ops that would be replayed twice. It is bounded: a log that outgrows `max(4096, list length)` ops goes stale and the commit diffs. Ops recorded while no sink is installed (or before the store has a handle) stay in the log and are sent by the next commit that delivers. A panic inside `update_at`'s closure makes the log stale.
 
@@ -1173,13 +1247,13 @@ pub mod testing;          // TestRuntime: a real Runtime with no core or timer t
                           // call / call_sync / run_pending / run_until(fut) / advance(Duration) / take_replies; host(): take_decoded_change_sets, take_stream_items,
                           // take_port_calls, take_timeline, take_logs, script_port*(port_id, method_id, ..); helpers call_payload, decode_reply, port_reply, port_reply_ok, sync_ok
 ```
-`undra-runtime` re-exports `undra_signals`, `undra_wire`, `undra_meta` (and `undra_meta::inventory`) and `futures_core::Stream`. The `undra` facade re-exports `undra_runtime as runtime`, `undra_signals as signals`, `undra_wire as wire`, `undra_meta as meta`, the six macros at the crate root and in `prelude`, `pub mod query` (`QueryDef`, `MutationDef`, `BoxFuture`, `CacheValue`, the traits undra-query implements the client against), and `prelude::*` = `{Signal, Computed, Effect, Ctx, Bytes, Uuid, Timestamp, Duration, txn, Handle}` plus the macros. (`undra_ports as ports` and `undra_query as query` join the facade when those crates land; until then `undra::query` is the trait module.)
+`undra-runtime` re-exports `undra_signals`, `undra_wire`, `undra_meta` (and `undra_meta::inventory`) and `futures_core::Stream`. The `undra` facade re-exports `undra_runtime as runtime`, `undra_signals as signals`, `undra_wire as wire`, `undra_meta as meta`, the six macros at the crate root and in `prelude`, `pub mod query` (`QueryDef`, `MutationDef`, `BoxFuture`, `CacheValue`, the traits undra-query implements the client against), and `prelude::*` = `{Signal, Computed, DerivedList, Effect, Ctx, Bytes, Uuid, Timestamp, Duration, txn, Handle}` plus the macros. (`undra_ports as ports` and `undra_query as query` join the facade when those crates land; until then `undra::query` is the trait module.)
 
 Ids are `fnv1a` hashes computed in `undra_meta::ids`: `type_id(name)`, `method_id(type, method)` (constructors are methods called `new`, or whatever the fn is named), `function_id(name)`, `port_id(trait)`, `port_method_id(trait, method)`, `query_id`, `mutation_id`, `fnv1a64(bytes)` (keyed-list keys).
 
 ### 16.3 What the macros emit (paths)
 
-Generated code uses absolute paths through the facade: `::undra::wire::{Encode, Decode, Writer, Reader, WireError}`, `::undra::meta::{inventory, Registration, RecordMeta, ObjectMeta, StoreMeta, SignalMeta, .., DispatchCall, DispatchOutcome, ids}`, `::undra::runtime::{Runtime, Ctx, DispatchResult, UndraObject, StoreObject, StoreRestorer, Port, PortDispatcher, PortDispatch, PortError, Stream, Subscription}`, `::undra::signals::{Signal, StoreCell, CellSlot, SignalsError}`, `::undra::query::{QueryDef, MutationDef, QueryRegistration, MutationRegistration, __private::{HYDRATE, LAYER}}`. A `#[undra(crate = "path")]` attribute (or `crate = "path"` in the macro arguments) overrides the root (for undra-ports and tests inside the workspace, which use `::undra_runtime` directly).
+Generated code uses absolute paths through the facade: `::undra::wire::{Encode, Decode, Writer, Reader, WireError}`, `::undra::meta::{inventory, Registration, RecordMeta, ObjectMeta, StoreMeta, SignalMeta, .., DispatchCall, DispatchOutcome, ids}`, `::undra::runtime::{Runtime, Ctx, DispatchResult, UndraObject, StoreObject, StoreRestorer, Port, PortDispatcher, PortDispatch, PortError, Stream, Subscription}`, `::undra::signals::{Signal, StoreCell, CellSlot, SignalsError}` (a store with a `DerivedList` field calls `attach_derived` on its cell), `::undra::query::{QueryDef, MutationDef, QueryRegistration, MutationRegistration, __private::{HYDRATE, LAYER}}`. A `#[undra(crate = "path")]` attribute (or `crate = "path"` in the macro arguments) overrides the root (for undra-ports and tests inside the workspace, which use `::undra_runtime` directly).
 
 Every type position the schema records is also checked against the type it resolves to, at compile time, in the user's crate: built-in mappings by a same-type assertion (E0060), `Named` mappings by comparing the inherent `UNDRA_TYPE_ID` of the type with `type_id` of the recorded name (E0061; a type without the constant is not declared with Undra at all, `0`, and says so), with `UNDRA_IS_ERROR` required on the error side of a `Result` and `__UNDRA_IS_OBJECT` refusing an object used as a value (E0064). `impl StoreObject` is written by the `#[undra::api(store)]` impl block next to `impl UndraObject`, forwarding to hidden members of the struct.
 
@@ -1196,9 +1270,9 @@ Diagnostics that need the compiler (v1.x, D1):
 
 * The struct must be marked on its impl block: `#[undra::api(store)] impl Todos { .. }`. The marker is what wires the constructors to the signals; a struct without `#[undra::store]`, or an impl block without the marker, is E0011.
 * The macro appends a hidden field `pub __undra_cell: ::undra::signals::CellSlot`. Struct literals of the type inside its `#[undra::api(store)]` impl block get `__undra_cell: Default::default()` added; struct literals anywhere else must spell it out. The field name is reserved (E0007).
-* `#[undra::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument), a `WeakCtx` (downgraded from it, ADR-034: what a store should keep, since a `Ctx` field is a reference cycle with the runtime until shutdown) or `Default`; a store with a `Computed` field needs the hook (E0013). Snapshots hold the plain signals only.
-* Field kinds: `Signal<T>` and `Computed<T>` are signals, numbered in declaration order; every other field is private state. `Lazy<T>` is rejected in v1 (E0001, "lazy lists are not available in v1"), like `undra-bindgen` rejects it.
-* The signal table is built by a hidden method that calls, per field and in order, `attach` (plain), `attach_keyed` with a generated `fn(&Item) -> u64` (`#[undra(key = "id")]`: `fnv1a64` over the encoded key field, encoded through a per-thread scratch buffer) or `attach_computed`, each followed by `set_no_coalesce(id)` for `#[undra(no_coalesce)]`, all with `?`. `StoreObject::cell()` creates the cell once through `CellSlot::get_or_init`; a store whose attach failed gets an empty cell there rather than a panic.
+* `#[undra::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument), a `WeakCtx` (downgraded from it, ADR-034: what a store should keep, since a `Ctx` field is a reference cycle with the runtime until shutdown) or `Default`; a store with a `Computed` or `DerivedList` field needs the hook (E0013). Snapshots hold the plain signals only.
+* Field kinds: `Signal<T>`, `Computed<T>` and `DerivedList<T>` are signals, numbered in declaration order; every other field is private state. A `DerivedList<T>` is recorded as `Vec<T>`, `computed: true`, with its `#[undra(key = "..")]` (required, E0008); one without its row type is E0001. `Lazy<T>` is rejected in v1 (E0001, "lazy lists are not available in v1"), like `undra-bindgen` rejects it.
+* The signal table is built by a hidden method that calls, per field and in order, `attach` (plain), `attach_keyed` with a generated `fn(&Item) -> u64` (`#[undra(key = "id")]`: `fnv1a64` over the encoded key field, encoded through a per-thread scratch buffer), `attach_computed`, or `attach_derived` with the same kind of key function for a `DerivedList<T>`, each followed by `set_no_coalesce(id)` for `#[undra(no_coalesce)]`, all with `?`. `StoreObject::cell()` creates the cell once through `CellSlot::get_or_init`; a store whose attach failed gets an empty cell there rather than a panic.
 * A constructor's dispatch arm first calls `__undra_attach_all()` (`CellSlot::get_or_try_init`); on `Err(SignalsError)` nothing is inserted and the arm answers `DispatchResult::BadRequest("store `Todos` could not attach its signals: <error>")`. Otherwise it inserts the object (`Runtime::insert_object`, which gives the cell its handle) and replies with the handle (`u64`). `restore` fails with `WireError::InvalidTag` if the rebuilt store cannot attach.
 * One `StoreRestorer` per store type is submitted through `inventory`.
 
@@ -1212,6 +1286,8 @@ A synchronous arm ends in `__rt.sync_ok(&value, ::undra::wire::Encode::encode)` 
 
 ## 17. Platform runtime base API (what generated code depends on)
 
+Generated code defaults to its own core through its generated entry (§10, ADR-044), which each runtime backs with one small type: `UndraCoreEntry` (Swift), `CoreEntry` with `NativeApi` (Kotlin), and `UndraCore.load`/`attach` with `UndraCore.unloaded` (TypeScript). `UndraCore.shared` is for app code.
+
 Generated code calls only these names. Runtimes implement them; bindgen golden files pin the usage.
 
 ### 17.1 TypeScript (`@undra/runtime`)
@@ -1220,6 +1296,7 @@ Generated code calls only these names. Runtimes implement them; bindgen golden f
 export class UndraCore {
   static load(opts: LoadOptions): Promise<UndraCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint, mirror?: { schedule?, maxPendingEntries?, maxPendingBytes? } /* §11.1 */, onDevNotice?: (message: string) => void /* last; dev only, remote cores served by `undra dev`, §5.10 (ADR-053) */ }
   static get shared(): UndraCore;                               // set by the first load; with none (or after it closed) a closed placeholder: its calls reject UndraCallError.Unavailable, access never throws
+  static get unloaded(): UndraCore;                             // that closed placeholder; what a generated entry's `core` is while its core is not loaded (ADR-044)
   static get current(): UndraCore | null;                       // the loaded shared core, or null (then `shared` is the placeholder)
   report(error: unknown, operation: string): void;              // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); a failure that is a remote core's connection being down (Unavailable while `connection` is reconnecting, or closed for a reason other than "requested") is logged at warning level and not delivered (ADR-051); only logs a failure reported while onError runs or of a call onError started
   callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw UndraModeError; drains the mirror before it returns
@@ -1269,7 +1346,9 @@ Generated stores call `super(core, handle)`, or `super(core, handle, { noCoalesc
 
 ```kotlin
 class UndraCore private constructor(...) {
-  companion object { fun load(options: LoadOptions): UndraCore; val shared: UndraCore; val current: UndraCore? }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong, mirror = MirrorOptions(...), onError: ((UndraUnhandledError) -> Unit)? = null, onDevNotice: ((String) -> Unit)? = null /* last; dev only: a REMOTE core served by `undra dev`, delivered on the runtime's delivery thread, §5.10 (ADR-053) */)
+  companion object { fun load(options: LoadOptions): UndraCore; fun load(options: LoadOptions, native: NativeApi): UndraCore; val shared: UndraCore; val current: UndraCore? }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong? = null, mirror = MirrorOptions(...), onError: ((UndraUnhandledError) -> Unit)? = null, onDevNotice: ((String) -> Unit)? = null /* last; dev only: a REMOTE core served by `undra dev`, delivered on the runtime's delivery thread, §5.10 (ADR-053) */); an in-process core needs its natives (the generated UndraCoreNative, ADR-044): load(options) with Mode.INPROC is refused (UndraModeException) and says to use Undra<Namespace>.load
+  // for generated code (ADR-044): class CoreEntry(namespace, schemaHash, native: () -> NativeApi) { fun load(options = LoadOptions()): UndraCore; val core: UndraCore }; interface NativeApi (namespace, isAvailable, unavailableReason and the natives of §6.1); interface NativeCallbacks; object NativeLibrary { fun load(namespace): Throwable? }
+  // the in-process claim is per namespace: two cores of two namespaces load side by side; one namespace loads once
                                                                                             // `shared` with no core loaded (or after it closed) is a closed placeholder: its calls throw UndraTransportException(CLOSED), generated code reports UndraCallError.Unavailable; access never throws; `current` is null then
   fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray            // reply body or throws UndraReplyException; on the main thread, drains the mirror first
   suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray         // cancellable
@@ -1320,7 +1399,8 @@ Main-thread delivery through `UndraDispatchers.main` (Android: `Dispatchers.Main
 
 ```swift
 public final class UndraCore: @unchecked Sendable {
-  public static func load(_ options: LoadOptions) throws -> UndraCore     // .inproc(adapters:) | .remote(url:adapters:), expectedSchemaHash; LoadOptions.maxPendingEntries / maxPendingBytes (§11.1)
+  public static func load(_ options: LoadOptions) throws -> UndraCore     // .inproc(api:adapters:) | .remote(url:adapters:), expectedSchemaHash (UInt64?); LoadOptions.maxPendingEntries / maxPendingBytes (§11.1). In process, `api` is the core's table (ADR-044): read and checked (abi_version 2, size, schema_hash) before init; the claim is per namespace
+  // for generated code (ADR-044): public final class UndraCoreEntry(namespace:schemaHash:api:) { func load(_:) throws -> UndraCore; var core: UndraCore }
   public static var shared: UndraCore { get }   // the loaded core, or a shut-down placeholder (calls on it fail with `UndraCallError.unavailable(.closed)`); `current` stays nil then
   public func callSync(_ target: CallTarget, method: UInt32, args: [UInt8]) throws -> [UInt8]   // on the main thread, drains the mirror before it returns
   public func call(_ target: CallTarget, method: UInt32, args: [UInt8]) async throws -> [UInt8]   // cancellation-aware
@@ -1366,10 +1446,10 @@ Swift payload types live under `enum Wire { … }` (`Wire.Log`, `Wire.Event`, �
 Generated code does not depend on this package: it is how a React Native app gets an `UndraCore` (§11.2), after which the generated TypeScript bindings and `@undra/runtime/react` are used as on the web.
 
 ```ts
-export function loadNative(options: NativeLoadOptions): Promise<UndraCore>;  // AttachOptions + { devtools?, logLevel?, platform? }; installs the module, attaches NativeTransport; the first core becomes UndraCore.shared; again while open: the same core
-export function installNative(): UndraNativeModule;                         // UndraNative.install() once, then globalThis.__undraNative; UndraTransportError("unsupported") when the TurboModule is not linked
+export function loadNative(entry: NativeCoreEntry, options?: NativeLoadOptions): Promise<UndraCore>;  // entry = the generated Undra<Namespace> ({ namespace, schemaHash, attach? }); options = AttachOptions without the hash + { devtools?, logLevel?, platform? }; installs the namespace's module, attaches NativeTransport through entry.attach; again while open: the same core
+export function installNative(namespace: string): UndraNativeModule;        // UndraNative.install(namespace) once, then globalThis.__undraNative[namespace]; UndraTransportError("unsupported") when the TurboModule is not linked or the core is not in the app
 export class NativeTransport implements Transport {                          // mode "native", synchronous, callSync; the gate of §11.2 in start()
-  constructor(options: { native: UndraNativeModule; expectedSchemaHash: bigint; platform?: string; devtools?: boolean; logLevel?: number; onError?: (e: unknown) => void; nativePorts?: readonly number[] /* the standard ports the module answers itself */ });
+  constructor(options: { namespace: string; native?: UndraNativeModule; expectedSchemaHash: bigint; platform?: string; devtools?: boolean; logLevel?: number; onError?: (e: unknown) => void; nativePorts?: readonly number[] /* the standard ports the module answers itself */ });
   snapshot(): Uint8Array;                                                    // undra_snapshot
   counters(): NativeHostCounters;                                            // records, bytes, wakes, dropped, nativePortCalls, jsSyncPortCalls, unavailableSyncPortCalls
 }
@@ -1377,9 +1457,9 @@ export function nativeFrameScheduler(native: UndraNativeModule, options: { isAct
 export function reactNativeAdapters(): AdapterOverrides;                     // { http: reactNativeHttp(), lifecycle: AppState }
 export function reactNativeHttp(options?: { fetch?: typeof fetch }): HttpAdapter;  // Http over React Native's fetch; any status is a response; HttpError Network / Timeout / Cancelled / InvalidUrl
 export function isHttpUrl(url: string): boolean;                             // http(s)://host[:port]...: what reactNativeHttp() accepts
-export function nativePlatformDefaults(): NativePlatformDefaults;             // { ports, kv?, fs?, secureStore?, error? }: the ports the module answers natively on this device
+export function nativePlatformDefaults(namespace: string): NativePlatformDefaults;  // { ports, kv?, fs?, secureStore?, error? }: the ports the module answers natively on this device (asked of the module of the core `namespace`; the same for every core)
 export function nativeDefaultPorts(offered: { ports: readonly number[] }, options: { adapters?: AdapterOverrides; ports?: Record<number, PortImpl> }): number[];  // offered minus what the options override (a value or null)
 export function portPlan(schemaJson: string): { ports: number[]; syncMethods: number[] };
-export interface UndraNativeModule { /* the JSI object: abiVersion, schemaHash, schemaJson, start(config, offset, length, ports, syncMethods, nativePorts?), platformDefaults, shutdown, call, callSync, cancel, streamCredit, observe, release, portReply, event, timerFired, snapshot, restore, statsJson, hostCounters, requestFrame; set by the transport: sink, portSync, frame */ }
+export interface UndraNativeModule { /* the JSI object of one core: namespace, abiVersion, schemaHash, schemaJson, start(config, offset, length, ports, syncMethods, nativePorts?), platformDefaults, shutdown, call, callSync, cancel, streamCredit, observe, release, portReply, event, timerFired, snapshot, restore, statsJson, hostCounters, requestFrame; set by the transport: sink, portSync, frame */ }
 ```
 Importing the package installs `TextDecoder` / `TextEncoder` where Hermes lacks them (import it before `@undra/runtime`); `@undra/react-native/babel-plugin` replaces `import.meta` for Hermes.

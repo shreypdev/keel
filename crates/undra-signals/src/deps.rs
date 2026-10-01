@@ -1,7 +1,7 @@
 //! [`Deps`]: the set of signals and computeds a [`Computed`] or [`Effect`](crate::Effect) reads.
 //!
-//! A dependency set is written as a reference to one signal or computed, or a tuple of up to six
-//! of them:
+//! A dependency set is written as a reference to one signal, computed or
+//! [`DerivedList`](crate::DerivedList), or a tuple of up to six of them:
 //!
 //! ```
 //! use undra_signals::{Computed, Signal};
@@ -18,16 +18,18 @@
 //! valid inside the closure; nothing is locked while the closure runs, so it may write signals,
 //! including the ones it reads.
 
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use crate::computed::Computed;
 use crate::graph::Reactive;
 use crate::signal::Signal;
 use crate::value::SignalValue;
 
-/// One reference to a [`Signal`] or [`Computed`] in a dependency set.
+/// One reference to a [`Signal`], [`Computed`] or [`DerivedList`](crate::DerivedList) in a
+/// dependency set.
 ///
-/// Implemented for `&Signal<T>` and `&Computed<T>`; there is nothing to implement by hand.
+/// Implemented for `&Signal<T>`, `&Computed<T>` and `&DerivedList<T>` (whose value is the
+/// materialised `Vec<T>`); there is nothing to implement by hand.
 pub trait Dep {
     /// The value type of the source.
     type Value: SignalValue;
@@ -43,6 +45,8 @@ pub trait OwnedDep: Send + Sync + 'static {
     type Value: 'static;
     fn subscribe(&self, dependent: Weak<dyn Reactive>);
     fn with_value<R>(&self, f: impl FnOnce(&Self::Value) -> R) -> R;
+    /// The current value as a shared snapshot: what a derived list keeps of a parameter.
+    fn snapshot(&self) -> Arc<Self::Value>;
 }
 
 impl<A: SignalValue> Dep for &Signal<A> {
@@ -61,6 +65,9 @@ impl<A: SignalValue> OwnedDep for Signal<A> {
     fn with_value<R>(&self, f: impl FnOnce(&A) -> R) -> R {
         self.with(f)
     }
+    fn snapshot(&self) -> Arc<A> {
+        Signal::snapshot(self)
+    }
 }
 
 impl<A: SignalValue> Dep for &Computed<A> {
@@ -78,6 +85,9 @@ impl<A: SignalValue> OwnedDep for Computed<A> {
     }
     fn with_value<R>(&self, f: impl FnOnce(&A) -> R) -> R {
         self.with(f)
+    }
+    fn snapshot(&self) -> Arc<A> {
+        self.inner.current()
     }
 }
 

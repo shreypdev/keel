@@ -1,5 +1,5 @@
-import { UndraCore, UndraSessionLostError } from "@undra/runtime";
-import { UndraIds, Todos } from "@@TS_PACKAGE@@";
+import { UndraSessionLostError } from "@undra/runtime";
+import { @@CORE_ENTRY@@, Todos } from "@@TS_PACKAGE@@";
 // The core, compiled to wasm by `undra build --platform web`.
 import wasmUrl from "@@WASM_IMPORT@@?url";
 import { onDevNotice, showDevConnection } from "./dev-banner";
@@ -20,10 +20,9 @@ export async function startUndra(): Promise<Todos> {
     ? (new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"])
     : undefined;
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    const core = await UndraCore.load({
+    const core = await @@CORE_ENTRY@@.load({
       mode: "remote",
       url: devUrl,
-      expectedSchemaHash: UndraIds.schemaHash,
       // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
       // usually stays where it is. When the state could not be carried (a schema change, a state too big), the
       // runtime finds a new core and says so: reload the page onto it.
@@ -35,10 +34,9 @@ export async function startUndra(): Promise<Todos> {
     });
     showDevConnection(core, devUrl);
   } else {
-    await UndraCore.load({
+    await @@CORE_ENTRY@@.load({
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
-      expectedSchemaHash: UndraIds.schemaHash,
     });
   }
   return Todos.create();

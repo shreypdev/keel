@@ -1,7 +1,8 @@
 # Swift contract runner: notes
 
-`run.sh` runs the twenty-one scenarios of `../scenarios.md` for Swift (`UndraRuntime` over the C ABI,
-the real playground core through `libundra_core.dylib`, the bindings `undra bindgen` generated) and
+`run.sh` runs the scenarios of `../scenarios.md` (S01 to S19, S23 to S26) for Swift (`UndraRuntime` over the C ABI
+table, the real playground core through `libplayground_core.dylib` and, for S26, `libplayground_a.dylib` and
+`libplayground_b.dylib` in the same process, the bindings `undra bindgen` generated) and
 pipes the `SCENARIO` lines through `../check.sh swift`.
 
 ## Layout

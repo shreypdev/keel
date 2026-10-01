@@ -15,7 +15,7 @@ public final class Clock: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(zone: String, ctx: UndraCore = .shared) throws {
+    public convenience init(zone: String, ctx: UndraCore = UndraGoldenStores.core) throws {
         var w = UndraWriter()
         zone.undraEncode(&w)
         let handle: UndraHandle
@@ -63,7 +63,7 @@ public final class Clock: UndraStore, @unchecked Sendable {
 public final class Todos: UndraStore, @unchecked Sendable {
     public private(set) var todos: [Todo] = []
     public private(set) var filter: Filter = .all
-    /// Computed by the core; read-only.
+    /// Derived by the core from another list; read-only. Changes arrive as keyed patches.
     public private(set) var visible: [Todo] = []
     /// Computed by the core; read-only.
     public private(set) var remaining: UInt32 = 0
@@ -85,7 +85,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenStores.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -100,7 +100,10 @@ public final class Todos: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-    public static func `open`(path: String, ctx: UndraCore = .shared) async throws -> Todos {
+    public static func `open`(
+        path: String,
+        ctx: UndraCore = UndraGoldenStores.core
+    ) async throws -> Todos {
         var w = UndraWriter()
         path.undraEncode(&w)
         let handle: UndraHandle

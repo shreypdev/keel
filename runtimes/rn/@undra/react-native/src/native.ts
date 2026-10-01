@@ -1,15 +1,18 @@
 /**
- * The JSI object the native module installs as `globalThis.__undraNative` (ADR-038, decisions 1
- * and 5): one host function per C ABI entry (docs/SPEC.md section 6). Bytes go in as
- * `(ArrayBuffer, byteOffset, byteLength)` and are borrowed by the core for the call; bytes come back
- * as `ArrayBuffer`s that JavaScript owns. Handles are passed as two unsigned 32-bit halves.
+ * The JSI object the native module installs for one core as `globalThis.__undraNative[namespace]`
+ * (ADR-038, decisions 1 and 5; ADR-044: one per core of the app): one host function per entry of
+ * the core's C ABI table (docs/SPEC.md section 6). Bytes go in as `(ArrayBuffer, byteOffset,
+ * byteLength)` and are borrowed by the core for the call; bytes come back as `ArrayBuffer`s that
+ * JavaScript owns. Handles are passed as two unsigned 32-bit halves.
  *
  * `NativeTransport` is the only intended caller. Tests pass a fake with the same shape.
  */
 export interface UndraNativeModule {
-  /** `undra_abi_version()`. */
+  /** The core's namespace, from its table (`[core] namespace` of its undra.toml). */
+  readonly namespace: string;
+  /** The table's `abi_version` (2). */
   abiVersion(): number;
-  /** `undra_schema_hash()`; works before `start`. */
+  /** The table's `schema_hash`; works before `start`. */
   schemaHash(): bigint;
   /** `undra_schema_json()`: the canonical schema JSON; works before `start`. */
   schemaJson(): string;
@@ -19,8 +22,8 @@ export interface UndraNativeModule {
    * synchronous methods; `nativePorts` are the standard ports the module answers itself (ADR-038
    * amendment B: ids of `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Db` from {@link platformDefaults};
    * the module keeps those this platform has, and starts the `Connectivity` source after `undra_init`).
-   * Returns 0, an `undra_init` code (1 to 5) or a host code (`0x100` another core of this process is
-   * running, `0x101` ABI mismatch, `0x102` already started).
+   * Returns 0, an `undra_init` code (1 to 5) or a host code (`0x100` this core is running for another
+   * JavaScript runtime of this process, `0x101` ABI mismatch, `0x102` already started).
    */
   start(
     config: ArrayBuffer,
@@ -40,7 +43,7 @@ export interface UndraNativeModule {
   /**
    * `undra_call`: 0 accepted (the reply arrives in the inbox), 5 refused. Every entry that reaches
    * the core answers as the C ABI does with no core (5, ignored, `undefined`, 6) without calling it
-   * when this runtime's core is not running: the process's core may be another runtime's.
+   * when this runtime's core is not running: the core may be another runtime's.
    */
   call(buffer: ArrayBuffer, byteOffset: number, byteLength: number): number;
   /** `undra_call_sync`: the `Reply` payload; `undefined` when this runtime's core is not running. */
@@ -134,9 +137,9 @@ export const RecordKind = {
 
 /** Start codes of the native host beyond `undra_init`'s. */
 export const NativeStartCode = {
-  /** Another core of this process is running (one core per process). */
+  /** This core is running for another JavaScript runtime of this process (one running host per core). */
   Busy: 0x100,
-  /** The linked core speaks another C ABI version. */
+  /** The core speaks another C ABI version. */
   AbiMismatch: 0x101,
   /** `start` was called twice. */
   AlreadyStarted: 0x102,
@@ -156,9 +159,9 @@ export function startFailure(code: number): string {
     case 5:
       return "undra_init panicked (code 5)";
     case NativeStartCode.Busy:
-      return "another Undra core is running in this process; there is one per process";
+      return "this core is already running in this process (for another JavaScript runtime); a core runs once per process";
     case NativeStartCode.AbiMismatch:
-      return "the linked core speaks another C ABI version";
+      return "the core speaks another C ABI version";
     case NativeStartCode.AlreadyStarted:
       return "this core is already started";
     default:

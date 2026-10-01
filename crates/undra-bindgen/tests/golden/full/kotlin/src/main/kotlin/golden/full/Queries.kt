@@ -121,7 +121,7 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(page: UInt, ctx: UndraCore = UndraCore.shared): TodosQueryHandle {
+        fun create(page: UInt, ctx: UndraCore = UndraPlaygroundCore.core): TodosQueryHandle {
             val w = UndraWriter()
             w.writeU32(page)
             val handle = ctx.constructObject(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
@@ -136,7 +136,7 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun addTodo(title: String, ctx: UndraCore = UndraCore.shared): Todo {
+suspend fun addTodo(title: String, ctx: UndraCore = UndraPlaygroundCore.core): Todo {
     val w = UndraWriter()
     w.writeStr(title)
     try {

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Runs JniE2E.kt against the fixture core over the real JNI shim.
+# Runs JniE2E.kt against the fixture core over the real JNI shim: the fixture's JNI_OnLoad registers its
+# natives on dev.undra.fixture.UndraCoreNative (declared in JniE2E.kt as bindgen generates it, ADR-044).
 #
 #   crates/undra-ffi/tests/jni/run.sh
 #
 # Needs the toolchain scripts/env.sh sets up (kotlinc, JDK 17, UNDRA_KOTLINX_COROUTINES,
 # UNDRA_KOTLIN_STDLIB) and builds what it uses: the Kotlin runtime (test-local.sh main) and the fixture
-# cdylib (libundra_core, feature jni).
+# cdylib (libundra_fixture, namespace undra_fixture, feature jni).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../../.." && pwd)"
@@ -20,4 +21,4 @@ cargo build --manifest-path "$HERE/../fixture/Cargo.toml"
 mkdir -p "$OUT/jni-e2e"
 kotlinc -cp "$OUT/main:$UNDRA_KOTLINX_COROUTINES" -d "$OUT/jni-e2e" "$HERE/JniE2E.kt"
 java -Xmx512m -Djava.library.path="$HERE/../fixture/target/debug" \
-  -cp "$OUT/main:$OUT/jni-e2e:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" JniE2EKt
+  -cp "$OUT/main:$OUT/jni-e2e:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES" dev.undra.fixture.JniE2EKt

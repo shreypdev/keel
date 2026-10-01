@@ -15,6 +15,7 @@ import {
   decodePatch,
   decodeValue,
 } from "@undra/runtime";
+import { UndraPlaygroundCore } from "./core.js";
 import { TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Filter, FilterCodec, type Todo, TodoCodec } from "./types.js";
@@ -23,7 +24,7 @@ import { type Filter, FilterCodec, type Todo, TodoCodec } from "./types.js";
 export class TodoStore extends UndraStore {
   readonly todos: Signal<Todo[]> = new Signal<Todo[]>([]);
   readonly filter: Signal<Filter> = new Signal<Filter>("all");
-  /** Computed by the core; read-only. */
+  /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
   readonly visible: Signal<Todo[]> = new Signal<Todo[]>([]);
   /** Computed by the core; read-only. */
   readonly remaining: Signal<number> = new Signal<number>(0);
@@ -35,7 +36,7 @@ export class TodoStore extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<TodoStore> {
+  static async create(core: UndraCore = UndraPlaygroundCore.core): Promise<TodoStore> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -55,7 +56,7 @@ export class TodoStore extends UndraStore {
    * @throws {TodoError}
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
    */
-  static async open(path: string, core: UndraCore = UndraCore.shared): Promise<TodoStore> {
+  static async open(path: string, core: UndraCore = UndraPlaygroundCore.core): Promise<TodoStore> {
     const w = new UndraWriter();
     w.writeStr(path);
     let handle: bigint;

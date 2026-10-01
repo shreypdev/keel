@@ -118,7 +118,7 @@ class BenchRunner(
         return JSONObject()
             .put("schema", "undra-device-bench-raw/1")
             .put("platform", "android")
-            .put("runtime", "inproc (JNI, libundra_core.so)")
+            .put("runtime", "inproc (JNI, libplayground_core.so)")
             .put("device", deviceFacts())
             .put("timer", JSONObject().put("kind", "System.nanoTime").put("resolution_ns", resolution).put("overhead_ns", overhead))
             .put(
@@ -137,7 +137,7 @@ class BenchRunner(
     }
 
     /**
-     * One cold start in a fresh process: the first `UndraCore.load` of the process (which `UndraApp` timed, and which loads
+     * One cold start in a fresh process: the first `UndraPlaygroundCore.load` of the process (which `UndraApp` timed, and which loads
      * the native library), then the restore of the snapshot the full run left behind.
      */
     fun runCold(): JSONObject {
@@ -384,7 +384,7 @@ class BenchRunner(
             .put(
                 "note",
                 "a 100 KB snapshot is ${config.snapshotTodos} to-dos of ${config.snapshotTitleLength} characters (the host row restores four stores of 250 rows of 100 bytes); " +
-                    "load = the first `UndraCore.load` of the process, which includes `System.loadLibrary`; an in-process core cannot be loaded twice, so the in-process row is restores only, and the restore of a cold launch includes the main-thread drain",
+                    "load = the first `UndraPlaygroundCore.load` of the process, which includes `System.loadLibrary`; an in-process core cannot be loaded twice, so the in-process row is restores only, and the restore of a cold launch includes the main-thread drain",
             )
     }
 

@@ -17,8 +17,16 @@ use undra_runtime::{InitError, RestoreError, Runtime, RuntimeConfig};
 
 use crate::guard::guarded;
 
-/// The ABI version this crate implements (`undra_abi_version`).
-pub const ABI_VERSION: u32 = 1;
+/// The native C ABI version this crate implements: the `abi_version` of every [`UndraApi`] table and
+/// what the JNI shim's `abiVersion()` returns. Version 2 is the function table of ADR-044 (version 1
+/// was 19 global `undra_*` symbols); the wire and the schema hash did not change with it.
+///
+/// [`UndraApi`]: crate::UndraApi
+pub const ABI_VERSION: u32 = 2;
+
+/// The wasm ABI version (SPEC 7, `undra_abi_version` of a wasm core). The wasm ABI did not change
+/// with the native table (ADR-044: a wasm module is its own namespace already).
+pub const WASM_ABI_VERSION: u32 = 1;
 
 /// Result codes of `undra_init` (`0` is success).
 pub mod init_code {

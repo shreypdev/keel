@@ -19,6 +19,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenStdlib } from "./core.js";
 import { UndraIds } from "./ids.js";
 
 /** Mirrors what the platform reports about the connection. */
@@ -35,7 +36,7 @@ export class Link extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Link> {
+  static async create(core: UndraCore = UndraGoldenStdlib.core): Promise<Link> {
     let handle: bigint;
     try {
       handle = await core.construct(

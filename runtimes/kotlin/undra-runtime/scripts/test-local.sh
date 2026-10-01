@@ -20,8 +20,10 @@
 #   UNDRA_FORCE=1 scripts/test-local.sh    # ignore the up-to-date stamps and recompile
 #   UNDRA_SKIP_GOLDEN=1 scripts/test-local.sh   # leave the generated golden/full code out of the test build
 #   UNDRA_BUILD_DIR=/tmp/undra-kotlin scripts/test-local.sh   # put the build output elsewhere (default: build/local)
-#   UNDRA_NATIVE_LIB_DIR=target/debug scripts/test-local.sh run   # -Djava.library.path for the JNI smoke test
-#                                        (also UNDRA_NATIVE_NAME -> -Dundra.native.name, UNDRA_NATIVE_PATH -> -Dundra.native.path)
+#   UNDRA_NATIVE_LIB_DIR=crates/undra-ffi/tests/fixture/target/debug scripts/test-local.sh run
+#                                        # -Djava.library.path: where NativeSmokeTests finds libundra_fixture (ADR-044)
+#   UNDRA_NATIVE_PATHS="undra_fixture=/abs/libundra_fixture.dylib" scripts/test-local.sh run
+#                                        # space-separated namespace=file pairs, each -Dundra.native.<namespace>.path=<file>
 #
 # Environment: UNDRA_KOTLINX_COROUTINES (kotlinx-coroutines-core-jvm jar; scripts/env.sh sets it),
 # UNDRA_KOTLIN_STDLIB (kotlin-stdlib jar; default: the one inside the kotlinc install), UNDRA_SQLITE_JDBC (the SQLite JDBC
@@ -154,15 +156,27 @@ phase_run() {
   phase_test
   echo "==> running suites"
   local jflags=(-Xmx512m)
+  local pair
+  if [ -n "${UNDRA_NATIVE_NAME:-}${UNDRA_NATIVE_PATH:-}" ]; then
+    echo "warning: UNDRA_NATIVE_NAME / UNDRA_NATIVE_PATH are gone (ADR-044: a core's library is lib<namespace>);" \
+      "NativeSmokeTests loads undra-ffi's fixture core: UNDRA_NATIVE_LIB_DIR=<dir of libundra_fixture> or" \
+      "UNDRA_NATIVE_PATHS=\"undra_fixture=<file>\"" >&2
+  fi
   if [ -n "${UNDRA_NATIVE_LIB_DIR:-}" ]; then jflags+=("-Djava.library.path=$UNDRA_NATIVE_LIB_DIR"); fi
-  if [ -n "${UNDRA_NATIVE_NAME:-}" ]; then jflags+=("-Dundra.native.name=$UNDRA_NATIVE_NAME"); fi
-  if [ -n "${UNDRA_NATIVE_PATH:-}" ]; then jflags+=("-Dundra.native.path=$UNDRA_NATIVE_PATH"); fi
+  for pair in ${UNDRA_NATIVE_PATHS:-}; do
+    case "$pair" in
+      *=*) jflags+=("-Dundra.native.${pair%%=*}.path=${pair#*=}") ;;
+      *) echo "error: UNDRA_NATIVE_PATHS takes namespace=file pairs, got: $pair" >&2; exit 2 ;;
+    esac
+  done
   local driver="${UNDRA_SQLITE_JDBC:-}"
   if [ -n "$driver" ] && [ ! -f "$driver" ]; then
     echo "error: UNDRA_SQLITE_JDBC=$driver is not a file" >&2
     exit 2
   fi
-  java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$OUT/test" "$STDLIB" "$COROUTINES" "$driver")" dev.undra.runtime.TestMainKt
+  # runtime/src/main/resources is on the classpath as in the jar (the R8 consumer rules, META-INF/proguard).
+  java "${jflags[@]}" -cp "$(join_cp "$OUT/main" "$HERE/runtime/src/main/resources" "$OUT/test" "$STDLIB" "$COROUTINES" "$driver")" \
+    dev.undra.runtime.TestMainKt
 }
 
 case "$PHASE" in

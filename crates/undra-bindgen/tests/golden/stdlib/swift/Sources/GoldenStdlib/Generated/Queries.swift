@@ -25,7 +25,7 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenStdlib.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -140,7 +140,10 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
 
 /// Runs the `retry` mutation.
 /// - Throws: ``HttpError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func retry(_ request: HttpRequest, ctx: UndraCore = .shared) async throws -> HttpResponse {
+public func retry(
+    _ request: HttpRequest,
+    ctx: UndraCore = UndraGoldenStdlib.core
+) async throws -> HttpResponse {
     var w = UndraWriter()
     request.undraEncode(&w)
     do {
