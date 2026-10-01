@@ -11,6 +11,7 @@ import {
   encodeEnvelope,
   encodePortReply,
 } from "../wire/index.js";
+import type { RestartResult, SnapshotPolicy } from "../recovery.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
 import { type HostToWorker, WORKER_PROTOCOL_VERSION, type WorkerFailure, type WorkerToHost, type WorkerWasm } from "./worker-protocol.js";
@@ -53,19 +54,34 @@ export interface WasmWorkerOptions {
    * `#[undra::port(sync)]` port, an override of Clock or Rng) must live; see `WorkerPortsModule`.
    */
   readonly ports?: URL | string;
+  /**
+   * Keep snapshots in the worker for a restart after a trap (`LoadOptions.recovery`, ADR-049). With it, a trap does
+   * not end the worker: `restart` can bring the core back.
+   */
+  readonly recovery?: SnapshotPolicy;
 }
 
-/** What waits for the worker's answer to a `snapshot` or `restore` request. */
+/** What waits for the worker's answer to a `snapshot`, `restore` or `restart` request. */
 type ControlWaiter =
   | { readonly kind: "snapshot"; resolve(bytes: Uint8Array): void; reject(error: unknown): void }
-  | { readonly kind: "restore"; resolve(): void; reject(error: unknown): void };
+  | { readonly kind: "restore"; resolve(): void; reject(error: unknown): void }
+  | { readonly kind: "restart"; resolve(result: RestartResult): void; reject(error: unknown): void };
+
+/** A transport failure from the worker; a trap keeps the engine's stack as the stack of its `cause` (for the panic report). */
+function transportError(failure: Extract<WorkerFailure, { kind: "transport" }>): UndraTransportError {
+  if (failure.stack === undefined) return new UndraTransportError(failure.reason, failure.message);
+  const cause = new Error(failure.message);
+  cause.name = "RuntimeError";
+  cause.stack = failure.stack;
+  return new UndraTransportError(failure.reason, failure.message, { cause });
+}
 
 function failureToError(failure: WorkerFailure): Error {
   switch (failure.kind) {
     case "schemaMismatch":
       return new UndraSchemaMismatchError(failure.expected, failure.got);
     case "transport":
-      return new UndraTransportError(failure.reason, failure.message);
+      return transportError(failure);
     case "error":
       return new UndraTransportError("handshake", failure.message);
   }
@@ -93,7 +109,7 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
 function controlFailure(failure: WorkerFailure): Error {
   switch (failure.kind) {
     case "transport":
-      return new UndraTransportError(failure.reason, failure.message);
+      return transportError(failure);
     case "schemaMismatch":
       return new UndraSchemaMismatchError(failure.expected, failure.got);
     case "error":
@@ -150,6 +166,10 @@ export class WasmWorkerTransport implements Transport {
   readonly #control = new Map<number, ControlWaiter>();
   /** Whether the worker said, in `ready`, that it understands `snapshot` and `restore`. */
   #canSnapshot = false;
+  /** Whether the worker said, in `ready`, that it can restart the core after a trap (and `recovery` is on). */
+  #canRestart = false;
+  /** The trap the worker reported, while the core waits for `restart` (recovery only). */
+  #trapped: UndraTransportError | null = null;
   /** Fails a `start` that has not settled yet (a protocol failure before `ready` must not wait for the timeout). */
   #abortStart: ((error: Error) => void) | null = null;
   #detach: (() => void) | null = null;
@@ -200,6 +220,7 @@ export class WasmWorkerTransport implements Transport {
             settle(() => {
               this.#open = true;
               this.#canSnapshot = message.features?.includes("snapshot") === true;
+              this.#canRestart = this.#options.recovery !== undefined && message.features?.includes("recovery") === true;
               resolve(message.hello);
             });
             return;
@@ -249,9 +270,29 @@ export class WasmWorkerTransport implements Transport {
             else waiting.resolve();
             return;
           }
-          case "closed":
-            this.#fail(failureToError(message.failure));
+          case "restarted": {
+            const waiting = this.#control.get(message.id);
+            if (waiting?.kind !== "restart") return;
+            this.#control.delete(message.id);
+            if (message.failure !== undefined || message.hello === undefined) {
+              waiting.reject(message.failure === undefined ? new UndraTransportError("protocol", "the worker answered a restart without a hello") : failureToError(message.failure));
+            } else {
+              this.#trapped = null;
+              waiting.resolve({ hello: message.hello, restoredFromAgeMs: message.restoredFromAgeMs ?? null, storeHandles: message.storeHandles ?? null });
+            }
             return;
+          }
+          case "closed": {
+            const error = failureToError(message.failure);
+            if (this.#canRestart && error instanceof UndraTransportError && error.reason === "trap" && this.#open) {
+              // Recovery: the worker keeps the compiled module and the last snapshot; the core decides to `restart` or `close`.
+              this.#trapped = error;
+              this.#handler?.closed(error);
+              return;
+            }
+            this.#fail(error);
+            return;
+          }
         }
       };
       const onError = (event: Event): void => {
@@ -295,6 +336,7 @@ export class WasmWorkerTransport implements Transport {
         protocol: WORKER_PROTOCOL_VERSION,
         asyncPorts: [...(handler.asyncPorts?.() ?? [])],
         ...(this.#options.ports !== undefined && { portsModule: String(this.#options.ports) }),
+        ...(this.#options.recovery !== undefined && { recovery: this.#options.recovery }),
       };
       try {
         worker.postMessage(init, transfer);
@@ -314,7 +356,31 @@ export class WasmWorkerTransport implements Transport {
     if ((!this.#open && !starting) || this.#worker === null) {
       throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
     }
+    if (this.#trapped !== null) throw this.#trapped;
     this.#post(kind, payload);
+  }
+
+  /**
+   * After a trap the worker reported (`recovery`, ADR-049): the worker instantiates the same compiled module again
+   * and restores the last snapshot it kept, with its generation floor raised to `generationFloor`. Rejects with an
+   * `UndraTransportError` (`"trap"`, with the engine's stack, when the new instance traps too).
+   */
+  restart(generationFloor: number): Promise<RestartResult> {
+    return new Promise<RestartResult>((resolve, reject) => {
+      const worker = this.#worker;
+      if (!this.#open || worker === null) {
+        reject(new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started"));
+        return;
+      }
+      if (!this.#canRestart) {
+        reject(new UndraTransportError("unsupported", "the worker was not started with recovery, or its script cannot restart the core"));
+        return;
+      }
+      const id = this.#nextControlId++;
+      this.#control.set(id, { kind: "restart", resolve, reject });
+      const message: HostToWorker = { t: "restart", id, generationFloor: generationFloor >>> 0 };
+      this.#sendControl(id, worker, message);
+    });
   }
 
   /** Tells the worker which ports of this thread it forwards calls to (a `registerPort` after load). */

@@ -56,7 +56,7 @@ export abstract class UndraCallError extends UndraError {
    * | status 3 | `CancelledByCore` |
    * | status 5, `UndraModeError`, `UndraRestoreError` | `Refused` |
    * | status 1 (the method has no error type), 0, 4 | `Malformed` |
-   * | `UndraTransportError` (closed, handshake, trap, timeout, unsupported; also what a `remote` core fails with while it reconnects, ADR-051), `UndraSchemaMismatchError`, `UndraSessionLostError` | `Unavailable` |
+   * | `UndraTransportError` (closed, handshake, trap, timeout, unsupported, restarted; also what a `remote` core fails with while it reconnects, ADR-051), `UndraSchemaMismatchError`, `UndraSessionLostError` | `Unavailable` |
    * | `UndraTransportError("protocol")`, `WireError`, `UndraPortError`, an `UndraError` the runtime itself raised | `Malformed` |
    */
   static mapped(error: unknown): unknown;
@@ -154,6 +154,8 @@ export namespace UndraCallError {
 
   /**
    * The core cannot be reached: it was closed, trapped or never loaded, or the connection to it closed or timed out.
+   * A wasm core loaded with `recovery` that trapped and restarted fails what was in flight with reason `"restarted"`
+   * (ADR-049): the call may or may not have run, and it is not retried.
    * Over `undra dev` it is also what every call rejects with while the connection is down and `UndraCore.connection`
    * is `reconnecting` (and what was in flight when it dropped rejects with): the connection state says what the runtime
    * is doing about it, and a command's failure of that kind is not handed to `onError`.

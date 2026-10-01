@@ -3,6 +3,15 @@ import type { ClockAdapter, RngAdapter, TimerAdapter } from "../adapters/types.j
 import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {
+  type KeptSnapshot,
+  type RestartResult,
+  SnapshotKeeper,
+  type SnapshotPolicy,
+  emptySnapshot,
+  snapshotStoreHandles,
+  withGenerationFloor,
+} from "../recovery.js";
+import {
   type HelloPayload,
   UndraReader,
   UndraWriter,
@@ -53,6 +62,12 @@ export interface WasmMainOptions {
   readonly timer?: TimerAdapter;
   /** Receives failures that have no caller: an import handler that threw, a timer or poll that trapped. Default: ignored (the handler's `closed` reports traps). */
   readonly onError?: (error: unknown) => void;
+  /**
+   * Keep snapshots for a restart after a trap (`LoadOptions.recovery`, ADR-049): after the core changed a store, at
+   * most one per `snapshotEveryMs`, none larger than `maxSnapshotBytes`. Absent: no snapshot is taken, and
+   * `restart` brings the core back without its stores.
+   */
+  readonly recovery?: SnapshotPolicy;
 }
 
 /** The exports of an Undra core module (SPEC 7) that this transport uses. */
@@ -111,12 +126,13 @@ function allocate(e: CoreExports, len: number): number {
   return ptr;
 }
 
-async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.Instance> {
+/** Compiles (unless it is compiled already) and instantiates `source`; the compiled module is kept for a restart (ADR-049: no recompile). */
+async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
   if (typeof WebAssembly !== "object") {
     throw new UndraTransportError("unsupported", "WebAssembly is not available on this platform");
   }
   try {
-    if (source instanceof WebAssembly.Module) return await WebAssembly.instantiate(source, imports);
+    if (source instanceof WebAssembly.Module) return { module: source, instance: await WebAssembly.instantiate(source, imports) };
     if (source instanceof URL) {
       const response = await fetch(source);
       if (!response.ok) throw new Error(`GET ${source.href} answered ${response.status}`);
@@ -124,11 +140,11 @@ async function instantiate(source: WasmSource, imports: WebAssembly.Imports): Pr
         typeof WebAssembly.instantiateStreaming === "function" &&
         response.headers.get("content-type")?.startsWith("application/wasm") === true
       ) {
-        return (await WebAssembly.instantiateStreaming(response, imports)).instance;
+        return await WebAssembly.instantiateStreaming(response, imports);
       }
-      return (await WebAssembly.instantiate(await response.arrayBuffer(), imports)).instance;
+      return await WebAssembly.instantiate(await response.arrayBuffer(), imports);
     }
-    return (await WebAssembly.instantiate(source, imports)).instance;
+    return await WebAssembly.instantiate(source, imports);
   } catch (cause) {
     throw new UndraTransportError("handshake", `could not instantiate the wasm core: ${errorMessage(cause)}`, {
       cause,
@@ -190,6 +206,14 @@ export class WasmMainTransport implements Transport {
   #pollScheduled = false;
   #closed = false;
   #dead: UndraTransportError | null = null;
+  /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049). */
+  #module: WebAssembly.Module | null = null;
+  /** Bumped by every restart: a timer or poll of an instance that trapped never reaches its successor. */
+  #generation = 0;
+  /** The snapshots kept for a restart, when `recovery` is on. */
+  readonly #keeper: SnapshotKeeper | null;
+  /** The schema hash of the module (checked at start). */
+  #schemaHash = 0n;
 
   /** @param options See {@link WasmMainOptions}. */
   constructor(options: WasmMainOptions) {
@@ -197,6 +221,35 @@ export class WasmMainTransport implements Transport {
     this.#clock = options.clock ?? systemClock();
     this.#timer = options.timer ?? setTimeoutTimer();
     this.#rng = options.rng ?? null;
+    this.#keeper =
+      options.recovery === undefined
+        ? null
+        : new SnapshotKeeper(options.recovery, {
+            take: () => this.#run((e) => this.#snapshotBytes(e)),
+            tooLarge: (bytes, limit) => {
+              this.#handler?.log(
+                3,
+                "undra::recovery",
+                `a snapshot of ${bytes} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes (${limit}); the previous one stays (said once)`,
+              );
+            },
+            failed: (error) => {
+              this.#report(error);
+            },
+          });
+  }
+
+  /**
+   * The last snapshot kept for a restart (`recovery`), or `null`. For tests, benchmarks and devtools: the
+   * runtime reads it itself.
+   */
+  get keptSnapshot(): KeptSnapshot | null {
+    return this.#keeper?.last ?? null;
+  }
+
+  /** Takes and keeps a snapshot now (`recovery` only; else `null`), whatever the schedule says: returns its size. For tests and benchmarks. */
+  keepSnapshotNow(): number | null {
+    return this.#keeper?.takeNow() ?? null;
   }
 
   /** The instantiated module (after `start`); for devtools and tests. */
@@ -206,7 +259,68 @@ export class WasmMainTransport implements Transport {
 
   async start(handler: TransportHandler): Promise<HelloPayload> {
     this.#handler = handler;
-    const instance = await instantiate(this.#options.wasm, this.#imports());
+    const { module, instance } = await instantiate(this.#options.wasm, this.#imports());
+    this.#module = module;
+    return this.#adopt(instance);
+  }
+
+  /**
+   * After a trap (ADR-049 decision 3.4.3): instantiates the same compiled module again (no recompile), runs
+   * `_initialize` and `undra_init`, and restores the last snapshot kept (`recovery`) with its generation floor raised
+   * to at least `generationFloor`, so that no handle the host still holds can be issued again to another object
+   * (ADR-022). Without a snapshot (or when the core refuses it), an empty one raises the floor alone and no store
+   * comes back. Rejects with an `UndraTransportError` (`"trap"` when the new instance traps too).
+   */
+  async restart(generationFloor: number): Promise<RestartResult> {
+    if (this.#closed) throw new UndraTransportError("closed", "the core is closed");
+    const module = this.#module;
+    if (module === null) throw new UndraTransportError("unsupported", "the core was never started, so there is nothing to restart");
+    this.#generation++;
+    this.#keeper?.pause();
+    this.#exports = null;
+    this.#instance = null;
+    this.#buffer = null;
+    this.#u8 = new Uint8Array(0);
+    this.#view = new DataView(new ArrayBuffer(0));
+    this.#depth = 0;
+    this.#scratchPtr = 0;
+    this.#scratchCap = 0;
+    this.#pollScheduled = false;
+    this.#dead = null;
+    let instance: WebAssembly.Instance;
+    try {
+      instance = await WebAssembly.instantiate(module, this.#imports());
+    } catch (cause) {
+      throw new UndraTransportError("handshake", `could not instantiate the wasm core again: ${errorMessage(cause)}`, { cause });
+    }
+    if (this.#closed) throw new UndraTransportError("closed", "the core was closed while it restarted");
+    const hello = this.#adopt(instance);
+    const kept = this.#keeper?.last ?? null;
+    let restored: RestartResult = { hello, restoredFromAgeMs: null, storeHandles: [] };
+    if (kept !== null) {
+      const bytes = withGenerationFloor(new Uint8Array(kept.data), generationFloor);
+      try {
+        this.#restore(bytes);
+        restored = { hello, restoredFromAgeMs: Math.max(0, Date.now() - kept.takenAt), storeHandles: snapshotStoreHandles(bytes) };
+      } catch (error) {
+        if (!(error instanceof UndraRestoreError)) throw error;
+        this.#handler?.log(4, "undra::recovery", `the core refused its last snapshot (code ${error.code}) after the restart; it runs without its stores`);
+      }
+    }
+    if (restored.restoredFromAgeMs === null) {
+      try {
+        this.#restore(emptySnapshot(this.#schemaHash, generationFloor));
+      } catch (error) {
+        if (!(error instanceof UndraRestoreError)) throw error;
+        this.#handler?.log(4, "undra::recovery", `the restarted core refused the generation floor (code ${error.code})`);
+      }
+    }
+    this.#keeper?.resume();
+    return restored;
+  }
+
+  /** Checks a fresh instance, initialises it and makes it the core (start and restart). */
+  #adopt(instance: WebAssembly.Instance): HelloPayload {
     this.#instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
     const missing = [
@@ -227,6 +341,7 @@ export class WasmMainTransport implements Transport {
     if (schemaHash !== this.#options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this.#options.expectedSchemaHash, schemaHash);
     }
+    this.#schemaHash = schemaHash;
     const mode = this.#options.devtools === true ? "dev" : "inproc";
     const platform = this.#options.platform ?? hostPlatform();
     const config = new UndraWriter(32);
@@ -310,17 +425,18 @@ export class WasmMainTransport implements Transport {
   /** The persisted state of every store (`undra_snapshot`, SPEC 5.9). Rejects `UndraTransportError` when the core is closed or exports no `undra_snapshot`. */
   snapshot(): Promise<Uint8Array> {
     try {
-      return Promise.resolve(
-        this.#run((e) => {
-          if (e.undra_snapshot === undefined) {
-            throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
-          }
-          return this.#takeBuf(e, e.undra_snapshot());
-        }),
-      );
+      return Promise.resolve(this.#run((e) => this.#snapshotBytes(e)));
     } catch (error) {
       return Promise.reject(error);
     }
+  }
+
+  /** `undra_snapshot`, copied out of wasm memory. */
+  #snapshotBytes(e: CoreExports): Uint8Array {
+    if (e.undra_snapshot === undefined) {
+      throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
+    }
+    return this.#takeBuf(e, e.undra_snapshot());
   }
 
   /**
@@ -341,6 +457,7 @@ export class WasmMainTransport implements Transport {
     this.#closed = true;
     this.#handler = null;
     this.#exports = null;
+    this.#keeper?.stop();
   }
 
   /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
@@ -465,7 +582,12 @@ export class WasmMainTransport implements Transport {
     const dead = new UndraTransportError("trap", `the wasm core trapped: ${errorMessage(error)}`, { cause: error });
     this.#dead = dead;
     const handler = this.#handler;
-    if (handler !== null) queueMicrotask(() => handler.closed(dead));
+    // Not when a restart replaced the instance meanwhile (`#dead` is the successor's then): its trap was handled there.
+    if (handler !== null) {
+      queueMicrotask(() => {
+        if (this.#dead === dead) handler.closed(dead);
+      });
+    }
     return dead;
   }
 
@@ -494,6 +616,8 @@ export class WasmMainTransport implements Transport {
         }, undefined),
         changeset: guard((ptr: number, len: number) => {
           this.#handler?.changeSet(this.#copyOut(ptr, len));
+          // A store changed: a snapshot for a restart is due (scheduled, never taken inside this callback).
+          this.#keeper?.changed();
         }, undefined),
         stream: guard((_callId: number, ptr: number, len: number) => {
           this.#handler?.streamItem(this.#copyOut(ptr, len));
@@ -508,8 +632,10 @@ export class WasmMainTransport implements Transport {
         }, undefined),
         timer_set: guard((timerId: number, delayLo: number, delayHi: number) => {
           const id = timerId >>> 0;
+          const generation = this.#generation;
           this.#timer.set(id, (delayHi >>> 0) * 0x1_0000_0000 + (delayLo >>> 0), (fired) => {
-            this.#timerFired(fired);
+            // A timer of an instance that trapped and was replaced is not the new one's.
+            if (generation === this.#generation) this.#timerFired(fired);
           });
         }, undefined),
         log: guard((level: number, ptr: number, len: number) => {

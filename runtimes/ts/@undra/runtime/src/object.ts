@@ -44,20 +44,40 @@ const leaks: FinalizationRegistry<Leak> | null =
 export abstract class UndraObject {
   /** The core this object lives in. */
   readonly core: UndraCore;
-  /** The handle of the object inside the core. */
-  readonly handle: Handle;
+  #handle: Handle;
   #closed = false;
 
   /** @param core The core that issued `handle`. @param handle A live handle the caller owns and hands over. */
   protected constructor(core: UndraCore, handle: Handle) {
     this.core = core;
-    this.handle = handle;
+    this.#handle = handle;
     leaks?.register(this, { core: new WeakRef(core), handle }, this);
+  }
+
+  /**
+   * The handle of the object inside the core. It changes only when the runtime re-creates a query handle after a
+   * crash recovery (ADR-049): code that keeps the raw handle instead of the object goes stale then.
+   */
+  get handle(): Handle {
+    return this.#handle;
   }
 
   /** Whether `close()` has been called. */
   get closed(): boolean {
     return this.#closed;
+  }
+
+  /**
+   * Moves this object to `handle`, a new object the runtime created in the core in its place (a re-created query
+   * handle after a crash recovery, ADR-049). The handle it had is not released: the core that issued it is gone.
+   *
+   * @internal Called by `UndraCore`.
+   */
+  _rebind(handle: Handle): void {
+    if (this.#closed) return;
+    leaks?.unregister(this);
+    this.#handle = handle;
+    leaks?.register(this, { core: new WeakRef(this.core), handle }, this);
   }
 
   /** Releases the handle. Later calls on the object fail in the core with a stale handle. Idempotent. */
@@ -81,6 +101,21 @@ export interface StoreOptions {
    * every value of these instead of the last one per frame (docs/SPEC.md section 11).
    */
   readonly noCoalesce?: readonly number[];
+  /**
+   * The constructor call that made this store, for a store the runtime re-creates after a crash recovery instead of
+   * restoring it (ADR-049): a query handle, which a snapshot leaves out. Generated query handles pass it.
+   */
+  readonly recreate?: RecreateCall;
+}
+
+/** A recorded constructor call: what `UndraCore.construct` was given (ADR-049, re-created query handles). */
+export interface RecreateCall {
+  /** The object type. */
+  readonly typeId: number;
+  /** The constructor. */
+  readonly methodId: number;
+  /** The encoded arguments. */
+  readonly args: Uint8Array;
 }
 
 /**
@@ -111,6 +146,7 @@ export abstract class UndraStore extends UndraObject {
       },
       options.noCoalesce === undefined ? {} : { noCoalesce: options.noCoalesce },
     );
+    if (options.recreate !== undefined) core._recreatable(this, options.recreate);
   }
 
   /**

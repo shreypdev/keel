@@ -5,6 +5,7 @@ import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchErro
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
+import { trapStack } from "./recovery.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
 import {
@@ -116,7 +117,9 @@ function toFailure(error: unknown): WorkerFailure {
     return { kind: "schemaMismatch", expected: error.expected, got: error.got };
   }
   if (error instanceof UndraTransportError) {
-    return { kind: "transport", reason: error.reason, message: error.message };
+    // A trap's stack (the engine's frames) travels for the panic report (ADR-046 decision 4.4).
+    const stack = error.reason === "trap" ? trapStack(error) : "";
+    return { kind: "transport", reason: error.reason, message: error.message, ...(stack !== "" && { stack }) };
   }
   return { kind: "error", message: errorMessage(error) };
 }
@@ -152,6 +155,8 @@ function wasmSource(wasm: WorkerWasm): WasmSource {
  */
 export function runWorker(scope: WorkerScope): () => void {
   let transport: Transport | null = null;
+  /** The transport as a restartable one (the same object): set when `init` asked for `recovery`. */
+  let restartable: WasmMainTransport | null = null;
   let schema = 0n;
   let seq = 0;
   let batching = false;
@@ -278,10 +283,12 @@ export function runWorker(scope: WorkerScope): () => void {
         ...(adapters.clock !== undefined && { clock: adapters.clock }),
         ...(adapters.rng !== undefined && { rng: adapters.rng }),
         ...(adapters.timer !== undefined && { timer: adapters.timer }),
+        ...(init.recovery !== undefined && { recovery: init.recovery }),
         onError: (error) => {
           handler.log(4, "undra::worker", `internal error: ${errorMessage(error)}`);
         },
       });
+      if (init.recovery !== undefined) restartable = wasm;
       const hello = await wasm.start(handler);
       transport = wasm;
       post({ t: "ready", hello, features: WORKER_FEATURES });
@@ -337,10 +344,28 @@ export function runWorker(scope: WorkerScope): () => void {
       case "restore":
         void restore(message.id, message.data);
         break;
+      case "restart":
+        void restart(message.id, message.generationFloor);
+        break;
       case "close":
         transport?.close();
         transport = null;
+        restartable = null;
         break;
+    }
+  };
+
+  /** Answers a `restart` request (ADR-049): the same module again, the kept snapshot restored, after the envelopes it produced. */
+  const restart = async (id: number, generationFloor: number): Promise<void> => {
+    if (restartable === null) {
+      post({ t: "restarted", id, failure: toFailure(new UndraTransportError("unsupported", "the worker was not started with recovery")) });
+      return;
+    }
+    try {
+      const result = await restartable.restart(generationFloor);
+      post({ t: "restarted", id, hello: result.hello, restoredFromAgeMs: result.restoredFromAgeMs, storeHandles: result.storeHandles === null ? null : [...result.storeHandles] });
+    } catch (error) {
+      post({ t: "restarted", id, failure: toFailure(error) });
     }
   };
 

@@ -1,5 +1,6 @@
 import type { TransportFailure } from "../errors.js";
-import type { HelloPayload } from "../wire/index.js";
+import type { SnapshotPolicy } from "../recovery.js";
+import type { Handle, HelloPayload } from "../wire/index.js";
 
 /*
  * The messages between the main thread and the worker of the `wasm-worker`
@@ -29,6 +30,12 @@ import type { HelloPayload } from "../wire/index.js";
  * the batch first), so when the host reads the acknowledgement the change-sets that re-deliver
  * every observed signal (ADR-023) and the replies of the calls the restore cancelled have already
  * been handed to the host's handler.
+ *
+ * Recovery (protocol 3, ADR-049 decision 3). With `recovery` in `init`, the worker keeps the last snapshot of
+ * the core itself (off the main thread), and a trap does not end it: it posts `closed` with the trap (and its
+ * stack), keeps the compiled module, and waits. The host rejects what was in flight and answers either `close`
+ * (the restart budget is spent) or `restart`, which the worker serves by instantiating the module again and
+ * restoring its last snapshot (with the host's generation floor), answered by `restarted`.
  */
 
 /**
@@ -43,7 +50,7 @@ import type { HelloPayload } from "../wire/index.js";
 export const WORKER_PROTOCOL_VERSION = 3;
 
 /** What a worker can do beyond the base protocol, announced in its `ready` message (see the header). */
-export const WORKER_FEATURES = Object.freeze(["snapshot", "ports"] as const);
+export const WORKER_FEATURES = Object.freeze(["snapshot", "ports", "recovery"] as const);
 
 /** One of {@link WORKER_FEATURES}. */
 export type WorkerFeature = (typeof WORKER_FEATURES)[number];
@@ -69,6 +76,8 @@ export type HostToWorker =
       readonly asyncPorts?: readonly number[];
       /** Protocol 3: the URL of the module of `LoadOptions.worker.ports`, imported before `undra_init`. */
       readonly portsModule?: string;
+      /** Protocol 3: keep snapshots for a restart after a trap (`LoadOptions.recovery`); absent, a trap ends the core. */
+      readonly recovery?: SnapshotPolicy;
     }
   | { readonly t: "envelope"; readonly data: ArrayBuffer }
   | { readonly t: "stats"; readonly id: number }
@@ -78,6 +87,8 @@ export type HostToWorker =
   | { readonly t: "snapshot"; readonly id: number }
   /** Asks for `undra_restore(data)`; `data` is a private copy, transferred. Answered by `restored` with the same `id`. */
   | { readonly t: "restore"; readonly id: number; readonly data: ArrayBuffer }
+  /** Protocol 3, after a `closed` trap with `recovery`: instantiate the module again and restore the kept snapshot, its floor raised to `generationFloor`. Answered by `restarted`. */
+  | { readonly t: "restart"; readonly id: number; readonly generationFloor: number }
   | { readonly t: "close" };
 
 /** A failure, in a form that survives structured cloning. */
@@ -104,4 +115,16 @@ export type WorkerToHost =
    * could not be run at all (the core is closed, the module exports none, it trapped).
    */
   | { readonly t: "restored"; readonly id: number; readonly code: number; readonly failure?: WorkerFailure }
+  /**
+   * The answer to `restart`: the new instance's `hello`, how old the restored snapshot was (`null`: none was
+   * restored) and the handles of the stores it brought back; or why the restart failed (a trap carries its stack).
+   */
+  | {
+      readonly t: "restarted";
+      readonly id: number;
+      readonly hello?: HelloPayload;
+      readonly restoredFromAgeMs?: number | null;
+      readonly storeHandles?: readonly Handle[] | null;
+      readonly failure?: WorkerFailure;
+    }
   | { readonly t: "closed"; readonly failure: WorkerFailure };

@@ -1,3 +1,4 @@
+import type { RestartResult } from "../recovery.js";
 import type { HelloPayload, Kind, PortCallPayload } from "../wire/index.js";
 
 /*
@@ -112,4 +113,12 @@ export interface Transport {
   readonly answersSyncPorts?: boolean;
   /** The set of the host's asynchronous ports changed after `start` (a `registerPort`): the worker of `wasm-worker` is told. */
   portsChanged?(asyncPorts: readonly number[]): void;
+  /**
+   * Only for a wasm transport loaded with recovery (ADR-049): after the handler heard of a trap (`closed` with an
+   * `UndraTransportError("trap")`), brings the core back: the same compiled module instantiated again, initialised,
+   * and the last snapshot restored with its generation floor raised to `generationFloor`. Rejects with an
+   * `UndraTransportError` (`"trap"` when the new instance traps too). A transport the host does not restart is
+   * closed with `close()`.
+   */
+  restart?(generationFloor: number): Promise<RestartResult>;
 }

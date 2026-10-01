@@ -164,8 +164,14 @@ export type TransportFailure =
   | "protocol"
   /** The peer did not answer in time. */
   | "timeout"
-  /** The environment lacks something the transport needs (`WebSocket`, `Worker`, `WebAssembly`). */
-  | "unsupported";
+  /** The environment lacks something the transport needs (`WebSocket`, `Worker`, `WebAssembly`, WebCrypto). */
+  | "unsupported"
+  /**
+   * The wasm core trapped and was restarted from its last snapshot (`LoadOptions.recovery`, ADR-049): what every
+   * call and stream in flight at the trap ends with. The call may or may not have run before the trap; it is not
+   * retried. Generated calls reject with it as `UndraCallError.Unavailable`.
+   */
+  | "restarted";
 
 /** The channel to the core failed. In-flight calls and streams reject with this. */
 export class UndraTransportError extends UndraError {
