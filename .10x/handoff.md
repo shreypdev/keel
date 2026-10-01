@@ -44,13 +44,13 @@ Spec: `.10x/specs/2026-10-01-v1x-default-choice-design.md` (tracks A–H; Amendm
 bets approved; gap-audit and boundary ADRs 034–051 accepted in direction). Distribution stays parked
 until after v2.
 
-**Merged (checkpoint 5 in status.md):** gaps + competitive + ADR-039 (design), schema-json (C1, C2),
+**Merged (checkpoints 5–6 in status.md):** gaps + competitive + ADR-039 (design), schema-json (C1, C2),
 device-bench (E1; the honest web size is 135 KB gzipped, over budget — E5), diagnostics (D1), dev-loop
-(B1, B2, ADR-051). Main `a0d638f`.
+(B1, B2, ADR-051), parity (C3, C4: the Kotlin/TS error channel). Main `143b72a`. CI pins Rust 1.98.1
+(1.99.0 broke it on 2026-10-01; the bump is a deliberate piece: four workflow pins, `rustup update`,
+`TRYBUILD=overwrite` goldens, bench re-baseline).
 
-**Merge queue, in order (cross-merge main on the branch, full matrix, fast-forward):** `parity`
-(C3/C4; Kotlin/TS `UndraCallError` sets, non-throwing commands, TS snapshot/restore, recursive
-records, `docs/ERRORS.md`) → `android-adapters` (`AndroidPlatformDefaults.install` + six adapters,
+**Merge queue, in order (cross-merge main on the branch, full matrix, fast-forward):** `android-adapters` (`AndroidPlatformDefaults.install` + six adapters,
 instrumented tests; hand-merge `UndraApp.kt` keeping dev-loop's start/load/retry skeleton and the
 frame pacer, the adapters replacing the fakes; M1 Maven publishing is an open item) →
 `runtime-lifecycle` (Track A; review `.10x/reviews/2026-10-01-runtime-lifecycle-review.md` when it
