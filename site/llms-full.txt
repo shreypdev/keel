@@ -652,8 +652,8 @@ Register the ports your core needs at load time. A core's start-up work (query h
 
 An unavailable port is a normal outcome, not a bug. A port nobody registered behaves as unavailable, a call can be cancelled, and a host can reply with bytes that do not decode. The core handles all three without panicking:
 
-- If the port method returns `Result<T, E>`, the failure becomes an `E`. `HttpError` and `FsError` implement `From<PortError>`, so an unavailable `Http` port is `Network("the Http port has no adapter registered")`. Your own error type needs the same conversion, and the macro checks it at compile time (`E0033`).
-- If the method has no error channel, there is no typed way to say "unavailable", so the call panics with a message that names the port and method and says how to bind one (`E0062`). The runtime contains that panic at the boundary. Give optional ports a `Result`, or register them.
+- If the port method returns `Result<T, E>`, the failure becomes an `E`. `HttpError` and `FsError` implement `From<PortError>`, so an unavailable `Http` port is `Network("the Http port has no adapter registered (E0062: register one, see ..)")`, with the code and the link to the fix. Your own error type needs the same conversion, and the macro checks it at compile time (`E0033`).
+- If the method has no error channel, there is no typed way to say "unavailable", so the call panics with a message that names the port and method and says how to bind one (`E0062`, in the shape of every diagnostic: what, why, fix, docs link). The runtime contains that panic at the boundary. Give optional ports a `Result`, or register them.
 
 ## Writing your own port
 
@@ -1056,7 +1056,7 @@ A UI and a core that were not built from the same schema must not talk. The sche
 
 ## Diagnostics
 
-Every macro mistake is an error with a stable code and a fixed shape: what happened, why, how to fix it, and where to read more. This one is verbatim from the test suite:
+Every macro mistake is an error with a stable code and a fixed shape: what happened, why, how to fix it, and where to read more. The same shape is used by schema validation and the runtime. This one is verbatim from the test suite:
 
 text
 
@@ -1076,10 +1076,10 @@ The catalogue, by family:
 | E0020 to E0022 | `&mut self` or `self` receivers, non-`Send` async futures |
 | E0030 to E0033 | port methods with non-wire parameters, invalid port shapes, an error type that cannot represent an unavailable port |
 | E0040 to E0042 | query and mutation keys, signatures and return types |
-| E0050 to E0052 | bindgen: duplicate names, names that collide after case conversion, clashes with the standard library |
+| E0050 to E0052 | schema validation: duplicate names, names that collide after case conversion, clashes with the standard library |
 | E0060 to E0064 | look-alike built-in names, aliased types, runtime port failures, `Option<Option<T>>`, objects used as values |
 
-The CLI has its own `C00NN` codes with the same shape.
+The CLI has its own `C00NN` codes with the same shape; [the error-codes page](https://shreypdev.github.io/undra/docs/errors.html) lists all of them, each with real messages from the test suite.
 
 ## The constitution
 
@@ -1137,7 +1137,7 @@ Source: https://shreypdev.github.io/undra/docs/errors.html
 
 # Error codes
 
-Every compile error the macros raise has a stable code, a fixed shape and a fix. The link at the end of each message lands on its code below.
+Every diagnostic Undra raises, from a macro at compile time, from schema validation, from the runtime or from the `undra` command, has a stable code, a fixed shape and a fix. The link at the end of each message lands on its code below.
 
 ## How to read one
 
@@ -1156,13 +1156,27 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 
 | Code | Meaning |
 | --- | --- |
+| [`C0001`](https://shreypdev.github.io/undra/docs/errors.html#C0001) | no `undra.toml` from `start` up to the filesystem root |
+| [`C0002`](https://shreypdev.github.io/undra/docs/errors.html#C0002) | a configuration or schema file is unusable |
+| [`C0003`](https://shreypdev.github.io/undra/docs/errors.html#C0003) | a tool is not installed |
+| [`C0004`](https://shreypdev.github.io/undra/docs/errors.html#C0004) | a build tool exited with a failure |
+| [`C0005`](https://shreypdev.github.io/undra/docs/errors.html#C0005) | the core crate is missing, or is not an Undra core |
+| [`C0006`](https://shreypdev.github.io/undra/docs/errors.html#C0006) | the schema could not be extracted from the built core |
+| [`C0007`](https://shreypdev.github.io/undra/docs/errors.html#C0007) | the schema cannot be turned into bindings (bindgen diagnostics) |
+| [`C0008`](https://shreypdev.github.io/undra/docs/errors.html#C0008) | the command would overwrite something it must not |
+| [`C0009`](https://shreypdev.github.io/undra/docs/errors.html#C0009) | an argument is unusable |
+| [`C0010`](https://shreypdev.github.io/undra/docs/errors.html#C0010) | an I/O operation failed |
+| [`C0011`](https://shreypdev.github.io/undra/docs/errors.html#C0011) | the Rust toolchain lacks a compilation target |
+| [`C0012`](https://shreypdev.github.io/undra/docs/errors.html#C0012) | the platform is not available on this machine |
+| [`C0013`](https://shreypdev.github.io/undra/docs/errors.html#C0013) | the dev server failed to start or crashed |
+| [`C0014`](https://shreypdev.github.io/undra/docs/errors.html#C0014) | the core and the project disagree about where Undra comes from |
 | [`E0001`](https://shreypdev.github.io/undra/docs/errors.html#E0001) | unsupported type in a public position |
 | [`E0002`](https://shreypdev.github.io/undra/docs/errors.html#E0002) | generic parameter |
 | [`E0003`](https://shreypdev.github.io/undra/docs/errors.html#E0003) | lifetime in a public signature |
 | [`E0004`](https://shreypdev.github.io/undra/docs/errors.html#E0004) | trait object, `dyn`, `impl Trait` |
 | [`E0005`](https://shreypdev.github.io/undra/docs/errors.html#E0005) | `Result` / `Stream` outside return position |
 | [`E0006`](https://shreypdev.github.io/undra/docs/errors.html#E0006) | map key type not allowed |
-| [`E0007`](https://shreypdev.github.io/undra/docs/errors.html#E0007) | unsupported item shape |
+| [`E0007`](https://shreypdev.github.io/undra/docs/errors.html#E0007) | unsupported item shape or placement of an Undra attribute |
 | [`E0008`](https://shreypdev.github.io/undra/docs/errors.html#E0008) | unknown or misplaced `#[undra(..)]` attribute or macro argument |
 | [`E0010`](https://shreypdev.github.io/undra/docs/errors.html#E0010) | invalid `#[undra::error]` variant |
 | [`E0011`](https://shreypdev.github.io/undra/docs/errors.html#E0011) | store and `#[undra::api(store)]` impl block disagree |
@@ -1170,7 +1184,7 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 | [`E0013`](https://shreypdev.github.io/undra/docs/errors.html#E0013) | store cannot be restored automatically |
 | [`E0020`](https://shreypdev.github.io/undra/docs/errors.html#E0020) | `&mut self` receiver |
 | [`E0021`](https://shreypdev.github.io/undra/docs/errors.html#E0021) | `self` by value |
-| [`E0022`](https://shreypdev.github.io/undra/docs/errors.html#E0022) | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry an Undra code) |
+| [`E0022`](https://shreypdev.github.io/undra/docs/errors.html#E0022) | non-`Send` future in an async method: `rustc`'s own error, pointed at the method by an assertion named after this code |
 | [`E0030`](https://shreypdev.github.io/undra/docs/errors.html#E0030) | port method with a non-wire parameter |
 | [`E0031`](https://shreypdev.github.io/undra/docs/errors.html#E0031) | event port method that is not a plain `fn(..)` returning `()` |
 | [`E0032`](https://shreypdev.github.io/undra/docs/errors.html#E0032) | invalid port trait shape |
@@ -1178,12 +1192,12 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 | [`E0040`](https://shreypdev.github.io/undra/docs/errors.html#E0040) | query without `key`, mutation with `stale`, or another invalid query argument |
 | [`E0041`](https://shreypdev.github.io/undra/docs/errors.html#E0041) | query or mutation function with an invalid signature |
 | [`E0042`](https://shreypdev.github.io/undra/docs/errors.html#E0042) | query whose success value is `()` or an `Option` |
-| [`E0050`](https://shreypdev.github.io/undra/docs/errors.html#E0050) | duplicate type name |
-| [`E0051`](https://shreypdev.github.io/undra/docs/errors.html#E0051) | a name that collides after case conversion |
-| [`E0052`](https://shreypdev.github.io/undra/docs/errors.html#E0052) | a record, enum, error, object or port named like a standard library item |
+| [`E0050`](https://shreypdev.github.io/undra/docs/errors.html#E0050) | duplicate type name, id or variant index |
+| [`E0051`](https://shreypdev.github.io/undra/docs/errors.html#E0051) | a name that collides after case conversion or is not an identifier |
+| [`E0052`](https://shreypdev.github.io/undra/docs/errors.html#E0052) | an item named like a standard library item, with another id |
 | [`E0060`](https://shreypdev.github.io/undra/docs/errors.html#E0060) | a spelling that looks like a built-in Undra type is another type |
-| [`E0061`](https://shreypdev.github.io/undra/docs/errors.html#E0061) | the schema names a different type than the one spelled, or a type that is not an Undra type |
-| [`E0062`](https://shreypdev.github.io/undra/docs/errors.html#E0062) | a port call had no adapter |
+| [`E0061`](https://shreypdev.github.io/undra/docs/errors.html#E0061) | the name written is not the declared name of the type, or the type is not declared with `#[undra::api]` |
+| [`E0062`](https://shreypdev.github.io/undra/docs/errors.html#E0062) | a port call could not be answered and its method has no error channel: a runtime message |
 | [`E0063`](https://shreypdev.github.io/undra/docs/errors.html#E0063) | nested `Option<Option<T>>` |
 | [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected |
 
@@ -1191,36 +1205,47 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 
 ### `E0001` unsupported type in a public position
 
-unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met)
+Raised by macros, schema validation, the `Encode`/`Decode` bounds.
+
+unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
+| `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs |
 | `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
 | `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
 | `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
 | `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | store a `Ctx` in the object when it is constructed, or use `Ctx::current()` |
-| `Instant` cannot cross the boundary | monotonic instants are meaningless outside their process | use `Duration` for spans and `Timestamp` for points in time; if `Instant` is a type of your own, rename it: Undra recognises this name wherever it is written |
-| `Handle` cannot be used in a public signature | a handle is how the runtime refers to an object instance; the schema has no handle type, because an object crosses the boundary through its constructors, never as a value in a signature | use the object's own methods from the platform (it holds the handle), or return a record with the data the platform needs; if `Handle` is a type of your own, rename it: Undra recognises this name wherever it is written |
+| `Uuid` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Uuid` with `#[undra::api]`, or return a record with the data the platform needs |
 
 ### `E0002` generic parameter
+
+Raised by macros.
 
 generic parameter on a `#[undra::api]` item
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | generic parameter `T` on `Page` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
+| generic parameter `T` on `first` | the schema describes concrete types; every target language would need one instantiation per use | remove the parameter, and declare one concrete `#[undra::api]` type per instantiation |
 
 ### `E0003` lifetime in a public signature
+
+Raised by macros.
 
 lifetime in a public signature
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | lifetime `'a` on `Label` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | remove the lifetime parameter and use owned types |
+| lifetime `'a` in `&'a str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
+| lifetime `'static` in `&'static str` | everything crosses the boundary by value; a borrow cannot outlive the call that made it | use an owned type such as `String` or `Vec<T>` |
 
 ### `E0004` trait object, `dyn`, `impl Trait`
 
-trait object / `dyn` / `Box<dyn Fn>`
+Raised by macros.
+
+trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Trait` that is not a stream
 
 | What you see | Why | Fix |
 | --- | --- | --- |
@@ -1230,49 +1255,63 @@ trait object / `dyn` / `Box<dyn Fn>`
 
 ### `E0005` `Result` / `Stream` outside return position
 
+Raised by macros, schema validation.
+
 `Result` or `Stream` outside return position
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `Result<u32, String>` cannot be used as a field | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
+| `Result<u32, String>` cannot be used as a parameter | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
+| `Result<u32, String>` cannot be nested inside another type | `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return | return the `Result` from the method and keep only plain values in fields, parameters and nested types |
+| `result<u8,named:Oops>` at record Todo, field outcome: Result is only allowed as the outermost type of a return | `Result<T, E>` is how a method reports a typed error, so it has no meaning inside a field, a parameter or another type | return the `Result` from the method and keep plain values in fields, parameters and nested types |
 
 ### `E0006` map key type not allowed
+
+Raised by macros, schema validation.
 
 map key type not allowed
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `f64` cannot be a map key | map keys must be `String`, an integer, `bool` or `Uuid`: those compare and hash identically on every platform (floats and composite keys do not) | use one of those key types, or a `Vec` of records with an explicit key field |
+| `f32` at record Scores, field by_weight is not a valid map key | map keys must compare and hash the same on every platform: `String`, an integer type, `bool` and `Uuid` do, floats and composite keys do not | use one of those key types, or a `Vec` of records with an explicit key field |
 
-### `E0007` unsupported item shape
+### `E0007` unsupported item shape or placement of an Undra attribute
 
-unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block)
+Raised by macros.
+
+unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| tuple struct `Meters` cannot be a record | the schema names every field so the other languages can generate properties; tuple fields have no names | use named fields: `struct Meters { value: f64 }` |
-| enum `Nothing` has no variants | an enum without variants has no values, so it can never be sent | add at least one variant |
-| constructor `new` is `async` | a constructor inserts the new object into the object table before it replies, so it must finish synchronously | construct synchronously and start asynchronous work with `ctx.spawn(..)` |
-| `helper` is neither a method nor a constructor | a `pub fn` in a `#[undra::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed | add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[undra::api] fn` |
-| the receiver `self: &Arc<Self>` of method `by_arc` is not supported | the dispatcher resolves the object from its handle and calls the method with `&Type`; a receiver such as `Arc<Self>`, `Box<Self>` or `Pin<&Self>` needs a different call | write `&self`; clone an `Arc` of the object inside the method if you need one |
-| unit struct `Marker` cannot be a record | a record without fields occupies zero bytes on the wire, and zero-width items defeat length validation (SPEC section 3.1): a `Vec` of them would accept any count from a four-byte message | add a field, or use an enum with a unit variant if you need a marker |
+| `#[undra::api]` on `new`, which is an associated function: its signature uses `Self` | `Self` only exists inside an `impl` block, and `#[undra::api]` on a function exposes a free function; the functions of an object are exposed by putting the attribute on the `impl` block they are in | remove `#[undra::api]` from `new` and write `#[undra::api]` above the `impl` block (it exposes every `pub fn` in it) |
+| `#[undra::query]` on the method `forecast` of a port trait | a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method | remove the attribute from `forecast`; a `#[undra::query]` is a free `async fn(ctx: &Ctx, ..)` that calls the port as `weather(ctx).forecast(..)`, so write it outside the trait |
+| `#[undra::api]` on the method `now` of a port trait | a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method | remove the attribute from `now`; a function the core exposes that calls the port is a free `#[undra::api] fn(ctx: &Ctx, ..)` outside the trait, calling `weather(ctx).now(..)` |
+| `#[undra::query]` on `admins`, which is inside an `impl` block: its signature uses `Self` | a query is a free function, and the macro generates a struct next to it, which an impl block cannot hold | move `admins` out of the impl block, to module level, and spell out the type instead of `Self` |
+| `#[undra::store]` cannot be applied to an `enum` | `#[undra::store]` applies to a struct | move `#[undra::store]` onto a struct, or remove it |
+| `#[undra::api]` cannot be applied to a type alias | `#[undra::api]` applies to a struct, an enum, an `impl` block or a free `fn` | move `#[undra::api]` onto a struct, an enum, an `impl` block or a free `fn`, or remove it |
 
 ### `E0008` unknown or misplaced `#[undra(..)]` attribute or macro argument
 
-unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
+Raised by macros.
+
+unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| unknown option `defualt` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | remove or correct the option |
-| `#[undra(key)]` is not valid on a record or variant field | `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches | remove the option, or move it to where it applies |
-| unknown argument `colour` for `#[undra::api]` | `#[undra::api]` accepts: `crate = "path"`, and `store` on an impl block of a `#[undra::store]` struct | remove or correct the argument |
-| `default` takes no value | `default` switches a behaviour on by being present; there is nothing to set it to | write `default` alone |
-| `key` must be a string literal naming a field | `key` takes a string literal naming a field; anything else cannot be read at compile time | write `key = "id"` |
-| `no_coalesce` takes no value | `no_coalesce` switches a behaviour on by being present; there is nothing to set it to | write `no_coalesce` alone |
+| `#[undra(key = "idd")]` on `typo` names no field of `Row` | `key` names the field of the list's items that identifies them, and `Row` has the fields `id`, `title` | write the name of one of those fields as the key |
+| `#[undra(key = "n")]` on `not_a_record` names no field of `u32` | `key` names the field of the list's items that identifies them, and `u32` has no fields (only a record declared with `#[undra::api]` has any) | write the name of one of those fields as the key |
+| unknown option `defualt` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | did you mean `default`? Otherwise remove `defualt` |
+| unknown option `frobnicate` in `#[undra(..)]` | the options are `crate = "path"` (items), `default` (record fields), `key = "field"` and `no_coalesce` (store signal fields) | remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce` |
+| `#[undra(key)]` is not valid on a record or variant field | `key = "field"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches | move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it |
+| unknown argument `restor` for `#[undra::store]` | `#[undra::store]` accepts: `crate = "path"` and `restore = "Self::function"` | did you mean `restore`? Otherwise remove `restor` |
 
 ## Errors and stores
 
 ### `E0010` invalid `#[undra::error]` variant
+
+Raised by macros, schema validation.
 
 `#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum
 
@@ -1282,14 +1321,26 @@ unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key,
 | invalid message for variant `Missing`: `{1}` refers to field 1, but the variant has 1 | the message is a template over the variant's fields | use `{0}`, `{1}`, .. for tuple fields and `{name}` for named fields |
 | `#[error(transparent)]` on variant `Both` needs exactly one field, found 2 | `transparent` forwards `Display` and `source()` to the variant's only field | give the variant a single field holding the inner error |
 | `#[error]` on the variant `A` belongs to `#[undra::error]`, not `#[undra::api]` | `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[undra::api]` enum has no messages, `Display` or `From` impls | change the enum's attribute to `#[undra::error]`, or remove the helper attribute |
+| `#[from]` on the field `0` belongs to `#[undra::error]`, not `#[undra::api]` | `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[undra::api]` enum has no messages, `Display` or `From` impls | change the enum's attribute to `#[undra::error]`, or remove the helper attribute |
+| variant `Unmessaged` has no `#[error(..)]` message | every variant of a `#[undra::error]` enum needs a message, because the platforms show it to users and logs | add `#[error("what went wrong")]`, or `#[error(transparent)]` to forward to the inner error |
 
 ### `E0011` store and `#[undra::api(store)]` impl block disagree
 
-`#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen)
+Raised by macros, schema validation.
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+`#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block and a `#[undra::api(store)]` block without a constructor (a type takes one block; a constructor in another block is not seen); a store without a constructor in the schema
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| store `Counter` has no constructor in this `#[undra::api(store)]` block | the platforms create a store by calling one of its constructors, and a type takes one `#[undra::api]` impl block, so a constructor in another block is not seen | add `pub fn new(ctx: Ctx) -> Self` to this block; if `Counter` has a second `#[undra::api]` block (where the constructor is), move this block's methods into that one |
+| `Todos` is a `#[undra::store]` but its `#[undra::api]` impl block is not marked as a store | the impl block of a store must say so, so its constructors can attach the store's signals and its struct literals get the hidden cell field | write `#[undra::api(store)]` on the impl block |
+| `Plain` is implemented with `#[undra::api(store)]` but the struct has no `#[undra::store]` | the `store` marker wires the constructors to the struct's signals, which only `#[undra::store]` sets up | add `#[undra::store]` to `struct Plain`, or remove `store` from the impl attribute |
+| store `Todos` has no `#[undra::api(store)]` impl block | the constructors of the impl block create the store and wire its signals to the platforms; without the block the store can never be instantiated | add an `impl Todos` block marked `#[undra::api(store)]` with a constructor such as `pub fn new(ctx: Ctx) -> Self` |
+| store `Counter` has no constructor | the platforms create a store by calling one of its constructors; without one it can never be instantiated | add `pub fn new(ctx: Ctx) -> Self` to its `#[undra::api(store)]` impl block |
 
 ### `E0012` trait object in a record field
+
+Raised by macros.
 
 trait object in a record field (the blueprint example)
 
@@ -1299,15 +1350,20 @@ trait object in a record field (the blueprint example)
 
 ### `E0013` store cannot be restored automatically
 
+Raised by macros.
+
 store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | store `Todos` cannot be restored automatically: `count` is computed | restoring a snapshot decodes the plain signals and rebuilds the store, but only your code knows how to derive computed signals from them | add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
+| store `Sync` cannot be restored automatically: its field of type `Config` has no `Default` | restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument) | implement `Default` for the type, or add `#[undra::store(restore = "Self::rebuild")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store |
 
 ## Methods
 
 ### `E0020` `&mut self` receiver
+
+Raised by macros.
 
 `&mut self` receiver
 
@@ -1317,21 +1373,52 @@ store cannot be restored automatically: it has a `Computed` field, or a field th
 
 ### `E0021` `self` by value
 
+Raised by macros.
+
 `self` by value
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `self` by value on method `finish` | an object is shared across calls; a method cannot consume it | take `&self` and clone whatever you need to keep |
 
-### `E0022` non-`Send` future in an async method: `rustc`'s own error, pointed at the method by a generated `Send` assertion (it cannot carry an Undra code)
+### `E0022` non-`Send` future in an async method: `rustc`'s own error, pointed at the method by an assertion named after this code
 
-non-`Send` future in an async method
+Raised by rustc, named by a macro.
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+non-`Send` future in an async method or query: `rustc`'s own "future cannot be sent between threads safely", pointed at the method by an assertion the macros emit; the last note names the assertion, `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`. Do not hold a non-`Send` value (an `Rc`, a `RefCell` borrow, a `MutexGuard`) across an `.await`
+
+The compiler reports this one itself, so it carries no Undra code. It is pointed at the method, and the last note names the assertion the macro emitted, `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`: the code to look up.
+
+text
+
+```
+error: future cannot be sent between threads safely
+  --> src/lib.rs:15:18
+   |
+15 |     pub async fn run(&self) -> u32 {
+   |                  ^^^ future created by async block is not `Send`
+   |
+   = help: within `{async block@src/lib.rs:9:1: 9:10}`, the trait `Send` is not implemented for `Rc<u32>`
+note: future is not `Send` as this value is used across an await
+  --> src/lib.rs:17:32
+   |
+16 |         let local = Rc::new(1_u32);
+   |             ----- has type `Rc<u32>` which is not `Send`
+17 |         std::future::ready(()).await;
+   |                                ^^^^^ await occurs here, with `local` maybe used later
+note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`
+  --> src/lib.rs:9:1
+   |
+ 9 | #[k::api]
+   | ^^^^^^^^^ required by this bound in `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+```
 
 ## Ports
 
 ### `E0030` port method with a non-wire parameter
+
+Raised by macros.
 
 port method with a non-wire parameter
 
@@ -1342,14 +1429,19 @@ port method with a non-wire parameter
 
 ### `E0031` event port method that is not a plain `fn(..)` returning `()`
 
-event port method with a return type
+Raised by macros, schema validation.
+
+event port method with a return type, or that is `async`
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | event port method `changed` returns a value | events are fire-and-forget notifications from the host; there is no reply to carry a value | remove the return type, or drop `event` from `#[undra::port(event)]` to make it a request/reply port |
 | event port method `resumed` is `async` | events are fire-and-forget notifications from the host; nothing waits for them | make it a plain `fn` returning `()` |
+| event port `Connectivity` method `changed` returns a value or is `async` | events are fire-and-forget notifications from the host; nothing waits for them, so there is no reply to carry a value | make the method a plain `fn` returning `()`, or make the port a request/reply port |
 
 ### `E0032` invalid port trait shape
+
+Raised by macros.
 
 invalid port trait shape (an `async` method on a `sync` port, a parameter that is not a plain name, an associated type or const, no `&self` receiver)
 
@@ -1360,13 +1452,19 @@ invalid port trait shape (an `async` method on a `sync` port, a parameter that i
 
 ### `E0033` the error type of a port method has no `From<PortError>`
 
+Raised by macros (a bound the compiler checks).
+
 the error type of a `Result` port method has no `From<PortError>` (an unavailable port cannot be reported)
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the error type `StoreError` of a method of the `Store` port cannot represent a port that is unavailable | a port nobody registered, a cancelled call and a reply that does not decode are ordinary outcomes (SPEC 6.3), and a method that returns `Result<T, E>` reports them as its error instead of panicking; that needs `From<PortError>` for the error type | implement `From<undra::runtime::PortError>` for `StoreError`, mapping it to a variant such as `Unavailable`, or to the `Display` text of the `PortError` |
 
 ## Queries and mutations
 
 ### `E0040` query without `key`, mutation with `stale`, or another invalid query argument
+
+Raised by macros.
 
 query without `key` / mutation with `stale` / a query argument of the wrong kind
 
@@ -1381,6 +1479,8 @@ query without `key` / mutation with `stale` / a query argument of the wrong kind
 
 ### `E0041` query or mutation function with an invalid signature
 
+Raised by macros.
+
 query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`)
 
 | What you see | Why | Fix |
@@ -1391,6 +1491,8 @@ query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx
 
 ### `E0042` query whose success value is `()` or an `Option`
 
+Raised by macros.
+
 query whose success value is `()` or an `Option` (a query caches a value; use a mutation for effects)
 
 | What you see | Why | Fix |
@@ -1400,59 +1502,214 @@ query whose success value is `()` or an `Option` (a query caches a value; use a 
 
 ## Names in the generators
 
-### `E0050` duplicate type name
+### `E0050` duplicate type name, id or variant index
 
-duplicate type name (bindgen)
+Raised by schema validation.
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+duplicate type name, a type named like something the generated code depends on, two items with one id, two variants with one index
 
-### `E0051` a name that collides after case conversion
+| What you see | Why | Fix |
+| --- | --- | --- |
+| duplicate type name `Todo` (declared as record and again as enum) | type names must be unique within a core: a type is identified to the platforms by its name (its id is a hash of it), so two declarations cannot share one | rename one of the two `Todo` declarations, or remove the duplicate |
+| duplicate type name `Storage` at the port `Storage` (the name is already used by a record) | names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core | rename one of the two, or remove the duplicate |
+| record `Signal` has a name the generated code depends on | the generated bindings use a type called `Signal` (a standard type of Swift, Kotlin or TypeScript, or one of the Undra runtime's), so a type of the schema with the same name would shadow it | rename it, for example `MySignal` |
+| duplicate type id `0x00000007` at the schema (`Alpha` and `Beta` hash to the same id) | names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core | rename one of the two items: ids are hashes of the names, so a different name gives a different id |
+| duplicate variant index `1` at enum Status | names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core | give every variant of the enum an index of its own |
 
-a name that collides after case conversion (`a_b` and `aB`) or is not an identifier in a target language (bindgen)
+### `E0051` a name that collides after case conversion or is not an identifier
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+Raised by schema validation.
 
-### `E0052` a record, enum, error, object or port named like a standard library item
+a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language
 
-a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids (bindgen)
+| What you see | Why | Fix |
+| --- | --- | --- |
+| at record Todo, `due_date`, `dueDate` all become `dueDate` | field names are converted to camelCase, so names that differ only in case or underscores end up equal | rename one of them so that they stay distinct after conversion |
+| at object Thing, `close` is a name the generated code already uses | the runtime base class or the generated code already declares a member with that name | rename it so that it does not meet that name |
+| at record Todo, `1st` is not a name the generated code can use | every name of the schema becomes an identifier in Swift, Kotlin and TypeScript: ASCII letters, digits and underscores, not starting with a digit | rename it to letters, digits and underscores, starting with a letter |
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+### `E0052` an item named like a standard library item, with another id
+
+Raised by schema validation.
+
+a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| record `HttpRequest` has the name of an Undra standard library item but the id 0x00000007 instead of 0xbbbc6e52 | every platform runtime implements the standard ports and types under those names and ids, and generated code refers to them instead of declaring them, so a different item cannot share the name | rename it, for example `MyHttpRequest`, or use the standard one from `undra-ports` |
 
 ## Type identity and the schema
 
 ### `E0060` a spelling that looks like a built-in Undra type is another type
 
+Raised by macros (a check the compiler runs).
+
 a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `Bytes` is spelled like the built-in Undra type `undra::prelude::Bytes`, but it is a different type | the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Bytes` where the generated code writes `Bytes` | rename your type, or import the built-in one (`undra::prelude::Bytes`) where it is used |
+| `Uuid` is spelled like the built-in Undra type `undra::prelude::Uuid`, but it is a different type | the schema records this position as the built-in type, so the platforms would read the bytes of `undra::prelude::Uuid` where the generated code writes `Uuid` | rename your type, or import the built-in one (`undra::prelude::Uuid`) where it is used |
 
-### `E0061` the schema names a different type than the one spelled, or a type that is not an Undra type
+### `E0061` the name written is not the declared name of the type, or the type is not declared with `#[undra::api]`
 
-the schema records a name that the type written there does not have: an alias (`type Todo = Item`), a renamed import (`use m::Item as Todo`) or a type that is not declared with `#[undra::api]`; reported by a const assertion comparing `UNDRA_TYPE_ID`
+Raised by macros (a check the compiler runs).
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+the schema records a name that the type written there does not have: an alias of an Undra type (`type Todo = Item`), a renamed import (`use m::Item as Todo`), or a name that is not a type declared with `#[undra::api]` at all (a plain struct, `type Id = u64`); reported by a const assertion on `UNDRA_TYPE_ID`
 
-### `E0062` a port call had no adapter
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `Plain` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Plain = u64`, has no definition the platforms could generate | add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used |
+| `Id` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Id = u64`, has no definition the platforms could generate | add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used |
+| `Todo` here is an alias or a renamed import of a different Undra type, not the type declared as `Todo` | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Todo = Other` or `use path::Other as Todo` the platforms would be told `Todo` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Todo` if you mean a distinct type |
+| `Entry` here is an alias or a renamed import of a different Undra type, not the type declared as `Entry` | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Entry = Other` or `use path::Other as Entry` the platforms would be told `Entry` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Entry` if you mean a distinct type |
 
-a port call had no adapter (runtime message of a method without an error channel; a typed error for one with a `Result`)
+### `E0062` a port call could not be answered and its method has no error channel: a runtime message
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+Raised by runtime (the generated port proxy).
+
+a port call that cannot be answered and has no error channel: no adapter registered, a cancelled call, a reply that does not decode. A method without an error channel panics with this message (the runtime contains the panic at the dispatch boundary; on wasm it traps the core); a method returning `Result` reports it as its error type, and `HttpError::Network` / `FsError::Io` carry the code and the link
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the `Kv` port has no adapter registered (method `get`) | this method has no error channel, so an unavailable port cannot be reported and the call panics; the runtime contains the panic, but on the web it traps the core | register an adapter (`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C), bind a Rust implementation (`undra::ports::fakes` in tests), or give the method a `Result<T, E>` return type so it can report the outage |
 
 ### `E0063` nested `Option<Option<T>>`
+
+Raised by macros.
 
 `Option<Option<T>>` in a public position
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | nested option `Option<Option<i32>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
+| nested option `Option<Box<Option<u8>>>` cannot cross the boundary | Kotlin and TypeScript cannot express nested optionality: `Some(None)` and `None` would both arrive as `null` | wrap the inner option in a record or an enum that names the two cases |
 
 ### `E0064` an object (`#[undra::api] impl`) used where a value is expected
 
+Raised by macros (a check the compiler runs).
+
 an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle
 
-No compile-fail example: this code comes from the generators or the runtime, not from the macros.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `Child` is an object and cannot be used as a value | an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value | return a record with the data the platform needs, or construct the object from the platform with one of its constructors |
 
-Generated by `site/scripts/build-errors.mjs` from `docs/SPEC.md` section 12 and the compile-fail tests of the macros crate. To change a message, change the macro; to change the catalogue, change the specification.
+## The command line
+
+### `C0001` no `undra.toml` from `start` up to the filesystem root
+
+Raised by `undra`.
+
+not inside an Undra project: no `undra.toml` from the working directory up to the filesystem root
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0002` a configuration or schema file is unusable
+
+Raised by `undra`.
+
+`undra.toml` or a schema file cannot be read or has a value the CLI cannot use
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0003` a tool is not installed
+
+Raised by `undra`.
+
+a tool the command needs is not installed or not on `PATH`
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0004` a build tool exited with a failure
+
+Raised by `undra`.
+
+a build tool ran and failed; its own output follows the diagnostic
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0005` the core crate is missing, or is not an Undra core
+
+Raised by `undra`.
+
+the core crate is missing, or is not an Undra core
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0006` the schema could not be extracted from the built core
+
+Raised by `undra`.
+
+the schema could not be extracted from the built core
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0007` the schema cannot be turned into bindings (bindgen diagnostics)
+
+Raised by `undra`.
+
+the schema cannot be turned into bindings (the E0001, E0005, E0006, E0010, E0011, E0031, E0050, E0051 and E0052 diagnostics of schema validation follow)
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0008` the command would overwrite something it must not
+
+Raised by `undra`.
+
+`undra init` or `undra adopt` would write into a directory that already has files in it
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0009` an argument is unusable
+
+Raised by `undra`.
+
+an argument has a value the command cannot use
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0010` an I/O operation failed
+
+Raised by `undra`.
+
+a file or directory operation failed
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0011` the Rust toolchain lacks a compilation target
+
+Raised by `undra`.
+
+the Rust toolchain lacks a compilation target the build needs
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0012` the platform is not available on this machine
+
+Raised by `undra`.
+
+the platform is not available on this machine
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0013` the dev server failed to start or crashed
+
+Raised by `undra`.
+
+the dev server failed to start or crashed
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+### `C0014` the core and the project disagree about where Undra comes from
+
+Raised by `undra`.
+
+the core and the project disagree about where Undra comes from
+
+The command prints this diagnostic with the details of the failure that caused it.
+
+Generated by `site/scripts/build-errors.mjs` from `docs/SPEC.md` section 12, the compile-fail tests of the macros crate and the message goldens of the other crates. To change a message, change the code that raises it and regenerate its golden; to change the catalogue, change the specification.
 
 ---
 

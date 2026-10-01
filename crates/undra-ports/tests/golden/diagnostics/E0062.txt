@@ -1,0 +1,4 @@
+error[undra::E0062]: the `Kv` port has no adapter registered (method `get`)
+  = note: this method has no error channel, so an unavailable port cannot be reported and the call panics; the runtime contains the panic, but on the web it traps the core
+  = help: register an adapter (`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C), bind a Rust implementation (`undra::ports::fakes` in tests), or give the method a `Result<T, E>` return type so it can report the outage
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0062

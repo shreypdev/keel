@@ -2,6 +2,7 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+pub mod diag;
 pub mod dispatch;
 pub mod ids;
 #[doc(hidden)]

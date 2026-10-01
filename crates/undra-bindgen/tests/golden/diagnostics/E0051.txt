@@ -1,0 +1,14 @@
+error[undra::E0051]: at record Todo, `due_date`, `dueDate` all become `dueDate`
+  = note: field names are converted to camelCase, so names that differ only in case or underscores end up equal
+  = help: rename one of them so that they stay distinct after conversion
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
+
+error[undra::E0051]: at object Thing, `close` is a name the generated code already uses
+  = note: the runtime base class or the generated code already declares a member with that name
+  = help: rename it so that it does not meet that name
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
+
+error[undra::E0051]: at record Todo, `1st` is not a name the generated code can use
+  = note: every name of the schema becomes an identifier in Swift, Kotlin and TypeScript: ASCII letters, digits and underscores, not starting with a digit
+  = help: rename it to letters, digits and underscores, starting with a letter
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0051
