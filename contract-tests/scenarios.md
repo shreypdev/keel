@@ -484,7 +484,8 @@ JVM, TypeScript `node:sqlite`), each rooted in a fresh temporary directory; the 
 `db_cells`, `db_run` and `db_migrate` of `examples/playground/core/src/notes.rs`.
 
 1. `Notes.create()`; `notes.open("contract-s25")` returns 2 (two migrations ran); `notes` is empty.
-2. `add("milk")`, `add("eggs")` return ids 1 and 2 and the mirror holds both (a keyed patch each);
+2. `add("milk")`, `add("eggs")` return ids 1 and 2 and the mirror holds both (the second arrives as a keyed
+   patch; the first, onto an empty list, as a full value: no key overlaps, SPEC 3.8);
    `toggle(1)`: note 1 is done; `count()` is 2.
 3. Every storage class there and back: `dbCells(-9007199254740993, 1.5, "é😀", [0, 255, 7], null)` returns the
    same five values (the integer is outside JavaScript's safe range: it crosses as `i64`/`bigint`) and the types

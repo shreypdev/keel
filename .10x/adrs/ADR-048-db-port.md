@@ -63,7 +63,7 @@ uses the SQLite every platform already ships (iOS, Android) or a vetted build (J
    a transaction dropped mid-way (its task cancelled) is rolled back through a `WeakCtx` (ADR-034).
 6. **Open options are fixed:** `foreign_keys = ON`, `busy_timeout = 5000`, `journal_mode = WAL` where the VFS has it
    (not the web). `name` is `[A-Za-z0-9._-]{1,64}` not starting with `.`; `":memory:"` opens a private in-memory
-   database (tests, caches). Files: iOS `Application Support/undra/db/<name>.sqlite`, Android
+   database (tests, caches). Files: iOS `Application Support/<bundle id>/Undra/db/<name>.sqlite` (the `Kv` adapter's root), Android
    `getDatabasePath("undra-<name>.sqlite")`, JVM `<root>/db/<name>.sqlite`, web OPFS `undra/db/<name>`; React
    Native uses the native shell's path on each OS so either shell reads the other's database. SQL time functions
    read the adapter's clock, not the core's: deterministic code binds `ctx.clock()` values (R12, documented).

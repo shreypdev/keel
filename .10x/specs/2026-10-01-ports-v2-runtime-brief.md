@@ -174,7 +174,7 @@ RN: `fetch` streaming when `response.body` exists, else `XMLHttpRequest` progres
   `Other` (message = SQLite's); `CORRUPT`(11)/`NOTADB`(26) → `Corrupt(message)`; `FULL`(13) → `Full`;
   `CANTOPEN`(14)/`PERM`(3)/`READONLY`(8)/`IOERR`(10) → `Unavailable(message)`; everything else →
   `Sql { message }`.
-* Files: iOS/macOS `Application Support/undra/db/<name>.sqlite` (directories created); Android
+* Files: iOS/macOS `Application Support/<bundle id>/Undra/db/<name>.sqlite` (the `Kv` adapter's root; directories created); Android
   `context.getDatabasePath("undra-<name>.sqlite")`; JVM `<dataDir>/db/<name>.sqlite`; Node `<dir>/<name>.sqlite`;
   web OPFS `undra/db/<name>`; `":memory:"` is in memory everywhere. Every default adapter takes a directory
   override (tests and S25 root it in a temporary directory).
