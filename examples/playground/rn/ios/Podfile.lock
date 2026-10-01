@@ -2058,7 +2058,7 @@ SPEC CHECKSUMS:
   ReactCommon: 749169e12aa3461a3df3656a00e48dbe0456b2d6
   ReactNativeDependencies: 94c922c39e0e6150ee9ad05e2ca1946e0ef55783
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
-  UndraReactNative: bb0f7fab64ab5cf5100ea88683bdc086df0e48b8
+  UndraReactNative: ae1cd6d1c32706cd6d3e90e546e15f4256df6e71
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
 
 PODFILE CHECKSUM: a6117beac7268e82b86e797a83705a393cba77d8
