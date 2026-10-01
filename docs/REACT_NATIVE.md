@@ -193,13 +193,13 @@ stand-in", never as a native column next to Swift and Kotlin.
 ## What is verified
 
 Everything below was run on 2026-10-01 at `wt/react-native` with `main` merged in (the schema JSON, device
-bench, diagnostics and dev loop pieces), on a Mac (Apple clang, Xcode 26.6) shared with other agents' builds.
+bench, diagnostics, dev loop and parity pieces: the typed failure model, `snapshot()` and `restore()`), on a Mac (Apple clang, Xcode 26.6) shared with other agents' builds.
 
 | What | Where | Result |
 |---|---|---|
 | The C++ host, both shims, ASan + UBSan | macOS; also a clean `git clone` (Node 20) running the CI job's steps | 14 + 14 checks, `UndraJsi.cpp` compiles against 0.87's headers |
-| `NativeTransport` and friends | Node 24 and Node 20 | 39 tests; typecheck clean |
-| Contract scenarios through `NativeTransport` | Node 24 and Node 20 | 17 pass, S17 skipped (app-tested) |
+| `NativeTransport` and friends | Node 24 and Node 20 | 41 tests; typecheck clean |
+| Contract scenarios through `NativeTransport` | Node 24 and Node 20 | 17 pass, S17 skipped (app-tested); S15 uses the public `core.snapshot()` and `core.restore()` |
 | The on-device checks, iOS | iPhone 17 Pro simulator (iOS 26.5), release core, Release app, `scripts/rn-device-checks.sh ios` | `CHECKS 10/10 passed` |
 | The on-device checks, Android | `undra-rn` emulator (arm64, API 35), release core, release APK, `scripts/rn-device-checks.sh android` | `CHECKS 10/10 passed` |
 | JavaScript reload, iOS | debug build on Metro, `POST /reload`: three reloads, one in the middle of the benchmarks (review, before the merge) | four runtimes in one process, 10/10 each |
@@ -212,7 +212,7 @@ quits the JS thread's looper never runs, and the one small allocation it carries
 the frame source's state it keeps alive, about 100 bytes) is not freed. That needs a frame requested in
 the instant of the teardown; it did not happen once in the 66 reloads above (the counter saw no pending
 callback each time the source was destroyed), and the native heap (`dumpsys meminfo`, Heap Alloc) was
-111.0 MB at launch and 98.8, 99.9, 100.0 and 99.4 MB after 5, 10, 15 and 20 reloads: the noise of a
+112.6 MB at launch and 100.6, 101.6, 100.1 and 100.6 MB after 5, 10, 15 and 20 reloads (a second run: 111.0, then 98.8, 99.9, 100.0, 99.4): the noise of a
 React Native reload (about a megabyte) is ten thousand times larger than that. It is a development-only cost, bounded by the
 number of reloads. The fix, if it is ever seen, is to pass an id instead of a pointer and keep the
 pending states in a table that the source's destructor empties.

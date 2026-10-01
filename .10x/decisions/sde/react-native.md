@@ -88,7 +88,7 @@ runtime's") failed. The copy was synced (comment only, no ABI change). That test
 
 Matrix after the merge (the tip of the branch, this machine): `cargo fmt --check` clean; `cargo clippy --workspace
 --all-targets -- -D warnings` clean; `cargo test --workspace` 2,333 passed, 0 failed, 11 `#[ignore]`d; `bash contract-tests/run-all.sh` 54/54 (ts, kotlin, swift x 18); in
-`runtimes/rn/@undra/react-native`: `cpp/test/run.sh` 14 + 14 checks and the JSI compile check, `npm test` 39/39,
+`runtimes/rn/@undra/react-native`: `cpp/test/run.sh` 14 + 14 checks and the JSI compile check, `npm test` 39/39 (41 after the second merge below),
 `npm run typecheck` clean, `npm run test:contract` 17 pass + S17 skipped; the playground app's `npm run
 typecheck` clean; `scripts/rn-device-checks.sh ios` (iPhone 17 Pro simulator, Release) and `... android --target
 emulator-5560` (`undra-rn`, release APK) each `UNDRA-RN CHECKS 10/10 passed`.
@@ -145,7 +145,9 @@ core rebuild the app is dropped and relinked (its own intermediates, not the Pod
 Native code under test: the tip of the branch (`UndraJsi.cpp` with the review's fixes, `UndraHost.cpp` with the
 slot wait). Debug build on Metro (`npx react-native start`, `adb reverse tcp:8081`), `undra-rn` AVD (arm64, API
 35) on port 5560, reloads by `curl -X POST localhost:8081/reload`, evidence from `adb logcat ReactNativeJS`.
-The drivers are throwaway scripts (not committed); the commands are in the sequence below.
+The drivers are throwaway scripts (not committed). All three sequences ran twice: on the tip after the first merge
+of `main` (below), and again on the tip after the second merge (`7f1080c`, the parity piece) with the app's JavaScript
+and the runtime changed and the native C++ untouched; the second run's numbers are in "After the second merge".
 
 * Sequence 1 (one process, pid 3371): launch, an idle reload, two reloads in the middle of the benchmarks, then
   two in quick succession. `loaded=6`, `UNDRA-RN CHECKS 10/10 passed` 6 times, 0 `CHECK ... FAIL`, 0 `UNDRA-RN
@@ -183,3 +185,39 @@ The `undra-rn` AVD was booted on port 5560 and shut down at the end; Metro on 80
 (emulator-5554) was not touched. A Node 20.20.2 binary was installed into the scratch directory with `npm i node@20`
 for the clean-clone run. The shared scratchpad directory is shared between agents: another agent overwrote a
 `env.sh` this work had put there, so its files live in a subdirectory.
+
+### After the second merge of `main` (7f1080c: parity, the typed failure model)
+
+`main` moved while this was being finished (wt/parity: the closed `UndraCallError` set, `onError` handing an
+`UndraUnhandledError`, `Transport.snapshot`/`restore` asynchronous and optional, `UndraCore.snapshot`/`restore`).
+It merged without a textual conflict and broke three things that no merge shows:
+
+1. `NativeTransport.snapshot()` was synchronous and `restore` went through `send(Kind.Restore)` with a
+   `protocol` error: the package no longer type-checked against `Transport`. Both are now the Transport's own
+   (asynchronous; a refused restore is `UndraRestoreError` with the core's code, as on the wasm transports; the
+   module drains the inbox before `undra_restore` returns, so the change-sets are delivered when it resolves).
+   S15 through `NativeTransport` now uses the public `core.snapshot()` / `core.restore()`. Tests: a snapshot and
+   restore round trip, a coded refusal on both paths, closed after `close()`, and 6 after the core was stopped
+   under this runtime.
+2. `loadNative` handed the user's `onError` to the transport and to the frame scheduler, whose parameter is
+   `(error: unknown)`; `onError` is `(error: UndraUnhandledError)` now. Their failures (a malformed inbox record, a
+   handler that threw, a failed scheduled drain) have no caller, which is what `UndraCore.report` is for: it logs
+   at error level and hands `onError` an `UndraUnhandledError` (`Malformed`, the original as the cause). Before the
+   core exists they are logged. Test: a record kind nobody sends reaches `onError` as `UndraUnhandledError`
+   (`operation` "the native module").
+3. The playground's RN04 expected `UndraReplyError` status 2 from `explode()`; the generated binding now maps the
+   reply onto `UndraCallError.Panicked`. It would have failed on every device; the check follows the binding.
+
+Matrix at this tip: `cargo fmt --check` clean, `cargo clippy --workspace --all-targets -- -D warnings` clean,
+`cargo test --workspace` 2,351 passed, 0 failed, 11 `#[ignore]`d; `bash contract-tests/run-all.sh` 54/54;
+`cpp/test/run.sh` 14 + 14 and the JSI check; `npm test` 41/41; `npm run typecheck` clean; `npm run test:contract`
+17 pass + S17 skipped; the playground app's `npm run typecheck` clean; the Linux job's steps in a fresh clone
+(Node 20.20.2) all green; `scripts/rn-device-checks.sh ios` and `... android` (full builds) `CHECKS 10/10`, RN04 now
+reading `UndraCallError.Panicked`.
+
+The Android reload sequences on this tip (debug build on Metro, `undra-rn`, no counter in the build): sequence 1
+(pid 3147) 6 runtimes, 6 x `CHECKS 10/10`; sequence 2 (pid 3411) 5 runtimes, the last `CHECKS 10/10`; sequence 3
+(pid 3544) 21 runtimes, 21 x `CHECKS 10/10`; no `CHECK FAIL`, no `UNDRA-RN failed|error`, no native crash in any.
+`dumpsys meminfo` Native Heap (Heap Alloc KB / total PSS KB): launch 112,565 / 235,632; after 5 reloads 100,561 /
+227,770; 10: 101,567 / 230,534; 15: 100,091 / 229,065; 20: 100,595 / 229,941. The frame-source counters (the 66
+reloads above) were measured on the tip before this merge; the native C++ did not change in it.
