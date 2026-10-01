@@ -29,6 +29,17 @@ enum StandardPorts {
         static let request: UInt32 = fnv1a32("Http.request")
     }
 
+    /// `Kv`, async, every method with the `StorageError` channel (ADR-049):
+    ///
+    ///     get(key: String) -> Result<Option<Bytes>, StorageError>
+    ///     set(key: String, value: Bytes) -> Result<(), StorageError>
+    ///     delete(key: String) -> Result<(), StorageError>      a missing key is not an error
+    ///     list(prefix: String) -> Result<Vec<String>, StorageError>   ascending
+    ///
+    /// A success answers port status 0 with the encoded `Ok` value; a failure answers status 1
+    /// with the encoded `StorageError` (an `UndraPortError`). Status 2 ("unavailable") is left for
+    /// a port with no adapter and for an adapter bug (an untyped throw), and the core reads it as
+    /// `StorageError::Unavailable`.
     enum Kv {
         static let portId: UInt32 = fnv1a32("port.Kv")
         static let get: UInt32 = fnv1a32("Kv.get")
@@ -37,6 +48,8 @@ enum StandardPorts {
         static let list: UInt32 = fnv1a32("Kv.list")
     }
 
+    /// `SecureStore`: the same four methods, shapes and `StorageError` channel as ``Kv``, under
+    /// its own ids.
     enum SecureStore {
         static let portId: UInt32 = fnv1a32("port.SecureStore")
         static let get: UInt32 = fnv1a32("SecureStore.get")
@@ -45,6 +58,7 @@ enum StandardPorts {
         static let list: UInt32 = fnv1a32("SecureStore.list")
     }
 
+    /// `Fs`, async, every method with the `FsError` channel.
     enum Fs {
         static let portId: UInt32 = fnv1a32("port.Fs")
         static let read: UInt32 = fnv1a32("Fs.read")
@@ -66,6 +80,50 @@ enum StandardPorts {
     enum Lifecycle {
         static let portId: UInt32 = fnv1a32("port.Lifecycle")
         static let changed: UInt32 = fnv1a32("Lifecycle.changed")
+    }
+
+    // MARK: Names, for diagnostics
+
+    /// Every standard port and method, by name: `"Kv"`, `"Kv.get"`, ...
+    private static let portNames: [String: [String]] = [
+        "Clock": ["now_ms", "monotonic_ns"],
+        "Rng": ["fill"],
+        "Log": ["log"],
+        "Http": ["request"],
+        "Kv": ["get", "set", "delete", "list"],
+        "SecureStore": ["get", "set", "delete", "list"],
+        "Fs": ["read", "write", "delete", "list"],
+        "Timer": ["set"],
+        "Connectivity": ["changed"],
+        "Lifecycle": ["changed"],
+    ]
+
+    private static let namesById: (ports: [UInt32: String], methods: [UInt32: String]) = {
+        var ports: [UInt32: String] = [:]
+        var methods: [UInt32: String] = [:]
+        for (port, names) in portNames {
+            ports[fnv1a32("port." + port)] = port
+            for name in names {
+                methods[fnv1a32(port + "." + name)] = port + "." + name
+            }
+        }
+        return (ports, methods)
+    }()
+
+    /// The port's name for a log line: `"Kv"` for a standard port, `"port 0x1a2b3c4d"` otherwise.
+    static func describe(portId: UInt32) -> String {
+        return namesById.ports[portId] ?? "port 0x" + hex8(portId)
+    }
+
+    /// The method's name for a log line: `"Kv.get"` for a standard method, `"method 0x1a2b3c4d"`
+    /// otherwise.
+    static func describe(methodId: UInt32) -> String {
+        return namesById.methods[methodId] ?? "method 0x" + hex8(methodId)
+    }
+
+    private static func hex8(_ value: UInt32) -> String {
+        let digits = String(value, radix: 16)
+        return String(repeating: "0", count: Swift.max(0, 8 - digits.count)) + digits
     }
 }
 

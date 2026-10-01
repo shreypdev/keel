@@ -43,47 +43,47 @@ func keyArgs(_ key: String) -> [UInt8] {
 final class MemoryBackend: KeyValueBackend, @unchecked Sendable {
     private let store = Guarded<[String: [UInt8]]>([:])
 
-    func get(_ key: String) throws -> [UInt8]? {
+    func get(_ key: String) -> [UInt8]? {
         return store.withLock { (values: inout [String: [UInt8]]) -> [UInt8]? in
             return values[key]
         }
     }
 
-    func set(_ key: String, _ value: [UInt8]) throws {
+    func set(_ key: String, _ value: [UInt8]) {
         store.withLock { (values: inout [String: [UInt8]]) -> Void in
             values[key] = value
         }
     }
 
-    func delete(_ key: String) throws {
+    func delete(_ key: String) {
         store.withLock { (values: inout [String: [UInt8]]) -> Void in
             values[key] = nil
         }
     }
 
-    func list(prefix: String) throws -> [String] {
+    func list(prefix: String) -> [String] {
         return store.withLock { (values: inout [String: [UInt8]]) -> [String] in
             return values.keys.filter { $0.hasPrefix(prefix) }.sorted()
         }
     }
 }
 
-/// A backend whose every operation fails.
+/// A backend whose every operation fails with `StorageError.io("broken")`.
 struct BrokenBackend: KeyValueBackend {
-    func get(_ key: String) throws -> [UInt8]? {
-        throw PortAdapterError.failed("broken")
+    func get(_ key: String) throws(StorageError) -> [UInt8]? {
+        throw .io("broken")
     }
 
-    func set(_ key: String, _ value: [UInt8]) throws {
-        throw PortAdapterError.failed("broken")
+    func set(_ key: String, _ value: [UInt8]) throws(StorageError) {
+        throw .io("broken")
     }
 
-    func delete(_ key: String) throws {
-        throw PortAdapterError.failed("broken")
+    func delete(_ key: String) throws(StorageError) {
+        throw .io("broken")
     }
 
-    func list(prefix: String) throws -> [String] {
-        throw PortAdapterError.failed("broken")
+    func list(prefix: String) throws(StorageError) -> [String] {
+        throw .io("broken")
     }
 }
 
@@ -425,16 +425,19 @@ final class KeyValueAdapterTests: XCTestCase {
         }
     }
 
-    func testABackendFailureSurfacesAsAnUnavailableError() async throws {
+    func testABackendFailureSurfacesAsATypedStorageError() async throws {
         let core = try makeCore(FakeTransport())
         let impl = SecureStoreAdapter(backend: BrokenBackend()).makePortImpl(core: core)
         do {
             _ = try await PortCaller.callAsync(impl, StandardPorts.SecureStore.get, keyArgs("x"))
             XCTFail("a broken backend must throw")
+        } catch let error as UndraPortError {
+            XCTAssertEqual(try StorageError.undraDecoded(from: error.body), .io("broken"))
         } catch {
-            XCTAssertTrue(error is PortAdapterError, "\(error)")
+            XCTFail("expected an UndraPortError carrying a StorageError, got \(error)")
         }
-        // Through the runtime the same failure answers with port status "unavailable".
+        // Through the runtime the same failure answers with port status 1 and the encoded error
+        // (ADR-049), not "unavailable".
         let transport = FakeTransport()
         let running = try makeCore(transport)
         running.registerPort(StandardPorts.SecureStore.portId, impl!)
@@ -447,7 +450,10 @@ final class KeyValueAdapterTests: XCTestCase {
         XCTAssertEqual(outcome, .async)
         let answered = await waitUntil { transport.portReplies.count == 1 }
         XCTAssertTrue(answered)
-        XCTAssertEqual(transport.portReplies[0], Wire.PortReply(portCallId: 3, status: .unavailable))
+        XCTAssertEqual(
+            transport.portReplies[0],
+            Wire.PortReply(portCallId: 3, status: .error, body: ArraySlice(StorageError.io("broken").undraEncoded()))
+        )
     }
 }
 
@@ -577,7 +583,15 @@ final class FsAdapterTests: XCTestCase {
         XCTAssertEqual(FsAdapter.map(CocoaError(.fileReadNoSuchFile)), .notFound)
         XCTAssertEqual(FsAdapter.map(CocoaError(.fileReadNoPermission)), .denied)
         XCTAssertEqual(FsAdapter.map(CocoaError(.fileWriteNoPermission)), .denied)
-        guard case .io? = Optional(FsAdapter.map(CocoaError(.fileWriteOutOfSpace))) else {
+        // Out of space is `Full` (ADR-049), however Foundation spells it.
+        XCTAssertEqual(FsAdapter.map(CocoaError(.fileWriteOutOfSpace)), .full)
+        XCTAssertEqual(FsAdapter.map(POSIXError(.ENOSPC)), .full)
+        XCTAssertEqual(FsAdapter.map(POSIXError(.EDQUOT)), .full)
+        XCTAssertEqual(
+            FsAdapter.map(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError, userInfo: [NSUnderlyingErrorKey: POSIXError(.ENOSPC)])),
+            .full
+        )
+        guard case .io? = Optional(FsAdapter.map(CocoaError(.fileWriteUnknown))) else {
             return XCTFail("other Cocoa errors are Io errors")
         }
         guard case .io? = Optional(FsAdapter.map(TestFailure(description: "x"))) else {
