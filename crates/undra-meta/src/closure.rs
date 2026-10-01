@@ -17,9 +17,10 @@
 //! the `undra.types.<fingerprint>` keys of `undra-query`), so a later build can decode the old
 //! bytes by name and migrate them. [`StoresClosure`] is the multi-store form a snapshot carries.
 //!
-//! Canonical form: `serde_json`, no whitespace, struct fields in declaration order, records and
-//! enums sorted by name, variants by index; a field's or signal's `default` flag is written only
-//! when it is `true`.
+//! Canonical form: the JSON `serde_json` writes for these types (no whitespace, struct fields in
+//! declaration order), records and enums sorted by name, variants by index; a field's or signal's
+//! `default` flag is written only when it is `true`. It is written and read by hand
+//! (`closure_json.rs`), because every core does both and `serde`'s code for them is large.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -145,8 +146,7 @@ impl TypeClosure {
     /// The canonical JSON the fingerprint is computed over, and what is persisted next to data.
     #[must_use]
     pub fn canonical_json(&self) -> String {
-        // Only strings, integers, booleans and sequences: serializing cannot fail.
-        serde_json::to_string(self).expect("closure types always serialize to JSON")
+        crate::closure_json::write_type_closure(self)
     }
 
     /// `fnv1a64` of [`canonical_json`](Self::canonical_json).
@@ -155,13 +155,14 @@ impl TypeClosure {
         fnv1a64(self.canonical_json().as_bytes())
     }
 
-    /// Parses a persisted closure.
+    /// Parses a persisted closure (any JSON of its shape: whitespace and key order are free,
+    /// unknown keys are ignored).
     ///
     /// # Errors
     ///
-    /// The `serde_json` error for anything that is not a closure's JSON.
-    pub fn from_json(json: &str) -> Result<TypeClosure, serde_json::Error> {
-        serde_json::from_str(json)
+    /// [`ClosureJsonError`](crate::ClosureJsonError) for anything that is not a closure's JSON.
+    pub fn from_json(json: &str) -> Result<TypeClosure, crate::ClosureJsonError> {
+        crate::closure_json::read_type_closure(json)
     }
 
     /// The record called `name`, if the closure reaches one.
@@ -226,16 +227,16 @@ impl StoresClosure {
     /// The canonical JSON: the description bytes of a snapshot.
     #[must_use]
     pub fn canonical_json(&self) -> String {
-        serde_json::to_string(self).expect("closure types always serialize to JSON")
+        crate::closure_json::write_stores_closure(self)
     }
 
     /// Parses a snapshot's description.
     ///
     /// # Errors
     ///
-    /// The `serde_json` error for anything that is not a description.
-    pub fn from_json(json: &str) -> Result<StoresClosure, serde_json::Error> {
-        serde_json::from_str(json)
+    /// [`ClosureJsonError`](crate::ClosureJsonError) for anything that is not a description.
+    pub fn from_json(json: &str) -> Result<StoresClosure, crate::ClosureJsonError> {
+        crate::closure_json::read_stores_closure(json)
     }
 
     /// The described store with `type_id`.
