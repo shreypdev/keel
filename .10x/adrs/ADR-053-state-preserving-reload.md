@@ -1,6 +1,6 @@
 # ADR-053: `undra dev` carries the core's state across a rebuild: the dev server snapshots the old core, restores it into the new one, and the clients resume
 
-Status: **Proposed** (2026-10-01, piece B3 of the v1.x plan, `wt/dev-reload`). Touches the dev server and its
+Status: **Accepted** (2026-10-01, piece B3 of the v1.x plan, `wt/dev-reload`; the integrator accepted it with the four decisions at the end, which supersede the text above where they differ). Touches the dev server and its
 generated runner (`undra-cli`: `commands/dev.rs`, `runner.rs`, `templates/runner/main.rs`), `undra-transport`
 (`ServerConfig`, `Server::suspend`, two small session hooks), the three platform runtimes (one optional callback,
 `onDevNotice`; SPEC section 17) and the three dev status bars. It does **not** touch the envelope (3.2), any
@@ -194,10 +194,10 @@ Nothing changes in the protocol: **a reload is, to a client, ADR-051's reconnect
    reloads its core, which is today's behaviour: the fallback for every failure is the loop as it is now.
 
 **The message.** The new server sends one `Log` record with target **`undra::dev`** (level 2, the message is the
-sentence to show) to the first client that attaches within 30 seconds of its start: a client that **resumed**
-gets `Reloaded, state kept` (plus `(2 objects not carried over)` when `lost > 0`); a **new** client (one whose
-session was not carried and that loaded a fresh core) gets `Reloaded, state reset: <reason>`. Each is sent once. It
-is a normal `Log` envelope: SPEC 5.10 already says the inspector is a consumer of the same stream, and a client that
+sentence to show) to every client that attaches within 30 seconds of its start, once per client (per session
+token): a client that **resumed** gets `Reloaded, state kept` (plus `(2 objects not carried over)` when
+`lost > 0`); a **new** client (one whose session was not carried and that loaded a fresh core) gets
+`Reloaded, state reset: <reason>`. It is a normal `Log` envelope: SPEC 5.10 already says the inspector is a consumer of the same stream, and a client that
 ignores it loses nothing. The runtimes route a record whose target is `undra::dev` to one new optional callback
 **in addition to** their log sink:
 
@@ -324,12 +324,26 @@ defined (4001 → load a new core; 1008 → schema mismatch). The feature can on
   (`snapshot/encode_100kb`, `snapshot/restore_100kb`, `snapshot/restore_1mb`); the swap's end-to-end time is
   reported in the piece's record, not gated (it is dominated by the process start).
 
-## Open decisions for the integrator
+## Decisions (2026-10-01, the integrator)
 
-1. **`onDevNotice` in the three runtimes** (recommended) versus no runtime change and the bars reading the log
-   through each platform's own route (not possible on Kotlin without a runtime change).
-2. **Resume when some retained objects are not restorable** (recommended, with the count shown) versus 4001 for the
-   whole session.
-3. **`undra dev --no-keep-state`** (recommended: five lines, the escape hatch for "my logic changed under the
-   restored state") versus none.
-4. **Limits**: 16 MiB of snapshot, 2 s of `settle`, 30 s of notice window.
+1. **`onDevNotice` is accepted**, with three constraints. (a) Only `undra dev`'s server emits a `undra::dev` record:
+   in-process and production cores never produce one, so each runtime dispatches `onDevNotice` **only from its
+   `remote` transport** (a record with that target arriving through an in-process core's `Log` port is an ordinary
+   log line), and the option is documented as dev-only and inert otherwise; a test per runtime asserts that an
+   in-process core never fires it. (b) The notice goes **once to every client that attaches within the window**, not
+   only the first (a simulator and an emulator are often attached together, taking turns on the one slot): the server
+   remembers which session tokens it told, so a client that reconnects again inside the window is not told twice;
+   a client with no token is told per connection. (c) The option is additive and **last** in every signature, so
+   generated code and existing call sites do not move.
+2. **Resume anyway and show `(N objects not carried over)`.** The stale handles keep today's status 5 path.
+   `docs/DEV_LOOP.md` says what an app does with a stale query handle after a reload: run the query again (re-mount
+   the screen, or construct the query again).
+3. **`undra dev --no-keep-state`: yes.**
+4. **The limits stand**: 16 MiB of snapshot, 2 s of `settle`, 30 s of notice window. The cap and the settle are named
+   constants with a one-line reason each. Over the cap the swap falls back to fresh state and the notice says
+   `Reloaded, state reset: snapshot over 16 MiB`.
+
+Also required of the evidence: the device proof shows the notice text on the Android dev bar (the `undra` AVD,
+shared: used, never killed) and on the iOS dev bar; the CLI integration test asserts the counter value after a
+reload and `state reset` after a schema change; the runtime-side diff stays additive (Track A touches
+`UndraCore.kt`, `core.ts` and `UndraCore.swift`).
