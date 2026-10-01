@@ -4,38 +4,38 @@ import PlaygroundCore
 import XCTest
 
 extension ContractScenarios {
-    // MARK: S19
+    // MARK: S20
 
-    /// S19, the native variant (scenarios.md, platform notes): steps 1, 2, 4 (what the harness's failed
+    /// S20, the native variant (scenarios.md, platform notes): steps 1, 2, 4 (what the harness's failed
     /// first read of the queue did) and 5. Step 3 needs a fresh core and is not run on native.
     func testS19_storageFailuresAreTyped() async {
-        await scenario("S19", "storage failures are typed") {
+        await scenario("S20", "storage failures are typed") {
             let core = try self.core
             let server = Fixture.shared.server
             let kv = Fixture.shared.kv
             let log = Fixture.shared.log
-            let path = "/lists/s19/todos"
+            let path = "/lists/s20/todos"
             let panicsBefore = core.stat("panics")
             let logBefore = log.all.count
             let statusBefore = try storageStatus(ctx: core)
             defer { kv.heal() }
-            let s19Key = Persisted.cacheKey(queryId: UndraIds.Queries.remoteTodos, arguments: "s19".undraEncoded())
+            let s20Key = Persisted.cacheKey(queryId: UndraIds.Queries.remoteTodos, arguments: "s20".undraEncoded())
             let item = RemoteTodo(id: 1, title: "Stored", done: false)
             server.respond("GET", path, json: [ServerTodo(id: 1, title: "Stored", done: false)])
 
             // 1. Every write fails `Full`: the item shows, nothing of it is stored, one WARN says so, nothing panicked.
             kv.fail(.set, with: .full)
-            let handle = try RemoteTodosQueryHandle(list: "s19", ctx: core)
+            let handle = try RemoteTodosQueryHandle(list: "s20", ctx: core)
             defer { handle.close() }
-            try await waitUntil("the s19 item to show") { handle.data == [item] && !handle.fetching }
+            try await waitUntil("the s20 item to show") { handle.data == [item] && !handle.fetching }
             try await quietFor(milliseconds: 300)
             try await waitUntil("the failed write to be counted") {
                 try storageStatus(ctx: core).writeFailed > statusBefore.writeFailed
             }
-            try check(kv.value(for: s19Key) == nil, "\(s19Key) is in the Kv although every write failed")
-            try check(!kv.operations.contains { $0.key == s19Key && $0.isSet }, "a write of \(s19Key) succeeded")
-            try check(kv.operations.contains { $0.key == s19Key && $0.kind == .set && $0.failure == .full },
-                      "no write of \(s19Key) was attempted (and failed Full)")
+            try check(kv.value(for: s20Key) == nil, "\(s20Key) is in the Kv although every write failed")
+            try check(!kv.operations.contains { $0.key == s20Key && $0.isSet }, "a write of \(s20Key) succeeded")
+            try check(kv.operations.contains { $0.key == s20Key && $0.kind == .set && $0.failure == .full },
+                      "no write of \(s20Key) was attempted (and failed Full)")
             let warnings = Array(log.all.dropFirst(logBefore)).filter {
                 $0.level == 3 && $0.target == "undra::query" && $0.message.contains("storage is full")
             }
@@ -46,8 +46,8 @@ extension ContractScenarios {
             // 2. The Kv heals: a refetch stores the entry, in format 2, next to the description of its type.
             kv.heal()
             handle.invalidate()
-            try await waitUntil("the s19 entry to be stored") { kv.value(for: s19Key) != nil }
-            let stored = try require(kv.value(for: s19Key), "the s19 entry")
+            try await waitUntil("the s20 entry to be stored") { kv.value(for: s20Key) != nil }
+            let stored = try require(kv.value(for: s20Key), "the s20 entry")
             try checkEqual(Array(stored.prefix(2)), [2, 0], "the format of the stored entry")
             let fingerprint = try require(Persisted.fingerprint(stored, at: 10), "the fingerprint of the stored entry")
             let typesKey = Persisted.typesKey(fingerprint)

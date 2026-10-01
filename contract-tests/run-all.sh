@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs the contract scenarios on every platform and prints the scenario grid (S01 to S19 on every
-# platform, S20 and S21 on ts only; scenarios.md).
+# Runs the contract scenarios on every platform and prints the scenario grid (scenarios.md: the
+# ids check.sh expects of each platform; a cell no platform's check expects reads n/a).
 #
 #   contract-tests/run-all.sh                 # ts, kotlin and swift (swift only on macOS)
 #   contract-tests/run-all.sh ts kotlin       # a subset
@@ -31,13 +31,14 @@ done
 
 echo
 printf '%-5s' ""; for p in "${platforms[@]}"; do printf '%-9s' "$p"; done; echo
-for n in $(seq -w 1 21); do
+for n in $(seq -w 1 22); do
   id="S$n"
   printf '%-5s' "$id"
   for p in "${platforms[@]}"; do
     cell="$(grep -E " $id " "$LOGS/$p.grade" | awk '{print $3}')"
-    if [ -z "$cell" ] && [ "$p" != ts ] && [ "$n" -ge 20 ]; then cell="n/a"; fi
-    printf '%-9s' "${cell:-MISSING}"
+    # check.sh prints a line (pass, FAIL, SKIP or MISSING) for every id it expects of the platform.
+    if [ -z "$cell" ]; then cell="n/a"; fi
+    printf '%-9s' "$cell"
   done
   echo
 done

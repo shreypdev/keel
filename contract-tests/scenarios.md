@@ -2,8 +2,9 @@
 
 This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty-one
 scenarios against the **real playground core** (`examples/playground/core`, the same Rust crate the
-apps run), through the real boundary. S01 to S19 run on every platform; S20 and S21 are about the web
-host (worker mode and crash recovery, ADR-049) and run on TypeScript only:
+apps run), through the real boundary. S01 to S18 and S20 run on every platform; S21 and S22 are about
+the web host (worker mode and crash recovery, ADR-049) and run on TypeScript only. S19 is reserved for
+ADR-039 (derived keyed lists), whose piece defines it:
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
@@ -12,8 +13,8 @@ host (worker mode and crash recovery, ADR-049) and run on TypeScript only:
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI and the real static core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S19, plus S20 and
-S21 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 59
+`contract-tests/check.sh` fails unless every id of the platform is `PASS` (S01 to S18 and S20, plus S21
+and S22 on TypeScript; a `SKIP` needs its reason here, in the platform notes of the scenario). That is 59
 cells: 19 on Swift, 19 on Kotlin, 21 on TypeScript.
 
 ## The harness (the same on every platform)
@@ -37,7 +38,7 @@ everything a UI would use and the runtime's own API (`UndraCore`) for what bindi
     operations, or every operation until it heals the store, of one kind (or of one key) fail with a
     `StorageError` (`Full`, `Locked`, `Io(..)`, ...), which the adapter answers as the port's typed
     error (reply status 1), exactly like the platform's own adapters do. On Swift and Kotlin the first
-    `get` of `undra.query.queue2` fails `Locked` (S19 step 4: what an app launched before the device's
+    `get` of `undra.query.queue2` fails `Locked` (S20 step 4: what an app launched before the device's
     first unlock reads). `Log`: captures `(level, target, message)`. `Rng`, `Timer`: the platform
     defaults (real timers; a real `setTimeout` / Rust timer thread).
   * `Connectivity`: the test emits events itself (`core.event(Connectivity.changed, online, kind)`;
@@ -305,7 +306,7 @@ handle observes and **records every value of `data`**.
 
 List `s14`; the server serves `[]`. A handle observes it. Before step 1 the runner waits until
 `storage_status().queue_readable` is `true` (on Swift and Kotlin the harness failed the first read of the
-queue, S19 step 4; the client reads it again after a backoff of about a second).
+queue, S20 step 4; the client reads it again after a backoff of about a second).
 
 1. The test emits `Connectivity.changed(online=false, kind=None)` and waits 50 ms.
 2. POST `/lists/s14/todos` is scripted to fail with `HttpError.Network("offline")`.
@@ -492,27 +493,29 @@ returns; TypeScript awaits them.
    heard `1, 2, ..., 10`; a Kotlin `StateFlow` conflates and SwiftUI renders once per frame, so they
    check the mirror's counter only.)
 
-### S19 storage failures are typed (ADR-049)
+### S19 (reserved: ADR-039, derived keyed lists)
+
+### S20 storage failures are typed (ADR-049)
 
 The storage ports have an error channel: an adapter that cannot store answers `StorageError`, and the core
-neither panics nor traps (a wasm core would have trapped before ADR-049). List `s19`; the server serves one item.
+neither panics nor traps (a wasm core would have trapped before ADR-049). List `s20`; the server serves one item.
 
-1. The harness `Kv` fails every `set` with `StorageError.Full`. `remote_todos("s19")` is observed; it shows the
-   item. After 300 ms (the write is debounced 250 ms) no key `undra.query.cache2.<query id>.*` of the `s19`
+1. The harness `Kv` fails every `set` with `StorageError.Full`. `remote_todos("s20")` is observed; it shows the
+   item. After 300 ms (the write is debounced 250 ms) no key `undra.query.cache2.<query id>.*` of the `s20`
    entry is in the `Kv`; `storage_status().write_failed` grew by at least 1; the `Log` port received a WARN
    record of target `undra::query` whose message contains `storage is full`, exactly once however many writes
    failed; `stats().panics` did not grow and the core answers the next call. (In a core that has not yet
    stored the description of the query's type, the first failing write is the key `undra.types.<fingerprint>`,
    written before the entry, and the entry's own write is not attempted: either way no entry key is stored.)
-2. The `Kv` heals. `invalidate()` on the handle refetches; within 5 s the `Kv` holds the `s19` entry, a value
+2. The `Kv` heals. `invalidate()` on the handle refetches; within 5 s the `Kv` holds the `s20` entry, a value
    whose first two bytes are `02 00` (format 2) and whose fingerprint (bytes 10 to 18) is the one of the key
    `undra.types.<fingerprint>` it also holds. The data still shows.
 3. A failed read of a cache entry starts it empty: (TypeScript) a fresh core whose `Kv` holds that entry and
-   fails one `get` with `StorageError.Io("busy")` shows no data for `s19` until it fetched, and the entry's key
+   fails one `get` with `StorageError.Io("busy")` shows no data for `s20` until it fetched, and the entry's key
    is still in the `Kv` afterwards; (Swift, Kotlin) not run, the core is not reloaded.
 4. An unreadable queue is never overwritten (ADR-049 decision 1.4).
    * TypeScript: a fresh core is loaded with a `Kv` whose `get` of `undra.query.queue2` fails `Locked`, and is
-     told it is offline. `storage_status().queue_readable == false`. `save_note("s19", "late")` (POST failing
+     told it is offline. `storage_status().queue_readable == false`. `save_note("s20", "late")` (POST failing
      with `HttpError.Network("offline")`) stays pending in memory: for 500 ms the `Kv` sees **no** `set` of
      `undra.query.queue2` and `pending == 1`. The `Kv` heals; `Lifecycle.changed(Active)`: within 5 s
      `queue_readable`, a `set` of `undra.query.queue2` (count 1); online: counted from the online event, the note
@@ -524,13 +527,13 @@ neither panics nor traps (a wasm core would have trapped before ADR-049). List `
 5. No step of this scenario panicked or trapped (`stats().panics` unchanged), and the core is the one loaded
    at the start (TypeScript: the fresh cores of steps 3 and 4 are closed).
 
-### S20 worker mode answers synchronous ports in the worker (ADR-049; TypeScript only)
+### S21 worker mode answers synchronous ports in the worker (ADR-049; TypeScript only)
 
 The playground core in `wasm-worker` mode, loaded with `worker.ports` pointing at a module that registers the
 playground's `Locale` port (`hello()` answers `"Hola"`).
 
-1. `remote_todos("s20")` observed: it shows the server's data and `updated_at` is within a minute of `Date.now()`
-   (the core read the `Clock` in the worker); `create_remote_todo("s20", "x")` reaches the server with an
+1. `remote_todos("s21")` observed: it shows the server's data and `updated_at` is within a minute of `Date.now()`
+   (the core read the `Clock` in the worker); `create_remote_todo("s21", "x")` reaches the server with an
    `Idempotency-Key` that is a UUID v4 made from the worker's `crypto.getRandomValues` (two calls carry
    different keys); a log record the core wrote reaches the main thread's `Log` adapter. Nothing trapped.
 2. `localized_greeting("Ada") == "Hola, Ada"`: the app's synchronous port answered in the worker.
@@ -541,13 +544,13 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
 4. The worker protocol is version 3: the `init` message carries `asyncPorts` (the host's asynchronous ports, `Http`
    and `Kv` among them) and the `portsModule` URL.
 
-### S21 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only)
+### S22 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only)
 
 `wasm-main`, loaded with `recovery: { snapshotEveryMs: 50, maxRestarts: 3, perMs: 60_000 }`, `onCoreRestarted`,
 `onError` and `onClose` recorded.
 
-1. `Counter` observed, `add(5)`; `remote_todos("s21")` observed through its generated handle, showing the server's
-   one item. Wait until the `s21` entry is persisted in the `Kv` (its write is debounced 250 ms; the re-created
+1. `Counter` observed, `add(5)`; `remote_todos("s22")` observed through its generated handle, showing the server's
+   one item. Wait until the `s22` entry is persisted in the `Kv` (its write is debounced 250 ms; the re-created
    handle of step 4 reads it back) and a snapshot was taken.
 2. A call is started and left in flight (`add_later(1, 2)` with a delay, or a `Probe.hang()`), then
    `explode("kaboom")` is called: it rejects as a failed call, the in-flight call rejects with
@@ -557,7 +560,7 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
    `restoredFromAgeMs` under a few seconds, `rejectedCalls >= 1` and the stale objects; `onError` received an
    `UndraCoreRestarted` with the same.
 4. The same `Counter` wrapper shows `count == 5` (restored, same handle) and `add(1)` makes it 6; the
-   `remote_todos("s21")` handle was re-created (its wrapper still shows the item and, after the runner calls
+   `remote_todos("s22")` handle was re-created (its wrapper still shows the item and, after the runner calls
    `configure_remote` again, since configuration is core state outside stores and is lost with the instance
    that trapped, `invalidate()` refetches through it); the `Probe` (not a store) is stale and fails with a typed
    refusal.
@@ -587,8 +590,8 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
   shrink them.
 * S14 steps 7 to 9 and S15 steps 11 to 14 need build B (see "Two builds"). TypeScript loads both wasm
   modules in one process; Swift and Kotlin run build B's steps in a second process after the main run.
-* S19 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
+* S20 step 4 differs by platform: a fresh TypeScript core can be loaded with a `Kv` whose queue reads fail, so
   the TypeScript column walks the whole "unreadable, then readable on `Active`" path; Swift and Kotlin load one
-  core per process, so their harness fails the first read of the queue at load and S19 checks what that did.
-* S20 and S21 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
+  core per process, so their harness fails the first read of the queue at load and S20 checks what that did.
+* S21 and S22 are TypeScript-only: worker mode and crash recovery are web features (ADR-049; a native core
   contains a panic without trapping, SPEC 5.6). `check.sh` does not expect them from Swift or Kotlin.

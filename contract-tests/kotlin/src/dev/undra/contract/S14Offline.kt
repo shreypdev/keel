@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 fun s14Offline(w: World) {
     w.configureRemoteOnce()
     Handover.discard("s14")
-    // The harness failed the first read of the queue (S19 step 4); the client reads it again after a backoff.
+    // The harness failed the first read of the queue (S20 step 4); the client reads it again after a backoff.
     awaitUntil("the offline queue to be readable") { storageStatus().queueReadable }
     val list = "s14"
     w.server.respond(HttpMethod.GET, "${World.BASE_URL}/lists/$list/todos", 200, "[]")

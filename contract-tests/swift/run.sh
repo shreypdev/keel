@@ -2,7 +2,7 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all nineteen (S01 to S19), then the check
+#   contract-tests/swift/run.sh                 all nineteen (S01 to S20), then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #
 # What it does:

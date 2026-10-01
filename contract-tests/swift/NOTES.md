@@ -1,6 +1,6 @@
 # Swift contract runner: notes
 
-`run.sh` runs the nineteen scenarios of `../scenarios.md` that Swift runs (S01 to S19: `UndraRuntime` over
+`run.sh` runs the nineteen scenarios of `../scenarios.md` that Swift runs (S01 to S20: `UndraRuntime` over
 the C ABI, the real playground core through `libundra_core.dylib`, the bindings `undra bindgen` generated)
 and pipes the `SCENARIO` lines through `../check.sh swift`. The build-B steps of S14 and S15 run in a second
 process over the second build of the core (see "Two builds" below).
@@ -32,7 +32,7 @@ the core's `build.rs` turns into `cfg(playground_v2)`; the CLI rebuilds when onl
 staged in `.build/core-b`, then build A, staged in `.build/core` where `Package.swift` links it. The script
 stops if the two libraries are identical.
 
-The main `swift test` runs S01 to S19 against build A. S14 step 7 writes `.build/migration/s14.json` (every
+The main `swift test` runs S01 to S20 against build A. S14 step 7 writes `.build/migration/s14.json` (every
 key and value of the harness `Kv` once both notes wait in the queue, and the `Idempotency-Key` of the failed
 `save_note` POST); S15 step 11 writes `s15.json` (snapshots `P` and `L` and the `Profile` handle). Each
 scenario deletes its file first, and `run.sh` deletes the directory before the run, so a failed scenario
@@ -72,13 +72,13 @@ fails. A filtered `run.sh` (any arguments) skips this phase.
 * **S14.7 replays build A's notes after the handover.** Once the `Kv` contents and the idempotency key are
   written to the handover file, the runner answers the notes' POST with 201 and goes online, so both notes
   replay in build A and the queue is empty for the rest of the run (the reloads of S16 to S18 would
-  otherwise hydrate and retry it, and S19's failing writes would meet it). Build B starts from the contents
+  otherwise hydrate and retry it, and S20's failing writes would meet it). Build B starts from the contents
   kept before that.
-* **S19 runs its native variant**: steps 1, 2, 4 (the harness failed the first `get` of `undra.query.queue2`
+* **S20 runs its native variant**: steps 1, 2, 4 (the harness failed the first `get` of `undra.query.queue2`
   with `Locked` when the process loaded its first core; the `Kv`'s operation log survives the reloads of S16
-  to S18) and 5; step 3 prints nothing. Step 1 also checks that a write of the `s19` entry was attempted and
-  failed `Full`. The `s19` entry's key is computed (`undra.query.cache2.<query id>.<fnv1a64 of the encoded
-  arguments>`). S19 is the last scenario of the main run.
+  to S18) and 5; step 3 prints nothing. Step 1 also checks that a write of the `s20` entry was attempted and
+  failed `Full`. The `s20` entry's key is computed (`undra.query.cache2.<query id>.<fnv1a64 of the encoded
+  arguments>`). S20 is the last scenario of the main run.
 * **S16.1 "before the core is initialised".** `InprocTransport.start` reads `undra_schema_hash()` (which
   needs no running core) and compares it before it claims the process or calls `undra_init`. The scenario
   checks what a caller can see (`UndraSchemaMismatchError` with `expected` and `got`, hex in the message, no

@@ -5,16 +5,16 @@ import { BASE_URL, bootWorker } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
 import { step, waitFor } from "../src/wait.js";
 
-// S20 worker mode answers synchronous ports in the worker (ADR-049; TypeScript only): the playground core in
+// S21 worker mode answers synchronous ports in the worker (ADR-049; TypeScript only): the playground core in
 // `wasm-worker` mode, with `worker.ports` pointing at a module that implements the app's synchronous `Locale` port in
 // the worker. The worker is `runWorker` on a MessageChannel in this thread (src/harness.ts, `bootWorker`).
 
-const LIST = "s20";
+const LIST = "s21";
 const TODOS = `${BASE_URL}/lists/${LIST}/todos`;
 const PORTS_MODULE = new URL("../src/locale-ports.ts", import.meta.url).href;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-test("S20 worker mode answers synchronous ports in the worker", async () => {
+test("S21 worker mode answers synchronous ports in the worker", async () => {
   const worker = await bootWorker({ workerPorts: PORTS_MODULE });
   const { core, server, log, closed } = worker;
   expect(core.mode).toBe("wasm-worker");

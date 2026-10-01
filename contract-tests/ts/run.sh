@@ -3,7 +3,7 @@
 # the real wasm build of the playground core, in wasm-main mode (and wasm-worker where a scenario says so),
 # under vitest on Node.
 #
-#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S21, grade
+#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S22, grade
 #   contract-tests/ts/run.sh -t S07       # extra arguments go to vitest (here: only scenario S07)
 #
 # Builds with the undra CLI (`undra build -C examples/playground --platform web`, which writes

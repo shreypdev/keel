@@ -7,18 +7,18 @@ import { MemoryKv, Persisted } from "../src/memory-kv.js";
 import { counters } from "../src/stats.js";
 import { sleep, step, waitFor } from "../src/wait.js";
 
-// S19 storage failures are typed (ADR-049): the storage ports have an error channel, so an adapter that cannot
+// S20 storage failures are typed (ADR-049): the storage ports have an error channel, so an adapter that cannot
 // store answers a `StorageError` and the core neither panics nor traps (a wasm core would have trapped before).
 // The TypeScript variant runs every step, steps 3 and 4 on fresh cores.
 
-const LIST = "s19";
+const LIST = "s20";
 const URL = `${BASE_URL}/lists/${LIST}/todos`;
 const NOTES = `${BASE_URL}/lists/${LIST}/notes`;
 const item: RemoteTodo = { id: 1, title: "Stored", done: false };
-/** The key of the `s19` entry of `remote_todos`: the query id and the fnv1a64 of its encoded argument. */
+/** The key of the `s20` entry of `remote_todos`: the query id and the fnv1a64 of its encoded argument. */
 const ENTRY_KEY = Persisted.cacheKey(UndraIds.Queries.remoteTodos, encodeValue(codecs.string, LIST));
 
-test("S19 storage failures are typed", async () => {
+test("S20 storage failures are typed", async () => {
   const { core, server, kv, log } = await boot();
   await configureRemote({ baseUrl: BASE_URL }, core);
   server.on("GET", URL, replies.json(200, [item]));
@@ -31,7 +31,7 @@ test("S19 storage failures are typed", async () => {
     kv.fail("set", new StorageError.Full());
     handle = await RemoteTodosQueryHandle.create(LIST, core);
     const h = handle;
-    await waitFor("the s19 item to show", () => h.data.peek()?.[0]?.id === 1 && !h.fetching.peek());
+    await waitFor("the s20 item to show", () => h.data.peek()?.[0]?.id === 1 && !h.fetching.peek());
     await sleep(300); // the write is debounced 250 ms
     await waitFor("the failed write to be counted", async () => (await storageStatus(core)).writeFailed > statusBefore.writeFailed);
     expect(kv.peek(ENTRY_KEY), `${ENTRY_KEY} is not in the Kv`).toBeUndefined();
@@ -52,7 +52,7 @@ test("S19 storage failures are typed", async () => {
     kv.heal();
     const h = handle as RemoteTodosQueryHandle;
     await h.invalidate();
-    const stored = await waitFor("the s19 entry to be stored", () => kv.peek(ENTRY_KEY));
+    const stored = await waitFor("the s20 entry to be stored", () => kv.peek(ENTRY_KEY));
     expect([...stored.subarray(0, 2)], "the format of the stored entry").toEqual([2, 0]);
     const fingerprint = Persisted.fingerprint(stored, 10) as bigint;
     expect(kv.peek(Persisted.typesKey(fingerprint)), `the Kv holds ${Persisted.typesKey(fingerprint)}`).toBeDefined();

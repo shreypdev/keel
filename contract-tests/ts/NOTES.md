@@ -1,8 +1,8 @@
 # Notes on the TypeScript column
 
-`run.sh` runs S01..S21 of `../scenarios.md` against the real wasm build of the playground core
+`run.sh` runs S01..S22 of `../scenarios.md` against the real wasm build of the playground core
 (`examples/playground/build/web/undra_core.wasm`, built by `undra build -C examples/playground --platform web`)
-through `@undra/runtime` in `wasm-main` mode (S17 step 6 and S20 in `wasm-worker` mode), on Node, under vitest. `src/reporter.ts` prints one
+through `@undra/runtime` in `wasm-main` mode (S17 step 6 and S21 in `wasm-worker` mode), on Node, under vitest. `src/reporter.ts` prints one
 `SCENARIO Sxx PASS|FAIL|SKIP <title>` line per scenario; `../check.sh ts` grades them. `NOTE` lines carry
 measurements (S03: ns per sync call; S07: how far the producer ran).
 
@@ -78,17 +78,17 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   in three runs; the hold makes the order certain.)
 * S15.11 to S15.14 run at the end of S15 in the same build-A core; snapshot `P` holds the stores of steps 1 to 10 as
   well, which build B restores on the fast path. Step 14 refuses the 8 zero bytes in both cores.
-* S19.1: in a fresh core the description of the entry's type (`undra.types.<fingerprint>`) is written before the
+* S20.1: in a fresh core the description of the entry's type (`undra.types.<fingerprint>`) is written before the
   entry and fails first, so the entry's own write never starts; the step checks that a write failed `Full`, that the
   entry is not in the `Kv`, the counter and the one WARN (Swift and Kotlin share a core whose description was stored by
-  an earlier scenario, so there the entry's write is the one that fails). S19.3: "no data until it fetched" is the
+  an earlier scenario, so there the entry's write is the one that fails). S20.3: "no data until it fetched" is the
   first non-empty `data` coming no sooner than the delayed reply of the fetch (300 ms); a hydrated entry would show at
-  once and would not be fetched (it is fresh). S19.4: the replay after `Active` and the online event is counted from
+  once and would not be fetched (it is fresh). S20.4: the replay after `Active` and the online event is counted from
   the online event (the attempt made while offline came before).
-* S20 loads `src/locale-ports.ts` as `worker.ports` (the runtime's worker imports it through vitest's module loader;
+* S21 loads `src/locale-ports.ts` as `worker.ports` (the runtime's worker imports it through vitest's module loader;
   a real worker imports it as an ES module). Step 3's refusal happens before anything is posted to the worker. Step 4
   reads the `init` message the harness recorded (`bootWorker`'s `posted`).
-* S21.4: the core's configuration (`configure_remote`, not store state) went with the instance that trapped (ADR-049
+* S22.4: the core's configuration (`configure_remote`, not store state) went with the instance that trapped (ADR-049
   3.5); the scenario configures the new one before `invalidate()` refetches through the re-created handle. The query's
   entry is persisted (the scenario waits for it after step 1's 200 ms) so the re-created handle shows the item again.
 * S15.5: the `Uuid` ids of `Todos` count up in their leading bytes, so "above `b`'s" is the string order of the

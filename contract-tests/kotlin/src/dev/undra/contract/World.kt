@@ -81,7 +81,7 @@ class Bootstrap {
     /**
      * The in-memory `Kv` port the core is loaded with. Its first `get` of the offline queue fails `Locked`, as the
      * platform's store answers an app launched before the device's first unlock (scenarios.md, "Adapters"): S14 waits
-     * until the core read the queue again, S19 step 4 checks what it did meanwhile.
+     * until the core read the queue again, S20 step 4 checks what it did meanwhile.
      */
     val kv = MemoryKv().also { it.fail(MemoryKv.Kind.GET, key = Persisted.QUEUE_KEY, error = StorageError.Locked, times = 1) }
 

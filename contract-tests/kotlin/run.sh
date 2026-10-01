@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S19 of contract-tests/scenarios.md on the JVM over
+# The Kotlin column of the contract tests: runs S01..S20 of contract-tests/scenarios.md on the JVM over
 # JNI against the real libundra_core of the playground core, then checks all nineteen passed.
 #
 #   contract-tests/kotlin/run.sh
@@ -91,7 +91,7 @@ HANDOVER="$OUT/migration"
 rm -rf "$HANDOVER"
 export UNDRA_CONTRACT_HANDOVER="$HANDOVER"
 CP="$OUT/runtime/main:$CLASSES:$UNDRA_KOTLIN_STDLIB:$UNDRA_KOTLINX_COROUTINES"
-echo "==> running S01..S19 against build A (${CORE_A#"$REPO"/})"
+echo "==> running S01..S20 against build A (${CORE_A#"$REPO"/})"
 mkdir -p "$OUT"
 status=0
 java -Xmx1g -Djava.library.path="$CORE_A" -cp "$CP" dev.undra.contract.MainKt 2>&1 | tee "$OUT/run.log" || status=$?

@@ -6,12 +6,12 @@ import { replies } from "../src/fake-server.js";
 import { Persisted } from "../src/memory-kv.js";
 import { sleep, step, waitFor } from "../src/wait.js";
 
-// S21 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only): `wasm-main` with recovery on.
+// S22 a trapped web core restarts from its last snapshot (ADR-049; TypeScript only): `wasm-main` with recovery on.
 // A panic traps the wasm core; the runtime fails what was in flight with "restarted", instantiates the same module
 // again, restores the last snapshot (stores keep their handles), observes them again and re-creates the query handles.
 // The fourth trap within the window leaves the core dead.
 
-const LIST = "s21";
+const LIST = "s22";
 const TODOS = `${BASE_URL}/lists/${LIST}/todos`;
 const ITEM = { id: 1, title: "Survives", done: false };
 
@@ -20,7 +20,7 @@ function unavailable(error: unknown, reason: string): boolean {
   return error instanceof UndraCallError.Unavailable && error.transport.reason === reason;
 }
 
-test("S21 a trapped web core restarts from its last snapshot", async () => {
+test("S22 a trapped web core restarts from its last snapshot", async () => {
   const restarts: UndraCoreRestarted[] = [];
   const { core, server, kv, closed, runtimeErrors } = await boot({
     load: {
@@ -35,7 +35,7 @@ test("S21 a trapped web core restarts from its last snapshot", async () => {
   let counter: Counter | undefined;
   let query: RemoteTodosQueryHandle | undefined;
 
-  await step("1. a counter at 5 and the s21 query showing the server's item; a snapshot is taken", async () => {
+  await step("1. a counter at 5 and the s22 query showing the server's item; a snapshot is taken", async () => {
     counter = await Counter.create(core);
     await counter.add(5);
     query = await RemoteTodosQueryHandle.create(LIST, core);
@@ -43,7 +43,7 @@ test("S21 a trapped web core restarts from its last snapshot", async () => {
     await waitFor("the query to show the item", () => q.data.peek()?.[0]?.id === 1);
     await sleep(200);
     // The query's entry is persisted (debounced 250 ms): the re-created handle reads it back after the restart.
-    await waitFor("the s21 entry to be persisted", () => kv.peek(Persisted.cacheKey(UndraIds.Queries.remoteTodos, encodeValue(codecs.string, LIST))));
+    await waitFor("the s22 entry to be persisted", () => kv.peek(Persisted.cacheKey(UndraIds.Queries.remoteTodos, encodeValue(codecs.string, LIST))));
   });
 
   const probe = await Probe.create(core);

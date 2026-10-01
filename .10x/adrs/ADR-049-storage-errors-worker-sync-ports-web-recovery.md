@@ -252,9 +252,9 @@ Landed items 1 to 10, with ADR-037 in the same piece. No wire change, no C ABI o
 hash moved once (the standard surface alone is `0xbbf6_f70d_0c56_7f47`). What the code decided where the text left
 room, and the deviations:
 
-* **Scenario numbers.** The provisional S29, S30 and S31 are **S19** (storage failures are typed; every column),
-  **S20** (worker sync ports; TypeScript) and **S21** (web recovery; TypeScript), the next free numbers in
-  `contract-tests/scenarios.md`.
+* **Scenario numbers.** The provisional S29, S30 and S31 are **S20** (storage failures are typed; every column),
+  **S21** (worker sync ports; TypeScript) and **S22** (web recovery; TypeScript), the next free numbers in
+  `contract-tests/scenarios.md` (S19 is ADR-039's, derived lists).
 * **`random` without a signature change** (decision 2.5). A JavaScript exception thrown through wasm frames abandons
   them without unwinding (the core's locks stay held), so the import cannot throw *into* the core. The built-in
   `Rng.fill` instead asks for 16 bytes more, pre-filled with a canary (`undra-rng-canary`); a host that wrote nothing,

@@ -12,14 +12,14 @@ import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.encodeToByteArray
 
 /**
- * S19, the native variant (scenarios.md, platform notes): storage failures are typed (ADR-049). Steps 1, 2, 4 (what the
+ * S20, the native variant (scenarios.md, platform notes): storage failures are typed (ADR-049). Steps 1, 2, 4 (what the
  * harness's failed first read of the queue, when S16 loaded the core, did) and 5; step 3 needs a fresh core and is not
  * run on native.
  */
-fun s19Storage(w: World) {
+fun s20Storage(w: World) {
     w.configureRemoteOnce()
     val core = w.core
-    val list = "s19"
+    val list = "s20"
     val url = "${World.BASE_URL}/lists/$list/todos"
     val panicsBefore = w.stats().panics
     val logBefore = w.log.records.size
@@ -33,7 +33,7 @@ fun s19Storage(w: World) {
         w.kv.fail(MemoryKv.Kind.SET, error = StorageError.Full)
         val handle = RemoteTodosQueryHandle.create(list)
         try {
-            awaitEq("the s19 item", listOf(item)) { handle.data.value }
+            awaitEq("the s20 item", listOf(item)) { handle.data.value }
             Thread.sleep(300) // the write is debounced 250 ms
             awaitUntil("the failed write to be counted") { storageStatus().writeFailed > statusBefore.writeFailed }
             check(w.kv.value(key) == null) { "$key is in the Kv although every write failed" }
@@ -49,7 +49,7 @@ fun s19Storage(w: World) {
             // 2. The Kv heals: a refetch stores the entry, in format 2, next to the description of its type.
             w.kv.heal()
             handle.invalidate()
-            val stored = awaitValue("the s19 entry to be stored") { w.kv.value(key) }
+            val stored = awaitValue("the s20 entry to be stored") { w.kv.value(key) }
             expectEq("the format of the stored entry", listOf<Byte>(2, 0), stored.take(2))
             val fingerprint = Persisted.fingerprint(stored, 10) ?: fail("the stored entry has no fingerprint: ${stored.size} bytes")
             val typesKey = Persisted.typesKey(fingerprint)

@@ -161,7 +161,7 @@ extension ContractScenarios {
             let path = "/lists/s14/todos"
             Handover.discard("s14")
 
-            // The harness failed the first read of the queue (S19.4); the client reads it again after a backoff.
+            // The harness failed the first read of the queue (S20.4); the client reads it again after a backoff.
             try await waitUntil("the offline queue to be readable") { try storageStatus(ctx: core).queueReadable }
 
             server.respond("GET", path, body: "[]")
