@@ -1,4 +1,4 @@
-//! The application core the benchmarks run against: real `#[keel::api]` / `#[keel::store]`
+//! The application core the benchmarks run against: real `#[undra::api]` / `#[undra::store]`
 //! output, exactly what an app would write, so the numbers include the generated dispatchers,
 //! codecs and change-set plumbing rather than hand-rolled stand-ins (constitution R10 in
 //! spirit: bench through the public surface).
@@ -9,17 +9,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use keel::meta::ids;
-use keel::prelude::*;
-use keel::runtime::{Port, Stream, Subscription};
-use keel::wire::{Decode, Encode};
+use undra::meta::ids;
+use undra::prelude::*;
+use undra::runtime::{Port, Stream, Subscription};
+use undra::wire::{Decode, Encode};
 
 // ---------------------------------------------------------------------------------------------
 // Wire fixtures
 // ---------------------------------------------------------------------------------------------
 
 /// A small record: five fields of mixed kinds, about 50 bytes encoded.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record5 {
     pub id: u64,
@@ -31,7 +31,7 @@ pub struct Record5 {
 
 /// The blueprint's "1 KB record": exactly 1,024 encoded bytes (asserted in `fixtures` tests and
 /// when the workloads are built).
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record1k {
     pub id: Uuid,
@@ -43,7 +43,7 @@ pub struct Record1k {
 }
 
 /// A data enum: unit, one-field and multi-field variants.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Shape {
     Empty,
@@ -87,7 +87,7 @@ pub struct Calculator {
     base: i64,
 }
 
-#[keel::api]
+#[undra::api]
 impl Calculator {
     pub fn new(base: i64) -> Self {
         Calculator { base }
@@ -110,7 +110,7 @@ impl Calculator {
 }
 
 /// A free function: no handle to look up.
-#[keel::api]
+#[undra::api]
 pub fn add_one(n: u32) -> u32 {
     n.wrapping_add(1)
 }
@@ -123,12 +123,12 @@ pub fn add_one(n: u32) -> u32 {
 /// transaction: the blueprint's "change-set with 100 dirty signals".
 macro_rules! wide_store {
     ($name:ident; $($field:ident),+ $(,)?) => {
-        #[keel::store]
+        #[undra::store]
         pub struct $name {
             $( $field: Signal<u32>, )+
         }
 
-        #[keel::api(store)]
+        #[undra::api(store)]
         #[allow(clippy::new_without_default)]
         impl $name {
             pub fn new() -> Self {
@@ -159,7 +159,7 @@ wide_store!(Wide100;
 );
 
 /// A list row.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub id: u64,
@@ -168,13 +168,13 @@ pub struct Item {
 }
 
 /// A store with one keyed list: what a todo screen, a feed or a chat is.
-#[keel::store]
+#[undra::store]
 pub struct Feed {
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     items: Signal<Vec<Item>>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 #[allow(clippy::new_without_default)]
 impl Feed {
     pub fn new() -> Self {
@@ -241,12 +241,12 @@ pub fn title_of(n: u32, len: u32) -> String {
 
 /// One observed `Signal<u64>`: the firehose. A change-set of a single `u64` entry is 37 bytes
 /// (12 header + 17 entry header + 8 value), which the scenarios assert.
-#[keel::store]
+#[undra::store]
 pub struct Ticker {
     value: Signal<u64>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 #[allow(clippy::new_without_default)]
 impl Ticker {
     pub fn new() -> Self {
@@ -257,7 +257,7 @@ impl Ticker {
 
     /// Writes `value`: one implicit transaction, one change-set when observed. Written through
     /// `update` (in place), so the write itself allocates nothing and the allocations the gate in
-    /// `crates/keel-ffi/tests/commit_alloc.rs` counts are the commit's alone.
+    /// `crates/undra-ffi/tests/commit_alloc.rs` counts are the commit's alone.
     pub fn set(&self, value: u64) {
         self.value.update(|v| *v = value);
     }
@@ -339,14 +339,14 @@ impl ChurnState {
 
 /// A store with one keyed list that is changed, one recorded operation per transaction, in a
 /// fixed cycle at seeded random positions: what a chat, a feed or a live board does under load.
-#[keel::store]
+#[undra::store]
 pub struct Churn {
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     rows: Signal<Vec<Item>>,
     state: Mutex<ChurnState>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 #[allow(clippy::new_without_default)]
 impl Churn {
     pub fn new() -> Self {
@@ -436,7 +436,7 @@ pub struct Producer {
     produced: Arc<AtomicU64>,
 }
 
-#[keel::api]
+#[undra::api]
 #[allow(clippy::new_without_default)]
 impl Producer {
     pub fn new() -> Self {
@@ -480,19 +480,19 @@ impl Stream for Numbers {
     }
 }
 
-/// The foreign port `Fetcher` calls. Not a `#[keel::port]` (there is no schema entry to keep in
+/// The foreign port `Fetcher` calls. Not a `#[undra::port]` (there is no schema entry to keep in
 /// step): the scenarios bind it with `Runtime::bind_foreign_port` and answer it from threads.
 pub const SOURCE_PORT: u32 = 0x4B45_454C;
 
 /// A store whose async method awaits a foreign port call and adds the reply to a signal: the
 /// shape of "fetch something, then record it", run hundreds at a time.
-#[keel::store]
+#[undra::store]
 pub struct Fetcher {
     ctx: Ctx,
     total: Signal<u64>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl Fetcher {
     pub fn new(ctx: Ctx) -> Self {
         Fetcher {
@@ -521,7 +521,7 @@ impl Fetcher {
 }
 
 /// A host-to-core event, as a socket or a sensor feed delivers it.
-#[keel::port(event)]
+#[undra::port(event)]
 pub trait Ticks {
     fn tick(&self, value: u64);
 }
@@ -538,13 +538,13 @@ pub fn tick_event(value: u64) -> (u32, u32, Vec<u8>) {
 
 /// A store that subscribes to `Ticks::tick` when it is built and writes each value into an
 /// observed signal: the path a WebSocket or sensor feed takes into the core.
-#[keel::store(restore = "Self::rebuild")]
+#[undra::store(restore = "Self::rebuild")]
 pub struct TickSink {
     value: Signal<u64>,
     subscription: Subscription,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl TickSink {
     pub fn new(ctx: Ctx) -> Self {
         Self::rebuild(ctx, Signal::new(0))

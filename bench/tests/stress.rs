@@ -5,7 +5,7 @@
 //! never more than one item ahead of its credit).
 //!
 //! This is what CI runs next to the budgets test:
-//! `cargo test -p keel-bench --test stress --release -- --nocapture`.
+//! `cargo test -p undra-bench --test stress --release -- --nocapture`.
 //!
 //! * The numbers are the **core side** on a host; the gates are regression guards (throughput
 //!   floors at a fifth of what an Apple-silicon laptop measures, tail ceilings at 5x and 10x),
@@ -15,12 +15,12 @@
 //!   under `cargo test --workspace`, and the timing gates are left to `--release`.
 //! * A noisy run gets three attempts: a scenario passes if any attempt meets every gate. An
 //!   invariant that breaks is never retried; it is not noise.
-//! * Knobs: `KEEL_STRESS_SECONDS=10` sets the wall time per scenario (default 2; the numbers in
-//!   `RESULTS.md` use 10), `KEEL_BENCH_SCALE=2.5` divides every floor and multiplies every
-//!   ceiling (never bytes, RSS or invariants), `KEEL_BENCH_FILTER=churn` runs only matching
-//!   scenarios, `KEEL_BENCH_BUDGETS=path` reads another file, `KEEL_STRESS_JSON=path` also
+//! * Knobs: `UNDRA_STRESS_SECONDS=10` sets the wall time per scenario (default 2; the numbers in
+//!   `RESULTS.md` use 10), `UNDRA_BENCH_SCALE=2.5` divides every floor and multiplies every
+//!   ceiling (never bytes, RSS or invariants), `UNDRA_BENCH_FILTER=churn` runs only matching
+//!   scenarios, `UNDRA_BENCH_BUDGETS=path` reads another file, `UNDRA_STRESS_JSON=path` also
 //!   writes one JSON row per scenario for the site.
-//! * `cargo test -p keel-bench --test stress --release -- --ignored --nocapture stress_baseline`
+//! * `cargo test -p undra-bench --test stress --release -- --ignored --nocapture stress_baseline`
 //!   prints fresh measurements as `[stress."name"]` tables, for setting or re-basing a gate.
 
 use std::collections::BTreeSet;
@@ -28,9 +28,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use keel::wire::payload::ChangeSetBuilder;
-use keel::wire::{Handle, Writer};
-use keel_bench::budget::{Budgets, StressBudget, StressObserved};
+use undra::wire::payload::ChangeSetBuilder;
+use undra::wire::{Handle, Writer};
+use undra_bench::budget::{Budgets, StressBudget, StressObserved};
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -48,7 +48,7 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn budgets_path() -> PathBuf {
-    match std::env::var_os("KEEL_BENCH_BUDGETS") {
+    match std::env::var_os("UNDRA_BENCH_BUDGETS") {
         Some(path) => PathBuf::from(path),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("budgets.toml"),
     }
@@ -62,10 +62,10 @@ fn load_budgets() -> Budgets {
 }
 
 fn scale() -> f64 {
-    match std::env::var("KEEL_BENCH_SCALE") {
+    match std::env::var("UNDRA_BENCH_SCALE") {
         Ok(text) => match text.parse::<f64>() {
             Ok(scale) if scale.is_finite() && scale > 0.0 => scale,
-            _ => panic!("KEEL_BENCH_SCALE must be a positive number, not `{text}`"),
+            _ => panic!("UNDRA_BENCH_SCALE must be a positive number, not `{text}`"),
         },
         Err(_) => 1.0,
     }
@@ -73,11 +73,11 @@ fn scale() -> f64 {
 
 /// The wall time of each scenario in release mode.
 fn seconds() -> f64 {
-    match std::env::var("KEEL_STRESS_SECONDS") {
+    match std::env::var("UNDRA_STRESS_SECONDS") {
         Ok(text) => match text.parse::<f64>() {
             Ok(s) if s.is_finite() && s >= 0.1 => s,
             _ => panic!(
-                "KEEL_STRESS_SECONDS must be a number of seconds, at least 0.1, not `{text}`"
+                "UNDRA_STRESS_SECONDS must be a number of seconds, at least 0.1, not `{text}`"
             ),
         },
         Err(_) => 2.0,
@@ -86,7 +86,7 @@ fn seconds() -> f64 {
 
 fn selected() -> Vec<(&'static str, Scenario)> {
     let all = scenarios();
-    match std::env::var("KEEL_BENCH_FILTER") {
+    match std::env::var("UNDRA_BENCH_FILTER") {
         Ok(filter) if !filter.is_empty() => all
             .into_iter()
             .filter(|(name, _)| name.contains(&filter))
@@ -96,7 +96,7 @@ fn selected() -> Vec<(&'static str, Scenario)> {
 }
 
 fn is_release() -> bool {
-    !cfg!(debug_assertions) || std::env::var_os("KEEL_BENCH_FORCE").is_some()
+    !cfg!(debug_assertions) || std::env::var_os("UNDRA_BENCH_FORCE").is_some()
 }
 
 fn observed(report: &StressReport) -> StressObserved {
@@ -182,7 +182,7 @@ fn stress_table_covers_every_scenario() {
 fn stress() {
     let _serial = serial();
     let scenarios = selected();
-    assert!(!scenarios.is_empty(), "KEEL_BENCH_FILTER matched nothing");
+    assert!(!scenarios.is_empty(), "UNDRA_BENCH_FILTER matched nothing");
 
     if !is_release() {
         // Timings from an unoptimised build say nothing; prove the scenarios still work and
@@ -209,7 +209,7 @@ fn stress() {
         }
         eprintln!(
             "stress: {} scenarios smoke-run, invariants only; timing is asserted only with \
-             --release (KEEL_BENCH_FORCE=1 to time a debug build anyway)",
+             --release (UNDRA_BENCH_FORCE=1 to time a debug build anyway)",
             scenarios.len()
         );
         return;
@@ -223,7 +223,7 @@ fn stress() {
     eprintln!(
         "{} s per scenario, scale {scale}; RSS is sampled {}",
         seconds(),
-        if keel_bench::rss::resident_bytes().is_some() {
+        if undra_bench::rss::resident_bytes().is_some() {
             "from the process"
         } else {
             "NOWHERE on this platform (the RSS gates are skipped)"
@@ -276,7 +276,7 @@ fn stress() {
             }
         }
     }
-    if let Some(path) = std::env::var_os("KEEL_STRESS_JSON") {
+    if let Some(path) = std::env::var_os("UNDRA_STRESS_JSON") {
         write_json(&PathBuf::from(path), &final_reports, &budgets);
     }
     assert!(
@@ -333,7 +333,7 @@ fn change_set(txn_id: u64, handles: &[u32]) -> Vec<u8> {
         b.push(
             Handle::new(*handle, 1),
             0,
-            keel::wire::payload::ChangeOp::Full,
+            undra::wire::payload::ChangeOp::Full,
             &[0; 8],
         );
     }
@@ -399,7 +399,7 @@ fn round_down(value: f64) -> u64 {
 fn stress_baseline() {
     let _serial = serial();
     let cfg = StressConfig::new(Duration::from_secs_f64(seconds()));
-    let factor: f64 = std::env::var("KEEL_BENCH_FACTOR")
+    let factor: f64 = std::env::var("UNDRA_BENCH_FACTOR")
         .ok()
         .and_then(|f| f.parse().ok())
         .unwrap_or(5.0);
@@ -573,7 +573,7 @@ fn write_json(path: &PathBuf, reports: &[StressReport], budgets: &Budgets) {
     }
     let text = format!("[\n{}\n]\n", rows.join(",\n"));
     if let Err(e) = std::fs::write(path, text) {
-        panic!("cannot write KEEL_STRESS_JSON to {}: {e}", path.display());
+        panic!("cannot write UNDRA_STRESS_JSON to {}: {e}", path.display());
     }
     eprintln!("wrote {} rows to {}", rows.len(), path.display());
 }

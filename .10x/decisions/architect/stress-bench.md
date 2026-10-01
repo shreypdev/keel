@@ -16,11 +16,11 @@ Full design and implementation brief: `.10x/specs/2026-09-30-stress-bench-design
   No new dependency: RSS from `/proc/self/status` or `ps`, a fixed log-linear histogram in `bench/src`.
 * **Scenarios**: firehose (core- and host-driven, plus an event-port variant), keyed churn on 10,000 rows with
   a fixed length-preserving op cycle, fan-out (100 k observed / 1% dirty, the 10 k pair that shows O(dirty),
-  and 1,000 stores), stream backpressure reshaped to "never more than one item beyond credit" (Keel's streams
+  and 1,000 stores), stream backpressure reshaped to "never more than one item beyond credit" (Undra's streams
   pull), concurrent completions (8 threads, 256 in flight, a 60 Hz drain), soak (mixed paced load).
 * **The playground's stress screen generates in the core**, paced by the `Timer` port and compensated by the
   `Clock` port, seeded, no ambient randomness (R12): a host loop would measure the read-your-writes path, not
-  the firehose. It reports through the site-v2 `keel-stats` message with optional extra fields.
+  the firehose. It reports through the site-v2 `undra-stats` message with optional extra fields.
 * **Frame-coalesced delivery needs an ADR.** Nothing coalesces across transactions between the core and the
   UI; the platforms coalesce the hop, not the work, with unbounded queues, an O(list) copy per keyed patch
   (TS, Kotlin) and one `postMessage` per change-set in TS worker mode. ADR-031 proposes a platform-side,
@@ -39,7 +39,7 @@ the core side in CI so it stays fast.
 ## Open for the integrator
 
 D1 accept ADR-031's direction; D2 let S1 add `Mirror.addDrainListener` to the TS runtime; D3 landing-page
-numbers before or after S2; D4 an allocation gate in `keel-ffi` (3 allocations per observed commit today);
+numbers before or after S2; D4 an allocation gate in `undra-ffi` (3 allocations per observed commit today);
 D5 about a minute more CI; D6 split S1 into bench and playground halves. Details in section 10 of the spec.
 
 ## Integrator decisions (2026-09-30, after the design)

@@ -4,9 +4,9 @@ Status: **proposed** (draft, 2026-09-30, from the harsh-conditions benchmark des
 `.10x/specs/2026-09-30-stress-bench-design.md`). Not accepted, not implemented. Touches SPEC 11 (the
 "per-frame coalescing" sentence becomes exact rules), SPEC 17.1-17.3 (mirror options and counters), the
 three platform runtimes' `Mirror` and reply paths, the TypeScript worker protocol (internal to the runtime
-package), and, for decision 6 only, `keel-meta` (`SignalDef.no_coalesce`) and `keel-bindgen` (one argument
+package), and, for decision 6 only, `undra-meta` (`SignalDef.no_coalesce`) and `undra-bindgen` (one argument
 of the generated store registration). **No wire change** (SPEC 3.5 and 3.8 bytes are unchanged), **no C ABI
-or wasm ABI change**, no change to `keel-signals` or `keel-runtime`. Constitution R11: the runtime model of
+or wasm ABI change**, no change to `undra-signals` or `undra-runtime`. Constitution R11: the runtime model of
 delivery (when and how the platform applies what the core commits) and, with decision 6, a generated shape
 change, so it is decided here before code.
 
@@ -15,24 +15,24 @@ change, so it is decided here before code.
 The core commits one change-set per transaction per store and hands it to the host synchronously, on the
 committing thread; nothing in the core or the FFI batches across transactions or across time:
 
-* `keel-signals`: "for each store, the slots that are observed (or `no_coalesce`) are encoded into **one**
-  change-set and handed to the sink" (`crates/keel-signals/src/txn.rs:8-10`), once per outermost
+* `undra-signals`: "for each store, the slots that are observed (or `no_coalesce`) are encoded into **one**
+  change-set and handed to the sink" (`crates/undra-signals/src/txn.rs:8-10`), once per outermost
   transaction (`txn.rs:227-247`, `commit_stores` `txn.rs:310-327`, `StoreCell::commit_slots`
-  `crates/keel-signals/src/store.rs:649-745`, `sink.deliver` at `store.rs:741`). The only merging in the
+  `crates/undra-signals/src/store.rs:649-745`, `sink.deliver` at `store.rs:741`). The only merging in the
   core is inside one transaction (a slot written many times is one entry: the dirty bit, `store.rs:673-692`)
   and for unobserved slots (never encoded, `store.rs:79-80`).
-* `keel-runtime`: `RuntimeSink::deliver` (`crates/keel-runtime/src/runtime.rs:136-143`) calls
+* `undra-runtime`: `RuntimeSink::deliver` (`crates/undra-runtime/src/runtime.rs:136-143`) calls
   `deliver_change_set`, which calls `Host::change_set` (`runtime.rs:846-866`).
-* `keel-ffi`: one C callback per change-set (`crates/keel-ffi/src/native.rs:142-146`), one JNI up-call
+* `undra-ffi`: one C callback per change-set (`crates/undra-ffi/src/native.rs:142-146`), one JNI up-call
   (`jni_shim.rs:135-137`), one wasm import call (`wasm.rs:127-132`).
 
 The platform runtimes coalesce the **hop** to the main thread, but not the **work**:
 
 | Runtime | Hop | Work per change-set on the main thread | Queue |
 |---|---|---|---|
-| Swift | at most one `Task { @MainActor }` scheduled (`runtimes/swift/KeelRuntime/Sources/KeelRuntime/Core/Mirror.swift:101-115`), which drains everything queued (`Mirror.swift:67-95`) | every change-set decoded and every entry applied (`Mirror.swift:91-93, 125-141`, a lock per entry to find the handler): one `@Observable` mutation per entry; patches applied through `inout` (`generated/swift/.../Stores.swift:1666`) | `pending: [[UInt8]]`, unbounded (`Mirror.swift:23`); each payload copied on the core thread (`InprocTransport.swift:339-348`) |
+| Swift | at most one `Task { @MainActor }` scheduled (`runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Mirror.swift:101-115`), which drains everything queued (`Mirror.swift:67-95`) | every change-set decoded and every entry applied (`Mirror.swift:91-93, 125-141`, a lock per entry to find the handler): one `@Observable` mutation per entry; patches applied through `inout` (`generated/swift/.../Stores.swift:1666`) | `pending: [[UInt8]]`, unbounded (`Mirror.swift:23`); each payload copied on the core thread (`InprocTransport.swift:339-348`) |
 | Kotlin | at most one `main.post(drainTask)` (`runtimes/kotlin/.../Mirror.kt:80-84`), up to 32 batches per hop (`Mirror.kt:118-141, 239`) | a full value superseded by a later full value of the same signal in the same batch is skipped (`Mirror.kt:158-186`); **patches are never merged**, and each one copies the list (`KeyedPatch.applyPatch`, `wire/KeyedPatch.kt:131-132`, called per entry from generated code, `examples/playground/generated/kotlin/.../Stores.kt:1286`) | `ConcurrentLinkedQueue`, unbounded (`Mirror.kt:43`) |
-| TypeScript, `wasm-main` | one `flush()` per microtask checkpoint (`runtimes/ts/@keel/runtime/src/mirror.ts:139-150`, default `queueMicrotask` `mirror.ts:69-73`) | every change-set decoded on arrival (`mirror.ts:128-141`), every entry applied (`mirror.ts:181-187, 197-207`); subscribers notified once per round (`batch`, `signal.ts:48`); each keyed patch copies the list (`applyPatch` = `list.slice()`, `wire/payloads.ts:880-881`, from generated `_apply`, `examples/playground/generated/ts/src/stores.ts:1175`) | `#queue: ChangeEntry[]`, unbounded (`mirror.ts:51`) |
+| TypeScript, `wasm-main` | one `flush()` per microtask checkpoint (`runtimes/ts/@undra/runtime/src/mirror.ts:139-150`, default `queueMicrotask` `mirror.ts:69-73`) | every change-set decoded on arrival (`mirror.ts:128-141`), every entry applied (`mirror.ts:181-187, 197-207`); subscribers notified once per round (`batch`, `signal.ts:48`); each keyed patch copies the list (`applyPatch` = `list.slice()`, `wire/payloads.ts:880-881`, from generated `_apply`, `examples/playground/generated/ts/src/stores.ts:1175`) | `#queue: ChangeEntry[]`, unbounded (`mirror.ts:51`) |
 | TypeScript, `wasm-worker` | **one `postMessage` per change-set** (`src/worker.ts:65-68, 75-77`), so one main-thread task, one microtask checkpoint and one `flush()` per change-set (`transport/wasm-worker.ts:284-285`, `core.ts:624-626`) | as above, but a flush holds one change-set, and React re-renders per flush (`useSignal` is `useSyncExternalStore`, `react.ts:42`) | as above |
 
 Measured (throwaway probes, Apple M5 Pro, shared machine; see the spec for the method):
@@ -58,8 +58,8 @@ message); and TS `wasm-worker` mode **is** 100 k main-thread tasks per second. T
 Change-sets committed before the platform's next main-thread hop are merged, so a burst of transactions from
 a network response becomes one render. Apps that need every intermediate state (progress bars) opt out per
 signal", `docs/blueprint.html:703`), SPEC 11 says "apply change-sets on the main thread with per-frame
-coalescing", and the opt-out cannot be honoured: `#[keel(no_coalesce)]` never reaches the platforms
-(`SignalMeta` has no such field, `crates/keel-meta/src/meta.rs:345-356`).
+coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never reaches the platforms
+(`SignalMeta` has no such field, `crates/undra-meta/src/meta.rs:345-356`).
 
 ## Decision
 
@@ -105,19 +105,19 @@ coalescing", and the opt-out cannot be honoured: `#[keel(no_coalesce)]` never re
 5. **Observable.** Each runtime counts `changeSetsReceived`, `entriesReceived`, `entriesApplied`
    (after merging), `drains`, `compactions`, `resyncs`, and offers a drain listener (TS
    `mirror.addDrainListener(fn): () => void`, called after each drain with `{ changeSets, entries,
-   appliedEntries, durationMs }`; Swift and Kotlin equivalents in the device phase). `KeelCore.stats()`
+   appliedEntries, durationMs }`; Swift and Kotlin equivalents in the device phase). `UndraCore.stats()`
    reports the counters. This is what the playground's stress screen and the landing page's live numbers
    read.
 6. **The per-signal opt-out reaches the platforms** (separable: may land after 1-5). `SignalDef` gains
    `no_coalesce: bool`, serialised only when `true` (canonical JSON, and so the schema hash, of every schema
-   without such a signal is unchanged); `#[keel::store]` records it in `SignalMeta`; bindgen passes the
+   without such a signal is unchanged); `#[undra::store]` records it in `SignalMeta`; bindgen passes the
    store's no-coalesce signal ids to its mirror registration. For those keys the mirror applies every entry,
    in order, and notifies after each (TS: one `batch` per entry). Whether the UI can observe each value is
    still up to the platform's reactive primitive (a Kotlin `StateFlow` conflates by design); the docs say so.
 
 ## Alternatives considered
 
-* **Core-side coalescing per delivery tick** (commits leave slots dirty; a host-driven `keel_flush()` or a
+* **Core-side coalescing per delivery tick** (commits leave slots dirty; a host-driven `undra_flush()` or a
   `RuntimeConfig.delivery = "frame"` mode emits one merged change-set per store per frame). It would also
   save the core's per-transaction encode and the FFI copy. Rejected for now: it adds an ABI entry point
   (R7/R11), it separates commit from delivery and so reopens ADR-019 (the transactional claim), ADR-020 (claim

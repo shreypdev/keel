@@ -19,7 +19,7 @@
 //! # Harsh conditions: a second layer
 //!
 //! The budgets test times one operation at a time. The **sustained** scenarios (`bench/common/
-//! stress.rs`, run by `cargo test -p keel-bench --test stress --release` and, for minutes at a
+//! stress.rs`, run by `cargo test -p undra-bench --test stress --release` and, for minutes at a
 //! time, by the `soak` binary) answer a different question: does it stay fast for seconds, at
 //! rates far above any UI, with producers and consumers on several threads? They record every
 //! operation in a [`stats::Histogram`] (no allocation per sample), sample resident memory with

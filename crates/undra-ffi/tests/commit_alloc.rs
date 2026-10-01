@@ -5,7 +5,7 @@
 //! The firehose scenario (`bench/common/stress.rs`) pushes 100,000 commits a second, so every
 //! allocation on the commit path is 100,000 `malloc`/`free` pairs a second. Today an observed
 //! commit makes exactly three (`group_by_store`'s `groups` and `ids` vectors in
-//! `keel-signals/src/txn.rs`, and the `claimed` vector in `store.rs`); reaching zero is a roadmap
+//! `undra-signals/src/txn.rs`, and the `claimed` vector in `store.rs`); reaching zero is a roadmap
 //! line. This test fails the day a fourth appears, and, like `sync_alloc.rs`, is the only place
 //! allowed to count: a global allocator is `unsafe`, and `unsafe` lives in this crate (R2).
 //!
@@ -21,13 +21,13 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use keel::meta::ids;
-use keel::prelude::Handle;
-use keel::runtime::testing::{call_payload, decode_reply};
-use keel::runtime::{Host, PortCallOutcome, Runtime, RuntimeConfig};
-use keel::signals::ALL_SIGNALS;
-use keel::wire::Decode;
-use keel::wire::payload::{CallTarget, ReplyStatus};
+use undra::meta::ids;
+use undra::prelude::Handle;
+use undra::runtime::testing::{call_payload, decode_reply};
+use undra::runtime::{Host, PortCallOutcome, Runtime, RuntimeConfig};
+use undra::signals::ALL_SIGNALS;
+use undra::wire::Decode;
+use undra::wire::payload::{CallTarget, ReplyStatus};
 
 #[path = "common/core.rs"]
 mod test_core;

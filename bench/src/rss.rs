@@ -2,7 +2,7 @@
 //!
 //! The sustained scenarios and the soak assert that memory stays flat, which needs the process's
 //! resident set size (RSS) sampled while it runs. A precise heap counter would need a custom
-//! global allocator, which is `unsafe` and outside `keel-ffi` (constitution R2), and a crate
+//! global allocator, which is `unsafe` and outside `undra-ffi` (constitution R2), and a crate
 //! that has to build for every host; RSS needs neither:
 //!
 //! * Linux and Android: `VmRSS` from `/proc/self/status`;
@@ -52,7 +52,7 @@ fn parse_ps(output: &str) -> Option<u64> {
 /// # Example
 ///
 /// ```
-/// if let Some(bytes) = keel_bench::rss::resident_bytes() {
+/// if let Some(bytes) = undra_bench::rss::resident_bytes() {
 ///     assert!(bytes > 0);
 /// }
 /// ```
@@ -104,7 +104,7 @@ impl RssGrowth {
 /// # Example
 ///
 /// ```
-/// use keel_bench::rss::RssSeries;
+/// use undra_bench::rss::RssSeries;
 /// use std::time::Duration;
 ///
 /// let mut series = RssSeries::new();

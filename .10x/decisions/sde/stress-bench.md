@@ -8,7 +8,7 @@ row, the soak at `--seconds 10` (more than twenty runs while tuning, five in a r
 
 This is the Rust half (S1a) of `.10x/specs/2026-09-30-stress-bench-design.md` (integrator decisions
 D1 to D6 in `.10x/decisions/architect/stress-bench.md`). Nothing outside `bench/**`, one new test
-in `crates/keel-ffi/tests/`, the CI workflow and this note changed: no runtime, no playground, no
+in `crates/undra-ffi/tests/`, the CI workflow and this note changed: no runtime, no playground, no
 site, no wire, ABI or generated shape (so no ADR).
 
 ## What was built
@@ -22,9 +22,9 @@ site, no wire, ABI or generated shape (so no ADR).
 | hosts `CopyingHost`, `ApplyingHost` (+`ListMirror`), `DrainHost` (+`Frame`, `MainThread`, `OrderChecker`) | `bench/common/host.rs` |
 | 8 layer A workloads and 7 sustained scenarios | `bench/common/stress.rs` |
 | criterion bench over `group("stress")` | `bench/benches/stress.rs` |
-| the sustained gate, baseline printer, `KEEL_STRESS_JSON` | `bench/tests/stress.rs` |
+| the sustained gate, baseline printer, `UNDRA_STRESS_JSON` | `bench/tests/stress.rs` |
 | the soak | `bench/src/bin/soak.rs` |
-| allocation gate (D4) | `crates/keel-ffi/tests/commit_alloc.rs` |
+| allocation gate (D4) | `crates/undra-ffi/tests/commit_alloc.rs` |
 | budgets, RESULTS.md "Harsh conditions", CI | `bench/budgets.toml`, `bench/RESULTS.md`, `.github/workflows/bench.yml` |
 
 ## Numbers (best of three 10 s runs; budgets are derived from these)
@@ -92,15 +92,15 @@ its throughput halved too). I did not widen anything for that run.
 8. **Completions window in the soak is 128, not 64.** At 50,000 per second a window of 64 needs a
    mean call to reply under 1.28 ms; on this loaded host the soak reached 90% of its target (a
    warning), and a slower CI runner would reach under 50% (a failure) for reasons that have nothing
-   to do with Keel. 128 reaches 100% here.
-9. **The Kv warning is not counted.** `keel-query` logs once that the `Kv` port never became
+   to do with Undra. 128 reaches 100% here.
+9. **The Kv warning is not counted.** `undra-query` logs once that the `Kv` port never became
    available; nothing in the harness binds a `Kv`, so `CountingHost` ignores exactly that record and
    every other warning or error still fails the run. `DrainHost` answers only `SOURCE_PORT` later
    and every other port "unavailable" (it first answered all of them with `1u64`, which made the
    query client's hydration count as two extra completions).
 10. **Debug smoke uses 500 churn rows**, not 10,000 (`CHURN_ROWS`): an unoptimised op on 10,000
-    rows takes 2.8 ms, which made `cargo test -p keel-bench` 11 s slower. The invariants are the
-    same; release runs the real size. Debug `cargo test -p keel-bench` takes 5.5 s in all (budgets smoke 0.9 s,
+    rows takes 2.8 ms, which made `cargo test -p undra-bench` 11 s slower. The invariants are the
+    same; release runs the real size. Debug `cargo test -p undra-bench` takes 5.5 s in all (budgets smoke 0.9 s,
     stress smoke and the two fault tests 2.8 s).
 11. **`DuplicateStress`** is a separate `BudgetError` variant rather than reusing `Duplicate`, so
     the existing `Duplicate { name }` test and its "[bench.\"..\"]" message keep meaning what they
@@ -120,6 +120,6 @@ its throughput halved too). I did not widen anything for that run.
   drift gate compares second with second, so the number itself is not gated.
 * The completions gate couples throughput and latency (a closed loop of 256 calls: mean latency is
   the window over the throughput), so a runner too slow for the floor also breaks the p99 ceiling;
-  `KEEL_BENCH_SCALE` moves both.
+  `UNDRA_BENCH_SCALE` moves both.
 * Everything here is the core side. The web numbers, the device numbers and the ADR-031 before and
   after belong to S1b and the device phase and are not in these tables.

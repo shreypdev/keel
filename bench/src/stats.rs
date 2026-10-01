@@ -55,7 +55,7 @@ fn upper_bound(bucket: usize) -> u64 {
 /// # Example
 ///
 /// ```
-/// use keel_bench::stats::Histogram;
+/// use undra_bench::stats::Histogram;
 ///
 /// let mut h = Histogram::new();
 /// for ns in 1..=1000 {

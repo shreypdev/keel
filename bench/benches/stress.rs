@@ -1,6 +1,6 @@
 //! Criterion benches for the `stress` group (the per-operation rows of the harsh-conditions
 //! scenarios). See `common/stress.rs` for what each one measures and `bench/RESULTS.md` for the
-//! numbers; the sustained runs are `cargo test -p keel-bench --test stress --release`.
+//! numbers; the sustained runs are `cargo test -p undra-bench --test stress --release`.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 

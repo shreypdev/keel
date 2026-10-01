@@ -40,31 +40,31 @@ for the integrator · 11 findings outside this piece.
 ### 2.1 In the core: one change-set per transaction per store, delivered synchronously
 
 * Every write outside `ctx.txn` is its own transaction (SPEC 5.5). The runtime does not wrap a dispatched
-  call in a transaction (the only `keel_signals::txn` calls in `crates/keel-runtime/src/runtime.rs` are
+  call in a transaction (the only `undra_signals::txn` calls in `crates/undra-runtime/src/runtime.rs` are
   `observe` at 1485 and `restore` at 2201), so a method that writes a signal 1,000 times outside `ctx.txn`
   commits 1,000 transactions.
 * The commit groups the thread's dirty slots by store and, "for each store, the slots that are observed (or
-  `no_coalesce`) are encoded into **one** change-set and handed to the sink" (`crates/keel-signals/src/txn.rs:8-10`;
+  `no_coalesce`) are encoded into **one** change-set and handed to the sink" (`crates/undra-signals/src/txn.rs:8-10`;
   `commit` 227-247, `commit_stores` 310-327).
-* `StoreCell::commit_slots` takes the store's delivery lock (`crates/keel-signals/src/store.rs:659`), claims
+* `StoreCell::commit_slots` takes the store's delivery lock (`crates/undra-signals/src/store.rs:659`), claims
   the dirty observed slots (673-692), builds the payload and calls `sink.deliver` (741) before releasing it.
 * The runtime's sink forwards every payload to the host: `RuntimeSink::deliver`
-  (`crates/keel-runtime/src/runtime.rs:136-143`) → `deliver_change_set` (846-866) → `Host::change_set`.
+  (`crates/undra-runtime/src/runtime.rs:136-143`) → `deliver_change_set` (846-866) → `Host::change_set`.
 * The FFI shells make one foreign call per change-set, on the committing thread: the C callback
-  (`crates/keel-ffi/src/native.rs:142-146`), one JNI up-call (`jni_shim.rs:135-137`), one wasm import call
+  (`crates/undra-ffi/src/native.rs:142-146`), one JNI up-call (`jni_shim.rs:135-137`), one wasm import call
   (`wasm.rs:127-132`).
 * **What the core does merge:** writes to one slot inside one transaction are one entry (the dirty bit,
   `store.rs:673-692`), and a slot that is dirty but unobserved is never encoded (`store.rs:79-80`). That is
-  the "coalescing" that `#[keel(no_coalesce)]` opts out of today. Nothing merges across transactions and
+  the "coalescing" that `#[undra(no_coalesce)]` opts out of today. Nothing merges across transactions and
   nothing is time- or frame-based.
 
 ### 2.2 On the platforms: hops are coalesced, work is not, queues are unbounded
 
 | Runtime | How the main thread is reached | Work per change-set | Queue |
 |---|---|---|---|
-| Swift | `Mirror.enqueue` schedules a `Task { @MainActor }` only if none is pending (`runtimes/swift/KeelRuntime/Sources/KeelRuntime/Core/Mirror.swift:101-115`); the hop clears the flag and drains (117-123, 67-95) | each payload copied on the committing thread (`InprocTransport.swift:339-348` → `KeelCore.swift:685-687`); on main every change-set decoded and every entry applied (`Mirror.swift:91-93, 125-141`, a lock per entry to find the handler); one `@Observable` mutation per entry | `pending: [[UInt8]]`, no bound (`Mirror.swift:23`) |
-| Kotlin | `submit` posts a drain only if none is scheduled (`runtimes/kotlin/keel-runtime/runtime/src/main/kotlin/dev/keel/runtime/Mirror.kt:80-84`); up to 32 batches per hop, then re-posts (118-141, 239) | payload copied off the `ByteBuffer` (`InprocTransport.kt:214-215`); on main a full value superseded later **in the same batch** is skipped (158-186, the only real cross-transaction merge in Keel); patches are never merged and each copies the list (`wire/KeyedPatch.kt:131-132`, called per entry by generated code, `examples/playground/generated/kotlin/.../Stores.kt:1286`) | `ConcurrentLinkedQueue`, no bound (`Mirror.kt:43`) |
-| TS `wasm-main` | one `flush()` per microtask checkpoint (`runtimes/ts/@keel/runtime/src/mirror.ts:139-150`, default scheduler `queueMicrotask` 69-73) | copied out of wasm memory (`transport/wasm-main.ts:457-459`), decoded and validated on arrival (`mirror.ts:128-141`), every entry applied (181-187, 197-207), subscribers told once per round (`batch`, `signal.ts:48`); a keyed patch is `list.slice()` + ops (`wire/payloads.ts:880-881`, from generated `_apply`, `examples/playground/generated/ts/src/stores.ts:1175`) | `#queue: ChangeEntry[]`, no bound (`mirror.ts:51`) |
+| Swift | `Mirror.enqueue` schedules a `Task { @MainActor }` only if none is pending (`runtimes/swift/UndraRuntime/Sources/UndraRuntime/Core/Mirror.swift:101-115`); the hop clears the flag and drains (117-123, 67-95) | each payload copied on the committing thread (`InprocTransport.swift:339-348` → `UndraCore.swift:685-687`); on main every change-set decoded and every entry applied (`Mirror.swift:91-93, 125-141`, a lock per entry to find the handler); one `@Observable` mutation per entry | `pending: [[UInt8]]`, no bound (`Mirror.swift:23`) |
+| Kotlin | `submit` posts a drain only if none is scheduled (`runtimes/kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/Mirror.kt:80-84`); up to 32 batches per hop, then re-posts (118-141, 239) | payload copied off the `ByteBuffer` (`InprocTransport.kt:214-215`); on main a full value superseded later **in the same batch** is skipped (158-186, the only real cross-transaction merge in Undra); patches are never merged and each copies the list (`wire/KeyedPatch.kt:131-132`, called per entry by generated code, `examples/playground/generated/kotlin/.../Stores.kt:1286`) | `ConcurrentLinkedQueue`, no bound (`Mirror.kt:43`) |
+| TS `wasm-main` | one `flush()` per microtask checkpoint (`runtimes/ts/@undra/runtime/src/mirror.ts:139-150`, default scheduler `queueMicrotask` 69-73) | copied out of wasm memory (`transport/wasm-main.ts:457-459`), decoded and validated on arrival (`mirror.ts:128-141`), every entry applied (181-187, 197-207), subscribers told once per round (`batch`, `signal.ts:48`); a keyed patch is `list.slice()` + ops (`wire/payloads.ts:880-881`, from generated `_apply`, `examples/playground/generated/ts/src/stores.ts:1175`) | `#queue: ChangeEntry[]`, no bound (`mirror.ts:51`) |
 | TS `wasm-worker` | **one `postMessage` per change-set** (`src/worker.ts:65-68, 75-77`), so one main-thread task, one microtask checkpoint and one flush each (`transport/wasm-worker.ts:284-285`, `core.ts:624-626`) | as above, plus a React render per flush (`useSignal` is `useSyncExternalStore`, `react.ts:42`) | as above |
 
 ### 2.3 The plain answer
@@ -85,9 +85,9 @@ keeps every guarantee of ADR-019/020/023/027 on the wire.
 ## 3. What was measured, and how
 
 Throwaway probes (not committed; kept in the session scratchpad): a release-profile integration test in
-`bench/` (the real `#[keel::store]` fixtures, `Runtime::new` with no core thread unless stated, the existing
-`CountingHost`), the existing `keel_bench::measure::measure` routine for the per-operation numbers, a counting
-global allocator in a `keel-ffi` test (the only crate where one is allowed, R2), and Node 24 running the
+`bench/` (the real `#[undra::store]` fixtures, `Runtime::new` with no core thread unless stated, the existing
+`CountingHost`), the existing `undra_bench::measure::measure` routine for the per-operation numbers, a counting
+global allocator in an `undra-ffi` test (the only crate where one is allowed, R2), and Node 24 running the
 TypeScript runtime's own `Mirror`, `Signal`, `applyPatch` and wire encoders from source.
 
 Machine: Apple M5 Pro, 18 cores, macOS 26.5, rustc 1.98.1, release profile (LTO fat, codegen-units 1).
@@ -108,7 +108,7 @@ timed operation's p50 includes one tick of quantisation.
 | Fan-out over 1,000 stores x 100 signals, one dirty signal in every store | 115-177 us per transaction: 1,000 change-sets (about 115 ns each), 33 KB |
 | Stream, always-ready producer, consumer granting 16 at a time (10,000 rounds) | produced − delivered never above **1**; RSS +0 KB |
 | Stream, consumer granting 100,000 at a time | 29.0 M items/s (harness: 37 ns per item) |
-| Concurrent completions: 8 threads answering async port calls, `keel-core` thread, a thread draining change-sets every 16.7 ms, 256 calls in flight, 400,000 calls | 280 k completions/s; call→reply p50 155 us, p99 1.08 ms; 400,000 change-sets, 0 out of order, 0 lost |
+| Concurrent completions: 8 threads answering async port calls, `undra-core` thread, a thread draining change-sets every 16.7 ms, 256 calls in flight, 400,000 calls | 280 k completions/s; call→reply p50 155 us, p99 1.08 ms; 400,000 change-sets, 0 out of order, 0 lost |
 | 12 s mixed loop (firehose bursts + churn), RSS by `ps` each second | 11,296 KB at 1 s, then 11,344 KB flat for 11 samples; 7.3 M change-sets |
 | Rust model of a platform mirror (copy + queue on the producer, drain at 60 Hz) at 100 k/s | drain 52 us/frame p50 (applying every entry) vs 35 us merged; at 1 M/s 631 us vs 324 us; queue 3,332 / 33,332 change-sets per frame (a model: Rust applies a `u64` in ~20 ns, platforms pay far more) |
 | TS mirror, full-value change-sets (V8) | **~175 ns per change-set** at any batch size (1,667 per flush: 286 us p50, 618 us p99); 226 ns when each change-set gets its own flush |
@@ -127,19 +127,19 @@ the claim a demanding app team would otherwise ask about.
 | b | **Keyed churn**: 10,000 rows, a fixed cycle of 10 ops (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one op per transaction, with a host-side list applying every patch | recorded list ops stay O(change) under sustained churn, and the mirror never desynchronises | ops/s, p50/p99/p999 per op (commit + deliver + host apply), bytes/op, final equality | A `stress/keyed_churn_10k/ops_x1000` ≤ 19 ms; B ≥ 56 k ops/s, p99 ≤ 24 us, p999 ≤ 71 us, bytes/op ≤ 1.1x measured, host list == core list | 280 k ops/s, 3.5/4.7/7.1 us, 61 B/op (random mix; re-measure with the fixed cycle) |
 | c | **Fan-out**: 100,000 observed signals in one store cell, 1% (1,000) dirty per transaction, and the same 1,000 dirty over 10,000 observed | commit time and bytes follow the dirty count, not the observed count | txn/s, p99 per txn, bytes/txn, time ratio 100 k / 10 k | A `stress/fanout/100k_observed_1k_dirty` ≤ 500 us, `.../10k_observed_1k_dirty` ≤ 180 us; B ≥ 2,500 txn/s, p99 ≤ 1.3 ms, 21,012 B exact, ratio ≤ 4, bytes equal | 36-103 us vs 26-36 us; 21,012 B both |
 | c' | **Fan-out across stores** (added): 1,000 stores, one dirty signal in each, one transaction | the per-store overhead when one transaction touches many stores (1,000 change-sets sharing a `txn_id`), the worst case for ADR-031's merge | txn/s, change-sets/txn | A `stress/fanout/1k_stores_1k_dirty` ≤ 890 us (re-baseline) | 115-177 us, 1,000 change-sets |
-| d | **Stream backpressure**: an always-ready producer (so its rate is whatever the core polls, far above 1 M items/s), a consumer granting 16 credits per round; then a consumer granting 100,000 | Keel buffers at most one item beyond credit, so memory is bounded whatever the producer does; the item path is fast when credit allows | max(produced − delivered), RSS growth, items/s | A `stress/stream/items_x1000` ≤ 190 us; B max ahead ≤ 1 exact, RSS growth ≤ 1%, ≥ 5.7 M items/s | 1; +0 KB; 29 M items/s |
-| e | **Concurrent completions**: 8 host threads answering async port calls, a `keel-core` thread, a "main" thread draining change-sets at 60 Hz, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention: nothing lost, nothing reordered | completions/s, call→reply p50/p99, lost, out-of-order `txn_id`s, final sum | B ≥ 56 k/s, p99 ≤ 5.4 ms, lost = 0, out-of-order = 0, sum exact | 280 k/s, 155 us / 1.08 ms, 0, 0 |
+| d | **Stream backpressure**: an always-ready producer (so its rate is whatever the core polls, far above 1 M items/s), a consumer granting 16 credits per round; then a consumer granting 100,000 | Undra buffers at most one item beyond credit, so memory is bounded whatever the producer does; the item path is fast when credit allows | max(produced − delivered), RSS growth, items/s | A `stress/stream/items_x1000` ≤ 190 us; B max ahead ≤ 1 exact, RSS growth ≤ 1%, ≥ 5.7 M items/s | 1; +0 KB; 29 M items/s |
+| e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a "main" thread draining change-sets at 60 Hz, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention: nothing lost, nothing reordered | completions/s, call→reply p50/p99, lost, out-of-order `txn_id`s, final sum | B ≥ 56 k/s, p99 ≤ 5.4 ms, lost = 0, out-of-order = 0, sum exact | 280 k/s, 155 us / 1.08 ms, 0, 0 |
 | f | **Soak**: the mixed, paced load of a busy app (firehose 100 k txn/s, churn 20 k ops/s, completions 50 k/s, a stream at 1 M items/s, a 60 Hz drain) for 60 s locally, 10 s in CI | no leak, no drift | RSS growth after warm-up, p99 per 1 s window, achieved rates | RSS ≤ +1% (or ≤ 64 KiB) from the first post-warm-up sample to the last; worst window p99 ≤ 3x the median window p99; invariants of a, b, e | 12 s probe: 0.0% after the first second |
 | g | **Event firehose** (added): `Runtime::event` on an event port whose subscriber writes a signal | the path a WebSocket or sensor feed takes into the core; `event` takes the core lock on the caller's thread (`runtime.rs:1975-1990`), which is natural backpressure for a network thread | events/s, p50 per event | A `stress/firehose/event` ≤ 5x baseline | not measured: baseline in the piece |
 
 Dropped or reshaped, with the reason:
 
-* "(c) 100 k observed signals" cannot be a `#[keel::store]` (one field per signal); it is measured at the
-  `StoreCell` level with `keel-signals`' public API, as `signals/changeset_100/cell` already is. The
+* "(c) 100 k observed signals" cannot be a `#[undra::store]` (one field per signal); it is measured at the
+  `StoreCell` level with `undra-signals`' public API, as `signals/changeset_100/cell` already is. The
   many-stores variant (c') is the realistic app shape and goes through the same public API.
-* "(d) a producer at 1 M items/s" is reshaped: Keel's stream plumbing pulls (`drive_stream` polls one item,
+* "(d) a producer at 1 M items/s" is reshaped: Undra's stream plumbing pulls (`drive_stream` polls one item,
   then waits for credit, `runtime.rs:2351-2384`; credit accounting 255-277), so a producer's rate is whatever
-  the core polls. The claim worth proving is "Keel never holds more than one item beyond credit", with a
+  the core polls. The claim worth proving is "Undra never holds more than one item beyond credit", with a
   producer that is always ready (faster than any push source). A push source inside an app (a channel fed by
   a port) is the app's buffer and must be bounded by the app; the docs page for ADR-031 says so. The soak runs
   a stream at 1 M items/s with a consumer that keeps up.
@@ -148,20 +148,20 @@ Dropped or reshaped, with the reason:
 ## 5. Metrics, and how to measure them portably (question 3)
 
 * **Sustained throughput**: operations completed divided by the wall time of the whole run (not the sum of
-  per-operation samples). Runs are 2 s per scenario in CI (`KEEL_STRESS_SECONDS`), 10 s locally for the
+  per-operation samples). Runs are 2 s per scenario in CI (`UNDRA_STRESS_SECONDS`), 10 s locally for the
   RESULTS.md numbers.
 * **p50/p99/p999**: every operation timed with one `Instant` pair and recorded in a fixed log-linear
-  histogram (`keel_bench::stats::Histogram`, section 7.2): no allocation per sample, 3.1% relative error. The
+  histogram (`undra_bench::stats::Histogram`, section 7.2): no allocation per sample, 3.1% relative error. The
   step timed is named per scenario: firehose, one `call_sync` (commit and host callback included); churn, one
   op including the host-side patch apply; fan-out, one transaction; completions, `call` to reply. The p50
   includes the clock (one 41.67 ns tick on Apple silicon; vDSO `clock_gettime` on Linux).
 * **Change-set bytes per transaction**: the host counts `payload.len()` (`CountingHost::change_set_bytes`,
   `bench/common/host.rs:53-57`). Deterministic for a given seed, so gated exactly or at 1.1x.
 * **Allocations per operation**: the bench crate cannot count them (`#![forbid(unsafe_code)]`, R2; a global
-  allocator is `unsafe impl`). The only counting harness is `crates/keel-ffi/tests/sync_alloc.rs`. Measured
-  today: 3 per observed commit. Gate it in `keel-ffi` (decision D4), report it in RESULTS.md.
+  allocator is `unsafe impl`). The only counting harness is `crates/undra-ffi/tests/sync_alloc.rs`. Measured
+  today: 3 per observed commit. Gate it in `undra-ffi` (decision D4), report it in RESULTS.md.
 * **Memory steady state**: resident set size, sampled once a second outside the timed region, by
-  `keel_bench::rss::resident_bytes()` with **std only** (no new dependency, nothing that has to build for
+  `undra_bench::rss::resident_bytes()` with **std only** (no new dependency, nothing that has to build for
   wasm, iOS or Android: the bench crate is host-only and `publish = false`):
   * Linux (and Android, should it ever run there): parse `VmRSS:` (kB) from `/proc/self/status`.
   * macOS and other Unix: `ps -o rss= -p <pid>` (kB) through `std::process::Command`, the same measure
@@ -177,7 +177,7 @@ The rules are the existing file's. Layer A rows (`[bench."stress/..."]`, p50 per
 existing rule: 5x the measured p50, floor 250 ns, rounded up to two significant figures. Layer B rows
 (`[stress."..."]`, new table kind, section 7.2) use: throughput floors at measured / 5 rounded **down** to two
 significant figures; p99 ceilings at 5x and p999 ceilings at 10x (tails on a shared runner are noisier than
-medians); bytes exact when fully deterministic, else 1.1x; RSS growth 1%. `KEEL_BENCH_SCALE` divides floors
+medians); bytes exact when fully deterministic, else 1.1x; RSS growth 1%. `UNDRA_BENCH_SCALE` divides floors
 and multiplies ceilings; it never touches bytes, RSS or invariants. Invariants (exact equalities, zero lost,
 zero out-of-order, max-ahead ≤ 1) live in the code, not the file.
 
@@ -235,7 +235,7 @@ budget_ns = 190000
 measured_ns = 36986.7
 
 # ---------------------------------------------------------------------------------------------
-# Harsh conditions, layer B: sustained runs (`cargo test -p keel-bench --test stress --release`).
+# Harsh conditions, layer B: sustained runs (`cargo test -p undra-bench --test stress --release`).
 # Floors = measured / 5 rounded down (2 s.f.); p99 = 5x, p999 = 10x measured, rounded up; bytes
 # exact or 1.1x; RSS growth in percent. Invariants are asserted in code.
 # ---------------------------------------------------------------------------------------------
@@ -349,7 +349,7 @@ pub struct Budgets { pub meta: .., pub benches: .., pub stress: BTreeMap<String,
 
 * `fixtures.rs` gains, with the same doc style:
   * `Ticker` store: `value: Signal<u64>`; `new()`, `set(v: u64)`, `burst(k: u32)` (k implicit transactions).
-  * `Churn` store: `#[keel(key = "id")] rows: Signal<Vec<Item>>`, `next_id: AtomicU64`, `rng: Mutex<u64>`;
+  * `Churn` store: `#[undra(key = "id")] rows: Signal<Vec<Item>>`, `next_id: AtomicU64`, `rng: Mutex<u64>`;
     `new()`, `seed(count: u32)`, `churn(k: u32)` (k ops, each its own transaction, following the fixed cycle
     `[update, insert, update, move, remove, update, insert, move, update, remove]` at positions from a
     seeded xorshift64; the length is back to its seed after every 10 ops), `ids() -> Vec<u64>`.
@@ -358,7 +358,7 @@ pub struct Budgets { pub meta: .., pub benches: .., pub stress: BTreeMap<String,
   * `Fetcher` store: `ctx: Ctx`, `total: Signal<u64>`; `async fn fetch(i: u32) -> u64` awaits
     `ctx.port_call(SOURCE_PORT, 1, i)`, adds the reply to `total`; `total_now() -> u64`.
     `pub const SOURCE_PORT: u32` (a foreign port bound with `Runtime::bind_foreign_port`).
-  * `Ticks` event port (`#[keel::port(event)] pub trait Ticks { fn tick(&self, value: u64); }`) and a
+  * `Ticks` event port (`#[undra::port(event)] pub trait Ticks { fn tick(&self, value: u64); }`) and a
     `TickSink` store that subscribes in its constructor (`ctx.events().subscribe(..)`, the `Subscription`
     kept in the store) and writes `value: Signal<u64>` per event. If the subscription API makes this more than
     an hour's work, drop row g and record why in the decision record.
@@ -423,12 +423,12 @@ How each is driven (the probes in section 3 did exactly this):
 * `stress_table_covers_every_scenario`: `[stress."..."]` names == `scenarios()` names plus `soak/mixed`
   (read by the soak binary); every measured value within its own gate.
 * `stress`: serial (a `static SERIAL: Mutex<()>`, as `budgets.rs`); release: each scenario for
-  `KEEL_STRESS_SECONDS` (default 2) and gated (floors / scale, ceilings x scale, bytes, RSS, invariants);
+  `UNDRA_STRESS_SECONDS` (default 2) and gated (floors / scale, ceilings x scale, bytes, RSS, invariants);
   debug: each for 100 ms, **invariants only** (so `cargo test --workspace` stays fast and still proves the
-  scenarios work). `KEEL_BENCH_FILTER` applies. Prints a table: name, per_sec, p50, p99, p999, bytes/op, RSS
+  scenarios work). `UNDRA_BENCH_FILTER` applies. Prints a table: name, per_sec, p50, p99, p999, bytes/op, RSS
   growth, verdict.
 * `stress_baseline` (`#[ignore]`): prints `[stress."..."]` tables with the section 6 rules.
-* `KEEL_STRESS_JSON=<path>`: also writes the reports as JSON rows (section 7.8), for the site.
+* `UNDRA_STRESS_JSON=<path>`: also writes the reports as JSON rows (section 7.8), for the site.
 
 ### 7.6 `bench/src/bin/soak.rs`
 
@@ -452,19 +452,19 @@ How each is driven (the probes in section 3 did exactly this):
 ### 7.7 CI (`.github/workflows/bench.yml`)
 
 Two steps after the existing one, same job:
-`cargo test -p keel-bench --test stress --release -- --nocapture` and
-`cargo run -p keel-bench --release --bin soak -- --seconds 10`. Budget about 1 minute extra.
+`cargo test -p undra-bench --test stress --release -- --nocapture` and
+`cargo run -p undra-bench --release --bin soak -- --seconds 10`. Budget about 1 minute extra.
 
 ### 7.8 RESULTS.md and `site/data/bench.json`
 
 * `bench/RESULTS.md` gains **"Harsh conditions"** after "Section 14 rows": one table (scenario, what it
-  proves, measured on the reference host from `--seconds 60` / `KEEL_STRESS_SECONDS=10`, CI gate, verdict),
+  proves, measured on the reference host from `--seconds 60` / `UNDRA_STRESS_SECONDS=10`, CI gate, verdict),
   the in-browser numbers from the stress screen with the browser, device and date, and a short honesty
   paragraph: host numbers are the core side; the platform apply is measured in the browser and, for iOS and
   Android, in the device phase; what ADR-031 changes once implemented (before and after on the same screen).
   "The CI gate" section mentions the second test and the soak.
 * `site/data/bench.json` is owned by site-v2 (it lands first). Stress adds rows to its "harsh" group in
-  whatever shape site-v2 chose; the proposed row, which `KEEL_STRESS_JSON` and `soak --json` emit:
+  whatever shape site-v2 chose; the proposed row, which `UNDRA_STRESS_JSON` and `soak --json` emit:
 
 ```json
 {
@@ -500,32 +500,32 @@ module table of `lib.rs`'s docs):
 
 ```rust
 /// Which kind of update the generator makes.
-#[keel::api] #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[undra::api] #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StressMode { Firehose, Churn, Board }
 
 /// What `Stress::start` runs.
-#[keel::api] #[derive(Clone, Debug, PartialEq)]
+#[undra::api] #[derive(Clone, Debug, PartialEq)]
 pub struct StressConfig { pub mode: StressMode, pub rate_per_sec: u32, pub seed: u64 }
 
 /// One cell of the ticker board.
-#[keel::api] #[derive(Clone, Debug, PartialEq, Eq)]
+#[undra::api] #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Quote { pub id: u32, pub cents: i64, pub change: i32 }
 
 /// Why a start was refused.
-#[keel::error] #[derive(Clone, Debug, PartialEq, Eq)]
+#[undra::error] #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StressError { #[error("rate {rate} is outside 1..=2000000 transactions per second")] RateOutOfRange { rate: u32 } }
 
-#[keel::store(restore = "Self::assemble")]
+#[undra::store(restore = "Self::assemble")]
 pub struct Stress {
     ctx: Ctx,
     generator: Arc<Mutex<Generator>>,        // config, rng state, epoch, carry; private
     value: Signal<u64>,                      // Firehose: +1 per transaction
-    #[keel(key = "id")] rows: Signal<Vec<Item>>,   // Churn: 10,000 rows, one recorded op per transaction
-    #[keel(key = "id")] board: Signal<Vec<Quote>>, // Board: 1,000 quotes, 10 update_at per transaction (1%)
+    #[undra(key = "id")] rows: Signal<Vec<Item>>,   // Churn: 10,000 rows, one recorded op per transaction
+    #[undra(key = "id")] board: Signal<Vec<Quote>>, // Board: 1,000 quotes, 10 update_at per transaction (1%)
     generated: Signal<u64>,                  // transactions since start; written once per tick
     running: Signal<bool>,
 }
-// #[keel::api(store)] impl Stress:
+// #[undra::api(store)] impl Stress:
 pub fn new(ctx: Ctx) -> Self;
 pub fn start(&self, config: StressConfig) -> Result<(), StressError>; // starts, or retunes a running generator
 pub fn stop(&self);                                                   // the task ends at its next tick
@@ -569,9 +569,9 @@ transaction is one change-set with a 10-op keyed patch.
 
 Files: `examples/playground/web/src/views/StressView.tsx` (new), `examples/playground/web/src/stress-stats.ts`
 (new: `WindowStats`, `FrameMonitor`, `percentile`), `App.tsx` (a `stress` tab; `screen=stress` from site-v2's
-URL parameters), `keel.ts` unchanged (the view creates the store with `useKeel(Stress)` so the 11,000 rows
+URL parameters), `undra.ts` unchanged (the view creates the store with `useUndra(Stress)` so the 11,000 rows
 exist only while the tab is open), `index.css` (tiles, grid). The generated bindings come from
-`keel bindgen` (section 9).
+`undra bindgen` (section 9).
 
 What it shows:
 
@@ -579,7 +579,7 @@ What it shows:
   second), Start/Stop; URL parameters `mode=`, `rate=`, `autostart=1` (in addition to site-v2's `screen=`,
   `embed=`).
 * Six tiles, refreshed every 500 ms: **Generated** (transactions/s: Δ`generated` / Δt), **Received**
-  (change-sets/s: Δ`KeelCore.shared.mirror.changeSets` / Δt), **Applied** (entries/s, from the drain listener;
+  (change-sets/s: Δ`UndraCore.shared.mirror.changeSets` / Δt), **Applied** (entries/s, from the drain listener;
   equal to received entries until ADR-031 merges), **Apply per frame** (p50 / p99 of drain durations, us),
   **Apply per change-set** (Σ drain time / Σ change-sets, ns: the average survives timer quantisation),
   **Dropped frames** (last 5 s / since start) and the longest frame (ms).
@@ -595,7 +595,7 @@ How it measures:
 * **Apply**: a drain listener on the TS mirror, `mirror.addDrainListener(fn): () => void`, called after each
   flush with `{ changeSets, entries, appliedEntries, durationMs }`, timed inside the runtime with
   `performance.now()` only while a listener is registered (decision D2; the fallback without the runtime
-  change is wrapping `KeelCore.shared.mirror.flush` from the view, which works because the scheduled flush
+  change is wrapping `UndraCore.shared.mirror.flush` from the view, which works because the scheduled flush
   calls `this.flush()`). `performance.now()` is coarsened by browsers (Chrome: 100 us without cross-origin
   isolation, which GitHub Pages cannot enable; 5 us with it), so per-drain percentiles are quantised; the
   per-change-set mean is the robust number, and the screen shows the resolution it detected.
@@ -606,8 +606,8 @@ How it measures:
   site-v2's base shape plus optional fields (a consumer that knows only the base keeps working):
 
 ```ts
-interface KeelStats {
-  type: "keel-stats";
+interface UndraStats {
+  type: "undra-stats";
   changeSetsPerSec: number;            // site-v2 base: received by the mirror
   applyP50Us: number;                  // site-v2 base: per drain (per change-set when one drain = one change-set)
   applyP99Us: number;                  // site-v2 base
@@ -667,23 +667,23 @@ recorded on the blueprint's devices only (RESULTS.md's rule: no simulator number
 | modify | `.github/workflows/bench.yml` | 7.7 |
 | new | `examples/playground/core/src/stress.rs` | 8.1 with its unit tests |
 | modify | `examples/playground/core/src/lib.rs` | `pub mod stress; pub use stress::Stress;` + docs table row |
-| regenerate | `examples/playground/generated/**` | `keel bindgen` (below); goldens of the playground only |
+| regenerate | `examples/playground/generated/**` | `undra bindgen` (below); goldens of the playground only |
 | new | `examples/playground/web/src/views/StressView.tsx`, `src/stress-stats.ts` | 8.2 |
 | modify | `examples/playground/web/src/App.tsx`, `src/index.css` | the tab and styles |
 | new | `examples/playground/web/src/stress-stats.test.ts` | vitest: `percentile`, `WindowStats` rates, `FrameMonitor` with a fake rAF clock (60 Hz and 120 Hz, drops counted right) |
 | modify | `examples/playground/web/smoke/*` | Playwright: open `?screen=stress&mode=firehose&rate=10000&autostart=1`, wait 2 s, the Received tile is > 0 and no console error |
-| modify (D2) | `runtimes/ts/@keel/runtime/src/mirror.ts`, `test/mirror.test.ts`, `docs/SPEC.md` 17.1 | `addDrainListener` + counters `entriesReceived`, `entriesApplied`, `drains`; tests: listener called once per flush with the right counts, removal, no timing when no listener |
+| modify (D2) | `runtimes/ts/@undra/runtime/src/mirror.ts`, `test/mirror.test.ts`, `docs/SPEC.md` 17.1 | `addDrainListener` + counters `entriesReceived`, `entriesApplied`, `drains`; tests: listener called once per flush with the right counts, removal, no timing when no listener |
 | modify | `site/data/bench.json` | the harsh rows (7.8) in site-v2's shape |
 | new | `.10x/decisions/sde/stress.md` | the implementer's decision record (what was re-baselined, what was dropped, numbers) |
 
-Out of S1's ownership unless the integrator says otherwise: `crates/keel-ffi/tests/commit_alloc.rs` (D4).
+Out of S1's ownership unless the integrator says otherwise: `crates/undra-ffi/tests/commit_alloc.rs` (D4).
 
 ### 9.3 What "done" means for S1
 
 1. Every row of section 6 exists and passes on the reference machine, re-baselined where marked, with the
    `measured` values that the harness itself printed; `the_budget_file_covers_every_workload_and_nothing_else`
    and `stress_table_covers_every_scenario` pass.
-2. `cargo test -p keel-bench --test stress --release` passes three times in a row locally; the soak passes
+2. `cargo test -p undra-bench --test stress --release` passes three times in a row locally; the soak passes
    for 60 s locally and 10 s in CI; each scenario's invariants fail when deliberately broken (try once by hand:
    make `ApplyingHost` skip one patch and see the equality invariant fail; make the drain thread swap two
    change-sets and see out-of-order fail) and that is described in the decision record.
@@ -702,41 +702,41 @@ Out of S1's ownership unless the integrator says otherwise: `crates/keel-ffi/tes
 ### 9.4 Commands
 
 ```bash
-source /Users/shrey/Desktop/src/keel/scripts/env.sh
+source /Users/shrey/Desktop/src/undra/scripts/env.sh
 
 # Rust: lint, unit + smoke (debug), gates (release)
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p keel-bench
-cargo test -p keel-bench --test budgets --release -- --nocapture
-cargo test -p keel-bench --test stress --release -- --nocapture
-KEEL_STRESS_SECONDS=10 cargo test -p keel-bench --test stress --release -- --nocapture   # RESULTS.md numbers
+cargo test -p undra-bench
+cargo test -p undra-bench --test budgets --release -- --nocapture
+cargo test -p undra-bench --test stress --release -- --nocapture
+UNDRA_STRESS_SECONDS=10 cargo test -p undra-bench --test stress --release -- --nocapture   # RESULTS.md numbers
 
 # Baselines (print rows in budgets.toml syntax)
-KEEL_BENCH_FILTER=stress/ cargo test -p keel-bench --test budgets --release -- --ignored --nocapture baseline
-cargo test -p keel-bench --test stress --release -- --ignored --nocapture stress_baseline
+UNDRA_BENCH_FILTER=stress/ cargo test -p undra-bench --test budgets --release -- --ignored --nocapture baseline
+cargo test -p undra-bench --test stress --release -- --ignored --nocapture stress_baseline
 
 # Soak
-cargo run -p keel-bench --release --bin soak -- --seconds 60 --json target/soak.json
-cargo run -p keel-bench --release --bin soak -- --seconds 10
+cargo run -p undra-bench --release --bin soak -- --seconds 60 --json target/soak.json
+cargo run -p undra-bench --release --bin soak -- --seconds 10
 
 # Criterion, for humans
-cargo bench -p keel-bench --bench stress
+cargo bench -p undra-bench --bench stress
 
 # Playground core, bindings, apps, contracts
 cargo test -p playground-core
-cargo run -p keel-cli -- bindgen -C examples/playground --docs
-cargo run -p keel-cli -- bindgen -C examples/playground --docs --check
-cargo run -p keel-cli -- build -C examples/playground --platform web
+cargo run -p undra-cli -- bindgen -C examples/playground --docs
+cargo run -p undra-cli -- bindgen -C examples/playground --docs --check
+cargo run -p undra-cli -- build -C examples/playground --platform web
 (cd examples/playground/web && npm ci && npm run typecheck && npm test && npm run smoke)
-(cd runtimes/ts/@keel/runtime && npm ci && npm run typecheck && npm test)
+(cd runtimes/ts/@undra/runtime && npm ci && npm run typecheck && npm test)
 bash contract-tests/run-all.sh
 
 # Whole workspace before the review
 cargo test --workspace
 ```
 
-(After the rename piece lands, `runtimes/ts/@keel/runtime` is at its new path; use it.)
+(After the rename piece lands, `runtimes/ts/@undra/runtime` is at its new path; use it.)
 
 ### 9.5 Traps for the implementer
 
@@ -767,7 +767,7 @@ cargo test --workspace
   against today's runtime (wasm-main batches per timer tick already, so firehose at 100 k/s is presentable;
   keyed churn at 1 M/s drops frames today) and swap the numbers when S2 lands, saying "before/after ADR-031"
   in RESULTS.md. Alternative: hold the stress screen's landing-page link until S2.
-* **D4. Allocation gate in `keel-ffi`** (`crates/keel-ffi/tests/commit_alloc.rs`: at most 3 allocations per
+* **D4. Allocation gate in `undra-ffi`** (`crates/undra-ffi/tests/commit_alloc.rs`: at most 3 allocations per
   observed single-signal commit, 0 unobserved) and a follow-up to make it 0 (section 11). Outside `bench/**`.
 * **D5. CI time**: layer B at 2 s x 5 scenarios + a 10 s soak adds about a minute to `bench.yml`. Accept, or
   run the soak on `main` only.
@@ -780,7 +780,7 @@ cargo test --workspace
 1. **Three allocations per observed commit** (`txn.rs:258, 280`, `store.rs:675`), zero unobserved. At 100 k
    commits/s that is 300 k `malloc`/`free` pairs per second; ADR-028 showed the allocator was 60% of the sync
    call on this OS. Reusing per-thread vectors (as `take_buffer` already does for the payload,
-   `txn.rs:360-374`) is internal to `keel-signals` (no ADR); ADR-028 took 40% off the sync call by removing
+   `txn.rs:360-374`) is internal to `undra-signals` (no ADR); ADR-028 took 40% off the sync call by removing
    allocations the same way, so a similar share of the 82 ns is likely. A follow-up task, gated by D4's test.
 2. **Kotlin's patch apply copies the list per change-set** and TS's does too; ADR-031 fixes both through the
    merge, but even one patch per frame on a 100,000-row list is a 100,000-element copy per frame on those two

@@ -27,12 +27,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use keel::runtime::testing::{drive_from_this_thread, port_reply_ok};
-use keel::signals::{ALL_SIGNALS, ChangeSink, Signal, StoreCell, txn, with_sink};
-use keel::wire::{Encode, Handle, Writer};
-use keel_bench::rss::{RssGrowth, RssSeries};
-use keel_bench::stats::Histogram;
-use keel_bench::workload::{Workload, plain};
+use undra::runtime::testing::{drive_from_this_thread, port_reply_ok};
+use undra::signals::{ALL_SIGNALS, ChangeSink, Signal, StoreCell, txn, with_sink};
+use undra::wire::{Encode, Handle, Writer};
+use undra_bench::rss::{RssGrowth, RssSeries};
+use undra_bench::stats::Histogram;
+use undra_bench::workload::{Workload, plain};
 
 use super::fixtures::{Churn, Fetcher, Producer, SOURCE_PORT, TickSink, Ticker, tick_event};
 use super::host::{
@@ -82,7 +82,7 @@ pub fn workloads() -> Vec<Workload> {
 }
 
 /// 1,000 implicit transactions on one observed `Signal<u64>` in one call: a core-side producer.
-fn firehose_burst() -> Box<dyn keel_bench::workload::Bench> {
+fn firehose_burst() -> Box<dyn undra_bench::workload::Bench> {
     let (rt, host) = runtime();
     let ticker = construct(&rt, "Ticker", &[]);
     rt.observe(ticker.0, ALL_SIGNALS, true);
@@ -105,7 +105,7 @@ fn firehose_burst() -> Box<dyn keel_bench::workload::Bench> {
 }
 
 /// One `Ticker.set(v)` through `Runtime::call_sync`: a host pushing updates one call at a time.
-fn firehose_call() -> Box<dyn keel_bench::workload::Bench> {
+fn firehose_call() -> Box<dyn undra_bench::workload::Bench> {
     let (rt, host) = runtime();
     let ticker = construct(&rt, "Ticker", &[]);
     rt.observe(ticker.0, ALL_SIGNALS, true);
@@ -125,7 +125,7 @@ fn firehose_call() -> Box<dyn keel_bench::workload::Bench> {
 
 /// One event through `Runtime::event` whose subscriber writes an observed signal: the path a
 /// WebSocket or sensor feed takes into the core.
-fn firehose_event() -> Box<dyn keel_bench::workload::Bench> {
+fn firehose_event() -> Box<dyn undra_bench::workload::Bench> {
     let (rt, host) = runtime();
     let sink = construct(&rt, "TickSink", &[]);
     rt.observe(sink.0, ALL_SIGNALS, true);
@@ -149,7 +149,7 @@ fn firehose_event() -> Box<dyn keel_bench::workload::Bench> {
 
 /// 1,000 recorded list operations on a 10,000-row keyed list, each its own transaction and
 /// applied to a host-side list.
-fn churn_ops() -> Box<dyn keel_bench::workload::Bench> {
+fn churn_ops() -> Box<dyn undra_bench::workload::Bench> {
     let (rt, host, churn) = churn_runtime();
     let payload = method_call(churn, "Churn", "churn", 3, &enc(&1_000_u32));
     let sets = host.counts.change_sets();
@@ -267,7 +267,7 @@ impl CellFanout {
 
 /// One transaction writing 1,000 of `observed` observed signals of one store cell: one
 /// change-set of 21,012 bytes whatever `observed` is.
-fn fanout_cell(observed: usize, dirty: usize) -> Box<dyn keel_bench::workload::Bench> {
+fn fanout_cell(observed: usize, dirty: usize) -> Box<dyn undra_bench::workload::Bench> {
     let mut fan = CellFanout::new(observed, dirty);
     fan.transaction();
     assert_eq!(fan.change_sets(), 1, "one transaction, one change-set");
@@ -338,7 +338,7 @@ impl StoresFanout {
     }
 }
 
-fn fanout_stores_workload() -> Box<dyn keel_bench::workload::Bench> {
+fn fanout_stores_workload() -> Box<dyn undra_bench::workload::Bench> {
     let mut fan = StoresFanout::new(1_000, 100);
     fan.transaction();
     assert_eq!(fan.change_sets(), 1_000, "one change-set per store");
@@ -360,7 +360,7 @@ fn open_stream(host: &Arc<CountingHost>) -> (Arc<Core>, Arc<Producer>, u32) {
 }
 
 /// 1,000 stream items: grant 1,000 credits, run the executor until idle.
-fn stream_items() -> Box<dyn keel_bench::workload::Bench> {
+fn stream_items() -> Box<dyn undra_bench::workload::Bench> {
     let host = Arc::new(CountingHost::default());
     let (rt, _producer, call_id) = open_stream(&host);
     let delivered = host.stream_items();
@@ -736,7 +736,7 @@ fn run_cell_fanout(fan: &mut CellFanout, duration: Duration) -> (Histogram, u64,
 /// transaction, then the same 1,000 writes over 10,000 observed. Commit time and bytes follow
 /// the dirty count, not the observed count: 21,012 bytes in one change-set either way, and the
 /// 100,000-signal commit costs under four times the 10,000-signal one. Measured at the
-/// signal-table layer (no runtime), as `signals/changeset_100/cell` is: a `#[keel::store]` has
+/// signal-table layer (no runtime), as `signals/changeset_100/cell` is: a `#[undra::store]` has
 /// one field per signal.
 pub fn fanout(cfg: &StressConfig) -> StressReport {
     let big_time = cfg.duration.mul_f64(0.75);
@@ -840,7 +840,7 @@ pub fn fanout_stores(cfg: &StressConfig) -> StressReport {
 const RSS_EVERY: Duration = Duration::from_millis(250);
 
 /// **Stream backpressure** (d): an always-ready producer and a consumer that grants 16 credits
-/// per round, then one that grants 100,000. Keel polls a stream one item ahead of its credit
+/// per round, then one that grants 100,000. Undra polls a stream one item ahead of its credit
 /// and never further, so whatever the producer could do, memory is bounded: the number of items
 /// the producer has made minus the number delivered never exceeds one, and RSS stays flat. The
 /// second half measures the item path when credit allows (items per second).
@@ -957,7 +957,7 @@ pub fn spawn_completers(rt: &Arc<Core>, host: &Arc<DrainHost>) -> Vec<JoinHandle
 }
 
 /// **Concurrent completions** (e): 8 host threads answering async port calls, a real
-/// `keel-core` thread, a "main thread" draining change-sets once a frame (60 Hz) and 256 calls
+/// `undra-core` thread, a "main thread" draining change-sets once a frame (60 Hz) and 256 calls
 /// kept in flight. The core lock and the per-store delivery lock must keep order under
 /// contention: every call is answered, every answer is one change-set, and the change-sets of
 /// the store arrive in increasing transaction order.

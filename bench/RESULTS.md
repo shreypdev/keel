@@ -9,8 +9,8 @@ measure, the full criterion tables behind them, and what is still waiting for de
   times the same operations with plain `Instant` and fails over `bench/budgets.toml` (see
   [The CI gate](#the-ci-gate)).
 * Harsh conditions (sustained load, tails, memory, invariants) have their own gate and a soak:
-  `cargo test -p keel-bench --test stress --release` and
-  `cargo run -p keel-bench --release --bin soak` (see [Harsh conditions](#harsh-conditions)).
+  `cargo test -p undra-bench --test stress --release` and
+  `cargo run -p undra-bench --release --bin soak` (see [Harsh conditions](#harsh-conditions)).
 * Medians are criterion's; the bracket is its 95% confidence interval on the median.
 
 ## Machine
@@ -66,7 +66,7 @@ and, for iOS and Android, on the blueprint's devices in the device phase, and th
 until then (see [Device numbers](#device-numbers-ios-android-web) and ADR-031, which is about exactly that
 platform half). A host number says "the core is not the bottleneck"; it does not say "the app is smooth".
 
-Numbers below are from `KEEL_STRESS_SECONDS=10` (best of three runs for the gates, the last run for the
+Numbers below are from `UNDRA_STRESS_SECONDS=10` (best of three runs for the gates, the last run for the
 medians) and a 60 s soak, on the machine above. **The machine was shared**: other builds ran throughout (load
 average 3 to 8), the cache-bound tails moved by up to 4x between runs (fan-out p99 82 to 295 us), and one
 gated run of three needed a second and third attempt for a tail. The gates are 5x to 10x the best run for that
@@ -79,12 +79,12 @@ reason; no number was tuned to pass.
 | b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **170 k operations/s**; p50 4.1 us, p99 17.9 us, p999 26.6 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
 | c | **Fan-out**: 1,000 of 100,000 observed signals written per transaction, then the same 1,000 over 10,000 observed (signal-table layer, no runtime) | commit time and bytes follow the dirty count, not the observed count | **22 k transactions/s**; p50 42 us, p99 98 us; one change-set of **21,012 bytes** either way; the 10,000-observed run has p50 27 us (ratio 1.5, gated at 4) | at least 4.6 k/s, p99 410 us, p999 1.3 ms, 21,012 bytes; layer A 190 us and 130 us | within |
 | c' | **Fan-out across stores**: 1,000 stores of 100 signals, one written in each, one transaction | the per-store overhead when one transaction touches many stores: 1,000 change-sets sharing a transaction | **7.5 k transactions/s** (7.5 M change-sets/s); p50 100 us, p99 377 us; 33,000 bytes | at least 1.6 k/s, p99 1.3 ms, 33,000 bytes; layer A 580 us | within |
-| d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Keel buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **29 M items/s** with credit; produced minus delivered never above **1** in 7.4 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
-| e | **Concurrent completions**: 8 host threads answering async port calls, a `keel-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
+| d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Undra buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **29 M items/s** with credit; produced minus delivered never above **1** in 7.4 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
+| e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | the core lock and the per-store delivery lock keep order under contention | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
 | f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, no drift | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
 
 Allocations: one observed single-signal commit allocates **exactly 3 times** (the two vectors of
-`group_by_store` and the `claimed` vector), an unobserved one **0**; `crates/keel-ffi/tests/commit_alloc.rs`
+`group_by_store` and the `claimed` vector), an unobserved one **0**; `crates/undra-ffi/tests/commit_alloc.rs`
 holds the first at "at most 3" and the second at 0 with a counting allocator (only that crate may count,
 R2). At 100,000 commits a second those 3 are 300,000 `malloc`/`free` pairs a second, which is the next thing
 to remove (a roadmap line, not a budget here).
@@ -135,9 +135,9 @@ is repeated, a broken invariant is not.
   applies each keyed patch, and a "main thread" that drains once a frame and checks per-store order. They stand
   in for the platform's mailbox and list state; they cost far less than the platform's own work does.
 * **Budgets** follow the file's rule: floor = measured / 5, p99 ceiling 5x, p999 ceiling 10x, bytes exact,
-  RSS 1%; each layer A row 5x its p50. Reproduce: `KEEL_STRESS_SECONDS=10 cargo test -p keel-bench --test
-  stress --release -- --nocapture`, `cargo run -p keel-bench --release --bin soak -- --seconds 60`,
-  `cargo bench -p keel-bench --bench stress` (criterion, for humans).
+  RSS 1%; each layer A row 5x its p50. Reproduce: `UNDRA_STRESS_SECONDS=10 cargo test -p undra-bench --test
+  stress --release -- --nocapture`, `cargo run -p undra-bench --release --bin soak -- --seconds 60`,
+  `cargo bench -p undra-bench --bench stress` (criterion, for humans).
 
 ### What these numbers are not
 
@@ -373,12 +373,12 @@ it measures, not the allocator.) The test takes the best p50 of up to three atte
 just smoke-runs every operation, so `cargo test --workspace` stays green and fast), and supports
 `UNDRA_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
 
-Two more steps follow it in the same job. `cargo test -p keel-bench --test stress --release` runs the seven
+Two more steps follow it in the same job. `cargo test -p undra-bench --test stress --release` runs the seven
 sustained scenarios of [Harsh conditions](#harsh-conditions) for 2 s each and fails over their
 `[stress."..."]` tables in `budgets.toml` (a throughput floor, p99 and p999 ceilings, exact change-set bytes,
 RSS growth) or on a broken invariant (nothing lost, nothing reordered, the host's list equals the core's, a
 stream never more than one item ahead); a noisy run gets three attempts, an invariant none. Then
-`cargo run -p keel-bench --release --bin soak -- --seconds 10 --attempts 2` runs the mixed paced load and fails
+`cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2` runs the mixed paced load and fails
 on RSS growth, drift in the firehose's p99, a broken invariant or a host that could not carry the load. The
 debug build of the stress test checks invariants only (500 churn rows, 100 ms per scenario), so
 `cargo test --workspace` stays green and about 4 s slower.

@@ -33,7 +33,7 @@
 //! measured_bytes_per_op = 37
 //! ```
 //!
-//! `KEEL_BENCH_SCALE` divides `min_per_sec` and multiplies the two latency ceilings; it never
+//! `UNDRA_BENCH_SCALE` divides `min_per_sec` and multiplies the two latency ceilings; it never
 //! touches `bytes_per_op`, `rss_growth_pct` or a scenario's own invariants (nothing lost,
 //! nothing reordered), which are not negotiable on a slower machine.
 
@@ -114,7 +114,7 @@ impl StressVerdict {
 }
 
 impl StressBudget {
-    /// Checks `observed` against the gates. `scale` (`KEEL_BENCH_SCALE`) divides the throughput
+    /// Checks `observed` against the gates. `scale` (`UNDRA_BENCH_SCALE`) divides the throughput
     /// floor and multiplies the latency ceilings; bytes and RSS are never scaled.
     pub fn check(&self, observed: &StressObserved, scale: f64) -> StressVerdict {
         let mut verdict = StressVerdict::default();

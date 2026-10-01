@@ -2,7 +2,7 @@
 #![deny(missing_docs)]
 //! The soak: a busy app's mixed load, paced, for minutes, looking for leaks and drift.
 //!
-//! One runtime with a real `keel-core` thread carries, at the same time:
+//! One runtime with a real `undra-core` thread carries, at the same time:
 //!
 //! | Load | Rate | Thread |
 //! |---|---|---|
@@ -30,7 +30,7 @@
 //! drift, rate), the way the budgets test takes the best of three; a broken invariant is never
 //! retried, because an intermittent reordering is a bug and not noise.
 //!
-//! `cargo run -p keel-bench --release --bin soak -- --seconds 60` (locally; CI runs 10).
+//! `cargo run -p undra-bench --release --bin soak -- --seconds 60` (locally; CI runs 10).
 //! Options: `--seconds N`, `--warmup PCT` (default 50), `--rss-limit-pct X`,
 //! `--attempts N`, `--json PATH`.
 //!
@@ -45,11 +45,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use keel::signals::ALL_SIGNALS;
-use keel::wire::Encode;
-use keel_bench::budget::Budgets;
-use keel_bench::rss::{RssSeries, resident_bytes};
-use keel_bench::stats::Histogram;
+use undra::signals::ALL_SIGNALS;
+use undra::wire::Encode;
+use undra_bench::budget::Budgets;
+use undra_bench::rss::{RssSeries, resident_bytes};
+use undra_bench::stats::Histogram;
 
 #[path = "../../common/fixtures.rs"]
 mod fixtures;
@@ -244,7 +244,7 @@ fn median(sorted: &[u64]) -> u64 {
 }
 
 fn budget_limit() -> f64 {
-    let path = match std::env::var_os("KEEL_BENCH_BUDGETS") {
+    let path = match std::env::var_os("UNDRA_BENCH_BUDGETS") {
         Some(path) => PathBuf::from(path),
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("budgets.toml"),
     };
