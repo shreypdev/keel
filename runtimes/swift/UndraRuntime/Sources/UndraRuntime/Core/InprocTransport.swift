@@ -38,11 +38,6 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         self.table = table
     }
 
-    /// The namespace of the core this transport reaches.
-    var namespace: String {
-        return table.namespace
-    }
-
     /// Whether a transport over the core of `namespace` is started in this process.
     static func isClaimed(_ namespace: String) -> Bool {
         return active.withLock { (claims: inout [String: InprocTransport]) -> Bool in
