@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xefd907be3070520a</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xc5f05c376fde398c</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
@@ -607,7 +607,7 @@ public func version(ctx: UndraCore = .shared) throws -&gt; String
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">An <code>@Observable</code> class for each <code>#[undra::store]</code>: its signals, then its methods.</p>
 <p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>197 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>204 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift" rel="noopener">Stores.swift</a></span></div><pre><code data-lang="swift">/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
 /// exercise the boundary.
 @MainActor @Observable
@@ -776,7 +776,7 @@ public final class Stress: UndraStore, @unchecked Sendable {
 public final class Todos: UndraStore, @unchecked Sendable {
     public private(set) var todos: [Todo]
     public private(set) var filter: Filter
-    /// Computed by the core; read-only.
+    /// Derived by the core from another list; read-only. Changes arrive as keyed patches.
     public private(set) var visible: [Todo]
     /// Computed by the core; read-only.
     public private(set) var remaining: UInt32
@@ -792,6 +792,13 @@ public final class Todos: UndraStore, @unchecked Sendable {
     /// Removes every finished item.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func clearDone()
+
+    /// Appends `count` items titled `Item 1`, `Item 2`, .. with every fourth one finished, in one
+    /// transaction (a demo and test helper: the big-list screen of the docs, contract scenario S19).
+    /// A bulk load is a raw write, so `todos` and `visible` are sent as full values this once; the
+    /// writes after it are patches again.
+    /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+    public func fill(count: UInt32)
 
     /// Removes the item with `id`; unknown ids are ignored.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
@@ -861,11 +868,11 @@ public func postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>111 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>112 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash to pass to `UndraCore.load` as the expected schema hash.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0xefd907be3070520a
+    public static let schemaHash: UInt64 = 0xc5f05c376fde398c
 
     public enum Objects {
         public enum Probe {
@@ -921,6 +928,7 @@ public enum UndraIds {
             public static let new: UInt32 = 0x35935dea
             public static let add: UInt32 = 0xd13d7ad7
             public static let clearDone: UInt32 = 0x27ffa842
+            public static let fill: UInt32 = 0x1ce95af5
             public static let remove: UInt32 = 0xa977479c
             public static let setFilter: UInt32 = 0x07781993
             public static let toggle: UInt32 = 0x1cc45d38

@@ -112,6 +112,19 @@ public struct KvAdapter: UndraAdapter {
 }
 
 /// One file per key: `u32 key length, key UTF-8, value bytes`, named `<fnv1a64>-<fnv1a32>`.
+///
+/// The directory is shared with the React Native module's C++ store (same names, same layout), and
+/// a process killed mid-write leaves a temporary file in it. Three rules keep those out of sight:
+///
+/// * `set` writes `<name>.<16 hex digits>.tmp`, flushes it and renames it to `<name>` (the name
+///   `temporaryName(for:)` defines, and the C++ store uses), so an entry file is whole or absent;
+/// * `list` considers only a *sealed entry*: a file named like `fileName(for:)` writes it, whose
+///   header holds the key that name belongs to. Temporary files, dot files, files of any other
+///   name and files with a damaged header are skipped (the entry format ends the value at the end
+///   of the file, so a value cut short cannot be told from a shorter one; the sealing above is
+///   what rules it out);
+/// * `get` of a file with a damaged header is "no value" (the key is not listed either), not a
+///   failure the app would meet on every launch until it overwrote the key.
 final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
     private let directory: URL
 
@@ -122,6 +135,34 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
     /// The file name of `key`: two FNV-1a hashes in hex, 16 + 1 + 8 characters.
     static func fileName(for key: String) -> String {
         return hex(fnv1a64(key), width: 16) + "-" + hex(UInt64(fnv1a32(key)), width: 8)
+    }
+
+    /// The end of the name of a file `set` is still writing.
+    static let temporarySuffix = ".tmp"
+
+    /// The name of the temporary file for the entry file `name`: `<name>.<16 hex digits>.tmp`.
+    static func temporaryName(for name: String) -> String {
+        return name + "." + PosixFiles.randomHex() + temporarySuffix
+    }
+
+    /// Whether `name` has the shape of an entry file name (`fileName(for:)`): 16 lowercase hex
+    /// digits, `-`, 8 more.
+    static func isEntryName(_ name: String) -> Bool {
+        let bytes = Array(name.utf8)
+        guard bytes.count == 16 + 1 + 8 else {
+            return false
+        }
+        for (index, byte) in bytes.enumerated() {
+            if index == 16 {
+                if byte != UInt8(ascii: "-") {
+                    return false
+                }
+            } else if !(UInt8(ascii: "0") ... UInt8(ascii: "9")).contains(byte)
+                        && !(UInt8(ascii: "a") ... UInt8(ascii: "f")).contains(byte) {
+                return false
+            }
+        }
+        return true
     }
 
     private static func hex(_ value: UInt64, width: Int) -> String {
@@ -142,13 +183,15 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             return nil
         }
         let data = try Data(contentsOf: url)
-        var reader = UndraReader([UInt8](data))
-        let storedKey = try reader.readString()
-        if storedKey != key {
+        guard let header = FileKeyValueBackend.header(of: data) else {
+            // Not a sealed entry (damaged, or cut short): this key has no value.
+            return nil
+        }
+        if header.key != key {
             // A hash collision with another key: this key has no value.
             return nil
         }
-        return Array(reader.readRemaining())
+        return [UInt8](data[(data.startIndex + header.end)...])
     }
 
     func set(_ key: String, _ value: [UInt8]) throws {
@@ -156,7 +199,22 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
         var writer = UndraWriter(capacity: 4 + key.utf8.count + value.count)
         writer.writeString(key)
         writer.writeRaw(value)
-        try Data(writer.finish()).write(to: fileURL(for: key), options: .atomic)
+        let raw = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        if raw < 0 {
+            throw PortAdapterError.failed("cannot open \(directory.path): \(PosixError(code: errno))")
+        }
+        let name = FileKeyValueBackend.fileName(for: key)
+        do {
+            try PosixFiles.writeAtomically(
+                writer.finish(),
+                named: name,
+                via: FileKeyValueBackend.temporaryName(for: name),
+                in: OwnedDescriptor(raw),
+                mode: 0o600
+            )
+        } catch let error as PosixError {
+            throw PortAdapterError.failed("cannot write the entry of '\(key)': \(error)")
+        }
     }
 
     func delete(_ key: String) throws {
@@ -175,12 +233,20 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: directory.path) else {
             return []
         }
-        let entries = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         var keys: [String] = []
-        for url in entries {
-            if let key = try readKey(at: url), key.hasPrefix(prefix) {
-                keys.append(key)
+        for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) {
+            guard FileKeyValueBackend.isEntryName(name) else {
+                continue
             }
+            // A file that vanished or cannot be read meanwhile is skipped, as the React Native
+            // module's store does.
+            guard let key = (try? readKey(at: directory.appendingPathComponent(name))) ?? nil,
+                  FileKeyValueBackend.fileName(for: key) == name,
+                  key.hasPrefix(prefix)
+            else {
+                continue
+            }
+            keys.append(key)
         }
         keys.sort()
         return keys
@@ -189,6 +255,13 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
     /// Reads only the key of an entry file, without loading the value.
     private func readKey(at url: URL) throws -> String? {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        return FileKeyValueBackend.header(of: data)?.key
+    }
+
+    /// The key at the start of an entry file's `data` and where the value begins, or nil when the
+    /// header is not whole: fewer than four bytes, a key longer than the file, or a key that is
+    /// not UTF-8.
+    private static func header(of data: Data) -> (key: String, end: Int)? {
         guard data.count >= 4 else {
             return nil
         }
@@ -205,7 +278,10 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             return nil
         }
         let keyBytes = data.subdata(in: (start + 4) ..< (start + 4 + length))
-        return String(data: keyBytes, encoding: .utf8)
+        guard let key = String(data: keyBytes, encoding: .utf8) else {
+            return nil
+        }
+        return (key, 4 + length)
     }
 }
 

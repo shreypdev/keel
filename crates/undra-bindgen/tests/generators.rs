@@ -1118,3 +1118,118 @@ fn swift_survives_a_type_that_has_no_value_at_all() {
     );
     assert!(file(&files, "Stores.swift").contains("public final class Holder"));
 }
+
+// ----- derived lists (ADR-039 decision 7) -------------------------------------------------
+
+/// The declaration lines of the store property `name` (the doc line above included), with the
+/// name replaced, so two properties can be compared modulo their names.
+fn declaration(text: &str, lang: &str, name: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let is_decl = |line: &str| match lang {
+        "swift" => line.contains(&format!(" var {name}: ")),
+        "kotlin" => {
+            line.contains(&format!(" val {name}: ")) || line.contains(&format!(" val _{name}: "))
+        }
+        _ => line.contains(&format!("readonly {name}: ")),
+    };
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if is_decl(line) {
+            if i > 0
+                && (lines[i - 1].trim_start().starts_with("/*")
+                    || lines[i - 1].trim_start().starts_with("///"))
+            {
+                out.push(lines[i - 1].trim().to_owned());
+            }
+            out.push(line.replace(name, "NAME").trim().to_owned());
+        }
+    }
+    assert!(!out.is_empty(), "{lang}: no declaration of {name}");
+    out
+}
+
+#[test]
+fn a_derived_list_is_declared_exactly_as_a_computed_list_and_also_applies_patches() {
+    // A derived list is `computed: true` with a `key` (ADR-039): `visible` in the stores case.
+    // `done_todos`, added here, is the same type, computed, without a key. Their generated
+    // declarations are the same; only `visible`'s `apply` has the keyed-patch case. No new
+    // generated surface.
+    let mut schema = common::case("stores");
+    let todos = schema
+        .objects
+        .iter_mut()
+        .find(|o| o.name == "Todos")
+        .and_then(|o| o.store.as_mut())
+        .unwrap();
+    let visible = todos.signals.iter().find(|s| s.name == "visible").unwrap();
+    assert!(visible.computed && visible.key.as_deref() == Some("id"));
+    let mut done = visible.clone();
+    done.name = "done_todos".into();
+    done.key = None;
+    done.signal_id = u32::try_from(todos.signals.len()).unwrap();
+    todos.signals.push(done);
+    let generator = common::generator_for("stores", &schema);
+    let outputs = [
+        ("swift".to_owned(), generator.swift(&schema).unwrap()),
+        ("kotlin".to_owned(), generator.kotlin(&schema).unwrap()),
+        ("ts".to_owned(), generator.typescript(&schema).unwrap()),
+    ];
+    for (lang, files) in outputs {
+        let (stores, derived, plain, patch_of) = match lang.as_str() {
+            "swift" => (
+                "Stores.swift",
+                "visible",
+                "doneTodos",
+                "try applyPatch(ops, to: &self.NAME)",
+            ),
+            "kotlin" => (
+                "Stores.kt",
+                "visible",
+                "doneTodos",
+                "_NAME.value = KeyedPatch.applyPatch(_NAME.value, ops)",
+            ),
+            _ => (
+                "stores.ts",
+                "visible",
+                "doneTodos",
+                "this.NAME._set(applyPatch(this.NAME.peek(), ops));",
+            ),
+        };
+        let text = file(&files, stores);
+        // The declarations are the same shape; only the doc comment says which kind it is.
+        let code_only = |lines: Vec<String>| -> Vec<String> {
+            lines
+                .into_iter()
+                .filter(|line| {
+                    let l = line.trim_start();
+                    !(l.starts_with("///") || l.starts_with("/**") || l.starts_with('*'))
+                })
+                .collect()
+        };
+        assert_eq!(
+            code_only(declaration(text, &lang, derived)),
+            code_only(declaration(text, &lang, plain)),
+            "{lang}: a derived list's declaration is a computed list's"
+        );
+        assert!(
+            declaration(text, &lang, derived)
+                .iter()
+                .any(|line| line.contains("Derived by the core from another list; read-only.")),
+            "{lang}: documented as derived and read-only"
+        );
+        assert!(
+            declaration(text, &lang, plain)
+                .iter()
+                .any(|line| line.contains("Computed by the core; read-only.")),
+            "{lang}: a plain computed list stays documented as computed"
+        );
+        assert!(
+            text.contains(&patch_of.replace("NAME", derived)),
+            "{lang}: the derived list applies keyed patches"
+        );
+        assert!(
+            !text.contains(&patch_of.replace("NAME", plain)),
+            "{lang}: a computed list without a key is only ever replaced"
+        );
+    }
+}

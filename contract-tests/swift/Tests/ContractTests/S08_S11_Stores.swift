@@ -290,12 +290,13 @@ extension ContractScenarios {
             let raw = try RawStore(core: core, type: UndraIds.Objects.Todos.typeId, method: UndraIds.Objects.Todos.new)
             defer { raw.close() }
             raw.observe()
-            var rawIds: [UUID] = []
+            var rawTodos: [Todo] = []
             for title in ["a", "b", "c"] {
                 let todo: Todo = try decoded(Todo.self, try await raw.call(UndraIds.Objects.Todos.add, encoded { (w: inout UndraWriter) in w.writeString(title) }))
-                rawIds.append(todo.id)
+                rawTodos.append(todo)
             }
-            try raw.callSync(UndraIds.Objects.Todos.toggle, encoded { (w: inout UndraWriter) in rawIds[1].undraEncode(&w) })
+            try raw.callSync(UndraIds.Objects.Todos.toggle, encoded { (w: inout UndraWriter) in rawTodos[1].id.undraEncode(&w) })
+            rawTodos[1].done = true
             try await waitUntil("the raw store to settle") { raw.entries(of: 3).last.flatMap { try? $0.decode(UInt32.self) } == 2 }
             raw.clear()
             let transactions = core.stat("transactions")
@@ -305,7 +306,12 @@ extension ContractScenarios {
             try checkEqual(core.stat("transactions") - transactions, 1, "change-sets for set_filter(Done)")
             try checkEqual(raw.entries.map(\.signal).sorted(), [1, 2], "signals of set_filter(Done): filter and visible only")
             try checkEqual(try raw.entries(of: 1)[0].decode(Filter.self), .done, "filter")
-            try checkEqual(try raw.entries(of: 2)[0].decode([Todo].self).map(\.title), ["b"], "visible in the same change-set")
+            // `visible` is a derived list (ADR-039): its entry is the keyed patch that leaves [b].
+            let visibleEntry = raw.entries(of: 2)[0]
+            try check(visibleEntry.op == .keyedPatch, "visible arrives as a keyed patch")
+            var shown = rawTodos
+            try applyPatch(try visibleEntry.decodePatch(Todo.self), to: &shown)
+            try checkEqual(shown.map(\.title), ["b"], "visible in the same change-set")
 
             // 3. The generated store follows the filter.
             todos.setFilter(.done)

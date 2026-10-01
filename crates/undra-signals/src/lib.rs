@@ -24,6 +24,16 @@
 //! thread has open, a write from this thread is delivered with that thread's transaction, not
 //! before the write returns.
 //!
+//! # Derived lists
+//!
+//! [`DerivedList`] (ADR-039) is a filtered, sorted and mapped view of a `Signal<Vec<T>>`, built with
+//! [`Signal::derive`] and kept from the list's recorded operations: O(log n) per changed row, at
+//! most two keyed-patch ops per source op on the wire, nothing for an op that does not change the
+//! view. Its value is always `stable_sort_by_key(filter_map(source))`. Its closures must be pure
+//! functions of the row; debug builds panic when one reads or writes reactive state, and a closure
+//! that reads its own list panics in every build. A `DerivedList` attached to a store
+//! ([`StoreCell::attach_derived`]) is isolated like a computed when a closure panics.
+//!
 //! # Panics
 //!
 //! A panic inside [`txn`], a computed closure, an effect, an encoder or a sink leaves the
@@ -48,6 +58,7 @@
 mod computed;
 mod context;
 mod deps;
+mod derived;
 mod effect;
 mod error;
 mod graph;
@@ -62,6 +73,7 @@ mod value;
 pub use computed::Computed;
 pub use context::{clear_write_checker, set_write_checker};
 pub use deps::{Dep, Deps};
+pub use derived::{Derive, DerivedList, DerivedStats, Order, Sorted, Unsorted};
 pub use effect::Effect;
 pub use error::{SignalsError, WriteError};
 pub use signal::Signal;

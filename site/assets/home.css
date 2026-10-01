@@ -212,7 +212,7 @@ html:not(.js) .live-fallback > span { display: none; }
 .reveal-ready .in .seg i { width: var(--w); transition: width 1.1s cubic-bezier(.2,.8,.2,1) .1s; }
 .seg-key { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 .74rem/1.4 var(--font-mono); color: var(--text-3); }
 .seg-key b { color: var(--text); font-weight: 500; margin-left: 5px; }
-.gridcells { display: grid; grid-template-columns: auto repeat(18, 1fr); gap: 3px; margin-top: 18px; align-items: center; font: 400 .66rem/1 var(--font-mono); color: var(--text-3); }
+.gridcells { display: grid; grid-template-columns: auto repeat(19, 1fr); gap: 3px; margin-top: 18px; align-items: center; font: 400 .66rem/1 var(--font-mono); color: var(--text-3); }
 .gridcells .r { padding-right: 6px; text-align: right; }
 .gridcells i { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--accent); opacity: .85; }
 @media (prefers-reduced-motion: no-preference) {

@@ -1,0 +1,24 @@
+{
+  "kind": "derived-platform-apply",
+  "date": "2026-10-01",
+  "what": "What each platform runtime does with the change-set entry of Todos.visible after one title change, at 1,000 / 10,000 / 100,000 rows (750 / 7,500 / 75,000 visible): before ADR-039 the full value (decode the whole list with the generated Todo codec), after it one keyed-patch op (decodePatch + applyPatch). Median per apply, best of three. Throwaway probes against each runtime's own reader, codecs and applyPatch (as ADR-039's were), not committed; the rows are what they printed.",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5"},
+  "load_average": {"before": 6.1},
+  "platforms": [
+    {"platform": "typescript", "engine": "Node 24 (V8), runtime sources through vitest", "rows": [
+      {"rows": 1000, "visible": 750, "full_us": 104.54, "patch_us": 0.46},
+      {"rows": 10000, "visible": 7500, "full_us": 1072.50, "patch_us": 1.62},
+      {"rows": 100000, "visible": 75000, "full_us": 11273.29, "patch_us": 47.25}
+    ], "note": "applyPatch returns a new array (React keeps unchanged rows' identity): the one-op cost at 100,000 rows is that copy, paid once per drain (ADR-031)"},
+    {"platform": "kotlin", "engine": "JVM 17 (HotSpot), kotlinc 2.4.20", "rows": [
+      {"rows": 1000, "visible": 750, "full_us": 15.21, "patch_us": 0.21},
+      {"rows": 10000, "visible": 7500, "full_us": 152.17, "patch_us": 1.13},
+      {"rows": 100000, "visible": 75000, "full_us": 1499.46, "patch_us": 7.21}
+    ], "note": "applyPatch copies the list into a new one"},
+    {"platform": "swift", "engine": "Swift 6, -c release", "rows": [
+      {"rows": 1000, "visible": 750, "full_us": 81.17, "patch_us": 0.38, "patch_while_held_us": 4.88},
+      {"rows": 10000, "visible": 7500, "full_us": 832.21, "patch_us": 0.38, "patch_while_held_us": 46.25},
+      {"rows": 100000, "visible": 75000, "full_us": 8968.62, "patch_us": 0.42, "patch_while_held_us": 512.79}
+    ], "note": "applyPatch(_:to:) is inout: in place unless another reference (a SwiftUI view's copy) holds the array, then copy-on-write"}
+  ]
+}

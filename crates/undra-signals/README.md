@@ -46,10 +46,11 @@ assert_eq!(double.get(), 22);
 |---|---|
 | `Signal<T>` | A shared value. `get`, `with`, `set`, `update`; `Clone` is another handle to the same signal. A `Signal<Vec<T>>` adds the recorded list operations `push`, `insert`, `remove`, `update_at`, `move_item`, `clear` (and `replace`, which is `set`). |
 | `Computed<T>` | A cached value derived from signals and other computeds; lazy, recomputed eagerly at commit only while observed. |
+| `DerivedList<T>`, `Derive` | A filtered, sorted and mapped view of a `Signal<Vec<T>>` (`list.derive().filter(..).sort_by_key(..).build()`, or `.count()` for its length), kept from the list's recorded operations at O(log n) per changed row and delivered as keyed patches (ADR-039). |
 | `Effect` | Runs after every commit that changed one of its inputs; dropping it cancels it. |
 | `Deps` | The inputs of a computed or effect: one `&Signal` / `&Computed`, or a tuple of up to six. |
 | `txn` | Batches writes; nested calls join the outer transaction; exception safe. |
-| `StoreCell` | The signal table of one store: `attach`, `attach_keyed`, `attach_computed`, `observe`, `encode_signal`, `encode_snapshot`. |
+| `StoreCell` | The signal table of one store: `attach`, `attach_keyed`, `attach_computed`, `attach_derived`, `observe`, `encode_signal`, `encode_snapshot`. |
 | `CellSlot` | Where a store keeps its `StoreCell`: empty until first use, then one shared cell for the store's life (the hidden field `#[undra::store]` adds). `get_or_init`, `get_or_try_init`. |
 | `SignalsError` | Why a signal could not be attached: already attached, out of order, unknown signal. |
 | `ChangeSink`, `set_sink`, `with_sink` | Where committed change-sets go. |
@@ -73,6 +74,16 @@ assert_eq!(double.get(), 22);
   long the list is; written with `set`, `update` or `replace` it is found by diffing the list
   against what the host has, O(list) (ADR-027). Memory: one clone of the list per *observed*
   keyed signal, plus the ops recorded since the last commit.
+* Derived lists (`DerivedList<T>`, ADR-039) are views of a list signal (`filter`, `filter_with` a
+  parameter, `map`, at most one stable `sort_by_key`) that are not recomputed: each replays the
+  list's recorded operations on an index of two order-statistic trees, O(log n) per changed row, and
+  reaches the host as at most two keyed-patch ops per source op; a transaction's ops are one patch,
+  and an op that does not change the view sends nothing. At 10,000 rows one change of a filtered view
+  costs about 0.3 µs and 158 bytes in the core, where a `Computed<Vec<T>>` cost 177 µs and 353 KB. A
+  raw write of the source rebuilds the view and sends it whole. Pipeline closures must be pure
+  functions of the row (debug builds panic when one reads or writes a signal); values a view depends
+  on besides its rows are parameters. Memory: 24 bytes per source row, plus about 24 bytes and the key
+  per passing row of a sorted view.
 * The only lock held while user code runs is a store's delivery lock, taken from the moment a
   commit claims the store's dirty slots until the sink has returned (a sink must not wait for
   another thread that writes the same store). Effects run after it is released. Writes made
@@ -95,4 +106,8 @@ cargo test -p undra-signals
 Unit tests next to the code; integration tests in `tests/` for stores, keyed lists,
 re-entrancy and panics, multi-threaded writes through the global sink, and a proptest that
 drives random edits, transactions and observation changes against a host-side mirror and checks
-that the mirror always agrees with the core.
+that the mirror always agrees with the core. Derived lists have their own: a proptest of four views
+and a count against `filter + stable sort` (`tests/derived.rs`, `UNDRA_DERIVED_CASES`), the delivery
+and bounds cases (`tests/derived_delivery.rs`), 60,000 seeded operations over three views
+(`tests/derived_seeded.rs`, whose recording `examples/derived_vectors.rs` writes for the platform
+runtimes' contract scenario S19), and property tests of the index against a `Vec`.

@@ -51,8 +51,10 @@ function ratio(row) {
   return row.floor ? (row.budget * b) / (row.value * a) : (row.value * a) / (row.budget * b);
 }
 
-/** Column spans (of 12) for n cards: rows of 3, then a last row of 4 (seven rows make 3 + 4). */
+/** Column spans (of 12) for n cards: rows of 3, then a last row of 4 (seven rows make 3 + 4); a
+ * multiple of four from eight on is rows of 4 (eight make 4 + 4). */
 function spans(n) {
+  if (n >= 8 && n % 4 === 0) return Array(n).fill(3);
   if (n >= 7) return Array.from({ length: n }, (_, i) => (i < n - 4 ? 4 : 3));
   if (n % 3 === 0) return Array(n).fill(4);
   if (n % 2 === 0) return Array(n).fill(6);
