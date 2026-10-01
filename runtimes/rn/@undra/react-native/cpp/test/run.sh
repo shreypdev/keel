@@ -5,7 +5,8 @@
 #   runtimes/rn/@undra/react-native/cpp/test/run.sh
 #
 # Needs the playground core for this machine: `undra build -C examples/playground --platform host`
-# (built here when missing). UNDRA_CORE_DYLIB points at another core. CXX picks the compiler (clang++).
+# (built here when missing, or older than the playground core's sources: the native-defaults checks
+# call its `platform` module). UNDRA_CORE_DYLIB points at another core. CXX picks the compiler (clang++).
 # The JSI compile check (step 3) is skipped when the playground app's dependencies are not installed;
 # UNDRA_RN_REQUIRE_JSI=1 (CI) makes that a failure instead of a skip.
 set -euo pipefail
@@ -18,7 +19,11 @@ case "$(uname -s)" in
   Linux) core="${UNDRA_CORE_DYLIB:-$root/examples/playground/build/host/libundra_core.so}" ;;
 esac
 
-if [ ! -f "$core" ]; then
+stale=0
+if [ -f "$core" ] && [ -z "${UNDRA_CORE_DYLIB:-}" ] && [ -n "$(find "$root/examples/playground/core/src" -newer "$core" -name '*.rs' 2>/dev/null | head -n 1)" ]; then
+  stale=1
+fi
+if [ ! -f "$core" ] || [ "$stale" = 1 ]; then
   echo "==> building the playground core for this machine" >&2
   undra="${UNDRA_CLI:-$root/target/debug/undra}"
   [ -x "$undra" ] || (cd "$root" && cargo build -p undra-cli >&2)
@@ -31,10 +36,17 @@ libdir="$(dirname "$core")"
 flags=(-std=c++20 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
   -fno-sanitize-recover=undefined -I "$pkg/cpp")
 
+# 0. The portable Kv and Fs (UndraStores.cpp), on this machine's file system: no core needed.
+echo "# the portable Kv and Fs stores"
+"${CXX:-clang++}" "${flags[@]}" "$pkg/cpp/UndraStores.cpp" "$here/stores_test.cpp" -o "$out/stores_test"
+"$out/stores_test"
+
+host=("$pkg/cpp/UndraHost.cpp" "$pkg/cpp/UndraDefaults.cpp" "$pkg/cpp/UndraStores.cpp" "$here/host_test.cpp")
+
 # 1. The linked shim (UndraApiLinked.cpp, what iOS builds): the core linked into the test.
 echo "# linked core (the iOS shim)"
 "${CXX:-clang++}" "${flags[@]}" \
-  "$pkg/cpp/UndraApiLinked.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp" \
+  "$pkg/cpp/UndraApiLinked.cpp" "${host[@]}" \
   -L "$libdir" -lundra_core -Wl,-rpath,"$libdir" \
   -o "$out/host_test_linked"
 "$out/host_test_linked"
@@ -43,7 +55,7 @@ echo "# linked core (the iOS shim)"
 #    run time by path, nothing linked.
 echo "# dlopen'ed core (the Android shim)"
 "${CXX:-clang++}" "${flags[@]}" -DUNDRA_RN_DLOPEN "-DUNDRA_RN_CORE_LIBRARY=\"$core\"" \
-  "$pkg/cpp/UndraApiAndroid.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp" \
+  "$pkg/cpp/UndraApiAndroid.cpp" "${host[@]}" \
   -o "$out/host_test_dlopen"
 "$out/host_test_dlopen"
 

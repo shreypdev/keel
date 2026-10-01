@@ -25,7 +25,16 @@
 #include <utility>
 #include <vector>
 
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <fstream>
+#include <iterator>
+#include <optional>
+
 #include "../UndraApi.h"
+#include "../UndraDefaults.h"
 #include "../UndraHost.h"
 
 namespace undra::rn {
@@ -584,6 +593,334 @@ void testsWithAReloadRace(const Api *api) {
   ok("a start while another host is shutting down waits for it (a reload on two JS threads)");
 }
 
+
+// ----- the native default ports (ADR-038 amendment B) -------------------------------------------
+
+const uint32_t kSecureStorePort = fnv1a32("port.SecureStore");
+const uint32_t kFsPort = fnv1a32("port.Fs");
+const uint32_t kKvPut = fnv1a32("fn.kv_put");
+const uint32_t kKvGet = fnv1a32("fn.kv_get");
+const uint32_t kKvKeys = fnv1a32("fn.kv_keys");
+const uint32_t kSecretPut = fnv1a32("fn.secret_put");
+const uint32_t kSecretGet = fnv1a32("fn.secret_get");
+const uint32_t kFileWrite = fnv1a32("fn.file_write");
+const uint32_t kFileRead = fnv1a32("fn.file_read");
+const uint32_t kFileList = fnv1a32("fn.file_list");
+const uint32_t kFileDelete = fnv1a32("fn.file_delete");
+const uint32_t kDevice = fnv1a32("Device");
+const uint32_t kDeviceNew = fnv1a32("Device.new");
+
+/// What the test platform's secret store and network monitor share with the test.
+struct TestPlatformState {
+  std::mutex mutex;
+  std::condition_variable cv;
+  std::map<std::string, std::vector<uint8_t>> secrets;
+  bool fail = false;
+  bool block = false;
+  bool entered = false;
+  ConnectivitySource::Report report;
+  bool started = false;
+  bool stopped = false;
+  bool slotHeldAtStop = false;
+  std::atomic<int> workersStarted{0};
+  std::atomic<int> workersEnded{0};
+};
+
+/// An in-memory secret store that can be made to fail or to block (to hold a worker mid-job).
+struct TestSecrets final : SecretStore {
+  explicit TestSecrets(std::shared_ptr<TestPlatformState> state) : s(std::move(state)) {}
+  bool get(const std::string &key, std::optional<std::vector<uint8_t>> &value, std::string &error) override {
+    std::lock_guard<std::mutex> lock(s->mutex);
+    if (s->fail) {
+      error = "the test keychain is locked";
+      return false;
+    }
+    auto it = s->secrets.find(key);
+    if (it == s->secrets.end()) value.reset();
+    else value = it->second;
+    return true;
+  }
+  bool set(const std::string &key, const std::vector<uint8_t> &value, std::string &) override {
+    std::unique_lock<std::mutex> lock(s->mutex);
+    s->entered = true;
+    s->cv.notify_all();
+    s->cv.wait(lock, [&] { return !s->block; });
+    s->secrets[key] = value;
+    return true;
+  }
+  bool remove(const std::string &key, std::string &) override {
+    std::lock_guard<std::mutex> lock(s->mutex);
+    s->secrets.erase(key);
+    return true;
+  }
+  bool list(const std::string &prefix, std::vector<std::string> &keys, std::string &) override {
+    std::lock_guard<std::mutex> lock(s->mutex);
+    keys.clear();
+    for (const auto &[key, value] : s->secrets)
+      if (key.compare(0, prefix.size(), prefix) == 0) keys.push_back(key);
+    return true;
+  }
+  std::string describe() const override { return "test secrets"; }
+  std::shared_ptr<TestPlatformState> s;
+};
+
+/// A network monitor the test drives: it reports from threads of its own, as the real ones do.
+struct ScriptedSource final : ConnectivitySource {
+  explicit ScriptedSource(std::shared_ptr<TestPlatformState> state) : s(std::move(state)) {}
+  bool start(Report report) override {
+    {
+      std::lock_guard<std::mutex> lock(s->mutex);
+      s->report = std::move(report);
+      s->started = true;
+    }
+    emit(true, NetKind::Wifi); // the current state first
+    return true;
+  }
+  void stop() noexcept override {
+    std::lock_guard<std::mutex> lock(s->mutex);
+    s->stopped = true;
+    s->slotHeldAtStop = Host::runningHost() != nullptr;
+    s->report = nullptr;
+  }
+  void emit(bool online, NetKind kind) {
+    std::thread([this, online, kind] {
+      Report report;
+      {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        report = s->report;
+      }
+      if (report) report(online, kind);
+    }).join();
+  }
+  std::shared_ptr<TestPlatformState> s;
+};
+
+struct TestPlatform final : Platform {
+  TestPlatform(std::string kv, std::string fs) : kvDir(std::move(kv)), fsDir(std::move(fs)) {}
+  std::string kvDirectory() override { return kvDir; }
+  KvNaming kvNaming() override { return KvNaming::Fnv; }
+  std::string fsRoot() override { return fsDir; }
+  std::unique_ptr<SecretStore> makeSecretStore() override { return std::make_unique<TestSecrets>(state); }
+  std::unique_ptr<ConnectivitySource> makeConnectivity() override { return std::make_unique<ScriptedSource>(state); }
+  void workerStarted() noexcept override { state->workersStarted++; }
+  void workerEnded() noexcept override { state->workersEnded++; }
+  std::string kvDir;
+  std::string fsDir;
+  std::shared_ptr<TestPlatformState> state = std::make_shared<TestPlatformState>();
+};
+
+/// The last value of every signal of `handle` in `records`' change-sets.
+std::map<uint32_t, std::vector<uint8_t>> signalValues(const std::vector<Record> &records, uint64_t handle) {
+  std::map<uint32_t, std::vector<uint8_t>> out;
+  for (const Record &r : records) {
+    if (r.kind != RecordKind::ChangeSet) continue;
+    const uint32_t count = getU32(&r.payload[8]);
+    std::size_t at = 12;
+    for (uint32_t i = 0; i < count; ++i) {
+      const uint64_t h = getU64(&r.payload[at]);
+      const uint32_t signal = getU32(&r.payload[at + 8]);
+      const uint32_t len = getU32(&r.payload[at + 13]);
+      if (h == handle) out[signal] = std::vector<uint8_t>(r.payload.begin() + at + 17, r.payload.begin() + at + 17 + len);
+      at += 17 + len;
+    }
+  }
+  return out;
+}
+
+std::string fileText(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+void testsWithNativeDefaults(const Api *api) {
+  char pattern[] = "/tmp/undra-rn-defaults.XXXXXX";
+  const char *base = ::mkdtemp(pattern);
+  check(base != nullptr, "a temporary directory");
+  TestPlatform platform(std::string(base) + "/kv", std::string(base) + "/fs");
+  const std::vector<uint32_t> native = nativePortsOf(platform);
+  check(native.size() == 4, "the test platform offers Kv, SecureStore, Fs and Connectivity");
+
+  Fixture f(api);
+  StartOptions options;
+  options.nativePorts = native;
+  options.platform = &platform;
+  const std::vector<uint8_t> cfg = config();
+  {
+    CallScope scope(*f.host, nullptr);
+    // The schema's ports as the plan lists them; the native ones are taken by the module.
+    const uint32_t code = f.host->start(cfg.data(), static_cast<uint32_t>(cfg.size()), {{kHttp, {}}, {kKv, {}}, {kSecureStorePort, {}}, {kFsPort, {}}}, options);
+    check(code == 0, "the core starts with native defaults, got " + std::to_string(code));
+  }
+  f.settle();
+  {
+    std::lock_guard<std::mutex> lock(platform.state->mutex);
+    check(platform.state->started, "the Connectivity source started after undra_init");
+  }
+  ok("start registers the native defaults and starts the Connectivity source after undra_init");
+
+  auto await = [&](uint32_t function, const std::vector<uint8_t> &args) -> const Record * {
+    const uint32_t id = f.nextCall++;
+    check(f.call(freeCall(function, id, args)) == 0, "the call is accepted");
+    check(f.waitFor([&] { return f.replied(id); }), "it replies within 5 s");
+    return f.reply(id);
+  };
+  auto noJsPortCall = [&](uint32_t port) {
+    for (const Record &r : f.seen)
+      if (r.kind == RecordKind::PortCall && getU32(r.payload.data()) == port) return false;
+    return true;
+  };
+
+  // Kv through the core: the file is the Swift layout's, and JavaScript never saw a port call.
+  {
+    Writer put;
+    put.str("rn.check").u32(2).u8('v').u8('1');
+    const Record *r = await(kKvPut, put.bytes);
+    check(r->payload[4] == 0, "kv_put answers ok");
+    const std::string file = platform.kvDir + "/" + kvFileName(KvNaming::Fnv, "rn.check");
+    const std::string expected = std::string("\x08\x00\x00\x00", 4) + "rn.check" + "v1";
+    check(fileText(file) == expected, "the entry is in the Kv directory, in the native layout");
+    Writer get;
+    get.str("rn.check");
+    r = await(kKvGet, get.bytes);
+    check(r->payload.size() == 5 + 1 + 4 + 2 && r->payload[5] == 1 && r->payload[10] == 'v', "kv_get answers Some(\"v1\")");
+    Writer keys;
+    keys.str("rn.");
+    r = await(kKvKeys, keys.bytes);
+    check(r->payload.size() >= 9 && getU32(&r->payload[5]) == 1, "kv_keys lists the one key");
+    check(noJsPortCall(kKv), "no Kv port call reached JavaScript");
+  }
+  ok("Kv through the core is answered natively, in the native file layout");
+
+  // SecureStore through the core, and a failing store answering "unavailable" with a log record.
+  {
+    Writer put;
+    put.str("token").u32(3).u8('s').u8('3').u8('c');
+    check(await(kSecretPut, put.bytes)->payload[4] == 0, "secret_put answers ok");
+    {
+      std::lock_guard<std::mutex> lock(platform.state->mutex);
+      check(platform.state->secrets["token"] == std::vector<uint8_t>({'s', '3', 'c'}), "the platform's store has it");
+    }
+    Writer get;
+    get.str("token");
+    const Record *r = await(kSecretGet, get.bytes);
+    check(r->payload[4] == 0 && r->payload[5] == 1, "secret_get answers Some");
+    {
+      std::lock_guard<std::mutex> lock(platform.state->mutex);
+      platform.state->fail = true;
+    }
+    r = await(kSecretGet, get.bytes);
+    check(r->payload[4] == 2, "a failing store is unavailable: the core's call fails (status 2), never 'missing'");
+    bool logged = false;
+    for (const Record &rec : f.seen) {
+      const std::string text(rec.payload.begin(), rec.payload.end());
+      logged = logged || (rec.kind == RecordKind::Log && text.find("SecureStore.get failed: the test keychain is locked") != std::string::npos);
+    }
+    check(logged, "and the failure is logged");
+    {
+      std::lock_guard<std::mutex> lock(platform.state->mutex);
+      platform.state->fail = false;
+    }
+    check(noJsPortCall(kSecureStorePort), "no SecureStore port call reached JavaScript");
+  }
+  ok("SecureStore through the core; a failing store answers unavailable and logs");
+
+  // Fs through the core, with its typed errors.
+  {
+    Writer write;
+    write.str("notes/a.txt").u32(2).u8('h').u8('i');
+    check(await(kFileWrite, write.bytes)->payload[4] == 0, "file_write answers Ok(())");
+    check(fileText(platform.fsDir + "/notes/a.txt") == "hi", "the file is under the Fs root");
+    Writer read;
+    read.str("notes/a.txt");
+    const Record *r = await(kFileRead, read.bytes);
+    check(r->payload[4] == 0 && getU32(&r->payload[5]) == 2, "file_read answers the bytes");
+    Writer list;
+    list.str("notes");
+    r = await(kFileList, list.bytes);
+    check(r->payload[4] == 0 && getU32(&r->payload[5]) == 1, "file_list answers one name");
+    Writer escape;
+    escape.str("../escape.txt");
+    r = await(kFileRead, escape.bytes);
+    check(r->payload[4] == 1 && r->payload.size() == 7 && r->payload[5] == 1 && r->payload[6] == 0, "'../' is the typed FsError::Denied (status 1, tag 1)");
+    r = await(kFileWrite, [&] {
+      Writer w;
+      w.str("../escape.txt").u32(0);
+      return w.bytes;
+    }());
+    check(r->payload[4] == 1 && r->payload[5] == 1, "writing outside the root: Denied");
+    struct stat st{};
+    check(::stat((std::string(base) + "/escape.txt").c_str(), &st) != 0, "nothing was written outside the root");
+    Writer del;
+    del.str("notes");
+    check(await(kFileDelete, del.bytes)->payload[4] == 0, "file_delete of a directory answers Ok(())");
+    r = await(kFileRead, read.bytes);
+    check(r->payload[4] == 1 && r->payload[5] == 0, "then reading it is FsError::NotFound (tag 0)");
+    check(noJsPortCall(kFsPort), "no Fs port call reached JavaScript");
+  }
+  ok("Fs through the core, with its typed errors; '../' is Denied");
+
+  // Connectivity: the first report reached the core before any store existed; identical
+  // consecutive reports are sent once.
+  {
+    const uint64_t device = constructStore(f, kDevice, kDeviceNew);
+    f.observe(device);
+    f.drain();
+    auto values = signalValues(f.seen, device);
+    check(values[0] == std::vector<uint8_t>{1}, "online");
+    check(values[1] == std::vector<uint8_t>({0, 0}), "on Wi-Fi");
+    check(values[3] == std::vector<uint8_t>({1, 0, 0, 0}), "one Connectivity report so far");
+    ScriptedSource source(platform.state);
+    source.emit(false, NetKind::None);
+    source.emit(false, NetKind::None);
+    source.emit(true, NetKind::Cellular);
+    check(f.waitFor([&] {
+      auto v = signalValues(f.seen, device);
+      return v[3] == std::vector<uint8_t>({3, 0, 0, 0});
+    }), "three reports reached the core");
+    values = signalValues(f.seen, device);
+    check(values[0] == std::vector<uint8_t>{1} && values[1] == std::vector<uint8_t>({1, 0}), "online on cellular now");
+    f.settle();
+    check(signalValues(f.seen, device)[3] == std::vector<uint8_t>({3, 0, 0, 0}), "the repeated offline report was sent once");
+  }
+  ok("Connectivity reports reach the core from the source's thread, the first one at start, repeats once");
+
+  check(f.host->counters().nativePortCalls > 0, "native port calls are counted");
+
+  // Shutdown while a SecureStore job is running: the event source stops, the worker finishes its
+  // job and is joined, and only then is the process's slot released.
+  {
+    {
+      std::lock_guard<std::mutex> lock(platform.state->mutex);
+      platform.state->block = true;
+      platform.state->entered = false;
+    }
+    Writer put;
+    put.str("late").u32(0);
+    check(f.call(freeCall(kSecretPut, f.nextCall++, put.bytes)) == 0, "secret_put is accepted");
+    {
+      std::unique_lock<std::mutex> lock(platform.state->mutex);
+      check(platform.state->cv.wait_for(lock, std::chrono::seconds(5), [&] { return platform.state->entered; }), "the worker is inside the store");
+    }
+    std::thread jsThread([&] { f.host->shutdown(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    check(Host::runningHost() == f.host.get(), "the slot is held while a worker is still running a job");
+    {
+      std::lock_guard<std::mutex> lock(platform.state->mutex);
+      check(platform.state->stopped && platform.state->slotHeldAtStop, "the Connectivity source stopped before the slot was released");
+      platform.state->block = false;
+    }
+    platform.state->cv.notify_all();
+    jsThread.join();
+    check(Host::runningHost() == nullptr, "then the slot is released");
+    check(platform.state->workersStarted.load() == 3 && platform.state->workersEnded.load() == 3, "three workers ran, and all three ended");
+    ScriptedSource(platform.state).emit(false, NetKind::None); // nothing to report to: a no-op
+  }
+  ok("shutdown stops the source, joins the workers mid-job, then releases the slot");
+
+  std::string cmd = std::string("rm -rf '") + base + "'";
+  if (std::system(cmd.c_str()) != 0) std::printf("# could not remove %s\n", base);
+}
+
 } // namespace
 
 int main() {
@@ -596,6 +933,7 @@ int main() {
   testsWithOneCore(api);
   testsWithSyncPorts(api);
   testsWithAReloadRace(api);
+  testsWithNativeDefaults(api);
   std::printf("# %d checks passed\n", g_checks);
   return 0;
 }
