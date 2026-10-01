@@ -12,7 +12,10 @@ use undra_bindgen::Generator;
 
 use crate::bindgen::{self, Plan, canonicalize_lenient};
 use crate::cli::InitArgs;
-use crate::config::{Platform, ProjectConfig, UNDRA_RELEASE_TAG, UNDRA_REPO_URL, UNDRA_VERSION};
+use crate::config::{
+    Platform, ProjectConfig, UNDRA_RELEASE_TAG, UNDRA_REPO_URL, UNDRA_SWIFT_PACKAGE_URL,
+    UNDRA_VERSION,
+};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{self, create_dir_all, is_empty_dir, make_executable, write_if_changed};
 use crate::names::{Names, portable, relative_path, validate_app_id, validate_project_name};
@@ -319,7 +322,7 @@ fn package_references(generated: &str, runtime: &RuntimeRef, ios_dir: &Path) -> 
         RuntimeRef::Registry { version } => {
             out.push_str("/* End XCLocalSwiftPackageReference section */\n\n/* Begin XCRemoteSwiftPackageReference section */\n");
             out.push_str(&format!(
-                "\t\tA0A0A0A0A0A0A0A000000121 /* UndraRuntime package */ = {{\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {{\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = {version}.0;\n\t\t\t}};\n\t\t}};\n/* End XCRemoteSwiftPackageReference section */"
+                "\t\tA0A0A0A0A0A0A0A000000121 /* UndraRuntime package */ = {{\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"{UNDRA_SWIFT_PACKAGE_URL}\";\n\t\t\trequirement = {{\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = {version}.0;\n\t\t\t}};\n\t\t}};\n/* End XCRemoteSwiftPackageReference section */"
             ));
         }
     }

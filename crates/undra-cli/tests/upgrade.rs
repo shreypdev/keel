@@ -366,6 +366,57 @@ fn a_fork_is_reported_and_left_while_the_other_pins_move() {
     assert!(!web.contains("^0.0.9"), "{web}");
 }
 
+/// A file the upgrade cannot write stops it before anything is written: no half-upgraded tree.
+#[cfg(unix)]
+#[test]
+fn a_file_that_cannot_be_written_leaves_every_file_as_it_was() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, root) = project("released-0.0.9");
+    // The last file in the order the edits are written: the five before it would have been written.
+    let locked = root.join("web/package.json");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let before = read_tree(&root);
+    let (code, stderr) = run_err(
+        undra()
+            .arg("-C")
+            .arg(&root)
+            .args(["upgrade", "--no-bindgen"]),
+    );
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(code, 1, "{stderr}");
+    assert_eq!(read_tree(&root), before, "a half-upgraded tree:\n{stderr}");
+    assert!(stderr.contains("error[undra::C0010]"), "{stderr}");
+    assert!(stderr.contains("web/package.json"), "{stderr}");
+    assert!(stderr.contains("nothing was written"), "{stderr}");
+}
+
+/// A Gradle version held in a variable is not a pin `undra init` writes: left, and said.
+#[test]
+fn a_gradle_version_variable_is_reported_and_left() {
+    let (_dir, root) = project("released-0.0.9");
+    let gradle = root.join("android/app/build.gradle.kts");
+    let text = std::fs::read_to_string(&gradle)
+        .unwrap()
+        .replace("dev.undra:runtime:0.0.9", "dev.undra:runtime:$undraVersion");
+    std::fs::write(&gradle, &text).unwrap();
+    let (_, stderr) = upgrade(&root, &["--no-bindgen"]);
+    assert!(
+        stderr.contains("android/app/build.gradle.kts")
+            && stderr.contains("not written out")
+            && stderr.contains("$undraVersion"),
+        "{stderr}"
+    );
+    let after = std::fs::read_to_string(&gradle).unwrap();
+    assert!(after.contains("dev.undra:runtime:$undraVersion"), "{after}");
+    assert!(
+        after.contains(&format!(
+            "dev.undra:android-adapters:{}.0",
+            CURRENT.rsplit_once('.').unwrap().0
+        )),
+        "{after}"
+    );
+}
+
 #[test]
 fn outside_a_project_it_says_where_to_run_it() {
     let dir = TempDir::new("upgrade-none");

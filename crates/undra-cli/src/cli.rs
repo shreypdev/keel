@@ -205,11 +205,12 @@ WHAT IT DETECTS
     #[command(
         long_about = "Reads the Undra version a project pins in every place `undra init` writes it: the core's \
 `undra` dependency in Cargo.toml (a git tag, or a registry version), `[undra] version` in undra.toml, \
-`@undra/runtime` in the web app's package.json, `dev.undra:runtime` and `dev.undra:android-adapters` in the Gradle \
-scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It moves them all to the \
+`@undra/runtime` (and `@undra/react-native`) in package.json, `dev.undra:runtime` and `dev.undra:android-adapters` in \
+the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It moves them all to the \
 version of this `undra` in one step, shaped as `undra init` would write them (so an upgraded project and a new one \
 agree), regenerates the bindings (`undra bindgen`), and prints the migration notes of every release the project crosses.\n\n\
-Only the version text changes; comments and formatting stay. Your app's own project files (the Xcode build \
+Only the version text changes; comments and formatting stay. A version that is not written out (a Gradle variable) \
+is left and named. The files are written all or none. Your app's own project files (the Xcode build \
 phase, the Gradle task, vite.config.ts) are not edited: the notes say what a newer `undra init` adds. A project that \
 depends on a checkout of the Undra repository (`--undra-path`, a `path` dependency) is on whatever that checkout \
 is: the command says so and changes nothing. A project newer than this `undra` is refused (error C0014): update the CLI.",

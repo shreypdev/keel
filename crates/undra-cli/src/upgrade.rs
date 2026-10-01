@@ -7,9 +7,9 @@
 //! |---|---|---|
 //! | `Cargo.toml` of the core (and any crate of the project) | `undra = { git = "...", tag = "v1.0.0" }`, or a registry version | `tag = "v1.2.3"` / `"1.2.3"` |
 //! | `undra.toml` | `[undra] version = "1.0"` | `"1.2"` |
-//! | `web/package.json` | `"@undra/runtime": "^1.0.0"` | `"^1.2.0"` |
+//! | `web/package.json` (any `package.json`) | `"@undra/runtime": "^1.0.0"`, `"@undra/react-native"` | `"^1.2.0"` |
 //! | `android/**/*.gradle(.kts)` | `dev.undra:runtime:1.0.0`, `dev.undra:android-adapters:1.0.0` | `1.2.0` |
-//! | `ios/**/project.pbxproj` | the Swift package's `minimumVersion = 1.0.0;` | `1.2.0` |
+//! | `ios/**/project.pbxproj` | the `undra-swift` package's `minimumVersion = 1.0.0;` | `1.2.0` |
 //! | `.github/workflows/*.yml` | `UNDRA_VERSION: "1.0.0"` | `"1.2.3"` |
 //!
 //! The runtimes are pinned to the release line (`major.minor.0`, the registries' compatible range),
@@ -18,13 +18,14 @@
 //! is not a pin a release can move: [`Plan::path_pins`] lists them and the command changes nothing.
 //!
 //! The editors work on lines and change only the version text (or, for a git dependency, the one
-//! `tag`/`rev`/`branch` pair), so a file's comments and formatting survive. Each returns the new
+//! `tag`/`rev`/`branch` pair), so a file's comments and formatting survive. A version that is not
+//! written out (a Gradle variable, a dynamic `+`) and anything in a comment is left alone. Each returns the new
 //! text, what it changed and what it saw ([`FileResult`]); the same pass that plans the edits
 //! therefore also reads the version the project is on.
 
 use std::path::{Path, PathBuf};
 
-use crate::config::UNDRA_REPO_URL;
+use crate::config::{UNDRA_REPO_URL, UNDRA_SWIFT_PACKAGE_URL};
 use crate::semver::Semver;
 
 /// One edit: a line, what it pins, and the text before and after.
@@ -75,6 +76,9 @@ pub enum Why {
     Path,
     /// A git dependency on a repository that is not Undra's (a fork).
     Fork,
+    /// A version that is not written out (a Gradle variable such as `$undraVersion`, a dynamic
+    /// `+`): it is not a pin `undra init` writes, so the author moves it where it is defined.
+    NotALiteral,
 }
 
 /// What an editor found in one file.
@@ -160,7 +164,13 @@ fn is_undra_crate(name: &str) -> bool {
 /// Whether `url` is Undra's repository: with or without `.git` or a trailing slash, in any case,
 /// over https, http or ssh (`git@github.com:shreypdev/undra.git`, `ssh://git@github.com/...`).
 fn is_undra_repo(url: &str) -> bool {
-    let wanted = UNDRA_REPO_URL
+    same_repository(url, UNDRA_REPO_URL)
+}
+
+/// Whether `url` names the repository `wanted` (an `https://` URL), in any of the spellings
+/// [`is_undra_repo`] accepts.
+fn same_repository(url: &str, wanted: &str) -> bool {
+    let wanted = wanted
         .trim_end_matches('/')
         .trim_start_matches("https://")
         .to_ascii_lowercase();
@@ -542,6 +552,15 @@ pub fn edit_cargo_toml(text: &str, target: &Target) -> FileResult {
         for (n, line, eol) in lines {
             let key = line.split('=').next().unwrap_or("").trim().to_owned();
             let indent = line[..line.len() - line.trim_start().len()].to_owned();
+            // What follows the value (` # the release`) stays on the line.
+            let tail = line
+                .split_once('=')
+                .and_then(|(_, value)| {
+                    let value = value.trim_start().strip_prefix('"')?;
+                    let end = value.find('"')?;
+                    Some(value[end + 1..].to_owned())
+                })
+                .unwrap_or_default();
             let record = |new: &str, result: &mut FileResult| {
                 result.changes.push(Change {
                     line: n,
@@ -554,7 +573,7 @@ pub fn edit_cargo_toml(text: &str, target: &Target) -> FileResult {
                 // `tag`, `rev` and `branch` are one pair: the first of them becomes the release tag.
                 "tag" | "rev" | "branch" if !placed_tag => {
                     placed_tag = true;
-                    let new = format!("{indent}{tag_line}");
+                    let new = format!("{indent}{tag_line}{tail}");
                     if new != line {
                         record(&new, result);
                     }
@@ -578,7 +597,7 @@ pub fn edit_cargo_toml(text: &str, target: &Target) -> FileResult {
                 }
                 "version" if dep.version.is_some() => {
                     let (operator, _) = split_requirement(dep.version.unwrap_or(""));
-                    let new = format!("{indent}version = \"{operator}{}\"", target.full());
+                    let new = format!("{indent}version = \"{operator}{}\"{tail}", target.full());
                     if new != line {
                         record(&new, result);
                     }
@@ -698,13 +717,20 @@ pub fn edit_cargo_toml(text: &str, target: &Target) -> FileResult {
 // ---------------------------------------------------------------------------------------------
 // package.json
 
-/// Moves `"@undra/runtime"` to `^<major>.<minor>.0`.
+/// The npm packages of the Undra repository, released in lockstep: the runtime and the React Native
+/// host over it (`@undra/react-native` peer-depends on the same line of `@undra/runtime`).
+const UNDRA_NPM_PACKAGES: &[&str] = &["@undra/runtime", "@undra/react-native"];
+
+/// Moves `"@undra/runtime"` and `"@undra/react-native"` to `^<major>.<minor>.0`.
 #[must_use]
 pub fn edit_package_json(text: &str, target: &Target) -> FileResult {
     let mut result = FileResult::default();
     for (n, line, eol) in lines_of(text) {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("\"@undra/runtime\"") {
+        let package = UNDRA_NPM_PACKAGES
+            .iter()
+            .find(|name| trimmed.starts_with(&format!("\"{name}\"")));
+        if let Some(&package) = package {
             if let Some(colon) = line.find(':') {
                 let after = &line[colon + 1..];
                 if let Some(open) = after.find('"') {
@@ -722,7 +748,7 @@ pub fn edit_package_json(text: &str, target: &Target) -> FileResult {
                         } else {
                             let (_, version) = split_requirement(value);
                             result.pins.push(Pin {
-                                what: "@undra/runtime".to_owned(),
+                                what: package.to_owned(),
                                 version: Semver::parse(version),
                                 shown: value.to_owned(),
                                 line: n,
@@ -735,7 +761,7 @@ pub fn edit_package_json(text: &str, target: &Target) -> FileResult {
                             if new != line {
                                 result.changes.push(Change {
                                     line: n,
-                                    what: "@undra/runtime".to_owned(),
+                                    what: package.to_owned(),
                                     old: line.trim().to_owned(),
                                     new: new.trim().to_owned(),
                                 });
@@ -757,15 +783,67 @@ pub fn edit_package_json(text: &str, target: &Target) -> FileResult {
 // ---------------------------------------------------------------------------------------------
 // Gradle
 
+/// For each byte of `line`, whether it is in a comment of a Gradle script (Kotlin or Groovy: `//` to
+/// the end of the line, `/* ... */` across lines, never inside a string). `in_block` carries an
+/// open block comment from one line to the next.
+fn gradle_comment_mask(line: &str, in_block: &mut bool) -> Vec<bool> {
+    let bytes = line.as_bytes();
+    let mut mask = vec![false; bytes.len()];
+    let mut quote: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if *in_block {
+            mask[i] = true;
+            if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                mask[i + 1] = true;
+                *in_block = false;
+                i += 2;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        match (quote, bytes[i]) {
+            (Some(_), b'\\') => i += 1,
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, b'"' | b'\'') => quote = Some(bytes[i]),
+            (None, b'/') if bytes.get(i + 1) == Some(&b'/') => {
+                for m in &mut mask[i..] {
+                    *m = true;
+                }
+                break;
+            }
+            (None, b'/') if bytes.get(i + 1) == Some(&b'*') => {
+                *in_block = true;
+                mask[i] = true;
+            }
+            (None, _) => {}
+        }
+        i += 1;
+    }
+    mask
+}
+
 /// Moves `dev.undra:runtime:<v>` and `dev.undra:android-adapters:<v>` to `<major>.<minor>.0`.
+///
+/// Only a version written out is moved; a variable (`$undraVersion`), a dynamic version (`+`) and
+/// anything in a comment are left as they are (a variable is reported: its definition is where the
+/// author moves it).
 #[must_use]
 pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
     let mut result = FileResult::default();
+    let mut in_block = false;
     for (n, line, eol) in lines_of(text) {
+        let comment = gradle_comment_mask(line, &mut in_block);
         let mut out = line.to_owned();
         let mut search_from = 0;
         while let Some(at) = out[search_from..].find("dev.undra:") {
             let start = search_from + at;
+            if comment.get(start).copied().unwrap_or(false) {
+                search_from = start + "dev.undra:".len();
+                continue;
+            }
             let rest = &out[start + "dev.undra:".len()..];
             let Some(colon) = rest.find(':') else { break };
             let module = &rest[..colon];
@@ -785,6 +863,14 @@ pub fn edit_gradle(text: &str, target: &Target) -> FileResult {
                     line: n,
                     text: line.trim().to_owned(),
                     why: Why::Path,
+                });
+                continue;
+            }
+            if Semver::parse(version).is_none() {
+                result.unmovable.push(Unmovable {
+                    line: n,
+                    text: line.trim().to_owned(),
+                    why: Why::NotALiteral,
                 });
                 continue;
             }
@@ -831,8 +917,10 @@ pub fn edit_pbxproj(text: &str, target: &Target) -> FileResult {
             while end + 1 < lines.len() && lines[end + 1].1 != "\t\t};" {
                 end += 1;
             }
+            // Undra's package by its URL, not by a substring: `acme/undra-charts` is someone else's.
             let ours = lines[i..=end].iter().any(|(_, l, _)| {
-                l.contains("repositoryURL") && l.to_ascii_lowercase().contains("undra")
+                quoted(l, "repositoryURL")
+                    .is_some_and(|(_, url, _)| same_repository(&url, UNDRA_SWIFT_PACKAGE_URL))
             });
             if ours {
                 for flag in &mut is_undra_block[i..=end] {
@@ -1002,11 +1090,25 @@ impl Plan {
     }
 
     /// A pin that names a release newer than the target: the project is ahead of this `undra`.
+    ///
+    /// A release-line pin (`^1.0.0`, `"1.0"`) is compared with the target's release: a
+    /// pre-release `undra` (`1.0.0-rc.1`) writes the line it belongs to, `1.0`, and is not behind
+    /// it. An exact pin is compared with the target itself.
     #[must_use]
     pub fn ahead(&self) -> Option<&(PathBuf, Pin)> {
-        self.pins
-            .iter()
-            .find(|(_, p)| p.version.as_ref().is_some_and(|v| *v > self.target))
+        let release = Semver {
+            pre: Vec::new(),
+            ..self.target.clone()
+        };
+        self.pins.iter().find(|(_, p)| {
+            p.version.as_ref().is_some_and(|v| {
+                if p.exact {
+                    *v > self.target
+                } else {
+                    *v > release
+                }
+            })
+        })
     }
 
     /// Whether any dependency is on a checkout of the repository.
@@ -1437,5 +1539,197 @@ mod tests {
             (t.full().as_str(), t.runtime().as_str(), t.line().as_str()),
             ("1.2.3", "1.2.0", "1.2")
         );
+    }
+
+    // ----- look-alikes: only the real pins move (review, 2026-10-01)
+
+    #[test]
+    fn a_swift_package_whose_url_merely_contains_undra_is_not_moved() {
+        let other = "https://github.com/acme/undra-charts";
+        let text = format!(
+            "/* Begin XCRemoteSwiftPackageReference section */\n\t\tA1 /* UndraRuntime package */ = {{\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {{\n\t\t\t\tkind = upToNextMajorVersion;\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t}};\n\t\t}};\n\t\tA2 /* Charts */ = {{\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"{other}\";\n\t\t\trequirement = {{\n\t\t\t\tkind = exactVersion;\n\t\t\t\tversion = 3.4.5;\n\t\t\t}};\n\t\t}};\n/* End XCRemoteSwiftPackageReference section */\n"
+        );
+        let r = edit_pbxproj(&text, &target("0.2.1"));
+        assert_eq!(
+            r.after,
+            text.replace("minimumVersion = 0.1.0;", "minimumVersion = 0.2.0;"),
+            "only Undra's package moves; {other} keeps 3.4.5"
+        );
+        assert_eq!(r.pins.len(), 1, "{:?}", r.pins);
+        // Xcode's other spellings of the same package are Undra's.
+        for url in [
+            "https://github.com/shreypdev/undra-swift.git",
+            "git@github.com:shreypdev/undra-swift.git",
+            "https://github.com/ShreyPDev/Undra-Swift/",
+        ] {
+            let r = edit_pbxproj(
+                &text.replace("https://github.com/shreypdev/undra-swift", url),
+                &target("0.2.1"),
+            );
+            assert_eq!(r.pins.len(), 1, "{url}");
+        }
+    }
+
+    #[test]
+    fn gradle_moves_literal_versions_only_and_never_a_comment() {
+        // A variable, a dynamic version and a comment are not pins `undra init` writes: they are
+        // left as they are, and a variable is reported so the author moves it.
+        let text = "dependencies {\n    // was dev.undra:runtime:0.0.1 before the rename\n    implementation(\"dev.undra:runtime:$undraVersion\")\n    implementation(\"dev.undra:android-adapters:${undraVersion}\")\n    implementation(\"dev.undra:runtime-extras:0.1.0\")\n    testImplementation(\"dev.undra:runtime:+\")\n    /* dev.undra:runtime:0.0.2 */\n    implementation(\"dev.undra:runtime:0.1.0\") // dev.undra:android-adapters:0.0.3\n}\n";
+        let r = edit_gradle(text, &target("0.2.1"));
+        assert_eq!(
+            r.after,
+            text.replace(
+                "implementation(\"dev.undra:runtime:0.1.0\")",
+                "implementation(\"dev.undra:runtime:0.2.0\")"
+            ),
+            "{}",
+            r.after
+        );
+        assert_eq!(r.pins.len(), 1, "{:?}", r.pins);
+        assert_eq!(
+            r.unmovable
+                .iter()
+                .map(|u| (u.line, u.why))
+                .collect::<Vec<_>>(),
+            [
+                (3, Why::NotALiteral),
+                (4, Why::NotALiteral),
+                (6, Why::NotALiteral)
+            ]
+        );
+    }
+
+    #[test]
+    fn package_json_moves_the_runtime_and_react_native_and_nothing_that_looks_like_them() {
+        let text = "{\n  \"description\": \"needs \\\"@undra/runtime\\\": ^0.0.1\",\n  \"dependencies\": {\n    \"@undra/runtime-extras\": \"^0.1.0\",\n    \"@undra/react-native\": \"^0.1.0\",\n    \"react\": \"^19.0.0\"\n  },\n  \"devDependencies\": {\n    \"@undra/runtime\": \"^0.1.0\"\n  }\n}\n";
+        let r = edit_package_json(text, &target("0.2.1"));
+        assert_eq!(
+            r.after,
+            text.replace(
+                "\"@undra/react-native\": \"^0.1.0\"",
+                "\"@undra/react-native\": \"^0.2.0\""
+            )
+            .replace(
+                "\"@undra/runtime\": \"^0.1.0\"",
+                "\"@undra/runtime\": \"^0.2.0\""
+            ),
+            "{}",
+            r.after
+        );
+        assert!(r.after.contains("\"@undra/runtime-extras\": \"^0.1.0\""));
+        assert_eq!(r.pins.len(), 2, "{:?}", r.pins);
+        let local = edit_package_json(
+            "  \"@undra/react-native\": \"file:../../runtimes/rn/@undra/react-native\",\n",
+            &target("0.2.1"),
+        );
+        assert_eq!(local.unmovable.len(), 1);
+    }
+
+    #[test]
+    fn cargo_look_alikes_are_left_alone() {
+        let text = "[dependencies]\n# undra = { git = \"https://github.com/shreypdev/undra\", tag = \"v0.0.1\" }\nundra-something = { git = \"https://github.com/shreypdev/undra\", tag = \"v0.0.9\" }\nundra = { git = \"https://github.com/shreypdev/undra\", tag = \"v0.1.0\" }\n\n[dependencies.undra-ffi]\n# tag = \"v0.0.2\"\ngit = \"https://github.com/shreypdev/undra\"\ntag = \"v0.1.0\" # the release\n";
+        let r = cargo(text);
+        assert_eq!(
+            r.after,
+            text.replace(
+                "undra = { git = \"https://github.com/shreypdev/undra\", tag = \"v0.1.0\" }",
+                "undra = { git = \"https://github.com/shreypdev/undra\", tag = \"v0.2.1\" }"
+            )
+            .replace(
+                "tag = \"v0.1.0\" # the release",
+                "tag = \"v0.2.1\" # the release"
+            ),
+            "{}",
+            r.after
+        );
+        assert_eq!(r.pins.len(), 2, "{:?}", r.pins);
+    }
+
+    #[test]
+    fn every_editor_keeps_crlf_line_endings() {
+        let t = target("0.2.1");
+        let crlf = |s: &str| s.replace('\n', "\r\n");
+        type Editor = fn(&str, &Target) -> FileResult;
+        let cases: [(&str, Editor, &str, &str); 6] = [
+            (
+                "Cargo.toml",
+                edit_cargo_toml,
+                "[dependencies.undra]\ngit = \"https://github.com/shreypdev/undra\"\nrev = \"abc\"\n",
+                "[dependencies.undra]\ngit = \"https://github.com/shreypdev/undra\"\ntag = \"v0.2.1\"\n",
+            ),
+            (
+                "undra.toml",
+                edit_undra_toml,
+                "[undra]\nversion = \"0.1\"\n",
+                "[undra]\nversion = \"0.2\"\n",
+            ),
+            (
+                "package.json",
+                edit_package_json,
+                "{\n  \"@undra/runtime\": \"^0.1.0\"\n}\n",
+                "{\n  \"@undra/runtime\": \"^0.2.0\"\n}\n",
+            ),
+            (
+                "build.gradle",
+                edit_gradle,
+                "implementation 'dev.undra:runtime:0.1.0'\n",
+                "implementation 'dev.undra:runtime:0.2.0'\n",
+            ),
+            (
+                "project.pbxproj",
+                edit_pbxproj,
+                "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {\n\t\t\t\tminimumVersion = 0.1.0;\n\t\t\t};\n\t\t};\n",
+                "\t\tA1 = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n\t\t\trepositoryURL = \"https://github.com/shreypdev/undra-swift\";\n\t\t\trequirement = {\n\t\t\t\tminimumVersion = 0.2.0;\n\t\t\t};\n\t\t};\n",
+            ),
+            (
+                "undra.yml",
+                edit_workflow,
+                "env:\n  UNDRA_VERSION: \"0.1.0\"\n",
+                "env:\n  UNDRA_VERSION: \"0.2.1\"\n",
+            ),
+        ];
+        for (name, edit, before, after) in cases {
+            let r = edit(&crlf(before), &t);
+            assert_eq!(r.after, crlf(after), "{name}");
+            assert_eq!(r.changes.len(), 1, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_prerelease_undra_is_not_behind_the_release_line_it_writes() {
+        // `undra init` from 1.0.0-rc.1 writes the release line 1.0 (`^1.0.0`, `1.0.0`, "1.0") and the
+        // exact pins 1.0.0-rc.1; the same `undra upgrade` must not call that project "ahead".
+        let rc = Semver::parse("1.0.0-rc.1").unwrap();
+        let pin = |version: &str, exact: bool| {
+            (
+                PathBuf::from("f"),
+                Pin {
+                    what: "p".into(),
+                    version: Semver::parse(version),
+                    shown: version.into(),
+                    line: 1,
+                    exact,
+                },
+            )
+        };
+        let plan = Plan {
+            target: rc.clone(),
+            files: Vec::new(),
+            pins: vec![
+                pin("1.0.0", false),
+                pin("1.0", false),
+                pin("1.0.0-rc.1", true),
+            ],
+            unmovable: Vec::new(),
+        };
+        assert!(plan.ahead().is_none(), "{:?}", plan.ahead());
+        // A project on the final release is ahead of its release candidate, and the next line is ahead.
+        for (version, exact) in [("1.0.0", true), ("1.1.0", false), ("1.0.1", false)] {
+            let plan = Plan {
+                pins: vec![pin(version, exact)],
+                ..plan.clone()
+            };
+            assert!(plan.ahead().is_some(), "{version} exact={exact}");
+        }
     }
 }

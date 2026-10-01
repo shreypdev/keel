@@ -8,7 +8,6 @@ use std::path::Path;
 
 use crate::cli::{BindgenArgs, UpgradeArgs};
 use crate::error::{CliError, Code, Result};
-use crate::fsutil::write_if_changed;
 use crate::migrations::{self, Migration};
 use crate::project::Project;
 use crate::semver::Semver;
@@ -50,13 +49,20 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
         ),
     ));
     for (file, unmovable) in &plan.unmovable {
-        if unmovable.why == Why::Fork {
-            ui.warn(&format!(
+        match unmovable.why {
+            Why::Fork => ui.warn(&format!(
                 "{}:{}: depends on a fork of Undra, which has no release tags to move to; left as it is ({})",
                 file.display(),
                 unmovable.line,
                 unmovable.text
-            ));
+            )),
+            Why::NotALiteral => ui.warn(&format!(
+                "{}:{}: the Undra version is not written out here, so it is left as it is; move it where it is defined ({})",
+                file.display(),
+                unmovable.line,
+                unmovable.text
+            )),
+            Why::Path => {}
         }
     }
 
@@ -90,9 +96,7 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
         return Ok(());
     }
 
-    for edit in &plan.files {
-        write_if_changed(&project.root.join(&edit.path), &edit.after)?;
-    }
+    write_all(&project.root, &plan.files)?;
     ui.line(&format!(
         "Updated {} file{}.",
         plan.files.len(),
@@ -125,6 +129,71 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
     print_notes(env, current.as_ref(), &target);
     ui.line("");
     ui.line("Review with `git diff`, then build.");
+    Ok(())
+}
+
+/// Writes every edit or none: a project is never left with some pins moved and others not.
+///
+/// Before the first write each file is checked to be unchanged since it was read and writable
+/// (opened for writing, not truncated). A write that fails after that (a full disk) puts the files
+/// already written back as they were.
+///
+/// # Errors
+///
+/// `C0010` naming the file, saying that nothing was written (or, should restoring fail too, which
+/// files were left changed).
+fn write_all(root: &Path, files: &[FileEdit]) -> Result<()> {
+    let nothing = |path: &Path, what: String| {
+        CliError::new(
+            Code::Io,
+            format!(
+                "could not write {}: {what}; nothing was written",
+                path.display()
+            ),
+            "`undra upgrade` moves every pin of the project or none, so the project is never half upgraded",
+            "make the file writable (or close what holds it) and run `undra upgrade` again",
+        )
+    };
+    for edit in files {
+        let path = root.join(&edit.path);
+        match std::fs::read_to_string(&path) {
+            Ok(now) if now == edit.before => {}
+            Ok(_) => {
+                return Err(nothing(
+                    &edit.path,
+                    "it changed while `undra upgrade` ran".to_owned(),
+                ));
+            }
+            Err(e) => return Err(nothing(&edit.path, e.to_string())),
+        }
+        if let Err(e) = std::fs::OpenOptions::new().write(true).open(&path) {
+            return Err(nothing(&edit.path, e.to_string()));
+        }
+    }
+    for (i, edit) in files.iter().enumerate() {
+        let path = root.join(&edit.path);
+        if let Err(e) = std::fs::write(&path, &edit.after) {
+            let mut left = Vec::new();
+            for done in &files[..i] {
+                if std::fs::write(root.join(&done.path), &done.before).is_err() {
+                    left.push(done.path.display().to_string());
+                }
+            }
+            if left.is_empty() {
+                return Err(nothing(&edit.path, e.to_string()));
+            }
+            return Err(CliError::new(
+                Code::Io,
+                format!(
+                    "could not write {}: {e}, and could not put back {}",
+                    edit.path.display(),
+                    left.join(", ")
+                ),
+                "`undra upgrade` moves every pin or none, and restoring the files it had already written failed too",
+                "`git checkout -- .` (or your editor's undo) returns the project to where it was; then run `undra upgrade` again",
+            ));
+        }
+    }
     Ok(())
 }
 

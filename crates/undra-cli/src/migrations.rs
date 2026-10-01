@@ -68,7 +68,7 @@ impl Migration {
 /// Every release with notes, oldest first.
 pub const MIGRATIONS: &[Migration] = &[Migration {
     version: "0.1.0",
-    title: "Since v1.0: the UNDR wire, frame-coalesced delivery, the Swift error channel, reconnecting apps",
+    title: "Since v1.0: the UNDR wire, frame-coalesced delivery, typed call errors, reconnecting apps",
     notes: &[
         Note {
             kind: Kind::Action,
@@ -76,15 +76,15 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
         },
         Note {
             kind: Kind::Changed,
-            text: "The platform mirrors apply what the core produces once per display frame, merged (ADR-031): a burst of transactions (a firehose of events, a stream, a burst of port completions) shows as one update per frame with its entries folded per signal, and the backlog is bounded (65,536 entries or 16 MiB, after which the store is observed again). A reply, `callSync` and `observe` are never delayed, so after `await store.method()` the mirror shows the change. A screen that needs every intermediate value of a signal sees the latest one per frame. `UndraCore.stats()` counts what was merged, and TypeScript has a drain listener.",
+            text: "The platform mirrors apply what the core produces once per display frame, merged (ADR-031): a burst of transactions (a firehose of events, a stream, a burst of port completions) shows as one update per frame with its entries folded per signal, and the backlog is bounded (65,536 entries or 16 MiB, after which the store is observed again). A reply, `callSync` and `observe` are never delayed, so after `await store.method()` the mirror shows the change. A screen that needs every intermediate value of a signal sees the latest one per frame. `UndraCore.stats()` counts what was merged, and every runtime has a drain listener (`addDrainListener`).",
         },
         Note {
             kind: Kind::Action,
             text: "Swift: a generated call that returns a value or has an error type now `throws` (untyped, ADR-032): add `try`, and keep catching the method's own error (`catch let error as TodoError`). Two more things can arrive: `CancellationError` when the calling task was cancelled, and the new `UndraCallError` for the failure of the call itself (a panic in the core, a refusal, a core that was shut down, a lost connection, a reply that does not decode). A method that returns nothing and has no error type stays non-throwing: its failure goes to `LoadOptions.onError` and to the log. Generated Swift no longer traps on the outcome of a call.",
         },
         Note {
-            kind: Kind::Changed,
-            text: "Kotlin and TypeScript report failures through the exceptions and `onError` they already had (`UndraReplyException`, `UndraTransportError`, `onError` in TypeScript); only Swift has `UndraCallError` so far, and bringing the other two to the same closed set of failures is planned.",
+            kind: Kind::Action,
+            text: "Kotlin and TypeScript have the same closed set (ADR-032 amendment A, docs/ERRORS.md): a generated call fails with the method's own error, a cancellation, or `UndraCallError` (`CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; Kotlin `sealed class UndraCallError : UndraException`, TypeScript `UndraCallError extends UndraError`), never with the runtime's raw `UndraReplyException` / `UndraTransportException` / `UndraReplyError` / `UndraTransportError`. Catch `UndraCallError` where you caught those around a generated call (a `catch (e: UndraException)` or `instanceof UndraError` still matches). A command (a method that returns nothing and has no error type) no longer throws or rejects: its failure goes to the `onError` of `UndraCore.load` and to the log.",
         },
         Note {
             kind: Kind::New,
@@ -144,9 +144,13 @@ mod tests {
     }
 
     #[test]
-    fn it_starts_with_an_entry_for_the_current_version() {
+    fn it_starts_with_the_notes_since_v1_0() {
+        // Keyed to the workspace version until the first release is cut; the release pull request
+        // re-keys it (docs/RELEASING.md), so this checks the entry, not its key: a test that asked
+        // for `CARGO_PKG_VERSION` here would fail the moment `scripts/bump-version.sh` ran.
         let first = &MIGRATIONS[0];
-        assert_eq!(first.version, env!("CARGO_PKG_VERSION"));
+        assert!(first.title.starts_with("Since v1.0"), "{}", first.title);
+        assert!(first.semver() <= v(env!("CARGO_PKG_VERSION")));
         // What changed since v1.0, for app authors: the wire, the mirrors, the error channel, reconnecting.
         let text: String = first
             .notes
@@ -162,6 +166,9 @@ mod tests {
             "once per display frame",
             "ADR-032",
             "UndraCallError",
+            "amendment A",
+            "Kotlin",
+            "TypeScript",
             "onError",
             "ADR-051",
             "reconnect",

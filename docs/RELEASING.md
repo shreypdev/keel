@@ -88,7 +88,9 @@ gh run watch
 
 Add the release's notes to `crates/undra-cli/src/migrations.rs` in the same pull request: `undra upgrade` prints the notes of
 every release a project crosses (what an app author must do, what behaves differently, what is new), and a release with
-no entry prints nothing, which tells the author nothing changed. The projects `undra init` writes pin this version
+no entry prints nothing, which tells the author nothing changed. **For the first release (1.0.0)**: the first entry, "Since v1.0",
+is keyed `0.1.0` (the workspace version while it was written); re-key it to `1.0.0` in the release pull request, or a
+project `undra init` pinned to `v0.1.0` crosses no entry on its way to 1.0.0 and is told nothing changed. The projects `undra init` writes pin this version
 (`core/Cargo.toml`'s git tag, the runtimes, `UNDRA_VERSION` of `.github/workflows/undra.yml`), so the release has to exist
 for their first CI run and `cargo build` to succeed.
 
