@@ -1,0 +1,9 @@
+[package]
+name = "demo-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The Undra release this core is built on: a commit of the repository.
+undra = { git = "https://github.com/shreypdev/undra", rev = "3a4f9c1d2e5b", features = ["extra"] } # pinned
+serde = "1"

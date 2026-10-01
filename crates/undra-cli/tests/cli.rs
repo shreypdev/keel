@@ -15,6 +15,7 @@ fn top_level_help_teaches_the_workflow() {
         "undra bindgen",
         "undra adopt",
         "undra doctor",
+        "undra upgrade",
         "error[undra::C00NN]",
     ] {
         assert!(text.contains(needle), "--help lacks {needle:?}:\n{text}");
@@ -23,7 +24,9 @@ fn top_level_help_teaches_the_workflow() {
 
 #[test]
 fn every_command_has_a_help_with_examples() {
-    for command in ["init", "bindgen", "build", "dev", "doctor", "adopt"] {
+    for command in [
+        "init", "bindgen", "build", "dev", "doctor", "adopt", "upgrade",
+    ] {
         let out = run_ok(undra().args([command, "--help"]));
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(

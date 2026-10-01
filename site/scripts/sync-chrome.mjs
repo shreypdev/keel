@@ -39,7 +39,8 @@ function markCurrent(header, pagePath) {
   return header.replace(/<a ([^>]*?)href="([^"#:]*\/)"([^>]*)>/g, (m, pre, href, post) => {
     if (!/class="nav-gh"|class="brand"/.test(pre + post)) {
       const target = posix.normalize(posix.join(dir, href)); // e.g. "docs/"
-      if (target !== "./" && pagePath.startsWith(target)) {
+      // the generated API reference (reference/*.html) wears the docs layout, so it belongs to the Docs section
+      if (target !== "./" && (pagePath.startsWith(target) || (target === "docs/" && pagePath.startsWith("reference/")))) {
         return `<a ${pre}href="${href}"${post} aria-current="page">`;
       }
     }

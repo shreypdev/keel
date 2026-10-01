@@ -42,6 +42,11 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # `cargo test --workspace` above skips the heavy halves of these (they run real builds); here they
+      # must run. The web app's build through the Vite plugin needs the npm registry; `undra upgrade`
+      # end to end builds the core from a local clone. Gradle runs in the android job, Xcode in macos.
+      - name: Build integrations (Vite plugin), undra upgrade end to end, the CI workflow, undra doctor
+        run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test build_systems --test upgrade --test ci_workflow --test doctor -- --skip xcode_builds --skip xcode_without --skip gradle_builds --skip gradle_without
       - name: The write rule in release (ADR-035; the audit's off-core writes were release-only)
         run: cargo test --release -p undra-runtime --test write_context -p undra-signals --test write_checker
       - name: Clippy (undra-ffi on wasm32)
@@ -147,6 +152,8 @@ jobs:
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
           cargo check -p undra-ffi --target aarch64-apple-ios
           cargo check -p undra-ffi --target aarch64-apple-ios-sim
+      - name: Xcode builds the core in its Run Script phase (undra init's project; Debug, Release, Debug)
+        run: UNDRA_REQUIRE_TOOLCHAINS=1 cargo test -p undra-cli --test build_systems -- xcode --nocapture
 
   android:
     name: Android cross-build
@@ -161,6 +168,20 @@ jobs:
         run: cargo install cargo-ndk
       - name: Build the JNI library for both ABIs
         run: cargo ndk -t arm64-v8a -t x86_64 build -p undra-ffi --features jni
+      # Gradle's undraBuild task over undra init's Android app (debug, release, debug again). It needs a
+      # JDK 17, platform 35 and NDK r27 besides cargo-ndk; UNDRA_TEST_BUILD_SYSTEMS (not REQUIRE) runs it
+      # when the runner image has them and prints why it skipped when it does not.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Gradle builds the core in its undraBuild task
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- gradle --nocapture
 
   ffi-miri:
     # macOS, not Linux: Miri's strict c-variadic check currently flags parking_lot_core's
