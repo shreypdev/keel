@@ -20,7 +20,7 @@
 <meta name="twitter:description" content="What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.">
 <meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/api-typescript.html#article","headline":"API overview, TypeScript · Undra docs","description":"What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.","url":"https://shreypdev.github.io/undra/docs/api-typescript.html","inLanguage":"en","dateModified":"2026-09-30","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"API overview, TypeScript","item":"https://shreypdev.github.io/undra/docs/api-typescript.html"}]}]}
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/api-typescript.html#article","headline":"API overview, TypeScript · Undra docs","description":"What Undra's generated TypeScript looks like: interfaces, unions, error classes, promise-returning stores with signals, React hooks and adapters.","url":"https://shreypdev.github.io/undra/docs/api-typescript.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-09-30","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"API overview, TypeScript","item":"https://shreypdev.github.io/undra/docs/api-typescript.html"}]}]}
 </script>
 <!-- chrome:head -->
 <meta name="theme-color" content="#0a0a0a">
@@ -63,7 +63,7 @@
     <p class="lede">Generated TypeScript is strict-mode ESM with no any in exported types: plain interfaces and unions for data, promises for calls, signals for state, and hooks for React. The core package has no runtime dependencies.</p>
 <p><code>undra bindgen</code> writes an npm package (<code>src/*.ts</code>, <code>package.json</code>, <code>tsconfig.json</code>) that imports only from <code>@undra/runtime</code>. The shapes below come from the playground's generated code and the specification (§10.3).</p>
 <h2 id="loading-the-core">Loading the core<a class="anchor" href="#loading-the-core" aria-label="Link to this section">#</a></h2>
-<p>Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with <code>UndraSchemaMismatch</code>.</p>
+<p>Load the core once, before you create a store. The runtime compares the core's schema hash with the one the bindings were generated from and rejects a mismatch with <code>UndraSchemaMismatchError</code>.</p>
 <div class="code"><div class="code-bar"><span>web/src/undra.ts</span></div><pre><code data-lang="ts">import { UndraCore } from "@undra/runtime";
 import { UndraIds, Todos } from "@playground/core";
 import wasmUrl from "../../build/web/undra_core.wasm?url";
@@ -77,6 +77,7 @@ await UndraCore.load({
 
 const todos = await Todos.create();        // uses UndraCore.shared</code></pre></div>
 <div class="table-wrap"><table><thead><tr><th><code>mode</code></th><th>Where the core runs</th></tr></thead><tbody><tr><td><code>"wasm-main"</code></td><td>a wasm module on the page's main thread</td></tr><tr><td><code>"wasm-worker"</code></td><td>the same module in a worker, keeping the main thread free</td></tr><tr><td><code>"remote"</code></td><td>the core that <code>undra dev</code> serves, over a WebSocket: <code class="cw">{ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash }</code></td></tr></tbody></table></div>
+<p>Before a core is loaded, or after it was closed, <code>UndraCore.shared</code>, the default core of every generated constructor and function, is a closed placeholder: constructors and calls on it reject with <code>UndraCallError.Unavailable</code>, and the first use logs what to do. Check <code>UndraCore.current</code>, not <code>shared</code>, to learn whether a core is loaded.</p>
 <h2 id="type-mapping">Type mapping<a class="anchor" href="#type-mapping" aria-label="Link to this section">#</a></h2>
 <div class="table-wrap"><table><thead><tr><th>Rust</th><th>TypeScript</th></tr></thead><tbody><tr><td><code>bool</code></td><td><code>boolean</code></td></tr><tr><td><code>i8</code> … <code>i32</code>, <code>u8</code> … <code>u32</code>, <code>f32</code>, <code>f64</code></td><td><code>number</code></td></tr><tr><td><code>i64</code>, <code>u64</code></td><td><code>bigint</code> (or <code>number</code> with <code>#[undra(js_number)]</code> / <code>ts_js_number</code>)</td></tr><tr><td><code>String</code>, <code>Bytes</code></td><td><code>string</code>, <code>Uint8Array</code></td></tr><tr><td><code>Duration</code>, <code>Timestamp</code>, <code>Uuid</code></td><td><code>Duration</code>, <code>Timestamp</code>, <code>string</code></td></tr><tr><td><code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code></td><td><code>T | null</code>, <code>T[]</code></td></tr><tr><td><code>Map&lt;K, V&gt;</code></td><td><code>Map&lt;K, V&gt;</code></td></tr><tr><td>record</td><td><code>interface</code></td></tr><tr><td>unit enum, data enum</td><td>string-literal union, discriminated union on <code>kind</code></td></tr><tr><td>error</td><td>a class extending <code>UndraError</code>, with subclasses per variant</td></tr></tbody></table></div>
 <p>64-bit integers become <code>bigint</code> so no value is ever silently rounded; a 64-bit value outside the safe range is a decode error rather than a wrong number when you opt into <code>number</code>.</p>
@@ -93,26 +94,50 @@ export type Figure =
   | { kind: "empty" };</code></pre></div>
 <p>A <code>switch (figure.kind)</code> over the union is exhaustive under <code>strict</code>, so adding a variant in Rust breaks every <code>switch</code> that forgot it.</p>
 <h2 id="errors">Errors<a class="anchor" href="#errors" aria-label="Link to this section">#</a></h2>
-<p>A <code>#[undra::error]</code> becomes an abstract class with a <code>kind</code> and one subclass per variant, so you can branch with <code>instanceof</code> or on <code>kind</code>. A rejected call carries the typed error, not a string to parse.</p>
+<p>A <code>#[undra::error]</code> becomes an abstract class with a <code>kind</code> and one subclass per variant, so you can branch with <code>instanceof</code> or on <code>kind</code>. A generated call that can fail rejects with exactly one of three things: its own error, as the typed class, not a string to parse; the <code>AbortSignal</code>'s reason (an <code>AbortError</code> by default), when the signal you passed cancelled the call; or <code>UndraCallError</code>, for anything else that went wrong with the call. The method's <code>@throws</code> documentation names its error.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export abstract class TodoError extends UndraError {
-  readonly kind: "emptyTitle";
+  declare readonly kind: "emptyTitle";
 }
 export namespace TodoError {
-  export class EmptyTitle extends TodoError { /* message: "the title cannot be empty" */ }
+  // message: "the title cannot be empty"
+  export class EmptyTitle extends TodoError {}
 }
 
+import { UndraCallError } from "@undra/runtime";
+
 try {
-  await todos.add(draft);
+  await todos.add(draft, controller.signal);
 } catch (error) {
-  if (error instanceof TodoError) setProblem(error.message);
+  if (error instanceof TodoError) {
+    setProblem("Give it a title first.");
+  } else if (error instanceof UndraCallError) {
+    setProblem(error.message);   // panicked, refused, unavailable, …
+  } else {
+    throw error;                 // the AbortError of controller.abort()
+  }
 }</code></pre></div>
+<p><code>UndraCallError</code> extends <code>UndraError</code>, so one <code>error instanceof UndraError</code> shows either kind of failure to the user, and <code>message</code> reads well in an alert. Each case is a class in the <code>UndraCallError</code> namespace, <code>kind</code> is its discriminant, and <code>switch (error.kind)</code> over the <code>UndraCallFailure</code> union is exhaustive. Every failure of the call is a typed value: no reply status, lost connection or undecodable byte reaches you as a raw <code>UndraReplyError</code> or <code>UndraTransportError</code>.</p>
+<div class="table-wrap"><table><thead><tr><th><code>kind</code></th><th>When</th></tr></thead><tbody><tr><td><code>"cancelledByCore"</code></td><td>The core cancelled the call: a restore replaced the object it ran on, or the core shut down. Not the <code>AbortSignal</code>'s reason, because your signal did not abort and the write did not land.</td></tr><tr><td><code>"panicked"</code> (<code>panicMessage</code>, <code>backtrace</code>)</td><td>The core panicked while running the call. A native core catches the panic and keeps working; a wasm core traps instead, and the call fails as <code>"unavailable"</code> (reason <code>"trap"</code>).</td></tr><tr><td><code>"refused"</code> (<code>reason</code>)</td><td>The core would not run the call: the object was closed or replaced by a restore, the call came from inside one of the core's callbacks (<code>E_REENTRANT</code>), or its arguments did not decode.</td></tr><tr><td><code>"unavailable"</code> (<code>transport</code>)</td><td>The core cannot be reached: it was closed or never loaded, a wasm core trapped, or the remote connection closed or timed out. <code>transport</code> is an <code>UndraTransportError</code> and its <code>reason</code> says which (<code>"closed"</code>, <code>"timeout"</code>, <code>"trap"</code>, …). While <code>undra dev</code> is reconnecting, every call rejects with it at once (<code>"closed"</code>); so does every call on a core that a rebuild closed for good (<code>onClose</code> receives an <code>UndraSessionLostError</code>).</td></tr><tr><td><code>"malformed"</code> (<code>detail</code>)</td><td>The core answered with something the bindings cannot read. After a successful schema check this is a bug in Undra; report it with the text.</td></tr></tbody></table></div>
+<p><strong>Commands report instead of rejecting.</strong> A method that returns nothing and has no error type, such as <code>counter.increment()</code>, is a command. Its promise never rejects, so an event handler calls it with <code>void</code> and no <code>.catch</code>, and a failure is never an unhandled rejection. If it fails, the runtime logs the failure at error level, passes an <code>UndraUnhandledError</code> to <code>onError</code> and resolves. Awaiting a command tells you it was sent and answered, not that it succeeded: read the effect from the store, which changes only from the core's change-sets. A value the wire cannot represent is reported as <code>"malformed"</code>, not thrown. A store that cannot decode a change from the core skips it and reports it the same way, and so does a malformed change-set (dropped whole) or a port implementation that failed.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">await UndraCore.load({
+  mode: "wasm-main",
+  wasm: new URL(wasmUrl, location.href),
+  expectedSchemaHash: UndraIds.schemaHash,
+  onError: (unhandled) =&gt; {
+    // unhandled.operation is "Todos.toggle", unhandled.error.kind is "refused"
+    reportToSentry(unhandled);
+  },
+});</code></pre></div>
+<p>The handler runs synchronously where the failure was found, so keep it short, and it must not call into Undra. An exception it throws is logged and dropped.</p>
+<p><strong>A lost connection is not an <code>onError</code> event.</strong> Over <code>undra dev</code>, a command tapped while the dev server is away fails with <code>"unavailable"</code> too, and the connection state (<code>core.connection</code>, or <code>onConnectionChange</code>) already says so, once. A failure that is the connection being down is therefore logged at warning level and not handed to <code>onError</code>; a crash reporter would otherwise get one event per tap for as long as the laptop sleeps. Everything else <code>"unavailable"</code> is still reported: a command on a core you closed yourself, a timeout, and a wasm core that trapped.</p>
 <h2 id="objects-and-functions">Objects and functions<a class="anchor" href="#objects-and-functions" aria-label="Link to this section">#</a></h2>
-<p>An object is a class holding a handle. <strong>Every method returns a <code>Promise</code></strong>, which keeps the API uniform across main-thread, worker and remote modes. Stream methods return an <code>AsyncIterable</code>, and any call takes an optional <code>AbortSignal</code> as its last argument to cancel it in the core.</p>
+<p>An object is a class holding a handle. <strong>Every method returns a <code>Promise</code></strong>, which keeps the API uniform across main-thread, worker and remote modes. A command's promise resolves even when the call fails (see <a href="#errors">Errors</a>), and a stream method returns an <code>AsyncIterable</code> that fails with the same errors while you iterate it. An async method takes an optional <code>AbortSignal</code> as its last argument to cancel the call in the core.</p>
 <div class="code"><div class="code-bar"><span><span class="lang">ts</span></span></div><pre><code data-lang="ts">export class Probe extends UndraObject {
   static create(core?: UndraCore): Promise&lt;Probe&gt;;
   counters(): Promise&lt;ProbeCounters&gt;;
   wait(ms: number, signal?: AbortSignal): Promise&lt;number&gt;;
   ticks(count: number): AsyncIterable&lt;number&gt;;     // backpressure through stream credit
+  reset(): Promise&lt;void&gt;;                          // a command: never rejects
 }
 
 export function add(a: number, b: number): Promise&lt;number&gt;;</code></pre></div>
@@ -126,7 +151,7 @@ export function add(a: number, b: number): Promise&lt;number&gt;;</code></pre></
   readonly remaining: Signal&lt;number&gt;;      // computed by the core
 
   static create(core?: UndraCore): Promise&lt;Todos&gt;;
-  setFilter(f: Filter): Promise&lt;void&gt;;
+  setFilter(f: Filter): Promise&lt;void&gt;;                  // a command: never rejects
   add(title: string, signal?: AbortSignal): Promise&lt;Todo&gt;;
 }</code></pre></div>
 <p>Change-sets are batched with <code>queueMicrotask</code> into one flush per macrotask, so several signals that changed in one transaction update together and a component never renders a half-applied state.</p>

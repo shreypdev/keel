@@ -318,7 +318,10 @@ class CallErrorTests : Suite() {
             val reports = Reports()
             val port = 0xaaaa0001u
             val method = 0xbbbb0003u
-            val impl = PortImpl(true, mapOf(method to { _: ByteArray -> throw IllegalStateException("boom") }))
+            // The type is spelled out: a lambda whose body is only `throw` has no return type for
+            // Kotlin 2.0 (CI) to infer the suspend function type from.
+            val boom: suspend (ByteArray) -> ByteArray = { throw IllegalStateException("boom") }
+            val impl = PortImpl(true, mapOf(method to boom))
             val core = UndraCore.attach(
                 t,
                 LoadOptions(expectedSchemaHash = HASH, defaultAdapters = false, adapters = mapOf(port to impl), onError = reports.handler),
