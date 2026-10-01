@@ -99,7 +99,10 @@ fi
 
 COMMIT="$(git -C "$REPO" rev-parse --short HEAD)"
 DIRTY_FLAG=()
-if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]; then DIRTY_FLAG=(--dirty); fi
+# What the files record as "uncommitted changes": the tree apart from the files this script writes.
+if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=no -- . ':(exclude)bench/results/device' ':(exclude)bench/RESULTS.md')" ]; then
+  DIRTY_FLAG=(--dirty)
+fi
 
 loadavg() { sysctl -n vm.loadavg | awk '{print $2}'; }
 host_cpu() { sysctl -n machdep.cpu.brand_string 2>/dev/null || uname -m; }
