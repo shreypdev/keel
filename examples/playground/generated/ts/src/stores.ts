@@ -1630,7 +1630,7 @@ export class Stress extends UndraStore {
 export class Todos extends UndraStore {
   readonly todos: Signal<Todo[]> = new Signal<Todo[]>([]);
   readonly filter: Signal<Filter> = new Signal<Filter>("all");
-  /** Computed by the core; read-only. */
+  /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
   readonly visible: Signal<Todo[]> = new Signal<Todo[]>([]);
   /** Computed by the core; read-only. */
   readonly remaining: Signal<number> = new Signal<number>(0);
