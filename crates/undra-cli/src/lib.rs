@@ -44,6 +44,7 @@ mod binary;
 mod bindgen;
 mod builds;
 mod cargo;
+mod ci;
 mod cli;
 mod commands;
 pub mod config;

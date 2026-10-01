@@ -1,0 +1,4 @@
+      - name: Install undra
+        run: |
+          curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
+          echo "$HOME/.undra/bin" >> "$GITHUB_PATH"

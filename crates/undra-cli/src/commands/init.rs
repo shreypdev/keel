@@ -356,12 +356,23 @@ fn scaffold(setup: &Setup) -> Result<usize> {
             Platform::Web => write_set(&setup.root, templates::WEB, &vars)?,
         };
     }
+    if has_ci(setup) {
+        let text = crate::ci::workflow(&setup.config, &setup.names, crate::ci::current_version());
+        write_if_changed(&setup.root.join(crate::ci::WORKFLOW_PATH), &text)?;
+        count += 1;
+    }
     count += write_set(
         &setup.root,
         std::slice::from_ref(&templates::README),
         &readme_vars(setup, vars),
     )?;
     Ok(count)
+}
+
+/// Whether the project gets a CI workflow: not when it uses a local checkout of Undra, which a
+/// CI machine cannot see (the workflow installs a released `undra` and the core pins a release).
+fn has_ci(setup: &Setup) -> bool {
+    setup.repo.is_none()
 }
 
 /// Renders every file of `set` below `root`.
@@ -391,6 +402,14 @@ fn template_bug(name: String) -> CliError {
 fn readme_vars(setup: &Setup, vars: Vars) -> Vars {
     let has = |p: Platform| setup.config.platforms.contains(&p);
     let mut vars = vars;
+    vars.set(
+        "CI_LINE",
+        if has_ci(setup) {
+            ".github/       the CI workflow (undra.yml): the core, and a job per app\n"
+        } else {
+            ""
+        },
+    );
     vars.set(
         "PLATFORM_LIST",
         setup

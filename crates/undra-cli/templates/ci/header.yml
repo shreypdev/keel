@@ -1,0 +1,25 @@
+# CI for @@NAME@@, written by `undra init`: the core, and one job per app (@@PLATFORM_LIST@@).
+#
+# UNDRA_VERSION is the Undra release this project builds with: CI installs that `undra` (the install script
+# of docs/RELEASING.md) and `undra upgrade` keeps this line in step with core/Cargo.toml and the runtimes.
+# Until that release is published the install step fails: change it to a published version or remove the
+# job that needs it.
+name: Undra
+
+env:
+  UNDRA_VERSION: "@@UNDRA_FULL_VERSION@@"
+  CARGO_TERM_COLOR: always
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:

@@ -11,8 +11,7 @@ core/          the Rust core: `#[undra::api]` records, enums, errors and a `#[un
 generated/     Swift, Kotlin and TypeScript bindings of the core (`undra bindgen`)
 ios/ android/ web/   one small app per platform, using the generated bindings
 build/         what `undra build` produces for the apps to link (not committed)
-.github/       the CI workflow (undra.yml): the core, and a job per app
-```
+@@CI_LINE@@```
 
 ## The loop
 
