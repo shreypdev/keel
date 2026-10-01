@@ -390,6 +390,28 @@ fn a_file_that_cannot_be_written_leaves_every_file_as_it_was() {
     assert!(stderr.contains("nothing was written"), "{stderr}");
 }
 
+/// A project whose core is missing cannot have its bindings regenerated: refused before any pin moves.
+#[test]
+fn a_project_without_its_core_is_refused_before_anything_is_written() {
+    let (_dir, root) = project("released-0.0.9");
+    std::fs::remove_file(root.join("core/Cargo.toml")).unwrap();
+    let before = read_tree(&root);
+    let (code, stderr) = run_err(undra().arg("-C").arg(&root).arg("upgrade"));
+    assert_eq!(code, 1, "{stderr}");
+    assert_eq!(
+        read_tree(&root),
+        before,
+        "pins moved for bindings that cannot be made:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("error[undra::C0005]") && stderr.contains("nothing was written"),
+        "{stderr}"
+    );
+    // --no-bindgen moves the pins it finds: there is nothing to regenerate.
+    upgrade(&root, &["--no-bindgen"]);
+    assert_ne!(read_tree(&root), before);
+}
+
 /// A Gradle version held in a variable is not a pin `undra init` writes: left, and said.
 #[test]
 fn a_gradle_version_variable_is_reported_and_left() {

@@ -20,8 +20,9 @@ use super::Env;
 /// # Errors
 ///
 /// `C0001` outside a project, `C0014` when the project is on a newer release than this `undra`,
-/// `C0010` when a file cannot be written, and whatever `undra bindgen` reports (the pins are
-/// already moved then, and the message says so).
+/// `C0005` when the core is missing (nothing is written), `C0010` when a file cannot be written
+/// (nothing is written), and whatever `undra bindgen` reports (the pins are already moved then, and
+/// the message says so).
 pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
     let project = Project::discover(&env.start_dir()?)?;
     let ui = env.ui;
@@ -96,6 +97,18 @@ pub fn run(env: &Env<'_>, args: &UpgradeArgs) -> Result<()> {
         return Ok(());
     }
 
+    if !args.no_bindgen && !project.core_manifest().is_file() {
+        // The bindings could not be regenerated after the pins moved: say so before moving any.
+        return Err(CliError::new(
+            Code::BadCore,
+            format!(
+                "there is no core crate at {}; nothing was written",
+                project.core_manifest().display()
+            ),
+            "`undra upgrade` moves the pins and then regenerates the bindings from the core, and without the core the second half cannot happen",
+            "fix `[core] path` in undra.toml (or restore the core), then run `undra upgrade` again; `--no-bindgen` moves the pins alone",
+        ));
+    }
     write_all(&project.root, &plan.files)?;
     ui.line(&format!(
         "Updated {} file{}.",
