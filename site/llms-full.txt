@@ -610,6 +610,8 @@ Each runtime ships an adapter for every port, so a new app works without adapter
 
 On Android one call installs all ten, `AndroidPlatformDefaults.install(core, context)`; the runtime alone installs only `Clock`, `Rng`, `Log` and `Timer`. On the JVM without Android, `Connectivity` and `Lifecycle` are stubs. On the web, `Clock`, `Rng` and `Log` are bound to imports of the wasm module, so a web app needs no adapter code for them.
 
+Under React Native, `loadNative` installs all ten too: `Kv`, `SecureStore`, `Fs` and `Connectivity` are native code in `@undra/react-native` (files in the app's private storage, the Keychain or the Android Keystore, `NWPathMonitor` or `ConnectivityManager`, with the Swift and Android adapters' file layouts), `Http` is React Native's `fetch` and `Lifecycle` its `AppState` ([docs/REACT_NATIVE.md](https://github.com/shreypdev/undra/blob/main/docs/REACT_NATIVE.md)).
+
 ## Supplying your own adapter
 
 You replace a default when you load the core. The playground replaces `Http` with an in-memory server (so it needs no backend) and `Kv` with a map:
@@ -2478,7 +2480,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb8dde1419dc06d35`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2498,13 +2500,13 @@ An enum for each `#[undra::error]`, conforming to `Error`.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `greet` `parseCount` `ping` `setRemoteDone` `version`
+`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
 
 ## Ports
 
@@ -2530,7 +2532,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb8dde1419dc06d35`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2550,13 +2552,13 @@ A sealed class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `greet` `parseCount` `ping` `setRemoteDone` `version`
+`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
 
 ## Ports
 
@@ -2582,7 +2584,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xb8dde1419dc06d35`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2606,13 +2608,13 @@ An abstract class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and an async function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `greet` `parseCount` `ping` `setRemoteDone` `version`
+`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
 
 ## Ports
 

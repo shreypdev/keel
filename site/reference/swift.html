@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xddcdea47fa95a8d4</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xb8dde1419dc06d35</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
@@ -408,8 +408,8 @@ extension TodoError: CustomStringConvertible, LocalizedError {
 </details>
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
-<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>135 lines</span></summary>
+<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>version</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>192 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift" rel="noopener">Objects.swift</a></span></div><pre><code data-lang="swift">public final class Probe: UndraObject, @unchecked Sendable {
     /// A probe with every counter at zero.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -520,9 +520,50 @@ public func failLater(
     ctx: UndraCore = .shared
 ) async throws -&gt; UInt32
 
+/// Deletes the file or directory `path` of the `Fs` port.
+/// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func fileDelete(path: String, ctx: UndraCore = .shared) async throws
+
+/// The names in the directory `dir` of the `Fs` port, sorted.
+/// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func fileList(dir: String, ctx: UndraCore = .shared) async throws -&gt; [String]
+
+/// The contents of the file `path` of the `Fs` port.
+/// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func fileRead(path: String, ctx: UndraCore = .shared) async throws -&gt; [UInt8]
+
+/// Writes `data` to the file `path` of the `Fs` port, creating its directories.
+/// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func fileWrite(path: String, data: [UInt8], ctx: UndraCore = .shared) async throws
+
 /// A greeting.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
 public func greet(name: String, ctx: UndraCore = .shared) throws -&gt; String
+
+/// `GET url` through the `Http` port, with an optional timeout in milliseconds. Any status is a
+/// response; only a failure to get one is an [`HttpError`].
+/// - Throws: ``HttpError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func httpGet(
+    url: String,
+    timeoutMs: UInt32?,
+    ctx: UndraCore = .shared
+) async throws -&gt; HttpResponse
+
+/// The value the `Kv` port has under `key`, if any.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func kvGet(key: String, ctx: UndraCore = .shared) async throws -&gt; [UInt8]?
+
+/// The keys of the `Kv` port that start with `prefix`, in ascending order.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func kvKeys(prefix: String, ctx: UndraCore = .shared) async throws -&gt; [String]
+
+/// Stores `value` under `key` in the `Kv` port.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func kvPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async throws
+
+/// Removes `key` from the `Kv` port; a missing key is not an error.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func kvRemove(key: String, ctx: UndraCore = .shared) async throws
 
 /// Reads an unsigned number of at most nine digits.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -531,6 +572,22 @@ public func parseCount(text: String, ctx: UndraCore = .shared) throws -&gt; UInt
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
 public func ping(ctx: UndraCore = .shared)
+
+/// The value the `SecureStore` port has under `key`, if any.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func secretGet(key: String, ctx: UndraCore = .shared) async throws -&gt; [UInt8]?
+
+/// The keys of the `SecureStore` port that start with `prefix`, in ascending order.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func secretKeys(prefix: String, ctx: UndraCore = .shared) async throws -&gt; [String]
+
+/// Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func secretPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async throws
+
+/// Removes `key` from the `SecureStore` port; a missing key is not an error.
+/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func secretRemove(key: String, ctx: UndraCore = .shared) async throws
 
 /// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
 /// refuses.
@@ -549,8 +606,8 @@ public func version(ctx: UndraCore = .shared) throws -&gt; String
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">An <code>@Observable</code> class for each <code>#[undra::store]</code>: its signals, then its methods.</p>
-<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>179 lines</span></summary>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>194 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift" rel="noopener">Stores.swift</a></span></div><pre><code data-lang="swift">/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
 /// exercise the boundary.
 @MainActor @Observable
@@ -663,6 +720,21 @@ public final class Counter: UndraStore, @unchecked Sendable {
     /// Sets the count back to zero and forgets the changes, in one transaction.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
     public func reset()
+}
+
+/// The `Connectivity` and `Lifecycle` reports as the core received them: the last of each and how
+/// many there were since the core started. Every report moves the signals in one transaction.
+@MainActor @Observable
+public final class Device: UndraStore, @unchecked Sendable {
+    public private(set) var online: Bool
+    public private(set) var netKind: NetKind
+    public private(set) var appState: UndraAppState
+    public private(set) var connectivityReports: UInt32
+    public private(set) var lifecycleReports: UInt32
+
+    /// The store, showing every report received so far and following the next ones.
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public convenience init(ctx: UndraCore = .shared) throws
 }
 
 /// A store that commits many transactions, for the coalesced-delivery scenarios and the
@@ -786,11 +858,11 @@ public func postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>94 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>111 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash to pass to `UndraCore.load` as the expected schema hash.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0xddcdea47fa95a8d4
+    public static let schemaHash: UInt64 = 0xb8dde1419dc06d35
 
     public enum Objects {
         public enum Probe {
@@ -830,6 +902,10 @@ public enum UndraIds {
             public static let increment: UInt32 = 0x0584c6ac
             public static let reset: UInt32 = 0x0c5ad256
         }
+        public enum Device {
+            public static let typeId: UInt32 = 0xbdcbb413
+            public static let new: UInt32 = 0x3f6646a7
+        }
         public enum Stress {
             public static let typeId: UInt32 = 0xafa58985
             public static let new: UInt32 = 0x6799185d
@@ -866,9 +942,22 @@ public enum UndraIds {
         public static let explode: UInt32 = 0x4b8e88d2
         public static let explodeLater: UInt32 = 0xe5a63d4b
         public static let failLater: UInt32 = 0x977e4974
+        public static let fileDelete: UInt32 = 0x3ea41ab3
+        public static let fileList: UInt32 = 0x97b9c870
+        public static let fileRead: UInt32 = 0x2103879c
+        public static let fileWrite: UInt32 = 0x2c0e4e77
         public static let greet: UInt32 = 0x0594d9ae
+        public static let httpGet: UInt32 = 0xbce1d1e6
+        public static let kvGet: UInt32 = 0x05cd83d7
+        public static let kvKeys: UInt32 = 0x4be5264d
+        public static let kvPut: UInt32 = 0x1b33766e
+        public static let kvRemove: UInt32 = 0xe4402f7d
         public static let parseCount: UInt32 = 0x1c438944
         public static let ping: UInt32 = 0x60e670d5
+        public static let secretGet: UInt32 = 0x3f96f35a
+        public static let secretKeys: UInt32 = 0x98a56bd2
+        public static let secretPut: UInt32 = 0x2c60b7cb
+        public static let secretRemove: UInt32 = 0x83a7330a
         public static let setRemoteDone: UInt32 = 0xa1e08a5f
         public static let version: UInt32 = 0xceb9168b
     }
