@@ -92,6 +92,7 @@ native_server! {
     mod resume;
     mod server;
     mod session;
+    mod tap;
     mod tracker;
     mod writer;
     mod ws;
@@ -103,5 +104,6 @@ native_server! {
     pub use resume::KeptSession;
     pub use server::{Server, ServerConfig, Suspended};
     pub use session::UNDRA_VERSION;
+    pub use tap::{Direction, FrameTap};
     pub use ws::close;
 }

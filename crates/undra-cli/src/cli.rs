@@ -336,6 +336,11 @@ pub struct DevArgs {
     /// Start every rebuilt core from fresh state instead of carrying the running core's state over (the escape hatch for "my logic changed under the restored state").
     #[arg(long)]
     pub no_keep_state: bool,
+
+    /// Record the session (every call, reply, change-set, port call and the core's clock and random readings) into FILE as an
+    /// `undra.recording` (docs/TESTING.md). A reload starts a new core and so a new file: FILE, then `NAME-2.json`, `NAME-3.json`.
+    #[arg(long, value_name = "FILE")]
+    pub record: Option<PathBuf>,
 }
 
 /// Arguments of `undra doctor`.

@@ -1219,6 +1219,7 @@ dependencies = [
  "undra-query",
  "undra-runtime",
  "undra-signals",
+ "undra-testkit",
  "undra-wire",
 ]
 
@@ -1340,6 +1341,21 @@ version = "0.1.0"
 dependencies = [
  "parking_lot",
  "proptest",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-testkit"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "proptest",
+ "serde_json",
+ "undra",
+ "undra-macros",
+ "undra-meta",
+ "undra-ports",
+ "undra-runtime",
  "undra-wire",
 ]
 

@@ -104,6 +104,67 @@ fn the_dev_server_serves_the_core_and_reports_its_schema() {
 }
 
 #[test]
+fn record_writes_the_session_as_an_undra_recording() {
+    let project = init_project("devrecord", "web");
+    let file = project.root.join("session.json");
+    let dev = Dev::start(
+        &project,
+        &[
+            "--no-watch",
+            "--record",
+            file.to_str().expect("a utf-8 path"),
+        ],
+    );
+    let (mut ws, _) = connect(&dev);
+    assert_eq!(
+        greeting(&mut ws, dev.hash, "Ada"),
+        "Hello, Ada, from the devrecord core"
+    );
+    drop(ws);
+
+    // The runner rewrites the file twice a second while it grows.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let recording = loop {
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) {
+            let kinds: Vec<&str> = doc["events"]
+                .as_array()
+                .map(|e| e.iter().filter_map(|e| e["kind"].as_str()).collect())
+                .unwrap_or_default();
+            if kinds.contains(&"call") && kinds.contains(&"reply") {
+                break doc;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no recording appeared at {}",
+            file.display()
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(recording["format"], "undra.recording");
+    assert_eq!(recording["version"], 1);
+    assert_eq!(recording["source"], "dev-server");
+    assert_eq!(
+        recording["schema_hash"],
+        format!("{:#018x}", dev.hash),
+        "the recording names the schema it belongs to"
+    );
+    let events = recording["events"].as_array().expect("events");
+    let call = events
+        .iter()
+        .find(|e| e["kind"] == "call")
+        .expect("the call");
+    assert_eq!(call["target"], "function");
+    assert_eq!(
+        call["method"],
+        undra_meta::ids::function_id("greeting"),
+        "ids are the schema's"
+    );
+    dev.kill_and_expect_the_port_to_close();
+}
+
+#[test]
 fn an_edit_rebuilds_and_restarts_the_core_on_the_same_address() {
     let project = init_project("devwatch", "web");
     let dev = Dev::start(&project, &[]);

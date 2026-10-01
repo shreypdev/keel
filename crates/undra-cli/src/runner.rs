@@ -15,7 +15,7 @@
 //! child, never a file.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -396,6 +396,24 @@ pub struct Running {
     stdin: Option<ChildStdin>,
 }
 
+/// Where run `id` writes its recording: `base` for the first run, `NAME-<id>.EXT` for the cores
+/// that replace it (a recording belongs to one core, and a reload starts a new one).
+#[must_use]
+pub fn record_path(base: &Path, id: u64) -> PathBuf {
+    if id <= 1 {
+        return base.to_path_buf();
+    }
+    let stem = base
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name = match base.extension() {
+        Some(ext) => format!("{stem}-{id}.{}", ext.to_string_lossy()),
+        None => format!("{stem}-{id}"),
+    };
+    base.with_file_name(name)
+}
+
 /// Starts the runner on `addr` and forwards what it prints as [`RunnerEvent`]s. A `standby` runner
 /// builds its core and waits for `listen` (see the module documentation).
 ///
@@ -408,6 +426,7 @@ pub fn spawn(
     log_level: u8,
     id: u64,
     standby: bool,
+    record: Option<&Path>,
     events: Sender<RunnerEvent>,
 ) -> Result<Running> {
     let mut command = Command::new(exe);
@@ -415,6 +434,9 @@ pub fn spawn(
         .arg(addr)
         .arg("--log-level")
         .arg(log_level.to_string());
+    if let Some(base) = record {
+        command.arg("--record").arg(record_path(base, id));
+    }
     if standby {
         command.arg("--standby");
     }
@@ -736,7 +758,7 @@ mod tests {
             .unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let mut running =
-            spawn(&script, "127.0.0.1:0", 1, 9, false, tx).expect("the fake runner starts");
+            spawn(&script, "127.0.0.1:0", 1, 9, false, None, tx).expect("the fake runner starts");
         let wait = |rx: &std::sync::mpsc::Receiver<RunnerEvent>| {
             rx.recv_timeout(Duration::from_secs(60))
                 .expect("an answer in time")

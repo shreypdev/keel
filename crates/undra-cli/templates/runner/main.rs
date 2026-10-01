@@ -2,7 +2,7 @@
 //! `remote` transport.
 //!
 //! ```text
-//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--print-schema]
+//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--print-schema] [--record FILE]
 //! ```
 //!
 //! It talks to `undra dev` over its stdin and stdout, in lines (docs/DEV_LOOP.md has the table; the
@@ -17,12 +17,14 @@
 
 use std::collections::HashSet;
 use std::io::{BufRead, Write};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use undra_runtime::undra_wire::payload::Snapshot;
 use undra_runtime::undra_wire::Reader;
 use undra_runtime::{Runtime, RuntimeConfig};
-use undra_transport::{AttachNotices, Bridge, KeptSession, Server, ServerConfig};
+use undra_testkit::Recorder;
+use undra_transport::{AttachNotices, Bridge, FrameTap, KeptSession, Server, ServerConfig};
 
 // Links the core, whose `#[undra::api]` items register themselves with the runtime at load time.
 extern crate app_core;
@@ -63,7 +65,6 @@ fn print_log(level: u8, target: &str, message: &str) {
 
 // @ports:begin
 use std::io::Read;
-use std::sync::Arc;
 
 /// The native `Clock` (SPEC 8): a dev core runs on your computer, so it asks your computer's
 /// clock. Synchronous ports cannot be answered by a remote client, which is why these are Rust
@@ -111,13 +112,20 @@ impl undra_ports::Log for NativeLog {
     }
 }
 
-fn bind_native_ports(runtime: &Arc<Runtime>) {
+fn bind_native_ports(runtime: &Arc<Runtime>, recorder: Option<&Arc<Recorder>>) {
     use undra_runtime::Port;
-    runtime.bind_dyn_port::<dyn undra_ports::Clock>(
-        <dyn undra_ports::Clock as Port>::PORT_ID,
-        Arc::new(NativeClock(std::time::Instant::now())),
-    );
-    runtime.bind_dyn_port::<dyn undra_ports::Rng>(<dyn undra_ports::Rng as Port>::PORT_ID, Arc::new(NativeRng));
+    // With `--record`, the readings of the two ports that never cross the socket are in the file too.
+    let clock: Arc<dyn undra_ports::Clock> = Arc::new(NativeClock(std::time::Instant::now()));
+    let rng: Arc<dyn undra_ports::Rng> = Arc::new(NativeRng);
+    let (clock, rng): (Arc<dyn undra_ports::Clock>, Arc<dyn undra_ports::Rng>) = match recorder {
+        Some(rec) => (
+            Arc::new(undra_testkit::RecordingClock::new(rec.clone(), clock)),
+            Arc::new(undra_testkit::RecordingRng::new(rec.clone(), rng)),
+        ),
+        None => (clock, rng),
+    };
+    runtime.bind_dyn_port::<dyn undra_ports::Clock>(<dyn undra_ports::Clock as Port>::PORT_ID, clock);
+    runtime.bind_dyn_port::<dyn undra_ports::Rng>(<dyn undra_ports::Rng as Port>::PORT_ID, rng);
     runtime.bind_dyn_port::<dyn undra_ports::Log>(<dyn undra_ports::Log as Port>::PORT_ID, Arc::new(NativeLog));
 }
 // @ports:end
@@ -259,13 +267,20 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
 
 /// Binds `addr` and serves `runtime`, holding the handed-over session and telling the clients what
 /// became of their state. Exits the process when the address cannot be bound.
-fn listen(addr: &str, runtime: &std::sync::Arc<Runtime>, bridge: &std::sync::Arc<Bridge>, handover: Handover) -> Server {
+fn listen(
+    addr: &str,
+    runtime: &std::sync::Arc<Runtime>,
+    bridge: &std::sync::Arc<Bridge>,
+    handover: Handover,
+    tap: Option<FrameTap>,
+) -> Server {
     // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
     // for ten minutes if it comes back with its session token (ADR-051).
     let config = ServerConfig {
         resume_grace: Duration::from_secs(600),
         inherited_session: handover.session,
         attach_notices: handover.notices,
+        tap,
         ..ServerConfig::default()
     };
     match Server::bind(addr, runtime.clone(), bridge.clone(), config) {
@@ -305,8 +320,19 @@ fn take_snapshot(server: &Server, runtime: &Runtime) {
     ));
 }
 
+/// Writes the recording whole, through a temporary file, so a reader never sees half of it.
+fn write_recording(path: &str, recorder: &Recorder) {
+    let temporary = format!("{path}.tmp");
+    let written = std::fs::write(&temporary, recorder.finish().to_json())
+        .and_then(|()| std::fs::rename(&temporary, path));
+    if let Err(e) = written {
+        eprintln!("undra-dev-runner: cannot write the recording {path}: {e}");
+    }
+}
+
 fn main() {
     let mut addr = "127.0.0.1:7443".to_owned();
+    let mut record: Option<String> = None;
     let mut log_level = 1_u8;
     let mut print_schema = false;
     let mut standby = false;
@@ -315,6 +341,7 @@ fn main() {
         match arg.as_str() {
             "--print-schema" => print_schema = true,
             "--standby" => standby = true,
+            "--record" => record = args.next(),
             "--log-level" => {
                 log_level = args.next().and_then(|v| v.parse().ok()).unwrap_or(log_level);
             }
@@ -348,16 +375,45 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // `--record FILE`: everything the server relays, and the readings of the native ports, in an
+    // `undra.recording`, rewritten twice a second while it grows and once more at the end.
+    let recorder = record.as_ref().map(|_| Arc::new(Recorder::new(runtime.schema_hash(), "dev-server")));
+    let tap = recorder.as_ref().map(|recorder| {
+        let recorder = recorder.clone();
+        FrameTap::new(move |_direction, kind, payload| {
+            let _ = recorder.record_envelope(kind, payload);
+        })
+    });
     // @ports:begin
-    bind_native_ports(&runtime);
+    bind_native_ports(&runtime, recorder.as_ref());
     // @ports:end
+    let flusher = record.clone().zip(recorder.clone()).map(|(path, recorder)| {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = stop.clone();
+        let bridge = bridge.clone();
+        let handle = std::thread::spawn(move || {
+            let mut written = usize::MAX;
+            while !flag.load(std::sync::atomic::Ordering::Acquire) {
+                if let Some(client) = bridge.client() {
+                    recorder.set_platform(client.platform);
+                }
+                if recorder.len() != written {
+                    written = recorder.len();
+                    write_recording(&path, &recorder);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            write_recording(&path, &recorder);
+        });
+        (stop, handle)
+    });
 
     let mut handover = Handover::default();
     let mut server = None;
     if standby {
         say(&format!("standby {:#018x}", runtime.schema_hash()));
     } else {
-        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover)));
+        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), tap.clone()));
     }
 
     // Commands until stdin closes: `undra dev` holds the other end, so this process ends when it does.
@@ -369,7 +425,7 @@ fn main() {
             ("state", None) => restore_state(&runtime, rest, &mut handover),
             ("reset", None) => handover.reset(rest),
             ("listen", None) => {
-                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover)));
+                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover), tap.clone()));
             }
             _ => print_log(3, "undra-dev-runner", &format!("ignoring a command it cannot run now: {verb}")),
         }
@@ -378,4 +434,8 @@ fn main() {
         server.shutdown();
     }
     runtime.shutdown();
+    if let Some((stop, handle)) = flusher {
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        let _ = handle.join();
+    }
 }

@@ -216,6 +216,7 @@ pub fn write_runner(target_dir: &Path, project_root: &Path, core: &CoreInfo) -> 
             "UNDRA_TRANSPORT",
             core.undra.dependency("undra-transport", &[]),
         )
+        .with("UNDRA_TESTKIT", core.undra.dependency("undra-testkit", &[]))
         .with("PORTS_DEP", ports_dep)
         .with(
             "STATE_LIMIT_BYTES",

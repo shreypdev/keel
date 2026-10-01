@@ -7,6 +7,7 @@ members = [
   "crates/undra-signals",
   "crates/undra-runtime",
   "crates/undra-ports",
+  "crates/undra-testkit",
   "crates/undra-query",
   "crates/undra-ffi",
   "crates/undra-transport",
@@ -32,6 +33,7 @@ undra-macros = { path = "crates/undra-macros", version = "0.1.0" }
 undra-signals = { path = "crates/undra-signals", version = "0.1.0" }
 undra-runtime = { path = "crates/undra-runtime", version = "0.1.0" }
 undra-ports = { path = "crates/undra-ports", version = "0.1.0" }
+undra-testkit = { path = "crates/undra-testkit", version = "0.1.0" }
 undra-query = { path = "crates/undra-query", version = "0.1.0" }
 undra-ffi = { path = "crates/undra-ffi", version = "0.1.0" }
 undra-transport = { path = "crates/undra-transport", version = "0.1.0" }
