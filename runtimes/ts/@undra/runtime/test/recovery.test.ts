@@ -392,7 +392,8 @@ describe("the restart sequence of UndraCore (ADR-049 decision 3.4)", () => {
     const event = t.restarts[0] as UndraCoreRestarted;
     expect(event).toBeInstanceOf(UndraCoreRestarted);
     expect(event).toBeInstanceOf(UndraUnhandledError);
-    expect(event).toMatchObject({ restoredFromAgeMs: 250, rejectedCalls: 2, staleObjects: 1, operation: "core restart" });
+    expect(event).toMatchObject({ restoredFromAgeMs: 250, rejectedCalls: 2, staleObjects: 1, operation: "wasm core" });
+    expect(event.message).toBe("the wasm core trapped (kaboom) and was restarted from a snapshot 250 ms old");
     expect(event.report).toBe(t.panics[0]);
     expect(event.error).toBeInstanceOf(UndraCallError.Panicked);
     expect(t.errors).toEqual([event]);

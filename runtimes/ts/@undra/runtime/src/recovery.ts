@@ -295,7 +295,7 @@ export interface CoreRestartInfo {
 
 /**
  * A wasm core trapped and was restarted from its last snapshot (ADR-049): what `onError` receives after a
- * restart, the same as `onCoreRestarted`. It is an {@link UndraUnhandledError} (operation `"core restart"`) whose
+ * restart, the same as `onCoreRestarted`. It is an {@link UndraUnhandledError} (operation `"wasm core"`) whose
  * `error` is the panic, so an `onError` that forwards every value to a crash reporter forwards this one too.
  */
 export class UndraCoreRestarted extends UndraUnhandledError implements CoreRestartInfo {
@@ -307,7 +307,10 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
 
   /** @param info What happened. @param trap The trap. */
   constructor(info: CoreRestartInfo, trap: Error) {
-    super("core restart", new UndraCallError.Panicked(info.report.message, info.report.frames.join("\n"), { cause: trap }), trap);
+    super("wasm core", new UndraCallError.Panicked(info.report.message, info.report.frames.join("\n"), { cause: trap }), trap);
+    this.message = `the wasm core trapped (${info.report.message}) and was restarted from ${
+      info.restoredFromAgeMs === null ? "no snapshot" : `a snapshot ${info.restoredFromAgeMs} ms old`
+    }`;
     this.report = info.report;
     this.restoredFromAgeMs = info.restoredFromAgeMs;
     this.rejectedCalls = info.rejectedCalls;

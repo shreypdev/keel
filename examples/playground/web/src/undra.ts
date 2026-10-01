@@ -1,4 +1,11 @@
-import { type UndraPanicReport, UndraCore, UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
+import {
+  UndraCore,
+  UndraCoreRestarted,
+  type UndraPanicReport,
+  UndraSessionLostError,
+  type UndraUnhandledError,
+  emitConnectivity,
+} from "@undra/runtime";
 import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/undra_core.wasm?url";
@@ -30,7 +37,9 @@ export interface Playground {
  * error reporter. The runtime has already logged it at error level.
  */
 function onError(unhandled: UndraUnhandledError): void {
-  console.warn(`${unhandled.operation} failed: ${unhandled.error.message}`);
+  // A restart after a crash (ADR-049) is reported here too; the debug panel lists it.
+  if (unhandled instanceof UndraCoreRestarted) console.warn(unhandled.message);
+  else console.warn(`${unhandled.operation} failed: ${unhandled.error.message}`);
 }
 
 /**
