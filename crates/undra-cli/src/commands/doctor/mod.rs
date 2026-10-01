@@ -21,7 +21,7 @@ pub mod web;
 #[cfg(test)]
 mod testing;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
@@ -30,7 +30,7 @@ use crate::config::Platform;
 use crate::error::Result;
 use crate::project::Project;
 use crate::runtimes::enclosing_checkout;
-use crate::sys::Sys;
+use crate::sys::{Os, Sys};
 use crate::toolchain::Toolchain;
 use crate::ui::Ui;
 
@@ -67,6 +67,66 @@ pub(crate) fn version_line(cx: &Context<'_>, program: &Path, args: &[&str]) -> O
         .next()
         .map(|l| l.trim().to_owned())
         .filter(|l| !l.is_empty())
+}
+
+/// Where Homebrew installs: Apple silicon's prefix, then Intel's.
+pub(crate) const HOMEBREW_PREFIXES: [&str; 2] = ["/opt/homebrew", "/usr/local"];
+
+/// Homebrew's own installer, as https://brew.sh gives it.
+pub(crate) const INSTALL_HOMEBREW: &str = "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
+
+/// After Homebrew's installer: puts `brew` on `PATH` for this shell, wherever it went.
+const HOMEBREW_SHELLENV_ANY: &str =
+    "eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)\"";
+
+/// `eval "$(<brew> shellenv)"`: Homebrew's directories on `PATH` for this shell.
+fn shellenv(brew: &Path) -> String {
+    format!("eval \"$({} shellenv)\"", brew.display())
+}
+
+/// The commands that run `brew <args>` on this Mac: as it is when `brew` is on `PATH`; after
+/// `brew shellenv` when Homebrew is installed but this shell does not have it (Apple silicon's
+/// `/opt/homebrew` is not on the default `PATH`); after Homebrew's installer when there is none.
+/// A fix must run in the shell the person has, not in a better one.
+pub(crate) fn brew(cx: &Context<'_>, args: &str) -> Vec<String> {
+    let run = format!("brew {args}");
+    if cx.toolchain.which(cx.sys, "brew").is_some() {
+        return vec![run];
+    }
+    let installed = HOMEBREW_PREFIXES
+        .iter()
+        .map(|prefix| Path::new(prefix).join("bin/brew"))
+        .find(|brew| cx.sys.is_file(brew));
+    match installed {
+        Some(brew) => vec![shellenv(&brew), run],
+        None => vec![
+            INSTALL_HOMEBREW.to_owned(),
+            HOMEBREW_SHELLENV_ANY.to_owned(),
+            run,
+        ],
+    }
+}
+
+/// A program Homebrew installed (`/opt/homebrew/bin/node`) that this shell's `PATH` does not reach,
+/// with the command that puts its directory on `PATH`. `None` off macOS and when there is none.
+pub(crate) fn homebrew_off_path(cx: &Context<'_>, program: &str) -> Option<(PathBuf, String)> {
+    if cx.sys.os() != Os::Macos {
+        return None;
+    }
+    HOMEBREW_PREFIXES.iter().find_map(|prefix| {
+        let bin = Path::new(prefix).join("bin");
+        let found = bin.join(program);
+        if !cx.sys.is_file(&found) {
+            return None;
+        }
+        let brew = bin.join("brew");
+        let fix = if cx.sys.is_file(&brew) {
+            shellenv(&brew)
+        } else {
+            format!("export PATH=\"{}:$PATH\"", bin.display())
+        };
+        Some((found, fix))
+    })
 }
 
 /// Runs every check that applies to `cx.scope`.
@@ -170,7 +230,9 @@ pub fn run(env: &Env<'_>, args: &DoctorArgs) -> Result<bool> {
         // Only the block on stdout, so it can be read, saved or piped; the tally goes to stderr.
         env.ui.line(report.fix_script().trim_end());
         let [ok, warn, fail, _] = report.counts();
-        eprintln!("undra doctor: {ok} ok, {warn} warning(s), {fail} failure(s); nothing was run");
+        env.ui.note(&format!(
+            "undra doctor: {ok} ok, {warn} warning(s), {fail} failure(s); nothing was run"
+        ));
     } else {
         env.ui.line(&render(&report, &env.ui, name, &scope));
     }
@@ -378,7 +440,7 @@ mod tests {
 
     #[test]
     fn the_report_renders_fixes_and_docs_under_each_gap() {
-        let report = scan(&bare_mac(), &["web"]);
+        let report = scan(&bare_mac_with_brew(), &["web"]);
         let text = render(&report, &Ui::plain(), Some("todo"), &[Platform::Web]);
         assert!(text.contains("checking todo (web)"), "{text}");
         assert!(text.contains("  FAIL  node was not found"), "{text}");
@@ -399,7 +461,7 @@ mod tests {
 
     #[test]
     fn json_has_the_documented_shape() {
-        let report = scan(&bare_mac(), &["web"]);
+        let report = scan(&bare_mac_with_brew(), &["web"]);
         let doc = to_json(
             &report,
             Some("todo"),
@@ -481,5 +543,96 @@ mod tests {
             None,
             Path::new(env!("CARGO_MANIFEST_DIR"))
         ));
+    }
+
+    // ----- a fix is a command that works in the shell the person has (review, 2026-10-01)
+
+    #[test]
+    fn a_tool_homebrew_installed_off_path_is_named_and_the_fix_puts_homebrew_on_path() {
+        // A shell that never ran `brew shellenv`: Apple silicon's /opt/homebrew is not on the default PATH.
+        let sys = bare_mac()
+            .with_file("/opt/homebrew/bin/brew")
+            .with_file("/opt/homebrew/bin/node")
+            .with_file("/opt/homebrew/bin/npm")
+            .with_file("/opt/homebrew/bin/wasm-opt");
+        let report = scan(&sys, &["web"]);
+        let node = by_id(&report, "web.node");
+        assert!(
+            node.message.contains("/opt/homebrew/bin/node"),
+            "{}",
+            node.message
+        );
+        assert_eq!(node.fix, ["eval \"$(/opt/homebrew/bin/brew shellenv)\""]);
+        // `brew install node` would fail here (no brew on PATH) or do nothing (node is installed).
+        for id in ["web.node", "web.npm", "web.wasm-opt"] {
+            let f = by_id(&report, id);
+            assert!(
+                !f.fix.iter().any(|c| c.starts_with("brew install")),
+                "{id}: {:?}",
+                f.fix
+            );
+        }
+    }
+
+    #[test]
+    fn without_homebrew_a_brew_fix_installs_homebrew_first() {
+        let report = scan(&bare_mac(), &["web", "android"]);
+        for id in ["web.node", "web.wasm-opt", "android.sdk", "android.jdk"] {
+            let fix = &by_id(&report, id).fix;
+            assert!(
+                fix[0].contains("Homebrew/install/HEAD/install.sh"),
+                "{id}: {fix:?}"
+            );
+            assert!(fix[1].contains("brew shellenv"), "{id}: {fix:?}");
+        }
+        // Pasted as one block, Homebrew is installed once.
+        let script = report.fix_script();
+        assert_eq!(
+            script.matches("Homebrew/install/HEAD/install.sh").count(),
+            1,
+            "{script}"
+        );
+    }
+
+    #[test]
+    fn homebrew_paths_are_asked_of_brew_not_assumed_to_be_apple_silicons() {
+        // An Intel Mac: Homebrew is /usr/local.
+        let sys = bare_mac().with_tool("brew", "/usr/local/bin/brew");
+        let report = scan(&sys, &["android"]);
+        let sdk = by_id(&report, "android.sdk");
+        assert!(
+            !sdk.fix.iter().any(|c| c.contains("/opt/homebrew")),
+            "{:?}",
+            sdk.fix
+        );
+        assert!(
+            sdk.fix
+                .iter()
+                .any(|c| c.contains("$(brew --prefix)/share/android-commandlinetools")),
+            "{:?}",
+            sdk.fix
+        );
+        // Homebrew's JDK is keg-only: installing it does not put `java` on PATH by itself.
+        let jdk = by_id(&report, "android.jdk");
+        assert_eq!(jdk.fix[0], "brew install openjdk@17");
+        assert!(
+            jdk.fix.iter().any(|c| c.contains("JAVA_HOME")),
+            "{:?}",
+            jdk.fix
+        );
+    }
+
+    #[test]
+    fn adb_fixes_name_the_adb_that_was_found() {
+        // adb is the SDK's (not on PATH) and `adb devices` fails: `adb kill-server` would not run.
+        let sys = good_machine().with_failing_output("adb", "devices", "error: protocol fault");
+        let report = scan(&sys, &["android"]);
+        let device = by_id(&report, "android.device");
+        assert!(
+            device.fix[0]
+                .contains("/opt/homebrew/share/android-commandlinetools/platform-tools/adb"),
+            "{:?}",
+            device.fix
+        );
     }
 }

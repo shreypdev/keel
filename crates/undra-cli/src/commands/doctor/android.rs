@@ -9,7 +9,7 @@ use crate::toolchain::ndk_major;
 
 use super::finding::{Check, Finding, State};
 use super::rust::target;
-use super::{Context, version_line};
+use super::{Context, brew, version_line};
 
 /// The Android SDK directory.
 pub const SDK: Check = Check::new("android.sdk", "android-sdk");
@@ -124,11 +124,13 @@ fn sdkmanager(sdk: Option<&Path>, packages: &[&str]) -> String {
 /// The commands that install the Android SDK's command line tools.
 fn install_sdk(cx: &Context<'_>) -> Vec<String> {
     if cx.sys.os() == Os::Macos {
-        vec![
-            "brew install --cask android-commandlinetools".to_owned(),
-            "export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools".to_owned(),
+        // Where the cask goes is Homebrew's prefix: /opt/homebrew on Apple silicon, /usr/local on Intel.
+        let mut out = brew(cx, "install --cask android-commandlinetools");
+        out.extend([
+            "export ANDROID_HOME=\"$(brew --prefix)/share/android-commandlinetools\"".to_owned(),
             "yes | \"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager\" --licenses".to_owned(),
-        ]
+        ]);
+        out
     } else {
         vec![
             "mkdir -p \"$HOME/Android/Sdk/cmdline-tools\"".to_owned(),
@@ -238,7 +240,7 @@ fn device(cx: &Context<'_>, adb_path: &Path, sdk: Option<&Path>) -> Finding {
             State::Missing,
             None,
             "`adb devices` failed",
-            &["adb kill-server && adb start-server"],
+            &[&restart_adb(adb_path)],
         );
     };
     let devices = adb::parse_devices(&listing.stdout);
@@ -270,7 +272,7 @@ fn device(cx: &Context<'_>, adb_path: &Path, sdk: Option<&Path>) -> Finding {
             State::Missing,
             Some(states.join(", ")),
             format!("no ready device: {} (accept the USB debugging prompt on the phone, or restart adb)", states.join(", ")),
-            &["adb kill-server && adb start-server"],
+            &[&restart_adb(adb_path)],
         );
     }
     DEVICE.warn_missing(
@@ -280,6 +282,12 @@ fn device(cx: &Context<'_>, adb_path: &Path, sdk: Option<&Path>) -> Finding {
             .map(String::as_str)
             .collect::<Vec<_>>(),
     )
+}
+
+/// Restarts the adb server with the `adb` that was found (the SDK's need not be on `PATH`).
+fn restart_adb(adb_path: &Path) -> String {
+    let adb = quoted_path(&adb_path.to_string_lossy());
+    format!("{adb} kill-server && {adb} start-server")
 }
 
 /// The `emulator` binary: the SDK's, else one on `PATH`.
@@ -425,11 +433,19 @@ fn cargo_ndk(cx: &Context<'_>) -> Finding {
 fn jdk(cx: &Context<'_>) -> Finding {
     // A gap blocks the app build when there is an app (a project); elsewhere it is advice.
     let in_project = cx.project.is_some();
-    let install = if cx.sys.os() == Os::Macos {
-        "brew install openjdk@17"
+    let install_list = if cx.sys.os() == Os::Macos {
+        // Homebrew's openjdk@17 is keg-only: installed, it is still not on PATH.
+        let mut out = brew(cx, "install openjdk@17");
+        out.extend([
+            "export JAVA_HOME=\"$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home\""
+                .to_owned(),
+            "export PATH=\"$JAVA_HOME/bin:$PATH\"".to_owned(),
+        ]);
+        out
     } else {
-        "sudo apt-get install -y openjdk-17-jdk"
+        vec!["sudo apt-get install -y openjdk-17-jdk".to_owned()]
     };
+    let install: &[&str] = &install_list.iter().map(String::as_str).collect::<Vec<_>>();
     if let Some(java) = cx.toolchain.which(cx.sys, "java") {
         let out = cx.sys.run(&java, &["-version"], &cx.toolchain.env_pairs());
         if let Some(out) = out.filter(|o| o.success) {
@@ -442,9 +458,9 @@ fn jdk(cx: &Context<'_>) -> Finding {
                         "{first}: Android Gradle plugins need JDK {MIN_JDK} or newer (Java {major} found)"
                     );
                     if in_project {
-                        JDK.wrong_version(first, message, &[install])
+                        JDK.wrong_version(first, message, install)
                     } else {
-                        JDK.warn_version(first, message, &[install])
+                        JDK.warn_version(first, message, install)
                     }
                 }
                 None => JDK.ok(first),
@@ -473,9 +489,9 @@ fn jdk(cx: &Context<'_>) -> Finding {
     let message =
         "no JDK found (Gradle and Android Studio builds need one; `undra build` does not)";
     if in_project {
-        JDK.missing(message, &[install])
+        JDK.missing(message, install)
     } else {
-        JDK.warn_missing(message, &[install])
+        JDK.warn_missing(message, install)
     }
 }
 
@@ -496,14 +512,20 @@ fn gradle_wrapper(cx: &Context<'_>) -> Finding {
             &[&create],
         )
     } else {
-        let install = if cx.sys.os() == Os::Macos {
-            "brew install gradle"
+        let mut fix = if cx.sys.os() == Os::Macos {
+            brew(cx, "install gradle")
         } else {
-            "sudo apt-get install -y gradle"
+            // A distribution's own Gradle is too old for JDK 17; SDKMAN has the current one.
+            vec![
+                "curl -s \"https://get.sdkman.io\" | bash".to_owned(),
+                "source \"$HOME/.sdkman/bin/sdkman-init.sh\"".to_owned(),
+                "sdk install gradle".to_owned(),
+            ]
         };
+        fix.push(create);
         GRADLE_WRAPPER.warn_missing(
             "android/gradlew is missing and Gradle is not installed to create it (Android Studio also creates one when it opens android/)",
-            &[install, &create],
+            &fix.iter().map(String::as_str).collect::<Vec<_>>(),
         )
     }
 }
@@ -555,7 +577,7 @@ mod tests {
         assert_eq!(f.status, Status::Ok);
         assert_eq!(f.observed.as_deref(), Some(SDK_DIR));
 
-        let f = by_id(&scan(&bare_mac(), &["android"]), "android.sdk").clone();
+        let f = by_id(&scan(&bare_mac_with_brew(), &["android"]), "android.sdk").clone();
         assert_eq!((f.status, f.state), (Status::Fail, State::Missing));
         assert_eq!(f.fix[0], "brew install --cask android-commandlinetools");
         assert!(
@@ -780,7 +802,14 @@ mod tests {
         )
         .clone();
         assert_eq!((f.status, f.state), (Status::Fail, State::WrongVersion));
-        assert_eq!(f.fix, ["brew install openjdk@17"]);
+        assert_eq!(
+            f.fix,
+            [
+                "brew install openjdk@17",
+                "export JAVA_HOME=\"$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home\"",
+                "export PATH=\"$JAVA_HOME/bin:$PATH\"",
+            ]
+        );
 
         // Installed but keg-only.
         let keg = bare_mac().with_file("/opt/homebrew/opt/openjdk@17/bin/java");

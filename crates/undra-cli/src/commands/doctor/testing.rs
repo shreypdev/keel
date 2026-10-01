@@ -94,6 +94,10 @@ impl Spec {
                 }
             }
         }
+        if self.mac {
+            // Homebrew, on PATH: every brew fix of a described Mac is then one `brew install`.
+            sys = sys.with_tool("brew", "/opt/homebrew/bin/brew");
+        }
         if self.mac && self.xcode {
             sys = sys
                 .with_dir(XCODE_DEVELOPER_DIR)
@@ -208,6 +212,11 @@ pub fn bare_machine() -> FakeSys {
 /// A Mac with nothing on it.
 pub fn bare_mac() -> FakeSys {
     FakeSys::macos().with_free_disk(500_000_000_000)
+}
+
+/// A Mac with nothing on it but Homebrew (on PATH).
+pub fn bare_mac_with_brew() -> FakeSys {
+    bare_mac().with_tool("brew", "/opt/homebrew/bin/brew")
 }
 
 /// A Mac without any Rust target.

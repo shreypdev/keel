@@ -4,7 +4,7 @@ use crate::sys::Os;
 
 use super::finding::{Check, Finding, State};
 use super::rust::target;
-use super::{Context, version_line};
+use super::{Context, brew, homebrew_off_path, version_line};
 
 /// Node, 20 or newer.
 pub const NODE: Check = Check::new("web.node", "node-and-npm");
@@ -31,14 +31,55 @@ pub fn node_major(line: &str) -> Option<u32> {
         .ok()
 }
 
-fn install_node(cx: &Context<'_>) -> Vec<&'static str> {
+fn install_node(cx: &Context<'_>) -> Vec<String> {
     if cx.sys.os() == Os::Macos {
-        vec!["brew install node"]
+        brew(cx, "install node")
     } else {
+        // fnm's installer adds fnm to the shell's startup file; this shell gets it from its directory.
         vec![
-            "curl -fsSL https://fnm.vercel.app/install | bash",
-            "fnm install --lts",
+            "curl -fsSL https://fnm.vercel.app/install | bash".to_owned(),
+            "export PATH=\"$HOME/.local/share/fnm:$PATH\" && eval \"$(fnm env)\"".to_owned(),
+            "fnm install --lts".to_owned(),
         ]
+    }
+}
+
+/// The finding of a program that is not on `PATH`: installed by Homebrew in a directory this shell
+/// does not reach (then the fix puts it on `PATH`), else not installed (then `install`).
+fn not_on_path(
+    cx: &Context<'_>,
+    check: &Check,
+    program: &str,
+    message: &str,
+    install: &[String],
+    warn_only: bool,
+) -> Finding {
+    if let Some((found, fix)) = homebrew_off_path(cx, program) {
+        let message = format!(
+            "{program} is installed at {}, but Homebrew's directory is not on this shell's PATH",
+            found.display()
+        );
+        return if warn_only || check.optional {
+            check.warn(
+                State::Missing,
+                Some(found.display().to_string()),
+                message,
+                &[&fix],
+            )
+        } else {
+            check.fail(
+                State::Missing,
+                Some(found.display().to_string()),
+                message,
+                &[&fix],
+            )
+        };
+    }
+    let install: Vec<&str> = install.iter().map(String::as_str).collect();
+    if warn_only {
+        check.warn_missing(message, &install)
+    } else {
+        check.missing(message, &install)
     }
 }
 
@@ -46,11 +87,16 @@ fn install_node(cx: &Context<'_>) -> Vec<&'static str> {
 #[must_use]
 pub fn check(cx: &Context<'_>) -> Vec<Finding> {
     let mut out = vec![target(cx, "wasm32-unknown-unknown", "the web build", false)];
-    let install = install_node(cx);
+    let install_list = install_node(cx);
+    let install: Vec<&str> = install_list.iter().map(String::as_str).collect();
     match cx.toolchain.which(cx.sys, "node") {
-        None => out.push(NODE.missing(
-            format!("node was not found (the web app shell and the TypeScript runtime need Node {MIN_NODE}+)"),
-            &install,
+        None => out.push(not_on_path(
+            cx,
+            &NODE,
+            "node",
+            &format!("node was not found (the web app shell and the TypeScript runtime need Node {MIN_NODE}+)"),
+            &install_list,
+            false,
         )),
         Some(node) => match version_line(cx, &node, &["--version"]) {
             Some(line) => match node_major(&line) {
@@ -70,9 +116,13 @@ pub fn check(cx: &Context<'_>) -> Vec<Finding> {
             let version = version_line(cx, &npm, &["--version"]).unwrap_or_default();
             out.push(NPM.ok_with(format!("npm {version}").trim().to_owned(), version));
         }
-        None => out.push(NPM.warn_missing(
+        None => out.push(not_on_path(
+            cx,
+            &NPM,
+            "npm",
             "npm was not found (the web app shell installs its dependencies with it)",
-            &install,
+            &install_list,
+            true,
         )),
     }
     match cx.toolchain.which(cx.sys, "wasm-opt") {
@@ -83,13 +133,17 @@ pub fn check(cx: &Context<'_>) -> Vec<Finding> {
         }
         None => {
             let install = if cx.sys.os() == Os::Macos {
-                "brew install binaryen"
+                brew(cx, "install binaryen")
             } else {
-                "sudo apt-get install -y binaryen"
+                vec!["sudo apt-get install -y binaryen".to_owned()]
             };
-            out.push(WASM_OPT.warn_missing(
+            out.push(not_on_path(
+                cx,
+                &WASM_OPT,
+                "wasm-opt",
                 "wasm-opt (binaryen) was not found. It is optional: `undra build --platform web` works without it, and with it the wasm core is 10-20% smaller",
-                &[install],
+                &install,
+                true,
             ));
         }
     }
@@ -137,7 +191,11 @@ mod tests {
         let f = by_id(&scan(&bare_mac(), &["web"]), "web.node").clone();
         assert_eq!((f.status, f.state), (Status::Fail, State::Missing));
         let f = by_id(&scan(&bare_machine(), &["web"]), "web.node").clone();
-        assert_eq!(f.fix[1], "fnm install --lts");
+        assert_eq!(f.fix[2], "fnm install --lts");
+        assert!(
+            f.fix[1].contains("fnm env"),
+            "fnm is on this shell's PATH first: {f:?}"
+        );
 
         let broken = good_machine().with_failing_output("node", "--version", "dyld error");
         assert_eq!(
@@ -161,7 +219,7 @@ mod tests {
         assert_eq!(f.status, Status::Ok);
         assert!(f.message.starts_with("wasm-opt version"), "{f:?}");
 
-        let f = by_id(&scan(&bare_mac(), &["web"]), "web.wasm-opt").clone();
+        let f = by_id(&scan(&bare_mac_with_brew(), &["web"]), "web.wasm-opt").clone();
         assert_eq!(
             (f.status, f.state, f.optional),
             (Status::Warn, State::Missing, true)

@@ -12,6 +12,13 @@ read and paste (it never runs them), and `undra doctor --json` gives the same re
 observed value, fix and anchor per finding). Rows marked *contributors* matter only if you work on Undra
 itself; building an app never needs them.
 
+On macOS the fixes install with Homebrew, and they are written for the shell you run doctor in: when `brew` is
+not on that shell's `PATH` but Homebrew is installed, a fix starts with `eval "$(/opt/homebrew/bin/brew shellenv)"`
+(Apple silicon's `/opt/homebrew` is not on the default `PATH`); when Homebrew is not installed, it starts with
+Homebrew's own installer. A tool Homebrew already installed out of `PATH`'s reach is reported as such, with only
+the `shellenv` line as its fix. The paths below are Apple silicon's; on an Intel Mac Homebrew is `/usr/local`
+(`brew --prefix` says which).
+
 ### Rust and its targets
 
 #### Rust
@@ -91,7 +98,7 @@ Studio read it; `undra` finds the usual locations without it).
 
 ```bash
 brew install --cask android-commandlinetools
-export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+export ANDROID_HOME="$(brew --prefix)/share/android-commandlinetools"
 SDKM=$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager
 yes | $SDKM --licenses
 $SDKM "platform-tools" "platforms;android-35" "build-tools;35.0.0"
@@ -125,7 +132,8 @@ failure inside a project with an Android app and advice elsewhere; `undra build`
 
 ```bash
 brew install openjdk@17               # Linux: sudo apt-get install -y openjdk-17-jdk
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export JAVA_HOME="$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"    # Homebrew's openjdk@17 is keg-only: not on PATH by itself
 ```
 
 #### Gradle wrapper

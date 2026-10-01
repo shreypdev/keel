@@ -8,7 +8,7 @@ use crate::fsutil::human_size;
 use crate::sys::Os;
 
 use super::finding::{Check, Finding, State};
-use super::{Context, version_line};
+use super::{Context, brew, version_line};
 
 /// Free disk space where the builds go.
 pub const DISK: Check = Check::new("system.disk", "disk-space").optional();
@@ -111,13 +111,18 @@ fn kotlinc(cx: &Context<'_>) -> Finding {
             );
         }
         let install = if cx.sys.os() == Os::Macos {
-            "brew install kotlin"
+            brew(cx, "install kotlin")
         } else {
-            "curl -s https://get.sdkman.io | bash && sdk install kotlin"
+            // `sdk` is a shell function: this shell has it once sdkman-init.sh is sourced.
+            vec![
+                "curl -s \"https://get.sdkman.io\" | bash".to_owned(),
+                "source \"$HOME/.sdkman/bin/sdkman-init.sh\"".to_owned(),
+                "sdk install kotlin".to_owned(),
+            ]
         };
         return KOTLINC.warn_missing(
             "kotlinc (for contributors) was not found: the Kotlin runtime tests (`runtimes/kotlin/undra-runtime/scripts/test-local.sh`) compile with it",
-            &[install],
+            &install.iter().map(String::as_str).collect::<Vec<_>>(),
         );
     };
     let line = version_line(cx, &tool, &["-version"])
@@ -220,7 +225,7 @@ mod tests {
 
         // A contributor without it gets the install.
         let f = by_id(
-            &run_as_contributor(&bare_mac(), &[]),
+            &run_as_contributor(&bare_mac_with_brew(), &[]),
             "contributors.kotlinc",
         )
         .clone();
