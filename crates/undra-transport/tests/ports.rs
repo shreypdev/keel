@@ -40,7 +40,7 @@ fn a_port_call_goes_to_the_client_and_its_reply_completes_the_call() {
     let handle = client.new_counter(0);
     let id = send_ask(&mut client, handle, 20);
 
-    let frame = client.recv_kind(Kind::PortCall);
+    let frame = client.recv_port_call(ECHO_PORT);
     assert_eq!(frame.schema, f.schema());
     let (port_id, method_id, port_call_id, args) = port_call(&frame);
     assert_eq!((port_id, method_id), (ECHO_PORT, ECHO_METHOD));
@@ -58,9 +58,9 @@ fn concurrent_port_calls_are_told_apart_by_port_call_id() {
     let handle = client.new_counter(0);
     let first = send_ask(&mut client, handle, 1);
     let second = send_ask(&mut client, handle, 2);
-    let a = port_call(&client.recv_kind(Kind::PortCall));
+    let a = port_call(&client.recv_port_call(ECHO_PORT));
 
-    let b = port_call(&client.recv_kind(Kind::PortCall));
+    let b = port_call(&client.recv_port_call(ECHO_PORT));
     assert_ne!(a.2, b.2, "distinct port call ids");
 
     // Answer them in the opposite order to how they were asked.
@@ -80,7 +80,7 @@ fn a_platform_that_does_not_implement_the_port_answers_unavailable() {
     let mut client = f.client();
     let handle = client.new_counter(0);
     let id = send_ask(&mut client, handle, 1);
-    let (_, _, port_call_id, _) = port_call(&client.recv_kind(Kind::PortCall));
+    let (_, _, port_call_id, _) = port_call(&client.recv_port_call(ECHO_PORT));
     client.port_reply(port_call_id, PortStatus::Unavailable, &[]);
     // `echo` has no error type, so the generated proxy turns an unavailable port into a panic
     // whose message names the port and the method and says how to bind one (E0062).
@@ -126,7 +126,7 @@ fn a_port_call_still_pending_when_the_client_disconnects_fails_instead_of_hangin
     let (status, _) = client.method(handle, ASK_LATER, &enc(&1_i32));
     assert_eq!(status, ReplyStatus::Ok);
     // The detached task runs after the reply; its PortCall follows.
-    client.recv_kind(Kind::PortCall);
+    client.recv_port_call(ECHO_PORT);
     assert_eq!(stat(&f.rt, "pending_port_calls"), 1);
     drop(client);
 
@@ -154,7 +154,7 @@ fn calls_awaiting_a_port_are_cancelled_at_disconnect_and_nothing_is_left_pending
     let mut client = f.client();
     let handle = client.new_counter(0);
     send_ask(&mut client, handle, 1);
-    client.recv_kind(Kind::PortCall);
+    client.recv_port_call(ECHO_PORT);
     assert_eq!(stat(&f.rt, "active_calls"), 1);
     drop(client); // never answers
 
@@ -173,7 +173,7 @@ fn a_reply_to_a_cancelled_port_call_is_discarded() {
     let mut client = f.client();
     let handle = client.new_counter(0);
     let id = send_ask(&mut client, handle, 1);
-    let (_, _, port_call_id, _) = port_call(&client.recv_kind(Kind::PortCall));
+    let (_, _, port_call_id, _) = port_call(&client.recv_port_call(ECHO_PORT));
     client.cancel(id);
     let (status, _) = client.await_reply(id);
     assert_eq!(status, ReplyStatus::Cancelled);

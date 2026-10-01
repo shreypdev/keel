@@ -670,6 +670,29 @@ impl TestClient {
         }
     }
 
+    /// The next `PortCall` addressed to `port_id`. A dev-mode core may ask this client for
+    /// other ports whenever its background work runs (undra-query's hydration asking `Kv`,
+    /// a `Wall` read), so the first `PortCall` frame is not necessarily the one a test
+    /// provoked. Calls for other ports are answered `Unavailable`, so nothing is left
+    /// pending, and skipped.
+    pub fn recv_port_call(&mut self, port_id: u32) -> Frame {
+        loop {
+            let frame = self.recv_kind(Kind::PortCall);
+            let call = undra::wire::payload::PortCall::decode(&mut undra::wire::Reader::new(
+                &frame.payload,
+            ))
+            .expect("a PortCall payload");
+            if call.port_id == port_id {
+                return frame;
+            }
+            self.port_reply(
+                call.port_call_id,
+                undra::wire::payload::PortStatus::Unavailable,
+                &[],
+            );
+        }
+    }
+
     /// Waits for the server to close and returns the close code and reason (`None` for a
     /// close without a Close frame). Envelopes that arrive first are kept in `seen`.
     pub fn expect_close(&mut self) -> Option<(u16, String)> {
