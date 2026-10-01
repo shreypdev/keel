@@ -117,7 +117,7 @@ fn dispatch(cli: &Cli, sys: &dyn sys::Sys, ui: Ui) -> Result<bool> {
         Command::Bindgen(args) => commands::bindgen::run(&env, args).map(|()| true),
         Command::Build(args) => commands::build::run(&env, args).map(|()| true),
         Command::Dev(args) => commands::dev::run(&env, args).map(|()| true),
-        Command::Doctor(args) => commands::doctor::run(&env, args.platform.as_deref()),
+        Command::Doctor(args) => commands::doctor::run(&env, args),
         Command::Adopt(args) => commands::adopt::run(&env, args).map(|()| true),
     }
 }

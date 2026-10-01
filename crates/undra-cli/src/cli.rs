@@ -29,7 +29,7 @@ EXISTING APP
     undra adopt ../MyApp                           add an Undra core to an app you already have, step by step
 
 CHECK THE MACHINE
-    undra doctor                                   toolchains, SDKs and targets, with the fix for each gap
+    undra doctor                                   every prerequisite, with the exact fix for each gap (--fix, --json)
 
 Errors are printed as `error[undra::C00NN]` with what happened, why, and what to do; every code is
 explained at https://shreypdev.github.io/undra/docs/errors.html#C00NN."
@@ -149,14 +149,29 @@ The server has no authentication. Keep the default loopback address unless a dev
     Dev(DevArgs),
     /// Check the toolchains and SDKs this machine has against what the project needs.
     #[command(
-        long_about = "Checks what the platforms need and prints one line per finding with the fix for each gap: \
-Rust and its targets, Xcode (and whether xcode-select points at it), the Android SDK, NDK and cargo-ndk, \
-Node, wasm-opt and a JDK. Inside a project only the platforms of undra.toml are checked; elsewhere all of \
-them. Exits with status 1 when something the project needs is missing.",
+        long_about = "Checks every prerequisite that `undra init`, `build`, `dev` and the device benchmarks use, and prints \
+one line per finding. Each one says what was found (ok, missing, or the wrong version), the value it saw, the exact \
+command that fixes it and the heading of docs/ONBOARDING.md that explains it. It covers: rustup, stable Rust at the \
+MSRV or newer and the Rust targets of the platforms (wasm32; the iOS device and simulator targets; the Android ABIs \
+of undra.toml); full Xcode against the command line tools and a simulator runtime; the Android SDK, platform-tools, \
+NDK r27, ANDROID_HOME and ANDROID_NDK_HOME, cargo-ndk, JDK 17, adb and whether a device or emulator is attached, and \
+the Gradle wrapper; Node 20+ and npm; wasm-opt (optional: it makes the wasm core 10-20% smaller); free disk space \
+(a warning under 10 GB); and whether `undra` is on PATH, since the Gradle task, the Xcode build phase and the Vite \
+plugin of a project run it by name. Checks for people who work on Undra (the Kotlin compiler, the `undra` emulator) are \
+marked `for contributors`. Inside a project only the platforms of undra.toml are checked; elsewhere all of them. \
+Exits with status 1 when something the project needs is missing.",
         after_long_help = "\
 EXAMPLES
     undra doctor
-    undra doctor --platform ios"
+    undra doctor --platform ios
+    undra doctor --fix                  the commands that close every gap, as one block to paste (nothing is run)
+    undra doctor --json                 the report for tools: state, observed value, fix and docs per finding
+
+STATUS
+    ok         present and fine
+    warn       something is off, builds still work (an optional tool, a variable that is not set)
+    FAIL       a build for a platform in scope cannot work
+    skip       does not apply here (iOS on Linux, a contributor-only tool for everyone else)"
     )]
     Doctor(DoctorArgs),
     /// Add an Undra core to an existing app, without touching the app's own project files.
@@ -279,6 +294,15 @@ pub struct DoctorArgs {
     /// Check only these platforms (ios, android, web; comma separated).
     #[arg(long, value_name = "LIST")]
     pub platform: Option<String>,
+
+    /// Print the commands that close the gaps as one block to paste into a shell (nothing is run).
+    #[arg(long, conflicts_with = "json")]
+    pub fix: bool,
+
+    /// Print the report as JSON: every finding with its state, observed value, fix commands and
+    /// documentation anchor.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments of `undra adopt`.
