@@ -101,6 +101,10 @@
         {
           "title": "One error channel on every platform (ADR-032)",
           "text": "Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event."
+        },
+        {
+          "title": "No manual build step",
+          "text": "A Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix."
         }
       ]
     },
@@ -126,10 +130,6 @@
         {
           "title": "React Native (ADR-038)",
           "text": "@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI."
-        },
-        {
-          "title": "No manual build step",
-          "text": "A Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project; undra doctor names every fix."
         },
         {
           "title": "The web bundle under its budget (ADR-052)",
