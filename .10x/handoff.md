@@ -34,8 +34,10 @@ ADR-019 amendment; Lows L2–L5/L8 open), docs-reference (H3), tooling (D2–D5)
 2026-10-02 when the usage budget ran low (5-hour cap, then the weekly cap; agents stop mid-step and resume
 with their context when told to):
 1. `devtools` (B4, ADR-054; implemented, sonnet review in progress — main merged, 12 commits ahead). Land next.
-2. `testkit` (F1/F2, ADR-055; implementing, 15 commits, near the matrix). Needs a review (sonnet is enough:
-   it is tooling and new packages), then fast-forward.
+2. `testkit` (F1/F2, ADR-055): **implemented and complete** at `ea5cc38` (18 commits, main `1b9b605` is an
+   ancestor, matrix green: Rust 2,756, Swift 551, Kotlin 656, TS 1,133 + kit 26, contracts 60/60; `undra dev
+   --record`, the three kits, `docs/TESTING.md`, a site page). Needs its review (sonnet is enough), then
+   fast-forward. The `dev_reload` tests are load-sensitive on a busy machine (fail on main too under load 13+).
 3. `ports-v2` → record as **ports** (G2/G3, ADR-047/048 written; implementing, 23 commits, merging main;
    the founder approved rusqlite/libsqlite3-sys dev-only, sqlite-jdbc test-only, wa-sqlite dev dep; the
    amalgamation is declined — RN Android uses JNI). Needs an opus review (new boundary surface), then land.
