@@ -3,13 +3,14 @@
 import {
   CallTarget,
   type Codec,
+  UndraCallError,
   UndraCore,
   UndraObject,
   UndraWriter,
   codecs,
   decodeValue,
 } from "@undra/runtime";
-import { LabError, RemoteError } from "./errors.js";
+import { LabErrorCodec, RemoteErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
   type Composite,
@@ -31,50 +32,81 @@ export class Probe extends UndraObject {
     super(core, handle);
   }
 
-  /** A probe with every counter at zero. */
+  /**
+   * A probe with every counter at zero.
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   */
   static async create(core: UndraCore = UndraCore.shared): Promise<Probe> {
-    const handle = await core.construct(
-      UndraIds.Objects.Probe.typeId,
-      UndraIds.Objects.Probe.new,
-      new Uint8Array(0),
-    );
+    let handle: bigint;
+    try {
+      handle = await core.construct(
+        UndraIds.Objects.Probe.typeId,
+        UndraIds.Objects.Probe.new,
+        new Uint8Array(0),
+      );
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
     return new Probe(core, handle);
   }
 
-  /** What the probe has seen so far. */
+  /**
+   * What the probe has seen so far.
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   */
   async counters(): Promise<ProbeCounters> {
-    const body = await this.core.call(
-      { target: CallTarget.ObjectMethod, handle: this.handle },
-      UndraIds.Objects.Probe.counters,
-      new Uint8Array(0),
-    );
-    return decodeValue(ProbeCountersCodec, body);
+    try {
+      const body = await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.Probe.counters,
+        new Uint8Array(0),
+      );
+      return decodeValue(ProbeCountersCodec, body);
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
   }
 
-  /** Waits forever. The only way it ends is cancellation, which the `cancelled` counter shows. */
+  /**
+   * Waits forever. The only way it ends is cancellation, which the `cancelled` counter shows.
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
   async hang(signal?: AbortSignal): Promise<number> {
-    const body = await this.core.call(
-      { target: CallTarget.ObjectMethod, handle: this.handle },
-      UndraIds.Objects.Probe.hang,
-      new Uint8Array(0),
-      signal,
-    );
-    return decodeValue(codecs.u32, body);
+    try {
+      const body = await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.Probe.hang,
+        new Uint8Array(0),
+        signal,
+      );
+      return decodeValue(codecs.u32, body);
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
   }
 
-  /** Sets every counter back to zero. */
+  /**
+   * Sets every counter back to zero.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
   async reset(): Promise<void> {
-    await this.core.call(
-      { target: CallTarget.ObjectMethod, handle: this.handle },
-      UndraIds.Objects.Probe.reset,
-      new Uint8Array(0),
-    );
+    try {
+      await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.Probe.reset,
+        new Uint8Array(0),
+      );
+    } catch (error) {
+      this.core.report(error, "Probe.reset");
+    }
   }
 
   /**
    * A stream of the numbers `0..count`, produced one per poll. The runtime sends an item only
    * against credit the platform granted and polls at most one item ahead of it, so `produced`
    * stays within one of what the platform has asked for, however large `count` is.
+   * Iterating throws UndraCallError; leaving the loop early ends the stream quietly.
    */
   ticks(count: number): AsyncIterable<number> {
     const w = new UndraWriter();
@@ -84,14 +116,14 @@ export class Probe extends UndraObject {
       UndraIds.Objects.Probe.ticks,
       w.finish(),
     );
-    return decodeStream(source, codecs.u32);
+    return decodeStream(source, codecs.u32, (error) => UndraCallError.mappedStream(error));
   }
 
   /**
    * The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
    * `code`) where the number `fail_at` would come, when `fail_at < count`: a stream that ends
    * with its typed error part-way (ADR-036). The items before it arrive first.
-   * @throws {LabError}
+   * Iterating throws LabError or UndraCallError; leaving the loop early ends the stream quietly.
    */
   ticksThenFail(count: number, failAt: number, code: number): AsyncIterable<number> {
     const w = new UndraWriter();
@@ -103,24 +135,39 @@ export class Probe extends UndraObject {
       UndraIds.Objects.Probe.ticksThenFail,
       w.finish(),
     );
-    return decodeStream(source, codecs.u32, (error) => LabError.fromReply(error));
+    return decodeStream(
+      source,
+      codecs.u32,
+      (error) => UndraCallError.mappedStream(error, LabErrorCodec),
+    );
   }
 
-  /** Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled. */
+  /**
+   * Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
   async wait(ms: number, signal?: AbortSignal): Promise<number> {
     const w = new UndraWriter();
     w.writeU32(ms);
-    const body = await this.core.call(
-      { target: CallTarget.ObjectMethod, handle: this.handle },
-      UndraIds.Objects.Probe.wait,
-      w.finish(),
-      signal,
-    );
-    return decodeValue(codecs.u32, body);
+    try {
+      const body = await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.Probe.wait,
+        w.finish(),
+        signal,
+      );
+      return decodeValue(codecs.u32, body);
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
   }
 }
 
-/** Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments. */
+/**
+ * Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ */
 export async function add(
   a: number,
   b: number,
@@ -129,17 +176,23 @@ export async function add(
   const w = new UndraWriter();
   w.writeI32(a);
   w.writeI32(b);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.add,
-    w.finish(),
-  );
-  return decodeValue(codecs.i32, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.add,
+      w.finish(),
+    );
+    return decodeValue(codecs.i32, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
 /**
  * Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
  * port.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
  */
 export async function addLater(
   a: number,
@@ -152,51 +205,60 @@ export async function addLater(
   w.writeI32(a);
   w.writeI32(b);
   w.writeU32(delayMs);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.addLater,
-    w.finish(),
-    signal,
-  );
-  return decodeValue(codecs.i32, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.addLater,
+      w.finish(),
+      signal,
+    );
+    return decodeValue(codecs.i32, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
 /**
  * The area of a circle or a rectangle. A label and an empty figure have none.
  * @throws {LabError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
 export async function area(figure: Figure, core: UndraCore = UndraCore.shared): Promise<number> {
   const w = new UndraWriter();
   FigureCodec.encode(w, figure);
-  let body: Uint8Array;
   try {
-    body = await core.call(
+    const body = await core.call(
       { target: CallTarget.FreeFunction },
       UndraIds.Functions.area,
       w.finish(),
     );
+    return decodeValue(codecs.f64, body);
   } catch (error) {
-    throw LabError.fromReply(error);
+    throw UndraCallError.mapped(error, LabErrorCodec);
   }
-  return decodeValue(codecs.f64, body);
 }
 
 /**
  * Tells the core where the server is. Call it once at start-up, before anything observes
  * [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
  * stale).
+ * A failure is logged and passed to `onError`; the returned promise never rejects.
  */
 export async function configureRemote(
   config: RemoteConfig,
   core: UndraCore = UndraCore.shared,
 ): Promise<void> {
-  const w = new UndraWriter();
-  RemoteConfigCodec.encode(w, config);
-  await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.configureRemote,
-    w.finish(),
-  );
+  try {
+    const w = new UndraWriter();
+    RemoteConfigCodec.encode(w, config);
+    await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.configureRemote,
+      w.finish(),
+    );
+  } catch (error) {
+    core.report(error, "configureRemote");
+  }
 }
 
 /**
@@ -208,6 +270,8 @@ export async function configureRemote(
  * keeps waiting; the placeholder stays visible until the network returns and the request is
  * replayed.
  * @throws {RemoteError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
  */
 export async function createRemoteTodo(
   list: string,
@@ -218,81 +282,110 @@ export async function createRemoteTodo(
   const w = new UndraWriter();
   w.writeStr(list);
   w.writeStr(title);
-  let body: Uint8Array;
   try {
-    body = await core.call(
+    const body = await core.call(
       { target: CallTarget.FreeFunction },
       UndraIds.Functions.createRemoteTodo,
       w.finish(),
       signal,
     );
+    return decodeValue(RemoteTodoCodec, body);
   } catch (error) {
-    throw RemoteError.fromReply(error);
+    throw UndraCallError.mapped(error, RemoteErrorCodec);
   }
-  return decodeValue(RemoteTodoCodec, body);
 }
 
-/** Returns `value` unchanged. */
+/**
+ * Returns `value` unchanged.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ */
 export async function echoComposite(
   value: Composite,
   core: UndraCore = UndraCore.shared,
 ): Promise<Composite> {
   const w = new UndraWriter();
   CompositeCodec.encode(w, value);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.echoComposite,
-    w.finish(),
-  );
-  return decodeValue(CompositeCodec, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.echoComposite,
+      w.finish(),
+    );
+    return decodeValue(CompositeCodec, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
-/** Returns `value` unchanged. */
+/**
+ * Returns `value` unchanged.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ */
 export async function echoFigure(
   value: Figure,
   core: UndraCore = UndraCore.shared,
 ): Promise<Figure> {
   const w = new UndraWriter();
   FigureCodec.encode(w, value);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.echoFigure,
-    w.finish(),
-  );
-  return decodeValue(FigureCodec, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.echoFigure,
+      w.finish(),
+    );
+    return decodeValue(FigureCodec, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
-/** Returns `value` unchanged. */
+/**
+ * Returns `value` unchanged.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ */
 export async function echoPrimitives(
   value: Primitives,
   core: UndraCore = UndraCore.shared,
 ): Promise<Primitives> {
   const w = new UndraWriter();
   PrimitivesCodec.encode(w, value);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.echoPrimitives,
-    w.finish(),
-  );
-  return decodeValue(PrimitivesCodec, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.echoPrimitives,
+      w.finish(),
+    );
+    return decodeValue(PrimitivesCodec, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
 /**
  * Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
  * crash, on the platforms that can unwind (R6).
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
 export async function explode(reason: string, core: UndraCore = UndraCore.shared): Promise<number> {
   const w = new UndraWriter();
   w.writeStr(reason);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.explode,
-    w.finish(),
-  );
-  return decodeValue(codecs.u32, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.explode,
+      w.finish(),
+    );
+    return decodeValue(codecs.u32, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
-/** Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call. */
+/**
+ * Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
 export async function explodeLater(
   delayMs: number,
   reason: string,
@@ -302,19 +395,25 @@ export async function explodeLater(
   const w = new UndraWriter();
   w.writeU32(delayMs);
   w.writeStr(reason);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.explodeLater,
-    w.finish(),
-    signal,
-  );
-  return decodeValue(codecs.u32, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.explodeLater,
+      w.finish(),
+      signal,
+    );
+    return decodeValue(codecs.u32, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
 /**
  * Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
  * call with a typed error.
  * @throws {LabError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
  */
 export async function failLater(
   delayMs: number,
@@ -325,35 +424,42 @@ export async function failLater(
   const w = new UndraWriter();
   w.writeU32(delayMs);
   w.writeI32(code);
-  let body: Uint8Array;
   try {
-    body = await core.call(
+    const body = await core.call(
       { target: CallTarget.FreeFunction },
       UndraIds.Functions.failLater,
       w.finish(),
       signal,
     );
+    return decodeValue(codecs.u32, body);
   } catch (error) {
-    throw LabError.fromReply(error);
+    throw UndraCallError.mapped(error, LabErrorCodec);
   }
-  return decodeValue(codecs.u32, body);
 }
 
-/** A greeting. */
+/**
+ * A greeting.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ */
 export async function greet(name: string, core: UndraCore = UndraCore.shared): Promise<string> {
   const w = new UndraWriter();
   w.writeStr(name);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.greet,
-    w.finish(),
-  );
-  return decodeValue(codecs.string, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.greet,
+      w.finish(),
+    );
+    return decodeValue(codecs.string, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
 /**
  * Reads an unsigned number of at most nine digits.
  * @throws {LabError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
 export async function parseCount(
   text: string,
@@ -361,28 +467,40 @@ export async function parseCount(
 ): Promise<number> {
   const w = new UndraWriter();
   w.writeStr(text);
-  let body: Uint8Array;
   try {
-    body = await core.call(
+    const body = await core.call(
       { target: CallTarget.FreeFunction },
       UndraIds.Functions.parseCount,
       w.finish(),
     );
+    return decodeValue(codecs.u32, body);
   } catch (error) {
-    throw LabError.fromReply(error);
+    throw UndraCallError.mapped(error, LabErrorCodec);
   }
-  return decodeValue(codecs.u32, body);
 }
 
-/** Does nothing and returns nothing: a call with neither arguments nor a result. */
+/**
+ * Does nothing and returns nothing: a call with neither arguments nor a result.
+ * A failure is logged and passed to `onError`; the returned promise never rejects.
+ */
 export async function ping(core: UndraCore = UndraCore.shared): Promise<void> {
-  await core.call({ target: CallTarget.FreeFunction }, UndraIds.Functions.ping, new Uint8Array(0));
+  try {
+    await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.ping,
+      new Uint8Array(0),
+    );
+  } catch (error) {
+    core.report(error, "ping");
+  }
 }
 
 /**
  * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
  * refuses.
  * @throws {RemoteError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
  */
 export async function setRemoteDone(
   list: string,
@@ -395,35 +513,41 @@ export async function setRemoteDone(
   w.writeStr(list);
   w.writeU32(id);
   w.writeBool(done);
-  let body: Uint8Array;
   try {
-    body = await core.call(
+    const body = await core.call(
       { target: CallTarget.FreeFunction },
       UndraIds.Functions.setRemoteDone,
       w.finish(),
       signal,
     );
+    return decodeValue(RemoteTodoCodec, body);
   } catch (error) {
-    throw RemoteError.fromReply(error);
+    throw UndraCallError.mapped(error, RemoteErrorCodec);
   }
-  return decodeValue(RemoteTodoCodec, body);
 }
 
-/** The name and version of the core. */
+/**
+ * The name and version of the core.
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ */
 export async function version(core: UndraCore = UndraCore.shared): Promise<string> {
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.version,
-    new Uint8Array(0),
-  );
-  return decodeValue(codecs.string, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.version,
+      new Uint8Array(0),
+    );
+    return decodeValue(codecs.string, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
-/** Decodes every item of a core stream; a failure passes through `mapError`. */
+/** Decodes every item of a core stream; a failure of the stream or of an item goes through `mapError`. */
 async function* decodeStream<T>(
   source: AsyncIterable<Uint8Array>,
   codec: Codec<T>,
-  mapError: (error: unknown) => unknown = (error) => error,
+  mapError: (error: unknown) => unknown,
 ): AsyncGenerator<T, void, undefined> {
   try {
     for await (const body of source) yield decodeValue(codec, body);

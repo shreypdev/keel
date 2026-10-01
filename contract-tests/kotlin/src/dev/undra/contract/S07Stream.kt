@@ -2,8 +2,7 @@ package dev.undra.contract
 
 import dev.undra.playground.core.LabError
 import dev.undra.playground.core.Probe
-import dev.undra.runtime.UndraReplyException
-import dev.undra.runtime.wire.Payloads.ReplyStatus
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.wire.WireException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
@@ -74,7 +73,7 @@ fun s07Stream(w: World) {
     expectEq("ticksThenFail(3, 9, 7)", listOf(0u, 1u, 2u), runBlocking { probe.ticksThenFail(3u, 9u, 7).toList() })
 
     // 7. A stream the core cancels (ADR-036, flag 3 status 3): a restore invalidates the probe, which is not a store,
-    // and ends its stream as cancelled by the core: UndraReplyException(CANCELLED), not LabError, not WireException.
+    // and ends its stream as cancelled by the core: UndraCallError.CancelledByCore, not LabError, not WireException.
     awaitEq("open_streams once the streams of steps 5 and 6 ended", streamsBefore) { w.stats().openStreams }
     val streamsBeforeRestore = w.stats().openStreams
     val snapshot = w.core.snapshot()
@@ -105,8 +104,8 @@ fun s07Stream(w: World) {
     val tookMs = (System.nanoTime() - restoreAt) / 1_000_000L
     check(outcome !is LabError) { "the stream the restore cancelled ended with the stream's own error $outcome" }
     check(outcome !is WireException) { "the stream the restore cancelled ended with a wire error: $outcome" }
-    check(outcome is UndraReplyException && outcome.status == ReplyStatus.CANCELLED) {
-        "the stream the restore cancelled ended with $outcome, not UndraReplyException(CANCELLED)"
+    check(outcome is UndraCallError.CancelledByCore) {
+        "the stream the restore cancelled ended with $outcome, not UndraCallError.CancelledByCore"
     }
     check(tookMs < 1_000L) { "the stream the restore cancelled took $tookMs ms to end" }
     awaitEq("open_streams after the core cancelled the stream", streamsBeforeRestore) { w.stats().openStreams }

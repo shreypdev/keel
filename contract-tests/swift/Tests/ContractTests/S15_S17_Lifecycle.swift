@@ -120,6 +120,23 @@ extension ContractScenarios {
             guard case .refused = report.error else {
                 throw ScenarioFailure(description: "Probe.reset after the restore reported \(report.error), not .refused")
             }
+
+            // 10. A stream in flight across a restore ends as cancelled by the core: the core's own "cancelled: ..."
+            // String is not read as a typed error, and the loop's end is not a platform cancellation.
+            let streamed = try Probe(ctx: core)
+            defer { streamed.close() }
+            var ticks = streamed.ticks(count: 1_000_000).makeAsyncIterator()
+            _ = try await ticks.next()
+            try core.restore(try core.snapshot())
+            var streamOutcome: (any Error)?
+            do {
+                while try await ticks.next() != nil {}
+            } catch {
+                streamOutcome = error
+            }
+            let ended = try require(streamOutcome, "the stream ended normally across a restore")
+            try check(!(ended is CancellationError), "a stream cancelled by the core ended as a CancellationError")
+            try checkEqual(ended as? UndraCallError, .cancelledByCore, "the error of ticks() across a restore")
         }
     }
 
@@ -146,6 +163,16 @@ extension ContractScenarios {
                           "the message names both hashes in hex: \(message)")
             }
             try check(UndraCore.current == nil, "a failed load left a shared core behind")
+
+            // 1a. With no core loaded `UndraCore.shared` does not trap: it is a closed placeholder, so a generated
+            // call and a generated constructor with the default core fail as unavailable, and a failure reported on
+            // the placeholder only logs.
+            let placeholder = UndraCore.shared
+            try check(UndraCore.current == nil, "UndraCore.shared became a loaded core")
+            try checkThrows({ try PlaygroundCore.add(a: 1, b: 2) }, UndraCallError.unavailable(.closed), "add(1, 2) with no core loaded")
+            try checkThrows({ try Counter() }, UndraCallError.unavailable(.closed), "Counter() with no core loaded")
+            placeholder.report(UndraTransportError.closed, operation: "Counter.increment")
+            try check(UndraCore.current == nil, "the placeholder became the loaded core after a report")
 
             // 1b. "Before the core is initialised" is what the error type shows when something else
             // already initialised it: `undra_init` would be refused, and a runtime that called it
@@ -325,6 +352,9 @@ extension ContractScenarios {
             let report = try require(reports.first, "the report of Counter.increment")
             try checkEqual(report.operation, "Counter.increment", "the operation of the report")
             try checkEqual(report.error, UndraCallError.unavailable(.closed), "the reason of the report")
+            // The shut-down core is no longer the shared one: a constructor with the default core fails as in S16.
+            try check(UndraCore.current == nil, "the shut-down core is still UndraCore.current")
+            try checkThrows({ try Counter() }, UndraCallError.unavailable(.closed), "Counter() after the shared core was shut down")
 
             // 7. Closing ended the core's work (ADR-034): for 200 ms after the shutdown no port call
             // reaches the harness's adapters (Clock, Log, Http, Kv, and Rng and Timer too), although

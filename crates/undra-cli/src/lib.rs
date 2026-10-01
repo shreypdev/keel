@@ -39,6 +39,7 @@
 //!   the generic crate name `undra-core`; `undra bindgen` relabels it with the core's package
 //!   name and drops the docs unless `--docs` is given.
 
+mod adb;
 mod binary;
 mod bindgen;
 mod builds;

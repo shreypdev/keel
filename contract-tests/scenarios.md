@@ -131,12 +131,15 @@ waiting for an event loop.
    undecodable arguments (`Probe` has none: use `RemoteTodosQueryHandle` with an empty argument
    buffer) fails as bad request. Each carries a reason string.
 5. After all of the above the core still works (`add(1, 2) == 3`) and `bad_requests` grew by 3.
-6. Through the generated bindings, on closed objects: close a `BigList`, then `remove_at(0)` fails as
-   **bad request** (Swift `UndraCallError.refused`, Kotlin `UndraReplyException(BAD_REQUEST)`, TypeScript
-   `UndraReplyError` status 5); close a `Counter`, then `increment()`: Swift returns normally and
-   `LoadOptions.onError` received one `UndraUnhandledError` with operation `Counter.increment` and
-   `.refused`; Kotlin throws `UndraReplyException(BAD_REQUEST)`; TypeScript rejects with `UndraReplyError`
-   status 5. `bad_requests` grew by exactly 2 more, the process is alive and `add(1, 2) == 3`.
+6. Through the generated bindings, on closed objects (ADR-032 and its amendment A: every platform fails a call
+   with its own `E`, the caller's cancellation or `UndraCallError`, and a command reports): close a `BigList`,
+   then `remove_at(0)` fails as **bad request** (Swift `UndraCallError.refused`, Kotlin
+   `UndraCallError.Refused`, TypeScript `UndraCallError.Refused`, `kind` `"refused"`), with a reason. Close a
+   `Counter`, then `increment()` (a command): it **returns normally** (TypeScript: the promise resolves) and
+   `LoadOptions.onError` received exactly one `UndraUnhandledError` with operation `Counter.increment`
+   (the platform's spelling, no keyword escapes) whose error is `Refused`. `bad_requests` grew by exactly 2 more,
+   the process is alive and `add(1, 2) == 3`. The runner clears what it recorded, and the TypeScript harness
+   treats an `onError` report nobody asserted as a failure of the scenario.
 
 ### S06 cancellation
 
@@ -176,8 +179,8 @@ waiting for an event loop.
 7. A stream the core cancels (ADR-036: flag 3, status 3). Take a snapshot; open
    `probe.ticks_then_fail(1000000, 999999, 1)` (a stream **with** an error type) and read 2 items; then
    `restore` the snapshot. The probe is not a store, so the restore invalidates it and ends the stream:
-   the iteration fails as **cancelled by the core** (Swift `UndraCallError.cancelledByCore`, Kotlin
-   `UndraReplyException(CANCELLED)`, TypeScript `UndraReplyError` status 3), not as a `LabError` and
+   the iteration fails as **cancelled by the core** (`UndraCallError.cancelledByCore` in Swift,
+   `UndraCallError.CancelledByCore` in Kotlin and TypeScript), not as a `LabError` and
    not as a wire decode error (Kotlin `WireException`, TypeScript `WireError`), within 1 s; `open_streams`
    is back to its value before the step. Close the probe.
 
@@ -298,27 +301,35 @@ List `s14`; the server serves `[]`. A handle observes it.
 
 1. `Todos` (observed) with `add("a")`, `add("b")`, `toggle(b)`; `Counter` (observed) with `add(5)`;
    `BigList` (observed).
-2. `snapshot = core.snapshot()` (TypeScript: the wasm export `undra_snapshot`; Kotlin/Swift:
-   `core.snapshot()`); it is non-empty and opaque.
+2. `snapshot = core.snapshot()` (TypeScript: `await core.snapshot()`, the public API of SPEC 17.1);
+   it is non-empty and opaque.
 3. Mutate: `Todos.add("c")`, `toggle(a)`, `set_filter(Done)`; `Counter.add(10)`; `BigList.remove_at(0)`.
-4. `core.restore(snapshot)`. The **same handles** still work: each store's mirror returns to the snapshot
-   values (`todos == [a, b(done)]`, `filter == all`, `visible` likewise, `remaining == 1`, `count == 5`,
-   `changes == 1`, `parity == odd`, `items.count == 10000` and `items[0].id == 1`), delivered as change-sets
-   for the observed signals.
+4. `core.restore(snapshot)` (TypeScript: `await core.restore(snapshot)`, which resolves after the restored
+   values reached the stores, so the checks that follow need no waiting). The **same handles** still work:
+   each store's mirror returns to the snapshot values (`todos == [a, b(done)]`, `filter == all`, `visible`
+   likewise, `remaining == 1`, `count == 5`, `changes == 1`, `parity == odd`, `items.count == 10000` and
+   `items[0].id == 1`), delivered as change-sets for the observed signals.
 5. Identities continue: `Todos.add("d")` returns an id above `b`'s (no collision with `c`'s earlier id is
    required, none with `a` or `b`).
 6. A **rejected snapshot** (16 random bytes) fails (`restore` throws / returns non-zero / rejects) and
-   leaves every store as it was.
+   leaves every store as it was (TypeScript and Swift: `UndraRestoreError`, whose code is the core's, 5 for
+   a malformed snapshot; the core is not closed and the next call works).
 7. A handle released **before** the snapshot is not resurrected.
 8. Stats: `live_handles` after the restore equals the count of surviving stores (the restore creates
    no extra handles).
 9. A call in flight across a restore. `Probe` = new; start `probe.hang()`; wait until
    `counters().started == 1`; take a snapshot; `restore` it. The probe is not a store, so the restore
    invalidates it and cancels its call: `hang()` fails as **cancelled by the core** (Swift
-   `UndraCallError.cancelledByCore`, Kotlin `UndraReplyException(CANCELLED)`, TypeScript `UndraReplyError`
-   status 3), not as a platform cancellation. Then, through the generated bindings, `probe.counters()`
-   fails as bad request (stale handle) and `probe.reset()` does too (Swift: returns normally and
-   `onError` received `Probe.reset` with `.refused`). Close the probe.
+   `UndraCallError.cancelledByCore`, Kotlin `UndraCallError.CancelledByCore`, TypeScript `UndraCallError.CancelledByCore`,
+   `kind` `"cancelledByCore"`), not as a platform cancellation. Then, through the generated bindings,
+   `probe.counters()` fails as bad request (`Refused`, stale handle) and `probe.reset()` (a command) returns
+   normally and `onError` received `Probe.reset` with `Refused`. Close the probe.
+10. A stream in flight across a restore. A new `Probe`; open `probe.ticks(1000000)` and read one item; take a
+    snapshot and `restore` it. The core ends the stream with an error item carrying its own String
+    (`"cancelled: ..."`, SPEC 5.9), and the consumer's iteration ends with **cancelled by the core** (the same
+    three spellings as step 9), not with a decoding failure and not as a platform cancellation. (Kotlin and
+    TypeScript used to read that String as a typed error; the stream mapping is one function per runtime now.)
+    Close the probe.
 
 ### S16 schema mismatch rejection
 
@@ -332,6 +343,14 @@ List `s14`; the server serves `[]`. A handle observes it.
    schema the core exports (`undra_schema_hash`).
 4. (TypeScript and Kotlin) the core's JSON schema (`undra_schema_json`) lists the playground's types
    (`Todos`, `Counter`, `BigList`, `Bench`, `Probe`, the queries) and the standard ports.
+5. **No core loaded.** (Kotlin and Swift: first, before the load that sticks; the failed load of step 1 left
+   nothing behind. TypeScript: the harness never makes a core shared, so it holds throughout.) `UndraCore.current`
+   is nil/null; `UndraCore.shared` does not throw on access but is a closed placeholder; a generated call with
+   the default core (`add(1, 2)`) and a generated constructor with the default core (`Counter` create) fail as
+   **unavailable** (Swift `UndraCallError.unavailable(.closed)`, Kotlin `UndraCallError.Unavailable` whose
+   transport reason is `CLOSED`, TypeScript `UndraCallError.Unavailable`, `transport.reason == "closed"`), with a
+   message that says to load a core; a failure reported on the placeholder (`UndraCore.shared`'s `report`) only
+   logs; `current` is still nil/null afterwards.
 
 ### S17 panic containment
 
@@ -339,23 +358,25 @@ List `s14`; the server serves `[]`. A handle observes it.
 
 1. `explode("kaboom")` fails with reply status **panic** and a message containing `kaboom` (plus a
    backtrace string). The process is alive. Swift and Kotlin call the generated `explode` (Swift:
-   `UndraCallError.panicked`, Kotlin: `UndraReplyException(PANIC)`).
-2. `explode_later(10, "later")` (an async call) fails the same way (Swift: `UndraCallError.panicked`).
+   `UndraCallError.panicked`, Kotlin: `UndraCallError.Panicked`, whose `panicMessage` contains `kaboom`).
+2. `explode_later(10, "later")` (an async call) fails the same way (Swift `UndraCallError.panicked`, Kotlin
+   `UndraCallError.Panicked`).
 3. The core keeps working: `add(1, 2) == 3`; a store constructed before still updates;
    `stats().panics` grew by 2.
 4. The Log port received a record with level >= 4 (error/fatal) and target `undra::panic` for each.
 5. Re-entry is refused, not deadlocked or aborted: while the core is logging the panic of
    `explode("reenter")`, the runner's Log adapter (a synchronous port, called on the thread that holds
-   the core lock) calls the generated `add(1, 1)` once. That call is **refused**: in Swift as a bad request
-   whose reason contains `E_REENTRANT` (`UndraCallError.refused`, the core's own refusal), in Kotlin as an
-   `UndraException` that says the call was made from inside a core callback (the runtime's guard refuses it
-   before the core does); `explode` itself fails as in step 1; afterwards `add(1, 2) == 3`.
+   the core lock) calls the generated `add(1, 1)` once. That call is **refused**, as a bad request whose reason
+   contains `E_REENTRANT` (Swift `UndraCallError.refused`, the core's own refusal; Kotlin `UndraCallError.Refused`,
+   raised by the runtime's guard, which answers with the same reply before the call reaches the core);
+   `explode` itself fails as in step 1; afterwards `add(1, 2) == 3`.
 6. Shutdown with a typed call in flight (it ends the core). Start
    `fail_later(5000, 1)`, wait 100 ms, shut the core down: the call fails as **closed** (Swift
-   `UndraCallError.unavailable(.closed)`, Kotlin `UndraException` "closed") within 1 s. Then, on the
-   shut-down core, the generated `add(1, 2)` fails the same way and `Counter.increment()` on a store of
-   that core returns (Swift; `onError` received `.unavailable(.closed)`) or throws (Kotlin). The
-   process is alive.
+   `UndraCallError.unavailable(.closed)`, Kotlin `UndraCallError.Unavailable` with transport reason `CLOSED`)
+   within 1 s. Then, on the shut-down core, the generated `add(1, 2)` fails the same way and
+   `Counter.increment()` on a store of that core returns (`onError` received `Unavailable`, closed). The
+   shut-down core is no longer the shared one: `UndraCore.current` is nil/null, and a generated constructor
+   with the default core fails as in S16.5. The process is alive.
 7. Closing ends the core's work, and a new load starts fresh (ADR-034; the last step of the run). Before
    step 6's shutdown a timer-paced core task is running (`Stress.start`); for 200 ms after the shutdown
    no port call reaches the runner's adapters (the runner counts the calls its Clock, Log, Http and Kv
@@ -379,9 +400,18 @@ the host survives and recovers:
 3. The page can **restart**: a fresh `UndraCore.load` of the same module succeeds and the snapshot restores:
    `Todos` (re-created from the restored handle) shows the two items.
 4. A second core loaded in the same process before the panic was not affected.
-5. On the trapped core, calls through the generated bindings reject with `UndraTransportError`
-   (`trap` or `closed`) and none hangs: an async call (`add_later`), a store command
-   (`Counter.increment`) and a typed one (`parse_count`).
+5. On the trapped core, calls through the generated bindings reject with `UndraCallError.Unavailable`
+   (its `transport.reason` is `trap` or `closed`) and none hangs: an async call (`add_later`) and a typed one
+   (`parse_count`); a store command (`Counter.increment`) resolves and `onError` received `Unavailable`.
+6. Worker mode: boot the playground core with `mode: "wasm-worker"` (an in-thread worker over a
+   `MessageChannel` is enough in the vitest harness, because the harness cannot load TypeScript in a real
+   worker thread; the real thread is covered by the undra-ffi acceptance test,
+   `crates/undra-ffi/tests/wasm/ts-runtime.test.mjs`). Observe a `RemoteTodosQueryHandle` (it reads the Clock
+   on every observe) against the harness `FakeServer` (Http is an async port: it crosses to the main thread)
+   and call `create_remote_todo` (it generates an idempotency key through the Rng). The core does not trap:
+   `core.closed` stays false, the data arrives (the list, then the created item), and the core's own log
+   records reach the harness Log adapter. (A worker that answered every port call "async" left the first
+   clock read without an answer, and the core trapped.)
 
 ### S18 coalesced burst
 
@@ -406,8 +436,9 @@ returns; TypeScript awaits them.
 
 ## Platform notes
 
-* TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); snapshot goes through the
-  wasm export because `UndraCore` has no public `snapshot()` (finding: SPEC 17.1 does not list one).
+* TypeScript: S03 runs only in `wasm-main` mode (the only one with `callSync`); S17 step 6 is the only
+  step that runs in `wasm-worker` mode. S15 uses the public `core.snapshot()` / `core.restore()` (SPEC 17.1),
+  which both wasm modes have (a socket has none yet: `UndraModeError`).
 * The Kotlin runner runs on the JVM with a single-thread "main" executor (`UndraDispatchers`), the Swift
   runner on the main actor; both load the real native library.
 * S17 steps 5, 6 and 7 are native-only (Kotlin and Swift): the wasm core cannot call out of a panic
@@ -416,9 +447,10 @@ returns; TypeScript awaits them.
   covers the same ground for a core that is gone. Steps 6 and 7 end and reload the core, so they are the
   last steps of the last scenario a native runner runs.
 * S07 step 7 restores a snapshot the way S15 does on each platform (TypeScript through the wasm export).
-* Swift reports a **command** (a synchronous method that returns nothing and has no error type) through
-  `LoadOptions.onError` instead of throwing (ADR-032); the Swift runner records those reports the way
-  the TypeScript harness records `runtimeErrors`, and S05.6, S15.9 and S17.6 assert them. Kotlin and
-  TypeScript throw from every shape.
+* Every platform reports a **command** (a synchronous method that returns nothing and has no error type)
+  through `LoadOptions.onError` / `onError` instead of throwing or rejecting (ADR-032, and its amendment A for
+  Kotlin and TypeScript); each runner records those reports (`UndraUnhandledError`: operation, error), and
+  S05.6, S15.9 and S17.6 assert them. A generated call fails with its own `E`, the caller's cancellation
+  (`CancellationException`, `AbortError`, `CancellationError`) or `UndraCallError`, on all three.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.

@@ -60,6 +60,8 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         var streams: [UInt32: FakeStream] = [:]
         var started = false
         var shutDown = false
+        /// `false` while the fake plays a remote core that is unreachable: nothing the host sends gets through.
+        var up = true
     }
 
     private let state = Guarded<State>(State())
@@ -104,6 +106,9 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     }
 
     func send(call payload: [UInt8]) -> Bool {
+        if !isUp {
+            return false
+        }
         guard let call = try? Wire.Call.decode(payload) else {
             return false
         }
@@ -146,6 +151,9 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     }
 
     func observe(handle: UndraHandle, signal: UInt32, on: Bool) {
+        if !isUp {
+            return
+        }
         record(.observe(handle.rawValue, signal, on))
         if let handler = onObserve {
             handler(handle, signal, on, self)
@@ -153,6 +161,9 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     }
 
     func release(handle: UndraHandle) {
+        if !isUp {
+            return
+        }
         record(.release(handle.rawValue))
     }
 
@@ -195,6 +206,35 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         }
     }
 
+    // MARK: A remote core that can be dropped (ADR-051)
+
+    var isUp: Bool {
+        return state.withLock { (current: inout State) -> Bool in
+            return current.up
+        }
+    }
+
+    /// The connection drops and the (pretend) transport starts reconnecting: attempt 1 is the loss.
+    func drop(_ error: any Error = UndraTransportError.connectionLost(reason: "the fake connection was lost")) {
+        state.withLock { (current: inout State) -> Void in
+            current.up = false
+        }
+        currentInbound()?.onReconnecting(attempt: 1, error: error)
+    }
+
+    /// A reconnect attempt failed; the transport tries again.
+    func retry(attempt: Int, _ error: any Error = UndraTransportError.connectionLost(reason: "the fake server is still down")) {
+        currentInbound()?.onReconnecting(attempt: attempt, error: error)
+    }
+
+    /// The connection is back.
+    func reconnect() {
+        state.withLock { (current: inout State) -> Void in
+            current.up = true
+        }
+        currentInbound()?.onReconnected()
+    }
+
     // MARK: Observations
 
     var wasShutDown: Bool {
@@ -206,6 +246,23 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
     var sent: [Sent] {
         return state.withLock { (current: inout State) -> [Sent] in
             return current.sent
+        }
+    }
+
+    /// The observations the host made, in order.
+    var observes: [Sent] {
+        return sent.filter { item in
+            if case .observe = item {
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Forgets what the host sent so far.
+    func forgetSent() {
+        state.withLock { (current: inout State) -> Void in
+            current.sent = []
         }
     }
 

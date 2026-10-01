@@ -36,6 +36,17 @@ export interface TransportHandler {
   log(level: number, target: string, message: string): void;
   /** The channel is gone (connection closed, worker died, wasm trapped). Not called after the host closed the transport itself. */
   closed(error: Error): void;
+  /**
+   * Only for a transport that reconnects by itself (`remote`, ADR-051): the channel dropped (or a
+   * retry failed) and the transport will try again. `attempt` counts from 1, and attempt 1 is the
+   * loss itself: whatever was in flight has failed for good. `closed` is called only when the
+   * transport gives up.
+   */
+  reconnecting?(attempt: number, error: Error): void;
+  /** Only for a transport that reconnects: the channel is back and the core's `Hello` checked. The host observes its stores again. */
+  reconnected?(hello: HelloPayload): void;
+  /** Only for a transport that reconnects: whether the host holds objects it expects the core to still have (it asks the server to resume them). */
+  holdsObjects?(): boolean;
 }
 
 /**
@@ -70,6 +81,21 @@ export interface Transport {
   callSync?(payload: Uint8Array): Uint8Array;
   /** The core's statistics as JSON (`undra_stats_json`), or `null` when the transport cannot ask. */
   stats?(): Promise<string | null>;
+  /**
+   * The persisted state of every store (`undra_snapshot`, SPEC 5.9) as opaque bytes. Present on the
+   * wasm transports only: a transport without it makes `UndraCore.snapshot` reject with
+   * `UndraModeError`. Rejects with `UndraTransportError` when the channel is closed.
+   */
+  snapshot?(): Promise<Uint8Array>;
+  /**
+   * Rebuilds the stores from `bytes` (`undra_restore`) and resolves once the core has applied them;
+   * every change-set the restore produced has reached the handler by then. Rejects with
+   * `UndraRestoreError` when the core refuses the bytes (it is unchanged), with
+   * `UndraTransportError` when the channel is closed or cannot restore. Absent on a transport that
+   * cannot restore (`UndraCore.restore` then rejects with `UndraModeError`). A `Restore` envelope
+   * sent through {@link Transport.send} does the same without the acknowledgement.
+   */
+  restore?(bytes: Uint8Array): Promise<void>;
   /** Releases the channel. Idempotent; the handler's `closed` is not called. */
   close(): void;
 }

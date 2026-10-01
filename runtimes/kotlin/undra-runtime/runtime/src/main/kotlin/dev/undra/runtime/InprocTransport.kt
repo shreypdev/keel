@@ -3,7 +3,6 @@ package dev.undra.runtime
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.Payloads.ReplyStatus
-import dev.undra.runtime.wire.Payloads.StreamFailure
 import dev.undra.runtime.wire.Payloads.StreamFlag
 import dev.undra.runtime.wire.WireException
 import java.nio.ByteBuffer
@@ -63,7 +62,8 @@ internal object JniNativeApi : NativeApi {
  * The callbacks arrive on the core thread, a blocking-pool thread or the calling thread, possibly with
  * the core lock held, and hand out direct buffers that die when the callback returns. So each callback
  * **copies** what it needs into a fresh array, passes it to [TransportEvents] and returns; it never calls
- * a native method (a thread-local flag turns an attempt into an [UndraException] instead of a deadlock),
+ * a native method (a thread-local flag turns an attempt into an [UndraReplyException] with status `BAD_REQUEST` and the core's own
+ * `E_REENTRANT` reason instead of a deadlock),
  * and it never lets an exception escape into native code.
  *
  * The native runtime is process-global, so the transport claims it on a successful [connect]: a second
@@ -102,8 +102,8 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
         if (got != expectedSchemaHash) return got
         if (!claimed.add(native)) {
             throw UndraException(
-                "an in-process Undra core is already loaded in this process and cannot be unloaded; " +
-                    "use UndraCore.shared instead of loading it again",
+                "an in-process Undra core is already loaded in this process; " +
+                    "use UndraCore.shared instead of loading it again, or close it (UndraCore.close()) before loading another",
             )
         }
         this.events = events
@@ -205,23 +205,16 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
         }
     }
 
-    /** Cancels the core's stream [callId] from the delivery thread, unless this transport was closed meanwhile. */
-    private fun cancelAfterCallback(callId: Int) {
-        UndraDispatchers.delivery.execute {
-            if (closed.get()) return@execute
-            try {
-                native.cancel(callId)
-            } catch (e: Throwable) {
-                UndraLog.warn("cancelling the stream $callId after an unreadable item failed", e)
-            }
-        }
-    }
-
     private fun checkNotInCallback(what: String) {
         if (insideCallback.get()) {
-            throw UndraException(
-                "$what was called from inside a core callback (a sync port implementation?); " +
-                    "the core lock may be held, so this would deadlock. Hand the work to another thread.",
+            // The refusal the core itself makes (status 5, E_REENTRANT, SPEC 6), so a generated call reports it as
+            // UndraCallError.Refused like every other platform does.
+            throw UndraReplyException(
+                ReplyStatus.BAD_REQUEST,
+                reasonBody(
+                    "E_REENTRANT: $what was called from inside a core callback (a sync port implementation?); " +
+                        "the core lock may be held, so this would deadlock. Hand the work to another thread.",
+                ),
             )
         }
     }
@@ -249,7 +242,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
                 target.onReply(id, status, r.readRemaining())
             } catch (e: WireException) {
                 // The call id is known from the JNI argument, so the caller can still be told.
-                target.onReply(callId.toUInt(), ReplyStatus.BAD_REQUEST, reasonBody("the core sent a malformed reply: ${e.message}"))
+                target.onMalformed(callId.toUInt(), UndraProtocolException("the core sent a malformed reply: ${e.message}", e))
             }
         }
 
@@ -266,14 +259,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
                 val flag = StreamFlag.fromByte(r.readU8(), at)
                 target.onStreamItem(id, flag, r.readRemaining())
             } catch (e: WireException) {
-                // A failure, not flag 2: that one carries the stream's own typed error E (ADR-036).
-                val failure = StreamFailure(ReplyStatus.BAD_REQUEST, "the core sent a malformed stream item: ${e.message}", "")
-                target.onStreamItem(callId.toUInt(), StreamFlag.FAILED, failure.toByteArray())
-                // The collector is told the stream failed, but the core's side did not end: it keeps the stream open
-                // and waits for credit until shutdown. UndraCore treats a flag-3 item as the core's own end and sends
-                // no Cancel, so cancel it here, off the callback (a native call from one is refused, SPEC 6 host
-                // contract 4), like Swift's cancelDeferred.
-                cancelAfterCallback(callId)
+                target.onMalformed(callId.toUInt(), UndraProtocolException("the core sent a malformed stream item: ${e.message}", e))
             }
         }
 

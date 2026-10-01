@@ -2,8 +2,12 @@ package dev.undra.runtime
 
 import dev.undra.runtime.wire.Payloads.CallTarget
 import java.net.URI
+import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * A running Undra core, seen from Kotlin: everything generated code calls (SPEC section 17.2).
@@ -35,24 +39,48 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     /** Loading a core and the process-wide shared one. */
     public companion object {
-        private val current = AtomicReference<UndraCore?>(null)
+        private val slot = AtomicReference<UndraCore?>(null)
+
+        /** The placeholder [shared] returns while no core is loaded. */
+        private val unloaded: UndraCore by lazy { UnloadedCore() }
+
+        /** Whether the placeholder's "load a core" message has been logged. */
+        private val unloadedWarned = AtomicBoolean(false)
 
         /**
-         * The core the first successful [load] returned. Generated constructors default to it.
+         * The core the first successful [load] returned. Generated constructors and free functions default
+         * to it.
          *
-         * @throws UndraException if no core has been loaded (or the first one was closed).
+         * Using it before a successful [load], or after the shared core was closed, is a programming error
+         * but not a crash (ADR-032, amendment A): it returns a permanently closed placeholder whose calls
+         * fail with [UndraCallError.Unavailable] (reason [UndraTransportException.Reason.CLOSED]), whose
+         * commands only log, and whose first use logs what to do. [current] still returns `null` in that
+         * state, so check it, not this, to learn whether a core is loaded.
          */
         public val shared: UndraCore
-            get() = current.get()
-                ?: throw UndraException("no UndraCore has been loaded: call UndraCore.load(LoadOptions(...)) before using generated bindings")
+            get() {
+                slot.get()?.let { return it }
+                if (unloadedWarned.compareAndSet(false, true)) {
+                    UndraLog.error(
+                        "UndraCore.shared was used while no core is loaded (before UndraCore.load(...) succeeds, or after the " +
+                            "shared core was closed); calls on it fail with UndraCallError.Unavailable. " +
+                            "Load a core at app startup, before creating any Undra object.",
+                    )
+                }
+                return unloaded
+            }
+
+        /** The core the first successful [load] returned and that is not closed, or `null`. While it is `null`, [shared] is the closed placeholder. */
+        public val current: UndraCore? get() = slot.get()
 
         /**
          * Starts a core as described by [options] and checks that it was built from the same schema as
          * the bindings ([LoadOptions.expectedSchemaHash]). The first successful call also becomes [shared].
          *
          * In [Mode.INPROC] this loads the native library (see [UndraNative]), initializes the core and
-         * registers the ports; only one in-process core can exist per process, and it cannot be
-         * unloaded, so a second `load(INPROC)` fails. In [Mode.REMOTE] it connects to `undra dev` and
+         * registers the ports; only one in-process core can exist per process at a time, so a second
+         * `load(INPROC)` fails until the first one is [close]d (which ends its work, ADR-034) and then starts a fresh
+         * core. In [Mode.REMOTE] it connects to `undra dev` and
          * performs the `Hello` handshake; see [Mode.REMOTE] for its limits.
          *
          * @throws UndraSchemaMismatchException if the core's schema hash differs.
@@ -70,13 +98,20 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * schema hash and compares it with [LoadOptions.expectedSchemaHash].
          */
         internal fun attach(transport: Transport, options: LoadOptions, makeShared: Boolean): UndraCore {
-            val core = ConnectedCore(transport, options.remoteTimeout, mirrorOptions = options.mirror)
+            val core = ConnectedCore(
+                transport,
+                options.remoteTimeout,
+                mirrorOptions = options.mirror,
+                onConnectionChange = options.onConnectionChange,
+                onError = options.onError,
+            )
             try {
                 core.installPorts(options)
                 val got = transport.connect(core, options.expectedSchemaHash)
                 if (got != options.expectedSchemaHash) {
                     throw UndraSchemaMismatchException(options.expectedSchemaHash, got)
                 }
+                core.markConnected()
             } catch (e: UndraException) {
                 core.abandon()
                 throw e
@@ -84,13 +119,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 core.abandon()
                 throw UndraException("could not start the Undra core: ${e.message}", e)
             }
-            if (makeShared) current.compareAndSet(null, core)
+            if (makeShared) slot.compareAndSet(null, core)
             return core
         }
 
         /** Forgets [core] as the shared core, if it is. */
         internal fun forget(core: UndraCore) {
-            current.compareAndSet(core, null)
+            slot.compareAndSet(core, null)
         }
 
         private fun createTransport(options: LoadOptions): Transport =
@@ -111,17 +146,35 @@ public open class UndraCore protected constructor() : AutoCloseable {
                     if (uri.scheme != "ws" && uri.scheme != "wss") {
                         throw UndraModeException("remoteUrl must start with ws:// or wss://, got: $url")
                     }
-                    try {
-                        RemoteTransport(uri, options.remoteTimeout)
-                    } catch (e: LinkageError) {
-                        throw UndraModeException("Mode.REMOTE needs java.net.http, which this platform does not provide (${e.message})")
-                    }
+                    RemoteTransport(uri, options.remoteTimeout, options.reconnect, session = newSessionToken())
                 }
             }
+
+        /** A random token for the dev server to recognise this core's connections by (ADR-051). */
+        private fun newSessionToken(): String {
+            val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
     }
 
     /** The mode this core runs in. */
     public open val mode: Mode get() = throw unsupported("mode")
+
+    private val inertConnection: StateFlow<ConnectionState> by lazy { MutableStateFlow(ConnectionState.Connected) }
+
+    /**
+     * What the connection to the core is doing: [ConnectionState.Connected] from [load] until the core is closed, and,
+     * for a [Mode.REMOTE] core, [ConnectionState.Reconnecting] while `undra dev` is unreachable (ADR-051). While it is,
+     * calls and [observe] fail at once with [UndraTransportException] (reason [UndraTransportException.Reason.CONNECTION_LOST]; a
+     * generated call throws [UndraCallError.Unavailable]), and what was in flight when the connection dropped failed
+     * with it; when it is [ConnectionState.Connected] again every store the app observes has been observed
+     * again, so the mirrors converge on the core's current values by themselves. A state that is
+     * [ConnectionState.Closed] is final.
+     *
+     * A `StateFlow` conflates: a quick drop and recovery can be seen as no change. [LoadOptions.onConnectionChange]
+     * hears every one.
+     */
+    public open val connectionState: StateFlow<ConnectionState> get() = inertConnection
 
     /**
      * Calls a synchronous method or function and returns the reply body. In [Mode.INPROC] this is a
@@ -132,8 +185,12 @@ public open class UndraCore protected constructor() : AutoCloseable {
      *
      * [methodId] must equal the id inside [target] (a [CallTarget.LazyListPage] carries none).
      *
+     * This is the raw API, for what generated bindings do not expose: it throws the runtime's own exceptions.
+     * Generated code maps them onto [UndraCallError] ([UndraCallError.mapped]).
+     *
      * @throws UndraReplyException if the core answers with anything but success.
-     * @throws UndraException if the core is closed or unreachable.
+     * @throws UndraTransportException if the core is closed or unreachable.
+     * @throws UndraProtocolException if the core's reply is malformed.
      */
     public open fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray =
         throw unsupported("callSync")
@@ -145,7 +202,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * change-sets that arrived before the reply have been applied to the stores.
      *
      * @throws UndraReplyException if the core answers with anything but success.
-     * @throws UndraException if the core is closed or unreachable.
+     * @throws UndraTransportException if the core is closed or unreachable.
      */
     public open suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray =
         throw unsupported("call")
@@ -154,8 +211,12 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * Opens a stream and returns its items as a cold [Flow]: every collection starts a new call. Items
      * are delivered with back-pressure: the collector grants the core 16 items when the stream opens
      * and 8 more each time fewer than 8 remain granted, so a slow collector slows the core down.
-     * Cancelling the collection cancels the stream in the core. A stream that fails ends the flow with
-     * [UndraReplyException] (`status == ERROR`, body the encoded error).
+     * Cancelling the collection cancels the stream in the core. A stream that fails ends the flow in the vocabulary of a
+     * failed reply (ADR-036): with [UndraReplyException] of status `ERROR` and the encoded error as its body when the
+     * stream ends with its own typed error (flag 2), or with the failure's own status and SPEC 3.4 body when the core
+     * ended the stream itself (flag 3: `PANIC`, `CANCELLED` by a restore or a shutdown, `BAD_REQUEST` when it refused
+     * it); with [UndraProtocolException] for an item or a failure body the runtime cannot read; and with
+     * [UndraTransportException] when the core goes away. Generated code maps them with [UndraCallError.mappedStream].
      */
     public open fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray> =
         throw unsupported("stream")
@@ -166,9 +227,25 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * are called with [call] and a [CallTarget.Constructor] instead.
      *
      * @throws UndraReplyException if the core answers with anything but success.
+     * @throws UndraTransportException if the core is closed or unreachable.
+     * @throws UndraProtocolException if the core answers with the null handle or a malformed handle.
      */
     public open fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long =
         throw unsupported("construct")
+
+    /**
+     * [construct] for generated code: what it throws is mapped onto the closed set ([UndraCallError.mapped]). A
+     * secondary constructor cannot hold a `try`, so the generated `constructor(ctx: UndraCore = UndraCore.shared)`
+     * delegates through this.
+     *
+     * @throws UndraCallError whatever [construct] throws.
+     */
+    public fun constructObject(typeId: UInt, methodId: UInt, args: ByteArray): Long =
+        try {
+            construct(typeId, methodId, args)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
 
     /**
      * Starts or stops observing a signal of the store [handle] ([signalId] `UInt.MAX_VALUE` means all
@@ -203,9 +280,30 @@ public open class UndraCore protected constructor() : AutoCloseable {
     public open fun stats(): UndraStats = UndraStats(liveHandles = UndraStats.UNKNOWN)
 
     /**
+     * Reports a failure that no caller can see (ADR-032, amendment A): logs it at error level and passes it to
+     * [LoadOptions.onError]. Generated commands and store `apply` call it; it never throws (an `Exception` from the
+     * handler is logged) and never stops the process.
+     *
+     * [error] is mapped the way a throwing call's error is ([UndraCallError.mapped]), so the handler always
+     * receives an [UndraCallError] inside the [UndraUnhandledError]. The handler runs synchronously on the calling
+     * thread. A report made while the handler runs on the same thread (a handler that calls a failing command) is
+     * only logged.
+     *
+     * The base class only logs; the core [load] returns also calls the handler.
+     *
+     * @param error what the call threw.
+     * @param operation what failed, as Kotlin spells it, for example `"TodoStore.toggle"`.
+     */
+    public open fun report(error: Throwable, operation: String) {
+        val unhandled = UndraUnhandledError(operation, UndraCallError.asCallError(error))
+        UndraLog.error(unhandled.message.orEmpty(), error)
+    }
+
+    /**
      * Serializes every store (SPEC 5.9), for restoring after a hot reload.
      *
      * @throws UndraModeException over a remote transport.
+     * @throws UndraTransportException if this core is closed.
      */
     public open fun snapshot(): ByteArray = throw unsupported("snapshot")
 
@@ -214,12 +312,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * applies the restored values to the stores before it returns, like any synchronous call.
      *
      * @throws UndraModeException over a remote transport.
-     * @throws UndraException if the core rejects the snapshot.
+     * @throws UndraRestoreException if the core rejects the snapshot (the core is unchanged).
+     * @throws UndraTransportException if this core is closed.
      */
     public open fun restore(snapshot: ByteArray): Unit = throw unsupported("restore")
 
     /**
-     * Closes this core: pending calls fail with [UndraException], streams end with it, port work is
+     * Closes this core: pending calls fail with [UndraTransportException] (reason `CLOSED`), streams end with it, port work is
      * cancelled and the link is closed. **Closing ends the core's work** (ADR-034): an in-process core is
      * shut down (its tasks, timers and port calls stop), and a later [load] in the same process starts a
      * fresh one with fresh handles. Idempotent.
@@ -231,8 +330,9 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * callback and the callback for the close, and a port callback that never returns keeps `close()` from
      * returning. Over a remote transport `close()` only closes the connection.
      *
-     * @throws UndraException when called from inside a core callback (a synchronous port implementation),
-     *   where the shutdown would wait for the very thread it runs on; the core is left open.
+     * @throws UndraReplyException (status `BAD_REQUEST`, reason `E_REENTRANT`) when called from inside a core
+     *   callback (a synchronous port implementation), where the shutdown would wait for the very thread it runs
+     *   on; the core is left open.
      */
     override fun close() {}
 

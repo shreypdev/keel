@@ -58,6 +58,13 @@ private class RecordingEvents : TransportEvents {
         items.add(Triple(callId, flag, body.toList()))
     }
 
+    val malformed = CopyOnWriteArrayList<Pair<UInt, UndraProtocolException>>()
+
+    override fun onMalformed(callId: UInt, error: UndraProtocolException) {
+        failWith?.let { throw it }
+        malformed.add(callId to error)
+    }
+
     override fun onChangeSet(changeSet: ByteArray) {
         failWith?.let { throw it }
         changeSets.add(changeSet)
@@ -192,17 +199,17 @@ class InprocTransportTests : Suite() {
             )
         }
 
-        case("a malformed reply still tells the caller, by the call id JNI passes alongside it") {
+        case("a malformed reply still tells the caller, by the call id JNI passes alongside it, as malformed") {
             val native = FakeNative()
             val events = RecordingEvents()
             InprocTransport(native).connect(events, HASH)
             native.emitReplyFor(11, byteArrayOf(1, 2)) // shorter than call_id + status
             native.emitReplyFor(12, byteArrayOf(12, 0, 0, 0, 99)) // an unknown status byte
-            assertEq(2, events.replies.size)
-            assertEq(11u, events.replies[0].first)
-            assertEq(ReplyStatus.BAD_REQUEST, events.replies[0].second)
-            assertEq(12u, events.replies[1].first)
-            assertEq(ReplyStatus.BAD_REQUEST, events.replies[1].second)
+            // Not a status the core never sent: a protocol failure, which generated code reports as Malformed.
+            assertEq(0, events.replies.size)
+            assertEq(listOf(11u, 12u), events.malformed.map { it.first })
+            assertTrue(events.malformed.all { it.second.message!!.contains("malformed reply") }, "${events.malformed}")
+            assertTrue(UndraCallError.mapped(events.malformed[0].second) is UndraCallError.Malformed, "maps to Malformed")
         }
 
         case("change-sets are copied out of the buffer before it is recycled") {
@@ -215,7 +222,7 @@ class InprocTransportTests : Suite() {
             assertTrue(events.changeSets.single().contentEquals(payload), "the copy differs from what the core sent")
         }
 
-        case("stream items are decoded and copied; a malformed one fails the stream with a refusal, not the stream's E") {
+        case("stream items are decoded and copied; one that cannot be read is reported as malformed, not as the stream's E") {
             val native = FakeNative()
             val events = RecordingEvents()
             InprocTransport(native).connect(events, HASH)
@@ -227,22 +234,16 @@ class InprocTransportTests : Suite() {
             native.emitStream(7, Payloads.StreamItem(7u, StreamFlag.FAILED, cancelled).toByteArray())
             assertEq(Triple(4u, StreamFlag.ITEM, listOf<Byte>(8, 9)), events.items[0])
             assertEq(Triple(4u, StreamFlag.END, emptyList<Byte>()), events.items[1])
-            for ((index, callId) in listOf(2 to 5u, 3 to 6u)) {
-                val (id, flag, body) = events.items[index]
-                assertEq(callId, id, "the call id JNI passes alongside the item")
-                assertEq(StreamFlag.FAILED, flag, "flag 2 would claim the stream's own typed error (ADR-036)")
-                val failure = Payloads.StreamFailure.decode(body.toByteArray())
-                assertEq(ReplyStatus.BAD_REQUEST, failure.status)
-                assertTrue(failure.message.startsWith("the core sent a malformed stream item: "), failure.message)
-                assertEq("", failure.detail)
-            }
+            assertEq(3, events.items.size, "the two unreadable items are not items")
             // A well-formed flag-3 item passes through as it came; UndraCore decodes the failure.
-            assertEq(Triple(7u, StreamFlag.FAILED, cancelled.toList()), events.items[4])
-            // The streams whose items could not be read are still open in the core, and UndraCore sends no Cancel
-            // for a flag-3 end, so the transport cancels them itself (off the callback); the ones that ended
-            // on the core's side are not cancelled.
-            eventually("the core's streams with unreadable items are cancelled") { native.cancels.toList().sorted() == listOf(5, 6) }
-            assertEq(emptyList<String>(), native.violations.toList(), "the cancel must not be a native call made from inside the callback")
+            assertEq(Triple(7u, StreamFlag.FAILED, cancelled.toList()), events.items[2])
+            assertEq(listOf(5u, 6u), events.malformed.map { it.first }, "the call id JNI passes alongside the item")
+            for ((_, error) in events.malformed) {
+                assertTrue(error.message!!.contains("malformed stream item"), "$error")
+                // Not flag 2 (the stream's own typed error, ADR-036) and not the core's own String (which reads as a panic): Malformed.
+                assertTrue(UndraCallError.mappedStream(error) is UndraCallError.Malformed, "maps to Malformed")
+            }
+            assertEq(emptyList<Int>(), native.cancels.toList(), "the transport only reports; UndraCore decides what to cancel")
         }
 
         case("a sync port answer is handed back through portSyncReply on the same thread") {
@@ -414,12 +415,12 @@ class InprocTransportTests : Suite() {
             }
         }
 
-        case("through an UndraCore: a stream the native core fails (flag 3) or garbles ends inside the UndraException hierarchy") {
+        case("through an UndraCore: a stream the native core fails (flag 3) or garbles ends inside the UndraException hierarchy, and an unreadable item cancels the core's stream") {
             val native = FakeNative()
             val core = UndraCore.attach(InprocTransport(native), LoadOptions(expectedSchemaHash = HASH, defaultAdapters = false), makeShared = false)
             core.use {
                 val garbledCallId = java.util.concurrent.atomic.AtomicReference<UInt>()
-                fun endWith(item: (callId: UInt) -> ByteArray): UndraReplyException {
+                fun endWith(item: (callId: UInt) -> ByteArray): UndraException {
                     native.onCall = { call ->
                         Thread {
                             native.emitReply(replyPayload(call.callId, ReplyStatus.STREAM_OPENED))
@@ -428,7 +429,7 @@ class InprocTransportTests : Suite() {
                         }.start()
                     }
                     val seen = CopyOnWriteArrayList<UInt>()
-                    val e = assertThrows<UndraReplyException> {
+                    val e = assertThrows<UndraException> {
                         runBlocking { core.stream(TARGET, METHOD, NO_BYTES).collect { seen.add(Codecs.u32.decodeAll(it)) } }
                     }
                     assertEq(listOf(1u), seen.toList(), "the item before the end was delivered")
@@ -438,21 +439,30 @@ class InprocTransportTests : Suite() {
                 val cancelled = endWith { id ->
                     Payloads.StreamItem(id, StreamFlag.FAILED, Payloads.StreamFailure(ReplyStatus.CANCELLED, "the runtime shut down", "").toByteArray()).toByteArray()
                 }
-                assertEq(ReplyStatus.CANCELLED, cancelled.status)
+                assertEq(ReplyStatus.CANCELLED, (cancelled as UndraReplyException).status)
                 // A stream that panicked.
                 val panicked = endWith { id ->
                     Payloads.StreamItem(id, StreamFlag.FAILED, Payloads.StreamFailure(ReplyStatus.PANIC, "boom", "at core.rs:1").toByteArray()).toByteArray()
                 }
-                assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), panicked.panicInfo)
+                assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), (panicked as UndraReplyException).panicInfo)
+                // A stream the core refused.
+                val refused = endWith { id ->
+                    Payloads.StreamItem(id, StreamFlag.FAILED, Payloads.StreamFailure(ReplyStatus.BAD_REQUEST, "stale handle", "").toByteArray()).toByteArray()
+                }
+                assertEq(ReplyStatus.BAD_REQUEST, (refused as UndraReplyException).status)
+                assertEq("stale handle", refused.badRequestReason)
+                assertEq(UndraCallError.Refused("stale handle").message, UndraCallError.mappedStream(refused).message, "status 5 maps to Refused, as a failed call does")
                 // An item the transport cannot read at all.
                 assertEq(emptyList<Int>(), native.cancels.toList(), "the core's own failures need no cancel")
                 val garbled = endWith { id -> garbledCallId.set(id); Codecs.u32.encodeToByteArray(id) + byteArrayOf(9) }
-                assertEq(ReplyStatus.BAD_REQUEST, garbled.status)
-                assertTrue(garbled.badRequestReason!!.startsWith("the core sent a malformed stream item: "), garbled.badRequestReason!!)
+                assertTrue(garbled is UndraProtocolException, "$garbled")
+                assertTrue(garbled.message!!.startsWith("the core sent a malformed stream item: "), garbled.message!!)
+                assertTrue(UndraCallError.mappedStream(garbled) is UndraCallError.Malformed, "maps to Malformed")
                 // A flag-3 item whose failure body cannot be read.
                 val badFailure = endWith { id -> Payloads.StreamItem(id, StreamFlag.FAILED, byteArrayOf(1)).toByteArray() }
-                assertEq(ReplyStatus.BAD_REQUEST, badFailure.status)
-                assertTrue(badFailure.badRequestReason!!.startsWith("the core sent a malformed stream failure: "), badFailure.badRequestReason!!)
+                assertTrue(badFailure is UndraProtocolException, "$badFailure")
+                assertTrue(badFailure.message!!.startsWith("the core sent a malformed stream failure: "), badFailure.message!!)
+                assertTrue(UndraCallError.mappedStream(badFailure) is UndraCallError.Malformed, "maps to Malformed")
                 eventually("no stream is left pending") { core.stats().hostPendingCalls == 0 }
                 // Only the unreadable item leaves the core's stream open (L6): one cancel, for that call. A flag-3
                 // item the core sent itself (cancelled, panic, an unreadable failure body) ended the core's side.

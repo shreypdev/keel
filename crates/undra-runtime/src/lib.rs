@@ -58,6 +58,7 @@ pub use undra_meta::inventory;
 pub use undra_signals;
 pub use undra_wire;
 
+mod atomic_update;
 mod blocking;
 mod config;
 mod ctx;

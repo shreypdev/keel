@@ -180,7 +180,7 @@ Debug builds of the core need the library linked with `-force_load`, or the link
 
 ### Android
 
-Build the core with `undra build --platform android --release`, then build and install from `android/` with Gradle. Use `--release` for anything you run: a debug core is tens of megabytes per ABI. The Kotlin runtime has no remote transport on Android yet, so use the JVM or the web for the `undra dev` loop.
+Build the core with `undra build --platform android --release`, then build and install from `android/` with Gradle. Use `--release` for anything you run: a debug core is tens of megabytes per ABI. Debug builds can run against `undra dev` instead (no native build needed): `./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug` for an emulator, or `adb reverse` (`undra dev --android`) and `ws://127.0.0.1:7443` for a USB device.
 
 ## 6. Build what you ship
 
@@ -814,25 +814,29 @@ bash
 
 ```bash
 undra dev                          # listen on 127.0.0.1:7443
+undra dev --android                # also adb reverse the port to every attached Android device
 undra dev --addr 0.0.0.0:7443      # reachable from a phone on your network
 undra dev --no-watch               # build once and serve
 ```
 
-Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, the core is rebuilt and restarted, reload the app to reconnect. Logs, including the development records (a line per transaction commit, port call and panic), print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port.
+Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, whenever the connection drops (a rebuild, a phone that slept, a restarted adb); after a rebuild an app finds a new core with none of its objects and loads it afresh. Logs, including the development records (a line per transaction commit, port call and panic) and a line for each client that connects, reconnects or leaves, print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port.
 
 | Flag | Meaning |
 | --- | --- |
 | `--addr <addr>` | address to listen on; port 0 picks a free one (default `127.0.0.1:7443`) |
 | `--no-watch` | build once and serve; do not rebuild on change |
 | `--log-level <n>` | log records below this level (0 trace to 5 fatal) are not printed; default 1 |
+| `--android` | run `adb reverse` for the server's port on every attached Android device or emulator (only the one in `ANDROID_SERIAL`, when set) |
 
-How each platform connects:
+How each platform connects (the banner prints these with the real port):
 
 | Platform | How |
 | --- | --- |
-| Web | `UndraCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash })` |
+| Web | `UndraCore.load({ mode: "remote", url: "ws://127.0.0.1:7443", expectedSchemaHash })`, or `?undra=ws://127.0.0.1:7443` in the page URL |
 | iOS | set `UNDRA_DEV_URL=ws://<your Mac>:7443`; the generated app reads it in debug builds |
-| Android | the Kotlin runtime has no remote transport on Android yet; use the JVM or the web |
+| Android | an emulator uses `ws://10.0.2.2:7443`; a USB device runs `adb reverse tcp:7443 tcp:7443` (or `--android`) and uses `ws://127.0.0.1:7443`. The generated app takes it from the `undra_dev_url` launch extra or `./gradlew -PundraDevUrl=...`, in debug builds only |
+
+Every platform runtime exposes what the connection is doing (`connecting`, `connected`, `reconnecting(attempt)`, `closed(reason)`) and observes its stores again after a reconnect. [docs/DEV_LOOP.md](https://github.com/shreypdev/undra/blob/main/docs/DEV_LOOP.md) has the details and a troubleshooting table.
 
 **No authentication.** The server has none. Keep the loopback default unless a device has to reach it.
 

@@ -2,8 +2,8 @@
 
 package dev.undra.playground.core
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.UndraStore
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
@@ -39,68 +39,92 @@ class RemoteTodosQueryHandle private constructor(core: UndraCore, handle: Long) 
     val updatedAt: StateFlow<Timestamp?> = _updatedAt.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
-    /** Fetches again now, even if the data is fresh. */
+    /**
+     * Fetches again now, even if the data is fresh.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun refetch() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.RemoteTodosQueryHandle.REFETCH),
-            UndraIds.Objects.RemoteTodosQueryHandle.REFETCH,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.RemoteTodosQueryHandle.REFETCH),
+                UndraIds.Objects.RemoteTodosQueryHandle.REFETCH,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "RemoteTodosQueryHandle.refetch")
+        }
     }
 
-    /** Marks the cached entry stale; it refetches while observed. */
+    /**
+     * Marks the cached entry stale; it refetches while observed.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun invalidate() {
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.RemoteTodosQueryHandle.INVALIDATE),
-            UndraIds.Objects.RemoteTodosQueryHandle.INVALIDATE,
-            ByteArray(0),
-        )
+        try {
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.RemoteTodosQueryHandle.INVALIDATE),
+                UndraIds.Objects.RemoteTodosQueryHandle.INVALIDATE,
+                ByteArray(0),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "RemoteTodosQueryHandle.invalidate")
+        }
     }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _data.value = codecOptionVecRemoteTodo.decode(reader)
-                    reader.finish()
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionVecRemoteTodo.decode(reader)
+                        reader.finish()
+                        _data.value = value
+                    }
                 }
-            }
-            1u -> {
-                if (op == ChangeOp.FULL) {
-                    _status.value = QueryStatus.decode(reader)
-                    reader.finish()
+                1u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = QueryStatus.decode(reader)
+                        reader.finish()
+                        _status.value = value
+                    }
                 }
-            }
-            2u -> {
-                if (op == ChangeOp.FULL) {
-                    _error.value = codecOptionRemoteError.decode(reader)
-                    reader.finish()
+                2u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionRemoteError.decode(reader)
+                        reader.finish()
+                        _error.value = value
+                    }
                 }
-            }
-            3u -> {
-                if (op == ChangeOp.FULL) {
-                    _fetching.value = Codecs.bool.decode(reader)
-                    reader.finish()
+                3u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.bool.decode(reader)
+                        reader.finish()
+                        _fetching.value = value
+                    }
                 }
-            }
-            4u -> {
-                if (op == ChangeOp.FULL) {
-                    _updatedAt.value = codecOptionTimestamp.decode(reader)
-                    reader.finish()
+                4u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTimestamp.decode(reader)
+                        reader.finish()
+                        _updatedAt.value = value
+                    }
                 }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "RemoteTodosQueryHandle.apply(signal: $signalId)")
         }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(list: String, ctx: UndraCore = UndraCore.shared): RemoteTodosQueryHandle {
             val w = UndraWriter()
             w.writeStr(list)
-            val handle = ctx.construct(UndraIds.Objects.RemoteTodosQueryHandle.TYPE_ID, UndraIds.Objects.RemoteTodosQueryHandle.NEW, w.toByteArray())
+            val handle = ctx.constructObject(UndraIds.Objects.RemoteTodosQueryHandle.TYPE_ID, UndraIds.Objects.RemoteTodosQueryHandle.NEW, w.toByteArray())
             return RemoteTodosQueryHandle(ctx, handle)
         }
     }
@@ -109,6 +133,8 @@ class RemoteTodosQueryHandle private constructor(core: UndraCore, handle: Long) 
 /**
  * Runs the `patch_remote_todo` mutation.
  * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
  */
 suspend fun patchRemoteTodo(
     list: String,
@@ -120,21 +146,23 @@ suspend fun patchRemoteTodo(
     w.writeStr(list)
     w.writeU32(id)
     w.writeBool(done)
-    val body = try {
-        ctx.call(
+    try {
+        val body = ctx.call(
             CallTarget.FreeFunction(UndraIds.Queries.PATCH_REMOTE_TODO),
             UndraIds.Queries.PATCH_REMOTE_TODO,
             w.toByteArray(),
         )
-    } catch (e: UndraReplyException) {
-        throw RemoteError.fromReply(e)
+        return RemoteTodo.decodeAll(body)
+    } catch (e: Exception) {
+        throw UndraCallError.mapped(e, RemoteError)
     }
-    return RemoteTodo.decodeAll(body)
 }
 
 /**
  * Runs the `post_remote_todo` mutation.
  * @throws RemoteError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
  */
 suspend fun postRemoteTodo(
     list: String,
@@ -144,16 +172,16 @@ suspend fun postRemoteTodo(
     val w = UndraWriter()
     w.writeStr(list)
     w.writeStr(title)
-    val body = try {
-        ctx.call(
+    try {
+        val body = ctx.call(
             CallTarget.FreeFunction(UndraIds.Queries.POST_REMOTE_TODO),
             UndraIds.Queries.POST_REMOTE_TODO,
             w.toByteArray(),
         )
-    } catch (e: UndraReplyException) {
-        throw RemoteError.fromReply(e)
+        return RemoteTodo.decodeAll(body)
+    } catch (e: Exception) {
+        throw UndraCallError.mapped(e, RemoteError)
     }
-    return RemoteTodo.decodeAll(body)
 }
 
 private val codecVecRemoteTodo = Codecs.vec(RemoteTodo)

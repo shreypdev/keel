@@ -209,7 +209,7 @@ class StreamTests : Suite() {
             }
         }
 
-        case("a flag-3 body that does not decode ends the stream with BAD_REQUEST, inside the UndraException hierarchy") {
+        case("a flag-3 body that does not decode ends the stream with an UndraProtocolException (Malformed), inside the UndraException hierarchy") {
             val valid = Payloads.StreamFailure(ReplyStatus.CANCELLED, "x", "").toByteArray()
             val malformed = listOf(
                 "empty" to NO_BYTES,
@@ -228,10 +228,9 @@ class StreamTests : Suite() {
                     t.failedOnCore(call.callId, body)
                 }
                 attach(t).use { core ->
-                    val e = assertThrows<UndraReplyException>(what) { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
-                    assertEq(ReplyStatus.BAD_REQUEST, e.status, what)
-                    val reason = e.badRequestReason
-                    assertTrue(reason != null && reason.startsWith("the core sent a malformed stream failure: "), "$what: $reason")
+                    val e = assertThrows<UndraProtocolException>(what) { runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() } }
+                    assertTrue(e.message!!.startsWith("the core sent a malformed stream failure: "), "$what: ${e.message}")
+                    assertTrue(UndraCallError.mappedStream(e) is UndraCallError.Malformed, "$what: maps to Malformed")
                     assertEq(0, core.stats().hostPendingCalls, what)
                 }
             }

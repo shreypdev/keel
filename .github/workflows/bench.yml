@@ -79,7 +79,7 @@ jobs:
         with:
           # A pull request's merge ref has the base as its first parent.
           fetch-depth: 2
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
         with:
           # A key of its own since the base build: rust-cache saves only on a miss, and the cache

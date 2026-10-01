@@ -1,4 +1,4 @@
-import { type Signal, UndraCore } from "@undra/runtime";
+import { type Signal, UndraCallError, UndraCore } from "@undra/runtime";
 import { useSignal, useUndra } from "@undra/runtime/react";
 import { Stress, StressError, type StressMode } from "@playground/core";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -127,7 +127,7 @@ function StressPanel({
     try {
       await stress.start(nextMode, nextRate);
     } catch (error) {
-      setProblem(error instanceof StressError ? error.message : String(error));
+      setProblem(error instanceof StressError || error instanceof UndraCallError ? error.message : String(error));
     }
   };
 
@@ -136,7 +136,7 @@ function StressPanel({
   useEffect(() => {
     if (autostart) void start(initialMode, initialRate, true);
     return () => {
-      stress.stop().catch(() => {});
+      void stress.stop(); // a command: it never rejects
     };
     // Once per store: the controls below call `start` themselves.
   }, [stress]);

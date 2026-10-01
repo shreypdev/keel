@@ -3,13 +3,10 @@
 package golden.ports
 
 import dev.undra.runtime.UndraException
-import dev.undra.runtime.UndraReplyException
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
-import dev.undra.runtime.wire.decodeAll
 
 sealed class FsError(message: String) : UndraException(message) {
     data object NotFound : FsError("not found")
@@ -33,11 +30,6 @@ sealed class FsError(message: String) : UndraException(message) {
                 1 -> Io(value = r.readStr())
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "FsError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }
@@ -64,11 +56,6 @@ sealed class HttpError(message: String) : UndraException(message) {
                 1 -> Network(value = r.readStr())
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "HttpError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }

@@ -1,6 +1,7 @@
 //! [`Runtime`]: the core lock, the call/reply machinery and every host-facing entry point
 //! (SPEC 5, 6, 16.2). See `docs/runtime-internals.md` for the threading model as built.
 
+use crate::atomic_update::cas_update;
 use core::any::Any;
 use core::future::Future;
 use core::pin::Pin;
@@ -343,18 +344,17 @@ struct StreamState {
 
 impl StreamState {
     fn add_credit(&self, n: u32) {
-        let _ = self
-            .credit
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| {
-                Some(c.saturating_add(n))
-            });
+        let _ = cas_update(&self.credit, Ordering::AcqRel, Ordering::Acquire, |c| {
+            Some(c.saturating_add(n))
+        });
         self.notify.notify_one();
     }
 
     fn try_take(&self) -> bool {
-        self.credit
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| c.checked_sub(1))
-            .is_ok()
+        cas_update(&self.credit, Ordering::AcqRel, Ordering::Acquire, |c| {
+            c.checked_sub(1)
+        })
+        .is_ok()
     }
 }
 

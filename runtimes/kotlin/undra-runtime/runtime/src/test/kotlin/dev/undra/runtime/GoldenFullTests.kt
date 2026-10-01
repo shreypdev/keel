@@ -68,23 +68,31 @@ class GoldenFullTests : Suite() {
             main.invoke(null)
         }
 
-        case("a typed stream the core cancels (flag 3) reaches the app as UndraReplyException CANCELLED, not as its E (ADR-036)") {
+        case("a typed stream the core cancels (flag 3) reaches the app as UndraCallError.CancelledByCore, not as its E (ADR-036)") {
             val e = watchEndingWith { t, call ->
                 t.serveStream(call, emptyList(), failed = Payloads.StreamFailure(ReplyStatus.CANCELLED, "a restore replaced the receiver", ""))
             }
             // Before ADR-036 the core sent a String under flag 2 and the generated fromReply decoded it as
             // TodoError, which threw a WireException.
             assertTrue(e !is WireException, "a WireException escaped the UndraException hierarchy: $e")
-            assertTrue(e is UndraReplyException, "expected UndraReplyException, got $e")
-            assertEq(ReplyStatus.CANCELLED, (e as UndraReplyException).status)
+            assertTrue(e is UndraCallError.CancelledByCore, "expected UndraCallError.CancelledByCore, got $e")
         }
 
-        case("a typed stream that panicked (flag 3) reaches the app as UndraReplyException PANIC with its message") {
+        case("a typed stream that panicked (flag 3) reaches the app as UndraCallError.Panicked with its message and backtrace") {
             val e = watchEndingWith { t, call ->
                 t.serveStream(call, emptyList(), failed = Payloads.StreamFailure(ReplyStatus.PANIC, "boom", "at core.rs:1"))
             }
-            assertTrue(e is UndraReplyException, "expected UndraReplyException, got $e")
-            assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), (e as UndraReplyException).panicInfo)
+            assertTrue(e is UndraCallError.Panicked, "expected UndraCallError.Panicked, got $e")
+            assertEq("boom", (e as UndraCallError.Panicked).panicMessage)
+            assertEq("at core.rs:1", e.backtrace)
+        }
+
+        case("a typed stream the core refused (flag 3, status 5) reaches the app as UndraCallError.Refused with its reason") {
+            val e = watchEndingWith { t, call ->
+                t.serveStream(call, emptyList(), failed = Payloads.StreamFailure(ReplyStatus.BAD_REQUEST, "stale handle", ""))
+            }
+            assertTrue(e is UndraCallError.Refused, "expected UndraCallError.Refused, got $e")
+            assertEq("stale handle", (e as UndraCallError.Refused).reason)
         }
 
         case("a typed stream that ends with its own E (flag 2) still reaches the app as that E") {

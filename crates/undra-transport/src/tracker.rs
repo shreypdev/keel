@@ -100,6 +100,11 @@ impl Tracker {
         self.constructed.remove(&handle);
     }
 
+    /// Takes over objects another connection of the same session left (a resumed session).
+    pub(crate) fn adopt(&mut self, handles: &[u64]) {
+        self.constructed.extend(handles.iter().copied());
+    }
+
     /// The core issued port call `id` to this client.
     pub(crate) fn begin_port_call(&mut self, id: u32) {
         self.port_calls.insert(id);
@@ -199,6 +204,16 @@ mod tests {
         let left = t.drain();
         assert!(left.constructed.is_empty());
         assert_eq!(left.observed, [(6, 0)]);
+    }
+
+    #[test]
+    fn adopted_objects_are_this_connections_to_give_back() {
+        let mut t = Tracker::default();
+        t.adopt(&[7, 3]);
+        t.begin_call(1, true);
+        t.on_reply(1, ReplyStatus::Ok, &9_u64.to_le_bytes());
+        t.release(3);
+        assert_eq!(t.drain().constructed, [7, 9]);
     }
 
     #[test]

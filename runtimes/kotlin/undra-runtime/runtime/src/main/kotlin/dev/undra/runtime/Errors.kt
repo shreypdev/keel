@@ -9,8 +9,11 @@ import dev.undra.runtime.wire.WireException
  * Base class of every exception the Undra runtime and generated bindings throw on purpose.
  *
  * Generated error types (`#[undra::error]`) extend it, so `catch (e: UndraException)` catches both the
- * typed errors of your core and the runtime's own failures ([UndraReplyException],
- * [UndraModeException], [UndraSchemaMismatchException]).
+ * typed errors of your core and the runtime's own failures: [UndraCallError] (what a generated call
+ * throws besides its own error type, ADR-032 amendment A), and the raw ones behind it
+ * ([UndraReplyException], [UndraTransportException], [UndraProtocolException],
+ * [dev.undra.runtime.wire.WireException], [UndraModeException], [UndraSchemaMismatchException],
+ * [UndraRestoreException]).
  */
 public open class UndraException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
@@ -21,8 +24,10 @@ public open class UndraException(message: String, cause: Throwable? = null) : Ru
  * [ReplyStatus.PANIC], [ReplyStatus.CANCELLED] or [ReplyStatus.BAD_REQUEST], with the section 3.4 body of
  * that status, exactly as a failed reply would carry it).
  *
- * Generated code turns the `ERROR` status into the method's typed error (`TodoError.fromReply`) and
- * lets every other status through unchanged.
+ * This is the *raw* failure of [UndraCore.callSync], [UndraCore.call], [UndraCore.stream] and
+ * [UndraCore.construct], for what bindings do not expose. Generated code never lets it through: it throws the
+ * method's own typed error for the `ERROR` status and an [UndraCallError] for every other one
+ * ([UndraCallError.mapped]).
  *
  * @property status what the core answered: [ReplyStatus.ERROR] (the [body] is the encoded typed error),
  *   [ReplyStatus.PANIC] (see [panicInfo]), [ReplyStatus.CANCELLED], [ReplyStatus.BAD_REQUEST] (see
@@ -67,6 +72,47 @@ public class UndraReplyException(public val status: ReplyStatus, public val body
 }
 
 /**
+ * The channel to the core failed, or the core is gone: this [UndraCore] was closed (or never loaded), a
+ * remote core did not answer in time, or its connection was lost. Pending calls and streams fail with it.
+ * A generated call reports it as [UndraCallError.Unavailable].
+ *
+ * @property reason what went wrong.
+ */
+public class UndraTransportException(public val reason: Reason, message: String, cause: Throwable? = null) :
+    UndraException(message, cause) {
+
+    /** Why a transport failed. */
+    public enum class Reason {
+        /** This [UndraCore] was closed (`close()`), or no core is loaded. */
+        CLOSED,
+
+        /** The remote core did not answer within [LoadOptions.remoteTimeout]. */
+        TIMEOUT,
+
+        /** The connection to a remote core ended or failed. */
+        CONNECTION_LOST,
+
+        /** The calling thread was interrupted while it waited for a remote core. */
+        INTERRUPTED,
+    }
+}
+
+/**
+ * The core sent something the protocol does not allow: a reply that does not decode, a reply for another
+ * call, a constructor that answered with the null handle, a single value where a stream was expected. After a
+ * successful schema check this is a bug in Undra. A generated call reports it as [UndraCallError.Malformed].
+ */
+public class UndraProtocolException(message: String, cause: Throwable? = null) : UndraException(message, cause)
+
+/**
+ * The core rejected a snapshot passed to [UndraCore.restore]; the core is unchanged (SPEC section 5.9).
+ *
+ * @property code the non-zero code `undra_restore` returned.
+ */
+public class UndraRestoreException(public val code: Int) :
+    UndraException("the Undra core rejected the snapshot (code $code); a rejected restore leaves the core unchanged")
+
+/**
  * An operation is not available in the mode the core was loaded in, or the [LoadOptions] contradict
  * each other. For example, snapshots exist only for an in-process core, and `Mode.REMOTE` needs a URL.
  */
@@ -85,6 +131,18 @@ public class UndraSchemaMismatchException(public val expected: ULong, public val
         "schema mismatch: this app expects schema 0x${expected.toString(16)} but the core reports 0x${got.toString(16)}; " +
             "regenerate the bindings and rebuild the core so both come from the same schema",
     )
+
+/**
+ * The dev server no longer holds the objects of this core (ADR-051): it was restarted (`undra dev` rebuilt the
+ * core) or the session's grace period passed while the client was away. The handles of every store and object of
+ * this core are dead; load a new core and create them again. The core reports it as [ConnectionState.Closed]
+ * with [ClosedReason.SESSION_LOST].
+ */
+public class UndraSessionLostException(message: String = DEFAULT) : UndraException(message) {
+    private companion object {
+        const val DEFAULT: String = "the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core"
+    }
+}
 
 /**
  * Thrown by a generated port adapter when the port implementation fails with the port's typed error.

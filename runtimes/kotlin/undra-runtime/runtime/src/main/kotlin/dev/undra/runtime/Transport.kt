@@ -109,6 +109,13 @@ internal interface TransportEvents {
     /** A stream produced an item, ended or failed. */
     fun onStreamItem(callId: UInt, flag: StreamFlag, body: ByteArray)
 
+    /**
+     * The core's reply or stream item for [callId] does not decode (the transport learned the call id some
+     * other way): the call or stream fails with [error], which generated code reports as
+     * `UndraCallError.Malformed`, not as a status the core never sent.
+     */
+    fun onMalformed(callId: UInt, error: UndraProtocolException)
+
     /** A transaction committed; [changeSet] is a whole `ChangeSet` payload. */
     fun onChangeSet(changeSet: ByteArray)
 
@@ -118,8 +125,24 @@ internal interface TransportEvents {
     /** A log record from the core (remote transports; in process the core logs through the `Log` port). */
     fun onLog(level: UByte, target: String, message: String)
 
-    /** The link went down. [cause] is `null` after a deliberate close. */
+    /** The link went down for good. [cause] is `null` after a deliberate close. */
     fun onClosed(cause: Throwable?)
+
+    /**
+     * Only for a transport that reconnects (remote, ADR-051): the link dropped (or a retry failed) and the
+     * transport will try again. [attempt] counts from 1, and attempt 1 is the loss itself: whatever was in flight
+     * has failed for good. [onClosed] follows only if the transport gives up.
+     */
+    fun onReconnecting(attempt: Int, cause: Throwable?) {}
+
+    /**
+     * Only for a transport that reconnects: the link is back and the core's `Hello` was checked. The core observes
+     * its stores again (on a thread of its own: this callback must not call into the transport).
+     */
+    fun onReconnected() {}
+
+    /** Only for a transport that reconnects: whether the core holds objects it expects the server to still have (it asks the server to resume them). */
+    fun holdsObjects(): Boolean = false
 }
 
 /** How a port call is being served (SPEC 6.3). */

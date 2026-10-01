@@ -1,6 +1,6 @@
 import { cryptoRng, setTimeoutTimer, systemClock } from "../adapters/system.js";
 import type { ClockAdapter, RngAdapter, TimerAdapter } from "../adapters/types.js";
-import { UndraError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {
   type HelloPayload,
@@ -72,6 +72,7 @@ interface CoreExports {
   undra_poll(): void;
   undra_buf_free(bufPtr: number): void;
   undra_stats_json(): number;
+  undra_snapshot?(): number;
   undra_restore?(ptr: number, len: number): number;
   _initialize?(): void;
 }
@@ -282,16 +283,9 @@ export class WasmMainTransport implements Transport {
         this.#run((e) => e.undra_timer_fired(timerId));
         return;
       }
-      case Kind.Restore: {
-        const code = this.#invoke(payload, (e, ptr, len) => {
-          if (e.undra_restore === undefined) {
-            throw new UndraTransportError("unsupported", "the core does not export undra_restore");
-          }
-          return e.undra_restore(ptr, len);
-        });
-        if (code !== 0) throw new UndraTransportError("protocol", `undra_restore failed with code ${code}`);
+      case Kind.Restore:
+        this.#restore(payload);
         return;
-      }
       default:
         throw new UndraTransportError("protocol", `cannot send a ${Kind[kind] ?? String(kind)} message to a wasm core`);
     }
@@ -310,10 +304,51 @@ export class WasmMainTransport implements Transport {
     }
   }
 
+  /** The persisted state of every store (`undra_snapshot`, SPEC 5.9). Rejects `UndraTransportError` when the core is closed or exports no `undra_snapshot`. */
+  snapshot(): Promise<Uint8Array> {
+    try {
+      return Promise.resolve(
+        this.#run((e) => {
+          if (e.undra_snapshot === undefined) {
+            throw new UndraTransportError("unsupported", "the core does not export undra_snapshot");
+          }
+          return this.#takeBuf(e, e.undra_snapshot());
+        }),
+      );
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  /**
+   * Rebuilds the stores from `bytes` (`undra_restore`). The change-sets of the observed signals the
+   * core re-delivers during the restore (ADR-023) have reached the handler when this resolves.
+   * Rejects with `UndraRestoreError` when the core refuses the bytes (it is unchanged).
+   */
+  restore(bytes: Uint8Array): Promise<void> {
+    try {
+      this.#restore(bytes);
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   close(): void {
     this.#closed = true;
     this.#handler = null;
     this.#exports = null;
+  }
+
+  /** `undra_restore`; throws `UndraRestoreError` for a non-zero code. */
+  #restore(bytes: Uint8Array): void {
+    const code = this.#invoke(bytes, (e, ptr, len) => {
+      if (e.undra_restore === undefined) {
+        throw new UndraTransportError("unsupported", "the core does not export undra_restore");
+      }
+      return e.undra_restore(ptr, len);
+    });
+    if (code !== 0) throw new UndraRestoreError(code);
   }
 
   // ----- memory ----------------------------------------------------------------------

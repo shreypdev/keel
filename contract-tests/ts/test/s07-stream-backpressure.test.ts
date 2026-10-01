@@ -1,10 +1,9 @@
 import { expect, test } from "vitest";
-import { ReplyStatus, UndraReplyError, WireError } from "@undra/runtime";
+import { UndraCallError, WireError } from "@undra/runtime";
 import { LabError, Probe } from "@playground/core";
-import { bootRaw } from "../src/harness.js";
+import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { sleep, step, waitFor } from "../src/wait.js";
-import { restore, snapshot } from "../src/wasm-exports.js";
 
 // S07 stream with backpressure: the core produces items only against credit the consumer grants
 // (16 at subscribe, topped up as the consumer drains), so a consumer that stops reading stops the
@@ -53,8 +52,7 @@ async function failureOf(iterator: AsyncIterator<number>, timeoutMs: number): Pr
 }
 
 test("S07 stream with backpressure", async ({ task }) => {
-  // bootRaw: step 7 takes a snapshot through the wasm export, as S15 does.
-  const { core, transport } = await bootRaw();
+  const { core } = await boot();
   const probe = await Probe.create(core);
 
   await probe.reset();
@@ -122,20 +120,19 @@ test("S07 stream with backpressure", async ({ task }) => {
   });
 
   await step("7. a stream the core cancels (a restore) fails as cancelled by the core, not as its E or a wire error", async () => {
-    const bytes = snapshot(transport);
+    const bytes = await core.snapshot();
     const before = await counters(core);
     const iterator = probe.ticksThenFail(1_000_000, 999_999, 1)[Symbol.asyncIterator]();
     expect(await read(iterator, 2)).toEqual([0, 1]);
     // The probe is not a store: the restore invalidates it and ends its stream.
-    restore(transport, bytes);
+    await core.restore(bytes);
     const { items, error } = await failureOf(iterator, 1_000);
     // What the core had already sent against credit is still delivered first, in order.
     expect(items, "the items delivered before the failure").toEqual(Array.from({ length: items.length }, (_, i) => i + 2));
     expect(items.length).toBeLessThanOrEqual(64);
     expect(error, "not a wire decode error").not.toBeInstanceOf(WireError);
     expect(error, "not the stream's own error").not.toBeInstanceOf(LabError);
-    expect(error).toBeInstanceOf(UndraReplyError);
-    expect((error as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
+    expect(error).toBeInstanceOf(UndraCallError.CancelledByCore);
     await waitFor("the core to close the stream", async () => (await counters(core)).openStreams === before.openStreams, { timeoutMs: 1_000 });
     expect((await core.stats()).openStreams, "the runtime forgot the stream too").toBe(0);
   });
