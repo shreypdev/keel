@@ -1,5 +1,5 @@
 import Foundation
-import KeelRuntime
+import UndraRuntime
 import PlaygroundCore
 import XCTest
 
@@ -167,16 +167,16 @@ extension ContractScenarios {
             // 4. A sync call of an async method is refused, and the core is unharmed.
             do {
                 _ = try core.callSync(
-                    .freeFunction(methodId: KeelIds.Functions.addLater),
-                    method: KeelIds.Functions.addLater,
-                    args: encoded { (w: inout KeelWriter) in
+                    .freeFunction(methodId: UndraIds.Functions.addLater),
+                    method: UndraIds.Functions.addLater,
+                    args: encoded { (w: inout UndraWriter) in
                         w.writeI32(1)
                         w.writeI32(1)
                         w.writeU32(1)
                     }
                 )
                 throw ScenarioFailure(description: "a sync call of add_later was accepted")
-            } catch let error as KeelReplyError {
+            } catch let error as UndraReplyError {
                 try checkEqual(error.status, .badRequest, "status of a sync call of an async method")
             }
             try checkEqual(PlaygroundCore.add(a: 1, b: 1, ctx: core), 2, "add(1, 1) after the refusal")
@@ -184,7 +184,7 @@ extension ContractScenarios {
     }
 
     /// The sync path from a plain, non-async function: it compiles only because `add`, `greet` do not suspend.
-    nonisolated static func plainSyncCalls(_ core: KeelCore) -> (Int32, Int32, String) {
+    nonisolated static func plainSyncCalls(_ core: UndraCore) -> (Int32, Int32, String) {
         return (
             PlaygroundCore.add(a: 40, b: 2, ctx: core),
             PlaygroundCore.add(a: 2_147_483_647, b: 1, ctx: core),

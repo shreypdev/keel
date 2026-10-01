@@ -1,9 +1,9 @@
 import Foundation
-@testable import KeelRuntime
+@testable import UndraRuntime
 
 /// The `Log` port of the harness: keeps every record `(level, target, message)` the core writes.
 /// Levels are 0 trace, 1 debug, 2 info, 3 warn, 4 error, 5 fatal.
-final class CapturingLog: KeelAdapter, @unchecked Sendable {
+final class CapturingLog: UndraAdapter, @unchecked Sendable {
     /// One log record.
     struct Record: Equatable, Sendable {
         let level: UInt8
@@ -22,11 +22,11 @@ final class CapturingLog: KeelAdapter, @unchecked Sendable {
         return records.snapshot
     }
 
-    func makePortImpl(core: KeelCore) -> PortImpl? {
+    func makePortImpl(core: UndraCore) -> PortImpl? {
         let records = self.records
         return .sync([
             StandardPorts.Log.log: { args in
-                var reader = KeelReader(args)
+                var reader = UndraReader(args)
                 let level = try reader.readU8()
                 let target = try reader.readString()
                 let message = try reader.readString()

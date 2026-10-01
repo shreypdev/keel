@@ -1,5 +1,5 @@
 import Foundation
-@testable import KeelRuntime
+@testable import UndraRuntime
 
 /// Why a scenario failed: the first check that did not hold.
 struct ScenarioFailure: Error, CustomStringConvertible {
@@ -87,18 +87,18 @@ func quietFor(milliseconds: Int) async throws {
 // MARK: - Encoding helpers for raw calls
 
 /// The encoded arguments of a raw call, written field by field.
-func encoded(_ write: (inout KeelWriter) -> Void) -> [UInt8] {
-    var writer = KeelWriter()
+func encoded(_ write: (inout UndraWriter) -> Void) -> [UInt8] {
+    var writer = UndraWriter()
     write(&writer)
     return writer.finish()
 }
 
 /// Decodes a whole reply body as `Value`.
-func decoded<Value: KeelCodec>(_ type: Value.Type, _ body: [UInt8]) throws -> Value {
-    return try Value.keelDecoded(from: body)
+func decoded<Value: UndraCodec>(_ type: Value.Type, _ body: [UInt8]) throws -> Value {
+    return try Value.undraDecoded(from: body)
 }
 
-extension KeelCore {
+extension UndraCore {
     /// A reading of one integer of the core's statistics document (`live_handles`,
     /// `crossings.calls`, ...): scenarios compare readings, since other scenarios share the core.
     func stat(_ key: String) -> Int {
@@ -161,7 +161,7 @@ func success<Value, Failure: Error>(
 
 // MARK: - Events and recording
 
-extension KeelCore {
+extension UndraCore {
     /// Emits `Connectivity.changed(online, kind)`, the way the platform's monitor would.
     func emitConnectivity(online: Bool, kind: PortNetKind) {
         event(

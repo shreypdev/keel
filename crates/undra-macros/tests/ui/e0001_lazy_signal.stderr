@@ -1,0 +1,8 @@
+error: error[undra::E0001]: `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet
+         = note: a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it
+         = help: expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0001_lazy_signal.rs:15:12
+   |
+15 |     older: Lazy<Row>,
+   |            ^^^^^^^^^

@@ -1,0 +1,17 @@
+error: error[undra::E0042]: query `ping` returns `()`
+         = note: a query caches the value it returns; a query with nothing to return has nothing to cache
+         = help: use `#[undra::mutation]` for a call that only has effects, or return the data the platform needs
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0042
+  --> tests/ui/m3_query_cannot_cache_unit_or_option.rs:20:30
+   |
+20 | pub async fn ping(ctx: &Ctx) -> Result<(), Failure> {
+   |                              ^^^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0042]: query `find` returns an `Option`
+         = note: the handle's `data` signal is already optional (no result yet), so an optional result would be ambiguous: `None` could mean "not loaded" or "loaded, absent"
+         = help: return a record or a list (an empty `Vec` says "nothing"), or an enum naming the cases
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0042
+  --> tests/ui/m3_query_cannot_cache_unit_or_option.rs:25:39
+   |
+25 | pub async fn find(ctx: &Ctx, id: u32) -> Result<Option<Todo>, Failure> {
+   |                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

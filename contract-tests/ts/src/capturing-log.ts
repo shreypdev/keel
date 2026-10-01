@@ -1,10 +1,10 @@
-import type { LogAdapter } from "@keel/runtime";
+import type { LogAdapter } from "@undra/runtime";
 
 /** One record the core (or the runtime) logged. */
 export interface LogRecord {
   /** 0 trace, 1 debug, 2 info, 3 warn, 4 error, 5 fatal. */
   readonly level: number;
-  /** The module the record came from, such as `keel::panic`. */
+  /** The module the record came from, such as `undra::panic`. */
   readonly target: string;
   /** The text of the record. */
   readonly message: string;

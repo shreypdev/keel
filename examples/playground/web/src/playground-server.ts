@@ -1,7 +1,7 @@
-import { type Header, type HttpAdapter, HttpError, type HttpRequest, type HttpResponse } from "@keel/runtime";
+import { type Header, type HttpAdapter, HttpError, type HttpRequest, type HttpResponse } from "@undra/runtime";
 
 /** The address the core is told the server is at (`configureRemote`). Nothing listens there: the `Http` port below answers. */
-export const REMOTE_BASE_URL = "https://playground.keel.test";
+export const REMOTE_BASE_URL = "https://playground.undra.test";
 
 /** The list the Remote tab shows. Any other list name works too and starts empty. */
 export const INBOX = "inbox";
@@ -22,7 +22,7 @@ export interface PlaygroundServerOptions {
   readonly latencyMs?: number;
 }
 
-const SEED = ["Buy milk", "Walk the dog", "Write Keel"];
+const SEED = ["Buy milk", "Walk the dog", "Write Undra"];
 const JSON_HEADERS: readonly Header[] = [{ name: "Content-Type", value: "application/json" }];
 const ROUTE = /^\/lists\/([^/]+)\/todos(?:\/(\d+))?$/;
 const encoder = new TextEncoder();
@@ -52,7 +52,7 @@ function readJson(request: HttpRequest): unknown {
  *
  * ```ts
  * const server = new PlaygroundServer({ latencyMs: 0 });
- * await KeelCore.load({ mode: "wasm-main", wasm, expectedSchemaHash, adapters: { http: server } });
+ * await UndraCore.load({ mode: "wasm-main", wasm, expectedSchemaHash, adapters: { http: server } });
  * ```
  */
 export class PlaygroundServer implements HttpAdapter {

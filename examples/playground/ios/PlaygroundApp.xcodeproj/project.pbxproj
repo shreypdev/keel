@@ -8,8 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		A0A0A0A0A0A0A0A000000001 /* PlaygroundCore in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000010 /* PlaygroundCore */; };
-		A0A0A0A0A0A0A0A000000002 /* KeelRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000011 /* KeelRuntime */; };
-		A0A0A0A0A0A0A0A000000003 /* KeelCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* KeelCore.xcframework */; };
+		A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000011 /* UndraRuntime */; };
+		A0A0A0A0A0A0A0A000000003 /* UndraCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,7 +24,7 @@
 
 /* Begin PBXFileReference section */
 		A0A0A0A0A0A0A0A00000200 /* PlaygroundAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlaygroundAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0A0A0A0A0A0A0A000000020 /* KeelCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = KeelCore.xcframework; path = "../build/ios/KeelCore.xcframework"; sourceTree = SOURCE_ROOT; };
+		A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = UndraCore.xcframework; path = "../build/ios/UndraCore.xcframework"; sourceTree = SOURCE_ROOT; };
 		A0A0A0A0A0A0A0A000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0A0A0A0A0A0A0A000000030 /* PlaygroundApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "PlaygroundApp.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -55,8 +55,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A0A0A0A0A0A0A0A000000001 /* PlaygroundCore in Frameworks */,
-				A0A0A0A0A0A0A0A000000002 /* KeelRuntime in Frameworks */,
-				A0A0A0A0A0A0A0A000000003 /* KeelCore.xcframework in Frameworks */,
+				A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */,
+				A0A0A0A0A0A0A0A000000003 /* UndraCore.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,7 +85,7 @@
 		A0A0A0A0A0A0A0A000000062 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				A0A0A0A0A0A0A0A000000020 /* KeelCore.xcframework */,
+				A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -140,7 +140,7 @@
 			name = "PlaygroundApp";
 			packageProductDependencies = (
 				A0A0A0A0A0A0A0A000000010 /* PlaygroundCore */,
-				A0A0A0A0A0A0A0A000000011 /* KeelRuntime */,
+				A0A0A0A0A0A0A0A000000011 /* UndraRuntime */,
 			);
 			productName = "PlaygroundApp";
 			productReference = A0A0A0A0A0A0A0A000000030 /* PlaygroundApp.app */;
@@ -176,7 +176,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A0A0A0A0A0A0A0A000000120 /* generated Swift package */,
-				A0A0A0A0A0A0A0A000000121 /* KeelRuntime package */,
+				A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A0A0A0A0A0A0A0A000000063 /* Products */;
@@ -285,7 +285,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "dev.keel.playground";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.undra.playground";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -293,12 +293,12 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-force_load",
-					"$(SRCROOT)/../build/ios/KeelCore.xcframework/ios-arm64/libkeel_core.a",
+					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"-force_load",
-					"$(SRCROOT)/../build/ios/KeelCore.xcframework/ios-arm64-simulator/libkeel_core.a",
+					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64-simulator/libundra_core.a",
 				);
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 			};
@@ -322,7 +322,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "dev.keel.playground";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.undra.playground";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -330,12 +330,12 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-force_load",
-					"$(SRCROOT)/../build/ios/KeelCore.xcframework/ios-arm64/libkeel_core.a",
+					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"-force_load",
-					"$(SRCROOT)/../build/ios/KeelCore.xcframework/ios-arm64-simulator/libkeel_core.a",
+					"$(SRCROOT)/../build/ios/UndraCore.xcframework/ios-arm64-simulator/libundra_core.a",
 				);
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 			};
@@ -348,7 +348,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "dev.keel.playground.uitests";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.undra.playground.uitests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
@@ -364,7 +364,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "dev.keel.playground.uitests";
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.undra.playground.uitests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 6.0;
@@ -410,9 +410,9 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../generated/swift";
 		};
-		A0A0A0A0A0A0A0A000000121 /* KeelRuntime package */ = {
+		A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../../runtimes/swift/KeelRuntime";
+			relativePath = "../../../runtimes/swift/UndraRuntime";
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -422,10 +422,10 @@
 			package = A0A0A0A0A0A0A0A000000120 /* generated Swift package */;
 			productName = "PlaygroundCore";
 		};
-		A0A0A0A0A0A0A0A000000011 /* KeelRuntime */ = {
+		A0A0A0A0A0A0A0A000000011 /* UndraRuntime */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A0A0A0A0A0A0A0A000000121 /* KeelRuntime package */;
-			productName = KeelRuntime;
+			package = A0A0A0A0A0A0A0A000000121 /* UndraRuntime package */;
+			productName = UndraRuntime;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,12 +1,12 @@
 import Foundation
-@testable import KeelRuntime
+@testable import UndraRuntime
 
 /// The `Http` port of the harness: an in-memory server.
 ///
 /// Routes are matched by method and exact URL. The server records every request (method, URL,
 /// headers, body), can hold a reply back for a number of milliseconds and can answer with a
 /// network error (`HttpError.network("offline")`). An unknown route answers 404.
-final class FakeServer: KeelAdapter, @unchecked Sendable {
+final class FakeServer: UndraAdapter, @unchecked Sendable {
     /// Where the harness tells the core the server is (`configureRemote`).
     static let baseURL = "https://playground.test"
 
@@ -96,12 +96,12 @@ final class FakeServer: KeelAdapter, @unchecked Sendable {
 
     // MARK: The port
 
-    func makePortImpl(core: KeelCore) -> PortImpl? {
+    func makePortImpl(core: UndraCore) -> PortImpl? {
         let state = self.state
         return .async([
             StandardPorts.Http.request: { args in
-                var reader = KeelReader(args)
-                let request = try PortHttpRequest.keelDecode(&reader)
+                var reader = UndraReader(args)
+                let request = try PortHttpRequest.undraDecode(&reader)
                 try reader.finish()
                 let route = state.withLock { (current: inout State) -> Route? in
                     current.requests.append(Request(
@@ -117,11 +117,11 @@ final class FakeServer: KeelAdapter, @unchecked Sendable {
                 }
                 switch route?.outcome {
                 case .response(let status, let body)?:
-                    return PortHttpResponse(status: status, headers: [], body: body).keelEncoded()
+                    return PortHttpResponse(status: status, headers: [], body: body).undraEncoded()
                 case .networkError(let reason)?:
-                    throw KeelPortError(body: PortHttpError.network(reason).keelEncoded())
+                    throw UndraPortError(body: PortHttpError.network(reason).undraEncoded())
                 case nil:
-                    return PortHttpResponse(status: 404, headers: [], body: []).keelEncoded()
+                    return PortHttpResponse(status: 404, headers: [], body: []).undraEncoded()
                 }
             },
         ])

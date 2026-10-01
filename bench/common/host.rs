@@ -9,12 +9,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use keel::meta::ids;
-use keel::runtime::testing::{call_payload, decode_reply};
-use keel::runtime::{Host, PortCallOutcome};
-use keel::runtime::{Runtime, RuntimeConfig};
-use keel::wire::payload::{CallTarget, ReplyStatus};
-use keel::wire::{Decode, Handle};
+use undra::meta::ids;
+use undra::runtime::testing::{call_payload, decode_reply};
+use undra::runtime::{Host, PortCallOutcome};
+use undra::runtime::{Runtime, RuntimeConfig};
+use undra::wire::payload::{CallTarget, ReplyStatus};
+use undra::wire::{Decode, Handle};
 
 #[derive(Default)]
 pub struct CountingHost {
@@ -74,7 +74,7 @@ impl Host for CountingHost {
 ///
 /// `Runtime::new` hands out an `Arc<Runtime>` whose last drop does **not** stop it: the
 /// query client (an extension) holds a `Ctx`, a reference cycle, so a runtime that is merely
-/// dropped keeps itself, and its `keel-core` thread, alive for the life of the process (see
+/// dropped keeps itself, and its `undra-core` thread, alive for the life of the process (see
 /// `bench/RESULTS.md`, findings). `shutdown()` is what releases it, so the harness calls it, and
 /// a benchmark that builds hundreds of runtimes does not accumulate threads.
 pub struct Core(Arc<Runtime>);
@@ -100,9 +100,9 @@ impl Drop for Core {
     }
 }
 
-/// A runtime with no `keel-core` thread (the host drives the executor with `run_pending`, as the
+/// A runtime with no `undra-core` thread (the host drives the executor with `run_pending`, as the
 /// wasm shell does), so the numbers do not include a thread hop; `bench/RESULTS.md` has the
-/// `keel_call` numbers that do.
+/// `undra_call` numbers that do.
 pub fn runtime() -> (Arc<Core>, Arc<CountingHost>) {
     let host = Arc::new(CountingHost::default());
     let config = RuntimeConfig {

@@ -1,4 +1,4 @@
-import type { KvAdapter } from "@keel/runtime";
+import type { KvAdapter } from "@undra/runtime";
 
 /** One call the core made to the `Kv` port. */
 export interface KvOperation {

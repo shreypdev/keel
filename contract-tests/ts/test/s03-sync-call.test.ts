@@ -1,24 +1,24 @@
 import { expect, test } from "vitest";
-import { CallTarget, KeelReplyError, KeelWriter, ReplyStatus, codecs, decodeValue } from "@keel/runtime";
-import { KeelIds } from "@playground/core";
+import { CallTarget, UndraReplyError, UndraWriter, ReplyStatus, codecs, decodeValue } from "@undra/runtime";
+import { UndraIds } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step } from "../src/wait.js";
 
-// S03 sync call: the synchronous path (`core.callSync`, the `keel_call_sync` export; `wasm-main`
+// S03 sync call: the synchronous path (`core.callSync`, the `undra_call_sync` export; `wasm-main`
 // only) answers without waiting for an event loop.
 
 const FREE = CallTarget.FreeFunction;
 
 function addArgs(a: number, b: number): Uint8Array {
-  const w = new KeelWriter();
+  const w = new UndraWriter();
   w.writeI32(a);
   w.writeI32(b);
   return w.finish();
 }
 
 function addLaterArgs(a: number, b: number, delayMs: number): Uint8Array {
-  const w = new KeelWriter();
+  const w = new UndraWriter();
   w.writeI32(a);
   w.writeI32(b);
   w.writeU32(delayMs);
@@ -26,24 +26,24 @@ function addLaterArgs(a: number, b: number, delayMs: number): Uint8Array {
 }
 
 function greetArgs(name: string): Uint8Array {
-  const w = new KeelWriter();
+  const w = new UndraWriter();
   w.writeStr(name);
   return w.finish();
 }
 
 test("S03 sync call", async ({ task }) => {
   const { core } = await boot();
-  const syncAdd = (a: number, b: number): number => decodeValue(codecs.i32, core.callSync(FREE, KeelIds.Functions.add, addArgs(a, b)));
+  const syncAdd = (a: number, b: number): number => decodeValue(codecs.i32, core.callSync(FREE, UndraIds.Functions.add, addArgs(a, b)));
 
   await step("1. add and greet through the sync path", () => {
     expect(syncAdd(40, 2)).toBe(42);
     expect(syncAdd(2_147_483_647, 1)).toBe(-2_147_483_648);
-    const greeting = decodeValue(codecs.string, core.callSync(FREE, KeelIds.Functions.greet, greetArgs("Ada")));
+    const greeting = decodeValue(codecs.string, core.callSync(FREE, UndraIds.Functions.greet, greetArgs("Ada")));
     expect(greeting).toBe("Hello, Ada, from the playground core");
   });
 
   await step("2. the sync path has no suspension: it returns bytes, not a promise", () => {
-    const result: unknown = core.callSync(FREE, KeelIds.Functions.add, addArgs(1, 2));
+    const result: unknown = core.callSync(FREE, UndraIds.Functions.add, addArgs(1, 2));
     expect(result).toBeInstanceOf(Uint8Array);
     expect(typeof (result as { then?: unknown }).then).toBe("undefined");
     expect(core.mode).toBe("wasm-main");
@@ -66,13 +66,13 @@ test("S03 sync call", async ({ task }) => {
     const before = await counters(core);
     let refusal: unknown;
     try {
-      core.callSync(FREE, KeelIds.Functions.addLater, addLaterArgs(1, 1, 10));
+      core.callSync(FREE, UndraIds.Functions.addLater, addLaterArgs(1, 1, 10));
     } catch (error) {
       refusal = error;
     }
-    expect(refusal).toBeInstanceOf(KeelReplyError);
-    expect((refusal as KeelReplyError).status).toBe(ReplyStatus.BadRequest);
-    expect((refusal as KeelReplyError).reason).toBeTruthy();
+    expect(refusal).toBeInstanceOf(UndraReplyError);
+    expect((refusal as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
+    expect((refusal as UndraReplyError).reason).toBeTruthy();
     expect(syncAdd(1, 1)).toBe(2);
     const after = await counters(core);
     expect(after.badRequests - before.badRequests).toBe(1);

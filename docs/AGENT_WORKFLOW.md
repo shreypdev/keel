@@ -1,4 +1,4 @@
-# The worktree workflow — how changes land on Keel
+# The worktree workflow — how changes land on Undra
 
 This is the working method that built v1, written down so the next contributor — human
 or AI agent — follows the same loop. It exists because parallel work on one checkout
@@ -65,7 +65,7 @@ No piece merges on its author's word. A reviewer who did not write the code atta
 * The author (or a fix round) closes every High/Medium with a regression test derived
   from the reviewer's repro, then the **same reviewer re-verifies** with their own
   repros and appends a per-finding CLOSED / NOT CLOSED verdict.
-* For `keel-ffi` (the only unsafe crate): the review runs ASan and Miri; a fix to a
+* For `undra-ffi` (the only unsafe crate): the review runs ASan and Miri; a fix to a
   safety finding is re-verified under the same tools.
 
 For small pieces the review can be a focused pass by the integrator; for core crates it
@@ -83,12 +83,12 @@ Then the integrator runs the **full matrix**, not just the touched crate:
 
 ```bash
 cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check
-(cd runtimes/ts/@keel/runtime && npm test)
-runtimes/kotlin/keel-runtime/scripts/test-local.sh
-(cd runtimes/swift/KeelRuntime && swift test)
-bash crates/keel-ffi/tests/wasm/run.sh && bash crates/keel-ffi/tests/c/run.sh
+(cd runtimes/ts/@undra/runtime && npm test)
+runtimes/kotlin/undra-runtime/scripts/test-local.sh
+(cd runtimes/swift/UndraRuntime && swift test)
+bash crates/undra-ffi/tests/wasm/run.sh && bash crates/undra-ffi/tests/c/run.sh
 bash contract-tests/run-all.sh
-cargo test -p keel-bench --test budgets --release
+cargo test -p undra-bench --test budgets --release
 ```
 
 Two rules of merge hygiene, both learned the hard way:
@@ -131,6 +131,38 @@ invite double-merges.
 * The stash stack is shared across all worktrees. Never bare `git stash` — prefer a WIP
   commit; if you must stash, tag it (`git stash push -u -m "<slug>"`) and `apply` by
   SHA, never `pop`.
+
+## Bringing a branch across the rename
+
+The product was renamed to Undra (ADR-030) by `scripts/rename-keel-to-undra.sh`. A branch cut
+before the rename crosses it mechanically, in the same order the rename branch did:
+
+1. **Commit your work, and `git add` every new file.** The script only touches tracked files
+   (it lists untracked ones that need it as a warning).
+2. **`git merge main`.** For a conflict in a file you own, keep your side
+   (`git checkout --ours -- <file>`); in any other file, take main's (`--theirs`). A file you
+   added inside a directory the rename moved is placed at the new path by git
+   (`CONFLICT (file location)`): `git add` it there.
+3. **`scripts/rename-keel-to-undra.sh <your paths>`** — files or directories, relative to where
+   you stand, in either spelling (`site/blog`, `crates/undra-foo`). It `git mv`s every path
+   whose name carries the old name (deepest first) and rewrites the content of every tracked
+   text file under the paths; running it again changes nothing. Without paths it renames the
+   whole tree except `site/` and the launch-v2 planning records; naming a path lifts those two
+   exclusions, never the immutable history (`.10x/reviews/`, ADR-018 to ADR-030).
+4. **Regenerate, never hand-edit:** lockfiles (`cargo build`; `npm install --package-lock-only`
+   in each package), the goldens (`UPDATE_GOLDEN=1 cargo test -p undra-bindgen --test golden`
+   and `-p undra-cli --test bindgen_schema`; `UPDATE_SNAPSHOTS=1 cargo test -p undra-macros
+   --lib`; `TRYBUILD=overwrite cargo test -p undra-macros --test compile_fail`;
+   `undra bindgen -C examples/playground --docs`), then `cargo fmt`. The regenerated output
+   differs from the script's only in import order (the new name sorts later than the old one did),
+   line wrapping and caret underlines; read the diff to confirm nothing else
+   moved.
+5. **What a text rename cannot see** fails a test, and the fix is to recompute the
+   expectation, not to loosen it: fixed-width text (a padded table), hashes of names
+   (`fnv1a64` known-answer vectors, file names derived from a key), and sort order. The four
+   envelope magic bytes `4B 45 45 4C` are wire format and deliberately did not change; a
+   test that needs a wrong magic spells it as bytes.
+6. **Re-run your suites.**
 
 ## For AI agents specifically
 

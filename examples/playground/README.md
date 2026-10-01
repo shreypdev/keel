@@ -1,19 +1,19 @@
-# The Keel playground
+# The Undra playground
 
-The reference app of Keel v1, and the first thing we ship on (constitution R10). One Rust core is the
+The reference app of Undra v1, and the first thing we ship on (constitution R10). One Rust core is the
 whole app logic; a React web app, a SwiftUI iOS app and a Jetpack Compose Android app are three
-UIs over it. Nothing in `core/` is special: it uses only the public `keel` API, the way your app's
+UIs over it. Nothing in `core/` is special: it uses only the public `undra` API, the way your app's
 core will.
 
 ```
 examples/playground/
-  keel.toml        the Keel project: core path, names of the generated bindings, platforms
+  undra.toml        the Undra project: core path, names of the generated bindings, platforms
   core/            the Rust core (crate playground-core): todos, counter, 10k list, remote query, lab, bench
-  generated/       Swift package, Kotlin module and npm package: written by `keel bindgen`, committed
-  web/             React + Vite app         -> build/web/keel_core.wasm
-  ios/             SwiftUI app (Xcode)      -> build/ios/KeelCore.xcframework
-  android/         Compose app (Gradle)     -> build/android/jniLibs/<abi>/libkeel_core.so
-  build/           what `keel build` writes (not committed)
+  generated/       Swift package, Kotlin module and npm package: written by `undra bindgen`, committed
+  web/             React + Vite app         -> build/web/undra_core.wasm
+  ios/             SwiftUI app (Xcode)      -> build/ios/UndraCore.xcframework
+  android/         Compose app (Gradle)     -> build/android/jniLibs/<abi>/libundra_core.so
+  build/           what `undra build` writes (not committed)
   .proof/          screenshots and logs of the apps running on Chromium, the iOS simulator and an Android emulator
 ```
 
@@ -30,39 +30,39 @@ examples/playground/
 
 The core reads no clock and no random source and starts no thread (R12): identities come from
 counters, time from the `Clock` port, delays from `Ctx::sleep`, the network from the `Http` port. That is
-why every scenario can be driven with `keel::ports::fakes` in Rust and with an in-memory server on
+why every scenario can be driven with `undra::ports::fakes` in Rust and with an in-memory server on
 each platform. The apps have no server either: each supplies its own in-memory `Http` adapter and tells the
 core where "the server" is with `configure_remote`.
 
 ## Commands
 
-All of them use the `keel` CLI (`cargo build -p keel-cli`; the binary is `target/debug/keel`):
+All of them use the `undra` CLI (`cargo build -p undra-cli`; the binary is `target/debug/undra`):
 
 ```sh
-keel bindgen -C examples/playground --docs      # after changing a public type: Swift, Kotlin, TypeScript again
-keel bindgen -C examples/playground --docs --check   # CI: fail when generated/ is stale
-keel build   -C examples/playground --platform web,host,ios,android [--release]
-cargo test -p playground-core                    # the core's own tests (TestRuntime + keel::ports::fakes)
+undra bindgen -C examples/playground --docs      # after changing a public type: Swift, Kotlin, TypeScript again
+undra bindgen -C examples/playground --docs --check   # CI: fail when generated/ is stale
+undra build   -C examples/playground --platform web,host,ios,android [--release]
+cargo test -p playground-core                    # the core's own tests (TestRuntime + undra::ports::fakes)
 ```
 
 Then run an app:
 
-* web: `keel build -C examples/playground --platform web`, then `cd web && npm ci && npm run dev`
+* web: `undra build -C examples/playground --platform web`, then `cd web && npm ci && npm run dev`
   (`npm test` runs the fake server's tests, `npm run smoke` builds and drives the app in headless Chromium).
-* iOS: `keel build -C examples/playground --platform ios`, then open `ios/PlaygroundApp.xcodeproj`
-  (`KEEL_LINK_CORE=1` in the environment of Xcode, see the project settings), or run `ios/smoke.sh` to
+* iOS: `undra build -C examples/playground --platform ios`, then open `ios/PlaygroundApp.xcodeproj`
+  (`UNDRA_LINK_CORE=1` in the environment of Xcode, see the project settings), or run `ios/smoke.sh` to
   build, launch every tab on the simulator, screenshot it and run the XCUITest tour.
-* Android: `keel build -C examples/playground --platform android --release`, then `cd android && ./gradlew
+* Android: `undra build -C examples/playground --platform android --release`, then `cd android && ./gradlew
   :app:installDebug` (`android/README.md` has the `adb` commands). `--release` is what you package: a debug
   core is 42 MB per ABI.
 
 The apps have no server: each supplies an in-memory `Http` adapter ("a server in a few lines of Swift, Kotlin
-or TypeScript") that answers for `https://playground.keel.test`, and an Offline switch on the Remote tab makes
+or TypeScript") that answers for `https://playground.undra.test`, and an Offline switch on the Remote tab makes
 it fail every request and tells the core through the `Connectivity` port, so you can watch the offline queue
 hold an optimistic add and replay it.
 
-`keel dev -C examples/playground` serves the core over a WebSocket: start an app against it (web:
-`?keel=ws://127.0.0.1:7443`; iOS: the `KEEL_DEV_URL` environment variable) and edit `core/` to see the
+`undra dev -C examples/playground` serves the core over a WebSocket: start an app against it (web:
+`?undra=ws://127.0.0.1:7443`; iOS: the `UNDRA_DEV_URL` environment variable) and edit `core/` to see the
 change without rebuilding the app.
 
 ## Benchmark hooks

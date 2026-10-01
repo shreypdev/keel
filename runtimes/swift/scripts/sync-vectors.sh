@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copies the shared wire contract vectors into the Swift test resources.
 #
-#   contract-tests/wire-vectors.json  ->  runtimes/swift/KeelRuntime/Tests/KeelRuntimeTests/Resources/wire-vectors.json
+#   contract-tests/wire-vectors.json  ->  runtimes/swift/UndraRuntime/Tests/UndraRuntimeTests/Resources/wire-vectors.json
 #
 # SwiftPM packages cannot reference files outside their own directory, so the tests read a copy.
 # Run this whenever contract-tests/wire-vectors.json changes and commit the result.
@@ -15,7 +15,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/../../.." && pwd)"
 source_file="$repo_root/contract-tests/wire-vectors.json"
 swift_root="$(cd "$here/.." && pwd)"
-target_dir="$swift_root/KeelRuntime/Tests/KeelRuntimeTests/Resources"
+target_dir="$swift_root/UndraRuntime/Tests/UndraRuntimeTests/Resources"
 target_file="$target_dir/wire-vectors.json"
 
 if [[ ! -f "$source_file" ]]; then

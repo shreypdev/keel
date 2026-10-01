@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { ChangeOp, codecs } from "@keel/runtime";
-import { BigList, Counter, FilterCodec, KeelIds, TodoCodec, Todos } from "@playground/core";
+import { ChangeOp, codecs } from "@undra/runtime";
+import { BigList, Counter, FilterCodec, UndraIds, TodoCodec, Todos } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { RawStore, valueOf } from "../src/raw-store.js";
 import { counters } from "../src/stats.js";
@@ -16,7 +16,7 @@ test("S08 store observe: initial change-set", async () => {
   const { core } = await boot();
 
   await step("1. raw: one change-set, four full values, before observe resolves", async () => {
-    const store = await RawStore.open(core, KeelIds.Objects.Todos, { observe: false });
+    const store = await RawStore.open(core, UndraIds.Objects.Todos, { observe: false });
     expect(store.received).toBe(0);
     const changeSetsBefore = core.mirror.changeSets;
     await store.observe(true);
@@ -60,11 +60,11 @@ test("S08 store observe: initial change-set", async () => {
   });
 
   await step("4. observing off silences the store; observing on sends the current values once", async () => {
-    const store = await RawStore.open(core, KeelIds.Objects.Todos);
+    const store = await RawStore.open(core, UndraIds.Objects.Todos);
     store.take();
     await store.observe(false);
     const changeSetsOff = core.mirror.changeSets;
-    await store.callWith(KeelIds.Objects.Todos.add, codecs.string, "x");
+    await store.callWith(UndraIds.Objects.Todos.add, codecs.string, "x");
     await sleep(200);
     expect(store.received, "nothing reaches a store nobody observes").toBe(0);
     expect(core.mirror.changeSets - changeSetsOff).toBe(0);

@@ -1,5 +1,5 @@
 import Foundation
-@testable import KeelRuntime
+@testable import UndraRuntime
 import PlaygroundCore
 import XCTest
 
@@ -214,7 +214,7 @@ extension ContractScenarios {
             }
 
             // 6. The queue was persisted while offline and is gone after the replay.
-            let queueKey = "keel.query.queue"
+            let queueKey = "undra.query.queue"
             try check(queuedWhileOffline.contains { $0.key == queueKey && $0.isSet }, "no write of \(queueKey) while offline: \(queuedWhileOffline)")
             try await waitUntil("the queue to be emptied") {
                 guard let last = kv.operations.last(where: { $0.key == queueKey }) else {
@@ -245,7 +245,7 @@ extension MemoryKv.Operation {
             guard value.count >= 12 else {
                 return false
             }
-            var reader = KeelReader(Array(value[8...]))
+            var reader = UndraReader(Array(value[8...]))
             return (try? reader.readU32()) == 0
         }
     }

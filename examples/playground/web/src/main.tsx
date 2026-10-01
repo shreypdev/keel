@@ -2,11 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./index.css";
-import { startKeel } from "./keel";
+import { startUndra } from "./undra";
 
 const root = createRoot(document.getElementById("root") as HTMLElement);
 
-startKeel().then(
+startUndra().then(
   (playground) => {
     root.render(
       <StrictMode>
@@ -16,11 +16,11 @@ startKeel().then(
   },
   (error: unknown) => {
     // Loading fails when the core was built from another schema than these bindings
-    // (`keel bindgen`, `keel build`), or when the dev server cannot be reached (`keel dev`).
+    // (`undra bindgen`, `undra build`), or when the dev server cannot be reached (`undra dev`).
     root.render(
       <main>
         <pre className="startup-error" role="alert">
-          Keel did not start: {String(error)}
+          Undra did not start: {String(error)}
         </pre>
       </main>,
     );
