@@ -16,6 +16,19 @@
 //! Undra's generated fixtures: the [`workload`] description, the [`measure`] routine and the
 //! [`budget`] file parser.
 //!
+//! # Harsh conditions: a second layer
+//!
+//! The budgets test times one operation at a time. The **sustained** scenarios (`bench/common/
+//! stress.rs`, run by `cargo test -p undra-bench --test stress --release` and, for minutes at a
+//! time, by the `soak` binary) answer a different question: does it stay fast for seconds, at
+//! rates far above any UI, with producers and consumers on several threads? They record every
+//! operation in a [`stats::Histogram`] (no allocation per sample), sample resident memory with
+//! [`rss`] (standard library only), check invariants that a fast-but-wrong core would fail
+//! (nothing lost, nothing reordered, the host's copy of a list equals the core's), and are gated
+//! by the `[stress."name"]` tables of `budgets.toml` ([`budget::StressBudget`]): throughput
+//! floors, tail-latency ceilings, change-set bytes and RSS growth. Design:
+//! `.10x/specs/2026-09-30-stress-bench-design.md`.
+//!
 //! # Wall-clock time is fine here
 //!
 //! The deterministic-core rule (R12) bans `Instant::now` from the core. This crate is a
@@ -33,4 +46,6 @@
 
 pub mod budget;
 pub mod measure;
+pub mod rss;
+pub mod stats;
 pub mod workload;

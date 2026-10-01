@@ -36,3 +36,7 @@ harness = false
 [[bench]]
 name = "snapshot"
 harness = false
+
+[[bench]]
+name = "stress"
+harness = false

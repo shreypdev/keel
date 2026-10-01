@@ -13,6 +13,18 @@ name: Bench
 # If a runner class is consistently slower, set UNDRA_BENCH_SCALE (for example 2) rather than
 # loosening the file. `cargo bench -p undra-bench` (criterion) is for humans and is deliberately
 # not run here.
+#
+# Harsh conditions (the second and third steps, about a minute together): the sustained scenarios
+# of `bench/tests/stress.rs` run for 2 s each (UNDRA_STRESS_SECONDS) at rates far above any UI, with
+# 8 threads completing port calls under a 60 Hz drain thread, and fail on a throughput floor, a
+# tail ceiling, change-set bytes or RSS growth over their `[stress."..."]` table in
+# `bench/budgets.toml`, or on a broken invariant (nothing lost, nothing reordered, the host list
+# equals the core list, a stream never more than one item ahead of its credit). Then the soak runs
+# the mixed paced load of a busy app for 10 s and fails on RSS growth, p99 drift or a broken
+# invariant. A noisy run gets three attempts per scenario (two for the soak); an invariant that
+# breaks is never retried. UNDRA_BENCH_SCALE applies to rates and latencies here too, never to
+# bytes, RSS or invariants. These are core-side host numbers: what a platform does with a
+# change-set afterwards is measured on the platform (`bench/RESULTS.md`, "Harsh conditions").
 
 on:
   push:
@@ -37,3 +49,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Budgets
         run: cargo test -p undra-bench --test budgets --release -- --nocapture
+      - name: Harsh conditions (sustained scenarios)
+        run: cargo test -p undra-bench --test stress --release -- --nocapture
+      - name: Soak (10 s)
+        run: cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2
