@@ -481,7 +481,9 @@ TypeScript shapes change (R11: decided here before the code). Swift is unchanged
    Argument validation is not an outcome of the call: a value the wire cannot represent (Kotlin
    `WireException.NegativeDuration`, `DuplicateKey`, `IllegalArgumentException`; TypeScript `TypeError` and
    `RangeError` from the writer) is a programming error raised before anything is sent, like Swift's codec
-   preconditions (ADR-032, section 3), and propagates unchanged.
+   preconditions (ADR-032, section 3), and propagates unchanged. A **command** is the exception: it
+   cannot throw, and a click handler has no way to handle a `WireException` or a `RangeError`, so its argument
+   encoding is inside its `try` and a failure there is reported like any other.
 4. **Commands report instead of failing**, as in decision 4 of the ADR. A synchronous method that returns `()` and
    has no error type is generated so that it logs the failure at error level, passes an
    `UndraUnhandledError(operation, error: UndraCallError)` to `LoadOptions.onError` and returns:
@@ -584,8 +586,8 @@ TypeScript (SPEC 10.3):
   undecoded body (fails R3), and `Panicked`, `Refused` and `CancelledByCore` need different fields.
 * **Make `UndraUnhandledError` a plain data class.** Kept an `UndraException` / `UndraError` so a handler can
   rethrow it (`onError = { throw it }` in a debug build), which the runtime contains and logs.
-* **Wrap the argument encoding in the call's `try`.** Rejected: a value the wire cannot represent is the caller's
-  bug, not an outcome of the call (decision 3).
+* **Wrap the argument encoding in every call's `try`.** Rejected: a value the wire cannot represent is the
+  caller's bug, not an outcome of the call (decision 3). Done for commands only, which must not throw.
 
 ### Consequences
 
@@ -620,6 +622,6 @@ TypeScript (SPEC 10.3):
   changed nothing, and the playgrounds show the hook (the ADR's own risk, applied to the two runtimes).
 * **The stream tie-break** (flag 2 as `E`, else `String`) is the Swift behaviour and the same ambiguity; ADR-036
   removes it.
-* **Remaining differences after this amendment** (recorded, not hidden): a failed port implementation is reported to
-  `onError` on Kotlin and TypeScript but only logged on Swift; `UndraCore.stats()` shapes and Kotlin's missing
+* **Remaining differences after this amendment** (recorded, not hidden): a failed port implementation and a malformed
+  change-set are reported to `onError` on Kotlin and TypeScript but only logged on Swift; `UndraCore.stats()` shapes and Kotlin's missing
   `isClosed` (PA-8) are untouched; close semantics (PA-6) and connection state (PA-7) belong to ADR-034 and B2.

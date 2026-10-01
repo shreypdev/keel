@@ -59,13 +59,13 @@ todos.close()                             // or let the cleaner release it if yo
 | `Mirror` | Per-handle registry of `apply` callbacks. Change-sets are applied on `UndraDispatchers.main` in batches (one hop for a burst) with per-batch coalescing of superseded full values; a throwing callback is logged and skipped, a malformed change-set is dropped whole |
 | `UndraDispatchers` | `main`: `Dispatchers.Main.immediate` on Android (found by reflection), else a daemon thread named `undra-main` |
 | `PortImpl(sync, methods)` | What generated `<trait>PortImpl(...)` returns and `LoadOptions.adapters` / `registerPort` take. Sync ports are answered inline (they must not suspend or call Undra); async ports run off the core's threads and answer through `portReply` |
-| Errors | `UndraException` (base of generated errors too), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)` |
+| Errors | `UndraException` (base of generated errors, and of everything below), `UndraCallError` (sealed: `CancelledByCore`, `Panicked`, `Refused`, `Unavailable`, `Malformed`; what a generated call throws besides its own `E` and `CancellationException`), `UndraUnhandledError(operation, error)` (what `LoadOptions.onError` receives), `UndraReplyException(status, body)` (+ `panicInfo`, `badRequestReason`), `UndraTransportException(reason, ...)`, `UndraProtocolException`, `UndraRestoreException(code)`, `UndraModeException`, `UndraSchemaMismatchException(expected, got)`, `UndraPortException(body)`, `WireException` (sealed) |
 
 ### Threading, in one paragraph
 
 The native core calls back from its own threads, possibly with its lock held, into direct buffers that die when the
 callback returns. So every callback **copies** what it needs and returns; nothing in the runtime calls a native method from
-inside a callback (a thread-local guard turns an attempt into an `UndraException` instead of a deadlock); replies resume
+inside a callback (a thread-local guard turns an attempt into the core's own `E_REENTRANT` bad request, `UndraCallError.Refused`, instead of a deadlock); replies resume
 suspended callers on their own dispatcher (a continuation that would run inline, such as `Dispatchers.Unconfined`, is resumed
 from the `undra-delivery` thread instead); stream items go through `undra-delivery` too; change-sets hop to the main thread
 through the mirror. `observe` in `INPROC` applies the initial change-set before it returns: inline on the main thread, or by
