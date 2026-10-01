@@ -1,0 +1,8 @@
+error: error[undra::E0012]: `Vec<Box<dyn Any>>` cannot cross the boundary
+         = note: trait objects have no wire representation
+         = help: make `items` a concrete `#[undra::api]` type, or an enum listing the cases you need
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0012
+ --> tests/ui/e0012_trait_object_field.rs:9:16
+  |
+9 |     pub items: Vec<Box<dyn Any>>,
+  |                ^^^^^^^^^^^^^^^^^

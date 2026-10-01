@@ -7,12 +7,12 @@
 //! table's "handle method call" row.
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use keel::runtime::testing::TestRuntime;
-use keel::wire::payload::CallTarget;
-use keel_ports::fakes;
-use keel_query::{BoxFuture, CtxQuery, QueryDef, REFETCH_METHOD_ID};
-use keel_runtime::Ctx;
-use keel_wire::{Decode, Encode, Handle};
+use undra::runtime::testing::TestRuntime;
+use undra::wire::payload::CallTarget;
+use undra_ports::fakes;
+use undra_query::{BoxFuture, CtxQuery, QueryDef, REFETCH_METHOD_ID};
+use undra_runtime::Ctx;
+use undra_wire::{Decode, Encode, Handle};
 
 /// A query that answers from memory: the benchmarks measure the client, not a network.
 struct Count;
@@ -32,7 +32,7 @@ impl QueryDef for Count {
     }
 }
 
-keel_runtime::inventory::submit! { keel_query::QueryRegistration::of::<Count>() }
+undra_runtime::inventory::submit! { undra_query::QueryRegistration::of::<Count>() }
 
 fn runtime() -> TestRuntime {
     let t = TestRuntime::new();

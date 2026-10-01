@@ -1,0 +1,28 @@
+[package]
+name = "undra-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Undra query client: a typed query cache with staleness, dedup, retry, optimistic mutations, an offline queue and persistence"
+readme = "README.md"
+keywords = ["undra", "query", "cache", "cross-platform"]
+categories = ["caching", "asynchronous"]
+
+[dependencies]
+undra-meta = { workspace = true }
+undra-wire = { workspace = true }
+undra-signals = { workspace = true }
+undra-runtime = { workspace = true }
+undra-ports = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+# The integration tests and the doc examples use the real macros through the facade
+# (`#[undra::query]`, `#[undra::mutation]`, `#[undra::error]`). The facade depends on this crate, a
+# cycle only through dev-dependencies, which cargo allows: the tests link the one undra-query.
+undra = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }

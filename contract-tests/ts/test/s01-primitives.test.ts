@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { durationToNanos } from "@keel/runtime";
+import { durationToNanos } from "@undra/runtime";
 import { type Primitives, echoPrimitives, ping } from "@playground/core";
 import { boot } from "../src/harness.js";
 import { step } from "../src/wait.js";

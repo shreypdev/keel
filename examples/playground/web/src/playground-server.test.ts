@@ -1,4 +1,4 @@
-import { HttpError, type HttpMethod, type HttpRequest } from "@keel/runtime";
+import { HttpError, type HttpMethod, type HttpRequest } from "@undra/runtime";
 import { describe, expect, test } from "vitest";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
 
@@ -27,7 +27,7 @@ describe("PlaygroundServer", () => {
     expect(inbox.body).toEqual([
       { id: 1, title: "Buy milk", done: false },
       { id: 2, title: "Walk the dog", done: false },
-      { id: 3, title: "Write Keel", done: false },
+      { id: 3, title: "Write Undra", done: false },
     ]);
     expect((await json(server, request("get", "/lists/other/todos"))).body).toEqual([]);
   });

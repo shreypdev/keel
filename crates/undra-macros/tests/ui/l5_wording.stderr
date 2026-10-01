@@ -1,0 +1,71 @@
+error: error[undra::E0007]: the receiver `self: &Arc<Self>` of method `by_arc` is not supported
+         = note: the dispatcher resolves the object from its handle and calls the method with `&Type`; a receiver such as `Arc<Self>`, `Box<Self>` or `Pin<&Self>` needs a different call
+         = help: write `&self`; clone an `Arc` of the object inside the method if you need one
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/l5_wording.rs:19:19
+   |
+19 |     pub fn by_arc(self: &Arc<Self>) -> u32 {
+   |                   ^^^^^^^^^^^^^^^^
+
+error: error[undra::E0007]: the receiver `self: Pin<&Self>` of method `pinned` is not supported
+         = note: the dispatcher resolves the object from its handle and calls the method with `&Type`; a receiver such as `Arc<Self>`, `Box<Self>` or `Pin<&Self>` needs a different call
+         = help: write `&self`; clone an `Arc` of the object inside the method if you need one
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/l5_wording.rs:23:19
+   |
+23 |     pub fn pinned(self: Pin<&Self>) -> u32 {
+   |                   ^^^^^^^^^^^^^^^^
+
+error: error[undra::E0007]: `alias` is neither a method nor a constructor
+         = note: a `pub fn` in a `#[undra::api] impl` block must take `&self` (a method) or return `Self` / `Result<Self, E>` (a constructor); the return type is read as written, so an alias such as `type R<T> = Result<T, E>` is not followed
+         = help: add `&self`, make it return `Self` or spell out `Result<Self, E>`, or make it private / move it to a free `#[undra::api] fn`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/l5_wording.rs:28:12
+   |
+28 |     pub fn alias() -> Res<Self> {
+   |            ^^^^^
+
+error: error[undra::E0004]: boxed stream `Pin<Box<dyn undra::runtime::Stream<Item = u32> + Send>>` cannot cross the boundary
+         = note: a stream is described to the platforms as `impl Stream<Item = T>` in a return type; a boxed or `dyn` stream has no schema representation
+         = help: return `impl Stream<Item = T> + Send + 'static` (box it inside the function if the branches differ)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0004
+  --> tests/ui/l5_wording.rs:37:19
+   |
+37 | pub fn boxed() -> Pin<Box<dyn undra::runtime::Stream<Item = u32> + Send>> {
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0005]: `Result<u32, String>` cannot be nested inside another type
+         = note: `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return
+         = help: return the `Result` from the method and keep only plain values in fields, parameters and nested types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0005
+  --> tests/ui/l5_wording.rs:43:24
+   |
+43 | pub fn nested() -> Vec<Result<u32, String>> {
+   |                        ^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0010]: `#[error]` on the variant `A` belongs to `#[undra::error]`, not `#[undra::api]`
+         = note: `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[undra::api]` enum has no messages, `Display` or `From` impls
+         = help: change the enum's attribute to `#[undra::error]`, or remove the helper attribute
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0010
+  --> tests/ui/l5_wording.rs:50:5
+   |
+50 |     #[error("not here")]
+   |     ^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0010]: `#[from]` on the field `0` belongs to `#[undra::error]`, not `#[undra::api]`
+         = note: `#[error(..)]`, `#[from]` and `#[source]` are the helper attributes of error enums; a plain `#[undra::api]` enum has no messages, `Display` or `From` impls
+         = help: change the enum's attribute to `#[undra::error]`, or remove the helper attribute
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0010
+  --> tests/ui/l5_wording.rs:52:15
+   |
+52 |     B(#[from] u8),
+   |               ^^
+
+error: error[undra::E0001]: `Instant` cannot cross the boundary
+         = note: monotonic instants are meaningless outside their process
+         = help: use `Duration` for spans and `Timestamp` for points in time; if `Instant` is a type of your own, rename it: Undra recognises this name wherever it is written
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/l5_wording.rs:57:20
+   |
+57 | pub fn instant(at: Instant) {}
+   |                    ^^^^^^^

@@ -119,7 +119,7 @@ struct RemoteScreen: View {
         typing = false
         Task {
             do {
-                _ = try await createRemoteTodo(list: KeelBootstrap.inboxList, title: title)
+                _ = try await createRemoteTodo(list: UndraBootstrap.inboxList, title: title)
                 problem = nil
             } catch {
                 problem = error.localizedDescription
@@ -131,7 +131,7 @@ struct RemoteScreen: View {
     private func toggle(_ todo: RemoteTodo) {
         Task {
             do {
-                _ = try await setRemoteDone(list: KeelBootstrap.inboxList, id: todo.id, done: !todo.done)
+                _ = try await setRemoteDone(list: UndraBootstrap.inboxList, id: todo.id, done: !todo.done)
                 problem = nil
             } catch {
                 problem = error.localizedDescription

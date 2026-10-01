@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { CallTarget, KeelReplyError, KeelTransportError, ReplyStatus } from "@keel/runtime";
-import { BigList, Counter, KeelIds, Todos, add } from "@playground/core";
+import { CallTarget, UndraReplyError, UndraTransportError, ReplyStatus } from "@undra/runtime";
+import { BigList, Counter, UndraIds, Todos, add } from "@playground/core";
 import { bootRaw } from "../src/harness.js";
 import { counters } from "../src/stats.js";
 import { step, waitFor } from "../src/wait.js";
@@ -108,8 +108,8 @@ test("S15 snapshot and restore", async () => {
     } catch (error) {
       refusal = error;
     }
-    expect(refusal, `restoring ${Array.from(junk).join(",")} must fail`).toBeInstanceOf(KeelTransportError);
-    expect((refusal as KeelTransportError).reason).toBe("protocol");
+    expect(refusal, `restoring ${Array.from(junk).join(",")} must fail`).toBeInstanceOf(UndraTransportError);
+    expect((refusal as UndraTransportError).reason).toBe("protocol");
     expect(core.closed, "a refused snapshot does not take the core down").toBe(false);
     // The core still answers, and nothing was delivered for the refused bytes.
     expect(await add(1, 1, core)).toBe(2);
@@ -120,13 +120,13 @@ test("S15 snapshot and restore", async () => {
 
   await step("7. a handle released before the snapshot is not resurrected", async () => {
     const error = await core
-      .call({ target: CallTarget.ObjectMethod, handle: ghostHandle }, KeelIds.Objects.Todos.clearDone, new Uint8Array(0))
+      .call({ target: CallTarget.ObjectMethod, handle: ghostHandle }, UndraIds.Objects.Todos.clearDone, new Uint8Array(0))
       .then(
         () => undefined,
         (e: unknown) => e,
       );
-    expect(error).toBeInstanceOf(KeelReplyError);
-    expect((error as KeelReplyError).status).toBe(ReplyStatus.BadRequest);
+    expect(error).toBeInstanceOf(UndraReplyError);
+    expect((error as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
   });
 
   await step("8. the restore created no handles: live_handles is the number of surviving stores", async () => {

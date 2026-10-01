@@ -576,162 +576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keel"
-version = "0.1.0"
-dependencies = [
- "keel-bindgen",
- "keel-macros",
- "keel-meta",
- "keel-ports",
- "keel-query",
- "keel-runtime",
- "keel-signals",
- "keel-wire",
-]
-
-[[package]]
-name = "keel-bench"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "keel",
- "keel-ports",
- "keel-query",
- "keel-runtime",
- "keel-wire",
-]
-
-[[package]]
-name = "keel-bindgen"
-version = "0.1.0"
-dependencies = [
- "heck",
- "keel-meta",
- "keel-ports",
- "serde_json",
-]
-
-[[package]]
-name = "keel-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "keel-bindgen",
- "keel-meta",
- "keel-wire",
- "libloading",
- "notify",
- "serde_json",
- "tungstenite",
-]
-
-[[package]]
-name = "keel-ffi"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "jni",
- "keel",
- "keel-runtime",
- "proptest",
- "serde_json",
-]
-
-[[package]]
-name = "keel-macros"
-version = "0.1.0"
-dependencies = [
- "keel",
- "prettyplease",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "trybuild",
-]
-
-[[package]]
-name = "keel-meta"
-version = "0.1.0"
-dependencies = [
- "inventory",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "keel-ports"
-version = "0.1.0"
-dependencies = [
- "keel-bindgen",
- "keel-macros",
- "keel-meta",
- "keel-runtime",
- "keel-wire",
- "parking_lot",
- "proptest",
-]
-
-[[package]]
-name = "keel-query"
-version = "0.1.0"
-dependencies = [
- "keel",
- "keel-meta",
- "keel-ports",
- "keel-runtime",
- "keel-signals",
- "keel-wire",
- "parking_lot",
- "proptest",
- "serde_json",
-]
-
-[[package]]
-name = "keel-runtime"
-version = "0.1.0"
-dependencies = [
- "futures-core",
- "inventory",
- "keel-meta",
- "keel-signals",
- "keel-wire",
- "parking_lot",
- "serde_json",
- "slab",
-]
-
-[[package]]
-name = "keel-signals"
-version = "0.1.0"
-dependencies = [
- "keel-wire",
- "parking_lot",
- "proptest",
-]
-
-[[package]]
-name = "keel-transport"
-version = "0.1.0"
-dependencies = [
- "keel",
- "keel-macros",
- "keel-runtime",
- "keel-wire",
- "parking_lot",
- "proptest",
- "serde_json",
- "tungstenite",
-]
-
-[[package]]
-name = "keel-wire"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde_json",
-]
-
-[[package]]
 name = "kqueue"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -888,9 +732,9 @@ dependencies = [
 name = "playground-core"
 version = "0.1.0"
 dependencies = [
- "keel",
  "serde",
  "serde_json",
+ "undra",
 ]
 
 [[package]]
@@ -1363,6 +1207,162 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "undra"
+version = "0.1.0"
+dependencies = [
+ "undra-bindgen",
+ "undra-macros",
+ "undra-meta",
+ "undra-ports",
+ "undra-query",
+ "undra-runtime",
+ "undra-signals",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-bench"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "undra",
+ "undra-ports",
+ "undra-query",
+ "undra-runtime",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-bindgen"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "serde_json",
+ "undra-meta",
+ "undra-ports",
+]
+
+[[package]]
+name = "undra-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libloading",
+ "notify",
+ "serde_json",
+ "tungstenite",
+ "undra-bindgen",
+ "undra-meta",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-ffi"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "jni",
+ "proptest",
+ "serde_json",
+ "undra",
+ "undra-runtime",
+]
+
+[[package]]
+name = "undra-macros"
+version = "0.1.0"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "trybuild",
+ "undra",
+]
+
+[[package]]
+name = "undra-meta"
+version = "0.1.0"
+dependencies = [
+ "inventory",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "undra-ports"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "proptest",
+ "undra-bindgen",
+ "undra-macros",
+ "undra-meta",
+ "undra-runtime",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-query"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "proptest",
+ "serde_json",
+ "undra",
+ "undra-meta",
+ "undra-ports",
+ "undra-runtime",
+ "undra-signals",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-runtime"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "inventory",
+ "parking_lot",
+ "serde_json",
+ "slab",
+ "undra-meta",
+ "undra-signals",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-signals"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "proptest",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-transport"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "proptest",
+ "serde_json",
+ "tungstenite",
+ "undra",
+ "undra-macros",
+ "undra-runtime",
+ "undra-wire",
+]
+
+[[package]]
+name = "undra-wire"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde_json",
+]
 
 [[package]]
 name = "unicode-ident"

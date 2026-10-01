@@ -13,7 +13,7 @@ rendering chunks...
 computing gzip size...
 dist/index.html                        0.86 kB │ gzip:   0.53 kB
 dist/assets/worker-DzrKiCp3.js        30.54 kB
-dist/assets/keel_core-CRNmuM_5.wasm  538.46 kB │ gzip: 205.50 kB
+dist/assets/undra_core-CRNmuM_5.wasm  538.46 kB │ gzip: 205.50 kB
 dist/assets/index-Ck_UYfUR.css         4.54 kB │ gzip:   1.54 kB
 dist/assets/wasm-worker-BWUAUNsX.js    5.51 kB │ gzip:   2.24 kB
 dist/assets/index-6EvRmS9G.js        319.10 kB │ gzip:  98.45 kB

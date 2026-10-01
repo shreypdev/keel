@@ -6,24 +6,24 @@
 #   examples/playground/ios/smoke.sh                 everything, output also in ../.proof/ios-smoke.log
 #   SIMULATOR="iPhone 17 Pro" examples/playground/ios/smoke.sh
 #
-# Needs Xcode, the aarch64-apple-ios-sim Rust target and the keel CLI (`cargo build -p keel-cli`).
+# Needs Xcode, the aarch64-apple-ios-sim Rust target and the undra CLI (`cargo build -p undra-cli`).
 # The core is linked with `-force_load` (see the project settings) and the runtime package is built
-# with KEEL_LINK_CORE=1, which leaves out its link-time stand-in for the core.
+# with UNDRA_LINK_CORE=1, which leaves out its link-time stand-in for the core.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$HERE/.." && pwd)"
 REPO="$(cd "$PROJECT/../.." && pwd)"
 PROOF="$PROJECT/.proof"
-KEEL="${KEEL:-$REPO/target/debug/keel}"
+UNDRA="${UNDRA:-$REPO/target/debug/undra}"
 SIMULATOR="${SIMULATOR:-iPhone 17 Pro}"
-BUNDLE="dev.keel.playground"
+BUNDLE="dev.undra.playground"
 DERIVED="$HERE/DerivedData"
 
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 export PATH="$HOME/.cargo/bin:$PATH"
-export KEEL_LINK_CORE=1
+export UNDRA_LINK_CORE=1
 
 mkdir -p "$PROOF"
 exec > >(tee "$PROOF/ios-smoke.log") 2>&1
@@ -35,9 +35,9 @@ echo "# playground iOS smoke run, $(date '+%Y-%m-%d %H:%M:%S')"
 run xcodebuild -version
 run swift --version
 
-# 1. The core, as an XCFramework (static libraries, no header: KeelRuntime's KeelFFI module has it).
-[ -x "$KEEL" ] || cargo build --manifest-path "$REPO/Cargo.toml" -p keel-cli
-run "$KEEL" build -C "$PROJECT" --platform ios
+# 1. The core, as an XCFramework (static libraries, no header: UndraRuntime's UndraFFI module has it).
+[ -x "$UNDRA" ] || cargo build --manifest-path "$REPO/Cargo.toml" -p undra-cli
+run "$UNDRA" build -C "$PROJECT" --platform ios
 
 # 2. The app.
 step "xcodebuild -project PlaygroundApp.xcodeproj -scheme PlaygroundApp -destination 'platform=iOS Simulator,name=$SIMULATOR' build"
@@ -75,17 +75,17 @@ for view in todos counter biglist remote; do
     failed=1
   fi
 done
-# Faults from anywhere in the process, and errors from Keel's own subsystem (dev.keel.*). The
+# Faults from anywhere in the process, and errors from Undra's own subsystem (dev.undra.*). The
 # simulator itself logs harmless errors (accessibility, haptics) that are not the app's.
-PREDICATE='process == "PlaygroundApp" AND (messageType == fault OR (messageType == error AND subsystem BEGINSWITH "dev.keel"))'
+PREDICATE='process == "PlaygroundApp" AND (messageType == fault OR (messageType == error AND subsystem BEGINSWITH "dev.undra"))'
 step "xcrun simctl spawn $UDID log show --last 5m --predicate '$PREDICATE'"
 problems="$(xcrun simctl spawn "$UDID" log show --last 5m --style compact --predicate "$PREDICATE" 2>/dev/null | grep -vE "^(Filtering the log data|Timestamp|getpwuid_r)" || true)"
 if [ -n "$problems" ]; then
   echo "$problems"
-  echo "FAULT OR KEEL ERROR LINES above"
+  echo "FAULT OR UNDRA ERROR LINES above"
   failed=1
 else
-  echo "no fault lines and no Keel error lines in the app's log"
+  echo "no fault lines and no Undra error lines in the app's log"
 fi
 step "crash reports for PlaygroundApp since this run started"
 if find "$HOME/Library/Logs/DiagnosticReports" -name 'PlaygroundApp*' -newer "$PROOF/ios-smoke.log" 2>/dev/null | grep .; then

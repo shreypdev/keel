@@ -4,10 +4,10 @@
 //! It does so inside one [`Ctx::txn`], so every platform receives exactly one change-set however
 //! many signals move (R5: writes cross once per transaction).
 
-use keel::prelude::*;
+use undra::prelude::*;
 
 /// Whether the count is even or odd: a value derived from `count` in the core.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Parity {
     /// The count is divisible by two.
@@ -17,7 +17,7 @@ pub enum Parity {
 }
 
 /// A counter with a change tally and a computed parity.
-#[keel::store(restore = "Self::assemble")]
+#[undra::store(restore = "Self::assemble")]
 pub struct Counter {
     ctx: Ctx,
     count: Signal<i32>,
@@ -25,7 +25,7 @@ pub struct Counter {
     parity: Computed<Parity>,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl Counter {
     /// A counter at zero with no changes made.
     pub fn new(ctx: Ctx) -> Self {
@@ -82,11 +82,11 @@ impl Counter {
 
 #[cfg(test)]
 mod tests {
-    use keel::meta::ids;
-    use keel::runtime::testing::TestRuntime;
-    use keel::signals::ALL_SIGNALS;
-    use keel::wire::Decode;
-    use keel::wire::payload::{CallTarget, ChangeSet, ReplyStatus};
+    use undra::meta::ids;
+    use undra::runtime::testing::TestRuntime;
+    use undra::signals::ALL_SIGNALS;
+    use undra::wire::Decode;
+    use undra::wire::payload::{CallTarget, ChangeSet, ReplyStatus};
 
     use super::*;
 

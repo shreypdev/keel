@@ -1,0 +1,21 @@
+[package]
+name = "undra-bindgen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Undra bindgen: emits idiomatic Swift, Kotlin and TypeScript bindings from an undra-meta schema"
+readme = "README.md"
+
+[dependencies]
+undra-meta = { workspace = true }
+serde_json = { workspace = true }
+heck = { workspace = true }
+
+[dev-dependencies]
+# The `stdlib` golden case starts from the registrations of the real standard ports, and
+# tests/stdlib.rs checks the standard-library table against them (undra-ports itself
+# dev-depends on this crate, which Cargo allows).
+undra-ports = { workspace = true }

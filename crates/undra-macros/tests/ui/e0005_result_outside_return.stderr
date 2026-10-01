@@ -1,0 +1,17 @@
+error: error[undra::E0005]: `Result<u32, String>` cannot be used as a field
+         = note: `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return
+         = help: return the `Result` from the method and keep only plain values in fields, parameters and nested types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0005
+ --> tests/ui/e0005_result_outside_return.rs:7:16
+  |
+7 |     pub value: Result<u32, String>,
+  |                ^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0005]: `Result<u32, String>` cannot be used as a parameter
+         = note: `Result<T, E>` is how a method reports a typed error; it is only legal as the outermost type of a return
+         = help: return the `Result` from the method and keep only plain values in fields, parameters and nested types
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0005
+  --> tests/ui/e0005_result_outside_return.rs:11:31
+   |
+11 | pub fn apply(previous: Option<Result<u32, String>>) {}
+   |                               ^^^^^^^^^^^^^^^^^^^

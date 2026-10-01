@@ -1,0 +1,17 @@
+error: error[undra::E0032]: `#[undra::port(sync)]` port has the `async` method `now_ms`
+         = note: `sync` promises that every method answers immediately, so the core can call it without yielding
+         = help: remove `async`, or remove `sync` from the attribute
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0032
+ --> tests/ui/e0032_port_shape.rs:7:5
+  |
+7 |     async fn now_ms(&self) -> i64;
+  |     ^^^^^
+
+error: error[undra::E0032]: port trait `Kv` has an associated item that is not a method
+         = note: a port is a list of methods the platform implements; associated types and constants have no wire representation
+         = help: remove it, or move it to a separate trait
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0032
+  --> tests/ui/e0032_port_shape.rs:12:5
+   |
+12 |     type Error;
+   |     ^^^^^^^^^^^

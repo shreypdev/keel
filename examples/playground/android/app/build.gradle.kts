@@ -5,17 +5,17 @@ plugins {
 }
 
 android {
-    namespace = "dev.keel.playground"
+    namespace = "dev.undra.playground"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.keel.playground"
+        applicationId = "dev.undra.playground"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         ndk {
-            // The ABIs `keel build --platform android` produces (keel.toml [android] abis).
+            // The ABIs `undra build --platform android` produces (undra.toml [android] abis).
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
@@ -37,10 +37,10 @@ android {
     }
 
     sourceSets {
-        // `keel build --platform android --release` writes libkeel_core.so for every ABI here. The
-        // Kotlin runtime loads it with System.loadLibrary("keel_core"). Like any path in this file
+        // `undra build --platform android --release` writes libundra_core.so for every ABI here. The
+        // Kotlin runtime loads it with System.loadLibrary("undra_core"). Like any path in this file
         // it is relative to this module (android/app), not to android/; Gradle ignores a
-        // directory that does not exist, so `keel build` checks this line after building.
+        // directory that does not exist, so `undra build` checks this line after building.
         getByName("main").jniLibs.srcDir("../../build/android/jniLibs")
     }
 }
@@ -52,8 +52,8 @@ kotlin {
 }
 
 dependencies {
-    // The Keel runtime and the bindings generated from the core.
-    implementation("dev.keel:runtime:0.1.0-SNAPSHOT")
+    // The Undra runtime and the bindings generated from the core.
+    implementation("dev.undra:runtime:0.1.0-SNAPSHOT")
     implementation(project(":core-bindings"))
 
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))

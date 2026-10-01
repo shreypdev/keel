@@ -1,8 +1,0 @@
-error: error[keel::E0012]: `Vec<Box<dyn Any>>` cannot cross the boundary
-         = note: trait objects have no wire representation
-         = help: make `items` a concrete `#[keel::api]` type, or an enum listing the cases you need
-         = docs: https://keel.dev/errors/E0012
- --> tests/ui/e0012_trait_object_field.rs:9:16
-  |
-9 |     pub items: Vec<Box<dyn Any>>,
-  |                ^^^^^^^^^^^^^^^^^

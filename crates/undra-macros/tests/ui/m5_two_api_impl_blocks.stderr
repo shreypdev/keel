@@ -1,0 +1,80 @@
+error[E0428]: the name `_undra_error_E0007_a_type_takes_one_undra_api_impl_block_Calc` is defined multiple times
+  --> tests/ui/m5_two_api_impl_blocks.rs:20:1
+   |
+ 9 | #[k::api]
+   | --------- previous definition of the value `_undra_error_E0007_a_type_takes_one_undra_api_impl_block_Calc` here
+...
+20 | #[k::api]
+   | ^^^^^^^^^ `_undra_error_E0007_a_type_takes_one_undra_api_impl_block_Calc` redefined here
+   |
+   = note: `_undra_error_E0007_a_type_takes_one_undra_api_impl_block_Calc` must be defined only once in the value namespace of this module
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0428]: the name `__UndraStoreProbe_Calc` is defined multiple times
+  --> tests/ui/m5_two_api_impl_blocks.rs:20:1
+   |
+ 9 | #[k::api]
+   | --------- previous definition of the trait `__UndraStoreProbe_Calc` here
+...
+20 | #[k::api]
+   | ^^^^^^^^^ `__UndraStoreProbe_Calc` redefined here
+   |
+   = note: `__UndraStoreProbe_Calc` must be defined only once in the type namespace of this module
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0428]: the name `__undra_dispatch_Calc` is defined multiple times
+  --> tests/ui/m5_two_api_impl_blocks.rs:20:1
+   |
+ 9 | #[k::api]
+   | --------- previous definition of the value `__undra_dispatch_Calc` here
+...
+20 | #[k::api]
+   | ^^^^^^^^^ `__undra_dispatch_Calc` redefined here
+   |
+   = note: `__undra_dispatch_Calc` must be defined only once in the value namespace of this module
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0428]: the name `__UNDRA_META_Calc` is defined multiple times
+  --> tests/ui/m5_two_api_impl_blocks.rs:20:1
+   |
+ 9 | #[k::api]
+   | --------- previous definition of the value `__UNDRA_META_Calc` here
+...
+20 | #[k::api]
+   | ^^^^^^^^^ `__UNDRA_META_Calc` redefined here
+   |
+   = note: `__UNDRA_META_Calc` must be defined only once in the value namespace of this module
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `__UndraStoreProbe_Calc` for type `Calc`
+  --> tests/ui/m5_two_api_impl_blocks.rs:20:1
+   |
+ 9 | #[k::api]
+   | --------- first implementation here
+...
+20 | #[k::api]
+   | ^^^^^^^^^ conflicting implementation for `Calc`
+   |
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `UndraObject` for type `Calc`
+  --> tests/ui/m5_two_api_impl_blocks.rs:20:1
+   |
+ 9 | #[k::api]
+   | --------- first implementation here
+...
+20 | #[k::api]
+   | ^^^^^^^^^ conflicting implementation for `Calc`
+   |
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `__UNDRA_IS_OBJECT`
+  --> tests/ui/m5_two_api_impl_blocks.rs:9:1
+   |
+ 9 | #[k::api]
+   | ^^^^^^^^^ duplicate definitions for `__UNDRA_IS_OBJECT`
+...
+20 | #[k::api]
+   | --------- other definition for `__UNDRA_IS_OBJECT`
+   |
+   = note: this error originates in the attribute macro `k::api` (in Nightly builds, run with -Z macro-backtrace for more info)

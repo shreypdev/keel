@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { HttpError, KeelReader, codecs, emitConnectivity } from "@keel/runtime";
+import { HttpError, UndraReader, codecs, emitConnectivity } from "@undra/runtime";
 import { type RemoteTodo, RemoteError, RemoteTodosQueryHandle, configureRemote, createRemoteTodo, setRemoteDone } from "@playground/core";
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
@@ -12,13 +12,13 @@ import { sleep, step, waitFor } from "../src/wait.js";
 const LIST = "s14";
 const URL = `${BASE_URL}/lists/${LIST}/todos`;
 const PATCH_URL = `${URL}/1`;
-const QUEUE_KEY = "keel.query.queue";
+const QUEUE_KEY = "undra.query.queue";
 const created: RemoteTodo = { id: 9, title: "Offline item", done: false };
 const isPlaceholder = (todo: RemoteTodo): boolean => todo.id >= 0x8000_0000;
 
 /** What the persisted queue holds: `{ schema_hash u64, count u32, count x { mutation_id u32, params bytes, idempotency_key Uuid } }`. */
 function decodeQueue(bytes: Uint8Array): { readonly keys: string[] } {
-  const r = new KeelReader(bytes);
+  const r = new UndraReader(bytes);
   r.readU64();
   const count = r.readU32();
   const keys: string[] = [];

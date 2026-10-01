@@ -3,7 +3,7 @@
 //! This is the data-layer demo. The app tells the core where the server is ([`configure_remote`]
 //! with a [`RemoteConfig`]); the core never opens a socket itself: every request goes through the
 //! `Http` port, which is `URLSession`, OkHttp or `fetch` in an app and a scripted fake in a test
-//! (`keel::ports::fakes::FakeHttp`). An app that has no server can answer the port itself, which
+//! (`undra::ports::fakes::FakeHttp`). An app that has no server can answer the port itself, which
 //! is what the playground apps do to work offline.
 //!
 //! * [`remote_todos`] is a query (`GET {base}/lists/{list}/todos`): cached per list, fresh for 30
@@ -22,12 +22,12 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use keel::ports::{HttpError, HttpMethod, HttpRequest};
-use keel::prelude::*;
 use serde::{Deserialize, Serialize};
+use undra::ports::{HttpError, HttpMethod, HttpRequest};
+use undra::prelude::*;
 
 /// Where the server is: what an app supplies once, at start-up.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemoteConfig {
     /// The server's address without a trailing slash, such as `https://api.example.com`.
@@ -35,7 +35,7 @@ pub struct RemoteConfig {
 }
 
 /// One to-do item on the server.
-#[keel::api]
+#[undra::api]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteTodo {
     /// The server's identity of the item. An item that is only shown optimistically, and that the
@@ -48,7 +48,7 @@ pub struct RemoteTodo {
 }
 
 /// Why a request to the server failed.
-#[keel::error]
+#[undra::error]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RemoteError {
     /// [`configure_remote`] was not called.
@@ -85,7 +85,7 @@ fn state(ctx: &Ctx) -> &RemoteState {
 /// Tells the core where the server is. Call it once at start-up, before anything observes
 /// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
-#[keel::api]
+#[undra::api]
 pub fn configure_remote(ctx: &Ctx, config: RemoteConfig) {
     let base = config.base_url.trim_end_matches('/').to_owned();
     *state(ctx)
@@ -125,7 +125,7 @@ fn parse<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, RemoteError> {
 }
 
 /// The items of the server's list `list`: `GET {base}/lists/{list}/todos`.
-#[keel::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
+#[undra::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
 pub async fn remote_todos(ctx: &Ctx, list: String) -> Result<Vec<RemoteTodo>, RemoteError> {
     let url = endpoint(ctx, &format!("/lists/{list}/todos"))?;
     parse(&send(ctx, HttpRequest::get(url)).await?)
@@ -134,7 +134,7 @@ pub async fn remote_todos(ctx: &Ctx, list: String) -> Result<Vec<RemoteTodo>, Re
 /// Creates an item in `list`: `POST {base}/lists/{list}/todos`. Idempotent: the request carries an `Idempotency-Key`
 /// header that stays the same across retries and offline replays, so the server can tell a repeat
 /// from a second item.
-#[keel::mutation(key = "remote-todos:{list}", idempotent)]
+#[undra::mutation(key = "remote-todos:{list}", idempotent)]
 pub async fn post_remote_todo(
     ctx: &Ctx,
     list: String,
@@ -144,14 +144,14 @@ pub async fn post_remote_todo(
     let body = serde_json::json!({ "title": title }).to_string();
     let mut request =
         HttpRequest::post(url, body.into_bytes()).with_header("Content-Type", "application/json");
-    if let Some(key) = keel::query::idempotency_key() {
+    if let Some(key) = undra::query::idempotency_key() {
         request = request.with_header("Idempotency-Key", key.to_string());
     }
     parse(&send(ctx, request).await?)
 }
 
 /// Marks an item of `list` finished or not: `PATCH {base}/lists/{list}/todos/{id}`.
-#[keel::mutation(key = "remote-todos:{list}")]
+#[undra::mutation(key = "remote-todos:{list}")]
 pub async fn patch_remote_todo(
     ctx: &Ctx,
     list: String,
@@ -173,7 +173,7 @@ pub async fn patch_remote_todo(
 /// While the device is offline the request is queued (the mutation is idempotent) and the call
 /// keeps waiting; the placeholder stays visible until the network returns and the request is
 /// replayed.
-#[keel::api]
+#[undra::api]
 pub async fn create_remote_todo(
     ctx: &Ctx,
     list: String,
@@ -195,7 +195,7 @@ pub async fn create_remote_todo(
 
 /// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
 /// refuses.
-#[keel::api]
+#[undra::api]
 pub async fn set_remote_done(
     ctx: &Ctx,
     list: String,
@@ -219,10 +219,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use keel::ports::fakes::{self, Fakes, Matcher};
-    use keel::ports::{HttpResponse, NetKind};
-    use keel::query::{CtxQuery, QueryHandle, QueryStatus};
-    use keel::runtime::testing::TestRuntime;
+    use undra::ports::fakes::{self, Fakes, Matcher};
+    use undra::ports::{HttpResponse, NetKind};
+    use undra::query::{CtxQuery, QueryHandle, QueryStatus};
+    use undra::runtime::testing::TestRuntime;
 
     use super::*;
 

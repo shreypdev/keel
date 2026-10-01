@@ -1,0 +1,64 @@
+package dev.undra.runtime.adapters
+
+import dev.undra.runtime.PortImpl
+import dev.undra.runtime.Platform
+import java.nio.file.Path
+import java.nio.file.Paths
+
+/**
+ * The default port implementations for a JVM host (SPEC section 11), keyed by port id so they can be
+ * passed to `LoadOptions.adapters`:
+ *
+ * | Port | Implementation |
+ * |---|---|
+ * | `Http` | [HttpAdapter] over `java.net.http.HttpClient` |
+ * | `Kv`, `SecureStore` | [FileKv] over files in `<dataDir>/kv` and `<dataDir>/secure` |
+ * | `Fs` | [FsAdapter] over `<dataDir>/fs` |
+ * | `Clock`, `Rng`, `Log` | [ClockAdapter], [RngAdapter] (`SecureRandom`), [LogAdapter] (`java.util.logging`) |
+ * | `Timer` | [TimerAdapter] over a scheduled executor |
+ * | `Connectivity`, `Lifecycle` | none: they are event ports; see [ConnectivityEvents] and [LifecycleEvents] |
+ *
+ * `UndraCore.load` installs these itself unless `LoadOptions.defaultAdapters` is `false`; use this object to
+ * pick another data directory or to mix them with your own.
+ */
+public object JvmAdapters {
+    /** System property naming the directory of the file-backed adapters. */
+    public const val DATA_DIR_PROPERTY: String = "undra.data.dir"
+
+    /** The data directory: the system property `undra.data.dir`, or `.undra/data` in the user's home directory. */
+    public fun defaultDataDir(): Path {
+        val configured = System.getProperty(DATA_DIR_PROPERTY)
+        if (!configured.isNullOrEmpty()) return Paths.get(configured)
+        return Paths.get(System.getProperty("user.home") ?: ".", ".undra", "data")
+    }
+
+    /**
+     * Every adapter of the table above, with file-backed ones under [dataDir].
+     *
+     * @param timerFired what the timer adapter calls when a timer is due; pass `core::timerFired`.
+     */
+    public fun standard(dataDir: Path = defaultDataDir(), timerFired: (UInt) -> Unit): Map<UInt, PortImpl> {
+        val all = LinkedHashMap<UInt, PortImpl>(portable(timerFired))
+        all[StandardPorts.Http.PORT_ID] = HttpAdapter().portImpl()
+        all[StandardPorts.Kv.PORT_ID] = FileKv(dataDir.resolve("kv")).portImpl("Kv")
+        all[StandardPorts.SecureStore.PORT_ID] = FileKv(dataDir.resolve("secure")).portImpl("SecureStore")
+        all[StandardPorts.Fs.PORT_ID] = FsAdapter(dataDir.resolve("fs")).portImpl()
+        return all
+    }
+
+    /**
+     * Only the adapters that need nothing from the platform beyond the JDK's core classes: Clock, Rng, Log
+     * and Timer. Used where the rest must come from elsewhere (Android).
+     */
+    public fun portable(timerFired: (UInt) -> Unit): Map<UInt, PortImpl> =
+        linkedMapOf(
+            StandardPorts.Clock.PORT_ID to ClockAdapter().portImpl(),
+            StandardPorts.Rng.PORT_ID to RngAdapter().portImpl(),
+            StandardPorts.Log.PORT_ID to LogAdapter().portImpl(),
+            StandardPorts.Timer.PORT_ID to TimerAdapter(timerFired).portImpl(),
+        )
+
+    /** What `UndraCore.load` installs by default: [standard] on a JVM, [portable] on Android. */
+    internal fun defaults(timerFired: (UInt) -> Unit): Map<UInt, PortImpl> =
+        if (Platform.isAndroid) portable(timerFired) else standard(timerFired = timerFired)
+}
