@@ -1,0 +1,14 @@
+{
+  "scenario": "event/sustained",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": "commit-spin",
+  "command": "UNDRA_BENCH_RESULTS_TAG=commit-spin UNDRA_STRESS_SECONDS=2 UNDRA_BENCH_BASELINE=/private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd-dirty"},
+  "load_average": {"before": 2.98, "after": 2.79},
+  "run": {"seconds": 2, "warmup_ms": 200, "elapsed_s": 2.000137458, "attempt": 3, "attempts": 3, "scale": 1, "baseline": "/private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml"},
+  "result": {"ops": 9200640, "per_sec": 4600003.846335645, "p50_ns": 211, "p99_ns": 295, "p999_ns": 375, "max_ns": 100125, "bytes_per_op": 37, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 1.4 M ops/s, p99 at most 840 ns", "passed": false, "failures": ["throughput 4600004/s is under 4968753/s (1.5x under the baseline's 7453129/s), against the baseline in /private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml"]},
+  "invariants": [{"what": "one change-set per event (9200640 for 9200640)", "holds": true, "timing": false}, {"what": "37 bytes per change-set (340423680 for 9200640)", "holds": true, "timing": false}, {"what": "the last event is the signal's value (1024)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": []
+}

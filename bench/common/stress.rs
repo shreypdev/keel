@@ -52,8 +52,13 @@ pub const CHURN_ROWS: u32 = if cfg!(debug_assertions) { 500 } else { 10_000 };
 pub const WINDOW: u64 = 256;
 /// Host threads answering port calls in the completions scenario.
 pub const COMPLETERS: usize = 8;
+/// Calls the completions issuer makes between two looks at the clock.
+const CLOCK_EVERY: usize = 32;
 /// Bytes of a change-set holding one `u64` entry: 12 header, 17 entry header, 8 value.
 pub const TICK_BYTES: u64 = 37;
+/// Bytes of change-sets per keyed-churn operation: the fixed cycle (4 updates, 2 inserts, 2 removes,
+/// 2 moves) at fixed widths ships 610 bytes per round of ten, whatever the positions.
+pub const CHURN_BYTES_PER_OP: u64 = 61;
 /// Bytes of a change-set holding `n` entries of a `u32` each: 12 header plus 21 per entry.
 pub const fn u32_change_set_bytes(entries: u64) -> u64 {
     12 + entries * 21
@@ -395,8 +400,11 @@ pub enum Fault {
     /// The scenario must still fail.
     DropOneUpdate,
     /// The "main thread" swaps the first two change-sets of its first frame: delivery order
-    /// must be reported as broken.
+    /// must be reported as broken (and, for a store whose writes each add one, the sequence).
     SwapChangeSets,
+    /// The "main thread" never looks at the second change-set of its first frame: a change-set
+    /// lost on the way to the UI must be reported (the walked count and the sequence).
+    DropChangeSet,
 }
 
 /// How a sustained scenario runs.
@@ -409,16 +417,46 @@ pub struct StressConfig {
     pub rss: bool,
     /// Something to break on purpose; [`Fault::None`] outside the invariant tests.
     pub fault: Fault,
+    /// How long each scenario runs **before** the measured run, results discarded: thread start-up,
+    /// cold caches, the first allocations. `None` is [`default_warmup`] (a tenth of the run, at
+    /// most 200 ms); `Some(Duration::ZERO)` measures from the first operation. The measured
+    /// `duration` is unchanged, so a run lasts `warmup + duration`.
+    pub warmup: Option<Duration>,
+}
+
+/// The warm-up of a run of `duration` that nobody configured: a tenth of it, at most 200 ms (a 10 s
+/// run warms up for 200 ms, a 2 s CI run for 200 ms, the 100 ms debug smoke run for 10 ms).
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(default_warmup(Duration::from_secs(10)), Duration::from_millis(200));
+/// assert_eq!(default_warmup(Duration::from_millis(100)), Duration::from_millis(10));
+/// ```
+pub fn default_warmup(duration: Duration) -> Duration {
+    (duration / 10).min(Duration::from_millis(200))
 }
 
 impl StressConfig {
-    /// A run of `duration` with RSS sampling on and nothing broken.
+    /// A run of `duration` with RSS sampling on, the default warm-up and nothing broken.
     pub fn new(duration: Duration) -> StressConfig {
         StressConfig {
             duration,
             rss: true,
             fault: Fault::None,
+            warmup: None,
         }
+    }
+
+    /// The warm-up before a measured phase of `span`: what was configured, else
+    /// [`default_warmup`] of the phase.
+    pub fn warmup_for(&self, span: Duration) -> Duration {
+        self.warmup.unwrap_or_else(|| default_warmup(span))
+    }
+
+    /// The warm-up of the whole run (see [`warmup_for`](StressConfig::warmup_for)).
+    pub fn warmup(&self) -> Duration {
+        self.warmup_for(self.duration)
     }
 }
 
@@ -459,8 +497,11 @@ pub struct StressReport {
     pub name: &'static str,
     /// Operations completed in the measured run.
     pub ops: u64,
-    /// Wall time of the measured run.
+    /// Wall time of the measured run (the warm-up is not in it).
     pub elapsed: Duration,
+    /// How long the scenario ran before the measured run, results discarded (zero for the stream,
+    /// whose own slow half and RSS warm-up do that job).
+    pub warmup: Duration,
     /// Per-operation latency; empty where the scenario has none (the stream).
     pub latency: Histogram,
     /// Change-set (or stream item) bytes over the run.
@@ -524,6 +565,7 @@ pub fn scenarios() -> Vec<(&'static str, Scenario)> {
         ("fanout_stores/sustained", fanout_stores),
         ("stream/backpressure", stream_backpressure),
         ("completions/8_threads", completions),
+        ("completions/contended", completions_contended),
     ]
 }
 
@@ -537,10 +579,31 @@ pub const BYTES_EXACT: &[&str] = &[
     "fanout/sustained",
     "fanout_stores/sustained",
     "completions/8_threads",
+    "completions/contended",
 ];
 
 pub fn nanos(d: Duration) -> u64 {
     d.as_nanos().min(u128::from(u64::MAX)) as u64
+}
+
+/// Runs `op` in rounds of `round` operations for `warmup` (at least one round unless `warmup` is
+/// zero), recording nothing. Whole rounds, so a scenario whose operations come in a cycle ends the
+/// warm-up where it started.
+fn warm_up(warmup: Duration, round: usize, mut op: impl FnMut(usize)) -> u64 {
+    if warmup.is_zero() {
+        return 0;
+    }
+    let deadline = Instant::now() + warmup;
+    let mut ops = 0_u64;
+    loop {
+        for i in 0..round {
+            op(i);
+        }
+        ops += round as u64;
+        if Instant::now() >= deadline {
+            return ops;
+        }
+    }
 }
 
 /// Times `op` one call at a time until `duration` has passed, in rounds of `round` operations
@@ -591,6 +654,9 @@ pub fn firehose(cfg: &StressConfig) -> StressReport {
     let payloads: Vec<Vec<u8>> = (0..1024_u64)
         .map(|i| method_call(ticker, "Ticker", "set", 2, &enc(&(i + 1))))
         .collect();
+    warm_up(cfg.warmup(), payloads.len(), |i| {
+        black_box(rt.call_sync(&payloads[i]));
+    });
     let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
 
     let (latency, ops, elapsed) = time_ops(cfg.duration, payloads.len(), |i| {
@@ -605,6 +671,7 @@ pub fn firehose(cfg: &StressConfig) -> StressReport {
         name: "firehose/sustained",
         ops,
         elapsed,
+        warmup: cfg.warmup(),
         latency,
         bytes: shipped,
         rss: None,
@@ -636,6 +703,10 @@ pub fn event_firehose(cfg: &StressConfig) -> StressReport {
     let sink = construct(&rt, "TickSink", &[]);
     rt.observe(sink.0, ALL_SIGNALS, true);
     let events: Vec<(u32, u32, Vec<u8>)> = (0..1024_u64).map(|i| tick_event(i + 1)).collect();
+    warm_up(cfg.warmup(), events.len(), |i| {
+        let (port, method, payload) = &events[i];
+        rt.event(*port, *method, payload);
+    });
     let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
 
     let (latency, ops, elapsed) = time_ops(cfg.duration, events.len(), |i| {
@@ -650,6 +721,7 @@ pub fn event_firehose(cfg: &StressConfig) -> StressReport {
         name: "event/sustained",
         ops,
         elapsed,
+        warmup: cfg.warmup(),
         latency,
         bytes: shipped,
         rss: None,
@@ -688,15 +760,18 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
     match cfg.fault {
         Fault::SkipPatches => mirror.skip_every(101),
         Fault::DropOneUpdate => mirror.skip_nth(1),
-        Fault::None | Fault::SwapChangeSets => {}
+        Fault::None | Fault::SwapChangeSets | Fault::DropChangeSet => {}
     }
     host.watch(mirror);
     rt.observe(churn.0, ALL_SIGNALS, true);
     let seeded = host.with_mirror(|m| m.list.len());
     let call = method_call(churn, "Churn", "churn", 3, &enc(&1_u32));
-    let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
 
     // Rounds of ten operations, so the list is back at its seeded length when the clock stops.
+    let warm_ops = warm_up(cfg.warmup(), 10, |_| {
+        black_box(rt.call_sync(&call));
+    });
+    let (sets, bytes) = (host.counts.change_sets(), host.counts.change_set_bytes());
     let (latency, ops, elapsed) = time_ops(cfg.duration, 10, |_| {
         let reply = rt.call_sync(&call);
         black_box(&reply);
@@ -711,6 +786,7 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
         name: "keyed_churn_10k/sustained",
         ops,
         elapsed,
+        warmup: cfg.warmup(),
         latency,
         bytes: shipped,
         rss: None,
@@ -730,13 +806,19 @@ pub fn keyed_churn(cfg: &StressConfig) -> StressReport {
             Invariant::new(
                 format!(
                     "every operation was applied on the host as one keyed patch ({patches} patches \
-                     for {ops} operations; {fulls} full values, 1 expected)"
+                     for {} operations, warm-up included; {fulls} full values, 1 expected)",
+                    warm_ops + ops
                 ),
-                patches == ops && fulls == 1,
+                patches == warm_ops + ops && fulls == 1,
+            ),
+            Invariant::new(
+                format!("{CHURN_BYTES_PER_OP} bytes per operation, exactly ({shipped} for {ops})"),
+                shipped == CHURN_BYTES_PER_OP * ops,
             ),
             Invariant::new(
                 format!(
-                    "the list is back at {seeded} rows after {ops} operations ({})",
+                    "the list is back at {seeded} rows after {} operations ({})",
+                    warm_ops + ops,
                     core.len()
                 ),
                 core.len() == seeded && seeded == CHURN_ROWS as usize,
@@ -784,13 +866,20 @@ pub fn fanout(cfg: &StressConfig) -> StressReport {
     let big_time = cfg.duration.mul_f64(0.75);
     let small_time = cfg.duration - big_time;
     let mut big = CellFanout::new(100_000, 1_000);
+    run_cell_fanout(&mut big, cfg.warmup_for(big_time));
+    let (big_sets0, big_bytes0) = (big.change_sets(), big.bytes());
     let (latency, ops, elapsed) = run_cell_fanout(&mut big, big_time);
-    let (big_sets, big_bytes) = (big.change_sets(), big.bytes());
+    let (big_sets, big_bytes) = (big.change_sets() - big_sets0, big.bytes() - big_bytes0);
     drop(big);
 
     let mut small = CellFanout::new(10_000, 1_000);
+    run_cell_fanout(&mut small, cfg.warmup_for(small_time));
+    let (small_sets0, small_bytes0) = (small.change_sets(), small.bytes());
     let (small_latency, small_ops, _) = run_cell_fanout(&mut small, small_time);
-    let (small_sets, small_bytes) = (small.change_sets(), small.bytes());
+    let (small_sets, small_bytes) = (
+        small.change_sets() - small_sets0,
+        small.bytes() - small_bytes0,
+    );
 
     let (p50_big, p50_small) = (latency.percentile(0.5), small_latency.percentile(0.5));
     let expected = u32_change_set_bytes(1_000);
@@ -798,6 +887,7 @@ pub fn fanout(cfg: &StressConfig) -> StressReport {
         name: "fanout/sustained",
         ops,
         elapsed,
+        warmup: cfg.warmup_for(big_time),
         bytes: big_bytes,
         rss: None,
         invariants: vec![
@@ -835,6 +925,14 @@ pub fn fanout(cfg: &StressConfig) -> StressReport {
 /// and the worst case for any platform-side merge.
 pub fn fanout_stores(cfg: &StressConfig) -> StressReport {
     let mut fan = StoresFanout::new(1_000, 100);
+    let warmup = cfg.warmup();
+    if !warmup.is_zero() {
+        let deadline = Instant::now() + warmup;
+        while Instant::now() < deadline {
+            fan.transaction();
+        }
+    }
+    let (sets0, bytes0) = (fan.change_sets(), fan.bytes());
     let mut hist = Histogram::new();
     let mut ops = 0_u64;
     let start = Instant::now();
@@ -850,28 +948,24 @@ pub fn fanout_stores(cfg: &StressConfig) -> StressReport {
         }
     }
     let elapsed = start.elapsed();
+    let (sets, bytes) = (fan.change_sets() - sets0, fan.bytes() - bytes0);
     let per_txn = 1_000 * u32_change_set_bytes(1);
     StressReport {
         name: "fanout_stores/sustained",
         ops,
         elapsed,
+        warmup,
         latency: hist,
-        bytes: fan.bytes(),
+        bytes,
         rss: None,
         invariants: vec![
             Invariant::new(
-                format!(
-                    "1,000 change-sets per transaction, one per store ({} for {ops})",
-                    fan.change_sets()
-                ),
-                fan.change_sets() == ops * 1_000,
+                format!("1,000 change-sets per transaction, one per store ({sets} for {ops})"),
+                sets == ops * 1_000,
             ),
             Invariant::new(
-                format!(
-                    "{per_txn} bytes per transaction ({})",
-                    fan.bytes() / ops.max(1)
-                ),
-                fan.bytes() == ops * per_txn,
+                format!("{per_txn} bytes per transaction ({})", bytes / ops.max(1)),
+                bytes == ops * per_txn,
             ),
         ],
         notes: Vec::new(),
@@ -949,6 +1043,7 @@ pub fn stream_backpressure(cfg: &StressConfig) -> StressReport {
         name: "stream/backpressure",
         ops: fast_items,
         elapsed: fast_elapsed,
+        warmup: Duration::ZERO,
         latency: Histogram::new(),
         bytes: fast_bytes,
         rss,
@@ -998,12 +1093,95 @@ pub fn spawn_completers(rt: &Arc<Core>, host: &Arc<DrainHost>) -> Vec<JoinHandle
         .collect()
 }
 
+/// How long the contended scenario's writer rests between two `call_sync` writes. `ZERO` is a
+/// thread that hammers the core lock as fast as it gets it back (it only yields); a short pause is
+/// a host thread that writes in bursts, as a UI thread tapping does.
+const WRITER_PAUSE: Duration = Duration::ZERO;
+
+/// What the contended scenario's writer thread did.
+struct WriterOutcome {
+    /// `call_sync` writes made.
+    calls: u64,
+    /// Of those, the ones that replied `Ok`.
+    ok: u64,
+    /// Latency of each `call_sync` since the warm-up ended: the wait for the core lock plus the
+    /// write.
+    latency: Histogram,
+    /// `calls` when the warm-up ended.
+    warm_calls: u64,
+}
+
+/// A host thread writing the `Fetcher` store through `call_sync` (`Fetcher::bump`, adds one to the
+/// same signal the completions add one to) until `stop` is set.
+fn spawn_writer(
+    rt: &Arc<Core>,
+    bump: Vec<u8>,
+    stop: Arc<AtomicBool>,
+    warmed: Arc<AtomicBool>,
+) -> JoinHandle<WriterOutcome> {
+    let rt = rt.clone();
+    std::thread::Builder::new()
+        .name("bench-writer".to_owned())
+        .spawn(move || {
+            let mut out = WriterOutcome {
+                calls: 0,
+                ok: 0,
+                latency: Histogram::new(),
+                warm_calls: 0,
+            };
+            let mut counted_warmup = false;
+            while !stop.load(Ordering::Relaxed) {
+                if !counted_warmup && warmed.load(Ordering::Relaxed) {
+                    // The warm-up is over: what the writer measured so far is not measured.
+                    counted_warmup = true;
+                    out.warm_calls = out.calls;
+                    out.latency.clear();
+                }
+                let t0 = Instant::now();
+                let reply = rt.call_sync(&bump);
+                out.latency.record(nanos(t0.elapsed()));
+                out.calls += 1;
+                // `call_id u32, status u8, body`: 0 is Ok.
+                if reply.get(4) == Some(&0) {
+                    out.ok += 1;
+                }
+                if WRITER_PAUSE.is_zero() {
+                    std::thread::yield_now();
+                } else {
+                    std::thread::sleep(WRITER_PAUSE);
+                }
+            }
+            out
+        })
+        .expect("the writer thread starts")
+}
+
 /// **Concurrent completions** (e): 8 host threads answering async port calls, a real
 /// `undra-core` thread, a "main thread" draining change-sets once a frame (60 Hz) and 256 calls
-/// kept in flight. The core lock and the per-store delivery lock must keep order under
-/// contention: every call is answered, every answer is one change-set, and the change-sets of
-/// the store arrive in increasing transaction order.
+/// kept in flight. Every call is answered, every answer is one change-set, and the change-sets of
+/// the store arrive in increasing transaction order and with the store's total stepping by exactly
+/// one each time.
+///
+/// Only the core thread commits to the store here (a completion runs on it; `port_reply` never
+/// takes the core lock), so this proves the completion path under 8 answering threads and not the
+/// ordering of commits made from different threads: that is [`completions_contended`].
 pub fn completions(cfg: &StressConfig) -> StressReport {
+    run_completions(cfg, "completions/8_threads", false)
+}
+
+/// **Contended completions** (e'): scenario e plus a host thread that writes the **same store**
+/// through `call_sync` as fast as it gets the core lock, so two threads (the `undra-core` thread
+/// running the completions, and the writer) commit to one store, interleaved: the core lock
+/// serialises the two committers (a task poll and `call_sync` both take it), so this proves the
+/// hand-off between them and the delivery under it, not two commits running in parallel, while
+/// 8 threads answer port calls and the main thread drains. The total is one signal that every completion and every
+/// write adds one to, so the main thread must see exactly `0, 1, 2, .., completions + writes`: any
+/// lost, repeated or reordered change-set breaks the sequence, whoever committed it.
+pub fn completions_contended(cfg: &StressConfig) -> StressReport {
+    run_completions(cfg, "completions/contended", true)
+}
+
+fn run_completions(cfg: &StressConfig, name: &'static str, contended: bool) -> StressReport {
     let host = Arc::new(DrainHost::new(4_096, SOURCE_PORT));
     let rt = runtime_with(host.clone(), 1);
     rt.bind_foreign_port(SOURCE_PORT);
@@ -1013,33 +1191,62 @@ pub fn completions(cfg: &StressConfig) -> StressReport {
     let base_bytes = host.counts.change_set_bytes();
 
     let stats = Arc::new(MainStats::default());
-    let mut main = MainThread::new(stats.clone()).track(fetcher);
-    if cfg.fault == Fault::SwapChangeSets {
-        main = main.swap_first_pair();
+    let mut main = MainThread::new(stats.clone()).track_sequence(fetcher);
+    match cfg.fault {
+        Fault::SwapChangeSets => main = main.swap_first_pair(),
+        Fault::DropChangeSet => main = main.drop_second_of_first_frame(),
+        Fault::None | Fault::SkipPatches | Fault::DropOneUpdate => {}
     }
     let stop = Arc::new(AtomicBool::new(false));
     let main = main.spawn(host.clone(), stop.clone());
     let completers = spawn_completers(&rt, &host);
+    let writer_stop = Arc::new(AtomicBool::new(false));
+    let warmed = Arc::new(AtomicBool::new(false));
+    let writer = contended.then(|| {
+        let bump = method_call(fetcher, "Fetcher", "bump", 3, &[]);
+        spawn_writer(&rt, bump, writer_stop.clone(), warmed.clone())
+    });
 
-    let start = Instant::now();
-    let deadline = start + cfg.duration;
     let mut issued = 0_u64;
     let mut rejected = 0_u64;
     let mut call_id = 10_u32;
-    while Instant::now() < deadline {
-        while issued + rejected - host.counts.replies() < WINDOW {
-            call_id += 1;
-            host.stamp(call_id);
-            let payload = method_call(fetcher, "Fetcher", "fetch", call_id, &enc(&(issued as u32)));
-            if rt.call(&payload) == 0 {
-                issued += 1;
-            } else {
-                rejected += 1;
+    let mut issue_until = |deadline: Instant| {
+        while Instant::now() < deadline {
+            // The clock is read every `CLOCK_EVERY` calls, not once the window fills: when the
+            // completers keep pace the window never fills, and a loop that looks at the clock
+            // only then runs as long as it likes (a 200 ms debug run took 154 s under load).
+            for _ in 0..CLOCK_EVERY {
+                if issued + rejected - host.counts.replies() >= WINDOW {
+                    std::thread::yield_now();
+                    break;
+                }
+                call_id += 1;
+                host.stamp(call_id);
+                let payload =
+                    method_call(fetcher, "Fetcher", "fetch", call_id, &enc(&(issued as u32)));
+                if rt.call(&payload) == 0 {
+                    issued += 1;
+                } else {
+                    rejected += 1;
+                }
             }
         }
-        std::thread::yield_now();
+    };
+    // Warm-up: thread start-up, cold caches, the first calls. What it shipped, answered and timed
+    // is not measured; the invariants still cover it (they hold over the whole run).
+    let warmup = cfg.warmup();
+    if !warmup.is_zero() {
+        issue_until(Instant::now() + warmup);
     }
-    // Let the calls in flight finish.
+    let warm_sets = host.counts.change_sets() - base_sets;
+    drop(host.take_latency());
+    warmed.store(true, Ordering::Relaxed);
+
+    let start = Instant::now();
+    issue_until(start + cfg.duration);
+    // The writer stops with the issuer; then let the calls in flight finish.
+    writer_stop.store(true, Ordering::Relaxed);
+    let written = writer.map(|w| w.join().expect("the writer thread finishes"));
     let patience = Instant::now() + Duration::from_secs(30);
     while host.counts.replies() < issued && Instant::now() < patience {
         std::thread::sleep(Duration::from_millis(1));
@@ -1056,68 +1263,118 @@ pub fn completions(cfg: &StressConfig) -> StressReport {
         .expect("the fetcher")
         .total_now();
     let last_seen = outcome.last_values.first().and_then(|(_, v)| *v);
-    let delivered = host.counts.change_sets();
+    let delivered = host.counts.change_sets() - base_sets;
+    let shipped = host.counts.change_set_bytes() - base_bytes;
     let order = stats.out_of_order.load(Ordering::Relaxed);
+    let steps = stats.sequence_breaks.load(Ordering::Relaxed);
     let walked = stats.change_sets.load(Ordering::Relaxed);
     let largest = stats.largest_batch.load(Ordering::Relaxed);
     let latency = host.latency();
+    let (writes, writes_ok) = written.as_ref().map_or((0, 0), |w| (w.calls, w.ok));
+    // The store writes of the measured run: change-sets delivered since the warm-up ended.
+    let measured_ops = delivered - warm_sets;
+    // Every completion and every write adds one to the store's total.
+    let expected = issued + writes_ok;
 
+    let mut invariants = vec![
+        Invariant::new(
+            format!(
+                "every call was answered ({replies} replies for {issued} calls; {rejected} rejected)"
+            ),
+            replies == issued && rejected == 0,
+        ),
+        Invariant::new(
+            format!("the completer threads answered every port call ({answered} of {issued})"),
+            answered == issued,
+        ),
+    ];
+    if contended {
+        invariants.push(Invariant::new(
+            format!(
+                "every write from the host thread succeeded ({writes_ok} of {writes} call_sync)"
+            ),
+            writes == writes_ok && writes > 0,
+        ));
+    }
+    invariants.extend([
+        Invariant::new(
+            format!(
+                "no change-set was lost ({delivered} delivered for {issued} completions and {writes_ok} writes)"
+            ),
+            delivered == expected,
+        ),
+        Invariant::new(
+            format!(
+                "every change-set is one {TICK_BYTES}-byte entry ({shipped} bytes in {delivered})"
+            ),
+            shipped == TICK_BYTES * delivered,
+        ),
+        Invariant::new(
+            format!(
+                "the main thread saw every change-set ({walked} of {})",
+                delivered + base_sets
+            ),
+            walked == delivered + base_sets && stats.malformed.load(Ordering::Relaxed) == 0,
+        ),
+        Invariant::new(
+            format!(
+                "nothing arrived out of order ({order} change-sets went backwards in transaction id)"
+            ),
+            order == 0,
+        ),
+        Invariant::new(
+            format!(
+                "the store's total arrived as an exact count, one more each change-set ({steps} steps were not +1)"
+            ),
+            steps == 0,
+        ),
+        Invariant::new(
+            format!(
+                "the store's total is the completions plus the writes ({total} for {issued} + {writes_ok})"
+            ),
+            total == expected,
+        ),
+        Invariant::new(
+            format!(
+                "the last change-set the main thread applied carries that total ({last_seen:?})"
+            ),
+            last_seen == Some(expected),
+        ),
+        Invariant::new(
+            format!("every reply was Ok ({} were not)", host.reply_errors()),
+            host.reply_errors() == 0,
+        ),
+        warnings(&host.counts),
+    ]);
+
+    let mut notes = vec![format!(
+        "largest drain {largest} change-sets over {} frames; call to reply p50 {} ns, p99 {} ns",
+        stats.frames.load(Ordering::Relaxed),
+        latency.percentile(0.5),
+        latency.percentile(0.99)
+    )];
+    if let Some(w) = &written {
+        notes.push(format!(
+            "writer thread: {} call_sync writes ({:.0}/s), each p50 {} ns, p99 {} ns, max {} ns",
+            w.calls - w.warm_calls,
+            (w.calls - w.warm_calls) as f64 / elapsed.as_secs_f64(),
+            w.latency.percentile(0.5),
+            w.latency.percentile(0.99),
+            w.latency.max()
+        ));
+    }
     StressReport {
-        name: "completions/8_threads",
-        ops: replies,
+        name,
+        // The operations of this scenario are the writes to the store (each one change-set of
+        // `TICK_BYTES`: the invariants above check that exactly): completions and, when
+        // contended, the host thread's own.
+        ops: measured_ops,
         elapsed,
-        bytes: host.counts.change_set_bytes() - base_bytes,
+        warmup,
+        bytes: TICK_BYTES * measured_ops,
         rss: None,
-        invariants: vec![
-            Invariant::new(
-                format!(
-                    "every call was answered ({replies} replies for {issued} calls; {rejected} rejected)"
-                ),
-                replies == issued && rejected == 0,
-            ),
-            Invariant::new(
-                format!("the completer threads answered every port call ({answered} of {issued})"),
-                answered == issued,
-            ),
-            Invariant::new(
-                format!(
-                    "no change-set was lost ({} delivered for {issued} completions)",
-                    delivered - base_sets
-                ),
-                delivered - base_sets == issued,
-            ),
-            Invariant::new(
-                format!("the main thread saw every change-set ({walked} of {delivered})"),
-                walked == delivered && stats.malformed.load(Ordering::Relaxed) == 0,
-            ),
-            Invariant::new(
-                format!(
-                    "nothing arrived out of order ({order} change-sets went backwards in transaction id)"
-                ),
-                order == 0,
-            ),
-            Invariant::new(
-                format!("the store's total is the sum of the replies ({total} for {issued})"),
-                total == issued,
-            ),
-            Invariant::new(
-                format!(
-                    "the last change-set the main thread applied carries that total ({last_seen:?})"
-                ),
-                last_seen == Some(issued),
-            ),
-            Invariant::new(
-                format!("every reply was Ok ({} were not)", host.reply_errors()),
-                host.reply_errors() == 0,
-            ),
-            warnings(&host.counts),
-        ],
-        notes: vec![format!(
-            "largest drain {largest} change-sets over {} frames; call to reply p50 {} ns, p99 {} ns",
-            stats.frames.load(Ordering::Relaxed),
-            latency.percentile(0.5),
-            latency.percentile(0.99)
-        )],
+        invariants,
+        notes,
         latency,
     }
 }

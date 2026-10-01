@@ -1,0 +1,14 @@
+{
+  "scenario": "event/sustained",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": "commit-spin-vs-host-baseline",
+  "command": "UNDRA_BENCH_RESULTS_TAG=commit-spin-vs-host-baseline UNDRA_STRESS_SECONDS=2 UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd-dirty"},
+  "load_average": {"before": 2.31, "after": 2.35},
+  "run": {"seconds": 2, "warmup_ms": 200, "elapsed_s": 2.000109834, "attempt": 3, "attempts": 3, "scale": 1, "baseline": "/Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"},
+  "result": {"ops": 9667584, "per_sec": 4833526.557222057, "p50_ns": 167, "p99_ns": 251, "p999_ns": 335, "max_ns": 27125, "bytes_per_op": 37, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 1.4 M ops/s, p99 at most 840 ns", "passed": false, "failures": ["throughput 4833527/s is under 5015971/s (1.5x under the baseline's 7523957/s), against the baseline in /Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"]},
+  "invariants": [{"what": "one change-set per event (9667584 for 9667584)", "holds": true, "timing": false}, {"what": "37 bytes per change-set (357700608 for 9667584)", "holds": true, "timing": false}, {"what": "the last event is the signal's value (1024)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": []
+}

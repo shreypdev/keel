@@ -521,6 +521,13 @@ impl Fetcher {
         value
     }
 
+    /// Adds one to `total` and returns: a synchronous write to the store the `fetch`
+    /// completions write, made from a host thread through `call_sync` while they commit on the
+    /// core thread (the contended completions scenario).
+    pub fn bump(&self) {
+        self.total.update(|total| *total += 1);
+    }
+
     /// The running total (for the scenarios' final-state checks).
     pub fn total_now(&self) -> u64 {
         self.total.get()

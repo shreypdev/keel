@@ -1,0 +1,14 @@
+{
+  "scenario": "stream/backpressure",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": null,
+  "command": "UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd"},
+  "load_average": {"before": 2.34, "after": 2.31},
+  "run": {"seconds": 10, "warmup_ms": 0, "elapsed_s": 4.961297624, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"},
+  "result": {"ops": 151900000, "per_sec": 30616990.05219768, "p50_ns": null, "p99_ns": null, "p999_ns": null, "max_ns": null, "bytes_per_op": 13, "rss_growth_pct": 0, "rss_baseline_bytes": 48250880, "rss_final_bytes": 48250880},
+  "gate": {"budget": "CI: at least 5.7 M ops/s, RSS growth at most 1%", "passed": true, "failures": []},
+  "invariants": [{"what": "the producer is never more than one item ahead of the credit (max 1, 0 violations)", "holds": true, "timing": false}, {"what": "the consumer got every item the producer made, less at most one (280403600 of 280403601)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": ["8031475 rounds of 16 credits delivered 128503600 items; max ahead 1; 41 RSS samples"]
+}

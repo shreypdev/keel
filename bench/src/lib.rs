@@ -29,6 +29,16 @@
 //! floors, tail-latency ceilings, change-set bytes and RSS growth. Design:
 //! `.10x/specs/2026-09-30-stress-bench-design.md`.
 //!
+//! # Gates that do not depend on the machine's speed
+//!
+//! The absolute budgets are 5x the reference host, so a slower runner passes; that also lets a
+//! commit path made 1.8x slower pass. Two things close that gap: **ratio gates**
+//! (`[ratio."name"]` in `budgets.toml`, [`budget::RatioBudget`]) compare two rows measured in the
+//! same run, so the machine's speed cancels; and a **baseline** ([`baseline`]) records what one
+//! machine class measured and fails a run on that class that is 1.5x worse, which in CI is the
+//! base commit (a pull request's target, or the commit a push replaced) measured on the same VM
+//! minutes earlier (`scripts/bench-record-base.sh`).
+//!
 //! # Wall-clock time is fine here
 //!
 //! The deterministic-core rule (R12) bans `Instant::now` from the core. This crate is a
@@ -44,8 +54,11 @@
 //! regress; the device numbers that prove the blueprint's targets are produced in the playground
 //! phase (see `bench/RESULTS.md`).
 
+pub mod baseline;
 pub mod budget;
+pub mod hostinfo;
 pub mod measure;
+pub mod results;
 pub mod rss;
 pub mod stats;
 pub mod workload;

@@ -66,25 +66,37 @@ and, for iOS and Android, on the blueprint's devices in the device phase, and th
 until then (see [Device numbers](#device-numbers-ios-android-web) and ADR-031, which is about exactly that
 platform half). A host number says "the core is not the bottleneck"; it does not say "the app is smooth".
 
-Numbers below are from `UNDRA_STRESS_SECONDS=10` (best of three runs for the gates, the last run for the
-medians) and a 60 s soak, on the machine above. **The machine was shared**: other builds ran throughout (load
-average 3 to 8), the cache-bound tails moved by up to 4x between runs (fan-out p99 82 to 295 us), and one
-gated run of three needed a second and third attempt for a tail. The gates are 5x to 10x the best run for that
-reason; no number was tuned to pass. Two consequences to keep in mind: the baselines come from that loaded machine,
-not the quiet one the design asked for, so a quiet run measures better than the `measured_*` values in
-`budgets.toml`; and the gates catch an operation that became several times slower, not a 2x one (in review, a
-commit path made 1.8x slower on purpose passed every layer A row and every sustained gate here).
+The numbers below are the files in `bench/results/`: `2026-09-30-<scenario>.json` for each sustained scenario (a 10 s
+measured run after a 200 ms warm-up, the first attempt that passed every gate, which was attempt 1 in all eight),
+`2026-09-30-layer-a.json` for the layer A rows and `2026-09-30-soak-60s.json` for the soak, all from commit `acc4a22`
+on the machine above with `UNDRA_BENCH_BASELINE=apple-m5-pro` selected (the baseline gate passed too). Each file says
+what it measured, the command, the machine and the load average before and after: **2.1 to 2.4** for these runs (the
+machine is shared, and 2 is as quiet as it gets while another agent builds; an earlier session saw 3 to 8). The
+cache-bound tails move by up to 4x between runs on a busier machine (fan-out p99 82 to 295 us), which is why the gates
+are 5x to 10x the best run set at the time (`measured_*` in `budgets.toml`, the best of three 10 s runs on that loaded
+machine) and why no number was tuned to pass. Two consequences to keep in mind: the **absolute** gates catch an
+operation that became several times slower, not a 2x one (in review, a commit path made 1.8x slower on purpose passed
+every layer A row and every sustained gate here; the ratio gates and baselines of [Gates that catch a 2x
+regression](#gates-that-catch-a-2x-regression) are what catch that); and the files of the experiments that
+show it are in the same directory, tagged `commit-control`, `commit-spin` and `commit-ramp`.
 
 | # | Scenario | What it proves | Measured (10 s run) | CI gate | Verdict |
 |---|---|---|---|---|---|
-| a | **Firehose**: one observed `Signal<u64>`, one transaction per update, a host calling `call_sync` | each transaction is O(1) in the core at 100x any UI rate: one change-set of exactly 37 bytes | **5.8 M transactions/s**; p50 167 ns, p99 211 ns, p999 295 ns per call (commit + delivery + the copy every FFI callback makes); a core-side burst commits at 79 ns each, 12.7 M/s | at least 1.1 M/s, p99 at most 1.1 us, p999 at most 3 us, 37 bytes; layer A: 1,000-burst 400 us, call 630 ns | within, 5x margin |
-| g | **Event firehose**: `Runtime::event` on an event port whose subscriber writes the signal | the path a WebSocket or sensor feed takes into the core | **6.5 M events/s**; p50 125 ns, p99 167 ns, p999 295 ns; 37 bytes | at least 1.4 M/s, p99 840 ns, p999 2.6 us; layer A 580 ns | within |
-| b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **170 k operations/s**; p50 4.1 us, p99 17.9 us, p999 26.6 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list field for field, every operation applied as exactly one patch | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
-| c | **Fan-out**: 1,000 of 100,000 observed signals written per transaction, then the same 1,000 over 10,000 observed (signal-table layer, no runtime) | commit time and bytes follow the dirty count, not the observed count | **22 k transactions/s**; p50 42 us, p99 98 us; one change-set of **21,012 bytes** either way; the 10,000-observed run has p50 27 us (ratio 1.5, gated at 4) | at least 4.6 k/s, p99 410 us, p999 1.3 ms, 21,012 bytes; layer A 190 us and 130 us | within |
-| c' | **Fan-out across stores**: 1,000 stores of 100 signals, one written in each, one transaction | the per-store overhead when one transaction touches many stores: 1,000 change-sets sharing a transaction | **7.5 k transactions/s** (7.5 M change-sets/s); p50 100 us, p99 377 us; 33,000 bytes | at least 1.6 k/s, p99 1.3 ms, 33,000 bytes; layer A 580 us | within |
-| d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Undra buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **29 M items/s** with credit; produced minus delivered never above **1** in 7.4 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
-| e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | port calls completed from 8 threads at once are never lost: each wakes its task, commits once and is delivered once, and the drain sees the store's change-sets in transaction order (the commits themselves run on the one `undra-core` thread, so this does not contend the per-store delivery lock) | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
-| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, and no second whose tail is far off the others' | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
+| a | **Firehose**: one observed `Signal<u64>`, one transaction per update, a host calling `call_sync` | each transaction is O(1) in the core at 100x any UI rate: one change-set of exactly 37 bytes | **6.2 M transactions/s**; p50 125 ns, p99 211 ns, p999 295 ns per call (commit + delivery + the copy every FFI callback makes); a core-side burst commits at 76 ns each, 13.1 M/s | at least 1.1 M/s, p99 at most 1.1 us, p999 at most 3 us, 37 bytes; layer A: 1,000-burst 400 us, call 630 ns | within, 5x margin |
+| g | **Event firehose**: `Runtime::event` on an event port whose subscriber writes the signal | the path a WebSocket or sensor feed takes into the core | **7.5 M events/s**; p50 125 ns, p99 167 ns, p999 251 ns; 37 bytes | at least 1.4 M/s, p99 840 ns, p999 2.6 us; layer A 580 ns | within |
+| b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **182 k operations/s**; p50 3.8 us, p99 16.9 us, p999 22.0 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list field for field, every operation applied as exactly one patch | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
+| c | **Fan-out**: 1,000 of 100,000 observed signals written per transaction, then the same 1,000 over 10,000 observed (signal-table layer, no runtime) | commit time and bytes follow the dirty count, not the observed count | **27.9 k transactions/s**; p50 35 us, p99 59 us; one change-set of **21,012 bytes** either way; the 10,000-observed run has p50 25.6 us (ratio 1.4, gated at 4) | at least 4.6 k/s, p99 410 us, p999 1.3 ms, 21,012 bytes; layer A 190 us and 130 us | within |
+| c' | **Fan-out across stores**: 1,000 stores of 100 signals, one written in each, one transaction | the per-store overhead when one transaction touches many stores: 1,000 change-sets sharing a transaction | **9.9 k transactions/s** (9.9 M change-sets/s); p50 98 us, p99 147 us; 33,000 bytes | at least 1.6 k/s, p99 1.3 ms, 33,000 bytes; layer A 580 us | within |
+| d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Undra buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **30.6 M items/s** with credit; produced minus delivered never above **1** in 8.0 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
+| e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | port calls completed from 8 threads at once are never lost: each wakes its task, commits once and is delivered once, and the drain sees the store's change-sets in transaction order and its total arriving as an exact count (the commits themselves run on the one `undra-core` thread, so this does not contend the per-store delivery lock: that is e') | **341 k completions/s**; call to reply p50 172 us, p99 573 us, p999 819 us; every call answered, every completion one change-set of 37 bytes, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
+| e' | **Contended completions**: scenario e plus a host thread writing the **same store** through `call_sync` as fast as it gets the core lock | ordering when two threads commit to one store (the `undra-core` thread running the completions, and the host thread): every completion and every write adds one to one signal, and the main thread must see that total arrive as exactly `0, 1, 2, .. N` in transaction order, so nothing is lost, repeated or reordered whichever thread committed it. The core lock serialises the two committers, so this tests the hand-off between them and the delivery inside it | **345 k writes/s** (about 302 k completions and 43 k host writes a second); completion call to reply p50 147 us, p99 336 us, p999 475 us; the host thread's `call_sync` p50 1.2 us, p99 152 us, max 0.49 ms; every call answered, every write one 37-byte change-set, **0 lost, 0 out of order, 0 steps that were not +1**, final total exact | at least 70 k/s, p99 1.8 ms, p999 6.6 ms, 37 bytes | within |
+| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, and no second whose tail is far off the others' | 60 s: all four loads at 98% to 100% of target in every second (see below); RSS **+0.14%** over the second half; the p99 trend **-26%** of its median; every invariant held | RSS at most 1% (or 64 KiB), the p99's trend over the second half rising by at most 50% of its median, worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
+
+The completions scenarios (e and e') run in one of **two regimes per process** on this host, which the scheduler
+picks when the threads start and which lasts the whole run: call to reply p50 near 170 us at about 340 k/s (the
+published files), or near 560 us at about 260 k/s (the final gate runs of 2026-09-30, and the first baseline
+recording). Both pass the gates, the baseline holds the best of three recordings, and the contended scenario is the
+steadier of the two (its p50 moved from 147 to 245 us across the same runs).
 
 Allocations: one observed single-signal commit allocates **exactly 3 times** (the two vectors of
 `group_by_store` and the `claimed` vector), an unobserved one **0**; `crates/undra-ffi/tests/commit_alloc.rs`
@@ -92,7 +104,7 @@ holds the first at "at most 3" and the second at 0 with a counting allocator (on
 R2). At 100,000 commits a second those 3 are 300,000 `malloc`/`free` pairs a second, which is the next thing
 to remove (a roadmap line, not a budget here).
 
-Keyed churn is 170 k operations/s here against the design's 280 k probe (`.10x/specs/2026-09-30-stress-bench-design.md`,
+Keyed churn is 182 k operations/s here against the design's 280 k probe (`.10x/specs/2026-09-30-stress-bench-design.md`,
 section 3) because the scenario does more per operation, not because the mix is harder: the probe's random
 20/20/20/40 mix has the same proportions as the fixed cycle, but the probe used a host that only counted, while
 the scenario's host decodes every patch and applies it to its own 10,000-row list inside the timed step. Measured
@@ -103,21 +115,56 @@ side by side in review on the same build (load average about 9): 243 k operation
 
 | | Target | Achieved (mean, slowest second) |
 |---|---|---|
-| firehose, `Ticker.set` through `call_sync` | 100,000/s | 99,999/s, 99,856/s |
+| firehose, `Ticker.set` through `call_sync` | 100,000/s | 99,996/s, 99,760/s |
 | keyed churn, 20 operations per call on 10,000 rows | 20,000 ops/s | 20,000/s, 19,959/s |
-| completions, 128 in flight, 8 completer threads | 50,000/s | 49,999/s, 49,916/s |
-| stream, the consumer granting 1,000 credits a millisecond | 1,000,000 items/s | 999,987/s, 998,608/s |
+| completions, 128 in flight, 8 completer threads | 50,000/s | 49,985/s, 49,210/s |
+| stream, the consumer granting 1,000 credits a millisecond | 1,000,000 items/s | 999,989/s, 998,397/s |
 
 6.0 M firehose writes, 1.2 M churn operations, 3.0 M completions, 60.0 M stream items and 10.2 M change-sets
-were delivered; the drain thread (60 Hz) found at most 4,280 change-sets in one frame. Every invariant held:
-nothing out of order, no completion lost, the store's total equals the number of completions and is the last
-value the main thread applied, the host's 10,000-row list equals the core's after 1.2 M patches, the stream
-at most one item ahead of its credit at the end (scenario d checks it after every round), no warning logged. **RSS** (`ps`, sampled once a second): 10.39 MB
-at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s to the end, so +0.00% after the half-run warm-up. The firehose's own
-p99 inside the mix is 59 us (median over the seconds, worst 76 us), not the 211 ns it has alone: it is the
-wait for the core lock behind a 20-operation churn call or a completion burst, which is what mixed load costs;
-the soak's latency gate compares each post-warm-up second with the others, so the number is not itself gated,
-and it catches a bad second, not a slow climb (a p99 that doubles steadily over the run passes it).
+were delivered; the drain thread (60 Hz) found at most 6,633 change-sets in one frame. Every invariant held:
+nothing out of order, no completion lost, the store's total equals the number of completions, arrives as the exact
+count `0, 1, 2, ..` and is the last value the main thread applied, the host's 10,000-row list equals the core's after
+1.2 M patches, the stream at most one item ahead of its credit at the end (scenario d checks it after every round),
+no warning logged. **RSS** (`ps`, sampled once a second; see the macOS caveat in Method): 10.69 MB at 1 s, 11.00 MB
+at 6 s, 11.06 MB from 20 s to 55 s, 11.08 MB at the end, so +0.14% after the half-run warm-up. The firehose's own
+p99 inside the mix is 96 us (median over the seconds after the warm-up, worst 121 us), not the 211 ns it has alone: it
+is the wait for the core lock behind a 20-operation churn call or a completion burst, which is what mixed load costs;
+the number itself is not gated: the soak's latency gates compare the post-warm-up seconds with each other (below).
+The p99 trend over those seconds was **-819 ns a second, -26% of the median**, against a limit of +50%.
+
+**The drift gate.** Until this commit the soak's latency gate was a spike gate (the worst post-warm-up second's p99 at
+most 3x the median second's), which a steady climb passes: a p99 that doubles over the second half has a worst/median of
+1.33. It now has two parts. The spike gate stays. Next to it, a straight line is fitted through the per-second p99s
+after the warm-up (the second half), and the line may not rise by more than **half of the median p99** across them
+(`undra_bench::stats::drift`). The fit is Theil-Sen, the median of the slopes between every pair of seconds, not least
+squares: one bad second at the end of the window tilts a least-squares line (a flat 40 us series with one 400 us
+second at the end rises by 40% of its median under least squares and by 0 under Theil-Sen), and that second is the spike
+gate's business. A trend is fitted to at least six seconds, which a 10 s run has exactly. Evidence, all in the unit tests
+of `bench/src/stats.rs` and on the real soak:
+
+* a synthetic p99 that climbs steadily, 40 us to 100 us over 30 seconds with 8% jitter, rises by 80% to 140% of its
+  median and **fails**; one that doubles steadily (40 us to 80 us, the review's case) **fails** and passes the old gate;
+  a flat series with 25% jitter, a 20% climb with 10% jitter and a falling series pass; two bad seconds at the end do
+  not tilt it;
+* the second half (30 to 60 s) of a real 60 s soak on this host (31 seconds, 57 to 125 us) fits at -5% and **passes**
+  (the series is `REAL_SOAK_SECOND_HALF` in the tests); the published 60 s soak above passed at -26% of the median
+  (`2026-09-30-soak-60s.json`). Of nine 60 s runs of the final gate on the unmodified core, eight passed, between
+  -101% and +9% of the median, and **one failed at +52% against a limit of +50%**, at a load average of 5.3 while another
+  build ran: on a shared machine a gradual rise in load is indistinguishable from a rise in latency, so the gate has a
+  false-positive rate here (about one run in nine at 60 s, none in five 10 s runs) and CI's `--attempts 2`, each
+  attempt a fresh process, is what absorbs it;
+* a commit made to slow down steadily while the soak runs (a spin of 60 iterations per second of uptime added to every
+  commit, never committed: firehose p50 251 ns at 1 s, 847 ns at 10 s, 1.79 us at 30 s, 3.52 us at 60 s, the p99 from
+  57 us to 143 us) is `2026-09-30-commit-ramp-soak-60s.json`. Every other gate passes it (the spike gate at 1.7x the
+  median, RSS +0.00%, every rate at 100%, every invariant); the drift gate fails it: "a rise of +95% of the median across
+  31 seconds after warm-up"; and with `--attempts 2` both fresh-process attempts of a 30 s version failed the same way
+  (+90% and +82%).
+
+The limit is the host, not the gate: this machine's scheduler moves the firehose thread between fast and slow cores, and
+the p99 flips between a regime around 40 us and one around 110 us, in one 60 s run at 7, 11, 15 and 27 s. A step that
+falls inside the second half and does not return reads as a climb (tested: 40 us then 110 us fails). That is why CI runs
+the soak with `--attempts 2`, each attempt a fresh process that lands in its own regime, and why the gate reads the
+second half only.
 
 RSS on macOS climbs in page-sized steps early under this load (allocator magazines and thread stacks
 settling): 10.39 MB at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s on in the run above, and in two of the four
@@ -130,32 +177,152 @@ is repeated, a broken invariant is not.
 
 ### Method
 
-* **Sustained throughput** is operations divided by the wall time of the whole run, not the sum of
+* **Warm-up** is excluded and configurable. Every sustained scenario first runs for a warm-up, results
+  discarded (thread start-up, cold caches, the first allocations): a tenth of the measured run, at most 200 ms, so a
+  10 s run warms up for 200 ms and a 2 s CI run for 200 ms. `UNDRA_STRESS_WARMUP_MS` sets it (`0` measures from the
+  first operation); each result file records the warm-up it used. The measured run is then exactly
+  `UNDRA_STRESS_SECONDS`; throughput, percentiles and bytes are of that run only, while the invariants cover both (a
+  patch lost during the warm-up still fails). The stream has no warm-up of its own: its slow half and the 20% RSS
+  warm-up do that job. Before this change no scenario excluded one, which at CI's 2 s put thread start-up and the
+  first cold calls into the completions histogram. The soak's warm-up is `--warmup PCT` (default half the run: the RSS
+  and drift gates look only at what follows; the rate gate counts every second).
+* **Sustained throughput** is operations divided by the wall time of the measured run, not the sum of
   per-operation samples. **Latencies** time every operation with one `Instant` pair into a fixed log-linear
   histogram (1/32 relative error, no allocation per sample), so p999 is of millions of samples; a percentile is
-  the upper bound of its bucket. `Instant` ticks at 41.67 ns on this host, so a 167 ns p50 is four ticks, and
+  the upper bound of its bucket. `Instant` ticks at 41.67 ns on this host, so a 125 ns p50 is three ticks, and
   the sub-microsecond percentiles are whole ticks (a 211 ns p99 is five, give or take one). Timing every
   operation costs about 35 ns of wall time per sample here (an empty timed step runs at 28 M/s), which the
-  throughput includes: the firehose's 5.8 M/s is the rate with that clock (and the host's copy) in the loop,
-  against 8 M/s for the same call timed in batches with a host that only counts (layer A, 125 ns).
-* **Bytes** are what the host's callback was handed (`payload.len()`), deterministic, so gated exactly.
+  throughput includes: the firehose's 6.2 M/s is the rate with that clock (and the host's copy) in the loop,
+  against 7.6 M/s for the same call timed in batches with a host that only counts (layer A, 131 ns).
+* **Bytes** are what the host's callback was handed (`payload.len()`) and are deterministic: every load is a fixed
+  cycle at fixed widths. The gate in `budgets.toml` (`bytes_per_op`) is a **ceiling**, not an equality: a run that
+  ships fewer bytes passes it. What makes it exact is each scenario's own invariant in code, which asserts the exact
+  count (37 bytes per change-set for the firehose, event and both completions scenarios, 61 per operation for
+  churn, 21,012 and 33,000 per transaction for the fan-outs); a scenario that shipped fewer bytes fails there.
 * **Memory** is resident set size (`/proc/self/status` on Linux, `ps -o rss=` on macOS, nothing else), sampled
   outside the timed region and page-granular (16 KiB here), so the gate is "at most 1% **or** 64 KiB" from the
   first sample after the warm-up to the last. A platform that cannot be sampled reports the gate as skipped, never
-  as passed.
+  as passed. **A flat RSS is weaker evidence on macOS than on Linux**: `ps`'s `rss` leaves out the pages the system has
+  compressed, so under memory pressure a leak that was written once can be compressed away and the line stays flat.
+  `phys_footprint` is the right metric there, and it needs `proc_pid_rusage` (FFI), which R2 keeps out of this crate.
+  Both the stress test and the soak print this next to their RSS verdict; trust the 60 s soak over the 10 s one, and
+  prefer a Linux run (CI) for a verdict on small leaks. The exact check is an allocation-balance test in `undra-ffi`
+  (review, "A stricter memory check"), which is not built.
 * **Invariants** are asserted in code and are not scaled or retried: a fast core that loses or reorders a
   change-set fails. They have teeth: tests make the host drop every 101st patch, drop one single patch (an
   update that a later write of the same row repairs, so only the count of applied patches sees it), and make
-  the main-thread model swap two change-sets, and require the equality, patch-count and order invariants to
-  fail. The one timing comparison a scenario makes about itself (fan-out over 100,000 observed at most 4x the
+  the main-thread model swap two change-sets or lose one on its way to the UI (in scenarios e and e'), and
+  require the equality, patch-count, order, loss and exact-count invariants to fail. In e and e' the store's
+  total is a signal every write adds one to, so the main thread checks that it arrives as `0, 1, 2, ..` with no
+  step that is not +1, which catches a lost, repeated or reordered change-set in one test. The one timing comparison a scenario makes about itself (fan-out over 100,000 observed at most 4x the
   10,000 case) is a gate, retried like the others, not an invariant.
 * **Host stand-ins**: a copy of every change-set (what each FFI callback does), a host list that decodes and
   applies each keyed patch, and a "main thread" that drains once a frame and checks per-store order. They stand
   in for the platform's mailbox and list state; they cost far less than the platform's own work does.
+* **Where a number comes from.** The harness writes the JSON behind a run when `UNDRA_BENCH_RESULTS_DIR` names a
+  directory: one file per sustained scenario (`<date>-<scenario>.json`), one for the layer A rows and ratio gates
+  (`<date>-layer-a.json`) and one for a soak (`<date>-soak-<N>s.json`), each with the numbers, the command, the machine
+  (CPU, cores, OS, compiler, commit) and the one-minute load average before and after. The published numbers
+  are those files, in `bench/results/`, and the sections above name them; CI uploads the same files of every run as an
+  artifact. `UNDRA_BENCH_RESULTS_TAG=name` puts a tag in the file names for a run that is evidence and not a published
+  number. The `measured_*` values in `budgets.toml` are different: the best of three runs at the time a gate was set,
+  kept for humans and checked to be inside their gates.
 * **Budgets** follow the file's rule: floor = measured / 5, p99 ceiling 5x, p999 ceiling 10x, bytes exact,
   RSS 1%; each layer A row 5x its p50. Reproduce: `UNDRA_STRESS_SECONDS=10 cargo test -p undra-bench --test
   stress --release -- --nocapture`, `cargo run -p undra-bench --release --bin soak -- --seconds 60`,
   `cargo bench -p undra-bench --bench stress` (criterion, for humans).
+
+### Gates that catch a 2x regression
+
+The absolute budgets are 5x what the reference host measures (CI doubles that with `UNDRA_BENCH_SCALE=2`), so that a
+slower runner passes. That is also why they cannot see a regression of 2x. The bench review (M1) made the commit path
+slower on purpose, with a spin in `undra_signals::txn::commit` (never committed), and every gate passed. Repeated on
+the reference host (load average 3), against a control run of the same binary with the spin off; the files are
+`2026-09-30-commit-control-*.json` and `2026-09-30-commit-spin-*.json` in `bench/results/`:
+
+| Row | Control | With the commit slowed (about +71 ns per commit) | Absolute budget | Margin left |
+|---|---|---|---|---|
+| `stress/firehose/txn_x1000` (a commit and its delivery, 1,000 times) | 77.5 us | **148.5 us** (1.92x) | 400 us | 2.7x |
+| `stress/firehose/call_set` | 125.5 ns | 223.9 ns (1.78x) | 630 ns | 2.8x |
+| `stress/firehose/event` | 117.6 ns | 205.6 ns (1.75x) | 580 ns | 2.8x |
+| every other layer A row | | unchanged | | 4.0x or more |
+| `firehose/sustained` (2 s) | 5.78 M/s, p99 211 ns | 4.01 M/s, p99 335 ns | floor 1.1 M/s, p99 1.1 us | 3.6x, 3.3x |
+
+Two gates that do not depend on how fast the machine is close that, and a third mechanism makes the second usable on
+CI.
+
+**Ratio gates** (`[ratio."..."]` tables in `budgets.toml`) compare two layer A rows measured **in the same run**, so
+the machine's speed cancels. Each `max` is 1.15x the largest ratio seen on any healthy sample (the reference host's
+runs and runs of the Bench workflow on a GitHub runner, Oct 2026), rounded up to 0.1. They were set from six runner
+runs; six more came after and are the out-of-sample check (the review of these gates read them): four ratios stayed
+inside what the first six showed, and the fan-out ratio did not (2.37 against its first maximum of 2.3, on a docs-only
+commit), so its maximum is now the bound of what it guards (below).
+
+| Gate | Rows | Healthy, host and twelve runner runs | `max` | Control | Commit slowed |
+|---|---|---|---|---|---|
+| `commit_vs_bare_call` | `txn_x1000` per transaction / `dispatch/call_sync/add` | 1.24 to 1.94 | 2.3 | 1.74 | **3.37 (fails)** |
+| `set_vs_bare_call` | `call_set` / `dispatch/call_sync/add` | 2.25 to 3.05 | 3.6 | 2.82 | **5.08 (fails)** |
+| `event_vs_set` | `event` / `call_set` | 0.76 to 0.93 | 1.1 | 0.94 | 0.92 (the commit is in both) |
+| `fanout_100k_vs_10k_observed` | the two fan-out rows | 0.99 to 2.37 | 4 (not 1.15x: cache-bound; commit cost following the observed count would read about 10) | 1.39 | 1.37 (commit cost follows the dirty count) |
+| `keyed_churn_vs_set` | `keyed_churn_10k` per operation / `call_set` | 15 to 47 | 54 | 43.6 | 25.5 |
+
+A ratio can only see a shift larger than **its own spread across hardware**, and the runner runs show how large
+that is. The ubuntu-latest pool is not one machine class: the same row measured up to 2.2x apart between runs
+(`stress/firehose/txn_x1000` 123 to 275 us, `signals/changeset_100/cell` 1.56 to 4.44 us), in two clusters. Rows of one
+family (a commit against a bare call) keep their ratio within 1.2x to 1.5x; rows of different families (a memmove-bound
+list operation against an atomics-bound call: the runner runs the list 1.2x slower than the host and the call 3x slower)
+within 2x to 3x, which is why `keyed_churn_vs_set` is wide and guards an order-of-magnitude shift on a runner, not a 2x
+one. Only the two commit-versus-call ratios are tight enough to see a commit that is 2x slower, and a uniform slowdown
+of the whole machine is, by construction, invisible to a ratio. `ratios_hold_on_every_recorded_sample` in
+`bench/tests/budgets.rs` holds the recorded samples (the runs are named in its comment) and checks that every gate
+passes on every one; the next two tests model a commit `S` times slower on the same samples (a transaction costs `S`
+times as much, and `call_set` and `event` pay the difference once). At 2x, `commit_vs_bare_call` fails on all fourteen
+samples; at 1.8x on eleven, and the three it misses are fast-class runner runs whose commit is the cheapest against their
+call (2.23 to 2.28 against a maximum of 2.3). There the baseline below is the gate: `txn_x1000` alone reads 1.8x its base.
+
+**Baselines** (`bench/baselines/<name>.toml`, `UNDRA_BENCH_BASELINE=<name or path>`) record what one machine class
+measured for every layer A row and sustained scenario, and fail a run on that class that is more than 1.5x worse
+(p50 1.5x, or 20 ns more where that is more for rows of a few tens of nanoseconds; a throughput under 1/1.5; a p99 over
+2.5x). The cache-bound fan-out rows get 2x and the two fan-out scenarios 3x (`baseline_tolerance` in their
+`budgets.toml` tables: their tails moved 82 to 295 us between runs on a busy host, and a commit regression shows in the
+firehose rows, not in these). `UNDRA_BENCH_RECORD=path` records one (best of three attempts, `UNDRA_BENCH_RECORD_BEST=1`
+keeps the better of what the file holds), with the CPU, the commands, the load average and the commit next to the
+numbers.
+`bench/baselines/apple-m5-pro.toml` is the reference host's (three recordings at load 2.1 to 2.4, best of each row).
+Against it, with the spin back on (a weaker one that run, `2026-09-30-commit-spin-vs-host-baseline-*.json`): `txn_x1000`
+at **1.61x** its baseline, `call_set` 1.70x, `event` 1.72x, both ratio gates failing (2.85 and 4.92), and the sustained
+scenarios at the edge: `event/sustained` 4.83 to 4.93 M/s against a floor of 5.02 M/s on all three attempts (fails),
+`firehose/sustained` 4.07 M/s then 4.19 M/s against 4.18 M/s (passes on its second attempt, by 0.2%). A sustained
+scenario dilutes a commit regression with the call, the clock and the host's copy, so **the layer A rows are the sharper
+instrument and the sustained gates catch a commit regression of about 1.6x and up**. `UNDRA_BENCH_SCALE` does not apply
+to a baseline.
+
+**On CI the baseline is the base commit, measured in the same job.** A baseline recorded on one machine is worth
+nothing on another, and the runner pool is at least two machines, so `bench.yml` records the baseline from the
+**base commit on the same VM** with `scripts/bench-record-base.sh` (this tree's harness against the base's crates, in
+a target directory of its own, best of three attempts per row, 2 s per scenario), then gates the head against it. For
+a pull request the base is the first parent of the merge ref; for a push it is the commit the push replaced, which is
+why no push's run is cancelled by the next push's (a cancelled run would leave that push compared with nothing, and the
+next one compared against it). The same machine, minutes apart: its speed cancels by construction. Run end to end on the reference host (the baseline is
+`bench/results/2026-09-30-commit-experiment-base.toml`, recorded about two minutes before the runs it gates):
+
+| | Layer A rows against the base | Ratio gates | `firehose/sustained`, `event/sustained` |
+|---|---|---|---|
+| the head unchanged (`commit-control`) | `txn_x1000` 0.99x, `call_set` 0.98x, `event` 1.01x; no row over 1.4x | pass (1.74, 2.82) | 5.78 M/s, 7.03 M/s: pass |
+| the head with the commit slowed (`commit-spin`) | `txn_x1000` **1.90x**, `call_set` **1.75x**, `event` **1.77x** | **fail** (3.37, 5.08) | 4.01 M/s, 4.60 M/s against floors of 4.20 and 4.97 on all three attempts: **fail** |
+
+A commit that slows down **while the process runs** is the soak's: a spin of 60 iterations per second of uptime added to
+every commit leaves the firehose p50 at 251 ns, 847 ns and 3.52 us at 1 s, 10 s and 60 s, and the soak's p99 trend gate
+fails it (`2026-09-30-commit-ramp-soak-60s.json`, below).
+
+What none of this sees: a regression under 1.5x (the baseline) or under a ratio's own spread, a regression in a row the
+base does not have, and anything when the base does not build against the head's harness (the run then carries a
+warning saying so, and the gates are the absolute budgets and the ratios). Noise is the other side of 1.5x: in the spin run a row the spin cannot
+touch, `signals/keyed_100/insert` (333 ns), read 1.43x its baseline on a machine at load 3, and it passed because the
+best of three attempts counts; the first CI run of this workflow is the first time `bench-record-base.sh` runs on a
+runner, and it is an A/A run by construction (this change touches no crate, so the base and the head build the same
+core): a row that proves too noisy there gets `baseline_tolerance` in its own `budgets.toml` table, the only place a
+per-row factor survives a baseline recorded afresh in every job.
 
 ### What these numbers are not
 
@@ -391,15 +558,22 @@ it measures, not the allocator.) The test takes the best p50 of up to three atte
 just smoke-runs every operation, so `cargo test --workspace` stays green and fast), and supports
 `UNDRA_BENCH_SCALE` for a slower runner. `.github/workflows/bench.yml` runs it on every PR and on main.
 
-Two more steps follow it in the same job. `cargo test -p undra-bench --test stress --release` runs the seven
+Two more steps follow it in the same job. `cargo test -p undra-bench --test stress --release` runs the eight
 sustained scenarios of [Harsh conditions](#harsh-conditions) for 2 s each and fails over their
-`[stress."..."]` tables in `budgets.toml` (a throughput floor, p99 and p999 ceilings, exact change-set bytes,
-RSS growth) or on a broken invariant (nothing lost, nothing reordered, the host's list equals the core's, a
-stream never more than one item ahead); a noisy run gets three attempts, an invariant none. Then
+`[stress."..."]` tables in `budgets.toml` (a throughput floor, p99 and p999 ceilings, a change-set bytes ceiling,
+RSS growth) or on a broken invariant (nothing lost, nothing reordered, the exact byte count, the host's list equals
+the core's, a stream never more than one item ahead); a noisy run gets three attempts, an invariant none. Then
 `cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2` runs the mixed paced load and fails
 on RSS growth, drift in the firehose's p99, a broken invariant or a host that could not carry the load. The
 debug build of the stress test checks invariants only (500 churn rows, 100 ms per scenario), so
 `cargo test --workspace` stays green and about 4 s slower.
+
+Before those steps `bench.yml` records a baseline from the base commit on the same VM, and the budgets and stress
+steps gate against it as well (see [Gates that catch a 2x regression](#gates-that-catch-a-2x-regression)); the
+ratio tables of `budgets.toml` run in every budgets step on every machine.
+
+Every run uploads the JSON behind its numbers (`UNDRA_BENCH_RESULTS_DIR`, see Method) as the `bench-results`
+artifact; the soak runs each attempt in a fresh process.
 
 ## Device numbers (iOS, Android, Web)
 

@@ -5,26 +5,46 @@ name: Bench
 # patches, snapshot and restore) with plain `Instant` and fails when the p50 of any of them is
 # over its budget in `bench/budgets.toml`.
 #
-# The budgets are HOST regression guards: about five times what an Apple-silicon laptop measures,
-# so a shared ubuntu runner passes and an operation that became several times slower does not.
-# They are not the blueprint's device targets (section 14: A15 iPhone, mid-range Android,
+# The absolute budgets are HOST regression guards: about five times what an Apple-silicon laptop
+# measures, so a shared ubuntu runner passes and an operation that became several times slower does
+# not. They are not the blueprint's device targets (section 14: A15 iPhone, mid-range Android,
 # Chromium); those are measured on devices in the playground phase and recorded in
 # `bench/RESULTS.md`. A noisy run gets three attempts per operation (the best p50 counts).
 # If a runner class is consistently slower, set UNDRA_BENCH_SCALE (for example 2) rather than
 # loosening the file. `cargo bench -p undra-bench` (criterion) is for humans and is deliberately
 # not run here.
 #
-# Harsh conditions (the second and third steps, about a minute together): the sustained scenarios
-# of `bench/tests/stress.rs` run for 2 s each (UNDRA_STRESS_SECONDS) at rates far above any UI, with
-# 8 threads completing port calls under a 60 Hz drain thread, and fail on a throughput floor, a
-# tail ceiling, change-set bytes or RSS growth over their `[stress."..."]` table in
-# `bench/budgets.toml`, or on a broken invariant (nothing lost, nothing reordered, the host list
-# equals the core list, a stream never more than one item ahead of its credit). Then the soak runs
-# the mixed paced load of a busy app for 10 s and fails on RSS growth, p99 drift or a broken
-# invariant. A noisy run gets three attempts per scenario (two for the soak); an invariant that
-# breaks is never retried. UNDRA_BENCH_SCALE applies to rates and latencies here too, never to
-# bytes, RSS or invariants. These are core-side host numbers: what a platform does with a
-# change-set afterwards is measured on the platform (`bench/RESULTS.md`, "Harsh conditions").
+# Two things catch what a 5x budget lets through (bench review M1: a commit path made 1.8x slower
+# passed every absolute gate):
+#   * RATIO gates (`[ratio."..."]` in budgets.toml) compare two rows measured in the same run, so
+#     the runner's speed cancels. They run in every step below, on every runner.
+#   * A BASELINE recorded from the BASE commit, in this same job on this same VM, minutes before the
+#     head is measured (scripts/bench-record-base.sh: the head's harness against the base's crates).
+#     The head must be within 1.5x of it on every row (p50, throughput; 2.5x for p99; the
+#     cache-bound fan-out rows have `baseline_tolerance` 2 and 3 in budgets.toml). It is the
+#     base measured here, not a number from another machine, because the ubuntu-latest pool is not
+#     one machine class: the same row measured 1.1x to 3.3x apart across six runs. For a pull request
+#     the base is the first parent of the merge ref; for a push it is the commit the push replaced.
+#     When there is no base to measure (a new branch, a base that does not build against this
+#     harness) the run carries a warning saying so, and the gates are the absolute budgets and the
+#     ratios. A noisy row on the runner gets `baseline_tolerance` in its budgets.toml table (the
+#     baseline is recorded afresh in every job, so it cannot carry one), never a looser default.
+#
+# Harsh conditions (the stress and soak steps): the sustained scenarios of `bench/tests/stress.rs`
+# run for 2 s each (UNDRA_STRESS_SECONDS) at rates far above any UI, with 8 threads completing port
+# calls under a 60 Hz drain thread, alone and with a host thread writing the same store, and fail
+# on a throughput floor, a tail ceiling, change-set bytes or RSS growth over their
+# `[stress."..."]` table in `bench/budgets.toml`, or on a broken invariant (nothing lost, nothing
+# reordered, the host list equals the core list, a stream never more than one item ahead of its
+# credit). Then the soak runs the mixed paced load of a busy app for 10 s and fails on RSS growth,
+# p99 drift (the trend of the second half, and one bad second), a broken invariant or a host that
+# could not carry the load; each attempt is a fresh process. A noisy run gets three attempts per
+# scenario (two for the soak); an invariant that breaks is never retried. UNDRA_BENCH_SCALE applies
+# to rates and latencies here too, never to bytes, RSS, invariants or a baseline. These are
+# core-side host numbers: what a platform does with a change-set afterwards is measured on the
+# platform (`bench/RESULTS.md`, "Harsh conditions").
+#
+# Every run uploads the JSON behind its numbers (UNDRA_BENCH_RESULTS_DIR) as an artifact.
 
 on:
   push:
@@ -32,16 +52,22 @@ on:
   pull_request:
 
 concurrency:
-  group: bench-${{ github.ref }}
+  # A pull request's newer run replaces its older one: each run compares the whole pull request
+  # with its base. A push to main is NEVER cancelled (one group per commit): its baseline is the
+  # commit the push replaced, so a cancelled run would leave that push compared with nothing, and
+  # the next push would be gated against it, regression included. (Before this, a merge followed a
+  # minute later by its state commit had the merge's run cancelled: 36803857331, 36808385622.)
+  group: bench-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 env:
   # Runner classes measured 3.5x-6.2x slower than the M5 host in Oct 2026 (signals/changeset_100/cell
   # hit 6.2x on one runner), against the 5x assumption the host budgets were set with. 2x more
-  # headroom keeps the gates honest about a real regression while they stop failing on the slowest
-  # runner; the follow-up (bench review M1) is runner-measured baselines or ratio gates.
+  # headroom keeps the absolute gates honest about a real regression while they stop failing on the
+  # slowest runner. It does not touch the ratio gates or the baseline gate (it would defeat them).
   UNDRA_BENCH_SCALE: "2"
   CARGO_TERM_COLOR: always
+  UNDRA_BENCH_RESULTS_DIR: ${{ github.workspace }}/bench-results
 
 jobs:
   budgets:
@@ -50,11 +76,49 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A pull request's merge ref has the base as its first parent.
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # A key of its own since the base build: rust-cache saves only on a miss, and the cache
+          # of the earlier key had no target/bench-base, so the base's dependencies would have been
+          # built cold on every run until Cargo.lock or the toolchain changed. rust-cache keeps a
+          # nested target directory's dependencies and drops its workspace crates, like target/'s.
+          key: with-base-target
+      - name: Baseline from the base commit (same VM)
+        id: base
+        # A base that does not build against this harness must not fail the job: the gates below
+        # then run without it. It must not be silent either: a warning on the run says so.
+        continue-on-error: true
+        env:
+          BASE_REV: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: |
+          case "$BASE_REV" in
+            ''|0000000000000000000000000000000000000000)
+              echo "::warning title=No baseline gate::no base commit to measure against; this run is gated by the absolute budgets and the ratios only"
+              exit 0 ;;
+          esac
+          if scripts/bench-record-base.sh "$BASE_REV" "$RUNNER_TEMP/base-baseline.toml" 2; then
+            echo "path=$RUNNER_TEMP/base-baseline.toml" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=No baseline gate::the base $BASE_REV could not be measured with this harness (see the step's log); this run is gated by the absolute budgets and the ratios only, which miss most regressions under 2x"
+          fi
       - name: Budgets
+        env:
+          UNDRA_BENCH_BASELINE: ${{ steps.base.outputs.path }}
         run: cargo test -p undra-bench --test budgets --release -- --nocapture
       - name: Harsh conditions (sustained scenarios)
+        env:
+          UNDRA_BENCH_BASELINE: ${{ steps.base.outputs.path }}
         run: cargo test -p undra-bench --test stress --release -- --nocapture
       - name: Soak (10 s)
         run: cargo run -p undra-bench --release --bin soak -- --seconds 10 --attempts 2
+      - name: The JSON behind the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results
+          if-no-files-found: ignore

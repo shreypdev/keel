@@ -1,0 +1,14 @@
+{
+  "scenario": "fanout/sustained",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": null,
+  "command": "UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_BASELINE=apple-m5-pro cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd"},
+  "load_average": {"before": 2.34, "after": 2.31},
+  "run": {"seconds": 10, "warmup_ms": 200, "elapsed_s": 7.500001791, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/Users/shrey/Desktop/src/.work/bench-followups/bench/baselines/apple-m5-pro.toml"},
+  "result": {"ops": 208957, "per_sec": 27860.926680144043, "p50_ns": 34815, "p99_ns": 59391, "p999_ns": 73727, "max_ns": 103458, "bytes_per_op": 21012, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 5 k ops/s, p99 at most 410.00 us", "passed": true, "failures": []},
+  "invariants": [{"what": "one change-set per transaction (208957 for 208957; 96751 for 96751 over 10k)", "holds": true, "timing": false}, {"what": "21012 bytes per transaction over 100k and over 10k observed (21012 and 21012)", "holds": true, "timing": false}, {"what": "cost follows the dirty count: p50 over 100k observed 34815 ns <= 4 x p50 over 10k 25599 ns", "holds": true, "timing": true}],
+  "notes": ["10,000 observed: 96751 transactions, p50 25599 ns, p99 32767 ns"]
+}

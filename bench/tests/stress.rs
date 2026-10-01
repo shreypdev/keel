@@ -15,11 +15,21 @@
 //!   under `cargo test --workspace`, and the timing gates are left to `--release`.
 //! * A noisy run gets three attempts: a scenario passes if any attempt meets every gate. An
 //!   invariant that breaks is never retried; it is not noise.
+//! * `UNDRA_BENCH_BASELINE=<name or path>` adds a gate against what one machine class measured
+//!   (`bench/baselines/<name>.toml`, or a file recorded earlier in the same CI job): throughput
+//!   under 1/1.5 of the baseline's, or a p99 over 2.5x it, fails. `UNDRA_BENCH_RECORD=path` runs
+//!   every scenario all three times and records the best of each metric as a baseline.
+//! * Every scenario runs for a **warm-up** first, results discarded (thread start-up, cold caches,
+//!   the first allocations): a tenth of the measured run, at most 200 ms, then the measured run
+//!   of `UNDRA_STRESS_SECONDS`. `UNDRA_STRESS_WARMUP_MS=0` measures from the first operation,
+//!   `=500` warms up for half a second. Each result says how long its warm-up was.
+//! * `UNDRA_BENCH_RESULTS_DIR=dir` writes the JSON behind every number (one file per scenario,
+//!   with the command, the machine and the load) for `bench/results/`; see `undra_bench::results`.
 //! * Knobs: `UNDRA_STRESS_SECONDS=10` sets the wall time per scenario (default 2; the numbers in
 //!   `RESULTS.md` use 10), `UNDRA_BENCH_SCALE=2.5` divides every floor and multiplies every
-//!   ceiling (never bytes, RSS or invariants), `UNDRA_BENCH_FILTER=churn` runs only matching
-//!   scenarios, `UNDRA_BENCH_BUDGETS=path` reads another file, `UNDRA_STRESS_JSON=path` also
-//!   writes one JSON row per scenario for the site.
+//!   ceiling (never bytes, RSS, invariants or a baseline), `UNDRA_BENCH_FILTER=churn` runs only
+//!   matching scenarios, `UNDRA_BENCH_BUDGETS=path` reads another file, `UNDRA_STRESS_JSON=path`
+//!   also writes one JSON row per scenario for the site.
 //! * `cargo test -p undra-bench --test stress --release -- --ignored --nocapture stress_baseline`
 //!   prints fresh measurements as `[stress."name"]` tables, for setting or re-basing a gate.
 
@@ -30,7 +40,9 @@ use std::time::Duration;
 
 use undra::wire::payload::ChangeSetBuilder;
 use undra::wire::{Handle, Writer};
+use undra_bench::baseline::{Baseline, Selected, StressBaseline};
 use undra_bench::budget::{Budgets, StressBudget, StressObserved};
+use undra_bench::hostinfo;
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -81,6 +93,18 @@ fn seconds() -> f64 {
             ),
         },
         Err(_) => 2.0,
+    }
+}
+
+/// `UNDRA_STRESS_WARMUP_MS`: the warm-up of every scenario in milliseconds (`None`: the default,
+/// a tenth of the run, at most 200 ms).
+fn warmup_override() -> Option<Duration> {
+    let text = std::env::var("UNDRA_STRESS_WARMUP_MS").ok()?;
+    match text.parse::<u64>() {
+        Ok(ms) => Some(Duration::from_millis(ms)),
+        Err(_) => panic!(
+            "UNDRA_STRESS_WARMUP_MS must be a whole number of milliseconds (0 for none), not `{text}`"
+        ),
     }
 }
 
@@ -191,6 +215,7 @@ fn stress() {
             duration: Duration::from_millis(100),
             rss: false,
             fault: Fault::None,
+            warmup: None,
         };
         for (name, run) in &scenarios {
             let report = run(&cfg);
@@ -217,19 +242,41 @@ fn stress() {
 
     let budgets = load_budgets();
     let scale = scale();
-    let cfg = StressConfig::new(Duration::from_secs_f64(seconds()));
+    let baseline = match Selected::from_env() {
+        Ok(selected) => selected,
+        Err(e) => panic!("{e}"),
+    };
+    let recording = std::env::var_os("UNDRA_BENCH_RECORD")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    let load_before = hostinfo::load_average();
+    let cfg = StressConfig {
+        warmup: warmup_override(),
+        ..StressConfig::new(Duration::from_secs_f64(seconds()))
+    };
     let mut failures = Vec::new();
     let mut retried: Vec<String> = Vec::new();
-    let mut final_reports = Vec::new();
+    let mut final_reports: Vec<Finished> = Vec::new();
+    let mut recorded = Baseline::default();
     eprintln!(
-        "{} s per scenario, scale {scale}; RSS is sampled {}",
+        "{} s per scenario after a warm-up of {} ms (UNDRA_STRESS_WARMUP_MS), scale {scale}; RSS is sampled {}",
         seconds(),
+        cfg.warmup().as_millis(),
         if undra_bench::rss::resident_bytes().is_some() {
             "from the process"
         } else {
             "NOWHERE on this platform (the RSS gates are skipped)"
         }
     );
+    if let Some(note) = undra_bench::rss::rss_caveat() {
+        eprintln!("note: {note}");
+    }
+    match &baseline {
+        Some(b) => eprintln!("{}", b.describe()),
+        None => eprintln!(
+            "no baseline selected (UNDRA_BENCH_BASELINE): only the absolute budgets gate this run"
+        ),
+    }
     header();
     for (name, run) in &scenarios {
         let Some(budget) = budgets.stress.get(*name) else {
@@ -238,18 +285,28 @@ fn stress() {
             ));
             continue;
         };
+        // What a recording keeps: the best of each metric over the attempts.
+        let mut best: Option<StressBaseline> = None;
+        let mut passed = false;
         for attempt in 1..=ATTEMPTS {
             let report = run(&cfg);
             let broken = report.broken();
             if !broken.is_empty() {
                 row(&report, "INVARIANT BROKEN");
-                for invariant in &broken {
-                    eprintln!("    x {}", invariant.what);
-                    failures.push(format!("{name}: {}", invariant.what));
+                let whats: Vec<String> = broken.iter().map(|i| i.what.clone()).collect();
+                for what in &whats {
+                    eprintln!("    x {what}");
+                    failures.push(format!("{name}: {what}"));
                 }
+                final_reports.push(Finished {
+                    report,
+                    attempt,
+                    failures: whats,
+                });
                 break;
             }
-            let mut verdict = budget.check(&observed(&report), scale);
+            let observed = observed(&report);
+            let mut verdict = budget.check(&observed, scale);
             // Timing comparisons a scenario makes about itself are gates, not invariants.
             verdict.failures.extend(
                 report
@@ -257,19 +314,63 @@ fn stress() {
                     .iter()
                     .map(|check| check.what.clone()),
             );
+            // What a machine class measured earlier: a regression on it fails whatever the budgets say.
+            match baseline.as_ref().map(|b| {
+                (
+                    b,
+                    b.stress_failures_with(name, &observed, budget.baseline_tolerance),
+                )
+            }) {
+                Some((b, Some(over))) => verdict.failures.extend(
+                    over.into_iter()
+                        .map(|f| format!("{f}, against the baseline in {}", b.path.display())),
+                ),
+                Some((b, None)) => verdict.notices.push(format!(
+                    "{name} has no table in {}: not gated against the baseline (record it again)",
+                    b.path.display()
+                )),
+                None => {}
+            }
             for notice in &verdict.notices {
                 eprintln!("    notice: {notice}");
             }
+            if recording.is_some() {
+                let mine = StressBaseline {
+                    per_sec: report.per_sec(),
+                    p99_ns: report.percentile(0.99).map(|n| n as f64),
+                    p999_ns: report.percentile(0.999).map(|n| n as f64),
+                    tolerance: None,
+                };
+                best = Some(match best.take() {
+                    None => mine,
+                    Some(b) => StressBaseline {
+                        per_sec: b.per_sec.max(mine.per_sec),
+                        p99_ns: b.p99_ns.zip(mine.p99_ns).map(|(a, c)| a.min(c)),
+                        p999_ns: b.p999_ns.zip(mine.p999_ns).map(|(a, c)| a.min(c)),
+                        tolerance: None,
+                    },
+                });
+            }
             if verdict.passed() {
-                let tag = if attempt == 1 {
+                let tag = if attempt == 1 || recording.is_some() {
                     "ok".to_owned()
                 } else {
                     retried.push(format!("{name} (attempt {attempt} of {ATTEMPTS})"));
                     format!("ok (attempt {attempt})")
                 };
                 row(&report, &tag);
-                final_reports.push(report);
-                break;
+                if !passed {
+                    final_reports.push(Finished {
+                        report,
+                        attempt,
+                        failures: Vec::new(),
+                    });
+                }
+                passed = true;
+                if recording.is_none() {
+                    break;
+                }
+                continue;
             }
             row(
                 &report,
@@ -278,11 +379,20 @@ fn stress() {
             for problem in &verdict.failures {
                 eprintln!("    x {problem}");
             }
-            if attempt == ATTEMPTS {
-                for problem in verdict.failures {
+            if attempt == ATTEMPTS && !passed {
+                for problem in &verdict.failures {
                     failures.push(format!("{name}: {problem}"));
                 }
+                // The result file of a scenario that failed says so, and why: it is evidence too.
+                final_reports.push(Finished {
+                    report,
+                    attempt,
+                    failures: verdict.failures,
+                });
             }
+        }
+        if let Some(best) = best {
+            recorded.stress.insert((*name).to_owned(), best);
         }
     }
     if !retried.is_empty() {
@@ -292,7 +402,24 @@ fn stress() {
         );
     }
     if let Some(path) = std::env::var_os("UNDRA_STRESS_JSON") {
-        write_json(&PathBuf::from(path), &final_reports, &budgets);
+        let reports: Vec<&StressReport> = final_reports
+            .iter()
+            .filter(|f| f.failures.is_empty())
+            .map(|f| &f.report)
+            .collect();
+        write_json(&PathBuf::from(path), &reports, &budgets);
+    }
+    if let Some(dir) = undra_bench::results::dir_from_env() {
+        write_results(
+            &dir,
+            &final_reports,
+            &budgets,
+            baseline.as_ref(),
+            (scale, load_before, hostinfo::load_average()),
+        );
+    }
+    if let Some(path) = &recording {
+        record(path, recorded, load_before);
     }
     assert!(
         failures.is_empty(),
@@ -302,6 +429,153 @@ fn stress() {
     );
 }
 
+/// A scenario's last report, which attempt it was, and the gates it missed (none: it passed).
+struct Finished {
+    report: StressReport,
+    attempt: usize,
+    failures: Vec<String>,
+}
+
+/// Writes the JSON behind each scenario's numbers: one file per scenario in `dir`, named after the
+/// date, the optional `UNDRA_BENCH_RESULTS_TAG` and the scenario.
+fn write_results(
+    dir: &std::path::Path,
+    reports: &[Finished],
+    budgets: &Budgets,
+    baseline: Option<&Selected>,
+    (scale, load_before, load_after): (f64, Option<f64>, Option<f64>),
+) {
+    use undra_bench::results::{
+        command, json_number, json_opt, json_string, machine_members, path_for, slug, tag_from_env,
+        write,
+    };
+    let (date, tag) = (hostinfo::date(), tag_from_env());
+    let how = command(
+        "cargo test -p undra-bench --test stress --release -- --nocapture",
+        &[
+            "UNDRA_BENCH_RESULTS_TAG",
+            "UNDRA_STRESS_SECONDS",
+            "UNDRA_STRESS_WARMUP_MS",
+            "UNDRA_BENCH_SCALE",
+            "UNDRA_BENCH_FILTER",
+            "UNDRA_BENCH_BASELINE",
+            "UNDRA_BENCH_BASELINE_TOLERANCE",
+        ],
+    );
+    for Finished {
+        report,
+        attempt,
+        failures,
+    } in reports
+    {
+        let at = |p: f64| report.percentile(p).map(|n| n as f64);
+        let strings = |items: Vec<String>| items.join(", ");
+        let invariants = strings(
+            report
+                .invariants
+                .iter()
+                .map(|i| {
+                    format!(
+                        "{{\"what\": {}, \"holds\": {}, \"timing\": {}}}",
+                        json_string(&i.what),
+                        i.holds,
+                        i.timing
+                    )
+                })
+                .collect(),
+        );
+        let notes = strings(report.notes.iter().map(|n| json_string(n)).collect());
+        let gate = budgets
+            .stress
+            .get(report.name)
+            .map(|b| gate_text(b, "ops"))
+            .unwrap_or_default();
+        let text = format!(
+            "{{\n  \"scenario\": {},\n  \"kind\": \"sustained\",\n  \"date\": {},\n  \"tag\": {},\n  \"command\": {},\n  {},\n  \
+             \"run\": {{\"seconds\": {}, \"warmup_ms\": {}, \"elapsed_s\": {}, \"attempt\": {}, \"attempts\": {ATTEMPTS}, \"scale\": {}, \"baseline\": {}}},\n  \
+             \"result\": {{\"ops\": {}, \"per_sec\": {}, \"p50_ns\": {}, \"p99_ns\": {}, \"p999_ns\": {}, \"max_ns\": {}, \"bytes_per_op\": {}, \"rss_growth_pct\": {}, \"rss_baseline_bytes\": {}, \"rss_final_bytes\": {}}},\n  \
+             \"gate\": {{\"budget\": {}, \"passed\": {}, \"failures\": [{}]}},\n  \"invariants\": [{}],\n  \"notes\": [{}]\n}}\n",
+            json_string(report.name),
+            json_string(&date),
+            tag.as_deref()
+                .map_or_else(|| "null".to_owned(), json_string),
+            json_string(&how),
+            machine_members(load_before, load_after),
+            json_number(seconds()),
+            report.warmup.as_millis(),
+            json_number(report.elapsed.as_secs_f64()),
+            attempt,
+            json_number(scale),
+            baseline.map_or_else(
+                || "null".to_owned(),
+                |b| json_string(&b.path.display().to_string())
+            ),
+            report.ops,
+            json_number(report.per_sec()),
+            json_opt(at(0.5)),
+            json_opt(at(0.99)),
+            json_opt(at(0.999)),
+            json_opt((report.latency.count() > 0).then(|| report.latency.max() as f64)),
+            json_number(report.bytes_per_op()),
+            json_opt(report.rss.map(|g| g.growth_pct)),
+            json_opt(report.rss.map(|g| g.baseline_bytes as f64)),
+            json_opt(report.rss.map(|g| g.final_bytes as f64)),
+            json_string(&gate),
+            failures.is_empty(),
+            strings(failures.iter().map(|f| json_string(f)).collect()),
+            invariants,
+            notes,
+        );
+        write(
+            &path_for(dir, &date, tag.as_deref(), &slug(report.name)),
+            &text,
+        );
+    }
+    eprintln!("wrote {} result files to {}", reports.len(), dir.display());
+}
+
+/// Writes what this run measured as a baseline, next to the facts about the machine.
+fn record(path: &std::path::Path, mut baseline: Baseline, load_before: Option<f64>) {
+    let load = |l: Option<f64>| l.map_or_else(|| "?".to_owned(), |l| format!("{l:.2}"));
+    for (key, value) in [
+        ("cpu", hostinfo::cpu()),
+        ("cores", hostinfo::cores().to_string()),
+        ("os", hostinfo::os()),
+        ("rustc", hostinfo::rustc()),
+        ("date", hostinfo::date()),
+        ("git", hostinfo::git_revision()),
+        ("stress_seconds", seconds().to_string()),
+        (
+            "command_layer_b",
+            undra_bench::results::command(
+                "cargo test -p undra-bench --test stress --release",
+                &[
+                    "UNDRA_BENCH_RECORD",
+                    "UNDRA_BENCH_RECORD_BEST",
+                    "UNDRA_STRESS_SECONDS",
+                    "UNDRA_STRESS_WARMUP_MS",
+                    "UNDRA_BENCH_FILTER",
+                ],
+            ),
+        ),
+        (
+            "load_layer_b",
+            format!(
+                "{} before, {} after (one-minute load average)",
+                load(load_before),
+                load(hostinfo::load_average())
+            ),
+        ),
+    ] {
+        baseline.meta.entry(key.to_owned()).or_insert(value);
+    }
+    let rows = baseline.stress.len();
+    if let Err(e) = baseline.record_into(path, undra_bench::baseline::record_keeps_best()) {
+        panic!("cannot write UNDRA_BENCH_RECORD to {}: {e}", path.display());
+    }
+    eprintln!("recorded {rows} scenarios to {}", path.display());
+}
+
 #[test]
 fn a_skipped_patch_fails_the_equality_invariant() {
     let _serial = serial();
@@ -309,6 +583,7 @@ fn a_skipped_patch_fails_the_equality_invariant() {
         duration: Duration::from_millis(200),
         rss: false,
         fault: Fault::SkipPatches,
+        warmup: None,
     };
     let report = common::stress::keyed_churn(&cfg);
     let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
@@ -329,6 +604,7 @@ fn a_single_dropped_update_fails_the_mirror_invariants() {
         duration: Duration::from_millis(200),
         rss: false,
         fault: Fault::DropOneUpdate,
+        warmup: None,
     };
     let report = common::stress::keyed_churn(&cfg);
     let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
@@ -341,23 +617,221 @@ fn a_single_dropped_update_fails_the_mirror_invariants() {
 }
 
 #[test]
-fn swapped_change_sets_fail_the_order_invariant() {
+fn the_default_warm_up_is_a_tenth_of_the_run_capped_at_200_ms() {
+    use common::stress::default_warmup;
+    assert_eq!(
+        default_warmup(Duration::from_secs(10)),
+        Duration::from_millis(200)
+    );
+    assert_eq!(
+        default_warmup(Duration::from_secs(2)),
+        Duration::from_millis(200)
+    );
+    assert_eq!(
+        default_warmup(Duration::from_millis(500)),
+        Duration::from_millis(50)
+    );
+    assert_eq!(
+        default_warmup(Duration::from_millis(100)),
+        Duration::from_millis(10)
+    );
+    // Configured wins, and zero means none.
+    let cfg = StressConfig {
+        warmup: Some(Duration::from_millis(7)),
+        ..StressConfig::new(Duration::from_secs(10))
+    };
+    assert_eq!(cfg.warmup(), Duration::from_millis(7));
+    assert_eq!(
+        cfg.warmup_for(Duration::from_secs(1)),
+        Duration::from_millis(7)
+    );
+    assert_eq!(
+        StressConfig::new(Duration::from_secs(1)).warmup(),
+        Duration::from_millis(100)
+    );
+}
+
+#[test]
+fn a_warm_up_runs_first_and_is_not_measured() {
+    // Every scenario that has one reports it, runs for the measured duration after it, and counts
+    // only that run: the "one change-set per transaction (N for N)" invariants hold only if the
+    // counters were read after the warm-up, whatever it did before.
     let _serial = serial();
+    for (scenario, name) in [
+        (
+            common::stress::firehose as fn(&StressConfig) -> StressReport,
+            "firehose",
+        ),
+        (common::stress::event_firehose, "event"),
+        (common::stress::keyed_churn, "keyed_churn"),
+        (common::stress::fanout_stores, "fanout_stores"),
+        (common::stress::completions, "completions"),
+        (common::stress::completions_contended, "contended"),
+    ] {
+        let cfg = StressConfig {
+            duration: Duration::from_millis(100),
+            rss: false,
+            fault: Fault::None,
+            warmup: Some(Duration::from_millis(60)),
+        };
+        let report = scenario(&cfg);
+        assert_eq!(report.warmup, Duration::from_millis(60), "{name}");
+        assert!(report.broken().is_empty(), "{name}: {:?}", report.broken());
+        assert!(report.ops > 0, "{name}");
+        // The measured run is the 100 ms (plus a round, or the in-flight calls), not 160.
+        assert!(
+            report.elapsed < Duration::from_secs(5),
+            "{name}: {:?}",
+            report.elapsed
+        );
+    }
+    // And a scenario with none measures from the first operation.
+    let none = StressConfig {
+        warmup: Some(Duration::ZERO),
+        ..StressConfig::new(Duration::from_millis(50))
+    };
+    let report = common::stress::firehose(&StressConfig { rss: false, ..none });
+    assert_eq!(report.warmup, Duration::ZERO);
+    assert!(report.broken().is_empty());
+}
+
+#[test]
+fn the_completions_scenario_stops_near_its_deadline() {
+    // The issuer once looked at the clock only when its window of calls in flight filled; when the
+    // completer threads kept pace it never did, and a run of 200 ms lasted up to 154 s (debug,
+    // a loaded machine). A run is its duration plus the time to answer what is in flight.
+    let _serial = serial();
+    let cfg = StressConfig {
+        duration: Duration::from_millis(100),
+        rss: false,
+        fault: Fault::None,
+        warmup: None,
+    };
+    for _ in 0..4 {
+        // On a thread with a watchdog: the old loop did not return at all (over 150 s, twice, in
+        // review), and a test that hangs fails only when the CI job times out.
+        let (done, report) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(common::stress::completions(&cfg));
+        });
+        let report = report
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a 100 ms run did not end in 60 s: the issuer ignored its deadline");
+        assert!(
+            report.elapsed < Duration::from_secs(5),
+            "a 100 ms run took {:?}: the issuer ignored its deadline",
+            report.elapsed
+        );
+        assert!(report.broken().is_empty());
+    }
+}
+
+/// The words of every invariant that broke when `scenario` ran with `fault`.
+fn broken_by(scenario: fn(&StressConfig) -> StressReport, fault: Fault) -> Vec<String> {
     let cfg = StressConfig {
         duration: Duration::from_millis(200),
         rss: false,
-        fault: Fault::SwapChangeSets,
+        fault,
+        warmup: None,
     };
-    let report = common::stress::completions(&cfg);
-    let broken: Vec<_> = report.broken().iter().map(|i| i.what.clone()).collect();
+    scenario(&cfg)
+        .broken()
+        .iter()
+        .map(|i| i.what.clone())
+        .collect()
+}
+
+#[test]
+fn swapped_change_sets_fail_the_order_invariants() {
+    let _serial = serial();
+    for scenario in [
+        common::stress::completions,
+        common::stress::completions_contended,
+    ] {
+        let broken = broken_by(scenario, Fault::SwapChangeSets);
+        assert!(
+            broken
+                .iter()
+                .any(|what| what.contains("nothing arrived out of order")),
+            "a main thread that swaps two change-sets must fail the order invariant: {broken:?}"
+        );
+        assert!(
+            broken.iter().any(|what| what.contains("exact count")),
+            "...and the total must stop arriving as a count: {broken:?}"
+        );
+        // Only those: nothing was lost and every call was answered.
+        assert_eq!(broken.len(), 2, "{broken:?}");
+    }
+}
+
+#[test]
+fn a_change_set_lost_on_the_way_to_the_ui_fails_the_loss_invariants() {
+    let _serial = serial();
+    for scenario in [
+        common::stress::completions,
+        common::stress::completions_contended,
+    ] {
+        let broken = broken_by(scenario, Fault::DropChangeSet);
+        assert!(
+            broken
+                .iter()
+                .any(|what| what.contains("the main thread saw every change-set")),
+            "{broken:?}"
+        );
+        assert!(
+            broken.iter().any(|what| what.contains("exact count")),
+            "{broken:?}"
+        );
+        // The core delivered and answered everything: only the UI side lost one.
+        assert_eq!(broken.len(), 2, "{broken:?}");
+    }
+}
+
+#[test]
+fn the_contended_scenario_really_has_two_threads_writing_one_store() {
+    // The point of the scenario: besides the completions that commit on the core thread, a host
+    // thread's `call_sync` writes land in the same store, and every one of them is accounted for.
+    let _serial = serial();
+    let cfg = StressConfig {
+        duration: Duration::from_millis(300),
+        rss: false,
+        fault: Fault::None,
+        warmup: None,
+    };
+    let report = common::stress::completions_contended(&cfg);
+    assert!(report.broken().is_empty(), "{:?}", report.broken());
+    let writer = report
+        .notes
+        .iter()
+        .find(|n| n.starts_with("writer thread:"))
+        .expect("the scenario reports its writer");
     assert!(
-        broken
-            .iter()
-            .any(|what| what.contains("nothing arrived out of order")),
-        "a main thread that swaps two change-sets must fail the order invariant: {broken:?}"
+        !writer.contains(": 0 call_sync"),
+        "the writer never ran: {writer}"
     );
-    // Only that: nothing was lost and every call was answered.
-    assert_eq!(broken.len(), 1, "{broken:?}");
+    let writes: u64 = report
+        .invariants
+        .iter()
+        .find_map(|i| {
+            i.what
+                .strip_prefix("every write from the host thread succeeded (")
+        })
+        .and_then(|rest| rest.split_whitespace().next()?.parse().ok())
+        .expect("the writes invariant says how many");
+    assert!(writes > 0);
+    // The measured run's store writes are among those of the whole run (the warm-up is not in it).
+    let replies: u64 = report
+        .invariants
+        .iter()
+        .find_map(|i| i.what.strip_prefix("every call was answered ("))
+        .and_then(|rest| rest.split_whitespace().next()?.parse().ok())
+        .expect("the answered invariant says how many");
+    assert!(
+        report.ops > 0 && report.ops <= replies + writes,
+        "{} of {}",
+        report.ops,
+        replies + writes
+    );
 }
 
 /// A change-set of one entry for store `handle`, transaction `txn_id`.
@@ -534,9 +1008,16 @@ const SITE_ROWS: &[(&str, &str, &str, &str, &str)] = &[
     (
         "completions/8_threads",
         "stress/completions",
-        "Concurrent completions: 8 threads, nothing lost or reordered",
+        "Concurrent completions: 8 threads, nothing lost",
         "completions",
         "call to reply",
+    ),
+    (
+        "completions/contended",
+        "stress/completions_contended",
+        "Contended completions: a host thread writing the same store, nothing lost or reordered",
+        "writes",
+        "completion call to reply",
     ),
 ];
 
@@ -579,10 +1060,10 @@ fn gate_text(budget: &StressBudget, unit: &str) -> String {
 }
 
 /// Writes one JSON row per scenario in the shape of `site/data/bench.json`'s "harsh" group.
-fn write_json(path: &PathBuf, reports: &[StressReport], budgets: &Budgets) {
+fn write_json(path: &PathBuf, reports: &[&StressReport], budgets: &Budgets) {
     let machine = budgets.meta.get("machine").cloned().unwrap_or_default();
     let mut rows = Vec::new();
-    for report in reports {
+    for report in reports.iter().copied() {
         let Some((_, id, label, unit, step)) = SITE_ROWS.iter().find(|r| r.0 == report.name) else {
             continue;
         };

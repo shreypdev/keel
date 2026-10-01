@@ -1,0 +1,14 @@
+{
+  "scenario": "fanout/sustained",
+  "kind": "sustained",
+  "date": "2026-09-30",
+  "tag": "commit-control",
+  "command": "UNDRA_BENCH_RESULTS_TAG=commit-control UNDRA_STRESS_SECONDS=2 UNDRA_BENCH_BASELINE=/private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "acc4a22494bd-dirty"},
+  "load_average": {"before": 3.15, "after": 3.25},
+  "run": {"seconds": 2, "warmup_ms": 150, "elapsed_s": 1.500029709, "attempt": 1, "attempts": 3, "scale": 1, "baseline": "/private/tmp/claude-501/-Users-shrey-Desktop-src-keel/acdcf20d-e5e0-4e55-baef-372c013afd72/scratchpad/base.toml"},
+  "result": {"ops": 37476, "per_sec": 24983.505176696468, "p50_ns": 38911, "p99_ns": 67583, "p999_ns": 90111, "max_ns": 496667, "bytes_per_op": 21012, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 5 k ops/s, p99 at most 410.00 us", "passed": true, "failures": []},
+  "invariants": [{"what": "one change-set per transaction (37476 for 37476; 19060 for 19060 over 10k)", "holds": true, "timing": false}, {"what": "21012 bytes per transaction over 100k and over 10k observed (21012 and 21012)", "holds": true, "timing": false}, {"what": "cost follows the dirty count: p50 over 100k observed 38911 ns <= 4 x p50 over 10k 26111 ns", "holds": true, "timing": true}],
+  "notes": ["10,000 observed: 19060 transactions, p50 26111 ns, p99 33791 ns"]
+}
