@@ -327,8 +327,10 @@ queue, S19 step 4; the client reads it again after a backoff of about a second).
    pending (`storage_status().pending == 2`). The runner keeps the `Kv` contents (every key and value) and the
    `Idempotency-Key` header of the failed `save_note` POST, and stops build A (Swift and Kotlin: at the end of
    the run, see "Two builds").
-8. **Build B reads it.** A core of build B is loaded with a `Kv` holding exactly those contents, offline (the
-   runner emits `Connectivity.changed(false, None)` right after load). Within 5 s `storage_status()` says
+8. **Build B reads it.** A core of build B is loaded with a `Kv` holding exactly those contents, offline: the
+   runner emits `Connectivity.changed(false, None)` and calls `configure_remote` **before the queue is read**
+   (configuration is not persisted, and a replay that started first would fail on an unconfigured endpoint;
+   the TypeScript runner holds build B's first `get` of `undra.query.queue2` until then). Within 5 s `storage_status()` says
    `queue_readable`, `pending == 1` (`save_note` gained `pinned: Option<bool>`: migrated by parameter name),
    `migrated == 1`, `dead_lettered == 1`, and `dead_letters == ["tag_note: <reason>"]` with a reason that says
    its input does not migrate (`id` became a `String`); nothing was replayed (no request reached the server).
@@ -499,7 +501,9 @@ neither panics nor traps (a wasm core would have trapped before ADR-049). List `
    item. After 300 ms (the write is debounced 250 ms) no key `undra.query.cache2.<query id>.*` of the `s19`
    entry is in the `Kv`; `storage_status().write_failed` grew by at least 1; the `Log` port received a WARN
    record of target `undra::query` whose message contains `storage is full`, exactly once however many writes
-   failed; `stats().panics` did not grow and the core answers the next call.
+   failed; `stats().panics` did not grow and the core answers the next call. (In a core that has not yet
+   stored the description of the query's type, the first failing write is the key `undra.types.<fingerprint>`,
+   written before the entry, and the entry's own write is not attempted: either way no entry key is stored.)
 2. The `Kv` heals. `invalidate()` on the handle refetches; within 5 s the `Kv` holds the `s19` entry, a value
    whose first two bytes are `02 00` (format 2) and whose fingerprint (bytes 10 to 18) is the one of the key
    `undra.types.<fingerprint>` it also holds. The data still shows.
@@ -511,8 +515,9 @@ neither panics nor traps (a wasm core would have trapped before ADR-049). List `
      told it is offline. `storage_status().queue_readable == false`. `save_note("s19", "late")` (POST failing
      with `HttpError.Network("offline")`) stays pending in memory: for 500 ms the `Kv` sees **no** `set` of
      `undra.query.queue2` and `pending == 1`. The `Kv` heals; `Lifecycle.changed(Active)`: within 5 s
-     `queue_readable`, a `set` of `undra.query.queue2` (count 1); online: the note replays once (body
-     `save:late`) and `pending == 0`.
+     `queue_readable`, a `set` of `undra.query.queue2` (count 1); online: counted from the online event, the note
+     replays exactly once (body `save:late`; its first attempt, made while offline, is not counted) and
+     `pending == 0`.
    * Swift and Kotlin: the harness failed the first `get` of `undra.query.queue2` with `Locked` at load. Now
      `queue_readable == true`, the `Kv`'s operation log shows the failed `get`, then a successful `get` of the
      key, and no `set` of the key between the two.
@@ -530,7 +535,8 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
    different keys); a log record the core wrote reaches the main thread's `Log` adapter. Nothing trapped.
 2. `localized_greeting("Ada") == "Hola, Ada"`: the app's synchronous port answered in the worker.
 3. A second load in `wasm-worker` mode that registers `Locale` on the **main thread** (`adapters` or
-   `registerPort` before load) fails at load with an error that names `Locale` and says to register it in
+   `registerPort` before load) fails at load with an error that names `Locale` (a generated adapter carries its
+   port's name; a hand-written `PortImpl` without one is named by its id) and says to register it in
    `worker.ports`; no core is left running.
 4. The worker protocol is version 3: the `init` message carries `asyncPorts` (the host's asynchronous ports, `Http`
    and `Kv` among them) and the `portsModule` URL.
@@ -541,7 +547,8 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
 `onError` and `onClose` recorded.
 
 1. `Counter` observed, `add(5)`; `remote_todos("s21")` observed through its generated handle, showing the server's
-   one item. Wait 200 ms (a snapshot was taken).
+   one item. Wait until the `s21` entry is persisted in the `Kv` (its write is debounced 250 ms; the re-created
+   handle of step 4 reads it back) and a snapshot was taken.
 2. A call is started and left in flight (`add_later(1, 2)` with a delay, or a `Probe.hang()`), then
    `explode("kaboom")` is called: it rejects as a failed call, the in-flight call rejects with
    `UndraTransportError("restarted")` (through generated code: `UndraCallError.Unavailable` whose transport reason is
@@ -550,8 +557,10 @@ playground's `Locale` port (`hello()` answers `"Hola"`).
    `restoredFromAgeMs` under a few seconds, `rejectedCalls >= 1` and the stale objects; `onError` received an
    `UndraCoreRestarted` with the same.
 4. The same `Counter` wrapper shows `count == 5` (restored, same handle) and `add(1)` makes it 6; the
-   `remote_todos("s21")` handle was re-created (its wrapper still shows the item and `invalidate()` refetches
-   through it); the `Probe` (not a store) is stale and fails with a typed refusal.
+   `remote_todos("s21")` handle was re-created (its wrapper still shows the item and, after the runner calls
+   `configure_remote` again, since configuration is core state outside stores and is lost with the instance
+   that trapped, `invalidate()` refetches through it); the `Probe` (not a store) is stale and fails with a typed
+   refusal.
 5. Three more `explode` calls within the minute: the third restart is the last; the fourth trap leaves the core
    dead: `onClose` reports the trap, `onCoreRestarted` was called 3 times in all, and calls fail as unavailable
    (`closed`).
