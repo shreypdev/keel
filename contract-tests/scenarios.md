@@ -1,18 +1,19 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): eighteen
-scenarios, each run by every platform runtime against the **real playground core**
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): nineteen
+scenarios (S01 to S18, and S26), each run by every platform runtime against the **real playground core**
 (`examples/playground/core`, the same Rust crate the apps run), through the real boundary:
 
 | Platform | Runner | Boundary under test |
 |---|---|---|
-| TypeScript | `contract-tests/ts` (vitest) | `@undra/runtime` `WasmMainTransport` over the real `undra_core.wasm` |
-| Kotlin | `contract-tests/kotlin` (kotlinc + JVM) | `dev.undra.runtime` `UndraCore` over JNI and the real `libundra_core` |
-| Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI and the real static core |
+| TypeScript | `contract-tests/ts` (vitest) | `@undra/runtime` `WasmMainTransport` over the real `playground_core.wasm` |
+| Kotlin | `contract-tests/kotlin` (kotlinc + JVM) | `dev.undra.runtime` `UndraCore` over JNI and the real `libplayground_core` |
+| Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless all eighteen ids are `PASS` (a `SKIP` needs its reason here,
-in the platform notes of the scenario).
+`contract-tests/check.sh` fails unless all nineteen ids are `PASS` (a `SKIP` needs its reason here,
+in the platform notes of the scenario). S19 to S25 are held by other ADRs (the boundary-surface plan
+numbers them); S26 is ADR-044's.
 
 ## The harness (the same on every platform)
 
@@ -21,8 +22,8 @@ The core is built by the `undra` CLI (`undra build --platform web|host|ios`) and
 everything a UI would use and the runtime's own API (`UndraCore`) for what bindings do not expose
 (raw signal updates, statistics, snapshots, cancellation, schema checks).
 
-* **One core per process** on the native platforms (`undra_init` is once per process), so scenarios
-  create their own stores and objects, and the state they share (the query cache, the offline queue,
+* **One playground core** per process on the native platforms (a core's `init` is once per core, and
+  the runner loads the playground's once), so scenarios create their own stores and objects, and the state they share (the query cache, the offline queue,
   the Clock) is isolated by **list names** (`s12`, `s13`, `s14`) and left clean.
 * **Adapters** the runner supplies at load time:
   * `Clock`: a **manual clock**, settable and advanceable by the test, starting at
@@ -433,6 +434,40 @@ returns; TypeScript awaits them.
    generated store registered `progress` as `no_coalesce`. (TypeScript also checks that a subscriber
    heard `1, 2, ..., 10`; a Kotlin `StateFlow` conflates and SwiftUI renders once per frame, so they
    check the mirror's counter only.)
+
+### S26 two cores
+
+ADR-044: a process can hold several cores, each its own image reached through its own table
+(`<namespace>_undra_api`), with nothing shared between them. The core under test is the playground core
+built twice under two namespaces, `playground_a` and `playground_b` (`examples/two-cores/a` and `b`: the
+same source, two libraries, two generated packages, `UndraPlaygroundA` and `UndraPlaygroundB`), loaded
+next to each other (and next to the runner's playground core on the native platforms) with the
+harness adapters.
+
+1. Both load through their generated entries (`UndraPlaygroundA.load(..)`, `UndraPlaygroundB.load(..)`),
+   with the bindings' schema hash and no `expectedSchemaHash` written by the runner: two open cores, two
+   different objects; each entry's `core` is its own; each core's `schema_hash` statistic is the bindings'
+   hash, and the bindings say their namespace (`UndraIds` namespace `playground_a` / `playground_b`).
+   (Native: the C ABI version is 2, the same image is never loaded twice.)
+2. A call on each: `add(2, 3)` is `5` through either core; the generated function's default core is its
+   package's own (`add(2, 3)` with no core argument goes to `A` for package A, to `B` for package B,
+   which their `calls` counters show).
+3. An observed change on each, independent: a `Counter` created in each core (`Counter.create()` /
+   `Counter()` with no core: the package's own); `add(2)` on A's, `add(5)` on B's: A's `count` is `2`
+   and B's is `5` as soon as the calls return, each core delivered its change-set to its own mirror
+   only (A's mirror counted one more change-set, B's did not move for A's write).
+4. Independent statistics: A's `live_handles` grew by the counter A made and B's by the one B made;
+   each generated object carries its own core; releasing A's counter takes A's count back and leaves
+   B's (and B's counter keeps its value). Two cores with the same history issue the **same handle
+   numbers** (a handle is a slot and a generation of one core's table), so a handle means something only
+   with the core that issued it; the bindings never pass one core's handle to another.
+5. One shut down while the other keeps working: close A. B's counter takes `add(1)` (`count == 6`) and
+   `add(2, 3)` through B is still `5`; a call through A's (closed) core fails as unavailable
+   (`UndraCallError.Unavailable` / `.unavailable`); A's entry's `core` is the closed placeholder.
+   (Native: A's image reports no running core and `runtime_threads == 0`, while B's still runs.)
+6. A namespace loads once: loading B again while it is loaded is refused (TypeScript: an `UndraError`
+   of kind `state`; native: the runtime's in-process claim), and A, closed, loads again and answers
+   `add(2, 3) == 5`. Both are closed at the end.
 
 ## Platform notes
 
