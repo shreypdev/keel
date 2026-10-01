@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Reads a contract runner's output (stdin or a file) and fails unless all eighteen scenarios of
-# scenarios.md reported PASS. A line looks like:  SCENARIO S07 PASS stream with backpressure
+# Reads a contract runner's output (stdin or a file) and fails unless every scenario of
+# scenarios.md the platform runs reported PASS: S01 to S19 everywhere, plus S20 and S21 (worker mode
+# and crash recovery, web-only, ADR-049) on ts. A line looks like:  SCENARIO S07 PASS stream with backpressure
 #
 #   contract-tests/ts/run.sh 2>&1 | tee /tmp/ts.log | contract-tests/check.sh ts
 #   contract-tests/check.sh kotlin < kotlin.log
 #
-# Prints the platform's column of the 18-scenario grid and exits 1 if any scenario is missing,
-# failed or skipped (a skip is listed, so it can be told apart from a failure).
+# Prints the platform's column of the scenario grid and exits 1 if any scenario is missing,
+# failed or skipped (a skip is listed, so it can be told apart from a failure). The last line of an
+# id counts: a second process (build B of S14/S15) prints only FAIL lines, which override a PASS.
 set -euo pipefail
 platform="${1:-runner}"
-IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18)
+IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19)
+# Web-only scenarios (ADR-049): the TypeScript runner runs them.
+case "$platform" in
+  ts) IDS+=(S20 S21) ;;
+esac
 log="$(cat "${2:-/dev/stdin}")"
 bad=0
 for id in "${IDS[@]}"; do
@@ -21,5 +27,5 @@ for id in "${IDS[@]}"; do
     *) printf '%s %s MISSING\n' "$platform" "$id"; bad=1 ;;
   esac
 done
-if [ "$bad" = 0 ]; then echo "$platform: all 18 scenarios pass"; else echo "$platform: NOT all scenarios pass" >&2; fi
+if [ "$bad" = 0 ]; then echo "$platform: all ${#IDS[@]} scenarios pass"; else echo "$platform: NOT all scenarios pass" >&2; fi
 exit "$bad"
