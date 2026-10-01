@@ -2684,6 +2684,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - One error channel on every platform (ADR-032)Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event.
 - No manual build stepA Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix.
 - The web bundle under its budget (ADR-052)The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record.
+- State-preserving reload (ADR-053)undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not.
 
 Now
 
@@ -2698,7 +2699,6 @@ In flight for the v1.x releases.
 - Real Android adaptersKv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call.
 - React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
 - Persisted-state migrations (ADR-037)A schema that changes shape still loads what the last version stored.
-- State-preserving reloadundra dev snapshots before a rebuild and restores after, so editing Rust never loses the screen you were on.
 
 Next
 
