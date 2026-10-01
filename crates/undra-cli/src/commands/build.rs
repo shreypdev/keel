@@ -19,11 +19,21 @@ pub fn run(env: &Env<'_>, args: &BuildArgs) -> Result<()> {
         Some(list) => parse_targets(list)?,
         None => default_targets(&session.project.config.platforms, session.sys.os(), &env.ui),
     };
-    let options = Options {
-        targets,
-        release: args.release,
-    };
+    let release = args.release
+        || args
+            .configuration
+            .as_deref()
+            .is_some_and(builds::xcode::is_release);
+    let options = Options { targets, release };
     let artifacts = builds::run(&session, &options)?;
+    if options.targets.contains(&Target::Ios) {
+        // What Xcode's build phase watches (see `builds::xcode`): the inputs of the core as they are
+        // now, and which configuration the XCFramework was built for.
+        builds::xcode::refresh_inputs(&session.project.root, &session.core()?.local_dirs)?;
+        if let Some(configuration) = args.configuration.as_deref() {
+            builds::xcode::write_stamp(&session.project.build_dir(), configuration)?;
+        }
+    }
     env.ui.line("");
     env.ui.line(&env.ui.bold_out("Built:"));
     env.ui

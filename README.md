@@ -166,9 +166,12 @@ undra init myapp --dir .. --undra-path .  # the project next to the checkout, us
 ```
 
 Then open `web/` (`npm install && npm run dev`), `ios/` (Xcode) or `android/` (Gradle) —
-each shell is a plain native project wired to your core. `undra build --platform
-ios,android,web` packages an XCFramework, 16 KB-aligned `.so`s and a `wasm-opt`'d module.
-`undra doctor` tells you exactly what your machine is missing.
+each shell is a plain native project wired to your core, and each builds the core itself (a Gradle
+task, an Xcode build phase, a Vite plugin: there is no manual `undra build`). `undra build --platform
+ios,android,web` is the explicit form: an XCFramework, 16 KB-aligned `.so`s and a `wasm-opt`'d module.
+`undra doctor` tells you exactly what your machine is missing, with the command that fixes it
+(`undra doctor --fix` prints them all). `undra init` also writes a CI workflow, and `undra upgrade`
+moves a project to a newer Undra in one step.
 
 Prefer to explore first? The [playground](examples/playground/README.md) is the same
 thing, fully built: todos, a counter, a 10,000-row keyed list, and remote

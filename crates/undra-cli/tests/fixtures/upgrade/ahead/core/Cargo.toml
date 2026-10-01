@@ -1,0 +1,7 @@
+[package]
+name = "demo-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+undra = { git = "https://github.com/shreypdev/undra", tag = "v99.1.0" }

@@ -16,6 +16,7 @@ pub(crate) mod host;
 pub(crate) mod ios;
 pub(crate) mod rn;
 pub(crate) mod web;
+pub(crate) mod xcode;
 
 use std::path::PathBuf;
 

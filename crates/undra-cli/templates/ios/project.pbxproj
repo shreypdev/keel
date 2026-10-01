@@ -9,11 +9,9 @@
 /* Begin PBXBuildFile section */
 		A0A0A0A0A0A0A0A000000001 /* @@SWIFT_MODULE@@ in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000010 /* @@SWIFT_MODULE@@ */; };
 		A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = A0A0A0A0A0A0A0A000000011 /* UndraRuntime */; };
-		A0A0A0A0A0A0A0A000000003 /* UndraCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = UndraCore.xcframework; path = "@@XCFRAMEWORK_PATH@@"; sourceTree = SOURCE_ROOT; };
 		A0A0A0A0A0A0A0A000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0A0A0A0A0A0A0A000000030 /* @@APP@@.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "@@APP@@.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -26,6 +24,12 @@
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
+/*
+ * The core (build/ios/UndraCore.xcframework) is linked with -force_load in OTHER_LDFLAGS (build settings below), not as a
+ * framework of this phase: Xcode reads an XCFramework while it plans the build, before the "Build the Undra core" phase
+ * could have created it ("There is no XCFramework found").
+ */
+
 /* Begin PBXFrameworksBuildPhase section */
 		A0A0A0A0A0A0A0A000000050 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -33,7 +37,6 @@
 			files = (
 				A0A0A0A0A0A0A0A000000001 /* @@SWIFT_MODULE@@ in Frameworks */,
 				A0A0A0A0A0A0A0A000000002 /* UndraRuntime in Frameworks */,
-				A0A0A0A0A0A0A0A000000003 /* UndraCore.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -45,7 +48,6 @@
 			children = (
 				A0A0A0A0A0A0A0A000000040 /* @@APP@@ */,
 				A0A0A0A0A0A0A0A000000061 /* Config */,
-				A0A0A0A0A0A0A0A000000062 /* Frameworks */,
 				A0A0A0A0A0A0A0A000000063 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -56,14 +58,6 @@
 				A0A0A0A0A0A0A0A000000021 /* Info.plist */,
 			);
 			path = Config;
-			sourceTree = "<group>";
-		};
-		A0A0A0A0A0A0A0A000000062 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				A0A0A0A0A0A0A0A000000020 /* UndraCore.xcframework */,
-			);
-			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		A0A0A0A0A0A0A0A000000063 /* Products */ = {
@@ -81,6 +75,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = A0A0A0A0A0A0A0A000000080 /* Build configuration list for PBXNativeTarget "@@APP@@" */;
 			buildPhases = (
+				A0A0A0A0A0A0A0A000000092 /* Build the Undra core */,
 				A0A0A0A0A0A0A0A000000090 /* Sources */,
 				A0A0A0A0A0A0A0A000000050 /* Frameworks */,
 				A0A0A0A0A0A0A0A000000091 /* Resources */,
@@ -149,6 +144,30 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		A0A0A0A0A0A0A0A000000092 /* Build the Undra core */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"$(SRCROOT)/Config/undra-core-inputs.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "Build the Undra core";
+			outputFileListPaths = (
+				"$(SRCROOT)/Config/undra-core-outputs.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Builds the Undra core (`undra build --platform ios`) before Compile Sources, so the app never needs a manual build step.\n# Xcode skips this phase while the files in Config/undra-core-inputs.xcfilelist are older than the ones in\n# Config/undra-core-outputs.xcfilelist (the XCFramework and a stamp for the configuration being built).\nexport PATH=\"$HOME/.undra/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nif ! command -v undra >/dev/null 2>&1; then\n  echo \"error: [undra::C0003] 'undra' was not found. This build phase runs 'undra build --platform ios' to compile the Rust core, and it is not on PATH or in ~/.undra/bin, ~/.cargo/bin or Homebrew's directories. Install it with: curl -fsSL https://shreypdev.github.io/undra/install.sh | sh  then build again; 'undra doctor' checks the rest of the toolchain. docs: https://shreypdev.github.io/undra/docs/errors.html#C0003\"\n  exit 1\nfi\necho \"note: undra build --platform ios --configuration $CONFIGURATION\"\n# Xcode's build environment (SDKROOT, CC, ARCHS, ...) says how to compile the app and breaks the toolchain lookups of\n# Cargo, so `undra` gets a clean one that keeps only what it needs.\nexec env -i HOME=\"$HOME\" USER=\"$USER\" LANG=\"${LANG:-en_US.UTF-8}\" TMPDIR=\"${TMPDIR:-/tmp}\" PATH=\"$PATH\" ${DEVELOPER_DIR:+\"DEVELOPER_DIR=$DEVELOPER_DIR\"} ${CARGO_HOME:+\"CARGO_HOME=$CARGO_HOME\"} ${RUSTUP_HOME:+\"RUSTUP_HOME=$RUSTUP_HOME\"} ${CARGO_TARGET_DIR:+\"CARGO_TARGET_DIR=$CARGO_TARGET_DIR\"} undra -C \"$SRCROOT/@@ROOT_REL@@\" build --platform ios --configuration \"$CONFIGURATION\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		A0A0A0A0A0A0A0A000000090 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -207,6 +226,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "@@NAME@@";
@@ -234,6 +254,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "@@NAME@@";

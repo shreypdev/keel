@@ -1,0 +1,23 @@
+
+  web:
+    name: Web (install, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+@@INSTALL_UNDRA@@      - name: Install the web app's dependencies
+        working-directory: web
+        # `npm ci` needs web/package-lock.json: run `npm install` once in web/ and commit the file.
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Test
+        working-directory: web
+        run: npm test --if-present
+      - name: Build (the undra() Vite plugin builds the core first)
+        working-directory: web
+        run: npm run build
