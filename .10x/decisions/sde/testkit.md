@@ -9,7 +9,7 @@ SPEC 17.5, `docs/DEV_LOOP.md` (`--record`). No envelope, payload, ABI, schema, g
 
 | | Swift `UndraTestKit` | Kotlin `dev.undra:testkit` | TypeScript `@undra/testkit` | Rust `undra::testing` |
 |---|---|---|---|---|
-| Real core on fakes | `PreviewCore.load(expectedSchemaHash:seed:)`, `.advance(ms:)`, `.settle()`, `.clock`, `.fakes` | `PreviewCore.load(hash, Seed)` same members | `await PreviewCore.load({wasm, expectedSchemaHash, seed, fakes, adapters, ports})` | `Harness` |
+| Real core on fakes | `PreviewCore.load(UndraPlaygroundCore.load, seed:)`, `.advance(ms:)`, `.settle()`, `.clock`, `.fakes` | `PreviewCore.load(UndraPlaygroundCore::load, Seed)` same members | `await PreviewCore.load({wasm, expectedSchemaHash, seed, fakes, adapters, ports})` | `Harness` |
 | A recording as a core | `RecordedCore.load(_, expectedSchemaHash:)`, `advance(ms:)`, `playAll()` | same | `await RecordedCore.load(rec, {expectedSchemaHash, ...})` | |
 | Record port traffic | `PortRecorder.wrap(adapters)`, `.toJSON()` | same | `new PortRecorder({schemaHash, now})`, `.toJson()` | `Recorder` (+ `RecordingTap`, `RecordingClock`, `RecordingRng`) |
 | Replay it | `Replayer(recording).adapters()`, `.finish()` | same | `new Replayer(rec)` | `Replayer::install(host)` |
