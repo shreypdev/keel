@@ -9,6 +9,10 @@
 #               run concurrently, a late Log answer does not loop. Built with AddressSanitizer when the
 #               compiler has it (UNDRA_C_SANITIZE=1 makes that a requirement, =0 turns it off), so a
 #               callback that outlives its registration is a heap-use-after-free report.
+#   two_cores.c two copies of the library dlopen'ed side by side, each its own image: a panic through
+#               either table is a status 2 reply, and shutting one down while the other has a stream
+#               open and a port call in flight leaves the other working and never calls the first
+#               one's callbacks again (also under AddressSanitizer).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../../.." && pwd)"
@@ -44,3 +48,13 @@ esac
 # use-after-free, so it stays off.
 if [ "$(uname -s)" = "Linux" ]; then export ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}detect_leaks=0"; fi
 "$OUT/lifetime"
+
+# two_cores.c: two copies of the library, each dlopen'ed as its own image (ADR-044), one shut down
+# while the other has a stream open and a port call in flight.
+case "$(uname -s)" in Darwin) EXT=dylib ;; *) EXT=so ;; esac
+cp "$LIBDIR/libundra_fixture.$EXT" "$OUT/libcore_a.$EXT"
+cp "$LIBDIR/libundra_fixture.$EXT" "$OUT/libcore_b.$EXT"
+DL=()
+if [ "$(uname -s)" = "Linux" ]; then DL=(-ldl); fi
+"$CC" "${CFLAGS[@]}" ${SAN[@]+"${SAN[@]}"} "$HERE/two_cores.c" -pthread ${DL[@]+"${DL[@]}"} -o "$OUT/two_cores"
+"$OUT/two_cores" "$OUT/libcore_a.$EXT" "$OUT/libcore_b.$EXT"

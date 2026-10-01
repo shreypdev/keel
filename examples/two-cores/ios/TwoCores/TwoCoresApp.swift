@@ -58,6 +58,14 @@ enum TwoCoreChecks {
             let sumA = try PlaygroundA.add(a: 2, b: 3)
             let sumB = try PlaygroundB.add(a: 2, b: 3)
             check("a call on each: add(2, 3) is \(sumA) through A and \(sumB) through B", sumA == 5 && sumB == 5)
+            // R6 through a prelinked object: the panic unwinds to the table entry's guard in each
+            // core's own image and comes back as a reply, not an abort.
+            let panicA = panicMessage { _ = try PlaygroundA.explode(reason: "boom in A") }
+            let panicB = panicMessage { _ = try PlaygroundB.explode(reason: "boom in B") }
+            check(
+                "a panic in each is a reply: \(panicA ?? "none"), \(panicB ?? "none")",
+                panicA == "boom in A" && panicB == "boom in B" && (try? PlaygroundA.add(a: 1, b: 1)) == 2
+            )
             let handlesA = a.stats().coreLiveHandles
             let handlesB = b.stats().coreLiveHandles
             let counterA = try PlaygroundA.Counter()
@@ -88,6 +96,18 @@ enum TwoCoreChecks {
         }
         log.notice("two-cores ios: \(checks.allSatisfy(\.passed) ? "passed" : "FAILED", privacy: .public)")
         return checks
+    }
+
+    /// The message of the panic `body` reports as `UndraCallError.panicked`, or `nil`.
+    private static func panicMessage(_ body: () throws -> Void) -> String? {
+        do {
+            try body()
+        } catch UndraCallError.panicked(let message, _) {
+            return message
+        } catch {
+            return nil
+        }
+        return nil
     }
 
     private static func hex(_ value: UInt64) -> String {
