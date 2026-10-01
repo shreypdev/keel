@@ -75,8 +75,8 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   `add(1, 2)` gets the fresh core explicitly. It hydrates the query cache from the `Kv` contents S12 to S14 left, so
   `Kv` calls start again after the reload. That is the new core's own work, and it is why the quiet window ends
   before the load. Because the transport detaches first, neither port-call window can show a task of the old core
-  that kept running: its calls go to the old, detached callbacks (never the fresh core's), and its sleeps run on the
-  core's own timer thread. The check with teeth is the native core's own report: once `close()` returned,
+  that kept running: its calls go to the old, detached callbacks (never the fresh core's), and the sleep it had set
+  on the default `Timer` adapter is never reported back to the closed core. The check with teeth is the native core's own report: once `close()` returned,
   `UndraNative.statsJson()` (no core loaded) must say `runtime_threads == 0`, the `undra-core`, timer and blocking
   threads joined; the same after the fresh core's close. (Review of runtime-lifecycle: a mutant whose shutdown only
   released the global slot, leaving the generator running, passed both windows and the reload; it fails here.)

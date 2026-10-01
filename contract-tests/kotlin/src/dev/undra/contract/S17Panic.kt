@@ -109,11 +109,11 @@ fun s17Panic(w: World) {
 
     // 7, second half: closing ended the core's work (ADR-034), not only detached this host from it. The native
     // core says so itself: with no runtime loaded, `undra_stats_json` counts the threads `undra-runtime` started that
-    // are still running, and a shutdown joins them (the `undra-core` thread that ran the generator above, the timer
-    // thread that paced it). The port-call windows below cannot show a surviving task on Kotlin: the transport
-    // detaches before the native shutdown, so a task of the old core that kept running would call into the old,
-    // detached callbacks and never reach the adapters, and its sleeps run on the core's own timer thread. (Review of
-    // runtime-lifecycle: a shutdown that only released the global slot passed both windows and the reload.)
+    // are still running, and a shutdown joins them (the `undra-core` thread that ran the generator above among them).
+    // The port-call windows below cannot show a surviving task on Kotlin: the transport detaches before the native
+    // shutdown, so a task of the old core that kept running would call into the old, detached callbacks and never reach
+    // the adapters, and the sleep it had set on the default Timer adapter is never reported back to a closed core.
+    // (Review of runtime-lifecycle: a shutdown that only released the global slot passed both windows and the reload.)
     awaitUntil("the old core's threads to exit after close") { runtimeThreadsLeft() == 0L }
     var portCallsSeen = portCallsAtShutdown
     try {
