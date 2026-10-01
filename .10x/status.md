@@ -343,3 +343,11 @@ In flight: `android-adapters` (crossing main), `runtime-lifecycle` (opus review)
 | **G1 React Native runtime** (ADR-038): `@undra/react-native` TurboModule over the C ABI under the TS mirror, `undra build --platform rn`, the playground RN app, a `react-native` CI job + `rn-devices.yml` (simulator/emulator on PRs touching RN, weekly), `scripts/rn-device-checks.sh` | `6fe1643` | opus review `.10x/reviews/2026-10-01-react-native-review.md`: ownership trace holds, 2 Medium fixed (a failed second start froze the running core; a stopped runtime kept calling the new core), 11 Low fixed; 10/10 on-device checks on the iPhone 17 Pro simulator and the `undra-rn` emulator; 20 Android reloads with flat heap; limits documented in `docs/REACT_NATIVE.md` (RN 0.87 New Architecture, one instance per process until ADR-044, ~10k patches/s on Hermes — E4, app supplies adapters — G1b open) |
 
 Matrix at checkpoint 7: Rust 2,351 · TS 1,049 · Kotlin 585 · Swift 467 · RN 41 + 14/14 C++ · contracts 54/54.
+
+### Checkpoint 8 (2026-10-01, evening) — Android adapters landed
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| **Android platform adapters**: `AndroidPlatformDefaults.install(core, context)` registers Kv, SecureStore (Keystore-sealed), Fs (root-guarded), Http, Connectivity and Lifecycle; the playground and the `undra init` template use it instead of the fakes; JVM `FsAdapter.delete` recursive, `FileKv.list` header-only; typed port errors stay typed (`HttpError.Network` offline), untyped adapter failures reach `onError` as `Malformed`; SPEC §8 Fs semantics; `docs/ERRORS.md` rows | `429fb9f` | opus review `.10x/reviews/2026-10-01-android-adapters-review.md` + cross-merge record in `.10x/decisions/sde/android-adapters.md`; Kotlin 588 (brew 2.4.20 and CI's 2.0.21), adapters 130/131 JVM, **112/113 instrumented on the `undra` AVD**, `smoke.sh` passed (offline queue, replay with the idempotency key), remote mode against `undra dev` reinstalls the adapters after a session loss; contracts 54/54; Rust 2,351. Open: M1 Maven publishing; remote cores drop Connectivity/Lifecycle reports made while the connection is down (dev only); F3–F6 |
+
+Matrix at checkpoint 8: Rust 2,351 · TS 1,049 · Kotlin 588 · Swift 467 · RN 41 · contracts 54/54.
