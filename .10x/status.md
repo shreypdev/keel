@@ -5,7 +5,7 @@ Updated: 2026-09-30 (integrator takeover, branch `claude/undra-framework-takeove
 ## Phase
 
 **v1 COMPLETE** (2026-09-30). Every item of docs/HANDOFF.md §5 is met; the final
-verification matrix (fmt, clippy, Rust 2,109, TS 869, Kotlin 454, Swift 328, wasm 29,
+verification matrix (fmt, clippy, Rust 2,110, TS 897, Kotlin 454, Swift 328, wasm 29,
 C harness, budgets gate in release, contracts 51/51) ran green on this tree in one pass.
 
 Honest caveats: (1) the bench rows that name devices (A15 / mid-range Android / Chromium
@@ -19,7 +19,7 @@ the "Landed" notes below and .10x/reviews resolutions.
 | Suite | Result |
 |---|---|
 | Rust `cargo test --workspace` | 2,109 passed / 0 failed |
-| TS `npm test` (runtimes/ts/@undra/runtime) | 869 passed |
+| TS `npm test` (runtimes/ts/@undra/runtime) | 897 passed |
 | Kotlin `scripts/test-local.sh` | 454 cases, 0 failed (JNI smoke passes against libundra_ffi) |
 | Swift `swift test` (needs full Xcode; env.sh sets DEVELOPER_DIR) | 328 passed / 0 failed |
 

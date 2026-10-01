@@ -42,7 +42,7 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 
 | Operation | Measured | Budget |
 |---|---|---|
-| Synchronous core call (C ABI, end to end) | **49.8 ns** | ≤ 60 ns |
+| Synchronous core call (C ABI, core side) | **49.8 ns** | ≤ 60 ns |
 | 1 KB record round trip | **228 ns** | ≤ 3 µs |
 | One insert into an observed 10,000-row list | **6.3 µs** | ≤ 20 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
@@ -52,7 +52,7 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 
 ## Why you can trust it
 
-* **3,800+ tests across five languages** — Rust 2,109 · TypeScript 897 · Kotlin 454 ·
+* **3,800+ tests across five languages** — Rust 2,110 · TypeScript 897 · Kotlin 454 ·
   Swift 328 · wasm/C-ABI acceptance suites — all green in one pass.
 * **17 wire-level contract scenarios, run on all three platforms** (51/51): sync/async
   calls, typed errors, cancellation, stream backpressure, keyed patches, optimistic

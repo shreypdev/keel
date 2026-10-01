@@ -277,7 +277,7 @@ figcaption b{color:var(--t1);font-weight:700}
 <h3>Five habits that build trust</h3>
 <ol>
 <li><strong>One contract suite, three platforms.</strong> Every feature ships with a behavioral test that runs on the iOS simulator, an Android emulator and a headless browser. If the platforms disagree, CI is red.</li>
-<li><strong>Benchmarks are tests.</strong> The budgets in §14 are asserted in CI against UniFFI and KMP baselines, and the numbers are published on the site every release.</li>
+<li><strong>Benchmarks are tests.</strong> The budgets in §14 are asserted in CI against the budgets in §14, and the numbers are published on the site every release (we do not benchmark other frameworks; the comparison posts say why).</li>
 <li><strong>Compatibility is a promise.</strong> A core built with Undra 1.x loads against bindings from any Undra 1.x; a mismatch fails at startup with a message, never with undefined behavior.</li>
 <li><strong>Error messages teach.</strong> Every macro error says what is wrong, why, and the fix, with a link. The compiler is the onboarding.</li>
 <li><strong>We ship on it first.</strong> A real store app with auth, offline cart and sync is built on public Undra APIs only, and it ships to TestFlight, Play internal testing and the web on every release.</li>
@@ -293,15 +293,15 @@ figcaption b{color:var(--t1);font-weight:700}
 <tbody>
 <tr><td><b>Language</b></td><td>Kotlin</td><td>Rust</td><td>Rust</td><td>Dart / JS</td><td>Rust</td></tr>
 <tr><td><b>What is shared</b></td><td>Logic; optionally UI via Compose Multiplatform</td><td>Functions, objects, records</td><td>Logic + state (Elm-style app), effects via capabilities</td><td>Everything including UI</td><td>Logic, reactive state, data layer, persistence, dev loop</td></tr>
-<tr><td><b>iOS story</b></td><td>Kotlin/Native compiles to a framework exposed through an Objective-C header; Swift export still maturing; GC and binary size costs</td><td>Generated Swift over a C ABI; solid, used in Firefox</td><td>UniFFI underneath</td><td>Own renderer (Flutter) or bridge (RN)</td><td>Generated Swift package, <code>@Observable</code>, typed throws, <code>Sendable</code>, XCFramework</td></tr>
-<tr><td><b>Android story</b></td><td>Native. This is why KMP wins Android teams</td><td>Kotlin over JNA; serialization on every call</td><td>UniFFI underneath</td><td>Own renderer / bridge</td><td>Kotlin over JNI with registered natives, Compose <code>State</code>, coroutines, <code>Flow</code></td></tr>
+<tr><td><b>iOS story</b></td><td>Kotlin/Native compiles to a framework exposed through an Objective-C header; Swift export still maturing; GC and binary size costs</td><td>Generated Swift over a C ABI; solid, used in Firefox</td><td>UniFFI underneath</td><td>Own renderer (Flutter) or host views driven from JS (RN)</td><td>Generated Swift package, <code>@Observable</code>, typed throws, <code>Sendable</code>, XCFramework</td></tr>
+<tr><td><b>Android story</b></td><td>Native. This is why KMP wins Android teams</td><td>Kotlin over JNA; non-trivial values cross through a byte buffer</td><td>UniFFI underneath</td><td>Own renderer (Flutter) or host views driven from JS (RN)</td><td>Kotlin over JNI with registered natives, Compose <code>State</code>, coroutines, <code>Flow</code></td></tr>
 <tr><td><b>Web story</b></td><td>Kotlin/JS or Kotlin/Wasm; still maturing, weak in frontend teams</td><td>No first-class web target</td><td>wasm-bindgen, hand-wired per app</td><td>Flutter web is canvas-based; RN web is a port</td><td>npm package with <code>.d.ts</code>, core in a Web Worker by default, React / Vue / Svelte / Solid bindings</td></tr>
-<tr><td><b>Reactive state</b></td><td>Bring your own (Flow, ViewModel)</td><td>None</td><td>Whole view model re-emitted on every event</td><td>Own UI state</td><td>Fine-grained signals mirrored to each platform's native observable; one crossing per transaction</td></tr>
+<tr><td><b>Reactive state</b></td><td>Bring your own (Flow, ViewModel)</td><td>None</td><td>The shell pulls the whole view model with <code>view()</code> after each update</td><td>Own UI state</td><td>Fine-grained signals mirrored to each platform's native observable; one crossing per transaction</td></tr>
 <tr><td><b>Data layer</b></td><td>Ktor + SQLDelight + your glue</td><td>None</td><td>None</td><td>Ecosystem packages</td><td>Built in: query cache, mutations, optimistic updates, persistence, offline queue</td></tr>
 <tr><td><b>Dev loop</b></td><td>Gradle; Compose hot reload on desktop</td><td>Rebuild app</td><td>Rebuild app</td><td>Hot reload (their strongest asset)</td><td>Remote core: Rust hot reload into the running native app; devtools with time travel</td></tr>
 <tr><td><b>Migration into an existing app</b></td><td>Natural on Android, awkward on iOS</td><td>Manual</td><td>All-or-nothing architecture</td><td>Rewrite</td><td>Ladder of five levels, each shippable (§04)</td></tr>
 <tr><td><b>Where it wins</b></td><td>Android-heavy orgs with Kotlin talent</td><td>Rust teams that need bindings and nothing else</td><td>Teams that want Elm on mobile</td><td>Startups that want one UI codebase</td><td>Teams that want one correct core and truly native UI</td></tr>
-<tr><td><b>Where Undra loses to it</b></td><td>A team with no Rust and no reason to learn it</td><td>A tiny library with three functions</td><td>Never, if we execute; Crux's ideas are absorbed</td><td>An app that is 90% UI and 10% logic</td><td></td></tr>
+<tr><td><b>Where Undra loses to it</b></td><td>A team with no Rust and no reason to learn it</td><td>A tiny library with three functions</td><td>A team that wants Elm-style events and effects as its whole architecture, or a shell language we do not generate for</td><td>An app that is 90% UI and 10% logic</td><td></td></tr>
 </tbody>
 </table>
 </div>
@@ -693,14 +693,14 @@ $ undra doctor                                <span class="c"># toolchains, SDKs
 <line class="ln" x1="300" y1="346" x2="110" y2="346" marker-end="url(#ar2)"/>
 </svg>
 </div>
-<figcaption><b>One command, three crossings, two render passes.</b> The same flow in a per-value binding design costs one crossing per signal per read. In a whole-view-model design (Crux) it re-sends the entire screen state on every event. Undra sends what changed, once, and never pays for reads.</figcaption>
+<figcaption><b>One command, three crossings, two render passes.</b> The same flow in a per-value binding design costs one crossing per signal per read. In a whole-view-model design (Crux) the shell re-reads the entire screen state after each update. Undra sends what changed, once, and never pays for reads.</figcaption>
 </figure>
 <h3>Why this design and not the alternatives</h3>
 <div class="grid2">
 <div class="tile"><h4>Not callbacks per signal</h4><p>A screen with forty bound values would cross the boundary forty times per change and re-render forty times. Change-sets are the difference between "works in a demo" and "works in the settings screen of a real app."</p></div>
 <div class="tile"><h4>Not a whole view model</h4><p>Re-emitting all state on every event is simple and it is what Crux does. It is also O(screen) per keystroke and makes stable list identity impossible. Keyed patches cost O(change) and keep animations correct.</p></div>
 <div class="tile"><h4>Not synchronous reads across the boundary</h4><p>If reads crossed, worker mode on the web and the remote core in development would both be impossible, because both make every crossing asynchronous. Local reads are what let one API work in-process, in a Worker, and over a socket.</p></div>
-<div class="tile"><h4>Coalescing is on by default</h4><p>Change-sets committed before the platform's next main-thread hop are merged, so a burst of transactions from a network response becomes one render. Apps that need every intermediate state (progress bars) opt out per signal.</p></div>
+<div class="tile"><h4>Coalescing (ADR-031, in progress)</h4><p>Today each transaction's change-set is applied in one main-thread hop. Once ADR-031 lands, change-sets committed before the platform's next frame are merged, so a burst of transactions from a network response becomes one render. Apps that need every intermediate state (progress bars) opt out per signal.</p></div>
 </div>
 <h3>Time travel comes for free</h3>
 <p>Every transaction has an id, a parent and a change-set. Record them and you have a log that replays deterministically, because the core reads time and randomness only through ports (§15, rule 12). A snapshot is the encoded state of every signal. The devtools inspector (§13) scrubs through transactions on any platform, and crash recovery (§12) restores from the last snapshot plus the log. None of this needed extra design; it fell out of the transaction model.</p>
