@@ -52,10 +52,9 @@ enum UndraBootstrap {
         #if DEBUG
         if let url = ProcessInfo.processInfo.environment["UNDRA_DEV_URL"], !url.isEmpty {
             devURL = url
-            core = try UndraCore.load(.remote(
+            core = try UndraPlaygroundCore.load(.remote(
                 url: url,
                 adapters: adapters,
-                expectedSchemaHash: UndraIds.schemaHash,
                 onError: onError,
                 // The runtime reconnects by itself; when it finds a new core instead of its own, it says so.
                 onConnectionChange: { state in
@@ -68,7 +67,7 @@ enum UndraBootstrap {
             return
         }
         #endif
-        core = try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: onError))
+        core = try UndraPlaygroundCore.load(.inproc(adapters: adapters, onError: onError))
         // Tell the core where the server is, before anything observes the remote list.
         configureRemote(RemoteConfig(baseUrl: serverURL))
     }

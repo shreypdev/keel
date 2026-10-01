@@ -7,8 +7,8 @@
 #   SIMULATOR="iPhone 17 Pro" examples/playground/ios/smoke.sh
 #
 # Needs Xcode, the aarch64-apple-ios-sim Rust target and the undra CLI (`cargo build -p undra-cli`).
-# The core is linked with `-force_load` (see the project settings) and the runtime package is built
-# with UNDRA_LINK_CORE=1, which leaves out its link-time stand-in for the core.
+# The core is the prelinked PlaygroundCore.xcframework (ADR-044), linked like any library: the
+# generated package's entry, UndraPlaygroundCore, references the one symbol it exports.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$HERE/.." && pwd)"
@@ -23,7 +23,6 @@ if [ -z "${DEVELOPER_DIR:-}" ] && [ -d "/Applications/Xcode.app/Contents/Develop
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 export PATH="$HOME/.cargo/bin:$PATH"
-export UNDRA_LINK_CORE=1
 
 mkdir -p "$PROOF"
 exec > >(tee "$PROOF/ios-smoke.log") 2>&1

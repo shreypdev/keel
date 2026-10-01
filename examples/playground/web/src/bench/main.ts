@@ -1,7 +1,7 @@
 import { CallTarget, UndraCore, UndraWriter, codecs, decodeValue } from "@undra/runtime";
 import { Bench, UndraIds } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
-import wasmUrl from "../../../build/web/undra_core.wasm?url";
+import wasmUrl from "../../../build/web/playground_core.wasm?url";
 import { memoryKv } from "../memory-kv";
 import { type BenchConfig, FULL, QUICK } from "./ops";
 import { type RawResult, run } from "./runner";

@@ -1,7 +1,7 @@
-import { UndraCore, UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
-import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
+import { UndraSessionLostError, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
+import { BigList, RemoteTodosQueryHandle, Todos, UndraPlaygroundCore, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
-import wasmUrl from "../../build/web/undra_core.wasm?url";
+import wasmUrl from "../../build/web/playground_core.wasm?url";
 import { showDevConnection } from "./dev-banner";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
@@ -52,10 +52,9 @@ export async function startUndra(): Promise<Playground> {
     ? (new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"])
     : undefined;
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    const core = await UndraCore.load({
+    const core = await UndraPlaygroundCore.load({
       mode: "remote",
       url: devUrl,
-      expectedSchemaHash: UndraIds.schemaHash,
       adapters,
       onError,
       // A rebuild restarts the core, and the stores of this page belong to the old one: the runtime reconnects,
@@ -66,10 +65,9 @@ export async function startUndra(): Promise<Playground> {
     });
     showDevConnection(core, devUrl);
   } else {
-    await UndraCore.load({
+    await UndraPlaygroundCore.load({
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
-      expectedSchemaHash: UndraIds.schemaHash,
       adapters,
       onError,
     });
@@ -91,5 +89,5 @@ export async function startUndra(): Promise<Playground> {
  */
 export function setOffline(playground: Playground, offline: boolean): void {
   playground.server.offline = offline;
-  emitConnectivity(UndraCore.shared, !offline, offline ? "none" : "wifi");
+  emitConnectivity(UndraPlaygroundCore.core, !offline, offline ? "none" : "wifi");
 }
