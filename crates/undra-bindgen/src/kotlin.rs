@@ -33,7 +33,8 @@ const THROWS_CALL: &str =
     "@throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.";
 
 /// The `@throws` line of a `suspend` call.
-const THROWS_CANCELLED: &str = "@throws CancellationException if the calling coroutine is cancelled.";
+const THROWS_CANCELLED: &str =
+    "@throws CancellationException if the calling coroutine is cancelled.";
 
 /// The doc sentence of a command (a synchronous method that returns nothing and
 /// has no error type): it does not throw, so the reader learns where a failure goes.
@@ -46,8 +47,9 @@ fn stream_doc(err: Option<&str>) -> String {
         Some(err) => format!(
             "Collecting throws {err} or UndraCallError; cancelling the collector ends it quietly."
         ),
-        None => "Collecting throws UndraCallError; cancelling the collector ends it quietly."
-            .to_owned(),
+        None => {
+            "Collecting throws UndraCallError; cancelling the collector ends it quietly.".to_owned()
+        }
     }
 }
 
@@ -1119,31 +1121,34 @@ impl<'a> Ctx<'a> {
                 },
             );
             w.blank();
-            w.block(format!("override fun decode(r: UndraReader): {}", en.name), |w| {
-                w.line("val at = r.position");
-                w.block("return when (val tag = r.readU16().toInt())", |w| {
-                    for v in &en.variants {
-                        if v.fields.is_empty() {
-                            w.line(format!("{} -> {}", v.index, v.name));
-                        } else {
-                            let names = self.variant_props(Some(en), v);
-                            let args: Vec<String> = v
-                                .fields
-                                .iter()
-                                .zip(&names)
-                                .map(|(f, n)| {
-                                    format!("{n} = {}", self.read_expr(&f.ty, "r", shadow))
-                                })
-                                .collect();
-                            w.call(format!("{} -> {}", v.index, v.name), &args, "", true);
+            w.block(
+                format!("override fun decode(r: UndraReader): {}", en.name),
+                |w| {
+                    w.line("val at = r.position");
+                    w.block("return when (val tag = r.readU16().toInt())", |w| {
+                        for v in &en.variants {
+                            if v.fields.is_empty() {
+                                w.line(format!("{} -> {}", v.index, v.name));
+                            } else {
+                                let names = self.variant_props(Some(en), v);
+                                let args: Vec<String> = v
+                                    .fields
+                                    .iter()
+                                    .zip(&names)
+                                    .map(|(f, n)| {
+                                        format!("{n} = {}", self.read_expr(&f.ty, "r", shadow))
+                                    })
+                                    .collect();
+                                w.call(format!("{} -> {}", v.index, v.name), &args, "", true);
+                            }
                         }
-                    }
-                    w.line(format!(
-                        "else -> throw WireException.InvalidTag(tag.toUInt(), at, {})",
-                        kt_string(&en.name)
-                    ));
-                });
-            });
+                        w.line(format!(
+                            "else -> throw WireException.InvalidTag(tag.toUInt(), at, {})",
+                            kt_string(&en.name)
+                        ));
+                    });
+                },
+            );
         });
     }
 
@@ -1451,7 +1456,14 @@ impl<'a> Ctx<'a> {
             params.push(format!("{core}: UndraCore = UndraCore.shared"));
         }
         let err = ret.error().map(str::to_owned);
-        let is_unit_ok = matches!(&ret, Ret::Plain(TypeRef::Unit) | Ret::Result { ok: TypeRef::Unit, .. });
+        let is_unit_ok = matches!(
+            &ret,
+            Ret::Plain(TypeRef::Unit)
+                | Ret::Result {
+                    ok: TypeRef::Unit,
+                    ..
+                }
+        );
         let is_command = !c.is_async && err.is_none() && matches!(&ret, Ret::Plain(TypeRef::Unit));
         let mut extra = Vec::new();
         if is_command {
@@ -1513,12 +1525,24 @@ impl<'a> Ctx<'a> {
             format!(": {ok_ty}")
         };
         w.call_block(prefix, &params, suffix, true, |w| {
-            let args = self.encode_args(w, c.params, &writer);
+            // A command's arguments are encoded inside the `try` too: it cannot throw, and a click
+            // handler has no way to handle a `WireException` from the writer. Any other call encodes
+            // them first: a value the wire cannot represent is the caller's bug, not an outcome of
+            // the call.
+            let encoded_before = if is_command {
+                None
+            } else {
+                Some(self.encode_args(w, c.params, &writer))
+            };
             let method = if c.is_async { "call" } else { "callSync" };
-            let call_args = [target.clone(), id.clone(), args];
             let call = format!("{core}.{method}");
             w.line("try {");
             w.indented(|w| {
+                let args = match encoded_before {
+                    Some(args) => args,
+                    None => self.encode_args(w, c.params, &writer),
+                };
+                let call_args = [target.clone(), id.clone(), args];
                 if is_unit {
                     w.call(call.clone(), &call_args, "", true);
                 } else {

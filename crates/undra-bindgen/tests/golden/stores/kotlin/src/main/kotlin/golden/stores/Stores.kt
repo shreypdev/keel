@@ -111,9 +111,9 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
      * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
      */
     fun setFilter(f: Filter) {
-        val w = UndraWriter()
-        Filter.encode(w, f)
         try {
+            val w = UndraWriter()
+            Filter.encode(w, f)
             this.core.callSync(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.SET_FILTER),
                 UndraIds.Objects.Todos.SET_FILTER,

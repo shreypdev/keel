@@ -46,9 +46,9 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
 
     /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
     fun setFilter(f: Filter) {
-        val w = UndraWriter()
-        Filter.encode(w, f)
         try {
+            val w = UndraWriter()
+            Filter.encode(w, f)
             this.core.callSync(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.SET_FILTER),
                 UndraIds.Objects.TodoStore.SET_FILTER,
@@ -81,9 +81,9 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
 
     /** A failure is logged and passed to `LoadOptions.onError`; the method does not throw. */
     fun toggle(id: UUID) {
-        val w = UndraWriter()
-        Codecs.uuid.encode(w, id)
         try {
+            val w = UndraWriter()
+            Codecs.uuid.encode(w, id)
             this.core.callSync(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.TodoStore.TOGGLE),
                 UndraIds.Objects.TodoStore.TOGGLE,
