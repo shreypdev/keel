@@ -55,13 +55,13 @@
   </div>
 </header>
 <div class="wrap docs">
-  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
-  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/realtime.html">WebSocket &amp; SSE</a></li><li><a href="../docs/db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/realtime.html">WebSocket &amp; SSE</a></li><li><a href="../docs/db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
   <main id="main" class="prose">
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>TypeScript reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xefd907be3070520a</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x733b7f34689c24e2</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
@@ -77,8 +77,8 @@ export * from "./ids.js";
 </details>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">An interface for each record, a union for each enum, each with a codec.</p>
-<p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>176 lines</span></summary>
+<p class="ref-names"><code>Composite</code> <code>DbCells</code> <code>Item</code> <code>Note</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>SseFollow</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>216 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/types.ts" rel="noopener">types.ts</a></span></div><pre><code data-lang="ts">/**
  * A record that nests the other kinds: lists, options, maps, enums with data and a map with
  * integer keys.
@@ -102,6 +102,24 @@ export interface Composite {
 
 export const CompositeCodec: Codec&lt;Composite&gt;;
 
+/** One value of each SQLite storage class, as [`db_cells`] read it back. */
+export interface DbCells {
+  /** The `INTEGER`. */
+  int: bigint;
+  /** The `REAL`. */
+  real: number;
+  /** The `TEXT`. */
+  text: string;
+  /** The `BLOB`. */
+  blob: Uint8Array;
+  /** The column that held `NULL` (or the text given for it). */
+  none: string | null;
+  /** SQLite's `typeof()` of the five columns, in order. */
+  types: string[];
+}
+
+export const DbCellsCodec: Codec&lt;DbCells&gt;;
+
 /** One row of a list, identified by `id`. */
 export interface Item {
   /** Identity of the row; lists are patched by it, never by position. */
@@ -113,6 +131,18 @@ export interface Item {
 }
 
 export const ItemCodec: Codec&lt;Item&gt;;
+
+/** One note, a row of the `notes` table. */
+export interface Note {
+  /** The row id. */
+  id: bigint;
+  /** The text. */
+  title: string;
+  /** Whether it is ticked. */
+  done: boolean;
+}
+
+export const NoteCodec: Codec&lt;Note&gt;;
 
 /** One value of every primitive the wire has, so a single call covers them all. */
 export interface Primitives {
@@ -188,6 +218,16 @@ export interface RemoteTodo {
 }
 
 export const RemoteTodoCodec: Codec&lt;RemoteTodo&gt;;
+
+/** What [`sse_follow`] read. */
+export interface SseFollow {
+  /** The events, in order. */
+  events: SseEvent[];
+  /** Whether the server ended the stream (`SseError::Ended`) before `max` events. */
+  ended: boolean;
+}
+
+export const SseFollowCodec: Codec&lt;SseFollow&gt;;
 
 /** One item of the to-do list. */
 export interface Todo {
@@ -397,9 +437,70 @@ export const TodoErrorCodec: Codec&lt;TodoError&gt;;
 </details>
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and an async function for each free Rust function.</p>
-<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>366 lines</span></summary>
-<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/objects.ts" rel="noopener">objects.ts</a></span></div><pre><code data-lang="ts">export class Probe extends UndraObject {
+<p class="ref-names"><code>Live</code> <code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>dbCells</code> <code>dbMigrate</code> <code>dbRun</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>sseFollow</code> <code>version</code> <code>wsEcho</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>503 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/objects.ts" rel="noopener">objects.ts</a></span></div><pre><code data-lang="ts">export class Live extends UndraObject {
+  /**
+   * No connection yet.
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   */
+  static create(core: UndraCore = UndraCore.shared): Promise&lt;Live&gt;;
+
+  /**
+   * Forgets the connection without closing it: the port closes it going away (1001).
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  abandon(): Promise&lt;void&gt;;
+
+  /**
+   * Connects to `url`, offering `protocols` and sending `headers`; a connection already open is
+   * closed first (1000). Returns the subprotocol the server chose (`""` for none).
+   * @throws {WsError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  connect(
+    url: string,
+    protocols: string[],
+    headers: Header[],
+    signal?: AbortSignal,
+  ): Promise&lt;string&gt;;
+
+  /**
+   * Closes the connection with `code` and `reason` (`close` is every object's own: it releases
+   * the handle).
+   * @throws {WsError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  disconnect(code: number, reason: string, signal?: AbortSignal): Promise&lt;void&gt;;
+
+  /**
+   * How many pulls the inbound stream has made (each asks the platform for up to 16).
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   */
+  pulls(): Promise&lt;bigint&gt;;
+
+  /**
+   * Reads exactly `count` messages. The connection's end before that is the error (its
+   * close code, a network failure); a stream that ended cleanly (after [`disconnect`](Live::disconnect))
+   * returns the messages it had.
+   * @throws {WsError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  read(count: number, signal?: AbortSignal): Promise&lt;WsMessage[]&gt;;
+
+  /**
+   * Sends `message` on the open connection.
+   * @throws {WsError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  send(message: WsMessage, signal?: AbortSignal): Promise&lt;void&gt;;
+}
+
+export class Probe extends UndraObject {
   /**
    * A probe with every counter at zero.
    * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
@@ -509,6 +610,51 @@ export function createRemoteTodo(
   core: UndraCore = UndraCore.shared,
   signal?: AbortSignal,
 ): Promise&lt;RemoteTodo&gt;;
+
+/**
+ * Writes one value of each storage class to an in-memory database and reads them back.
+ * @throws {DbError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function dbCells(
+  int: bigint,
+  real: number,
+  text: string,
+  blob: Uint8Array,
+  none: string | null,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;DbCells&gt;;
+
+/**
+ * Opens database `name` with two migrations, the second broken when `broken`: the adapter runs
+ * them in one transaction, so a broken second one leaves the database at the version it had.
+ * Returns the version reached.
+ * @throws {DbError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function dbMigrate(
+  name: string,
+  broken: boolean,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;number&gt;;
+
+/**
+ * Runs one statement (SQL given at run time, no parameters) on database `name` and returns the
+ * rows it changed: how a platform's adapter reports SQL and constraint errors.
+ * @throws {DbError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function dbRun(
+  name: string,
+  sql: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;bigint&gt;;
 
 /**
  * Returns `value` unchanged.
@@ -761,16 +907,47 @@ export function setRemoteDone(
 ): Promise&lt;RemoteTodo&gt;;
 
 /**
+ * Subscribes to `url` (resuming after `last_event_id`) and reads up to `max` events, or until
+ * the server ends the stream. Reconnecting is the caller's: call again with the last id read.
+ * @throws {SseError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function sseFollow(
+  url: string,
+  lastEventId: string | null,
+  max: number,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;SseFollow&gt;;
+
+/**
  * The name and version of the core.
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
 export function version(core: UndraCore = UndraCore.shared): Promise&lt;string&gt;;
+
+/**
+ * Connects to `url`, sends `messages` in order, reads as many back and closes (1000).
+ *
+ * Against an echo server the replies are the messages; any end of the connection before that is
+ * the error (a refusal, `Closed` with the server's code, `Network`).
+ * @throws {WsError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function wsEcho(
+  url: string,
+  messages: WsMessage[],
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;WsMessage[]&gt;;
 </code></pre></div>
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>Signal</code>, then its methods.</p>
-<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>262 lines</span></summary>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Notes</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>341 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/stores.ts" rel="noopener">stores.ts</a></span></div><pre><code data-lang="ts">/**
  * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
  * exercise the boundary.
@@ -945,6 +1122,85 @@ export class Device extends UndraStore {
   static create(core: UndraCore = UndraCore.shared): Promise&lt;Device&gt;;
 }
 
+/** The notes of one database, mirrored: `notes` changes only after the database did. */
+export class Notes extends UndraStore {
+  readonly notes: Signal&lt;Note[]&gt;;
+  readonly version: Signal&lt;number&gt;;
+
+  /**
+   * No database open yet: call [`open`](Notes::open).
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   */
+  static create(core: UndraCore = UndraCore.shared): Promise&lt;Notes&gt;;
+
+  /**
+   * Adds a note at the end.
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  add(title: string, signal?: AbortSignal): Promise&lt;Note&gt;;
+
+  /**
+   * Adds every title in one transaction: all or none. A `None` title breaks `NOT NULL` and
+   * rolls the whole batch back. Returns how many were added.
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  addAll(titles: (string | null)[], signal?: AbortSignal): Promise&lt;number&gt;;
+
+  /**
+   * Adds a note with a chosen id (an id in use is `Constraint { kind: Unique }`).
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  addWithId(id: bigint, title: string, signal?: AbortSignal): Promise&lt;Note&gt;;
+
+  /**
+   * Closes the database; the list keeps what it showed (`close` is every store's own: it
+   * releases the handle).
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  closeDatabase(signal?: AbortSignal): Promise&lt;void&gt;;
+
+  /**
+   * How many notes the database holds (read from it, not from the mirror).
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  count(signal?: AbortSignal): Promise&lt;number&gt;;
+
+  /**
+   * Opens (creating it if needed) database `name`, migrates it and loads every note.
+   * Returns its version.
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  open(name: string, signal?: AbortSignal): Promise&lt;number&gt;;
+
+  /**
+   * Removes note `id`.
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  remove(id: bigint, signal?: AbortSignal): Promise&lt;void&gt;;
+
+  /**
+   * Ticks or unticks note `id`.
+   * @throws {DbError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
+  toggle(id: bigint, signal?: AbortSignal): Promise&lt;void&gt;;
+}
+
 /**
  * A store that commits many transactions, for the coalesced-delivery scenarios and the
  * playground's stress screen.
@@ -1107,14 +1363,24 @@ export function postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>110 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>137 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
  */
 export const UndraIds = {
-  schemaHash: 0xefd907be3070520an,
+  schemaHash: 0x733b7f34689c24e2n,
   Objects: {
+    Live: {
+      typeId: 0x881c63cf,
+      new: 0xff026383,
+      abandon: 0x1a6729e8,
+      connect: 0xa8ddf747,
+      disconnect: 0xb47c6859,
+      pulls: 0x1649f03d,
+      read: 0xc853d487,
+      send: 0xbb31ff25,
+    },
     Probe: {
       typeId: 0x4fdd3051,
       new: 0xb843ab99,
@@ -1156,6 +1422,18 @@ export const UndraIds = {
       typeId: 0xbdcbb413,
       new: 0x3f6646a7,
     },
+    Notes: {
+      typeId: 0x0ff01b6a,
+      new: 0x5981902a,
+      add: 0xf7a61617,
+      addAll: 0xd4384f5b,
+      addWithId: 0x20b4cbe8,
+      closeDatabase: 0x11647c30,
+      count: 0x39cf3133,
+      open: 0x5d8df10c,
+      remove: 0x6e4b1cdc,
+      toggle: 0xe1983278,
+    },
     Stress: {
       typeId: 0xafa58985,
       new: 0x6799185d,
@@ -1185,6 +1463,9 @@ export const UndraIds = {
     area: 0x293fbad8,
     configureRemote: 0xa991dd26,
     createRemoteTodo: 0x3f635105,
+    dbCells: 0x31c92fa5,
+    dbMigrate: 0x2f1b2165,
+    dbRun: 0x8c3edc9d,
     echoComposite: 0x769db4ec,
     echoFigure: 0xeeb27e01,
     echoPrimitives: 0x59ba77e7,
@@ -1208,7 +1489,9 @@ export const UndraIds = {
     secretPut: 0x2c60b7cb,
     secretRemove: 0x83a7330a,
     setRemoteDone: 0xa1e08a5f,
+    sseFollow: 0x237de656,
     version: 0xceb9168b,
+    wsEcho: 0x2b49a875,
   },
   Ports: {
   },

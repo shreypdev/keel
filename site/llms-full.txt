@@ -594,6 +594,8 @@ They exchange a small set of types: `HttpRequest` (method, url, headers, optiona
 
 These ports and types ship inside each platform runtime and are **not** generated into your app's bindings. Every core links `undra-ports`, so its schema contains them and the schema hash covers them, but the generator leaves them out and the generated code refers to the runtime's own types. That is why your app can have its own record called `Timer` or `Log`.
 
+Three more ports are opt-in, each behind a cargo feature of `undra`, so a core that does not ask for them keeps its hash and its size: `WebSocket` and `Sse` ([WebSocket & SSE](https://shreypdev.github.io/undra/docs/realtime.html)) and `Db` ([Local database](https://shreypdev.github.io/undra/docs/db.html)).
+
 ## Default adapters
 
 Each runtime ships an adapter for every port, so a new app works without adapter code.
@@ -716,6 +718,190 @@ assert_eq!(http.call_count(), 3);
 Time works the same way. `FakeClock` is the single source of time for both `Clock` and `Timer`, so `ctx.sleep` asks for a timer and advancing the fake clock serves it: sleeps wake at exactly their deadline. On a runtime with the fakes installed, advance time with `Fakes::advance`, not `TestRuntime::advance`.
 
 The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/realtime.html
+
+# WebSocket & server-sent events
+
+Live data comes into the core like everything else: through a port. The core reads at its own pace and decides when to reconnect; the platform owns the socket.
+
+## Turn it on
+
+`WebSocket` and `Sse` are opt-in ports: a core asks for them with a cargo feature, and a core that does not keeps the schema hash and the wasm size it had. Each platform answers with its own client: `URLSessionWebSocketTask`, the Kotlin runtime's client on the JVM and Android, the browser's `WebSocket`.
+
+core/Cargo.toml
+
+```toml
+[dependencies]
+undra = { version = "0.1", features = ["websocket", "sse"] }
+```
+
+## A connection
+
+The core connects, sends and reads. Messages arrive as a stream the core pulls: it asks for 16 at a time, so a core that stops reading stops the socket, on the platforms that can pause one.
+
+core/src/chat.rs
+
+```rust
+use undra::ports::ws::{WsConnection, WsError, WsMessage, WsOptions};
+
+let conn = WsConnection::connect(&ctx, "wss://chat.example.com/room", WsOptions::default()).await?;
+conn.send_text("hello").await?;
+let mut messages = conn.messages();
+while let Some(next) = undra::ports::next(&mut messages).await {
+    match next {
+        Ok(WsMessage::Text(text)) => room.push(text),
+        Ok(WsMessage::Binary(_)) => {}
+        Err(WsError::Closed { code: 1000, .. }) => break, // the server said goodbye
+        Err(error) => return Err(error),
+    }
+}
+```
+
+## Every end is typed
+
+| What happened | The stream ends with |
+| --- | --- |
+| the core called `close` | nothing: it simply ends |
+| the server sent a close frame | `Closed { code, reason }` |
+| the connection dropped | `Network` |
+| the server broke the protocol | `Protocol` |
+| the upgrade was refused | `Refused { status }` (from `connect`) |
+
+Browsers cannot send headers with a WebSocket, so the browser adapter refuses a connect that has some instead of dropping them: put the credential in the URL or a subprotocol.
+
+## Reconnecting is yours
+
+The port never reconnects on its own: which close codes to retry, how long to wait and what to resend are your app's rules, and they run in the core, where a test drives them with a fake clock. `Backoff` gives the delay, a weak context sleeps.
+
+rust
+
+```rust
+let backoff = Backoff::default(); // 500 ms doubling to 30 s, with jitter from the Rng port
+let mut attempt = 0;
+while weak.sleep(backoff.delay(attempt, &*ctx.rng())).await.is_ok() {
+    attempt += 1;
+    // connect again, re-subscribe, reset `attempt` once a message arrives
+}
+```
+
+## Server-sent events
+
+`sse::subscribe` is a stream of events parsed as the HTML standard says. It ends with `Ended` when the server finishes the response; subscribe again with the last event id to resume.
+
+rust
+
+```rust
+let mut events = sse::subscribe(&ctx, "https://api.example.com/feed", vec![], last_id.clone());
+while let Some(Ok(event)) = undra::ports::next(&mut events).await {
+    last_id = event.id.clone().or(last_id);
+    feed.apply(event.data);
+}
+```
+
+## In tests
+
+`FakeWebSocket` and `FakeSse` are scripted servers: accept or refuse, push, close, drop, echo. They record what the core sent and how much it pulled, so backpressure is an assertion.
+
+rust
+
+```rust
+let fakes = fakes::install(&t);
+fakes.web_socket.echo(true);
+// ... the core connects and sends ...
+assert!(fakes.web_socket.delivered(conn) <= consumed + 24);
+```
+
+On the web the adapters are an opt-in import, `@undra/runtime/realtime`, so an app that does not use them ships none of them. Design: [ADR-047](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-047-websocket-and-sse-ports.md).
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/db.html
+
+# Local database
+
+Structured local data with SQLite, written once in the core. The platform owns the file and the thread; the core sends bound statements and gets typed rows back.
+
+## Turn it on
+
+`Db` is an opt-in port over the SQLite each platform already has: the system library on iOS, `android.database.sqlite` on Android, a JDBC driver on the JVM, `node:sqlite` in Node and wa-sqlite in a worker on the web. The core stays small and never blocks: the platform owns the database and its thread.
+
+core/Cargo.toml
+
+```toml
+[dependencies]
+undra = { version = "0.1", features = ["db"] }
+```
+
+## Open and migrate
+
+Migrations are numbered SQL. The platform runs every one the database has not seen yet, in one transaction: if one fails, none of them happened.
+
+core/src/notes.rs
+
+```rust
+const MIGRATIONS: &[Migration] = &[
+    Migration::new(1, "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0)"),
+    Migration::new(2, "CREATE INDEX notes_done ON notes (done)"),
+];
+
+let db = Database::open(&ctx, "notes", MIGRATIONS).await?;
+```
+
+## Values are parameters
+
+SQL is a `&'static str`, so a value can only reach a statement as a bound parameter. Cells come back typed.
+
+rust
+
+```rust
+db.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
+let rows = db.query("SELECT id, title, done FROM notes WHERE done = ?", params![false]).await?;
+for row in rows.iter() {
+    let id: i64 = row.get("id")?;
+    let title: String = row.get("title")?;
+}
+```
+
+## Transactions
+
+A transaction commits when its body returns `Ok` and rolls back on `Err`, or when its task is dropped half-way.
+
+rust
+
+```rust
+db.transaction(|tx| async move {
+    for title in titles {
+        tx.execute("INSERT INTO notes (title) VALUES (?)", params![title]).await?;
+    }
+    Ok(())
+}).await?;
+```
+
+## Errors you can match
+
+| Error | When |
+| --- | --- |
+| `Constraint { kind, .. }` | a `UNIQUE`, `NOT NULL`, foreign-key or `CHECK` constraint failed |
+| `Busy` | the database stayed locked past five seconds |
+| `Migration { version, .. }` | a migration failed and everything rolled back, or the file is newer than the app |
+| `Sql` | a syntax error, a missing table, a cell read as the wrong type |
+| `Corrupt`, `Full`, `Unavailable` | the file, the disk, or no database to talk to |
+
+## In tests
+
+`FakeDb` answers by SQL fragment, injects failures and records every statement, migration and transaction, so the core's database logic is tested without a device.
+
+rust
+
+```rust
+fakes.db.fail_on("INSERT", DbError::Full);
+assert_eq!(notes.add("milk".into()).await, Err(DbError::Full));
+```
+
+Design: [ADR-048](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-048-db-port.md).
 
 ---
 
@@ -2482,7 +2668,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xefd907be3070520a`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x733b7f34689c24e2`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2490,7 +2676,7 @@ Bodies, initializers, private and override members are left out, and a run of de
 
 A struct for each record, an enum for each enum, with the wire codec beside it.
 
-`Composite` `Item` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
@@ -2502,13 +2688,13 @@ An enum for each `#[undra::error]`, conforming to `Error`.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
+`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `version` `wsEcho`
 
 ## Stores
 
 An `@Observable` class for each `#[undra::store]`: its signals, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Notes` `Stress` `Todos`
 
 ## Ports
 
@@ -2534,7 +2720,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xefd907be3070520a`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x733b7f34689c24e2`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2542,7 +2728,7 @@ Bodies, initializers, private and override members are left out, and a run of de
 
 A data class for each record, an enum or sealed interface for each enum, each with its codec.
 
-`Composite` `Item` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
@@ -2554,13 +2740,13 @@ A sealed class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and a function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
+`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `StateFlow`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Notes` `Stress` `Todos`
 
 ## Ports
 
@@ -2586,7 +2772,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xefd907be3070520a`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x733b7f34689c24e2`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2598,7 +2784,7 @@ The package entry: it re-exports every file below.
 
 An interface for each record, a union for each enum, each with a codec.
 
-`Composite` `Item` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
+`Composite` `DbCells` `Item` `Note` `Primitives` `ProbeCounters` `RemoteConfig` `RemoteTodo` `SseFollow` `Todo` `Figure` `Filter` `Parity` `StressMode` `QueryStatus`
 
 ## Errors
 
@@ -2610,13 +2796,13 @@ An abstract class for each `#[undra::error]`, one subclass per variant.
 
 A class for each object, and an async function for each free Rust function.
 
-`Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `version`
+`Live` `Probe` `add` `addLater` `area` `configureRemote` `createRemoteTodo` `dbCells` `dbMigrate` `dbRun` `echoComposite` `echoFigure` `echoPrimitives` `explode` `explodeLater` `failLater` `fileDelete` `fileList` `fileRead` `fileWrite` `greet` `httpGet` `kvGet` `kvKeys` `kvPut` `kvRemove` `parseCount` `ping` `secretGet` `secretKeys` `secretPut` `secretRemove` `setRemoteDone` `sseFollow` `version` `wsEcho`
 
 ## Stores
 
 A class for each `#[undra::store]`: its signals as `Signal`, then its methods.
 
-`Bench` `BigList` `Counter` `Device` `Stress` `Todos`
+`Bench` `BigList` `Counter` `Device` `Notes` `Stress` `Todos`
 
 ## Ports
 

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebSocket &amp; server-sent events · Undra docs</title>
+<meta name="description" content="Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/docs/realtime.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="WebSocket &amp; server-sent events · Undra docs">
+<meta property="og:description" content="Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/docs/realtime.html">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="WebSocket &amp; server-sent events · Undra docs">
+<meta name="twitter:description" content="Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://shreypdev.github.io/undra/docs/realtime.html#article","headline":"WebSocket & server-sent events \u00b7 Undra docs","description":"Real-time from the core: an opt-in WebSocket port with backpressure, server-sent events that resume, typed ends, reconnection under your control.","url":"https://shreypdev.github.io/undra/docs/realtime.html","inLanguage":"en","dateModified":"2026-10-01","datePublished":"2026-10-01","author":{"@type":"Organization","name":"Undra team"},"publisher":{"@id":"https://shreypdev.github.io/undra/#org"},"isPartOf":{"@id":"https://shreypdev.github.io/undra/#website"},"about":{"@type":"SoftwareApplication","name":"Undra"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Undra","item":"https://shreypdev.github.io/undra/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://shreypdev.github.io/undra/docs/"},{"@type":"ListItem","position":3,"name":"WebSocket & server-sent events","item":"https://shreypdev.github.io/undra/docs/realtime.html"}]}]}
+</script>
+<!-- chrome:head -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="../feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/docs.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
+      <a href="../docs/" aria-current="page">Docs</a>
+      <a href="../blog/">Blog</a>
+      <a href="../roadmap/">Roadmap</a>
+      <a href="../playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
+    </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</header>
+<div class="wrap docs">
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="realtime.html" aria-current="page">WebSocket &amp; SSE</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="concepts.html">Core concepts</a></li><li><a href="queries.html">Queries &amp; mutations</a></li><li><a href="ports.html">Ports &amp; adapters</a></li><li><a href="realtime.html" aria-current="page">WebSocket &amp; SSE</a></li><li><a href="db.html">Local database</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="cli.html">The CLI</a></li><li><a href="architecture.html">Architecture</a></li><li><a href="errors.html">Error codes</a></li><li><a href="../reference/rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="api-swift.html">Swift</a></li><li><a href="api-kotlin.html">Kotlin</a></li><li><a href="api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <main id="main" class="prose">
+    <p class="crumb">Guides</p>
+    <h1>WebSocket &amp; server-sent events</h1>
+    <p class="lede">Live data comes into the core like everything else: through a port. The core reads at its own pace and decides when to reconnect; the platform owns the socket.</p>
+<h2 id="turn-it-on">Turn it on<a class="anchor" href="#turn-it-on" aria-label="Link to this section">#</a></h2>
+<p><code>WebSocket</code> and <code>Sse</code> are opt-in ports: a core asks for them with a cargo feature, and a core that does not keeps the schema hash and the wasm size it had. Each platform answers with its own client: <code>URLSessionWebSocketTask</code>, the Kotlin runtime's client on the JVM and Android, the browser's <code>WebSocket</code>.</p>
+<div class="code"><div class="code-bar"><span>core/Cargo.toml</span></div><pre><code data-lang="toml">[dependencies]
+undra = { version = &quot;0.1&quot;, features = [&quot;websocket&quot;, &quot;sse&quot;] }</code></pre></div>
+<h2 id="a-connection">A connection<a class="anchor" href="#a-connection" aria-label="Link to this section">#</a></h2>
+<p>The core connects, sends and reads. Messages arrive as a stream the core pulls: it asks for 16 at a time, so a core that stops reading stops the socket, on the platforms that can pause one.</p>
+<div class="code"><div class="code-bar"><span>core/src/chat.rs</span></div><pre><code data-lang="rust">use undra::ports::ws::{WsConnection, WsError, WsMessage, WsOptions};
+
+let conn = WsConnection::connect(&amp;ctx, &quot;wss://chat.example.com/room&quot;, WsOptions::default()).await?;
+conn.send_text(&quot;hello&quot;).await?;
+let mut messages = conn.messages();
+while let Some(next) = undra::ports::next(&amp;mut messages).await {
+    match next {
+        Ok(WsMessage::Text(text)) =&gt; room.push(text),
+        Ok(WsMessage::Binary(_)) =&gt; {}
+        Err(WsError::Closed { code: 1000, .. }) =&gt; break, // the server said goodbye
+        Err(error) =&gt; return Err(error),
+    }
+}</code></pre></div>
+<h2 id="every-end-is-typed">Every end is typed<a class="anchor" href="#every-end-is-typed" aria-label="Link to this section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>What happened</th><th>The stream ends with</th></tr></thead><tbody><tr><td>the core called <code>close</code></td><td>nothing: it simply ends</td></tr><tr><td>the server sent a close frame</td><td><code>Closed { code, reason }</code></td></tr><tr><td>the connection dropped</td><td><code>Network</code></td></tr><tr><td>the server broke the protocol</td><td><code>Protocol</code></td></tr><tr><td>the upgrade was refused</td><td><code>Refused { status }</code> (from <code>connect</code>)</td></tr></tbody></table></div>
+<p>Browsers cannot send headers with a WebSocket, so the browser adapter refuses a connect that has some instead of dropping them: put the credential in the URL or a subprotocol.</p>
+<h2 id="reconnecting-is-yours">Reconnecting is yours<a class="anchor" href="#reconnecting-is-yours" aria-label="Link to this section">#</a></h2>
+<p>The port never reconnects on its own: which close codes to retry, how long to wait and what to resend are your app's rules, and they run in the core, where a test drives them with a fake clock. <code>Backoff</code> gives the delay, a weak context sleeps.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">let backoff = Backoff::default(); // 500 ms doubling to 30 s, with jitter from the Rng port
+let mut attempt = 0;
+while weak.sleep(backoff.delay(attempt, &amp;*ctx.rng())).await.is_ok() {
+    attempt += 1;
+    // connect again, re-subscribe, reset `attempt` once a message arrives
+}</code></pre></div>
+<h2 id="server-sent-events">Server-sent events<a class="anchor" href="#server-sent-events" aria-label="Link to this section">#</a></h2>
+<p><code>sse::subscribe</code> is a stream of events parsed as the HTML standard says. It ends with <code>Ended</code> when the server finishes the response; subscribe again with the last event id to resume.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">let mut events = sse::subscribe(&amp;ctx, &quot;https://api.example.com/feed&quot;, vec![], last_id.clone());
+while let Some(Ok(event)) = undra::ports::next(&amp;mut events).await {
+    last_id = event.id.clone().or(last_id);
+    feed.apply(event.data);
+}</code></pre></div>
+<h2 id="in-tests">In tests<a class="anchor" href="#in-tests" aria-label="Link to this section">#</a></h2>
+<p><code>FakeWebSocket</code> and <code>FakeSse</code> are scripted servers: accept or refuse, push, close, drop, echo. They record what the core sent and how much it pulled, so backpressure is an assertion.</p>
+<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">let fakes = fakes::install(&amp;t);
+fakes.web_socket.echo(true);
+// ... the core connects and sends ...
+assert!(fakes.web_socket.delivered(conn) &lt;= consumed + 24);</code></pre></div>
+<p>On the web the adapters are an opt-in import, <code>@undra/runtime/realtime</code>, so an app that does not use them ships none of them. Design: <a href="https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-047-websocket-and-sse-ports.md">ADR-047</a>.</p>
+<nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="ports.html"><span>Previous</span><b>Ports &amp; adapters</b></a>
+    <a class="next" href="db.html"><span>Next</span><b>Local database</b></a>
+  </nav>
+  </main>
+  <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#turn-it-on">Turn it on</a></li><li><a href="#a-connection">A connection</a></li><li><a href="#every-end-is-typed">Every end is typed</a></li><li><a href="#reconnecting-is-yours">Reconnecting is yours</a></li><li><a href="#server-sent-events">Server-sent events</a></li><li><a href="#in-tests">In tests</a></li></ul></aside>
+</div>
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="../" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+      </div>
+      <div>
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="../docs/getting-started.html">Getting started</a></li>
+          <li><a href="../docs/concepts.html">Core concepts</a></li>
+          <li><a href="../docs/realtime.html">Queries &amp; mutations</a></li>
+          <li><a href="../docs/ports.html">Ports &amp; adapters</a></li>
+          <li><a href="../docs/cli.html">The CLI</a></li>
+          <li><a href="../docs/architecture.html">Architecture</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="../blog/">Blog</a></li>
+          <li><a href="../roadmap/">Roadmap</a></li>
+          <li><a href="../playground/">Playground</a></li>
+          <li><a href="../feed.xml">RSS feed</a></li>
+          <li><a href="../llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
+    </div>
+  </div>
+</footer>
+<script src="../assets/site.js" defer></script>
+</body>
+</html>
