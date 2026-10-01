@@ -37,7 +37,8 @@ public struct LoadOptions: Sendable {
     /// `dev.undra.runtime`) when the handler runs. It runs synchronously on the thread that made the
     /// call (the main actor for a store), so keep it short, and it must not call into Undra: a failure
     /// reported while the handler is running is only logged, so a handler that calls a failing
-    /// command cannot recurse. The default (`nil`) logs and returns.
+    /// command cannot recurse (a `Task` started from inside the handler inherits that, so what it
+    /// reports is only logged too). The default (`nil`) logs and returns.
     ///
     /// ```swift
     /// // Stop at the failing line in debug builds; the default never stops the process.
