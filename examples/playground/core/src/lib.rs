@@ -21,7 +21,7 @@
 //! | [`remote`](mod@remote) | a query, mutations and optimistic commands over the `Http` port |
 //! | [`lab`](mod@lab) | every wire type, sync and async calls, typed errors, panics, cancellation, streams |
 //! | [`bench`](mod@bench) | the budget-row methods: a primitive call, 1 KB echo, 100 dirty signals, one insert |
-//! | [`stress`](mod@stress) | high-frequency data: bursts of transactions the platforms apply once per frame, and a `no_coalesce` signal they apply step by step |
+//! | [`stress`](mod@stress) | high-frequency data: a Timer-paced generator (and bursts) of one-write transactions the platforms apply once per frame, and a `no_coalesce` signal they apply step by step |
 //!
 //! The core reads no clock and no random source and starts no thread (R12): identities come from
 //! counters, time from the `Clock` port, delays from `Ctx::sleep` and the network from the
@@ -50,5 +50,5 @@ pub use remote::{
     RemoteConfig, RemoteError, RemoteTodo, configure_remote, create_remote_todo, patch_remote_todo,
     post_remote_todo, remote_todos, set_remote_done,
 };
-pub use stress::{Stress, StressMode};
+pub use stress::{MAX_RATE, Stress, StressError, StressMode};
 pub use todos::{Filter, Todo, TodoError, Todos};
