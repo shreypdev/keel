@@ -145,6 +145,12 @@ mod tests {
             "[::]:7443",
             "192.168.1.5:7443",
             "myhost.local:7443",
+            // Spellings the OS would resolve to loopback but this does not recognise: closed, not open.
+            "127.1:7443",
+            "[::ffff:127.0.0.1]:7443",
+            ":7443",
+            "7443",
+            "",
         ] {
             assert!(!enabled(DevtoolsMode::Auto, no), "{no}");
             assert!(enabled(DevtoolsMode::On, no), "{no}");

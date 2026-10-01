@@ -134,3 +134,20 @@ tests. `undra dev` writes the assets beside the runner's sources and the runner 
   SPEC 5.10, 13 and 16.2 are updated; `docs/DEV_LOOP.md` gets a section.
 * Time travel shares ADR-053's limits. It is not undo for the world: a request already sent, a port already answered and a
   timer already armed stay what they were.
+
+## Amendments from the adversarial review (2026-10-02, `.10x/reviews/2026-10-02-devtools-review.md`)
+
+None touches the wire, the ABI or a generated shape.
+
+* **The socket's refusal is the page's `404`.** Section 6 said every refusal is the same `404`; the WebSocket upgrade at
+  `/devtools/ws` answered with the WebSocket library's bare `404` instead. The token is now checked on the request line
+  before anything is allocated and a request without it is answered by the code that answers every other refusal.
+* **Pacing.** The worker's snapshots are at least 10 ms apart and at least nine times as far apart as the last one took
+  (at most 2 s), and the query cache is sampled at most four times a second and nine times as far apart as the last sample
+  took, with the cache's lock held only to copy its rows. Section 5's "sampled" and section 3's "coalesced over 10 ms" are
+  those numbers for a small state.
+* **Inspector panics (section 5's seam).** A panicking inspector is logged once (level 5, counted in `panics`) and skipped
+  until a new one is registered under its name.
+* **The app's notice** says how many stores a time travel dropped, as the page's answer does.
+* **A worker that dies closes the pages** (they reconnect and get a new one); the hub stays active until the last has left,
+  so the app client is never sent what it did not observe.
