@@ -577,24 +577,76 @@ artifact; the soak runs each attempt in a fresh process.
 
 ## Device numbers (iOS, Android, Web)
 
-> The playground has now been exercised interactively on the iOS simulator, the Android
-> emulator (live 10/s keyed-patch streaming on the 10,000-row list) and Chrome. Those runs
-> validate behaviour, not budgets: virtualized numbers are deliberately NOT recorded here —
-> only real-device measurements will fill this table, so the budget verdicts stay honest.
-> Per-platform benchmark splits are likewise deferred until real devices produce them.
+The host rows above are the core's half: a core call on a fast desktop core, not what a Swift, Kotlin or TypeScript app
+pays. This section is the platform's half, **measured through the generated binding and the platform's mirror, in the
+playground app itself**, by one command per target:
 
-Land with the playground phase, measured on the devices the blueprint names (iPhone with an A15, a 2022
-mid-range Android phone, Chromium) from `examples/playground`. Until then:
+```sh
+scripts/bench-device.sh --device ios                   # the iPhone 17 Pro simulator (boots it if needed)
+scripts/bench-device.sh --device android               # the one device or emulator adb sees; else boots the `undra` AVD headless
+scripts/bench-device.sh --device web                   # headless Chromium (Playwright)
+```
 
-| Row | Waiting for |
-|---|---|
-| Handle method call, all three platforms | the real Swift/JNI/JS crossing on device: the host number above is the core half only |
-| 1 KB record round trip, all three | the same, plus the platform runtime's own encode/decode (Swift, Kotlin, TypeScript) |
-| Change-set with 100 dirty signals, applied on the main thread | the platform mirror applying the change-set (`@Observable`, Compose `State`, the TS store): this host measures the core side and a borrowed decode only |
-| Keyed patch on 10,000 items, all three | the list mirror applying a patch (the core half is fixed, Finding 1) |
-| Core cold start with 100 KB snapshot restore | dlopen/app launch on iOS and Android, wasm compile and instantiate on web (the web row is "after wasm compile") |
-| Hello-world size added to the app | release builds for `aarch64-apple-ios`, the Android ABIs and `wasm32-unknown-unknown` (none of these targets is installed here); the host proxy above is thin against 900 KB |
-| Runtime memory at idle | a device memory profile (Instruments, Android Studio); the host proxy above is an RSS delta, and an exact heap counter needs a custom global allocator, which is `unsafe` and outside `undra-ffi` (R2) |
-| Incremental core rebuild in `undra dev`, 20k-line core | a 20k-line core, which the playground does not yet have |
-| Web crash recovery, 1 MB | the wasm build; the restore itself is measured above |
-| Comparison with UniFFI and KMP baselines | the playground phase; the blueprint publishes these per release |
+Each run builds the playground core (`undra build --release`) and app for the target, drives the app's bench hooks
+(`Bench`, ADR-031's drain) with the harness each platform's smoke test already uses (an XCUITest, an instrumented test,
+Playwright), writes `bench/results/device/<date>-<target>.json` (schema `undra-device-bench/1`: device model, OS version,
+build type, commit, host load, the timer's step, every row's p50/p99/min/max, the drain experiment, the cold-start
+launches) and renders this section's tables from those files (`node scripts/bench-device-report.mjs render`; `node --test
+scripts/bench-device-report.test.mjs` fails when the tables are not what the files say). **To get a real-device row** (the command that matters
+the day hardware is attached):
+
+```sh
+# an iPhone (USB, trusted, Developer Mode on; the team id is the one in Xcode > Settings > Accounts)
+UNDRA_IOS_TEAM=<team id> scripts/bench-device.sh --device ios --target <udid from `xcrun devicectl list devices`> --runs 3
+# an Android phone (USB debugging on; `adb devices` shows the serial)
+scripts/bench-device.sh --device android --target <serial> --runs 3
+```
+
+A row from a physical device is the only one that gets a verdict against the blueprint's target. `--runs 3` makes three
+files and the reproducibility lines compare them. Keep the phone charged, cool, unlocked and out of low-power mode (the
+file records the thermal state and the mode).
+
+### How the rows are timed
+
+* **End to end, as the app experiences it.** Every row calls the generated store method (`bench.benchAdd(..)`,
+  `benchEchoBytes`, `benchListInsert`, `benchTouchSignals`), on the main thread (the main actor, the main looper, the page's
+  thread), and the clock stops when the mirror holds the result: the call returns only after the main-thread drain
+  (ADR-031 decision 2), and **after every operation the runner compares the mirror's state with what the operation did**
+  (the sum of the replies, the length of the list and the id at the insert position, the hundredth counter) and aborts the
+  run, reporting no number, when they differ.
+* **Release builds.** The core is `undra build --release` (LTO fat); the iOS app is the Release configuration, the Android
+  app the `benchmark` build type (release, not debuggable, signed with the debug key) with the code compiled ahead of time
+  (`cmd package compile -m speed`), the web page the production build. The file records all of it.
+* **Clocks.** `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` (41.67 ns tick), `System.nanoTime` and `performance.now`, which a
+  browser rounds to 100 us, or to 5 us when the page is cross-origin isolated (the bench page is). The handle call is
+  tens to hundreds of nanoseconds, so it is timed as **batches of calls divided by the batch** (1,000 on a phone) and
+  its p50/p99 are over batches; the other rows are timed **one operation at a time** on iOS and Android (2,000 samples
+  after a warm-up) and as batches on the web (the batch size is in each file and in the "Timed as" column), where the
+  clock cannot resolve one. A pair of clock reads costs 10 to 30 ns on a phone (in the file).
+* **The rows are not the host rows.** The 1 KB row echoes a `Bytes` of 1,024 (the playground's `bench_echo_bytes`; a byte
+  string is a `memcpy`, a record of the same size is more work), so it is a floor for the blueprint's record. The keyed
+  insert is the **whole call** (encode, core insert, patch, apply) on a list of about 10,000 rows (it is put back to
+  10,000 outside the timed region), where the host row is the core's part. The 100-signal row is one call that dirties
+  100 signals and the apply of that change-set to 100 observable properties. On the web the generated call is
+  asynchronous, so there are two handle-call rows: the generated binding, and the runtime's `callSync` (the blueprint's
+  "in-thread" row, which generated code does not use).
+* **Cold start** is the first `UndraCore.load` of a fresh process plus the restore of a 100 KB snapshot (1,000 to-dos of 80
+  characters; the host row restores four stores of 250 rows of 100 bytes), over ten launches (XCUITest launches, `am
+  instrument` runs, Playwright contexts); iOS also reloads the core in process thirty times. An in-process core cannot be
+  loaded twice on Android, so its in-process figure is the restore alone; the generated TypeScript has no `snapshot()` or
+  `restore()` (Finding 5 below), so the web row is the load after the module is compiled (the blueprint's own wording) and
+  says it has no restore.
+* **The drain (ADR-031)**: 1,667 one-update keyed patches on the 10,000-row list per frame, 100,000 a second at 60 Hz. The
+  core commits them in a burst (`bench_list_update_burst`, one transaction per update, each its own change-set) from a
+  thread of its own on iOS and Android, so the main thread meets them only as the drain at the next frame, through the
+  real frame source (`CADisplayLink`, the Choreographer); on the web the page's own thread commits them and the whole
+  burst is main-thread time. The tables report the main thread's cost of a frame with the runtime as it is (merged), and
+  **estimate the unmerged cost, not by reverting the runtime**: the drain of a single entry (a call on the main thread
+  drains before it returns, so the drain listener times a drain of exactly one change-set applied on its own; on the web, a
+  call that commits one update minus a call that commits none) times 1,667.
+
+<!-- device-bench:begin (generated by scripts/bench-device-report.mjs render; edit nothing between the markers) -->
+
+_No device-bench result files yet: run `scripts/bench-device.sh --device <ios|android|web>`._
+
+<!-- device-bench:end -->

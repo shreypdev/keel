@@ -30,6 +30,8 @@ jobs:
         run: cargo fmt --check
       - name: Shared wire vectors (the Swift copy matches contract-tests/wire-vectors.json)
         run: bash runtimes/swift/scripts/sync-vectors.sh --check
+      - name: Device bench report (RESULTS.md's device tables are what the result files say; the blueprint targets match)
+        run: node --test scripts/bench-device-report.test.mjs
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
