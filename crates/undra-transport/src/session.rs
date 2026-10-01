@@ -235,11 +235,12 @@ impl Session {
                     self.note(
                         WARN,
                         &format!(
-                            "a {} client asked to resume session {}, which this core does not hold (it was restarted, or the session expired): its objects are gone, so it is told to load a new core",
+                            "a client ({}) asked to resume session {}, which this core does not hold (it was restarted, or the session expired): its objects are gone, so it is told to load a new core",
                             info.platform,
                             request.short()
                         ),
                     );
+                    self.conn.mark_refused();
                     Err(Violation {
                         code: close::SESSION_LOST,
                         reason: format!(
@@ -413,7 +414,7 @@ impl Session {
         // Vacated after the retention above: a client waiting in `claim` for this slot (the
         // same session, back on a new socket) must find the objects when it gets it.
         self.bridge.vacate(self.conn.id);
-        if attached && had_client {
+        if attached && had_client && !self.conn.is_refused() {
             let objects = if keep_for.is_some() {
                 format!(
                     "{} object(s) kept for {} s so it can reconnect",

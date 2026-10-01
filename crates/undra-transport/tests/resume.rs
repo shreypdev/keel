@@ -133,7 +133,7 @@ fn asking_to_resume_a_session_the_core_does_not_hold_is_session_lost() {
     f.eventually("the refusal is logged", |f| {
         f.log_lines()
             .iter()
-            .any(|l| l.contains("asked to resume session never-se") && l.contains("android"))
+            .any(|l| l.contains("asked to resume session never-se") && l.contains("(android)"))
     });
     f.eventually("the slot is free", |f| !f.bridge.is_connected());
     // Not a ban: the same client may connect as a new one.
@@ -311,4 +311,38 @@ fn a_malformed_token_is_an_ordinary_client() {
         stat(&f.rt, "live_handles") == 0
     });
     let _ = handle;
+}
+
+#[test]
+fn client_churn_never_wedges_the_server_or_leaks_objects() {
+    // Reconnects, relaunches and abrupt drops in a row: the server keeps at most the last client's
+    // objects, always lets the next client in, and gives everything back at the end.
+    let f = resuming(minutes(10));
+    for round in 0..25 {
+        let token = format!("launch-{round}");
+        let mut app = f.session_client(&token, false);
+        let kept = app.new_counter(round);
+        app.new_counter(round + 1);
+        drop(app);
+        for _ in 0..3 {
+            // The network flaps: the app is back under its own token and gone again.
+            let mut back = f.session_client(&token, true);
+            let (status, body) = back.method(kept, GET, &[]);
+            assert_eq!((status, dec::<i32>(&body)), (ReplyStatus::Ok, round));
+            drop(back);
+        }
+        assert!(
+            stat(&f.rt, "live_handles") <= 2,
+            "round {round}: at most one launch's objects are held"
+        );
+    }
+    f.eventually("the last launch's two objects are all that is held", |f| {
+        stat(&f.rt, "live_handles") == 2
+    });
+    f.server.shutdown();
+    assert_eq!(
+        stat(&f.rt, "live_handles"),
+        0,
+        "shutting down gives everything back"
+    );
 }

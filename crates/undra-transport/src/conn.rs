@@ -100,6 +100,9 @@ pub(crate) struct Conn {
     client: OnceLock<ClientInfo>,
     /// What the upgrade request said about the client's session (ADR-034).
     session: OnceLock<SessionRequest>,
+    /// The server turned this client away after it attached (a session it cannot resume): its
+    /// teardown is not worth a log line of its own.
+    refused: AtomicBool,
     /// Where the keepalive reads the time.
     clock: Clock,
     /// Milliseconds on `clock` at which bytes last arrived from the peer; until then, when the
@@ -144,6 +147,7 @@ impl Conn {
             tcp,
             client: OnceLock::new(),
             session: OnceLock::new(),
+            refused: AtomicBool::new(false),
             last_rx: AtomicU64::new(clock().as_millis().try_into().unwrap_or(u64::MAX)),
             clock,
         };
@@ -173,6 +177,16 @@ impl Conn {
     /// The session the client announced in its URL, if it did.
     pub(crate) fn session(&self) -> Option<&SessionRequest> {
         self.session.get()
+    }
+
+    /// Notes that the server is turning this client away.
+    pub(crate) fn mark_refused(&self) {
+        self.refused.store(true, Ordering::Release);
+    }
+
+    /// Whether the server turned this client away.
+    pub(crate) fn is_refused(&self) -> bool {
+        self.refused.load(Ordering::Acquire)
     }
 
     /// Makes `handles` (objects of a session this client resumed) this connection's own: its

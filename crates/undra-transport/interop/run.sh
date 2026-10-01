@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 WHICH="${1:-all}"
 WORK="$(mktemp -d)"
-trap 'kill "${SERVER_PID:-0}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+trap '[ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
 
 cargo build -p undra-transport --example serve
 BIN="$PWD/target/debug/examples/serve"
@@ -45,7 +45,7 @@ if [ "$WHICH" = all ] || [ "$WHICH" = kotlin ]; then
   field() { python3 -c "import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])" "$INFO" "$1"; }
   java -cp "$WORK/kt:$UNDRA_KOTLINX_COROUTINES:$UNDRA_KOTLIN_STDLIB" InteropKt \
     "$(field url)" "$(field schema)" "$(field counter)" "$(field new)" "$(field add)" \
-    "$(field sum)" "$(field ask)" "$(field echoPort)" "$(field echoMethod)"
+    "$(field sum)" "$(field ask)" "$(field echoPort)" "$(field echoMethod)" "$BIN"
   stop_server
 fi
 echo "interop OK"
