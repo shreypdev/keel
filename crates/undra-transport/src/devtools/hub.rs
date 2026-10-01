@@ -485,11 +485,22 @@ impl Hub {
     // ----- the worker ----------------------------------------------------------------------
 
     fn work(self: &Arc<Self>, rx: &Receiver<Event>) {
-        // A panic here must not take the dev server with it (R6); the pages notice the silence.
+        // A panic here must not take the dev server with it (R6).
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.work_loop(rx)));
         if outcome.is_err() {
-            self.note(WARN, "the devtools thread panicked; the page stops updating");
-            self.active.store(false, Ordering::Release);
+            self.on_worker_panic();
+        }
+    }
+
+    /// The worker died. The pages are closed, so that each one leaves through [`detach`](Self::detach):
+    /// the last of them undoes the observation and the hub goes idle, and the app client is sent
+    /// only what it observed all the while (the bridge filters while the hub is active, and the hub
+    /// stays active until that is done). A page that connects again gets a new worker.
+    fn on_worker_panic(&self) {
+        self.note(WARN, "the devtools thread panicked; the pages are closed and may reconnect");
+        let clients: Vec<Arc<Conn>> = self.clients.lock().clone();
+        for c in clients {
+            c.close(crate::ws::close::GOING_AWAY, "the devtools thread failed");
         }
     }
 
@@ -602,7 +613,7 @@ impl Hub {
         let restored_from = self.restored_from.swap(0, Ordering::AcqRel);
         let pushed = {
             let mut ring = self.ring.lock();
-            if ring.newest_bytes().is_some_and(|b| b.as_slice() == bytes.as_slice()) {
+            if ring.unchanged(&bytes) {
                 self.counters.skipped_same.fetch_add(1, Ordering::Relaxed);
                 return;
             }
@@ -883,6 +894,38 @@ mod tests {
         hub.shutdown("test");
         assert!(idle(&hub));
         assert!(!hub.attach(&conn), "a stopped hub takes no page");
+        bridge.set_hub(None);
+        rt.shutdown();
+    }
+
+    #[test]
+    fn a_dead_worker_closes_the_pages_and_leaves_the_hub_to_undo_its_observation() {
+        use undra_runtime::RuntimeConfig;
+        let bridge = Bridge::new();
+        let rt = Runtime::new(
+            RuntimeConfig {
+                platform: "rust".into(),
+                mode: "dev".into(),
+                core_threads: 1,
+                blocking_threads: 1,
+                log_level: 0,
+            },
+            bridge.clone(),
+        )
+        .unwrap();
+        let hub = Hub::new(rt.clone(), &bridge, DevtoolsConfig::new("0123456789abcdef", &[]));
+        bridge.set_hub(Some(hub.clone()));
+        let (conn, _queue) = Conn::new(1, rt.schema_hash(), 1 << 20, None);
+        let conn = Arc::new(conn);
+        assert!(hub.attach(&conn));
+        hub.on_worker_panic();
+        assert!(conn.is_closing(), "the page is told to go");
+        assert!(
+            hub.is_active() && bridge.devtools_attached(),
+            "the hub stays active (the bridge keeps filtering) until the page has left"
+        );
+        hub.detach(1);
+        assert!(!hub.is_active() && hub.worker.lock().is_none(), "the page leaving puts everything back");
         bridge.set_hub(None);
         rt.shutdown();
     }

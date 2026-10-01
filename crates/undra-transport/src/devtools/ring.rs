@@ -15,6 +15,17 @@ use super::proto::StepInfo;
 pub(crate) struct Step {
     pub(crate) info: StepInfo,
     pub(crate) bytes: Option<Arc<Vec<u8>>>,
+    /// The length and a hash of a snapshot that was not kept, so that the same state is not listed
+    /// again and again (a commit that changes nothing a snapshot holds, a query handle's, is common).
+    print: Option<(usize, u64)>,
+}
+
+/// A hash of `bytes` for telling two snapshots apart without keeping them.
+fn fingerprint(bytes: &[u8]) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
 }
 
 /// The bounded history of snapshots.
@@ -66,9 +77,24 @@ impl Ring {
         self.bytes
     }
 
-    /// The most recent snapshot that was kept, for telling whether the state changed at all.
+    /// The most recent snapshot that was kept.
+    #[cfg(test)]
     pub(crate) fn newest_bytes(&self) -> Option<&Arc<Vec<u8>>> {
         self.steps.back().and_then(|s| s.bytes.as_ref())
+    }
+
+    /// Whether `snapshot` is the state the newest step already has (kept or not), so that a capture
+    /// that found nothing new adds no step.
+    pub(crate) fn unchanged(&self, snapshot: &[u8]) -> bool {
+        match self.steps.back() {
+            Some(Step { bytes: Some(kept), .. }) => kept.as_slice() == snapshot,
+            Some(Step {
+                bytes: None,
+                print: Some((len, hash)),
+                ..
+            }) => *len == snapshot.len() && fingerprint(snapshot) == *hash,
+            _ => false,
+        }
     }
 
     /// The step `n`, when it is still in the ring.
@@ -90,11 +116,13 @@ impl Ring {
         info.bytes = u32::try_from(snapshot.len()).unwrap_or(u32::MAX);
         let keep = snapshot.len() <= self.max_step_bytes;
         info.restorable = keep;
+        let print = (!keep).then(|| (snapshot.len(), fingerprint(&snapshot)));
         let bytes = keep.then(|| Arc::new(snapshot));
         self.bytes += bytes.as_ref().map_or(0, |b| b.len());
         self.steps.push_back(Step {
             info: info.clone(),
             bytes,
+            print,
         });
         let mut evicted = false;
         while self.steps.len() > 1 && (self.steps.len() > self.max_steps || self.bytes > self.max_bytes) {
@@ -250,6 +278,24 @@ mod tests {
         assert_eq!((ring.len(), ring.bytes()), (2, 20));
         ring.clear();
         assert_eq!((ring.len(), ring.bytes()), (0, 0), "nothing is kept once the page leaves");
+    }
+
+    #[test]
+    fn the_same_state_is_not_listed_twice_whether_or_not_it_was_kept() {
+        let mut ring = Ring::new(10, 1 << 20, 16);
+        assert!(!ring.unchanged(&[1; 4]), "an empty ring has nothing to equal");
+        ring.push(info(), vec![1; 4]);
+        assert!(ring.unchanged(&[1; 4]) && !ring.unchanged(&[2; 4]) && !ring.unchanged(&[1; 5]));
+        // A state over the per-step bound is not kept, and is still recognised by its length and hash.
+        ring.push(info(), vec![7; 40]);
+        assert!(ring.get(2).unwrap().bytes.is_none());
+        assert!(ring.unchanged(&[7; 40]));
+        let mut other = vec![7; 40];
+        other[39] = 8;
+        assert!(!ring.unchanged(&other), "one byte different is a different state");
+        assert!(!ring.unchanged(&[7; 41]));
+        ring.clear();
+        assert!(!ring.unchanged(&[7; 40]), "nothing is compared with once the page has left");
     }
 
     #[test]
