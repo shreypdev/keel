@@ -82,6 +82,9 @@ export interface UndraStats {
   readonly core: Readonly<Record<string, unknown>> | null;
 }
 
+/** The `Log` target of the messages `undra dev` addresses to the developer (ADR-053); see `AttachOptions.onDevNotice`. */
+const DEV_NOTICE_TARGET = "undra::dev";
+
 /** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-051), or the connection failed for good. */
 export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
 
@@ -137,6 +140,15 @@ export interface AttachOptions {
    * `maxPendingEntries` (default 65,536) / `maxPendingBytes` (default 16 MiB) bound the backlog.
    */
   readonly mirror?: Pick<MirrorOptions, "schedule" | "maxPendingEntries" | "maxPendingBytes">;
+  /**
+   * **Development only, and inert unless the core is a `remote` one served by `undra dev`.** Called with a
+   * one-line message the dev server says about itself, such as `Reloaded, state kept` after it rebuilt the
+   * core (ADR-053): show it in a status bar for a few seconds. `undra dev` tells every client that attaches
+   * soon after a rebuild, once; an in-process or production core never produces one, so the callback never
+   * fires there. The message is also written to the log. The callback runs synchronously inside a core
+   * callback: keep it short and do not call into Undra from it. An exception it throws is logged and dropped.
+   */
+  readonly onDevNotice?: (message: string) => void;
 }
 
 /** Options of `UndraCore.load`. */
@@ -963,6 +975,7 @@ export class UndraCore {
     portCall: (call) => this.#onPortCall(call),
     log: (level, target, message) => {
       this.#log(level, target, message);
+      if (target === DEV_NOTICE_TARGET && this.#transport.mode === "remote") this.#devNotice(message);
     },
     closed: (error) => {
       this.#lost(error);
@@ -1118,6 +1131,15 @@ export class UndraCore {
       this.#transport.send(Kind.PortReply, reply);
     } catch (error) {
       this.#reportError("port reply", error);
+    }
+  }
+
+  /** Hands a dev server's message to `onDevNotice` (only a `remote` core gets here: see the `log` handler). */
+  #devNotice(message: string): void {
+    try {
+      this.#options.onDevNotice?.(message);
+    } catch (error) {
+      this.#reportError("onDevNotice", error);
     }
   }
 

@@ -41,9 +41,11 @@ import kotlinx.coroutines.flow.StateFlow
  * frame, through the [ChoreographerFramePacer] of `android-adapters` (ADR-031).
  *
  * **Against `undra dev`** (debug builds, see [DevServer]) the core is the one `undra dev` serves, over a WebSocket:
- * edit the Rust, save, and the app is on the new core within a second, with no rebuild of the app. A dropped
- * connection (the laptop slept, `adb` restarted) is reconnected by the runtime; [connection] says what it is doing.
- * When the dev server comes back with a new core (a rebuild) the old core's objects are gone: the runtime reports
+ * edit the Rust, save, and the app is on the new core within a second, with no rebuild of the app, and with its state:
+ * `undra dev` snapshots the old core and restores it into the new one (ADR-053), so the runtime just reconnects and the
+ * screens converge on the values they had. A dropped connection (the laptop slept, `adb` restarted) is reconnected by the
+ * runtime; [connection] says what it is doing and [devNotice] what the dev server said about the reload. When the state
+ * could not be carried (a schema change, a state over the limit) the old core's objects are gone: the runtime reports
  * `Closed(SESSION_LOST)`, this class loads the new core and bumps [epoch], and the activity starts over on it. The
  * platform adapters stay on the device either way: each core gets its own `install`, and the previous one stops
  * reporting.
@@ -82,6 +84,11 @@ class UndraApp : Application() {
 
     /** Counts the cores this process has loaded after the first: it changes when a new core replaced a lost one. */
     val epoch: StateFlow<Int> get() = _epoch
+
+    private val _devNotice = MutableStateFlow<String?>(null)
+
+    /** What `undra dev` said about its last reload ("Reloaded, state kept", ADR-053), for a few seconds; `null` after. */
+    val devNotice: StateFlow<String?> get() = _devNotice
 
     private val _failure = MutableStateFlow<String?>(null)
 
@@ -125,6 +132,7 @@ class UndraApp : Application() {
                     mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
                     remoteTimeout = 5.seconds,
                     onConnectionChange = ::onConnection,
+                    onDevNotice = ::onDevNotice,
                     onError = { unhandled -> Log.w(TAG, "${unhandled.operation} failed: ${unhandled.error.message}") },
                 ),
             )
@@ -157,6 +165,13 @@ class UndraApp : Application() {
         }
     }
 
+    /** Heard on a thread of the runtime's: what the dev server says about a reload. Shown for [NOTICE_MILLIS]. */
+    private fun onDevNotice(message: String) {
+        Log.i(TAG, "dev server: $message")
+        _devNotice.value = message
+        main.postDelayed({ if (_devNotice.value == message) _devNotice.value = null }, NOTICE_MILLIS)
+    }
+
     private fun reloadWhenReachable() {
         if (load()) {
             _epoch.value += 1
@@ -168,5 +183,6 @@ class UndraApp : Application() {
     private companion object {
         const val TAG = "UndraApp"
         const val RELOAD_RETRY_MILLIS = 500L
+        const val NOTICE_MILLIS = 4_000L
     }
 }

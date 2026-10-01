@@ -144,6 +144,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 mirrorOptions = options.mirror,
                 onConnectionChange = options.onConnectionChange,
                 onError = options.onError,
+                onDevNotice = options.onDevNotice,
             )
             try {
                 val expected = options.expectedSchemaHash ?: throw missingSchemaHash()

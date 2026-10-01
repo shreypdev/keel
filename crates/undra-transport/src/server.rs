@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -16,9 +16,10 @@ use parking_lot::{Condvar, Mutex};
 use crate::bridge::Bridge;
 use crate::conn::Conn;
 use crate::error::ServeError;
+use crate::notice::{AttachNotices, Notices};
 use crate::origin::OriginPolicy;
-use crate::resume::{self, Resume};
-use crate::session;
+use crate::resume::{self, KeptSession, Resume, short_token};
+use crate::session::{self, Hooks};
 use crate::ws::close;
 
 const TARGET: &str = "undra::transport";
@@ -70,6 +71,16 @@ pub struct ServerConfig {
     /// Which web pages may connect. Default: pages on this machine or a private network (see
     /// [`OriginPolicy`]); native clients always may.
     pub origin_policy: OriginPolicy,
+    /// A session to hold from the first instant, as if its client had just dropped: the token it
+    /// announced and the objects it made, which must already be in the runtime. `undra dev` hands
+    /// the session of the core it is replacing to the core that replaces it, after restoring that
+    /// core's state, so the client that reconnects finds its objects (ADR-053). Needs
+    /// [`resume_grace`](ServerConfig::resume_grace) above zero and a valid token; otherwise the
+    /// objects are released again and the server logs why. Default `None`.
+    pub inherited_session: Option<KeptSession>,
+    /// What to tell the clients that attach soon after the server starts (a dev notice, ADR-053).
+    /// Default: nothing.
+    pub attach_notices: AttachNotices,
 }
 
 impl Default for ServerConfig {
@@ -86,8 +97,30 @@ impl Default for ServerConfig {
             resume_grace: Duration::ZERO,
             ping_interval: Duration::from_secs(5),
             origin_policy: OriginPolicy::default(),
+            inherited_session: None,
+            attach_notices: AttachNotices::default(),
         }
     }
+}
+
+/// What [`Server::suspend`] hands back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Suspended {
+    /// The session the attached (or recently dropped) client left, with the objects it made: held
+    /// in the runtime, **not released**. `None` when no client had objects to come back to, when
+    /// the client announced no session token, or when [`ServerConfig::resume_grace`] is zero.
+    pub session: Option<KeptSession>,
+    /// Whether every call that was open on the attached connection had been answered when it
+    /// was closed (`false`: [`cancelled_calls`](Suspended::cancelled_calls) of them were not,
+    /// and were cancelled with the connection).
+    pub settled: bool,
+    /// How many calls were still open, and were cancelled, when the connection was closed.
+    pub cancelled_calls: usize,
+    /// How many calls the client sent after the server stopped running calls (step 2 of
+    /// [`Server::suspend`]): never run, never answered (the client fails them as unavailable when
+    /// the socket closes). Their writes are not in a snapshot taken afterwards, so whoever reports
+    /// the reload should say so.
+    pub dropped_calls: usize,
 }
 
 struct Entry {
@@ -108,6 +141,7 @@ pub(crate) struct Shared {
     pub(crate) bridge: Arc<Bridge>,
     pub(crate) config: ServerConfig,
     pub(crate) resume: Arc<Resume>,
+    pub(crate) hooks: Hooks,
     stopping: AtomicBool,
     next_id: AtomicU64,
     registry: Mutex<Registry>,
@@ -197,13 +231,13 @@ impl Shared {
         }
     }
 
-    /// Asks every connection to end: a Close frame to established ones, a hard shutdown to
-    /// those still upgrading.
-    fn close_all(&self, hard: bool) {
+    /// Asks every connection to end: a Close frame (with `reason`) to established ones, a hard
+    /// shutdown to those still upgrading.
+    fn close_all(&self, hard: bool, reason: &str) {
         let registry = self.registry.lock();
         for entry in registry.conns.values() {
             match &entry.conn {
-                Some(conn) if !hard => conn.close(close::GOING_AWAY, "the server is shutting down"),
+                Some(conn) if !hard => conn.close(close::GOING_AWAY, reason),
                 Some(conn) => conn.abort(),
                 None => {
                     let _ = entry.tcp.shutdown(std::net::Shutdown::Both);
@@ -319,11 +353,37 @@ impl Server {
         let listener = TcpListener::bind(addr)?;
         let addr = listener.local_addr()?;
         let resume = Resume::new(config.resume_grace);
+        if let Some(inherited) = &config.inherited_session {
+            if resume.seed(inherited) {
+                runtime.log(
+                    INFO,
+                    TARGET,
+                    &format!(
+                        "holding session {} ({} object(s)) for its client",
+                        short_token(&inherited.token),
+                        inherited.handles.len()
+                    ),
+                );
+            } else {
+                resume::release_all(&runtime, &inherited.handles);
+                runtime.log(
+                    WARN,
+                    TARGET,
+                    "could not hold the inherited session (resume_grace is zero, or its token is not valid): its objects were released",
+                );
+            }
+        }
+        let hooks = Hooks {
+            frozen: Arc::new(AtomicBool::new(false)),
+            dropped: Arc::new(AtomicUsize::new(0)),
+            notices: Arc::new(Notices::new(config.attach_notices.clone())),
+        };
         let shared = Arc::new(Shared {
             rt: runtime,
             bridge,
             config,
             resume,
+            hooks,
             stopping: AtomicBool::new(false),
             next_id: AtomicU64::new(1),
             registry: Mutex::new(Registry::default()),
@@ -381,9 +441,40 @@ impl Server {
     /// thread is joined. Idempotent (later calls return once the first has finished). The
     /// runtime keeps running; shut it down separately.
     pub fn shutdown(&self) {
+        self.stop(None);
+    }
+
+    /// Stops the server so that the core can be replaced without losing its state (ADR-053):
+    /// the quiesce of a reload.
+    ///
+    /// In this order: (1) no new connection is accepted, and the listener is closed, so the
+    /// address is free for the next server; (2) calls the attached client sends from now on are
+    /// not run (they are counted in [`Suspended::dropped_calls`]); (3) it waits until the calls open on that connection have been answered, at most
+    /// `settle` (streams are not waited for); (4) the client is closed with 1001, which cancels
+    /// what is still open, stops its observations and, when it announced a session
+    /// ([`ServerConfig::resume_grace`] above zero), **retains the objects it made**; (5) every
+    /// thread is joined and the retained session is taken out and returned **without releasing
+    /// it**. When this returns no client frame is processed any more: the core's stores can only
+    /// change by its own tasks, so a [`Runtime::snapshot`] taken now is the state the next core
+    /// resumes from. Hand [`Suspended::session`] to the next server as
+    /// [`ServerConfig::inherited_session`].
+    ///
+    /// Like [`shutdown`](Server::shutdown) it leaves the runtime running, is idempotent, and a
+    /// later `shutdown` (or drop) finds nothing left to release. Called on a server that is
+    /// already stopped it returns an empty [`Suspended`].
+    pub fn suspend(&self, settle: Duration) -> Suspended {
+        self.stop(Some(settle))
+    }
+
+    fn stop(&self, suspend: Option<Duration>) -> Suspended {
         let mut done = self.shut.lock();
         if *done {
-            return;
+            return Suspended {
+                session: None,
+                settled: true,
+                cancelled_calls: 0,
+                dropped_calls: 0,
+            };
         }
         let shared = &self.shared;
         shared.stopping.store(true, Ordering::Release);
@@ -397,24 +488,76 @@ impl Server {
             }
         }
 
-        shared.close_all(false);
+        let mut open = 0;
+        if let Some(settle) = suspend {
+            // Calls the client sends from now on are not run; the ones already running get `settle`
+            // to finish, so that an async command in the middle of a port call is not left at a
+            // transient value.
+            shared.hooks.frozen.store(true, Ordering::Release);
+            let deadline = Instant::now() + settle;
+            loop {
+                open = shared.bridge.current().map_or(0, |conn| conn.open_plain_calls());
+                if open == 0 || Instant::now() >= deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+        let reason = if suspend.is_some() {
+            "the core is reloading"
+        } else {
+            "the server is shutting down"
+        };
+        shared.close_all(false, reason);
         let grace = shared.config.close_timeout + Duration::from_secs(1);
         if !shared.wait_drained(grace) {
-            shared.close_all(true);
+            shared.close_all(true, reason);
             shared.wait_drained(Duration::from_secs(2));
         }
         let threads = std::mem::take(&mut shared.registry.lock().threads);
         for handle in threads {
             let _ = handle.join();
         }
-        // Whatever a dropped client left for its return goes back to the runtime.
-        if let Some(left) = shared.resume.stop() {
-            resume::release_all(&shared.rt, &left.handles);
+        // What a dropped client left for its return: a shutdown gives it back to the runtime; a
+        // suspend hands it to the caller, who hands it to the next core.
+        let left = shared.resume.stop();
+        let session = match left {
+            Some(left) if suspend.is_some() && left.is_live() => Some(left.into_kept()),
+            Some(left) => {
+                resume::release_all(&shared.rt, &left.handles);
+                None
+            }
+            None => None,
+        };
+        // Read after every connection thread was joined: no frame is processed any more.
+        let dropped = shared.hooks.dropped.load(Ordering::Acquire);
+        if suspend.is_some() {
+            shared.rt.log(
+                INFO,
+                TARGET,
+                &format!(
+                    "suspended for a reload: {open} call(s) were still open, {dropped} sent meanwhile were not run, {}",
+                    session.as_ref().map_or_else(
+                        || "no session to hand over".to_owned(),
+                        |s| format!(
+                            "session {} ({} object(s)) handed over",
+                            short_token(&s.token),
+                            s.handles.len()
+                        )
+                    )
+                ),
+            );
         }
         if let Some(handle) = self.reaper.lock().take() {
             let _ = handle.join();
         }
         *done = true;
+        Suspended {
+            session,
+            settled: open == 0,
+            cancelled_calls: open,
+            dropped_calls: dropped,
+        }
     }
 }
 

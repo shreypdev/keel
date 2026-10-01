@@ -55,9 +55,12 @@ the connection needs and release does not: `app/src/debug/AndroidManifest.xml` (
 (`core.connectionState`, a `StateFlow`): green, amber while the runtime reconnects, red when it is over. If the dev
 server cannot be reached at launch, the app says so with a Retry button.
 
-Save a Rust change and the app is on the rebuilt core within a second: the runtime reconnects, finds a new core
-with none of its objects (`Closed(SESSION_LOST)`), and `UndraApp` loads it and restarts the activity on it. A
-dropped connection alone (the emulator slept, adb restarted) is resumed with the same objects.
+Save a Rust change and the app is on the rebuilt core within a second, on the same screen with the same state:
+`undra dev` restores the old core's state into the new one (ADR-053), the runtime reconnects and resumes its session,
+and the bar says "Reloaded, state kept" (`UndraApp.devNotice`, fed by `LoadOptions.onDevNotice`). When the state could
+not be carried (a schema change, a snapshot over 16 MiB) the runtime finds a new core with none of its objects
+(`Closed(SESSION_LOST)`), and `UndraApp` loads it and restarts the activity on it. A dropped connection alone (the
+emulator slept, adb restarted) is resumed with the same objects.
 
 ## How the app is wired
 

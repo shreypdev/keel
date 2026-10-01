@@ -54,6 +54,14 @@ impl Tracker {
         true
     }
 
+    /// How many plain calls (not streams) are waiting for their reply.
+    pub(crate) fn open_plain_calls(&self) -> usize {
+        self.calls
+            .values()
+            .filter(|state| matches!(state, CallState::Pending { .. }))
+            .count()
+    }
+
     /// Forgets a call (cancelled, or refused without a reply).
     pub(crate) fn end_call(&mut self, call_id: u32) {
         self.calls.remove(&call_id);

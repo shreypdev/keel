@@ -4,131 +4,14 @@
 
 mod common;
 
-use std::io::{BufRead, BufReader, Read};
 use std::net::TcpStream;
-use std::process::{Child, Stdio};
-use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use common::{Project, init_project};
+use common::devserver::{Dev, send};
+use common::init_project;
 use tungstenite::{Message, WebSocket};
 use undra_wire::payload::{Call, CallTarget, Hello, Reply};
 use undra_wire::{Decode, Encode, Envelope, Kind, Reader, Writer};
-
-/// A running `undra dev`.
-struct Dev {
-    child: Child,
-    lines: Receiver<String>,
-    url: String,
-    hash: u64,
-    log: std::sync::Arc<std::sync::Mutex<String>>,
-}
-
-impl Dev {
-    fn start(project: &Project, extra: &[&str]) -> Dev {
-        let mut cmd = project.undra();
-        cmd.args(["dev", "--addr", "127.0.0.1:0"])
-            .args(extra)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = cmd.spawn().expect("undra dev starts");
-        let stdout = child.stdout.take().unwrap();
-        let mut stderr = child.stderr.take().unwrap();
-        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let sink = log.clone();
-        std::thread::spawn(move || {
-            let mut buf = [0_u8; 4096];
-            while let Ok(n) = stderr.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                sink.lock()
-                    .unwrap()
-                    .push_str(&String::from_utf8_lossy(&buf[..n]));
-            }
-        });
-        let (tx, lines) = mpsc::channel();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
-        let mut dev = Dev {
-            child,
-            lines,
-            url: String::new(),
-            hash: 0,
-            log,
-        };
-        // The banner: the URL on a line of its own, then `schema hash   0x...`.
-        let deadline = Instant::now() + Duration::from_secs(600);
-        while dev.url.is_empty() || dev.hash == 0 {
-            let line = dev.next_line(deadline);
-            if line.starts_with("ws://") {
-                dev.url = line.trim().to_owned();
-            } else if let Some(hash) = line.trim().strip_prefix("schema hash") {
-                dev.hash = u64::from_str_radix(hash.trim().trim_start_matches("0x"), 16)
-                    .expect("a hex hash");
-            }
-        }
-        dev
-    }
-
-    fn next_line(&self, deadline: Instant) -> String {
-        let left = deadline.saturating_duration_since(Instant::now());
-        self.lines.recv_timeout(left).unwrap_or_else(|_| {
-            panic!(
-                "undra dev printed nothing in time; stderr:\n{}",
-                self.log.lock().unwrap()
-            )
-        })
-    }
-
-    /// Waits for a line containing `needle`.
-    fn wait_for(&self, needle: &str, limit: Duration) {
-        let deadline = Instant::now() + limit;
-        loop {
-            if self.next_line(deadline).contains(needle) {
-                return;
-            }
-        }
-    }
-
-    fn addr(&self) -> String {
-        self.url.trim_start_matches("ws://").to_owned()
-    }
-
-    /// Stops `undra dev` the hard way (as a closed terminal or a crash would) and checks that the
-    /// core it was serving goes away with it.
-    fn kill_and_expect_the_port_to_close(mut self) {
-        let addr = self.addr();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let deadline = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < deadline {
-            if TcpStream::connect(&addr).is_err() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        panic!("the dev runner outlived `undra dev`: {addr} still accepts connections");
-    }
-}
-
-impl Drop for Dev {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-fn send(ws: &mut WebSocket<TcpStream>, schema: u64, kind: Kind, seq: u32, payload: &[u8]) {
-    let mut w = Writer::new();
-    Envelope::write(&mut w, kind, seq, schema, payload);
-    ws.send(Message::Binary(w.into_vec())).unwrap();
-}
 
 /// Connects as a web client would and completes the handshake; returns the socket and the schema
 /// hash the server reported in its Hello.

@@ -2,24 +2,46 @@
 //! `remote` transport.
 //!
 //! ```text
-//! undra-dev-runner [ADDR] [--log-level N] [--print-schema]
+//! undra-dev-runner [ADDR] [--log-level N] [--standby] [--print-schema]
 //! ```
 //!
-//! It prints one machine-readable line, `UNDRA-DEV ready <ws-url> <schema-hash>`, on stdout and
-//! keeps running until its stdin closes (so it cannot outlive `undra dev`). Log records, the dev
-//! records of docs/SPEC.md 5.10 included, go to stderr.
+//! It talks to `undra dev` over its stdin and stdout, in lines (docs/DEV_LOOP.md has the table; the
+//! design is ADR-053). Without `--standby` it listens at once and prints
+//! `UNDRA-DEV ready <ws-url> <schema-hash>`. With `--standby` it builds its core, prints
+//! `UNDRA-DEV standby <schema-hash>` and waits for `undra dev` to hand it the state of the core it
+//! replaces (`state ..` or `reset ..`) and then to say `listen`, so that the state is restored
+//! before any client can attach. A serving runner answers `snapshot` with the state of its core
+//! after suspending its server. It keeps running until its stdin closes (so it cannot outlive
+//! `undra dev`). Log records, the dev records of docs/SPEC.md 5.10 included, go to stderr.
 #![forbid(unsafe_code)]
 
-use std::io::{Read, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashSet;
+use std::io::{BufRead, Write};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use undra_runtime::undra_wire::payload::Snapshot;
+use undra_runtime::undra_wire::Reader;
 use undra_runtime::{Runtime, RuntimeConfig};
-use undra_transport::{Server, ServerConfig};
+use undra_transport::{AttachNotices, Bridge, KeptSession, Server, ServerConfig};
 
 // Links the core, whose `#[undra::api]` items register themselves with the runtime at load time.
 extern crate app_core;
 
 const LEVELS: [&str; 6] = ["TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"];
+
+/// The most state a reload carries, in bytes of snapshot: it crosses a pipe as hex (twice the size)
+/// and the dev loop has to stay quick; a core with more state than this is better reset than stalled.
+const STATE_LIMIT_BYTES: usize = @@STATE_LIMIT_BYTES@@;
+
+/// How long the serving core gets to finish the calls it is already running before its client is
+/// closed for a reload: long enough for a port round trip, short enough that a stuck call cannot
+/// stall the swap.
+const SETTLE: Duration = Duration::from_millis(@@SETTLE_MS@@);
+
+/// How long after a reload a client that attaches is still told what became of its state: a
+/// reconnecting client retries for at most five seconds a time, and a notice minutes late would
+/// describe something the developer has moved past.
+const NOTICE_WINDOW: Duration = Duration::from_secs(@@NOTICE_WINDOW_SECS@@);
 
 /// Prints one log record: `12:03:44.123 DEBUG undra::runtime: txn 7: 2 dirty`.
 fn print_log(level: u8, target: &str, message: &str) {
@@ -40,6 +62,7 @@ fn print_log(level: u8, target: &str, message: &str) {
 }
 
 // @ports:begin
+use std::io::Read;
 use std::sync::Arc;
 
 /// The native `Clock` (SPEC 8): a dev core runs on your computer, so it asks your computer's
@@ -99,14 +122,199 @@ fn bind_native_ports(runtime: &Arc<Runtime>) {
 }
 // @ports:end
 
+/// Writes one protocol line to stdout, whole (the stdout lock keeps it from interleaving with the
+/// core's own `println!`).
+fn say(line: &str) {
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "UNDRA-DEV {line}");
+    let _ = out.flush();
+}
+
+/// Bytes as lower-case hex.
+fn to_hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 15)]));
+    }
+    out
+}
+
+/// Hex back to bytes; `None` for anything else.
+fn from_hex(text: &str) -> Option<Vec<u8>> {
+    let digits = text.as_bytes();
+    if digits.len() % 2 != 0 {
+        return None;
+    }
+    let digit = |d: u8| char::from(d).to_digit(16);
+    digits
+        .chunks(2)
+        .map(|pair| Some(u8::try_from(digit(pair[0])? * 16 + digit(pair[1])?).ok()?))
+        .collect()
+}
+
+/// `1a2b,3c4d` (or `-` for none) as handles.
+fn parse_handles(text: &str) -> Option<Vec<u64>> {
+    if text == "-" {
+        return Some(Vec::new());
+    }
+    text.split(',').map(|h| u64::from_str_radix(h, 16).ok()).collect()
+}
+
+fn handles_text(handles: &[u64]) -> String {
+    if handles.is_empty() {
+        return "-".to_owned();
+    }
+    handles.iter().map(|h| format!("{h:x}")).collect::<Vec<_>>().join(",")
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// What `undra dev` handed this runner before it listened: the session to hold for its client and
+/// what to tell the clients that attach.
+#[derive(Default)]
+struct Handover {
+    session: Option<KeptSession>,
+    notices: AttachNotices,
+}
+
+impl Handover {
+    /// The state was not carried over: the clients that load a core afresh are told why.
+    fn reset(&mut self, reason: &str) {
+        let reason: String = reason.chars().take(160).collect();
+        self.session = None;
+        self.notices = AttachNotices {
+            fresh: Some(format!("Reloaded, state reset: {reason}")),
+            window: NOTICE_WINDOW,
+            ..AttachNotices::default()
+        };
+    }
+}
+
+/// `state <old-hash> <lost-calls> <token|-> <handles|-> <hex>`: restores the snapshot into the new
+/// core, before anything listens. `lost-calls` counts the calls the reload cut off (cancelled at the
+/// end of the settle, or sent after the old core stopped running calls): the notice says so, because
+/// their writes are not in the state. Answers `UNDRA-DEV restored ..` or `UNDRA-DEV reset <reason>`.
+fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
+    let reset = |handover: &mut Handover, reason: String| {
+        handover.reset(&reason);
+        say(&format!("reset {reason}"));
+    };
+    let parts: Vec<&str> = rest.splitn(5, ' ').collect();
+    let [old_hash, lost_calls, token, handles, hex] = parts[..] else {
+        return reset(handover, "the state handed over was malformed".to_owned());
+    };
+    let Ok(lost_calls) = lost_calls.parse::<usize>() else {
+        return reset(handover, "the state handed over was malformed".to_owned());
+    };
+    let ours = format!("{:#018x}", runtime.schema_hash());
+    // A snapshot is restored by position into whatever types the new core has: across a schema
+    // change that can succeed with wrong values (ADR-037), so a changed hash means fresh state.
+    if old_hash != ours {
+        return reset(handover, format!("schema changed (was {old_hash}, now {ours})"));
+    }
+    let (Some(bytes), Some(handles)) = (from_hex(hex), parse_handles(handles)) else {
+        return reset(handover, "the state handed over did not decode".to_owned());
+    };
+    let stores: HashSet<u64> = {
+        let mut reader = Reader::new(&bytes);
+        match Snapshot::decode(&mut reader) {
+            Ok(snapshot) => snapshot.stores.iter().map(|s| s.handle.0).collect(),
+            Err(e) => return reset(handover, format!("the snapshot is malformed: {e}")),
+        }
+    };
+    let started = Instant::now();
+    if let Err(e) = runtime.restore(&bytes) {
+        return reset(handover, format!("the core refused the snapshot: {e}"));
+    }
+    let micros = started.elapsed().as_micros();
+    // Objects that are not stores (and query handles) do not survive a restore: their handles
+    // are stale and the app re-creates them.
+    let (kept, lost): (Vec<u64>, Vec<u64>) = handles.into_iter().partition(|h| stores.contains(h));
+    let mut text = "Reloaded, state kept".to_owned();
+    let mut caveats = Vec::new();
+    if !lost.is_empty() {
+        caveats.push(format!("{} not carried over", plural(lost.len(), "object", "objects")));
+    }
+    if lost_calls > 0 {
+        caveats.push(format!("{} lost in the reload", plural(lost_calls, "call", "calls")));
+    }
+    if !caveats.is_empty() {
+        text.push_str(&format!(" ({})", caveats.join("; ")));
+    }
+    handover.session = (token != "-").then(|| KeptSession {
+        token: token.to_owned(),
+        handles: kept,
+    });
+    handover.notices = AttachNotices {
+        resumed: Some(text),
+        window: NOTICE_WINDOW,
+        ..AttachNotices::default()
+    };
+    say(&format!("restored {} {} {} {micros}", stores.len(), lost.len(), bytes.len()));
+}
+
+/// Binds `addr` and serves `runtime`, holding the handed-over session and telling the clients what
+/// became of their state. Exits the process when the address cannot be bound.
+fn listen(addr: &str, runtime: &std::sync::Arc<Runtime>, bridge: &std::sync::Arc<Bridge>, handover: Handover) -> Server {
+    // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
+    // for ten minutes if it comes back with its session token (ADR-051).
+    let config = ServerConfig {
+        resume_grace: Duration::from_secs(600),
+        inherited_session: handover.session,
+        attach_notices: handover.notices,
+        ..ServerConfig::default()
+    };
+    match Server::bind(addr, runtime.clone(), bridge.clone(), config) {
+        Ok(server) => {
+            say(&format!("ready {} {:#018x}", server.url(), runtime.schema_hash()));
+            server
+        }
+        Err(e) => {
+            eprintln!("undra-dev-runner: cannot serve on {addr}: {e}");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// `snapshot`: suspends the server (no new calls, open calls finish or are cancelled, the client is
+/// closed, its session is kept) and answers with the core's state and that session:
+/// `snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>`.
+fn take_snapshot(server: &Server, runtime: &Runtime) {
+    let suspended = server.suspend(SETTLE);
+    let bytes = runtime.snapshot();
+    if bytes.len() > STATE_LIMIT_BYTES {
+        say(&format!("snapshot failed too-large {}", bytes.len()));
+        return;
+    }
+    let stores = bytes.first_chunk::<4>().map_or(0, |n| u32::from_le_bytes(*n));
+    let (token, handles) = match &suspended.session {
+        Some(session) => (session.token.as_str(), handles_text(&session.handles)),
+        None => ("-", "-".to_owned()),
+    };
+    say(&format!(
+        "snapshot ok {} {} {} {stores} {} {token} {handles} {}",
+        u8::from(suspended.settled),
+        suspended.cancelled_calls,
+        suspended.dropped_calls,
+        bytes.len(),
+        to_hex(&bytes)
+    ));
+}
+
 fn main() {
     let mut addr = "127.0.0.1:7443".to_owned();
     let mut log_level = 1_u8;
     let mut print_schema = false;
+    let mut standby = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--print-schema" => print_schema = true,
+            "--standby" => standby = true,
             "--log-level" => {
                 log_level = args.next().and_then(|v| v.parse().ok()).unwrap_or(log_level);
             }
@@ -121,41 +329,53 @@ fn main() {
         return;
     }
 
-    // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
-    // for ten minutes if it comes back with its session token (ADR-051).
-    let config = ServerConfig {
-        resume_grace: std::time::Duration::from_secs(600),
-        ..ServerConfig::default()
-    };
-    let server = match Server::start(addr.as_str(), config, |host| {
-        host.set_log_sink(print_log);
-        let runtime = Runtime::new(
-            RuntimeConfig {
-                platform: "rust".to_owned(),
-                mode: "dev".to_owned(),
-                log_level,
-                ..RuntimeConfig::default()
-            },
-            host,
-        )?;
-        // @ports:begin
-        bind_native_ports(&runtime);
-        // @ports:end
-        Ok(runtime)
-    }) {
-        Ok(server) => server,
+    // The core is built first and listens later (at once, unless `--standby`): `undra dev` restores
+    // the state of the core it replaces into it before any client can attach (ADR-053).
+    let bridge = Bridge::new();
+    bridge.set_log_sink(print_log);
+    let runtime = match Runtime::new(
+        RuntimeConfig {
+            platform: "rust".to_owned(),
+            mode: "dev".to_owned(),
+            log_level,
+            ..RuntimeConfig::default()
+        },
+        bridge.clone(),
+    ) {
+        Ok(runtime) => runtime,
         Err(e) => {
-            eprintln!("undra-dev-runner: cannot serve on {addr}: {e}");
+            eprintln!("undra-dev-runner: cannot start the core: {e}");
             std::process::exit(2);
         }
     };
+    // @ports:begin
+    bind_native_ports(&runtime);
+    // @ports:end
 
-    println!("UNDRA-DEV ready {} {:#018x}", server.url(), server.runtime().schema_hash());
-    let _ = std::io::stdout().flush();
+    let mut handover = Handover::default();
+    let mut server = None;
+    if standby {
+        say(&format!("standby {:#018x}", runtime.schema_hash()));
+    } else {
+        server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover)));
+    }
 
-    // Serve until stdin closes: `undra dev` holds the other end, so this process ends when it does.
-    let mut sink = Vec::new();
-    let _ = std::io::stdin().read_to_end(&mut sink);
-    server.shutdown();
-    server.runtime().shutdown();
+    // Commands until stdin closes: `undra dev` holds the other end, so this process ends when it does.
+    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+        let (verb, rest) = line.trim_end().split_once(' ').unwrap_or((line.trim_end(), ""));
+        match (verb, server.as_ref()) {
+            ("snapshot", Some(server)) => take_snapshot(server, &runtime),
+            ("snapshot", None) => say("snapshot failed this runner is not serving"),
+            ("state", None) => restore_state(&runtime, rest, &mut handover),
+            ("reset", None) => handover.reset(rest),
+            ("listen", None) => {
+                server = Some(listen(&addr, &runtime, &bridge, std::mem::take(&mut handover)));
+            }
+            _ => print_log(3, "undra-dev-runner", &format!("ignoring a command it cannot run now: {verb}")),
+        }
+    }
+    if let Some(server) = &server {
+        server.shutdown();
+    }
+    runtime.shutdown();
 }

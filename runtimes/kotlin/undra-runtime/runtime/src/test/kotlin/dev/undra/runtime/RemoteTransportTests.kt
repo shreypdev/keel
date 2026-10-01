@@ -262,6 +262,27 @@ class RemoteTransportTests : Suite() {
             }
         }
 
+        case("a frame the server sends right behind its Hello is not lost: the connecting thread has not made the connection current yet (ADR-053)") {
+            repeat(20) {
+                withServer(configure = { conn ->
+                    val previous = conn.onMessage
+                    conn.onMessage = { bytes ->
+                        previous(bytes)
+                        if (Envelope.decode(bytes).kind == Envelope.Kind.HELLO) {
+                            conn.send(Envelope.Kind.LOG, Payloads.Log(2u, "undra.behind", "right behind the Hello").toByteArray())
+                        }
+                    }
+                }) { server ->
+                    LogCapture("undra.behind").use { log ->
+                        load(server).use {
+                            eventually("the record that followed the Hello arrives") { log.records.isNotEmpty() }
+                            assertEq("right behind the Hello", log.records.first().message)
+                        }
+                    }
+                }
+            }
+        }
+
         case("a message the server sends in several frames is put back together") {
             withServer(configure = { conn ->
                 val previous = conn.onMessage

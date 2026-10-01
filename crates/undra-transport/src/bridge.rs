@@ -7,6 +7,7 @@ use undra_runtime::{Host, PortCallOutcome};
 use parking_lot::{Condvar, Mutex};
 
 use crate::conn::Conn;
+use crate::notice::NOTICE_TARGET;
 
 /// A callback for log records: `(level, target, message)`, levels as in the Log port (0 trace
 /// .. 5 fatal).
@@ -89,7 +90,7 @@ impl Bridge {
         self.active.lock().is_some()
     }
 
-    fn current(&self) -> Option<Arc<Conn>> {
+    pub(crate) fn current(&self) -> Option<Arc<Conn>> {
         self.active.lock().clone()
     }
 
@@ -175,6 +176,13 @@ impl Host for Bridge {
         let sink = self.sink.lock().clone();
         if let Some(sink) = sink {
             sink(level, target, message);
+        }
+        // `undra::dev` is the dev server's own voice (ADR-053): only the server says a notice to a
+        // client (`Session::tell`, which does not come through here). A record the core logs under
+        // that target reaches the terminal, never a client, so an app cannot make a dev bar say
+        // "Reloaded, state kept".
+        if target == NOTICE_TARGET {
+            return;
         }
         if let Some(conn) = self.current() {
             conn.on_log(level, target, message);

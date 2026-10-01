@@ -148,7 +148,7 @@ undra dev                          # serves the core on ws://127.0.0.1:7443
 undra dev --addr 0.0.0.0:7443      # reachable from a phone on your network
 ```
 
-`undra dev` runs your core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport of its runtime and uses this core instead of a built-in one. Edit Rust, save, and the core is rebuilt and restarted; the app reconnects by itself and loads the new core. Development log records (a line per transaction commit, port call and panic) print in the terminal.
+`undra dev` runs your core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport of its runtime and uses this core instead of a built-in one. Edit Rust, save, and the core is rebuilt and restarted; the app reconnects by itself and comes back to the screen it was on, with its state, and its dev bar says "Reloaded, state kept". Development log records (a line per transaction commit, port call and panic) print in the terminal.
 
 **No authentication.** The server has none. Keep the default loopback address unless a device has to reach it, and never expose it beyond a network you trust.
 
@@ -880,9 +880,10 @@ undra dev                          # listen on 127.0.0.1:7443
 undra dev --android                # also adb reverse the port to every attached Android device
 undra dev --addr 0.0.0.0:7443      # reachable from a phone on your network
 undra dev --no-watch               # build once and serve
+undra dev --no-keep-state          # every rebuilt core starts fresh
 ```
 
-Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, whenever the connection drops (a rebuild, a phone that slept, a restarted adb); after a rebuild an app finds a new core with none of its objects and loads it afresh. Logs, including the development records (a line per transaction commit, port call and panic) and a line for each client that connects, reconnects or leaves, print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port.
+Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a browser tab connects with the `remote` transport and uses this core instead of a built-in one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, whenever the connection drops (a rebuild, a phone that slept, a restarted adb); the core's state is carried across a rebuild (it is snapshotted in this process's memory, never on disk, and restored into the new core), so an app comes back to the screen it was on and its dev bar says "Reloaded, state kept"; a changed schema, or `--no-keep-state`, starts the new core fresh and says so. Logs, including the development records (a line per transaction commit, port call and panic) and a line for each client that connects, reconnects or leaves, print here. Clocks, randomness and logging are answered by this machine, because a remote client cannot answer a synchronous port.
 
 | Flag | Meaning |
 | --- | --- |
@@ -890,6 +891,7 @@ Runs the core on this machine and serves it over a WebSocket. A simulator, a pho
 | `--no-watch` | build once and serve; do not rebuild on change |
 | `--log-level <n>` | log records below this level (0 trace to 5 fatal) are not printed; default 1 |
 | `--android` | run `adb reverse` for the server's port on every attached Android device or emulator (only the one in `ANDROID_SERIAL`, when set) |
+| `--no-keep-state` | start every rebuilt core from fresh state instead of carrying the running core's state over |
 
 How each platform connects (the banner prints these with the real port):
 
@@ -2747,6 +2749,7 @@ Landed in the day after v1.0, each behind an ADR and an adversarial review.
 - One error channel on every platform (ADR-032)Kotlin and TypeScript calls fail with the same closed UndraCallError set as Swift; commands report instead of throwing; a lost connection is state, not an error event.
 - No manual build stepA Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix.
 - The web bundle under its budget (ADR-052)The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record.
+- State-preserving reload (ADR-053)undra dev snapshots the old core and restores into the rebuilt one; the dev bar says whether the state was kept, and why not when it was not.
 
 Now
 
@@ -2761,7 +2764,6 @@ In flight for the v1.x releases.
 - Real Android adaptersKv, SecureStore, Fs, Http, Connectivity and Lifecycle backed by the platform, installed with one call.
 - React Native (ADR-038)@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI.
 - Persisted-state migrations (ADR-037)A schema that changes shape still loads what the last version stored.
-- State-preserving reloadundra dev snapshots before a rebuild and restores after, so editing Rust never loses the screen you were on.
 
 Next
 

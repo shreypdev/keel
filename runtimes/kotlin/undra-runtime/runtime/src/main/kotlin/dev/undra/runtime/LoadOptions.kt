@@ -58,6 +58,12 @@ public enum class Mode {
  *   `Exception` it throws is logged and dropped; an `Error` propagates, so a debug build can crash on purpose with
  *   `onError = { throw AssertionError(it) }`. Failures that originate in a core callback (a malformed change-set, a
  *   failed port) are delivered from the runtime's delivery thread instead.
+ * @property onDevNotice **Development only, and inert unless the core is a [Mode.REMOTE] one served by `undra dev`.** Called
+ *   with a one-line message the dev server says about itself, such as `Reloaded, state kept` after it rebuilt the core
+ *   (ADR-053): show it in a status bar for a few seconds. `undra dev` tells every client that attaches soon after a
+ *   rebuild, once; an in-process or production core never produces one, so the callback never fires there. The message
+ *   is also written to the log. It runs on a thread of the runtime's own (the delivery thread), never on the transport's:
+ *   keep it short, and hop to the main thread before touching UI. An exception it throws is logged and dropped.
  */
 public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
@@ -70,6 +76,7 @@ public class LoadOptions(
     public val reconnect: ReconnectPolicy? = ReconnectPolicy(),
     public val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     public val onError: ((UndraUnhandledError) -> Unit)? = null,
+    public val onDevNotice: ((String) -> Unit)? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +

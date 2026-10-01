@@ -135,9 +135,10 @@ NOT A MANUAL STEP
         long_about = "Runs the core on this machine and serves it over a WebSocket. A simulator, a phone or a \
 browser tab connects with the `remote` transport of its Undra runtime and uses this core instead of a built-in \
 one: edit Rust, save, and the core is rebuilt and restarted. The apps reconnect by themselves, with backoff, \
-whenever the connection drops (a rebuild, a phone that slept, a restarted adb): nothing to relaunch for a \
-dropped socket. After a rebuild an app finds a new core with none of its objects and loads it afresh (the web \
-playground reloads its page); keeping the state across a rebuild is planned.\n\n\
+whenever the connection drops (a rebuild, a phone that slept, a restarted adb): nothing to relaunch. The \
+state of the core is carried across a rebuild: before the old core stops it is snapshotted (in this \
+process's memory, never on disk) and the new core is restored from it, so the apps come back to the screen \
+they were on; a changed schema, or --no-keep-state, starts the new core fresh and says so.\n\n\
 Logs, including the development records of docs/SPEC.md 5.10 (a line per transaction commit, port call and \
 panic), are printed here, with a line for each client that connects, reconnects or leaves. Clocks, randomness and \
 logging are answered by this machine because a remote client cannot answer a synchronous port.",
@@ -147,6 +148,7 @@ EXAMPLES
     undra dev --android                     also `adb reverse` the port to every attached Android device
     undra dev --addr 0.0.0.0:7443           reachable from a phone on your network (no authentication!)
     undra dev --no-watch                    build once and serve
+    undra dev --no-keep-state               every rebuilt core starts fresh, as before the state was carried over
 
 CONNECTING
     web       UndraCore.load({ mode: \"remote\", url: \"ws://127.0.0.1:7443\", expectedSchemaHash })   (or ?undra=ws://... in the page URL)
@@ -332,6 +334,10 @@ pub struct DevArgs {
     /// Run `adb reverse` for the server's port on every attached Android device or emulator (only the one in ANDROID_SERIAL, when set).
     #[arg(long)]
     pub android: bool,
+
+    /// Start every rebuilt core from fresh state instead of carrying the running core's state over (the escape hatch for "my logic changed under the restored state").
+    #[arg(long)]
+    pub no_keep_state: bool,
 }
 
 /// Arguments of `undra doctor`.
