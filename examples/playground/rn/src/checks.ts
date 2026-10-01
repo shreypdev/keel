@@ -35,6 +35,7 @@ import {
   secretGet,
   secretKeys,
   secretPut,
+  secretRemove,
 } from '@playground/core';
 import { PLAYGROUND_HEADER, nativeCounters, type Log, type Playground } from './undra';
 
@@ -266,6 +267,13 @@ const CHECKS: ReadonlyArray<readonly [string, string, Check]> = [
       expect(fromUtf8(await secretGet('rn.checks.secret', core)) === secret, 'secret_get returns what secret_put stored');
       expect((await secretKeys('rn.checks.', core)).includes('rn.checks.secret'), 'secret_keys lists it');
       expect((await kvGet('rn.checks.secret', core)) === null, 'a secret is not in Kv');
+      // A key is any string, U+0000 included: list returns it whole (the Keychain's account, the sealed file's key).
+      const nul = 'rn.checks.nul\u0000end';
+      await secretPut(nul, utf8('n'), core);
+      const listed = await secretKeys('rn.checks.nul', core);
+      expect(listed.length === 1 && listed[0] === nul, `secret_keys returns a key with U+0000 whole, got ${JSON.stringify(listed)}`);
+      await secretRemove(nul, core);
+      expect((await secretGet(nul, core)) === null, 'and secret_remove removes it');
       // Kept: the device script checks that this value is not readable in the app's files.
       return `stored and read back (marker nonce ${playground.nonce}); ${nativePlatformDefaults().secureStore ?? ''}`;
     },

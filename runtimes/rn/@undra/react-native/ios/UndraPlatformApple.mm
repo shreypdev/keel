@@ -135,9 +135,10 @@ class Keychain final : public SecretStore {
       for (NSDictionary *entry in entries) {
         id account = entry[(__bridge id)kSecAttrAccount];
         if (![account isKindOfClass:[NSString class]]) continue;
-        const char *utf8 = [(NSString *)account UTF8String];
-        if (utf8 == nullptr) continue;
-        std::string name(utf8);
+        // All of its UTF-8 bytes: `UTF8String` would end a key that holds U+0000 at that character.
+        NSData *utf8 = [(NSString *)account dataUsingEncoding:NSUTF8StringEncoding];
+        if (utf8 == nil) continue;
+        std::string name(static_cast<const char *>(utf8.bytes), utf8.length);
         if (name.compare(0, prefix.size(), prefix) == 0) keys.push_back(std::move(name));
       }
       std::sort(keys.begin(), keys.end());
@@ -170,7 +171,11 @@ class PathMonitor final : public ConnectivitySource {
   bool start(Report report) override {
     queue_ = dispatch_queue_create("dev.undra.connectivity", DISPATCH_QUEUE_SERIAL);
     monitor_ = nw_path_monitor_create();
-    if (queue_ == nil || monitor_ == nil) return false;
+    if (queue_ == nil || monitor_ == nil) {
+      monitor_ = nil; // `stop()` then has nothing to cancel, and no queue to wait on
+      queue_ = nil;
+      return false;
+    }
     auto shared = std::make_shared<Report>(std::move(report));
     auto live = live_;
     nw_path_monitor_set_queue(monitor_, queue_);
