@@ -591,22 +591,33 @@ fn port_calls_are_recorded_with_arguments_reply_and_latency() {
 }
 
 #[test]
-fn a_port_call_with_no_app_client_is_recorded_as_unavailable() {
+fn a_port_call_with_no_app_client_is_counted_and_not_listed() {
     let fx = start_devtools();
     let mut page = Page::connect(&fx);
     page.step();
-    // No app client: the core's own call to a platform port ends at once.
+    // No app client: the core's own call to a platform port ends at once. Such calls repeat (a
+    // query's hydration retries), so the page is told how many, not each one.
     on_core(&fx.rt, {
         let rt = fx.rt.clone();
         move || {
-            drop(rt.ctx().port_call(ECHO_PORT, ECHO_METHOD, enc(&1_i32)));
+            for _ in 0..3 {
+                drop(rt.ctx().port_call(ECHO_PORT, ECHO_METHOD, enc(&1_i32)));
+            }
         }
     });
-    let status = page.until("an unavailable end", |m| match m {
-        ServerMsg::Port(PortRecord::End { status, .. }) => Some(*status),
+    let unattended = page.until("the counters to say so", |m| match m {
+        ServerMsg::Stats(json) => {
+            let stats: serde_json::Value = serde_json::from_str(json).unwrap();
+            let n = stats["server"]["unattended_port_calls"].as_u64().unwrap();
+            (n >= 3).then_some(n)
+        }
         _ => None,
     });
-    assert_eq!(status, 2);
+    assert!(unattended >= 3);
+    assert!(
+        !page.seen.iter().any(|m| matches!(m, ServerMsg::Port(PortRecord::End { port_id, .. }) if *port_id == ECHO_PORT)),
+        "nobody was asked, so there is nothing to list"
+    );
 }
 
 #[test]

@@ -112,6 +112,28 @@ describe("the timeline", () => {
   });
 });
 
+describe("a restore", () => {
+  it("is one row, with only what it changed", () => {
+    const s = started();
+    s.onMessage(commit(1, changeSet(1n, [full(COUNTER, 0, i32Bytes(5)), full(TODOS, 0, listBytes([[1, "a"]]))])));
+    s.dirty.clear();
+    const restore = (seq: number, payload: Uint8Array): ServerMsg => commit(seq, payload, { kind: "restore", step: 1 });
+    // The core re-sends every observed value of every store: the counter changed, the list did not.
+    s.onMessage(restore(2, changeSet(2n, [full(COUNTER, 0, i32Bytes(3))])));
+    s.onMessage(restore(3, changeSet(3n, [full(TODOS, 0, listBytes([[1, "a"]]))])));
+    expect(s.timeline.length).toBe(2);
+    expect(s.timeline[0]).toMatchObject({ label: "restore to step 1", changes: [{ signal: "count", before: 5, after: 3 }] });
+    expect([...s.dirty]).toEqual([`${COUNTER}:0`]);
+  });
+
+  it("says when it changed nothing", () => {
+    const s = started();
+    s.onMessage(commit(1, changeSet(1n, [full(COUNTER, 0, i32Bytes(5))])));
+    s.onMessage(commit(2, changeSet(2n, [full(COUNTER, 0, i32Bytes(5))]), { kind: "restore", step: 1 }));
+    expect(s.timeline[0]).toMatchObject({ label: "restore to step 1", changes: [] });
+  });
+});
+
 describe("a core that was replaced", () => {
   it("marks the break in the timeline and forgets steps that cannot be travelled to", () => {
     const s = started();
@@ -144,6 +166,9 @@ describe("time travel", () => {
     s.onMessage({ t: "traveled", result: { requestId: id, ok: true, step: 2, dropped: 0, message: "restored step 2" } });
     expect(s.traveling).toBe(false);
     expect(s.travel).toEqual({ ok: true, step: 2, message: "restored step 2" });
+    // The note describes the restore until something else happens.
+    s.onMessage(commit(1, changeSet(1n, [full(COUNTER, 0, i32Bytes(1))])));
+    expect(s.travel).toBeUndefined();
   });
 });
 

@@ -53,7 +53,8 @@ export function renderCounters(state: DevtoolsState): HTMLElement {
       ["commits merged per step", steps === 0 ? "–" : (commits / steps).toFixed(1)],
       ["history kept", `${n(s["ring_steps"])} steps, ${bytesText(n(s["ring_bytes"]))}`],
       ["app connection backlog", s["app_connected"] === true ? bytesText(n(s["app_backlog_bytes"])) : "no app attached"],
-      ["port calls", String(n(s["port_calls"]))],
+      ["port calls to the app", String(n(s["port_calls"]))],
+      ["port calls with no app", String(n(s["unattended_port_calls"]))],
       ["pages open", String(n(s["pages"]))],
     ]),
   );

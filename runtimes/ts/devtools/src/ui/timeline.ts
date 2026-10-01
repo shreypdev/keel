@@ -38,7 +38,7 @@ function row(e: CommitEntry, state: DevtoolsState, ui: UiState, actions: Actions
     { class: "row-head", "aria-expanded": open, onclick: () => { ui.toggle(key); window.dispatchEvent(new Event("undra:repaint")); } },
     h("span", { class: "time mono dim" }, state.welcome === undefined ? "" : clock(state.welcome.startedUnixMs + e.atMs)),
     h("span", { class: `cause${e.cause.kind === "restore" ? " restore" : ""}` }, e.label),
-    h("span", { class: "chips mono" }, shown.join("  ·  "), more > 0 && `  ·  +${more}`),
+    h("span", { class: "chips mono" }, e.changes.length === 0 ? "nothing changed" : shown.join("  ·  "), more > 0 && `  ·  +${more}`),
     e.step !== undefined && h("span", { class: "step-badge mono" }, `step ${e.step}`),
   );
   return h(

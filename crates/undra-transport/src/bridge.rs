@@ -202,13 +202,18 @@ impl Host for Bridge {
         args: &[u8],
     ) -> PortCallOutcome {
         let hub = self.active_hub();
+        let Some(conn) = self.current() else {
+            // Nobody to ask. Such calls repeat (a query's hydration retries while no app is
+            // attached), so the devtools count them instead of listing each.
+            if let Some(hub) = &hub {
+                hub.port_unattended();
+            }
+            return PortCallOutcome::Unavailable;
+        };
         if let Some(hub) = &hub {
             hub.port_start(port_call_id, port_id, method_id, args);
         }
-        let outcome = match self.current() {
-            Some(conn) => conn.on_port_call(port_id, method_id, port_call_id, args),
-            None => PortCallOutcome::Unavailable,
-        };
+        let outcome = conn.on_port_call(port_id, method_id, port_call_id, args);
         if outcome == PortCallOutcome::Unavailable {
             if let Some(hub) = &hub {
                 hub.port_end(port_call_id, 2, &[]);

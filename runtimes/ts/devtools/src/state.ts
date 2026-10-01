@@ -1,5 +1,6 @@
 /** What the page knows: the core's stores, the timeline, the ports, the query cache, the counters. No DOM in here. */
 
+import { equal } from "./diff.js";
 import { type AppliedChange, Mirror } from "./mirror.js";
 import type { Cause, PortRecord, ServerMsg, StepInfo, Traveled, Welcome } from "./proto.js";
 import { parseSchema, type SchemaIndex } from "./schema.js";
@@ -14,7 +15,7 @@ export interface CommitEntry {
   readonly cause: Cause;
   readonly label: string;
   readonly txn: bigint;
-  readonly changes: readonly AppliedChange[];
+  readonly changes: AppliedChange[];
   /** The step that recorded the state after this commit; `undefined` until the next one is taken. */
   step: number | undefined;
   /** Which core process it came from: steps of an earlier one cannot be restored. */
@@ -263,12 +264,25 @@ export class DevtoolsState {
       this.#notice(`a change-set could not be decoded: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
-    for (const c of applied.changes) {
-      if (c.error !== undefined) this.#notice(`${c.store}.${c.signal}: ${c.error}`);
-      if (msg.delivery === "commit") this.dirty.add(`${c.handle}:${c.signalId}`);
-    }
+    // A restore re-sends every observed value, the unchanged ones too: the timeline shows what it changed.
+    const restoring = msg.cause.kind === "restore";
+    const changes = restoring ? applied.changes.filter((c) => c.error !== undefined || c.op !== "full" || !equal(c.before, c.after)) : applied.changes;
+    for (const c of applied.changes) if (c.error !== undefined) this.#notice(`${c.store}.${c.signal}: ${c.error}`);
+    if (msg.delivery === "commit") for (const c of changes) this.dirty.add(`${c.handle}:${c.signalId}`);
     this.#touch("stores");
     if (msg.delivery !== "commit") return;
+    // The note about the last restore describes the state until something else happens to it.
+    if (!restoring && this.travel !== undefined) {
+      this.travel = undefined;
+      this.#touch("travel");
+    }
+    // A restore arrives as one change-set per store: one row on the timeline.
+    const top = this.timeline[0];
+    if (restoring && top?.kind === "commit" && top.cause.kind === "restore" && top.cause.step === msg.cause.step && top.epoch === this.#epoch) {
+      top.changes.push(...changes);
+      this.#touch("timeline");
+      return;
+    }
     this.timeline.unshift({
       kind: "commit",
       id: msg.seq,
@@ -276,7 +290,7 @@ export class DevtoolsState {
       cause: msg.cause,
       label: this.#labelOf(msg.cause),
       txn: applied.txn,
-      changes: applied.changes,
+      changes,
       step: undefined,
       epoch: this.#epoch,
     });

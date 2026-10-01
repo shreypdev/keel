@@ -120,6 +120,8 @@ struct Counters {
     steps: AtomicU64,
     skipped_same: AtomicU64,
     port_calls: AtomicU64,
+    /// Port calls made while no app client was attached: not listed, only counted.
+    unattended_port_calls: AtomicU64,
     travels: AtomicU64,
 }
 
@@ -427,6 +429,11 @@ impl Hub {
         self.broadcast_bytes(w.as_slice(), None);
     }
 
+    /// The core made a port call while no app client was attached: it was answered `Unavailable`.
+    pub(crate) fn port_unattended(&self) {
+        self.counters.unattended_port_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// A port call ended (`status`: 0 ok, 1 typed error, 2 unavailable).
     pub(crate) fn port_end(&self, id: u32, status: u8, reply: &[u8]) {
         let Some(open) = self.ports.lock().remove(&id) else {
@@ -724,13 +731,14 @@ impl Hub {
         let commits = c.commits.load(Ordering::Relaxed);
         let steps = c.steps.load(Ordering::Relaxed);
         format!(
-            "{{\"at_ms\":{},\"core\":{},\"server\":{{\"commits\":{commits},\"entries\":{},\"change_set_bytes\":{},\"steps\":{steps},\"unchanged_captures\":{},\"port_calls\":{},\"travels\":{},\"open_port_calls\":{},\"ring_steps\":{ring_steps},\"ring_bytes\":{ring_bytes},\"pages\":{},\"app_connected\":{},\"app_backlog_bytes\":{}}}}}",
+            "{{\"at_ms\":{},\"core\":{},\"server\":{{\"commits\":{commits},\"entries\":{},\"change_set_bytes\":{},\"steps\":{steps},\"unchanged_captures\":{},\"port_calls\":{},\"unattended_port_calls\":{},\"travels\":{},\"open_port_calls\":{},\"ring_steps\":{ring_steps},\"ring_bytes\":{ring_bytes},\"pages\":{},\"app_connected\":{},\"app_backlog_bytes\":{}}}}}",
             self.at_ms(),
             self.rt.stats_json(),
             c.entries.load(Ordering::Relaxed),
             c.change_set_bytes.load(Ordering::Relaxed),
             c.skipped_same.load(Ordering::Relaxed),
             c.port_calls.load(Ordering::Relaxed),
+            c.unattended_port_calls.load(Ordering::Relaxed),
             c.travels.load(Ordering::Relaxed),
             self.ports.lock().len(),
             self.clients.lock().len(),
