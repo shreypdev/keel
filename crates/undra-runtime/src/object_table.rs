@@ -33,6 +33,7 @@
 //! assert!(table.get::<Counter>(second).is_ok());
 //! ```
 
+use crate::atomic_update::cas_update;
 use core::fmt;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -213,12 +214,11 @@ impl Generations {
 
     /// The next generation, or `None` if all `u32::MAX` of them have been issued.
     fn issue(&self) -> Option<u32> {
-        self.last
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |last| {
-                last.checked_add(1)
-            })
-            .ok()
-            .map(|previous| previous + 1)
+        cas_update(&self.last, Ordering::AcqRel, Ordering::Acquire, |last| {
+            last.checked_add(1)
+        })
+        .ok()
+        .map(|previous| previous + 1)
     }
 
     /// The highest generation issued so far.
