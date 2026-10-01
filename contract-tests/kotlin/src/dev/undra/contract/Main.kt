@@ -8,13 +8,19 @@ import kotlin.system.exitProcess
 private const val SCENARIO_LIMIT_MS: Long = 120_000L
 
 /**
- * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S18 on the JVM
+ * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S19 on the JVM
  * over JNI against the real `libundra_core` of the playground core and prints one line per scenario,
  * `SCENARIO S07 PASS|FAIL <title>`, which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.
+ *
+ * With `UNDRA_CONTRACT_PHASE=B` (and build B's library on `java.library.path`) it runs only the build-B steps of S14
+ * and S15 instead ([migrationBuildB]), which print nothing but `FAIL` lines for those two ids.
  */
 fun main() {
     // The default file-backed adapters (Fs, SecureStore) stay in a throwaway directory.
     System.setProperty("undra.data.dir", Files.createTempDirectory("undra-contract-kotlin").toString())
+    if (System.getenv("UNDRA_CONTRACT_PHASE") == "B") {
+        exitProcess(if (migrationBuildB() == 0) 0 else 1)
+    }
     if (!UndraNative.isAvailable) {
         println("the native core library could not be loaded: ${UndraNative.unavailableReason}")
         SCENARIOS.forEach { println("SCENARIO ${it.id} FAIL ${it.title}: native library not loaded") }

@@ -9,6 +9,7 @@ import dev.undra.runtime.PortImpl
 import dev.undra.runtime.UndraUnhandledError
 import dev.undra.runtime.adapters.ConnectivityEvents
 import dev.undra.runtime.adapters.StandardPorts
+import dev.undra.runtime.adapters.StorageError
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
@@ -16,13 +17,13 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * What a scenario runs against: the one core of this process and the adapters it was loaded with.
  * The adapters are the harness of scenarios.md: a manual clock, an in-memory server, an in-memory
- * `Kv` that records its writes and a `Log` that captures. `Rng` and `Timer` are the runtime's
+ * `Kv` that records its operations and fails on demand, and a `Log` that captures. `Rng` and `Timer` are the runtime's
  * JVM defaults.
  *
  * @property core the core, which is also `UndraCore.shared`.
  * @property clock the `Clock` port; the test moves it.
  * @property server the `Http` port: the routes and the requests it saw.
- * @property kv the `Kv` port: the writes the core made.
+ * @property kv the `Kv` port: what the core stored and every operation it asked for.
  * @property log the `Log` port: the records the core emitted.
  * @property portCalls how many calls the four adapters above received (S17.7).
  * @property options the options [core] was loaded with; S17.7 loads a fresh core with them after the shutdown.
@@ -77,8 +78,12 @@ class Bootstrap {
     /** The in-memory `Http` server the core is loaded with. */
     val server = FakeServer()
 
-    /** The in-memory `Kv` port the core is loaded with. */
-    val kv = MemoryKv()
+    /**
+     * The in-memory `Kv` port the core is loaded with. Its first `get` of the offline queue fails `Locked`, as the
+     * platform's store answers an app launched before the device's first unlock (scenarios.md, "Adapters"): S14 waits
+     * until the core read the queue again, S19 step 4 checks what it did meanwhile.
+     */
+    val kv = MemoryKv().also { it.fail(MemoryKv.Kind.GET, key = Persisted.QUEUE_KEY, error = StorageError.Locked, times = 1) }
 
     /** The capturing `Log` port the core is loaded with. */
     val log = CapturingLog()
