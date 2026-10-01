@@ -61,8 +61,8 @@ channel; the next piece aims for 16 KB).
 
 ## Why you can trust it
 
-* **4,000+ tests across five languages** — Rust 2,168 · TypeScript 931 · Kotlin 500 ·
-  Swift 425 · wasm/C-ABI acceptance suites — all green in one pass.
+* **4,900+ tests across five languages** — Rust 2,700 · TypeScript 1,132 · Kotlin 617 ·
+  Swift 483 · wasm/C-ABI acceptance suites — all green in one pass.
 * **19 wire-level contract scenarios, run on all three platforms** (57/57): sync/async
   calls, typed errors, cancellation, stream backpressure, keyed patches, optimistic
   rollback, offline queue replay, snapshot/restore, schema-mismatch rejection, panic
