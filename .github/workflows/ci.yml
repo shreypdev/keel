@@ -7,8 +7,8 @@ on:
 
 # The Rust version is pinned, not "stable": the compile-fail goldens (trybuild) quote rustc's
 # wording and the bench budgets are baselined on one compiler, so a new stable release must land
-# as a deliberate commit that bumps every `rust-toolchain@` line here, in bench.yml, release.yml
-# and site.yml together, regenerates the goldens (TRYBUILD=overwrite) and re-baselines the
+# as a deliberate commit that bumps every `rust-toolchain@` line here, in bench.yml, release.yml,
+# rn-devices.yml and site.yml together, regenerates the goldens (TRYBUILD=overwrite) and re-baselines the
 # budgets. 1.99.0 (2026-10-01) is the first one waiting: it renames `fetch_update`
 # (already replaced by `cas_update`) and rewords const-eval panics.
 env:
@@ -243,3 +243,63 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run the Swift scenario runner
         run: bash contract-tests/run-all.sh swift
+
+  react-native:
+    # The React Native runtime without a device (docs/REACT_NATIVE.md, "What is tested where"): the C++ host
+    # against the real core under ASan + UBSan, the JSI layer compiled against React Native 0.87's own headers
+    # with -Werror, the package's unit tests on a fake module, and the contract scenarios through
+    # NativeTransport over a stand-in of the module on the wasm core. What only a device can show (JSI under
+    # Hermes, both builds, the vsync sources) is .github/workflows/rn-devices.yml.
+    name: React Native (host + model)
+    # ubuntu-24.04, not -latest: the host's Rng is arc4random_buf, which glibc has had since 2.36 (24.04 ships 2.39).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            runtimes/rn/@undra/react-native/package-lock.json
+            examples/playground/rn/package-lock.json
+      # clang with its sanitizer runtime: the C++ test is built with clang++ (-fsanitize=address,undefined),
+      # and the JSI check needs clang's view of React Native's headers. Pinned to 18, the release of 24.04.
+      - name: clang 18 and its sanitizer runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev
+          # The runner's kernel randomises mmap with more bits than ASan's shadow layout accepted until
+          # recently; 28 is what LLVM's own CI sets (runner-images issue 9491).
+          sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: The undra CLI, then the playground core for this machine (the C++ test) and for the web (the contract column)
+        run: |
+          cargo build -p undra-cli
+          target/debug/undra build -C examples/playground --platform host
+          target/debug/undra build -C examples/playground --platform web
+      - name: Package dependencies
+        working-directory: runtimes/rn/@undra/react-native
+        run: npm ci --no-audit --no-fund
+      # The playground app is installed only for the React Native 0.87 headers that the JSI check compiles
+      # against (run.sh fails, it does not skip, when they are missing: UNDRA_RN_REQUIRE_JSI).
+      - name: React Native headers (the playground app's dependencies)
+        working-directory: examples/playground/rn
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: C++ host under ASan + UBSan (both shims), and the JSI layer against React Native's headers
+        env:
+          CXX: clang++-18
+          UNDRA_RN_REQUIRE_JSI: "1"
+        run: runtimes/rn/@undra/react-native/cpp/test/run.sh
+      - name: Unit tests (NativeTransport, frame scheduler, polyfills, loadNative)
+        working-directory: runtimes/rn/@undra/react-native
+        run: npm test
+      - name: Typecheck (sources and the build config)
+        working-directory: runtimes/rn/@undra/react-native
+        run: npm run typecheck
+      - name: Contract scenarios through NativeTransport (17 pass, S17 is app-tested)
+        working-directory: runtimes/rn/@undra/react-native
+        run: npm run test:contract
