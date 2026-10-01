@@ -5,7 +5,10 @@ import kotlin.time.Duration.Companion.seconds
 
 /** Where the core runs relative to the app. */
 public enum class Mode {
-    /** In this process, through the JNI shim ([UndraNative]). The production mode. */
+    /**
+     * In this process, through the JNI natives of the core's generated `UndraCoreNative` ([NativeApi]). The
+     * production mode. Load an in-process core through its generated entry, `Undra<Namespace>.load()`.
+     */
     INPROC,
 
     /**
@@ -17,7 +20,13 @@ public enum class Mode {
 }
 
 /**
- * How [UndraCore.load] starts a core.
+ * How a core is started: by its generated entry, `Undra<Namespace>.load(options)` (which fills in
+ * [expectedSchemaHash]), or by [UndraCore.load].
+ *
+ * ```kotlin
+ * UndraPlaygroundCore.load()                                                              // in this process
+ * UndraPlaygroundCore.load(LoadOptions(Mode.REMOTE, remoteUrl = "ws://10.0.2.2:7878"))   // `undra dev`
+ * ```
  *
  * @property mode [Mode.INPROC] (default) or [Mode.REMOTE].
  * @property remoteUrl the `ws://` or `wss://` URL of the `undra dev` server; required for [Mode.REMOTE]
@@ -26,11 +35,12 @@ public enum class Mode {
  *   made with the generated `<trait>PortImpl(...)` functions. They take precedence over the default
  *   adapters.
  * @property expectedSchemaHash the schema hash of the bindings (`UndraIds.SCHEMA_HASH`); loading fails
- *   with [UndraSchemaMismatchException] if the core reports another one.
+ *   with [UndraSchemaMismatchException] if the core reports another one. `null` (the default) lets the generated
+ *   `Undra<Namespace>.load` fill it in; [UndraCore.load] refuses options without it.
  * @property defaultAdapters install the JVM default adapters (`dev.undra.runtime.adapters.JvmAdapters`) for
  *   every standard port not in [adapters]. On Android only the portable ones (Clock, Rng, Log, Timer) are
  *   installed; Http, Kv, SecureStore, Fs, Connectivity and Lifecycle come from the `android-adapters` module, which
- *   installs all ten with `AndroidPlatformDefaults.install(core, context)` after [UndraCore.load].
+ *   installs all ten with `AndroidPlatformDefaults.install(core, context)` after the core is loaded.
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
@@ -53,7 +63,7 @@ public class LoadOptions(
     public val mode: Mode = Mode.INPROC,
     public val remoteUrl: String? = null,
     public val adapters: Map<UInt, PortImpl> = emptyMap(),
-    public val expectedSchemaHash: ULong,
+    public val expectedSchemaHash: ULong? = null,
     public val defaultAdapters: Boolean = true,
     public val remoteTimeout: Duration = 30.seconds,
     public val mirror: MirrorOptions = MirrorOptions(),
@@ -63,8 +73,27 @@ public class LoadOptions(
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
-            "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
+            "expectedSchemaHash=${expectedSchemaHash?.let { "0x" + it.toString(16) } ?: "unset"}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
             "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"})"
+
+    /** These options with [expectedSchemaHash] set to [hash] when it is not set already. */
+    internal fun withSchemaHashDefault(hash: ULong): LoadOptions =
+        if (expectedSchemaHash != null) {
+            this
+        } else {
+            LoadOptions(
+                mode = mode,
+                remoteUrl = remoteUrl,
+                adapters = adapters,
+                expectedSchemaHash = hash,
+                defaultAdapters = defaultAdapters,
+                remoteTimeout = remoteTimeout,
+                mirror = mirror,
+                reconnect = reconnect,
+                onConnectionChange = onConnectionChange,
+                onError = onError,
+            )
+        }
 }
 
 /**
@@ -72,7 +101,7 @@ public class LoadOptions(
  *
  * ```kotlin
  * // Android: drain at the display's own frames (module android-adapters).
- * LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, mirror = MirrorOptions(framePacer = ChoreographerFramePacer()))
+ * UndraPlaygroundCore.load(LoadOptions(mirror = MirrorOptions(framePacer = ChoreographerFramePacer())))
  * ```
  *
  * @property framePacer when the change-sets the core produced on its own are applied. `null` (the default)

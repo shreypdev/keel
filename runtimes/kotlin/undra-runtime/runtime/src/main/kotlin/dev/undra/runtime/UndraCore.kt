@@ -12,12 +12,15 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * A running Undra core, seen from Kotlin: everything generated code calls (SPEC section 17.2).
  *
- * Get one with [load] (once, at startup), then let generated classes use [shared]:
+ * Get one from the generated entry of the core's bindings, `Undra<Namespace>` (once, at startup); the generated
+ * classes of those bindings use it unless they are given another (ADR-044):
  *
  * ```kotlin
- * UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, adapters = mapOf(...)))
- * val todos = TodoStore()                 // uses UndraCore.shared
+ * UndraPlaygroundCore.load(LoadOptions(adapters = mapOf(...)))
+ * val todos = TodoStore()                 // uses UndraPlaygroundCore.core
  * ```
+ *
+ * Several cores (each with its own namespace) can be loaded in one process; each generated entry knows its own.
  *
  * ### Threading
  *
@@ -33,7 +36,7 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * The class is `open` with a protected constructor so that tests can subclass it and override the
  * members generated code uses; every member of the base class throws [UnsupportedOperationException]
- * (or, for [mirror] and [stats], answers with an inert value). Only [load] returns a working core.
+ * (or, for [mirror] and [stats], answers with an inert value). Only a load returns a working core.
  */
 public open class UndraCore protected constructor() : AutoCloseable {
 
@@ -42,16 +45,17 @@ public open class UndraCore protected constructor() : AutoCloseable {
         private val slot = AtomicReference<UndraCore?>(null)
 
         /** The placeholder [shared] returns while no core is loaded. */
-        private val unloaded: UndraCore by lazy { UnloadedCore() }
+        private val unloaded: UndraCore by lazy { UnloadedCore(null) }
 
         /** Whether the placeholder's "load a core" message has been logged. */
         private val unloadedWarned = AtomicBoolean(false)
 
         /**
-         * The core the first successful [load] returned. Generated constructors and free functions default
-         * to it.
+         * The core the first successful load returned (of any core: a generated `Undra<Namespace>.load` or [load]),
+         * for app code that uses one core. Generated code never reads it: its classes and functions default to
+         * their own core, `Undra<Namespace>.core`.
          *
-         * Using it before a successful [load], or after the shared core was closed, is a programming error
+         * Using it before a successful load, or after the shared core was closed, is a programming error
          * but not a crash (ADR-032, amendment A): it returns a permanently closed placeholder whose calls
          * fail with [UndraCallError.Unavailable] (reason [UndraTransportException.Reason.CLOSED]), whose
          * commands only log, and whose first use logs what to do. [current] still returns `null` in that
@@ -62,33 +66,69 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 slot.get()?.let { return it }
                 if (unloadedWarned.compareAndSet(false, true)) {
                     UndraLog.error(
-                        "UndraCore.shared was used while no core is loaded (before UndraCore.load(...) succeeds, or after the " +
-                            "shared core was closed); calls on it fail with UndraCallError.Unavailable. " +
-                            "Load a core at app startup, before creating any Undra object.",
+                        "UndraCore.shared was used while no core is loaded (before a load succeeds, or after the shared " +
+                            "core was closed); calls on it fail with UndraCallError.Unavailable. Load the core at app " +
+                            "startup with its generated entry (Undra<Namespace>.load()), before creating any Undra object.",
                     )
                 }
                 return unloaded
             }
 
-        /** The core the first successful [load] returned and that is not closed, or `null`. While it is `null`, [shared] is the closed placeholder. */
+        /** The core the first successful load returned and that is not closed, or `null`. While it is `null`, [shared] is the closed placeholder. */
         public val current: UndraCore? get() = slot.get()
 
         /**
-         * Starts a core as described by [options] and checks that it was built from the same schema as
-         * the bindings ([LoadOptions.expectedSchemaHash]). The first successful call also becomes [shared].
+         * Connects to a core over `undra dev` ([Mode.REMOTE]) as described by [options] and checks that it was built
+         * from the same schema as the bindings ([LoadOptions.expectedSchemaHash], required here). The first successful
+         * load also becomes [shared].
          *
-         * In [Mode.INPROC] this loads the native library (see [UndraNative]), initializes the core and
-         * registers the ports; only one in-process core can exist per process at a time, so a second
-         * `load(INPROC)` fails until the first one is [close]d (which ends its work, ADR-034) and then starts a fresh
-         * core. In [Mode.REMOTE] it connects to `undra dev` and
-         * performs the `Hello` handshake; see [Mode.REMOTE] for its limits.
+         * An in-process core ([Mode.INPROC]) is not loaded here: its library and natives belong to its bindings, so
+         * load it through its generated entry, `Undra<Namespace>.load(...)`, which also fills in the schema hash.
          *
+         * @throws UndraModeException for [Mode.INPROC] (use the generated entry), when [LoadOptions.expectedSchemaHash]
+         *   is not set, or when [options] contradict each other.
          * @throws UndraSchemaMismatchException if the core's schema hash differs.
-         * @throws UndraModeException if [options] contradict each other or the mode is unavailable here.
-         * @throws UndraException if the core cannot be started or reached.
+         * @throws UndraException if the core cannot be reached.
          */
         public fun load(options: LoadOptions): UndraCore {
-            val transport = createTransport(options)
+            if (options.mode == Mode.INPROC) {
+                checkModeOptions(options)
+                throw UndraModeException(
+                    "UndraCore.load(options) cannot load an in-process core: it does not know the core's library. " +
+                        "Load it through the generated entry of its bindings, Undra<Namespace>.load(...) " +
+                        "(for example UndraPlaygroundCore.load()), or use Mode.REMOTE",
+                )
+            }
+            return start(options, native = null)
+        }
+
+        /**
+         * Starts the core whose JNI natives are [native] (its generated `UndraCoreNative`) as described by [options],
+         * and checks that it was built from the same schema as the bindings ([LoadOptions.expectedSchemaHash], required
+         * here). The first successful load also becomes [shared]. This is what the generated `Undra<Namespace>.load`
+         * does (through [CoreEntry], which fills in the hash); apps call that instead.
+         *
+         * In [Mode.INPROC] this checks the core's ABI version and schema hash, initializes it and registers the ports.
+         * Only one in-process core per namespace ([NativeApi.namespace]) can be loaded at a time, so a second load of
+         * the same core fails until the first one is [close]d (which ends its work, ADR-034); cores with different
+         * namespaces run side by side. In [Mode.REMOTE] it connects to `undra dev` and performs the `Hello`
+         * handshake, and [native] is not used; see [Mode.REMOTE] for its limits.
+         *
+         * @throws UndraSchemaMismatchException if the core's schema hash differs.
+         * @throws UndraModeException if [LoadOptions.expectedSchemaHash] is not set, or [options] contradict each other.
+         * @throws UndraException if the core cannot be started or reached (its library is missing, it speaks another
+         *   ABI version, or a core with its namespace is already loaded).
+         */
+        public fun load(options: LoadOptions, native: NativeApi): UndraCore = start(options) { native }
+
+        /**
+         * Starts a core: in process over the natives [native] returns (called only for [Mode.INPROC]), or over
+         * `undra dev`.
+         */
+        internal fun start(options: LoadOptions, native: (() -> NativeApi)?): UndraCore {
+            checkModeOptions(options)
+            if (options.expectedSchemaHash == null) throw missingSchemaHash()
+            val transport = createTransport(options, native)
             return attach(transport, options, makeShared = true)
         }
 
@@ -106,10 +146,11 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 onError = options.onError,
             )
             try {
+                val expected = options.expectedSchemaHash ?: throw missingSchemaHash()
                 core.installPorts(options)
-                val got = transport.connect(core, options.expectedSchemaHash)
-                if (got != options.expectedSchemaHash) {
-                    throw UndraSchemaMismatchException(options.expectedSchemaHash, got)
+                val got = transport.connect(core, expected)
+                if (got != expected) {
+                    throw UndraSchemaMismatchException(expected, got)
                 }
                 core.markConnected()
             } catch (e: UndraException) {
@@ -128,26 +169,42 @@ public open class UndraCore protected constructor() : AutoCloseable {
             slot.compareAndSet(core, null)
         }
 
-        private fun createTransport(options: LoadOptions): Transport =
+        private fun missingSchemaHash(): UndraModeException =
+            UndraModeException(
+                "LoadOptions.expectedSchemaHash is not set: load the core through the generated entry of its bindings, " +
+                    "Undra<Namespace>.load(...), which sets it, or pass UndraIds.SCHEMA_HASH",
+            )
+
+        /** Refuses [options] that contradict each other: a URL for [Mode.INPROC], or a missing or malformed one for [Mode.REMOTE]. */
+        private fun checkModeOptions(options: LoadOptions) {
+            when (options.mode) {
+                Mode.INPROC -> if (options.remoteUrl != null) {
+                    throw UndraModeException("Mode.INPROC does not use remoteUrl (${options.remoteUrl}); did you mean Mode.REMOTE?")
+                }
+                Mode.REMOTE -> remoteUri(options)
+            }
+        }
+
+        private fun remoteUri(options: LoadOptions): URI {
+            val url = options.remoteUrl ?: throw UndraModeException("Mode.REMOTE needs LoadOptions.remoteUrl (for example ws://localhost:7350)")
+            val uri = try {
+                URI(url)
+            } catch (e: java.net.URISyntaxException) {
+                throw UndraModeException("remoteUrl is not a valid URL: $url")
+            }
+            if (uri.scheme != "ws" && uri.scheme != "wss") {
+                throw UndraModeException("remoteUrl must start with ws:// or wss://, got: $url")
+            }
+            return uri
+        }
+
+        private fun createTransport(options: LoadOptions, native: (() -> NativeApi)?): Transport =
             when (options.mode) {
                 Mode.INPROC -> {
-                    if (options.remoteUrl != null) {
-                        throw UndraModeException("Mode.INPROC does not use remoteUrl (${options.remoteUrl}); did you mean Mode.REMOTE?")
-                    }
-                    InprocTransport()
+                    val api = native ?: throw UndraModeException("an in-process core is loaded through the generated entry of its bindings, Undra<Namespace>.load(...)")
+                    InprocTransport(api())
                 }
-                Mode.REMOTE -> {
-                    val url = options.remoteUrl ?: throw UndraModeException("Mode.REMOTE needs LoadOptions.remoteUrl (for example ws://localhost:7350)")
-                    val uri = try {
-                        URI(url)
-                    } catch (e: java.net.URISyntaxException) {
-                        throw UndraModeException("remoteUrl is not a valid URL: $url")
-                    }
-                    if (uri.scheme != "ws" && uri.scheme != "wss") {
-                        throw UndraModeException("remoteUrl must start with ws:// or wss://, got: $url")
-                    }
-                    RemoteTransport(uri, options.remoteTimeout, options.reconnect, session = newSessionToken())
-                }
+                Mode.REMOTE -> RemoteTransport(remoteUri(options), options.remoteTimeout, options.reconnect, session = newSessionToken())
             }
 
         /** A random token for the dev server to recognise this core's connections by (ADR-051). */
@@ -235,7 +292,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     /**
      * [construct] for generated code: what it throws is mapped onto the closed set ([UndraCallError.mapped]). A
-     * secondary constructor cannot hold a `try`, so the generated `constructor(ctx: UndraCore = UndraCore.shared)`
+     * secondary constructor cannot hold a `try`, so the generated `constructor(ctx: UndraCore = Undra<Namespace>.core)`
      * delegates through this.
      *
      * @throws UndraCallError whatever [construct] throws.
@@ -289,7 +346,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * thread. A report made while the handler runs on the same thread (a handler that calls a failing command) is
      * only logged.
      *
-     * The base class only logs; the core [load] returns also calls the handler.
+     * The base class only logs; a loaded core also calls the handler.
      *
      * @param error what the call threw.
      * @param operation what failed, as Kotlin spells it, for example `"TodoStore.toggle"`.
@@ -320,7 +377,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
     /**
      * Closes this core: pending calls fail with [UndraTransportException] (reason `CLOSED`), streams end with it, port work is
      * cancelled and the link is closed. **Closing ends the core's work** (ADR-034): an in-process core is
-     * shut down (its tasks, timers and port calls stop), and a later [load] in the same process starts a
+     * shut down (its tasks, timers and port calls stop), and a later load of it in the same process starts a
      * fresh one with fresh handles. Idempotent.
      *
      * **For an in-process core, `close()` waits for the native shutdown**: it returns only after the core's
@@ -338,6 +395,6 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     private fun unsupported(member: String): UnsupportedOperationException =
         UnsupportedOperationException(
-            "UndraCore.$member is not implemented by this UndraCore; use UndraCore.load(...) or override it in your test double",
+            "UndraCore.$member is not implemented by this UndraCore; load a core (Undra<Namespace>.load(...)) or override it in your test double",
         )
 }

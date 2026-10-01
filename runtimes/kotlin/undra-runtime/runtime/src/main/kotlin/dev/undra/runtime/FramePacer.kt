@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
  * [MirrorOptions.framePacer]; without one the runtime paces itself on a 60 Hz grid.
  *
  * ```kotlin
- * UndraCore.load(LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, mirror = MirrorOptions(framePacer = ChoreographerFramePacer())))
+ * UndraPlaygroundCore.load(LoadOptions(mirror = MirrorOptions(framePacer = ChoreographerFramePacer()))) // the generated entry of your core
  * ```
  */
 public fun interface FramePacer {

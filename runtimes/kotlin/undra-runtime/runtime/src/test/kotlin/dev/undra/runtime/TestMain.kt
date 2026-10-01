@@ -43,6 +43,7 @@ fun main() {
         StoreTests(),
         PortTests(),
         InprocTransportTests(),
+        CoreEntryTests(),
         RemoteTransportTests(),
         WebSocketClientTests(),
         WebSocketHostileServerTests(),

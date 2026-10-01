@@ -5,19 +5,25 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 /**
- * What [UndraCore.shared] returns while no core is loaded (ADR-032, amendment A, decision 7): a core that was closed
+ * What [UndraCore.shared] returns while no core is loaded, and what [CoreEntry.core] (the generated
+ * `Undra<Namespace>.core`) returns while its core is not (ADR-032, amendment A, decision 7): a core that was closed
  * from the start. Every call fails with [UndraTransportException] (reason `CLOSED`), which a generated call
  * reports as [UndraCallError.Unavailable]; a command's failure is only logged (there is no
  * [LoadOptions.onError] to call); [release], [timerFired] and [close] do nothing. It never becomes the shared core
- * and never reaches the native library.
+ * and never reaches a native library.
+ *
+ * @param namespace the core it stands in for (named in its messages), or `null` for [UndraCore.shared]'s.
  */
-internal class UnloadedCore : UndraCore() {
+internal class UnloadedCore(private val namespace: String?) : UndraCore() {
     override val mode: Mode get() = Mode.INPROC
+
+    private val what: String get() = if (namespace == null) "no Undra core is loaded" else "the Undra core `$namespace` is not loaded"
 
     private fun gone(): UndraTransportException =
         UndraTransportException(
             UndraTransportException.Reason.CLOSED,
-            "no UndraCore is loaded: call UndraCore.load(LoadOptions(...)) at app startup, before creating any Undra object",
+            "$what: load it at app startup with the generated entry of its bindings (Undra<Namespace>.load()), " +
+                "before creating any Undra object",
         )
 
     override fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray = throw gone()
@@ -37,7 +43,7 @@ internal class UnloadedCore : UndraCore() {
     override fun timerFired(timerId: UInt) = Unit
 
     override fun registerPort(portId: UInt, impl: PortImpl) {
-        UndraLog.warn("registerPort($portId) on UndraCore.shared while no core is loaded is ignored; register ports on the core UndraCore.load(...) returned")
+        UndraLog.warn("registerPort($portId) while $what is ignored; register ports on the core its load returned")
     }
 
     override fun snapshot(): ByteArray = throw gone()
