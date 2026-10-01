@@ -5,9 +5,10 @@ ADR-044's implementation brief, items 1–8. Before this piece a process could h
 the iOS library needed `-force_load` and every artefact was called `undra_core`. Now each core exports one
 symbol named after its namespace, `<namespace>_undra_api()`, returning its `UndraApi` table (C ABI version 2);
 its libraries, its JNI class and its bindings' entry are named after the namespace too, and two cores load into
-one app on iOS, Android, the JVM, Node and React Native. **No wire change, no schema change** (the playground's
-hash is still `0xddcdea47fa95a8d4`, asserted by `schema_retention.rs`, `abi.rs` and `undra bindgen --check`),
-**no wasm ABI change** (`WASM_ABI_VERSION` stays 1).
+one app on iOS, Android, the JVM, Node and React Native. **No wire change, no schema change**: this piece moves no
+hash (the playground's was `0xddcdea47fa95a8d4` before and after it; `0xefd907be3070520a` once main's playground
+`platform` module was merged in, again identical with and without the namespacing), asserted by
+`schema_retention.rs`, `abi.rs` and `undra bindgen --check`. **No wasm ABI change** (`WASM_ABI_VERSION` stays 1).
 
 ## What landed, per item
 
@@ -71,6 +72,45 @@ hash is still `0xddcdea47fa95a8d4`, asserted by `schema_retention.rs`, `abi.rs` 
 * Release iOS core prelinked: `libplayground_a.a` 3.05 MB per slice; the two-core Release app binary 6.2 MB. Android
   `lib<ns>.so` about 1.6 MB per ABI for the playground core.
 
+## Verification on the final tree (main `0aa98a4` merged)
+
+| Suite | Result |
+|---|---|
+| `cargo fmt --check`; `cargo clippy --workspace --all-targets -D warnings`; `cargo clippy -p undra-ffi --target wasm32-unknown-unknown -D warnings`; `cargo doc --no-deps -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | 2,620 passed, 0 failed, 13 ignored (doc tests included) |
+| Miri: `-p undra-ffi --lib`; the `abi` subset CI runs plus the table tests | 35 pass; 4 pass |
+| C harness (plain and ASan), wasm harness, Swift over the fixture's table, JNI end-to-end (Kotlin 2.4.20 and 2.0.21) | ok; 19 + 24; 6; 16 + 16 |
+| Swift runtime `swift test` | 497, 0 failures |
+| Kotlin runtime `test-local.sh`, Kotlin 2.4.20 and 2.0.21 (own build directory) | 629 cases, 0 failed, 1 skipped, both |
+| TypeScript runtime `npm test` | 1,133 |
+| React Native: `npm test`, typecheck, `test:contract`; `cpp/test/run.sh` | 65; clean; 17 + S17 skipped; 15 store + 29 + 29 host checks, JSI, TurboModule and the Apple platform compile |
+| `contract-tests/run-all.sh` | 57/57 (S01–S18 and S26 × TS, Kotlin, Swift) |
+| interop, `bindgen --check --docs` (playground, two-cores a and b), `schema_docs --ignored`, `schema_retention --include-ignored`, `sync_alloc`/`commit_alloc`, `undra-bench` budgets | pass |
+| site: `build-all.mjs`, `check-links.mjs --words` | clean |
+
+Devices (screenshots and logs in the session scratchpad): two-core app on the iPhone 17 Pro simulator, Debug and
+Release (`ios-two-cores-debug.log`, `ios-two-cores.log`, `ios-two-cores.png`), on the `undra` emulator
+(`android-two-cores.log`, `.png`), JVM and Node (`jvm-two-cores.log`, `node-two-cores.log`): every line `ok`, then
+`passed`. The playground on iOS (four screens alive, no fault lines, the XCUITest tour 6 tests / 1 skipped / 0
+failed; `ios-playground-*.png`) and Android (four tabs alive; `android-playground-*.png`), its web build. A fresh
+`undra init` app in process and on `undra dev` with the dev bar, on iOS (`ios-init-app.png`, `ios-init-app-dev.png`),
+Android (`android-init-app.png`, `android-init-app-dev.png`) and the web (`web-init-app.jpg`,
+`web-init-app-dev.jpg`). `scripts/rn-device-checks.sh`: iOS 19/19, Android 20/20.
+
+## Merging main (dev-reload, rn-adapters)
+
+* rn-adapters' default ports sit on top of the per-namespace host unchanged: the native defaults are created per
+  host (so per core) and registered through the table's `port_register`. `nativePlatformDefaults()` became
+  `nativePlatformDefaults(namespace)` (the module object is per namespace now; the answer is the device's).
+  Main's default-port tests were moved to the per-namespace fakes and entries.
+* The native defaults of React Native, like Swift's and Kotlin's platform defaults, keep one `Kv` directory, one
+  `Fs` root and one secure store per app: two cores of one app share them (documented in REACT_NATIVE.md; see Open).
+* Gotcha found on the device run: React Native's autolinking cache
+  (`android/build/generated/autolinking/autolinking.json`) is keyed by the app's package files, not the
+  dependency's `react-native.config.cjs`, so an app built before the package gained its Java library still links
+  it as a pure C++ dependency (`ClassNotFoundException: dev.undra.reactnative.UndraPlatform`) until that file is
+  deleted. Not this piece's, but anyone updating `@undra/react-native` meets it.
+
 ## Deviations from ADR-044 (each with why)
 
 * **17 function pointers and 2 data fields, not 19 pointers.** `abi_version` and `schema_hash` are fields: a host
@@ -109,6 +149,9 @@ hash is still `0xddcdea47fa95a8d4`, asserted by `schema_retention.rs`, `abi.rs` 
   with the iOS app connected).
 
 ## Open
+
+* The default storage adapters (`Kv`, `Fs`, `SecureStore`) are per app on every platform, so two cores of one app
+  share them unless the app passes its own; a per-namespace default directory is a follow-up decision.
 
 * An on-device React Native app with two cores and S26 in the React Native contract column (the C++ host test does
   load two real cores in one process).
