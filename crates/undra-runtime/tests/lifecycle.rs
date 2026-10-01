@@ -93,7 +93,7 @@ fn l1_shutdown_clears_subscribers_and_bindings_so_the_runtime_can_be_freed() {
         .subscribe(
             1,
             2,
-            Box::new(move |_| {
+            Box::new(move |_, _| {
                 let _ = &ctx;
                 h2.fetch_add(1, Ordering::SeqCst);
             }),

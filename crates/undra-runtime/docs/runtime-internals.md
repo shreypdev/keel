@@ -457,9 +457,16 @@ error item), a level 5 log record, `stats.panics += 1`, and the receiver object 
 ## 15. Lifetime, shutdown and reference cycles
 
 `Ctx` is an `Arc<Runtime>`. A store that keeps a `Ctx`, an event subscriber or Rust port
-binding that captured one, and every in-flight async call, is therefore a **reference cycle**
-with the runtime that owns it. `Runtime::shutdown` breaks them, in this order (ADR-023, L1):
+binding that captured one is therefore a **reference cycle** with the runtime that owns it.
+Since ADR-034 the runtime's own work does not form one: the call and stream tasks hold a
+`Weak<Runtime>` (they upgrade only to reply or emit, a stream once per item after its credit
+wait), a blocking job holds a `WeakCtx` until it runs, event subscribers receive the `Ctx` as an
+argument instead of capturing one, and `undra-query`'s tasks and query handles hold `WeakCtx`s.
+App code is asked to do the same (`WeakCtx`, SPEC 5.3). `Runtime::shutdown` breaks the cycles
+that remain, in this order (ADR-023, L1):
 
+0. close the **lifeline** (`Lifeline::close(Gone::ShutDown)`): `Ctx::closed`, `WeakCtx::closed`
+   and every pending `WeakCtx::sleep` complete, and `WeakCtx::upgrade` refuses from now on;
 1. flag the runtime shut down (later `call`s answer 5) and close the executor (`Executor::shutdown`
    sets `closed` under the `tasks` lock, so a racing `spawn` is refused instead of landing after
    the final `clear`);
@@ -476,9 +483,16 @@ with the runtime that owns it. `Runtime::shutdown` breaks them, in this order (A
    `Runtime::extension` values stay (they are handed out as `&T`; one that holds a `Ctx` must let go
    of it itself).
 
-After `shutdown` a runtime that nothing else references is freed; before it, an idle
-runtime with no stores holding a `Ctx` is also freed when the last `Arc` drops (its `Drop`
-runs the same teardown without locks, since nothing else can be running). `spawn`, `sleep`,
+After `shutdown` a runtime that nothing else references is freed. Without it, a runtime is
+freed when its owner drops the last `Arc` and no app code keeps a strong `Ctx` (ADR-034): its
+`Drop` closes the lifeline with `Gone::Dropped`, **answers what is in flight** exactly as step 2
+does (the tasks no longer pin the runtime, so a host may still be waiting; `"cancelled: the
+runtime was dropped"`), then joins the threads it does not run on and tears down. It runs on
+whichever thread released the last reference: the owner's, the `undra-core` thread at the end of
+a turn (it then skips joining itself; the loop sees the closed queue and exits), or a blocking
+worker whose job held the last `Ctx`. Nothing else can reach the runtime by then, so it takes no
+lock; it marks the thread as the core (`HeldMark`) so user `Drop` code that writes signals is
+allowed, and never calls `me()` (there is no strong reference left to make current). `spawn`, `sleep`,
 `port_call` and `event` on a surviving `Ctx` do nothing but log a WARN (the first eight per
 runtime; `warn_shut_down`): `spawn` drops the future unpolled and returns `TaskId::dead()`,
 `sleep` completes at once, `port_call` resolves to `PortError::Cancelled`, `event` returns.
@@ -542,7 +556,7 @@ Known limitations, each deliberate for v1:
 * Signal writes from off-core threads (release builds only; debug builds refuse them, section 12)
   are not ordered with core writes.
 * An `Arc<Runtime>` held only by your code does not stop a global runtime, and a store's `Ctx`
-  keeps a runtime alive until `shutdown` (section 15).
+  keeps a runtime alive until `shutdown` (section 15); a `WeakCtx` field does not (ADR-034).
 * Generations are a process-wide `u32` counter: 2^32 - 1 handles per process, then object creation
   fails loudly (section 13, ADR-022).
 * `Runtime::extension` values are not released by `shutdown`; one that holds a `Ctx` pins the

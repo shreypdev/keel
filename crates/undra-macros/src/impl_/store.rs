@@ -45,8 +45,9 @@
 //! u32`, then per signal `signal_id u32` and a length-prefixed value. Only non-computed
 //! signals are stored. The store is then rebuilt in one of two ways:
 //!
-//! * automatically, if every non-signal field is a `Ctx` (cloned from the argument) or
-//!   `Default`, and there are no `Computed` fields: a struct literal;
+//! * automatically, if every non-signal field is a `Ctx` (cloned from the argument), a `WeakCtx`
+//!   (downgraded from it; what a store should keep, ADR-034) or `Default`, and there are no
+//!   `Computed` fields: a struct literal;
 //! * through a hook, `#[undra::store(restore = "Self::rebuild")]`, with the signature
 //!   `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in order>) -> Self`. Use it when
 //!   the store has computed fields (only your code knows how to derive them) or other
@@ -86,10 +87,21 @@ struct SignalField {
     no_coalesce: bool,
 }
 
+/// How a non-signal field is filled when the store is restored automatically.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CtxField {
+    /// Not a context: `Default::default()`.
+    No,
+    /// A `Ctx`: cloned from the restore context.
+    Strong,
+    /// A `WeakCtx`: downgraded from the restore context (ADR-034, decision 7).
+    Weak,
+}
+
 struct StateField {
     ident: syn::Ident,
     ty: syn::Type,
-    is_ctx: bool,
+    ctx: CtxField,
 }
 
 /// The last path segment of a one-argument generic type (`Signal<T>`), with its `T`.
@@ -148,10 +160,18 @@ fn vec_item(ty: &syn::Type) -> Option<syn::Type> {
     }
 }
 
-fn is_ctx_type(ty: &syn::Type) -> bool {
-    matches!(ty, syn::Type::Path(path)
-        if path.qself.is_none()
-            && path.path.segments.last().is_some_and(|seg| seg.ident == "Ctx" && seg.arguments.is_none()))
+fn ctx_field(ty: &syn::Type) -> CtxField {
+    let syn::Type::Path(path) = ty else {
+        return CtxField::No;
+    };
+    if path.qself.is_some() {
+        return CtxField::No;
+    }
+    match path.path.segments.last() {
+        Some(seg) if seg.arguments.is_none() && seg.ident == "Ctx" => CtxField::Strong,
+        Some(seg) if seg.arguments.is_none() && seg.ident == "WeakCtx" => CtxField::Weak,
+        _ => CtxField::No,
+    }
 }
 
 /// Expands `#[undra::store]` on a struct.
@@ -262,7 +282,7 @@ pub(crate) fn expand_store(
                     None => {
                         take(&mut field.attrs, Site::STATE_FIELD, &mut errors);
                         state.push(StateField {
-                            is_ctx: is_ctx_type(&field.ty),
+                            ctx: ctx_field(&field.ty),
                             ty: field.ty.clone(),
                             ident,
                         });
@@ -406,14 +426,14 @@ pub(crate) fn expand_store(
         .collect();
 
     let default_trait = format_ident!("__UndraRestoreDefault_{}", name_str);
-    let needs_default = restore_hook.is_none() && state.iter().any(|f| !f.is_ctx);
+    let needs_default = restore_hook.is_none() && state.iter().any(|f| f.ctx == CtxField::No);
     let default_attr = on_unimplemented(
         &Diag::new(
             code::E0013,
             format!(
                 "store `{name_str}` cannot be restored automatically: its field of type `{{Self}}` has no `Default`"
             ),
-            "restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument)",
+            "restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument, a `WeakCtx` downgraded from it)",
             "implement `Default` for the type, or add `#[undra::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store",
         ),
         "this field type has no `Default`",
@@ -466,10 +486,10 @@ pub(crate) fn expand_store(
             let state_inits = state.iter().map(|f| {
                 let ident = &f.ident;
                 let ty = &f.ty;
-                if f.is_ctx {
-                    quote!(#ident: ::core::clone::Clone::clone(&__ctx))
-                } else {
-                    quote_spanned!(ty.span()=> #ident: <#ty as #default_trait>::__undra_default())
+                match f.ctx {
+                    CtxField::Strong => quote!(#ident: ::core::clone::Clone::clone(&__ctx)),
+                    CtxField::Weak => quote!(#ident: __ctx.downgrade()),
+                    CtxField::No => quote_spanned!(ty.span()=> #ident: <#ty as #default_trait>::__undra_default()),
                 }
             });
             let signal_inits = plain.iter().zip(&values).map(|(s, value)| {

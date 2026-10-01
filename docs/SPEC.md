@@ -318,7 +318,7 @@ On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{fie
 
 ### 4.3 `#[undra::store]`
 
-On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
+On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (a `WeakCtx`, config; a `Ctx` field works but keeps the runtime alive until shutdown, ADR-034). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
 
 ### 4.4 `#[undra::port]`
 
@@ -344,7 +344,8 @@ The runtime is dependency-light (no tokio). It provides the executor, the core l
 * **Core thread** (native): one `std::thread` named `undra-core` that owns the executor loop: wait for work → lock → poll ready tasks (bounded batch, max 64) → unlock → repeat.
 * **Blocking pool** (native, and the test runtime): `undra_runtime::spawn_blocking(f)` runs `f` on a pool of `min(4, cores)` threads without the lock and resumes the awaiting task via the executor. `f` must not write signals: debug builds refuse such a write (the runtime installs `undra_signals::set_write_checker`, §16.1). The check is an allowlist (ADR-023): a signal write with consequences is allowed on a thread that holds a runtime's core lock (a dispatched call, a task poll, an event subscriber, `observe`, `restore`), on a `TestRuntime` driver thread and inside `testing::unchecked_writes`, and refused on every other thread (a pool worker, a host or embedder thread, a thread inside no runtime). Release builds do not evaluate it; the store's delivery lock (§16.1) keeps an off-core write from being overtaken.
 * **wasm**: single thread; `undra_poll()` export drives the executor; wakers call the `undra_host_schedule()` import (deduplicated per turn).
-* **Shutdown.** `undra_shutdown` / `Runtime::shutdown` first answers every call still in flight with status 3 (`cancelled`) and ends every open stream with a `StreamItem` flag 2 (error) whose `String` body starts `"cancelled: "`, each exactly once; then it stops and joins the core, timer and blocking threads, fails pending port calls with `PortError::Cancelled`, clears event subscribers and Rust port bindings (closures that hold a `Ctx` are reference cycles with the runtime), and drops every task and object under the core lock. Afterwards `call` answers status 5, and `spawn`, `sleep`, `port_call` and `event` on a surviving `Ctx` are no-ops that log a warning (never a panic, never queued). It must not be called from the core thread or a host callback (it would wait for itself); debug builds assert this (ADR-023). `Runtime::extension` values are not cleared. A cancelled task's future is always dropped on the core (with the core lock held), so user `Drop` code never runs concurrently with core code.
+* **Shutdown.** `undra_shutdown` / `Runtime::shutdown` first answers every call still in flight with status 3 (`cancelled`) and ends every open stream with a `StreamItem` flag 2 (error) whose `String` body starts `"cancelled: "`, each exactly once; then it stops and joins the core, timer and blocking threads, fails pending port calls with `PortError::Cancelled`, clears event subscribers and Rust port bindings (closures that hold a `Ctx` are reference cycles with the runtime), and drops every task and object under the core lock. Afterwards `call` answers status 5, and `spawn`, `sleep`, `port_call` and `event` on a surviving `Ctx` are no-ops that log a warning (never a panic, never queued). It must not be called from the core thread or a host callback (it would wait for itself); debug builds assert this (ADR-023). `Runtime::extension` values are not cleared. A cancelled task's future is always dropped on the core (with the core lock held), so user `Drop` code never runs concurrently with core code. Shutdown first closes the runtime's *lifeline*: `Ctx::closed()`, `WeakCtx::closed()` and a pending `WeakCtx::sleep` complete with `Gone::ShutDown` before anything else happens, and `WeakCtx::upgrade` answers `Err(Gone::ShutDown)` from then on, even while the memory is alive (ADR-034).
+* **Owners and `Drop` (ADR-034).** The `Arc<Runtime>` that `Runtime::new` / `init` return is the owner; the global runtime's owner is the global slot, so `undra_shutdown` stays the only way to end it. The runtime's own call and stream tasks, the blocking pool's queued jobs, `undra-query`'s tasks and its query handles hold the runtime **weakly**, and event subscribers receive the `Ctx` as an argument, so a runtime whose app code keeps only `WeakCtx`s across awaits is freed when its owner drops it. `Drop` then does what shutdown does, including answering what is in flight (status 3 for calls, the cancelled stream item for streams, each once: the `Host` is still owned by the runtime while it drops), closes the lifeline with `Gone::Dropped`, and joins the core, timer and blocking threads, except the one it runs on (the last strong reference can be released at the end of a poll on the `undra-core` thread, or by a blocking job). A `Ctx` kept in a long-lived place (a store field, a task that loops, a closure in an extension) still pins the runtime until `shutdown`; `stats_json`'s `strong_refs` makes that visible.
 * **Host callbacks** (reply, change-set, port call) are invoked from whatever thread completed the work, **while the core lock may be held**. The host must not call back into the core synchronously from these callbacks except `undra_buf_free`; it enqueues onto its main thread. Violations are detected in every build and reported as `E_REENTRANT`: the runtime marks the calling thread for the duration of **every** host callback (`reply`, `change_set`, `stream_item`, `port_call`, `timer_set`, `log`, `schedule`) and each core-lock entry point refuses a thread that holds that runtime's core lock or is inside one of its callbacks (ADR-023). The second condition matters: a callback delivered on a thread that does not hold the core lock (an off-core commit hands its change-set to the host while holding the store's delivery lock) that waited for the core would deadlock against a core waiting for that delivery lock. `port_reply`, `timer_fired`, `stream_credit` and `stats_json` never take the core lock and stay allowed from callbacks.
 
 ### 5.2 Executor
@@ -364,10 +365,22 @@ impl Ctx {
     pub fn sleep(&self, d: Duration) -> impl Future<Output = ()>; // via Timer port
     pub fn query(&self) -> &QueryClient;                      // undra-query
     pub fn mutate<M: MutationDef>(&self, input: M::Input) -> MutationBuilder<M>;
-    pub fn events(&self) -> &Events;                          // subscribe to Connectivity/Lifecycle events
+    pub fn events(&self) -> &Events;                          // subscribe to Connectivity/Lifecycle events; subscribers receive (&Ctx, payload)
     pub fn current() -> Ctx;                                  // thread-local, valid inside any dispatched call
+    pub fn downgrade(&self) -> WeakCtx;                       // ADR-034
+    pub fn closed(&self) -> Closed;                           // completes (Gone::ShutDown) when shutdown starts, at once if it has
 }
+pub struct WeakCtx(..);                                       // Clone + Send + Sync; a Weak<Runtime>: does not keep the runtime alive
+impl WeakCtx {
+    pub fn upgrade(&self) -> Result<Ctx, Gone>;               // Err(ShutDown) once shutdown began (memory may be alive), Err(Dropped) after the last strong reference went
+    pub fn is_alive(&self) -> bool;                           // cheap, for loop conditions
+    pub fn closed(&self) -> Closed;                           // completes with the reason (the first one: a runtime shut down and then dropped says ShutDown)
+    pub fn sleep(&self, d: Duration) -> WeakSleep;            // Ok(()) after d, Err(Gone) as soon as the runtime goes; holds only the weak reference
+}
+pub enum Gone { ShutDown, Dropped }                           // Copy + Display + Error
 ```
+
+**The rule (ADR-034): a `Ctx` lives for a call or a task step; anything that outlives the call keeps a `WeakCtx`.** A `Ctx` is a strong reference; one kept by something the runtime owns (a task that loops, a subscriber, a store field) is a reference cycle that keeps the runtime and its threads alive until `shutdown`. The periodic-task idiom is `while weak.sleep(d).await.is_ok() { let Ok(ctx) = weak.upgrade() else { break }; work(&ctx).await }`, which ends with a typed outcome instead of spinning or pinning. A surviving strong `Ctx` after shutdown keeps the behaviour of §5.1 (logged no-ops; `Ctx::sleep` completes at once). `#[undra::store]` restores a `WeakCtx` field by downgrading the restore context, as it clones a `Ctx` field.
 
 ### 5.4 Object table
 
@@ -444,7 +457,7 @@ void     undra_event(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, u
 void     undra_timer_fired(uint32_t timer_id);
 UndraBuf  undra_snapshot(void);
 uint32_t undra_restore(const uint8_t *ptr, uint32_t len);
-UndraBuf  undra_stats_json(void);                        // live handles, tasks, txn count, crossings
+UndraBuf  undra_stats_json(void);                        // live handles, tasks, txn count, crossings, strong_refs (ADR-034)
 void     undra_buf_free(UndraBuf buf);
 ```
 
@@ -486,6 +499,7 @@ static native void   timerFired(int timerId);
 static native byte[] snapshot();
 static native int    restore(byte[] snapshot);
 static native String statsJson();
+static native void   shutdown();                                  // what undra_shutdown runs; releases the Callbacks global reference (ADR-034). Kotlin's UndraCore.close() of an in-process core calls it (never from a callback), and a later load starts a fresh core
 ```
 `ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`. The JNI callbacks follow the host contract of §6. In particular a synchronous port is a two-call protocol with hidden per-thread state: the shim calls `portSyncReply()` on the same thread, right after `onPortCall` returned 0, and callbacks run concurrently, so an implementation must carry the reply in thread-local state (the shipped `InprocTransport` does, in a `ThreadLocal`), never in a shared field.
 
@@ -736,7 +750,7 @@ Macro errors use stable codes and a fixed shape: `error[undra::E00NN]: <what>` +
 | E0010 | `#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum |
 | E0011 | `#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen) |
 | E0012 | trait object in a record field (the blueprint example) |
-| E0013 | store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook |
+| E0013 | store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx`, a `WeakCtx` nor `Default`, and no `#[undra::store(restore = "..")]` hook |
 | E0020 | `&mut self` receiver |
 | E0021 | `self` by value |
 | E0022 | non-`Send` future in an async method |
@@ -948,7 +962,7 @@ impl Runtime {
     pub fn poll(&self);                              // drive the executor (wasm and manual runtimes); run_pending() runs until idle
     pub fn snapshot(&self) -> Vec<u8>;
     pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;   // all or nothing; cancels in-flight calls on replaced receivers (§5.9); resumes the generation counter above the snapshot's floor (ADR-022)
-    pub fn stats_json(&self) -> String;
+    pub fn stats_json(&self) -> String;              // includes `strong_refs`: strong references besides the global slot (ADR-034)
     pub fn schema(&self) -> &undra_meta::Schema; pub fn schema_hash(&self) -> u64;
     pub fn ctx(&self) -> Ctx;
     // What generated code calls:
@@ -963,13 +977,15 @@ impl Runtime {
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;
     pub fn extension<T: Default + Send + Sync + 'static>(&self) -> &T;      // per-runtime state of layered crates (undra-query)
 }
-#[derive(Clone)] pub struct Ctx(..);   // §5.3; an Arc<Runtime>. `Ctx::current()` / `try_current()` read a thread-local set by dispatch, by the executor while polling and by `Ctx::enter()`
+#[derive(Clone)] pub struct Ctx(..);   // §5.3; an Arc<Runtime>. `Ctx::current()` / `try_current()` read a thread-local set by dispatch, by the executor while polling and by `Ctx::enter()`. `downgrade() -> WeakCtx`, `closed() -> Closed` (ADR-034)
+#[derive(Clone)] pub struct WeakCtx(..);   // §5.3; a Weak<Runtime> plus the runtime's lifeline: upgrade() -> Result<Ctx, Gone>, is_alive(), closed(), sleep(d) -> WeakSleep (Output = Result<(), Gone>), runtime_id()
+pub enum Gone { ShutDown, Dropped }
 impl Ctx {
     pub fn txn<R>(&self, f: impl FnOnce() -> R) -> R;                       // one transaction, delivered through this runtime
     pub fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) -> TaskId;   pub fn cancel_task(&self, id: TaskId);   // the cancelled future is dropped on the core (core lock held, or queued for the core's next turn); after shutdown spawn/sleep/port_call/event are logged no-ops
     pub fn spawn_blocking<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> BlockingTask<T>;
     pub fn sleep(&self, d: Duration) -> Sleep;                              // through the host's timer or the internal one
-    pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&[u8]) + Send + Sync>) -> Subscription
+    pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&Ctx, &[u8]) + Send + Sync>) -> Subscription; the subscriber gets the runtime's Ctx as an argument so it never captures one (ADR-034)
     pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture;
     pub fn port_call_sync(&self, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;   pub fn bind_port / bind_dyn_port;
@@ -1028,7 +1044,7 @@ Every type position the schema records is also checked against the type it resol
 
 * The struct must be marked on its impl block: `#[undra::api(store)] impl Todos { .. }`. The marker is what wires the constructors to the signals; a struct without `#[undra::store]`, or an impl block without the marker, is E0011.
 * The macro appends a hidden field `pub __undra_cell: ::undra::signals::CellSlot`. Struct literals of the type inside its `#[undra::api(store)]` impl block get `__undra_cell: Default::default()` added; struct literals anywhere else must spell it out. The field name is reserved (E0007).
-* `#[undra::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument) or `Default`; a store with a `Computed` field needs the hook (E0013). Snapshots hold the plain signals only.
+* `#[undra::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument), a `WeakCtx` (downgraded from it, ADR-034: what a store should keep, since a `Ctx` field is a reference cycle with the runtime until shutdown) or `Default`; a store with a `Computed` field needs the hook (E0013). Snapshots hold the plain signals only.
 * Field kinds: `Signal<T>` and `Computed<T>` are signals, numbered in declaration order; every other field is private state. `Lazy<T>` is rejected in v1 (E0001, "lazy lists are not available in v1"), like `undra-bindgen` rejects it.
 * The signal table is built by a hidden method that calls, per field and in order, `attach` (plain), `attach_keyed` with a generated `fn(&Item) -> u64` (`#[undra(key = "id")]`: `fnv1a64` over the encoded key field, encoded through a per-thread scratch buffer) or `attach_computed`, each followed by `set_no_coalesce(id)` for `#[undra(no_coalesce)]`, all with `?`. `StoreObject::cell()` creates the cell once through `CellSlot::get_or_init`; a store whose attach failed gets an empty cell there rather than a panic.
 * A constructor's dispatch arm first calls `__undra_attach_all()` (`CellSlot::get_or_try_init`); on `Err(SignalsError)` nothing is inserted and the arm answers `DispatchResult::BadRequest("store `Todos` could not attach its signals: <error>")`. Otherwise it inserts the object (`Runtime::insert_object`, which gives the cell its handle) and replies with the handle (`u64`). `restore` fails with `WireError::InvalidTag` if the rebuilt store cannot attach.

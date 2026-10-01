@@ -27,9 +27,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use undra_ports::{CtxPorts, HttpError};
-use undra_runtime::Ctx;
 use undra_runtime::executor::Notify;
 use undra_runtime::log::{DEBUG, WARN};
+use undra_runtime::{Ctx, WeakCtx};
 use undra_wire::{Bytes, Uuid};
 
 use crate::defs::BoxFuture;
@@ -198,12 +198,16 @@ impl Shared {
         state.queue.dirty = true;
         if !state.queue.writer_running {
             state.queue.writer_running = true;
-            ctx.spawn(run_queue_writer(self.clone(), ctx.clone()));
+            ctx.spawn(run_queue_writer(self.clone(), ctx.downgrade()));
         }
     }
 
     /// Reads the persisted queue (at hydration) and replays it if the client is online.
-    pub(crate) async fn hydrate_queue(self: &Arc<Self>, ctx: &Ctx) {
+    pub(crate) async fn hydrate_queue(self: &Arc<Self>, weak: &WeakCtx) {
+        let Ok(ctx) = weak.upgrade() else {
+            return;
+        };
+        let ctx = &ctx;
         let kv = ctx.kv();
         let Some(Bytes(raw)) = kv.get(QUEUE_KEY.to_owned()).await else {
             return;
@@ -258,7 +262,7 @@ impl Shared {
             return;
         }
         state.queue.replaying = true;
-        ctx.spawn(run_replay(self.clone(), ctx.clone()));
+        ctx.spawn(run_replay(self.clone(), ctx.downgrade()));
     }
 
     /// Removes the head of the queue (it was answered) and persists the change.
@@ -271,7 +275,7 @@ impl Shared {
 }
 
 /// Persists the queue whenever it is dirty, one write at a time.
-async fn run_queue_writer(shared: Arc<Shared>, ctx: Ctx) {
+async fn run_queue_writer(shared: Arc<Shared>, weak: WeakCtx) {
     struct Guard(Arc<Shared>, bool);
     impl Drop for Guard {
         fn drop(&mut self) {
@@ -281,8 +285,12 @@ async fn run_queue_writer(shared: Arc<Shared>, ctx: Ctx) {
         }
     }
     let mut guard = Guard(shared.clone(), true);
-    let schema_hash = ctx.runtime().schema_hash();
     loop {
+        // One write per step, with the runtime upgraded for that step only (ADR-034).
+        let Ok(ctx) = weak.upgrade() else {
+            return;
+        };
+        let schema_hash = ctx.runtime().schema_hash();
         let bytes = {
             let mut state = shared.state.lock();
             if !state.queue.dirty {
@@ -311,7 +319,7 @@ async fn run_queue_writer(shared: Arc<Shared>, ctx: Ctx) {
 }
 
 /// Runs the queued mutations in order until the queue is empty or the network is gone.
-async fn run_replay(shared: Arc<Shared>, ctx: Ctx) {
+async fn run_replay(shared: Arc<Shared>, weak: WeakCtx) {
     struct Guard(Arc<Shared>, bool);
     impl Drop for Guard {
         fn drop(&mut self) {
@@ -347,6 +355,10 @@ async fn run_replay(shared: Arc<Shared>, ctx: Ctx) {
         let Some((mutation, vt)) = head else {
             return;
         };
+        // One queued mutation per step, with the runtime upgraded for that step only (ADR-034).
+        let Ok(ctx) = weak.upgrade() else {
+            return;
+        };
         let Some(vt) = vt else {
             Shared::log(
                 &ctx,
@@ -368,7 +380,7 @@ async fn run_replay(shared: Arc<Shared>, ctx: Ctx) {
 
         let key = mutation.idempotency_key;
         let params = mutation.params.clone();
-        let outcome = with_retries(&ctx, vt.retry, Failure::retryable, || {
+        let outcome = with_retries(&weak, vt.retry, Failure::retryable, || {
             scoped(Some(key), (vt.execute)(ctx.clone(), &params))
         })
         .await;
@@ -377,7 +389,10 @@ async fn run_replay(shared: Arc<Shared>, ctx: Ctx) {
             if is_network_error(&ctx, vt.id, error) {
                 if shared.is_online() {
                     // The platform says online, the request says otherwise: try again later.
-                    backoff_sleep(&ctx, attempt).await;
+                    drop(ctx);
+                    if backoff_sleep(&weak, attempt).await.is_err() {
+                        return;
+                    }
                     attempt = attempt.saturating_add(1);
                 } else {
                     let mut state = shared.state.lock();

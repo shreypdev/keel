@@ -329,7 +329,7 @@ fn connectivity_events_decode_online_then_kind() {
     let t = platform();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
-    let _sub = on_connectivity_changed(&ctx(&t), move |online, kind| {
+    let _sub = on_connectivity_changed(&ctx(&t), move |_ctx, online, kind| {
         sink.lock().unwrap().push((online, kind));
     });
     let (port, method) = (0x1fef_f6ff, 0xb4f2_a010);
@@ -350,7 +350,9 @@ fn lifecycle_events_decode_the_state() {
     let t = platform();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
-    let _sub = on_lifecycle_changed(&ctx(&t), move |state| sink.lock().unwrap().push(state));
+    let _sub = on_lifecycle_changed(&ctx(&t), move |_ctx, state| {
+        sink.lock().unwrap().push(state)
+    });
     let (port, method) = (0x81c0_afd4, 0x0bc8_2569);
     for payload in ["0000", "0100", "0200", "0300", ""] {
         t.runtime().event(port, method, &hex(payload));

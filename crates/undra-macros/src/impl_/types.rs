@@ -681,7 +681,7 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
             "`Ctx` cannot be passed across the boundary".to_owned(),
             "the runtime injects `Ctx`; it is only accepted as the first parameter of a constructor, a free function, a query or a mutation",
             &format!(
-                "remove the parameter; store a `Ctx` in the object at construction, or call `Ctx::current()`{}",
+                "remove the parameter; keep a `WeakCtx` (`ctx.downgrade()`) in the object at construction, or call `Ctx::current()`{}",
                 reserved_hint("Ctx")
             ),
         )),

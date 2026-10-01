@@ -281,7 +281,7 @@ pub(crate) fn analyze(sig: &mut Signature, errors: &mut Errors) -> Analysis {
                         code::E0001,
                         format!("`Ctx` parameter on method `{fn_name}`"),
                         "methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations",
-                        "store a `Ctx` in the object when it is constructed, or use `Ctx::current()`",
+                        "keep a `WeakCtx` (`ctx.downgrade()`) in the object when it is constructed and upgrade it in the method, or use `Ctx::current()`",
                     )
                     .on(&pat_type.ty),
                 );

@@ -70,6 +70,36 @@ use crate::runtime::{BuildOptions, Runtime, UncheckedWrites};
 /// How long [`TestRuntime::run_pending`] waits for one blocking closure to finish.
 const BLOCKING_SETTLE_LIMIT: Duration = Duration::from_secs(10);
 
+/// Threads started by `undra-runtime` (`undra-core`, `undra-timer`, `undra-blocking-N`) that are
+/// still running, in this process.
+static LIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts a runtime thread in [`live_threads`] for as long as it lives.
+pub(crate) struct ThreadMark(());
+
+impl ThreadMark {
+    pub(crate) fn enter() -> ThreadMark {
+        LIVE_THREADS.fetch_add(1, Ordering::SeqCst);
+        ThreadMark(())
+    }
+}
+
+impl Drop for ThreadMark {
+    fn drop(&mut self) {
+        LIVE_THREADS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How many threads started by `undra-runtime` (the `undra-core`, `undra-timer` and
+/// `undra-blocking-N` threads of every runtime in the process) are running right now.
+///
+/// For tests that prove a runtime let its threads go (ADR-034: a runtime dropped by its owner
+/// joins them). The count is process-wide, so such a test must not run alongside other tests that
+/// start runtimes.
+pub fn live_threads() -> usize {
+    LIVE_THREADS.load(Ordering::SeqCst)
+}
+
 /// Declares the calling thread a test driver: it plays the core, so its direct signal writes are
 /// allowed (see the [module documentation](self)). `TestRuntime::new` does this for the thread
 /// that creates it; call it yourself from a harness that builds a real `Runtime` without a core

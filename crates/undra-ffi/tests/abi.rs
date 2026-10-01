@@ -1301,7 +1301,7 @@ fn events_reach_subscribers_on_the_core() {
     let _subscription = runtime.events().subscribe(
         0xE0E0_0001,
         0xE0E0_0002,
-        Box::new(move |payload: &[u8]| {
+        Box::new(move |_ctx: &undra::runtime::Ctx, payload: &[u8]| {
             sink.lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(payload.to_vec());

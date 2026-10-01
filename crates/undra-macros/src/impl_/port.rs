@@ -924,7 +924,9 @@ fn event_helpers(
         let mname = &m.name;
         let on_fn = format_ident!("on_{}_{}", snake, mname);
         let encode_fn = format_ident!("encode_{}_{}_event", snake, mname);
-        let on_doc = format!("Calls `f` with the decoded arguments of every `{name_str}.{mname}` event.");
+        let on_doc = format!(
+            "Calls `f` with the runtime's `Ctx` and the decoded arguments of every `{name_str}.{mname}` event. Use the `Ctx` it is given: a captured one would keep the runtime alive (ADR-034)."
+        );
         let encode_doc = format!(
             "Encodes the payload of a `{name_str}.{mname}` event, as the host would send it to `Runtime::event`."
         );
@@ -953,18 +955,18 @@ fn event_helpers(
             #[doc = #on_doc]
             #vis fn #on_fn(
                 ctx: &#runtime::Ctx,
-                f: impl ::core::ops::Fn( #(#tys),* ) + ::core::marker::Send + ::core::marker::Sync + 'static,
+                f: impl ::core::ops::Fn( &#runtime::Ctx, #(#tys),* ) + ::core::marker::Send + ::core::marker::Sync + 'static,
             ) -> #runtime::Subscription {
                 ctx.events().subscribe(
                     <dyn #name as #runtime::Port>::PORT_ID,
                     #meta::ids::port_method_id(#name_str, #mname),
-                    ::std::boxed::Box::new(move |__payload: &[u8]| {
+                    ::std::boxed::Box::new(move |__ctx: &#runtime::Ctx, __payload: &[u8]| {
                         let mut __r = #wire::Reader::new(__payload);
                         #(#decodes)*
                         if __r.finish().is_err() {
                             return;
                         }
-                        f( #(#locals),* )
+                        f( __ctx, #(#locals),* )
                     }),
                 )
             }

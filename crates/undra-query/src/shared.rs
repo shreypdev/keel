@@ -32,7 +32,7 @@ use undra_meta::ids::fnv1a64;
 use undra_ports::{CtxPorts, Kv};
 use undra_runtime::executor::TaskId;
 use undra_runtime::log::{DEBUG, ERROR, WARN};
-use undra_runtime::{Ctx, Port, PortError, Runtime};
+use undra_runtime::{Ctx, Port, PortError, Runtime, WeakCtx};
 use undra_wire::{Bytes, Decode, Encode};
 
 use crate::erased::{Erased, Failure, Outcome, QueryVTable};
@@ -604,7 +604,7 @@ impl Shared {
         let serial = self.next_gen.fetch_add(1, Ordering::Relaxed) + 1;
         let task = ctx.spawn(run_fetch(
             self.clone(),
-            ctx.clone(),
+            ctx.downgrade(),
             key.clone(),
             entry.vt,
             serial,
@@ -766,20 +766,17 @@ impl Shared {
         if self.started.swap(true, Ordering::SeqCst) {
             return;
         }
+        // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
+        // they captured would keep it alive. (`Shared` holds no `Ctx`.)
         let shared = self.clone();
-        undra_ports::on_connectivity_changed(ctx, move |online, _kind| {
-            // Event callbacks run on the core loop, where the runtime is current.
-            if let Some(ctx) = Ctx::try_current() {
-                shared.on_connectivity(&ctx, online);
-            }
+        undra_ports::on_connectivity_changed(ctx, move |ctx, online, _kind| {
+            shared.on_connectivity(ctx, online);
         })
         .detach();
         let shared = self.clone();
-        undra_ports::on_lifecycle_changed(ctx, move |state| {
+        undra_ports::on_lifecycle_changed(ctx, move |ctx, state| {
             if state == undra_ports::AppState::Active {
-                if let Some(ctx) = Ctx::try_current() {
-                    shared.on_active(&ctx);
-                }
+                shared.on_active(ctx);
             }
         })
         .detach();
@@ -794,10 +791,12 @@ impl Shared {
         }
         let delay = Duration::from_millis(self.gc_ms.load(Ordering::Relaxed));
         let shared = self.clone();
-        let (ctx2, key2) = (ctx.clone(), key.clone());
+        // Weak (ADR-034): a pending collection must not keep a dropped runtime alive for `gc_ms`.
+        let (weak, key2) = (ctx.downgrade(), key.clone());
         entry.gc = Some(ctx.spawn(async move {
-            ctx2.sleep(delay).await;
-            shared.collect(&key2);
+            if weak.sleep(delay).await.is_ok() {
+                shared.collect(&key2);
+            }
         }));
     }
 
@@ -820,7 +819,8 @@ impl Shared {
         if entry.persist_task.is_some() {
             return;
         }
-        entry.persist_task = Some(ctx.spawn(run_persist(self.clone(), ctx.clone(), key.clone())));
+        entry.persist_task =
+            Some(ctx.spawn(run_persist(self.clone(), ctx.downgrade(), key.clone())));
     }
 
     /// Reads the persisted cache entries and the offline queue from the `Kv` port
@@ -829,26 +829,32 @@ impl Shared {
     /// An entry written under another schema hash is deleted; one whose query has not been
     /// observed yet waits in memory until it is. A queue written under another schema hash
     /// is deleted; otherwise its mutations are replayed at once if the client is online.
-    pub(crate) async fn hydrate(self: &Arc<Self>, ctx: &Ctx) {
-        let Some(keys) = list_when_available(ctx, CACHE_KEY_PREFIX).await else {
+    pub(crate) async fn hydrate(self: &Arc<Self>, weak: &WeakCtx) {
+        // Every step upgrades the weak context and lets go of it before waiting again
+        // (ADR-034): hydration, with its retries for a late `Kv`, must not keep a runtime alive
+        // that its owner has dropped.
+        let Some(keys) = list_when_available(weak, CACHE_KEY_PREFIX).await else {
             return;
         };
-        let kv = ctx.kv();
-        let schema_hash = ctx.runtime().schema_hash();
         for key in keys {
             let Some((query_id, params_hash)) = parse_cache_key(&key) else {
                 continue;
             };
+            let Ok(ctx) = weak.upgrade() else {
+                return;
+            };
+            let kv = ctx.kv();
+            let schema_hash = ctx.runtime().schema_hash();
             let Some(Bytes(raw)) = kv.get(key.clone()).await else {
                 continue;
             };
             match decode_persisted(&raw) {
                 Ok(persisted) if persisted.schema_hash == schema_hash => {
-                    self.adopt_persisted(ctx, query_id, params_hash, persisted);
+                    self.adopt_persisted(&ctx, query_id, params_hash, persisted);
                 }
                 _ => {
                     Shared::log(
-                        ctx,
+                        &ctx,
                         DEBUG,
                         &format!("dropping the stale cache entry `{key}`"),
                     );
@@ -856,7 +862,7 @@ impl Shared {
                 }
             }
         }
-        self.hydrate_queue(ctx).await;
+        self.hydrate_queue(weak).await;
     }
 
     /// Keeps a persisted entry for its query, or shows it right away if the query is already
@@ -1055,22 +1061,24 @@ const KV_RETRY_MS: u64 = 100;
 /// platform has registered its adapters (a native host registers them right after
 /// `undra_init`, while the core thread is already running), so `Unavailable` is retried for a
 /// few seconds. `None` if the port never appears (the cache then simply starts empty).
-async fn list_when_available(ctx: &Ctx, prefix: &str) -> Option<Vec<String>> {
+async fn list_when_available(weak: &WeakCtx, prefix: &str) -> Option<Vec<String>> {
     let args = prefix.to_owned().encode_to_vec();
     for _ in 0..KV_ATTEMPTS {
-        match ctx
-            .port_call(<dyn Kv as Port>::PORT_ID, KV_LIST_ID, args.clone())
-            .await
-        {
+        let call = {
+            let ctx = weak.upgrade().ok()?;
+            ctx.port_call(<dyn Kv as Port>::PORT_ID, KV_LIST_ID, args.clone())
+        };
+        match call.await {
             Ok(body) => return Vec::<String>::decode_exact(&body).ok(),
             Err(PortError::Unavailable) => {
-                ctx.sleep(Duration::from_millis(KV_RETRY_MS)).await;
+                weak.sleep(Duration::from_millis(KV_RETRY_MS)).await.ok()?;
             }
             Err(_) => return None,
         }
     }
+    let ctx = weak.upgrade().ok()?;
     Shared::log(
-        ctx,
+        &ctx,
         WARN,
         "the Kv port never became available; the query cache starts empty",
     );
@@ -1083,7 +1091,7 @@ const KV_LIST_ID: u32 = undra_meta::ids::port_method_id("Kv", "list");
 /// Clears the in-flight marker of a fetch whose task was dropped before it finished.
 struct FetchGuard {
     shared: Arc<Shared>,
-    ctx: Ctx,
+    ctx: WeakCtx,
     key: QueryKey,
     serial: u64,
     armed: bool,
@@ -1091,33 +1099,44 @@ struct FetchGuard {
 
 impl Drop for FetchGuard {
     fn drop(&mut self) {
-        if self.armed && !self.ctx.runtime().is_shut_down() {
-            self.shared.abort(&self.ctx, &self.key, self.serial);
+        if !self.armed {
+            return;
+        }
+        // A runtime that is shutting down or gone has no entry left to show the error on.
+        if let Ok(ctx) = self.ctx.upgrade() {
+            self.shared.abort(&ctx, &self.key, self.serial);
         }
     }
 }
 
-/// The fetch task of one entry: runs the query with retries and reports the outcome.
+/// The fetch task of one entry: runs the query with retries and reports the outcome. It holds the
+/// runtime weakly (ADR-034): each attempt upgrades for as long as the query's own future runs, and
+/// the backoff between attempts holds nothing.
 async fn run_fetch(
     shared: Arc<Shared>,
-    ctx: Ctx,
+    weak: WeakCtx,
     key: QueryKey,
     vt: &'static QueryVTable,
     serial: u64,
 ) {
     let mut guard = FetchGuard {
         shared: shared.clone(),
-        ctx: ctx.clone(),
+        ctx: weak.clone(),
         key: key.clone(),
         serial,
         armed: true,
     };
-    let outcome = with_retries(&ctx, vt.retry, Failure::retryable, || {
-        (vt.fetch)(ctx.clone(), &key.params)
+    let outcome = with_retries(&weak, vt.retry, Failure::retryable, || {
+        match weak.upgrade() {
+            Ok(ctx) => (vt.fetch)(ctx, &key.params),
+            Err(gone) => Box::pin(async move { Err(Failure::Broken(gone.to_string())) }),
+        }
     })
     .await;
     guard.armed = false;
-    shared.complete(&ctx, &key, serial, outcome);
+    if let Ok(ctx) = weak.upgrade() {
+        shared.complete(&ctx, &key, serial, outcome);
+    }
 }
 
 /// Clears the persist marker of an entry whose write task ended abnormally.
@@ -1139,15 +1158,21 @@ impl Drop for PersistGuard {
 
 /// The write task of one entry: waits out the debounce, writes the entry to the `Kv` port, and
 /// goes around again if another fetch finished meanwhile.
-async fn run_persist(shared: Arc<Shared>, ctx: Ctx, key: QueryKey) {
+async fn run_persist(shared: Arc<Shared>, weak: WeakCtx, key: QueryKey) {
     let mut guard = PersistGuard {
         shared: shared.clone(),
         key: key.clone(),
         armed: true,
     };
-    let schema_hash = ctx.runtime().schema_hash();
     loop {
-        ctx.sleep(Duration::from_millis(PERSIST_DEBOUNCE_MS)).await;
+        // The debounce holds only the weak context (ADR-034).
+        if weak
+            .sleep(Duration::from_millis(PERSIST_DEBOUNCE_MS))
+            .await
+            .is_err()
+        {
+            return;
+        }
         let write = {
             let mut state = shared.state.lock();
             let Some(entry) = state.entries.get_mut(&key) else {
@@ -1161,7 +1186,10 @@ async fn run_persist(shared: Arc<Shared>, ctx: Ctx, key: QueryKey) {
             }
         };
         if let Some((bytes, updated_at)) = write {
-            let value = encode_persisted(schema_hash, updated_at, &bytes);
+            let Ok(ctx) = weak.upgrade() else {
+                return;
+            };
+            let value = encode_persisted(ctx.runtime().schema_hash(), updated_at, &bytes);
             ctx.kv()
                 .set(cache_key(key.query_id, &key.params), Bytes(value))
                 .await;

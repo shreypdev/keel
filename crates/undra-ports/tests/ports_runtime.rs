@@ -419,7 +419,7 @@ fn connectivity_events_reach_core_subscribers() {
     let (t, fakes) = rig();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
-    let _sub = on_connectivity_changed(&t.ctx(), move |online, kind| {
+    let _sub = on_connectivity_changed(&t.ctx(), move |_ctx, online, kind| {
         sink.lock().unwrap().push((online, kind));
     });
     fakes.connectivity.emit_current();
@@ -445,7 +445,9 @@ fn lifecycle_events_reach_core_subscribers() {
     let (t, fakes) = rig();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
-    let _sub = on_lifecycle_changed(&t.ctx(), move |state| sink.lock().unwrap().push(state));
+    let _sub = on_lifecycle_changed(&t.ctx(), move |_ctx, state| {
+        sink.lock().unwrap().push(state)
+    });
     fakes
         .lifecycle
         .script([AppState::Inactive, AppState::Background]);
@@ -462,7 +464,7 @@ fn a_dropped_subscription_stops_receiving() {
     let (t, fakes) = rig();
     let count = Arc::new(Mutex::new(0));
     let counter = count.clone();
-    let subscription = on_lifecycle_changed(&t.ctx(), move |_| *counter.lock().unwrap() += 1);
+    let subscription = on_lifecycle_changed(&t.ctx(), move |_, _| *counter.lock().unwrap() += 1);
     fakes.lifecycle.set(AppState::Background);
     drop(subscription);
     fakes.lifecycle.set(AppState::Active);

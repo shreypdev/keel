@@ -22,7 +22,7 @@ use undra_wire::{Handle, Reader, Writer};
 
 use crate::blocking::{Blocking, BlockingTask, default_pool_size};
 use crate::config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
-use crate::ctx::{Ctx, CtxScope, current_runtime};
+use crate::ctx::{Ctx, CtxScope, Gone, Lifeline, current_runtime};
 use crate::dispatch::{DispatchBytes, DispatchResult, DispatchTable, E_REENTRANT, needs_async};
 #[cfg(not(target_family = "wasm"))]
 use crate::executor::Shared;
@@ -333,6 +333,9 @@ pub struct Runtime {
     /// lock; dropped at the start of the next core turn.
     deferred_drops: Mutex<Vec<BoxFuture>>,
     core_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Closed at the top of `shutdown` and in `Drop`: what `Ctx::closed`, `WeakCtx::closed` and
+    /// `WeakCtx::sleep` wait on without holding the runtime (ADR-034).
+    lifeline: Arc<Lifeline>,
 }
 
 /// Where an object lives: equal addresses are the same object.
@@ -482,6 +485,7 @@ impl Runtime {
             late_uses: AtomicU32::new(0),
             deferred_drops: Mutex::new(Vec::new()),
             core_thread: Mutex::new(None),
+            lifeline: Arc::new(Lifeline::default()),
         });
 
         for (id, first, second) in &rt.table.collisions {
@@ -518,7 +522,10 @@ impl Runtime {
         let shared = self.exec.shared();
         let handle = std::thread::Builder::new()
             .name("undra-core".to_owned())
-            .spawn(move || core_loop(&weak, &shared))
+            .spawn(move || {
+                let _alive = crate::testing::ThreadMark::enter();
+                core_loop(&weak, &shared);
+            })
             .map_err(|e| InitError::Spawn(e.to_string()))?;
         *self.core_thread.lock() = Some(handle);
         Ok(())
@@ -583,6 +590,8 @@ impl Runtime {
         if self.shut_down.swap(true, Ordering::AcqRel) {
             return;
         }
+        // Long-lived work waiting on `closed()` (or a `WeakCtx::sleep`) learns first.
+        self.lifeline.close(Gone::ShutDown);
         // Refuses every task spawned from now on; the core thread leaves its loop.
         self.exec.shutdown();
         // Answer and cancel what is in flight, under the core lock (so no poll is running and
@@ -668,6 +677,11 @@ impl Runtime {
     /// A [`Ctx`] for this runtime.
     pub fn ctx(&self) -> Ctx {
         Ctx(self.me())
+    }
+
+    /// The runtime's "it is over" signal (ADR-034).
+    pub(crate) fn lifeline(&self) -> &Arc<Lifeline> {
+        &self.lifeline
     }
 
     /// A process-unique id for this runtime instance.
@@ -1268,11 +1282,17 @@ impl Runtime {
         handle: Handle,
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
-        let rt = self.me();
+        // The task holds the runtime weakly (ADR-034): the executor owns the task, so a strong
+        // reference here would be a cycle that keeps a dropped runtime alive while the call is
+        // in flight. It upgrades only to reply; a runtime that is gone has answered the call
+        // already (shutdown and `Drop` answer every call in flight).
+        let rt = self.weak.clone();
         let spawned = self.exec.try_spawn(
             Box::pin(async move {
                 let result = future.await;
-                rt.finish_call(call_id, result);
+                if let Some(rt) = rt.upgrade() {
+                    rt.finish_call(call_id, result);
+                }
             }),
             TaskKind::Call { call_id, handle },
         );
@@ -1314,9 +1334,13 @@ impl Runtime {
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
-        let rt = self.me();
         let spawned = self.exec.try_spawn(
-            Box::pin(drive_stream(rt, call_id, stream, state.clone())),
+            Box::pin(drive_stream(
+                self.weak.clone(),
+                call_id,
+                stream,
+                state.clone(),
+            )),
             TaskKind::Stream { call_id, handle },
         );
         let task = match spawned {
@@ -1625,7 +1649,9 @@ impl Runtime {
         &self,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> BlockingTask<T> {
-        self.blocking.spawn(self.ctx(), f)
+        // Weak (ADR-034): a closure still waiting in the pool's queue does not keep a dropped
+        // runtime alive; it becomes current for the closure while it runs.
+        self.blocking.spawn(self.ctx().downgrade(), f)
     }
 
     /// Sleeps; see [`Ctx::sleep`]. After [`shutdown`](Runtime::shutdown) it completes at once
@@ -1971,7 +1997,8 @@ impl Runtime {
     }
 
     /// A host-to-core event (SPEC 5.7): fans out to the [`Events`] subscribers of
-    /// `(port_id, method_id)` on the core loop, with the core lock held.
+    /// `(port_id, method_id)` on the core loop, with the core lock held; each receives this
+    /// runtime's [`Ctx`].
     pub fn event(&self, port_id: u32, method_id: u32, payload: &[u8]) {
         if self.is_shut_down() {
             self.warn_shut_down("event");
@@ -1982,8 +2009,15 @@ impl Runtime {
             return;
         };
         Stats::inc(&self.stats.events);
-        for callback in self.events.callbacks(port_id, method_id) {
-            if let Err(report) = guard::guarded(|| callback(payload)) {
+        let callbacks = self.events.callbacks(port_id, method_id);
+        if callbacks.is_empty() {
+            return;
+        }
+        // Subscribers get the context as an argument (ADR-034): one they captured would be a
+        // reference cycle through the event table.
+        let ctx = self.ctx();
+        for callback in callbacks {
+            if let Err(report) = guard::guarded(|| callback(&ctx, payload)) {
                 self.log_panic("an event subscriber panicked", &report);
             }
         }
@@ -2229,7 +2263,9 @@ impl Runtime {
     // ----- statistics --------------------------------------------------------------------
 
     /// A JSON document with the live handle count, tasks, calls, crossing counters, poisoned
-    /// stores and panics (SPEC 6 `undra_stats_json`). Never takes the core lock.
+    /// stores and panics (SPEC 6 `undra_stats_json`), and `strong_refs`: the strong references
+    /// to the runtime besides the global slot (the caller's included), which makes a `Ctx` kept
+    /// where a `WeakCtx` belongs visible (ADR-034). Never takes the core lock.
     pub fn stats_json(&self) -> String {
         let s = &self.stats;
         let (started, max) = self.blocking.threads();
@@ -2240,14 +2276,24 @@ impl Runtime {
                 calls.len(),
             )
         };
+        // Strong references held outside the runtime's own bookkeeping (the global slot is the
+        // global runtime's owner): the caller's, plus whatever app code keeps. A number that
+        // grows while nothing is in flight is a `Ctx` kept where a `WeakCtx` belongs (ADR-034).
+        let global = usize::from(
+            GLOBAL
+                .try_lock()
+                .is_some_and(|g| g.as_ref().is_some_and(|g| g.id == self.id)),
+        );
+        let strong_refs = self.weak.strong_count().saturating_sub(global);
         let mut out = String::with_capacity(512);
         out.push_str("{\"platform\":");
         push_json_string(&mut out, &self.config.platform);
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
             self.schema_hash,
+            strong_refs,
             self.objects.live(),
             self.objects.store_count(),
             self.objects.poisoned_stores(),
@@ -2312,10 +2358,22 @@ impl core::fmt::Debug for Runtime {
 }
 
 impl Drop for Runtime {
+    /// The last strong reference went without `shutdown` (ADR-034): tears everything down the way
+    /// [`shutdown`](Runtime::shutdown) does, including **answering what is in flight** (status 3
+    /// for calls, the cancelled item for streams, each once): the runtime's own call and stream
+    /// tasks hold it weakly, so a host may still be waiting on them. The `Host` is still owned by
+    /// the runtime here. `Drop` may run on the core thread (the last upgrade released at the end
+    /// of a poll) or a blocking-pool thread; it never joins the thread it runs on.
     fn drop(&mut self) {
-        // The last reference is gone, so nothing else can be running; no lock is needed.
-        self.shut_down.store(true, Ordering::Release);
+        let was_shut_down = self.shut_down.swap(true, Ordering::AcqRel);
+        self.lifeline.close(Gone::Dropped);
         self.exec.shutdown();
+        if !was_shut_down {
+            // Nobody else can hold the core lock (it takes a strong reference to reach it), so
+            // this is the core now; the mark lets user `Drop` code that writes signals do so.
+            let _held = HeldMark::enter(self.id);
+            self.cancel_all_calls("the runtime was dropped");
+        }
         let handle = self.core_thread.lock().take();
         if let Some(handle) = handle {
             if handle.thread().id() != std::thread::current().id() {
@@ -2325,8 +2383,34 @@ impl Drop for Runtime {
         self.timers.shutdown();
         self.blocking.shutdown();
         self.ports.cancel_all();
+        self.release_user_references();
+        let _held = HeldMark::enter(self.id);
         self.teardown();
         // The global slot holds a strong reference, so a registered runtime is never dropped.
+    }
+}
+
+/// Marks the calling thread as holding a runtime's core lock without taking it (`Drop`, where no
+/// other thread can reach the runtime) and without making the runtime current (there is no
+/// strong reference left to make current).
+struct HeldMark(u64);
+
+impl HeldMark {
+    fn enter(id: u64) -> HeldMark {
+        let _ = HELD.try_with(|held| held.borrow_mut().push(id));
+        HeldMark(id)
+    }
+}
+
+impl Drop for HeldMark {
+    fn drop(&mut self) {
+        let id = self.0;
+        let _ = HELD.try_with(|held| {
+            let mut held = held.borrow_mut();
+            if let Some(pos) = held.iter().rposition(|&x| x == id) {
+                held.remove(pos);
+            }
+        });
     }
 }
 
@@ -2354,8 +2438,12 @@ fn core_loop(weak: &Weak<Runtime>, shared: &Shared) {
 /// The stream is polled *before* credit is checked, so it runs at most one item ahead of the
 /// host, and an ended stream reports its end immediately even if the host has spent all its
 /// credit (as gRPC servers send trailers regardless of the flow-control window).
+///
+/// The driver holds the runtime weakly (ADR-034) and upgrades once per item, after the credit
+/// wait and never across an `.await`: an open stream does not keep a dropped runtime alive. A
+/// runtime that is gone has already ended the stream (shutdown and `Drop` do).
 async fn drive_stream(
-    rt: Arc<Runtime>,
+    rt: Weak<Runtime>,
     call_id: u32,
     mut stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     state: Arc<StreamState>,
@@ -2367,14 +2455,17 @@ async fn drive_stream(
                 while !state.try_take() {
                     state.notify.notified().await;
                 }
+                let Some(rt) = rt.upgrade() else { return };
                 rt.send_stream_item(call_id, StreamFlag::Item, &item);
             }
             Some(Err(error)) => {
+                let Some(rt) = rt.upgrade() else { return };
                 rt.calls.lock().remove(&call_id);
                 rt.send_stream_item(call_id, StreamFlag::Error, &error);
                 return;
             }
             None => {
+                let Some(rt) = rt.upgrade() else { return };
                 rt.calls.lock().remove(&call_id);
                 rt.send_stream_item(call_id, StreamFlag::End, &[]);
                 return;

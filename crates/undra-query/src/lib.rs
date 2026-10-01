@@ -126,10 +126,14 @@ pub use status::QueryStatus;
 
 use undra_runtime::{Ctx, InitHook, inventory};
 
-/// Reads the persisted cache and queue when a runtime starts.
+/// Reads the persisted cache and queue when a runtime starts. The task holds the runtime weakly
+/// (ADR-034), so an idle runtime whose owner lets go is freed even while hydration still waits
+/// for a late `Kv` adapter.
 pub(crate) fn init(ctx: &Ctx) {
-    let client = ctx.query();
-    ctx.spawn(async move { client.hydrate().await });
+    let shared = shared::shared_of(ctx.runtime());
+    shared.start(ctx);
+    let weak = ctx.downgrade();
+    ctx.spawn(async move { shared.hydrate(&weak).await });
 }
 
 inventory::submit! {

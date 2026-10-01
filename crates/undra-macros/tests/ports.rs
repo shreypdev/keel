@@ -555,7 +555,7 @@ fn event_subscriptions_decode_the_payload() {
     let ctx = rt.ctx();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
-    let _subscription = on_reachability_changed(&ctx, move |online, kind| {
+    let _subscription = on_reachability_changed(&ctx, move |_ctx, online, kind| {
         sink.lock().unwrap().push((online, kind));
     });
     let payload = encode_reachability_changed_event(false, LinkKind::Cellular);
@@ -598,10 +598,10 @@ fn event_methods_without_arguments_and_same_named_methods_do_not_clash() {
     let ctx = rt.ctx();
     let states = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&states);
-    let _a = on_phase_changed(&ctx, move |state| sink.lock().unwrap().push(state));
+    let _a = on_phase_changed(&ctx, move |_ctx, state| sink.lock().unwrap().push(state));
     let count = Arc::new(Mutex::new(0));
     let counter = Arc::clone(&count);
-    let _b = on_phase_low_memory(&ctx, move || *counter.lock().unwrap() += 1);
+    let _b = on_phase_low_memory(&ctx, move |_ctx| *counter.lock().unwrap() += 1);
     let payload = encode_phase_changed_event(2);
     rt.event(
         <dyn Phase as Port>::PORT_ID,

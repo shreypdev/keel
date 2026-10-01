@@ -1,7 +1,7 @@
 # ADR-034: anything that outlives a call holds a `WeakCtx`, and a runtime ends when its owner lets go
 
-Status: **Proposed** (2026-10-01, from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps LC-1…LC-3
-and PA-6; Track A, piece A1). Touches SPEC 5.1 (Shutdown), 5.3 and 16.2 (`Ctx`, the new `WeakCtx`, `Events`),
+Status: **Accepted** (2026-10-01; implemented on `wt/runtime-lifecycle`, Track A, piece A1. Proposed the same day
+from the v1.x gap audit `.10x/specs/2026-10-01-v1x-gaps.md`, gaps LC-1…LC-3 and PA-6). Touches SPEC 5.1 (Shutdown), 5.3 and 16.2 (`Ctx`, the new `WeakCtx`, `Events`),
 `undra-runtime` (`ctx.rs`, `runtime.rs`, `ports.rs`), `undra-query` (its tasks and subscribers), `undra-ports`
 (the event helpers), `undra-macros` (a `WeakCtx` store field restores like a `Ctx`), and the Kotlin runtime's
 `close()` with one JNI native added (`UndraNative.shutdown()`, SPEC 6.1). **No wire change, no C ABI or wasm
