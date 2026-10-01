@@ -84,6 +84,7 @@ native_server! {
     mod bridge;
     mod conn;
     mod error;
+    mod notice;
     mod origin;
     mod resume;
     mod server;
@@ -94,8 +95,10 @@ native_server! {
 
     pub use bridge::{Bridge, ClientInfo, LogSink};
     pub use error::ServeError;
+    pub use notice::{AttachNotices, NOTICE_TARGET};
     pub use origin::OriginPolicy;
-    pub use server::{Server, ServerConfig};
+    pub use resume::KeptSession;
+    pub use server::{Server, ServerConfig, Suspended};
     pub use session::UNDRA_VERSION;
     pub use ws::close;
 }

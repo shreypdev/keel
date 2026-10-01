@@ -322,6 +322,12 @@ impl Conn {
         self.state.lock().tracker.end_call(call_id);
     }
 
+    /// How many plain calls of this connection have not been answered yet (streams are not
+    /// counted: they stay open for as long as the client wants them).
+    pub(crate) fn open_plain_calls(&self) -> usize {
+        self.state.lock().tracker.open_plain_calls()
+    }
+
     /// Records an observation change.
     pub(crate) fn observe(&self, handle: u64, signal_id: u32, on: bool) {
         self.state.lock().tracker.observe(handle, signal_id, on);

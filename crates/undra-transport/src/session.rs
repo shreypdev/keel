@@ -25,6 +25,7 @@ use std::io::{self, Read};
 use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -42,6 +43,7 @@ use tungstenite::http::StatusCode;
 
 use crate::bridge::{Bridge, ClientInfo};
 use crate::conn::{Conn, Item};
+use crate::notice::{self, NOTICE_TARGET, Notices};
 use crate::resume::{self, Resume, short_token};
 use crate::server::{Shared, ServerConfig};
 use crate::ws::{self, ReadHalf, close};
@@ -101,6 +103,26 @@ fn decode<'a, T>(
         .map_err(|e| Violation::protocol(format!("malformed {what} payload: {e}")))
 }
 
+/// What the server shares with every session beyond the runtime: the flag that stops calls
+/// from being run while the server is being suspended (ADR-053), and what it tells a client that
+/// attaches.
+#[derive(Clone)]
+pub(crate) struct Hooks {
+    /// Set by [`Server::suspend`](crate::Server::suspend): calls are no longer run.
+    pub(crate) frozen: Arc<AtomicBool>,
+    /// The dev notices of this server.
+    pub(crate) notices: Arc<Notices>,
+}
+
+impl Default for Hooks {
+    fn default() -> Self {
+        Hooks {
+            frozen: Arc::new(AtomicBool::new(false)),
+            notices: Arc::new(Notices::new(notice::AttachNotices::default())),
+        }
+    }
+}
+
 /// What the reader thread does with one client's envelopes.
 pub(crate) struct Session {
     rt: Arc<Runtime>,
@@ -109,6 +131,7 @@ pub(crate) struct Session {
     resume: Arc<Resume>,
     release_on_disconnect: bool,
     busy_grace: Duration,
+    hooks: Hooks,
 }
 
 impl Session {
@@ -118,6 +141,7 @@ impl Session {
         conn: Arc<Conn>,
         resume: Arc<Resume>,
         config: &ServerConfig,
+        hooks: Hooks,
     ) -> Session {
         Session {
             rt,
@@ -126,6 +150,15 @@ impl Session {
             resume,
             release_on_disconnect: config.release_on_disconnect,
             busy_grace: config.busy_grace,
+            hooks,
+        }
+    }
+
+    /// Says the dev notice that is due to this client, if any (ADR-053).
+    fn tell(&self, kind: notice::Kind) {
+        let token = self.conn.session().map(|s| s.token.as_str());
+        if let Some(text) = self.hooks.notices.for_client(kind, token) {
+            self.conn.on_log(INFO, NOTICE_TARGET, &text);
         }
     }
 
@@ -229,6 +262,7 @@ impl Session {
                             kept.handles.len()
                         ),
                     );
+                    self.tell(notice::Kind::Resumed);
                     Ok(())
                 }
                 None => {
@@ -271,6 +305,7 @@ impl Session {
                 info.platform, info.mode, info.undra_version
             ),
         );
+        self.tell(notice::Kind::Fresh);
         Ok(())
     }
 
@@ -340,6 +375,16 @@ impl Session {
 
     fn on_call(&self, payload: &[u8]) -> Result<(), Violation> {
         let call = decode(payload, "Call", Call::decode)?;
+        if self.hooks.frozen.load(Ordering::Acquire) {
+            // The server is being suspended (ADR-053): the core is about to be replaced, so a
+            // call that starts now would run on state the snapshot may already have missed. It
+            // is not answered; the client fails it as unavailable when the socket closes.
+            self.note(
+                DEBUG,
+                &format!("not running call {}: the core is being reloaded", call.call_id),
+            );
+            return Ok(());
+        }
         let constructor = matches!(call.target, CallTarget::Constructor { .. });
         // Recorded before the runtime sees it: a sync method replies before `call` returns.
         if !self.conn.begin_call(call.call_id, constructor) {
@@ -479,6 +524,7 @@ fn serve(shared: &Arc<Shared>, id: u64, tcp: TcpStream) {
         conn.clone(),
         shared.resume.clone(),
         config,
+        shared.hooks.clone(),
     );
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         session_loop(shared, &session, tcp, &control, write_tcp, queue);
@@ -711,6 +757,7 @@ mod tests {
                 conn,
                 Resume::new(Duration::ZERO),
                 &ServerConfig::default(),
+                Hooks::default(),
             );
             Rig {
                 rt,

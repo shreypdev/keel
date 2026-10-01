@@ -89,7 +89,7 @@ impl Bridge {
         self.active.lock().is_some()
     }
 
-    fn current(&self) -> Option<Arc<Conn>> {
+    pub(crate) fn current(&self) -> Option<Arc<Conn>> {
         self.active.lock().clone()
     }
 
