@@ -356,7 +356,9 @@ export class WasmWorkerTransport implements Transport {
     if ((!this.#open && !starting) || this.#worker === null) {
       throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
     }
-    if (this.#trapped !== null) throw this.#trapped;
+    // While the worker restarts a trapped core, only the answers to the port calls of the new instance go through (an
+    // init hook that reads the cache); the core drops the replies that belonged to the instance that trapped.
+    if (this.#trapped !== null && kind !== Kind.PortReply) throw this.#trapped;
     this.#post(kind, payload);
   }
 

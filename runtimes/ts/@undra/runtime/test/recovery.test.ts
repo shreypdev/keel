@@ -554,6 +554,57 @@ describe("the wasm transports restart over the stub core", () => {
     await until("the close", () => closed.length === 1);
   });
 
+  it.each(["wasm-main", "wasm-worker"] as const)(
+    "%s: a port call the new instance makes while it initialises is answered (the cache an init hook reads)",
+    async (mode) => {
+      const module = await WebAssembly.compile((await compileStub({ snapshot: true, portOnInit: true })) as Uint8Array<ArrayBuffer>);
+      let asked = 0;
+      const port: PortImpl = {
+        sync: false,
+        methods: {
+          // Answered from a microtask: before the worker's `restarted` message is read on this thread.
+          [STUB.PORT_METHOD]: async () => {
+            asked++;
+            await Promise.resolve();
+            return u32(40 + asked);
+          },
+        },
+      };
+      const worker = mode === "wasm-worker" ? channelWorker() : null;
+      const policy = { snapshotEveryMs: 0, maxSnapshotBytes: 1024 };
+      const transport =
+        worker === null
+          ? new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH, recovery: policy })
+          : new WasmWorkerTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH, worker: worker.host, recovery: policy });
+      const restarts: UndraCoreRestarted[] = [];
+      const core = track(
+        await UndraCore.attach(transport, {
+          expectedSchemaHash: STUB.SCHEMA_HASH,
+          shared: false,
+          adapters: { log: captureLog(), http: null, timer: null },
+          ports: { [STUB.PORT_ID]: port },
+          recovery: true,
+          onCoreRestarted: (event) => restarts.push(event),
+        }),
+      );
+      await until("the first init's port reply", () => asked === 1);
+      await expect(core.call(FREE, STUB.PANIC, new Uint8Array(0))).rejects.toMatchObject({ reason: "restarted" });
+      await until("the restart", () => restarts.length === 1);
+      await until("the second init's port call", () => asked === 2);
+      // What the new instance heard back from the port call its `undra_init` made: PortReply { id, Ok, u32 42 }.
+      let heard: Uint8Array = new Uint8Array(0);
+      await until("the reply to reach the new instance", () => {
+        void core.call(FREE, STUB.INIT_PORT_REPLY, new Uint8Array(0)).then((body) => {
+          heard = body;
+        });
+        return heard.length > 0;
+      });
+      expect([...heard.subarray(4)]).toEqual([0, ...u32(42)]);
+      core.close();
+      worker?.close();
+    },
+  );
+
   it("wasm-worker: the worker keeps the snapshot and restarts the core itself", async () => {
     const module = await WebAssembly.compile((await compileStub({ snapshot: true })) as Uint8Array<ArrayBuffer>);
     const worker = channelWorker();

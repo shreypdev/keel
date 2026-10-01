@@ -24,9 +24,13 @@ export interface RecoveryOptions {
 
 /** {@link RecoveryOptions} with every default applied. */
 export interface ResolvedRecovery {
+  /** At most one snapshot per this many ms. */
   readonly snapshotEveryMs: number;
+  /** The largest snapshot kept, in bytes. */
   readonly maxSnapshotBytes: number;
+  /** Restarts allowed within `perMs`. */
   readonly maxRestarts: number;
+  /** The window of `maxRestarts`, in ms. */
   readonly perMs: number;
 }
 
@@ -54,7 +58,9 @@ export function resolveRecovery(option: boolean | RecoveryOptions | undefined): 
 
 /** The part of {@link ResolvedRecovery} the side that runs the core needs (it travels to the worker in `init`). */
 export interface SnapshotPolicy {
+  /** At most one snapshot per this many ms. */
   readonly snapshotEveryMs: number;
+  /** A snapshot larger than this many bytes is not kept. */
   readonly maxSnapshotBytes: number;
 }
 
@@ -300,9 +306,13 @@ export interface CoreRestartInfo {
  */
 export class UndraCoreRestarted extends UndraUnhandledError implements CoreRestartInfo {
   override readonly name: string = "UndraCoreRestarted";
+  /** The panic that trapped the core. */
   readonly report: UndraPanicReport;
+  /** How old the restored snapshot was, in ms; `null` when no store came back. */
   readonly restoredFromAgeMs: number | null;
+  /** Calls and streams in flight that failed with `UndraTransportError("restarted")`. */
   readonly rejectedCalls: number;
+  /** Objects the app holds that went stale. */
   readonly staleObjects: number;
 
   /** @param info What happened. @param trap The trap. */
