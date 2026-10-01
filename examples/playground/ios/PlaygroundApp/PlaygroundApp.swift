@@ -7,10 +7,18 @@ import SwiftUI
 /// call its methods.
 @main
 struct PlaygroundApp: App {
-    /// The stores of the four screens, created once the core is loaded.
-    @State private var model: PlaygroundModel
+    /// The stores of the four screens, created once the core is loaded; none in benchmark mode (`-bench`, see
+    /// `BenchLaunch`), where the benchmark loads the core itself.
+    @State private var model: PlaygroundModel?
+
+    /// Counts the cores this process has loaded after the first: the screens start over when it changes.
+    @State private var epoch = 0
 
     init() {
+        if BenchLaunch.mode != nil {
+            _model = State(initialValue: nil)
+            return
+        }
         do {
             try UndraBootstrap.start()
             _model = State(initialValue: try PlaygroundModel())
@@ -23,7 +31,31 @@ struct PlaygroundApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            if let bench = BenchLaunch.mode {
+                // A benchmark run gets neither the dev status bar nor the reload wrapper: it loads the core itself.
+                BenchScreen(mode: bench, quick: BenchLaunch.quick)
+            } else if let model {
+                RootView(model: model)
+                    .id(epoch)
+                    .safeAreaInset(edge: .top, spacing: 0) { DevStatusBar().id(epoch) }
+                    .task { UndraBootstrap.coreLost = { Task { await reload() } } }
+            }
+        }
+    }
+
+    /// `undra dev` restarted the core, so the stores of the old one are gone: load the new core (the dev server may
+    /// still be starting) and create the stores again.
+    @MainActor
+    private func reload() async {
+        for _ in 0..<60 {
+            do {
+                try UndraBootstrap.start()
+                model = try PlaygroundModel()
+                epoch += 1
+                return
+            } catch {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
         }
     }
 }

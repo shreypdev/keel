@@ -16,9 +16,18 @@ import wabt from "wabt";
  *   6  RANDOM_NOW     replies with 8 bytes from `random` and `now_ms` as an f64
  *   7  STREAM         replies status 4, then one item with the arguments, then the end
  *   8  PANIC          logs at level 5 and traps
+ *   9  INIT_PORT_REPLY replies with the last PortReply payload the host gave `undra_port_reply` (empty if none): what the
+ *                     core heard back from the port call `undra_init` made (`StubOptions.portOnInit`)
  *  any other          status 5 "unknown method"
  * Constructors (`target` 2) reply with the handle HANDLE. `call_id == 0` is refused with 5.
  * `undra_observe(on)` delivers one entry (value 42) for the signal, or signal 0 for ALL_SIGNALS.
+ *
+ * With `StubOptions.snapshot` the stub also exports `undra_snapshot` and `undra_restore` (see SNAPSHOT_WAT):
+ * the snapshot is the canned bytes STUB.SNAPSHOT; a restore whose bytes start with 0xff is refused with code 5,
+ * one that starts with 0xfe with code 6, one shorter than 4 bytes with code 5 (nothing changes); any other
+ * answers the calls waiting in the stub (an ECHO_ASYNC or PORT call) with status 3 (cancelled) and delivers one
+ * change-set for HANDLE signal 0 whose value is the little-endian u32 at the start of the bytes. The globals
+ * `restore_count` and `restore_len` record what the host asked.
  */
 
 export const STUB = {
@@ -35,6 +44,9 @@ export const STUB = {
   RANDOM_NOW: 6,
   STREAM: 7,
   PANIC: 8,
+  INIT_PORT_REPLY: 9,
+  /** What `undra_snapshot` returns when the stub is built with `snapshot`. */
+  SNAPSHOT: Uint8Array.of(0x53, 0x4e, 0x41, 0x50, 1, 2, 3, 4),
 } as const;
 
 /** The stub's exported globals, read as numbers. */
@@ -56,6 +68,9 @@ export interface StubGlobals {
   event_method: WebAssembly.Global;
   event_len: WebAssembly.Global;
   buf_free_count: WebAssembly.Global;
+  /** With `StubOptions.snapshot`: how often `undra_restore` was called, and the length it was last given. */
+  restore_count: WebAssembly.Global;
+  restore_len: WebAssembly.Global;
 }
 
 /** `s` as a WAT string literal with every byte escaped. */
@@ -71,6 +86,14 @@ export interface StubOptions {
   readonly abiVersion?: number;
   /** What `undra_init` returns. */
   readonly initResult?: number;
+  /** Also export `undra_snapshot` and `undra_restore` (see the header). */
+  readonly snapshot?: boolean;
+  /** The port the `PORT` method calls, instead of `STUB.PORT_ID` (a standard port's id, to see how a transport answers it). */
+  readonly portId?: number;
+  /** `undra_init` logs a record (level 3, "unknown method"): a core talks while it initialises, before the host has its `Hello`. */
+  readonly logOnInit?: boolean;
+  /** `undra_init` calls the port (`portId`, `STUB.PORT_METHOD`) with port call id 1 and no arguments, like an init hook that reads the cache. */
+  readonly portOnInit?: boolean;
 }
 
 /** The WAT source of the stub. */
@@ -79,6 +102,7 @@ export function stubWat(options: StubOptions = {}): string {
   const abi = options.abiVersion ?? 1;
   const initRc = options.initResult ?? 0;
   const statsLen = new TextEncoder().encode(STATS_JSON).length;
+  const portId = options.portId ?? STUB.PORT_ID;
   return `(module
   (import "undra" "reply" (func $reply (param i32 i32 i32)))
   (import "undra" "changeset" (func $changeset (param i32 i32)))
@@ -150,6 +174,8 @@ export function stubWat(options: StubOptions = {}): string {
     (global.set $init_len (local.get $len))
     (memory.copy (i32.const 0x400) (local.get $ptr)
       (select (local.get $len) (i32.const 64) (i32.lt_u (local.get $len) (i32.const 64))))
+    ${options.logOnInit === true ? "(call $log (i32.const 3) (i32.const 0x304) (i32.const 14))" : ""}
+    ${options.portOnInit === true ? `(drop (call $port_call (i32.const ${portId}) (i32.const ${STUB.PORT_METHOD}) (i32.const 1) (i32.const 0x300) (i32.const 0)))` : ""}
     (i32.const ${initRc}))
 
   ;; A Reply payload (call_id u32, status u8, body) in fresh memory; returns its address, its length is body_len + 5.
@@ -206,7 +232,7 @@ export function stubWat(options: StubOptions = {}): string {
 
     (if (i32.eq (local.get $method) (i32.const ${STUB.PORT}))
       (then
-        (local.set $rc (call $port_call (i32.const ${STUB.PORT_ID}) (i32.const ${STUB.PORT_METHOD}) (i32.const 1) (local.get $args) (local.get $alen)))
+        (local.set $rc (call $port_call (i32.const ${portId}) (i32.const ${STUB.PORT_METHOD}) (i32.const 1) (local.get $args) (local.get $alen)))
         (if (i32.eqz (local.get $rc))
           (then
             (call $send_reply (local.get $call) (i32.const 0) (global.get $port_reply_ptr) (global.get $port_reply_len))
@@ -248,6 +274,11 @@ export function stubWat(options: StubOptions = {}): string {
       (then
         (call $log (i32.const 5) (i32.const 0x304) (i32.const 14))
         unreachable))
+
+    (if (i32.eq (local.get $method) (i32.const ${STUB.INIT_PORT_REPLY}))
+      (then
+        (call $send_reply (local.get $call) (i32.const 0) (global.get $port_reply_ptr) (global.get $port_reply_len))
+        (return (i32.const 0))))
 
     (call $send_reply (local.get $call) (i32.const 5) (i32.const 0x300) (i32.const 18))
     (i32.const 0))
@@ -332,8 +363,43 @@ export function stubWat(options: StubOptions = {}): string {
 
   (func (export "undra_buf_free") (param $ptr i32)
     (global.set $buf_free_count (i32.add (global.get $buf_free_count) (i32.const 1))))
-)`;
+${options.snapshot === true ? SNAPSHOT_WAT : ""})`;
 }
+
+/** The snapshot and restore exports of the stub (see the header); they use the helpers and globals of the module. */
+const SNAPSHOT_WAT = `
+  (global $restore_count (export "restore_count") (mut i32) (i32.const 0))
+  (global $restore_len (export "restore_len") (mut i32) (i32.const -1))
+  (data (i32.const 0x700) "${watString(String.fromCharCode(...STUB.SNAPSHOT))}")
+
+  (func (export "undra_snapshot") (result i32)
+    (call $undrabuf (i32.const 0x700) (i32.const ${STUB.SNAPSHOT.length})))
+
+  (func (export "undra_restore") (param $ptr i32) (param $len i32) (result i32)
+    (global.set $restore_count (i32.add (global.get $restore_count) (i32.const 1)))
+    (global.set $restore_len (local.get $len))
+    (if (i32.lt_u (local.get $len) (i32.const 4)) (then (return (i32.const 5))))
+    (if (i32.eq (i32.load8_u (local.get $ptr)) (i32.const 0xff)) (then (return (i32.const 5))))
+    (if (i32.eq (i32.load8_u (local.get $ptr)) (i32.const 0xfe)) (then (return (i32.const 6))))
+    (if (i32.ne (global.get $async_call) (i32.const 0))
+      (then
+        (call $send_reply (global.get $async_call) (i32.const 3) (i32.const 0) (i32.const 0))
+        (global.set $async_call (i32.const 0))))
+    (if (i32.ne (global.get $port_wait_call) (i32.const 0))
+      (then
+        (call $send_reply (global.get $port_wait_call) (i32.const 3) (i32.const 0) (i32.const 0))
+        (global.set $port_wait_call (i32.const 0))))
+    (i64.store (i32.const 0x600) (i64.const 2))
+    (i32.store (i32.const 0x608) (i32.const 1))
+    (i32.store (i32.const 0x60c) (i32.const ${Number(STUB.HANDLE & 0xffff_ffffn)}))
+    (i32.store (i32.const 0x610) (i32.const ${Number(STUB.HANDLE >> 32n)}))
+    (i32.store (i32.const 0x614) (i32.const 0))
+    (i32.store8 (i32.const 0x618) (i32.const 0))
+    (i32.store (i32.const 0x619) (i32.const 4))
+    (i32.store (i32.const 0x61d) (i32.load (local.get $ptr)))
+    (call $changeset (i32.const 0x600) (i32.const 33))
+    (i32.const 0))
+`;
 
 let toolkit: Awaited<ReturnType<typeof wabt>> | undefined;
 

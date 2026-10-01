@@ -2,16 +2,15 @@
 
 package golden.stdlib
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraObject
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.adapters.FsError
 import dev.undra.runtime.adapters.HttpError
 import dev.undra.runtime.adapters.HttpRequest
 import dev.undra.runtime.adapters.HttpResponse
 import dev.undra.runtime.wire.Handle
 import dev.undra.runtime.wire.Payloads.CallTarget
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.decodeAll
 import kotlinx.coroutines.flow.Flow
@@ -20,33 +19,36 @@ import kotlinx.coroutines.flow.map
 
 /** Talks to the server. */
 class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     constructor(ctx: UndraCore = UndraCore.shared) : this(
         ctx,
-        ctx.construct(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0)),
+        ctx.constructObject(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0)),
     )
 
     /**
      * Performs one request.
      * @throws HttpError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
      */
     suspend fun send(request: HttpRequest): HttpResponse {
         val w = UndraWriter()
         HttpRequest.encode(w, request)
-        val body = try {
-            this.core.call(
+        try {
+            val body = this.core.call(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Syncer.SEND),
                 UndraIds.Objects.Syncer.SEND,
                 w.toByteArray(),
             )
-        } catch (e: UndraReplyException) {
-            throw if (e.status == ReplyStatus.ERROR) HttpError.decodeAll(e.body) else e
+            return HttpResponse.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, HttpError)
         }
-        return HttpResponse.decodeAll(body)
     }
 
     /**
      * Streams the responses of a request that repeats.
-     * @throws HttpError
+     * Collecting throws HttpError or UndraCallError; cancelling the collector ends it quietly.
      */
     fun follow(endpoint: Endpoint): Flow<HttpResponse> {
         val w = UndraWriter()
@@ -59,13 +61,15 @@ class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(co
         return stream
             .map { bytes -> HttpResponse.decodeAll(bytes) }
             .catch { error ->
-                throw if (error is UndraReplyException && error.status == ReplyStatus.ERROR) HttpError.decodeAll(error.body) else error
+                throw UndraCallError.mappedStream(error, HttpError)
             }
     }
 
     /**
      * Writes the last response to disk.
      * @throws FsError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
      */
     suspend fun save(path: String) {
         val w = UndraWriter()
@@ -76,12 +80,16 @@ class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(co
                 UndraIds.Objects.Syncer.SAVE,
                 w.toByteArray(),
             )
-        } catch (e: UndraReplyException) {
-            throw if (e.status == ReplyStatus.ERROR) FsError.decodeAll(e.body) else e
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, FsError)
         }
     }
 
-    /** @throws SyncError */
+    /**
+     * @throws SyncError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
+     */
     suspend fun sync() {
         try {
             this.core.call(
@@ -89,14 +97,15 @@ class Syncer private constructor(core: UndraCore, handle: Long) : UndraObject(co
                 UndraIds.Objects.Syncer.SYNC,
                 ByteArray(0),
             )
-        } catch (e: UndraReplyException) {
-            throw SyncError.fromReply(e)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, SyncError)
         }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraCore.shared): Syncer {
-            val handle = ctx.construct(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0))
+            val handle = ctx.constructObject(UndraIds.Objects.Syncer.TYPE_ID, UndraIds.Objects.Syncer.NEW, ByteArray(0))
             return Syncer(ctx, handle)
         }
     }

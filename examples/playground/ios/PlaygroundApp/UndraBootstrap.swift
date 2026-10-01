@@ -26,7 +26,18 @@ enum UndraBootstrap {
     /// except that `Http` is the in-memory server, `Connectivity` is the one the Offline switch
     /// drives (the app's network is simulated, so its connectivity is too) and `Kv` is emptied at launch. In debug builds, when
     /// `UNDRA_DEV_URL` is set (for example `ws://192.168.1.20:7443`), attaches to the core that
-    /// `undra dev` serves instead: edit the Rust, save, relaunch the app, no rebuild of the app.
+    /// `undra dev` serves instead: edit the Rust, save, and the app is on the rebuilt core within a second, no rebuild
+    /// of the app.
+    /// The dev server this process uses (`UNDRA_DEV_URL`, debug builds), or `nil` for the in-process core.
+    @MainActor static var devURL: String?
+
+    /// The core `start()` loaded, so a view can show what its connection is doing (`core.connection`).
+    @MainActor static var core: UndraCore?
+
+    /// Called when `undra dev` restarted the core and the objects of this app's core are gone: the app loads the new
+    /// core and starts over on it (`PlaygroundApp.reload`).
+    @MainActor static var coreLost: (() -> Void)?
+
     @MainActor
     static func start() throws {
         // The server the app carries forgets everything when the app quits, so the core's cache of
@@ -40,12 +51,24 @@ enum UndraBootstrap {
             .replacing(KvAdapter(directory: store))
         #if DEBUG
         if let url = ProcessInfo.processInfo.environment["UNDRA_DEV_URL"], !url.isEmpty {
-            try UndraCore.load(.remote(url: url, adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: onError))
+            devURL = url
+            core = try UndraCore.load(.remote(
+                url: url,
+                adapters: adapters,
+                expectedSchemaHash: UndraIds.schemaHash,
+                onError: onError,
+                // The runtime reconnects by itself; when it finds a new core instead of its own, it says so.
+                onConnectionChange: { state in
+                    if case .closed(.sessionLost) = state {
+                        Task { @MainActor in coreLost?() }
+                    }
+                }
+            ))
             configureRemote(RemoteConfig(baseUrl: serverURL))
             return
         }
         #endif
-        try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: onError))
+        core = try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: onError))
         // Tell the core where the server is, before anything observes the remote list.
         configureRemote(RemoteConfig(baseUrl: serverURL))
     }

@@ -1,0 +1,224 @@
+{
+ "schema": "undra-device-bench/1",
+ "date": "2026-10-01",
+ "finished_at": "2026-10-01T16:33:59.550Z",
+ "target": "ios-simulator-iphone-17-pro",
+ "platform": "ios",
+ "kind": "simulator",
+ "label": "iPhone 17 Pro simulator (iOS 26.5, arm64 on Apple M5 Pro)",
+ "claim": "Not a device: simulator, emulator or desktop browser on a Mac. Real-device rows are pending hardware, and no claim of meeting a device target is made from this file.",
+ "device": {
+  "arch": "arm64",
+  "cores": 18,
+  "is_virtual": true,
+  "low_power_mode": false,
+  "model": "iPhone18,1 (simulated)",
+  "os": "iOS 26.5",
+  "physical_memory_bytes": 51539607552,
+  "swift_configuration": "Release",
+  "thermal_state": "nominal"
+ },
+ "host": {
+  "cpu": "Apple M5 Pro",
+  "os": "macOS 26.5 (25F71)",
+  "arch": "arm64",
+  "load_before": 3.3,
+  "load_after": 10.61
+ },
+ "build": {
+  "type": "release",
+  "core": "release (LTO fat), static XCFramework slice",
+  "app": "Release (-O, whole-module); UI test launches in benchmark mode",
+  "commit": "65bf971",
+  "dirty": false
+ },
+ "command": "scripts/bench-device.sh --device ios --target C7835F25-1C6D-4F7D-92FB-CB4FB3D33983 --runs 2 --no-render --keep-booted",
+ "runtime": "inproc (C ABI, linked static library)",
+ "timer": {
+  "kind": "clock_gettime_nsec_np(CLOCK_UPTIME_RAW)",
+  "overhead_ns": 7.6775,
+  "resolution_ns": 41
+ },
+ "config": {
+  "drain_frames": 240,
+  "drain_warmup_frames": 60,
+  "each_samples": 2000,
+  "each_warmup": 200,
+  "reloads": 30,
+  "reset_every_inserts": 500,
+  "singles_per_round": 8,
+  "sync_batch": 1000,
+  "sync_batches": 200,
+  "warmup_batches": 20
+ },
+ "ops": [
+  {
+   "batch": 1000,
+   "id": "sync_call",
+   "max": 334.541,
+   "mean": 296.73873999999995,
+   "min": 274.292,
+   "mode": "batched",
+   "note": "`try bench.benchAdd(a:b:)` on the main actor: encode, `callSync` through the C ABI, decode, through the generated binding",
+   "p50": 293.542,
+   "p90": 313.209,
+   "p99": 325.083,
+   "samples": 200
+  },
+  {
+   "batch": 1,
+   "id": "record_1kb",
+   "max": 1000,
+   "mean": 454.7745,
+   "min": 416,
+   "mode": "each",
+   "note": "`try bench.benchEchoBytes(data:)` with 1,024 bytes: the payload crosses the boundary twice (a byte string, which is cheaper than a record of the same size)",
+   "p50": 458,
+   "p90": 459,
+   "p99": 500,
+   "samples": 2000
+  },
+  {
+   "batch": 1,
+   "id": "keyed_insert_10k",
+   "max": 37583,
+   "mean": 8072.8605,
+   "min": 7250,
+   "mode": "each",
+   "note": "`bench.benchListInsert(i: 5000)` on about 10,000 rows: the call, the core's recorded insert, the one-operation patch, applied to the mirror's list before the call returns",
+   "p50": 8000,
+   "p90": 8375,
+   "p99": 10167,
+   "samples": 2000
+  },
+  {
+   "batch": 1,
+   "id": "changeset_100",
+   "max": 55792,
+   "mean": 26325.758,
+   "min": 24292,
+   "mode": "each",
+   "note": "`bench.benchTouchSignals(k: 100)`: one call, one change-set of 100 entries, applied to 100 `@Observable` properties of the mirror before the call returns",
+   "p50": 26167,
+   "p90": 27208,
+   "p99": 34542,
+   "samples": 2000
+  }
+ ],
+ "cold": {
+  "first_load_in_run_ns": 2196958,
+  "launches": [
+   {
+    "load_ns": 2200958,
+    "restore_ns": 57458
+   },
+   {
+    "load_ns": 2775583,
+    "restore_ns": 62125
+   },
+   {
+    "load_ns": 2949458,
+    "restore_ns": 62333
+   },
+   {
+    "load_ns": 2865958,
+    "restore_ns": 63458
+   },
+   {
+    "load_ns": 2892458,
+    "restore_ns": 150166
+   },
+   {
+    "load_ns": 2273750,
+    "restore_ns": 62791
+   },
+   {
+    "load_ns": 3140333,
+    "restore_ns": 69041
+   },
+   {
+    "load_ns": 2389125,
+    "restore_ns": 55833
+   },
+   {
+    "load_ns": 2531083,
+    "restore_ns": 60416
+   },
+   {
+    "load_ns": 2438791,
+    "restore_ns": 57792
+   }
+  ],
+  "note": "a 100 KB snapshot is 1000 to-dos of 80 characters (the host row restores four stores of 250 rows of 100 bytes); load = `UndraCore.load` of the linked core, which starts the runtime and its core thread; the C library is statically linked, so there is no dlopen",
+  "reload_in_process": {
+   "load_ns": {
+    "max": 474167,
+    "mean": 268845.8333333333,
+    "min": 222833,
+    "n": 30,
+    "p50": 245333,
+    "p90": 325500,
+    "p99": 474167
+   },
+   "restore_ns": {
+    "max": 48959,
+    "mean": 40483.4,
+    "min": 31750,
+    "n": 30,
+    "p50": 40125,
+    "p90": 47000,
+    "p99": 48959
+   }
+  },
+  "snapshot_bytes": 101046
+ },
+ "drain": {
+  "frames": 240,
+  "merged": {
+   "applied_per_frame_p50": 1,
+   "change_sets_per_frame_p50": 1667,
+   "drain_ns": {
+    "max": 1361084,
+    "mean": 760129.8566666667,
+    "min": 328291,
+    "n": 300,
+    "p50": 777459,
+    "p90": 1181792,
+    "p99": 1327625
+   },
+   "drains_per_frame_p50": 1,
+   "entries_per_frame_p50": 1667,
+   "frame_ns": {
+    "max": 1361084,
+    "mean": 839561.1041666666,
+    "min": 344709,
+    "n": 240,
+    "p50": 820291,
+    "p90": 1189917,
+    "p99": 1333375
+   }
+  },
+  "note": "merged frame = the drain(s) that consumed one burst, summed: decode and apply of the merged patch to the `@Observable` store",
+  "producer": "a thread of its own commits the burst (the core's side of a socket or a timer): the main thread's cost of a frame is the drain at the next frame, as `DrainStats.duration` times it (`ContinuousClock`)",
+  "ratio_unmerged_over_merged": 4.233084356649043,
+  "ratio_unmerged_over_merged_mean": 4.993702942258703,
+  "rows": 10000,
+  "unmerged_estimate": {
+   "frame_ns": 3472361,
+   "frame_ns_mean": 4096289.5802083337,
+   "method": "the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), 8 after each frame of the experiment so that both are measured in the same minutes (1920 in all); times 1667, by the median entry and by the mean entry. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here",
+   "per_entry_ns": {
+    "max": 15500,
+    "mean": 2457.282291666667,
+    "min": 667,
+    "n": 1920,
+    "p50": 2083,
+    "p90": 3750,
+    "p99": 8375
+   }
+  },
+  "updates_per_frame": 1667,
+  "warmup_frames": 60
+ },
+ "notes": []
+}

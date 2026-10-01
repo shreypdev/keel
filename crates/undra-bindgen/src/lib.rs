@@ -11,6 +11,7 @@ mod model;
 mod swift;
 mod ts;
 mod validate;
+mod zero;
 
 use std::io;
 use std::path::Path;

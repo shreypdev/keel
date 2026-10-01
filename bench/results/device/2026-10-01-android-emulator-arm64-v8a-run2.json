@@ -1,0 +1,221 @@
+{
+ "schema": "undra-device-bench/1",
+ "date": "2026-10-01",
+ "finished_at": "2026-10-01T16:37:39.868Z",
+ "target": "android-emulator-arm64-v8a",
+ "platform": "android",
+ "kind": "emulator",
+ "label": "Android emulator \"Google sdk_gphone64_arm64\" (Android 15 (API 35), arm64-v8a, hardware-virtualized on Apple M5 Pro)",
+ "claim": "Not a device: simulator, emulator or desktop browser on a Mac. Real-device rows are pending hardware, and no claim of meeting a device target is made from this file.",
+ "device": {
+  "model": "Google sdk_gphone64_arm64",
+  "device": "emu64a",
+  "hardware": "ranchu",
+  "os": "Android 15 (API 35)",
+  "arch": "arm64-v8a",
+  "abis": "arm64-v8a",
+  "cores": 4,
+  "is_virtual": true,
+  "build_fingerprint": "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.043/12960925:userdebug/dev-keys",
+  "max_memory_bytes": 201326592,
+  "display_refresh_hz": 60.000003814697266,
+  "power_save_mode": false,
+  "thermal_status": 0,
+  "debuggable_app": false
+ },
+ "host": {
+  "cpu": "Apple M5 Pro",
+  "os": "macOS 26.5 (25F71)",
+  "arch": "arm64",
+  "load_before": 3.8,
+  "load_after": 3.37
+ },
+ "build": {
+  "type": "release",
+  "core": "release (LTO fat), libundra_core.so",
+  "app": "benchmark build type (release, not debuggable); ART compile filter speed; instrumented test",
+  "commit": "65bf971",
+  "dirty": false
+ },
+ "command": "scripts/bench-device.sh --device android --target emulator-5580 --runs 2 --no-render --no-build",
+ "runtime": "inproc (JNI, libundra_core.so)",
+ "timer": {
+  "kind": "System.nanoTime",
+  "resolution_ns": 41,
+  "overhead_ns": 21.93042
+ },
+ "config": {
+  "sync_batch": 1000,
+  "sync_batches": 200,
+  "warmup_batches": 30,
+  "each_samples": 2000,
+  "each_warmup": 500,
+  "reset_every_inserts": 500,
+  "drain_frames": 240,
+  "drain_warmup_frames": 60,
+  "singles_per_round": 8,
+  "restores": 30
+ },
+ "ops": [
+  {
+   "id": "sync_call",
+   "mode": "batched",
+   "batch": 1000,
+   "samples": 200,
+   "min": 241,
+   "p50": 251.167,
+   "p90": 436.75,
+   "p99": 561.292,
+   "max": 768.5,
+   "mean": 292.453335,
+   "note": "`bench.benchAdd(a, b)` on the main thread: encode, `callSync` through JNI, decode, through the generated binding"
+  },
+  {
+   "id": "record_1kb",
+   "mode": "each",
+   "batch": 1,
+   "samples": 2000,
+   "min": 833,
+   "p50": 1375,
+   "p90": 1750,
+   "p99": 8708,
+   "max": 40834,
+   "mean": 1590.169,
+   "note": "`bench.benchEchoBytes(1,024 bytes)`: the payload crosses the boundary twice (a byte string, which is cheaper than a record of the same size)"
+  },
+  {
+   "id": "keyed_insert_10k",
+   "mode": "each",
+   "batch": 1,
+   "samples": 2000,
+   "min": 20958,
+   "p50": 23166,
+   "p90": 27083,
+   "p99": 191000,
+   "max": 6693417,
+   "mean": 31348.81,
+   "note": "`bench.benchListInsert(5000)` on about 10,000 rows: the call, the core's recorded insert, the one-operation patch, applied to the mirror's list before the call returns"
+  },
+  {
+   "id": "changeset_100",
+   "mode": "each",
+   "batch": 1,
+   "samples": 2000,
+   "min": 17625,
+   "p50": 19583,
+   "p90": 24750,
+   "p99": 98666,
+   "max": 437916,
+   "mean": 23415.49,
+   "note": "`bench.benchTouchSignals(100)`: one call, one change-set of 100 entries, applied to 100 `StateFlow`s of the mirror before the call returns"
+  }
+ ],
+ "cold": {
+  "snapshot_bytes": 101046,
+  "first_load_in_run_ns": 1070291,
+  "launches": [
+   {
+    "load_ns": 1011583,
+    "restore_ns": 245250
+   },
+   {
+    "load_ns": 1015542,
+    "restore_ns": 314584
+   },
+   {
+    "load_ns": 1123500,
+    "restore_ns": 252208
+   },
+   {
+    "load_ns": 1003375,
+    "restore_ns": 273208
+   },
+   {
+    "load_ns": 1128500,
+    "restore_ns": 217708
+   },
+   {
+    "load_ns": 1201500,
+    "restore_ns": 249750
+   },
+   {
+    "load_ns": 1186291,
+    "restore_ns": 291084
+   },
+   {
+    "load_ns": 1077167,
+    "restore_ns": 147875
+   },
+   {
+    "load_ns": 1123625,
+    "restore_ns": 249708
+   },
+   {
+    "load_ns": 1089625,
+    "restore_ns": 436500
+   }
+  ],
+  "reload_in_process": {
+   "load_ns": null,
+   "restore_ns": {
+    "n": 30,
+    "min": 382959,
+    "p50": 442416,
+    "p90": 569042,
+    "p99": 917791,
+    "max": 917791,
+    "mean": 487034.7
+   }
+  },
+  "note": "a 100 KB snapshot is 1000 to-dos of 80 characters (the host row restores four stores of 250 rows of 100 bytes); load = the first `UndraCore.load` of the process, which includes `System.loadLibrary`; an in-process core cannot be loaded twice, so the in-process row is restores only, and the restore of a cold launch includes the main-thread drain"
+ },
+ "drain": {
+  "rows": 10000,
+  "updates_per_frame": 1667,
+  "frames": 240,
+  "warmup_frames": 60,
+  "producer": "a thread of its own commits the burst (the core's side of a socket or a timer): the main thread's cost of a frame is the drain at the next frame (`ChoreographerFramePacer`), as `DrainStats.duration` times it (`System.nanoTime`)",
+  "merged": {
+   "frame_ns": {
+    "n": 240,
+    "min": 127583,
+    "p50": 167375,
+    "p90": 229500,
+    "p99": 285458,
+    "max": 415625,
+    "mean": 179652.05416666667
+   },
+   "drain_ns": {
+    "n": 300,
+    "min": 127583,
+    "p50": 169834,
+    "p90": 263333,
+    "p99": 301875,
+    "max": 415625,
+    "mean": 189087.90333333332
+   },
+   "change_sets_per_frame_p50": 1667,
+   "entries_per_frame_p50": 1667,
+   "applied_per_frame_p50": 1,
+   "drains_per_frame_p50": 1
+  },
+  "unmerged_estimate": {
+   "per_entry_ns": {
+    "n": 1920,
+    "min": 9000,
+    "p50": 12542,
+    "p90": 17292,
+    "p99": 23250,
+    "max": 195625,
+    "mean": 13737.588020833333
+   },
+   "frame_ns": 20907514,
+   "frame_ns_mean": 22900559.230729166,
+   "method": "the drain of a single entry (a call on the main thread drains before it returns, so the drain listener times a drain of exactly one change-set of one entry applied on its own), 8 after each frame of the experiment so that both are measured in the same minutes (1920 in all); times 1667, by the median entry and by the mean entry. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here"
+  },
+  "ratio_unmerged_over_merged": 124.91419865571322,
+  "ratio_unmerged_over_merged_mean": 136.82186246888224,
+  "note": "merged frame = the drain(s) that consumed one burst, summed: decode and apply of the merged patch to the `StateFlow` store (the list is copied once per drain)"
+ },
+ "notes": []
+}

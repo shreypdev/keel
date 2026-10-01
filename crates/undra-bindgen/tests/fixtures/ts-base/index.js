@@ -4,29 +4,10 @@
 // are just enough to construct generated objects and stores and to let a test-owned fake core
 // answer their calls.
 
+import { ALL_SIGNALS, UndraCallError } from "./dist/index.js";
+
+// The real wire layer, errors (including the closed set of generated calls), adapters and standard types.
 export * from "./dist/index.js";
-
-export class UndraError extends Error {
-  constructor(kind, message, options) {
-    super(message, options);
-    this.kind = kind;
-  }
-}
-
-export class UndraReplyError extends UndraError {
-  constructor(status, body) {
-    super("reply", `undra reply with status ${status}`);
-    this.status = status;
-    this.body = body;
-  }
-}
-
-export class UndraPortError extends UndraError {
-  constructor(body) {
-    super("port", "typed port failure");
-    this.body = body;
-  }
-}
 
 export class Signal {
   #value;
@@ -60,6 +41,10 @@ export class UndraCore {
   static get shared() {
     throw new Error("no shared core in this test");
   }
+
+  static get current() {
+    return null;
+  }
 }
 
 export class UndraObject {
@@ -78,5 +63,14 @@ export class UndraStore extends UndraObject {
     super(core, handle);
     this._signals = [];
     core.mirror.register(handle, (signalId, op, value) => this._apply(signalId, op, value), options);
+  }
+
+  async _observeAll() {
+    try {
+      await this.core.observe(this.handle, ALL_SIGNALS, true);
+    } catch (error) {
+      this.close();
+      throw UndraCallError.mapped(error);
+    }
   }
 }

@@ -3,13 +3,14 @@
 import {
   CallTarget,
   type Codec,
+  UndraCallError,
   UndraCore,
   UndraObject,
   UndraWriter,
   codecs,
   decodeValue,
 } from "@undra/runtime";
-import { HttpError, TodoError } from "./errors.js";
+import { HttpErrorCodec, TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Priority, PriorityCodec, type Todo, TodoCodec } from "./types.js";
 
@@ -19,55 +20,70 @@ export class Calculator extends UndraObject {
     super(core, handle);
   }
 
+  /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraCore.shared): Promise<Calculator> {
-    const handle = await core.construct(
-      UndraIds.Objects.Calculator.typeId,
-      UndraIds.Objects.Calculator.new,
-      new Uint8Array(0),
-    );
+    let handle: bigint;
+    try {
+      handle = await core.construct(
+        UndraIds.Objects.Calculator.typeId,
+        UndraIds.Objects.Calculator.new,
+        new Uint8Array(0),
+      );
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
     return new Calculator(core, handle);
   }
 
+  /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   async add(a: number, b: number): Promise<number> {
     const w = new UndraWriter();
     w.writeI32(a);
     w.writeI32(b);
-    const body = await this.core.call(
-      { target: CallTarget.ObjectMethod, handle: this.handle },
-      UndraIds.Objects.Calculator.add,
-      w.finish(),
-    );
-    return decodeValue(codecs.i32, body);
+    try {
+      const body = await this.core.call(
+        { target: CallTarget.ObjectMethod, handle: this.handle },
+        UndraIds.Objects.Calculator.add,
+        w.finish(),
+      );
+      return decodeValue(codecs.i32, body);
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
   }
 
-  /** @throws {HttpError} */
+  /**
+   * @throws {HttpError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
   async fetch(url: string, signal?: AbortSignal): Promise<string> {
     const w = new UndraWriter();
     w.writeStr(url);
-    let body: Uint8Array;
     try {
-      body = await this.core.call(
+      const body = await this.core.call(
         { target: CallTarget.ObjectMethod, handle: this.handle },
         UndraIds.Objects.Calculator.fetch,
         w.finish(),
         signal,
       );
+      return decodeValue(codecs.string, body);
     } catch (error) {
-      throw HttpError.fromReply(error);
+      throw UndraCallError.mapped(error, HttpErrorCodec);
     }
-    return decodeValue(codecs.string, body);
   }
 
+  /** Iterating throws UndraCallError; leaving the loop early ends the stream quietly. */
   ticks(): AsyncIterable<number> {
     const source = this.core.stream(
       { target: CallTarget.ObjectMethod, handle: this.handle },
       UndraIds.Objects.Calculator.ticks,
       new Uint8Array(0),
     );
-    return decodeStream(source, codecs.u32);
+    return decodeStream(source, codecs.u32, (error) => UndraCallError.mappedStream(error));
   }
 
-  /** @throws {TodoError} */
+  /** Iterating throws TodoError or UndraCallError; leaving the loop early ends the stream quietly. */
   watch(priority: Priority): AsyncIterable<Todo> {
     const w = new UndraWriter();
     PriorityCodec.encode(w, priority);
@@ -76,22 +92,35 @@ export class Calculator extends UndraObject {
       UndraIds.Objects.Calculator.watch,
       w.finish(),
     );
-    return decodeStream(source, TodoCodec, (error) => TodoError.fromReply(error));
+    return decodeStream(
+      source,
+      TodoCodec,
+      (error) => UndraCallError.mappedStream(error, TodoErrorCodec),
+    );
   }
 }
 
+/** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
 export async function greet(name: string, core: UndraCore = UndraCore.shared): Promise<string> {
   const w = new UndraWriter();
   w.writeStr(name);
-  const body = await core.call(
-    { target: CallTarget.FreeFunction },
-    UndraIds.Functions.greet,
-    w.finish(),
-  );
-  return decodeValue(codecs.string, body);
+  try {
+    const body = await core.call(
+      { target: CallTarget.FreeFunction },
+      UndraIds.Functions.greet,
+      w.finish(),
+    );
+    return decodeValue(codecs.string, body);
+  } catch (error) {
+    throw UndraCallError.mapped(error);
+  }
 }
 
-/** @throws {TodoError} */
+/**
+ * @throws {TodoError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
 export async function ping(
   core: UndraCore = UndraCore.shared,
   signal?: AbortSignal,
@@ -104,15 +133,15 @@ export async function ping(
       signal,
     );
   } catch (error) {
-    throw TodoError.fromReply(error);
+    throw UndraCallError.mapped(error, TodoErrorCodec);
   }
 }
 
-/** Decodes every item of a core stream; a failure passes through `mapError`. */
+/** Decodes every item of a core stream; a failure of the stream or of an item goes through `mapError`. */
 async function* decodeStream<T>(
   source: AsyncIterable<Uint8Array>,
   codec: Codec<T>,
-  mapError: (error: unknown) => unknown = (error) => error,
+  mapError: (error: unknown) => unknown,
 ): AsyncGenerator<T, void, undefined> {
   try {
     for await (const body of source) yield decodeValue(codec, body);

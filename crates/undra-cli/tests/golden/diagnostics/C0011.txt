@@ -1,0 +1,4 @@
+error[undra::C0011]: the Rust target `wasm32-unknown-unknown` is not installed
+  = note: building for this platform needs the standard library compiled for it, and rustup has not installed it
+  = help: rustup target add wasm32-unknown-unknown
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0011

@@ -1,0 +1,17 @@
+error: error[undra::E0007]: `#[undra::query]` on the method `forecast` of a port trait
+         = note: a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method
+         = help: remove the attribute from `forecast`; a `#[undra::query]` is a free `async fn(ctx: &Ctx, ..)` that calls the port as `weather(ctx).forecast(..)`, so write it outside the trait
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+ --> tests/ui/d1_port_method_with_an_undra_attribute.rs:9:5
+  |
+9 |     #[undra::query(key = "forecast")]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0007]: `#[undra::api]` on the method `now` of a port trait
+         = note: a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method
+         = help: remove the attribute from `now`; a function the core exposes that calls the port is a free `#[undra::api] fn(ctx: &Ctx, ..)` outside the trait, calling `weather(ctx).now(..)`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/d1_port_method_with_an_undra_attribute.rs:12:5
+   |
+12 |     #[undra::api]
+   |     ^^^^^^^^^^^^^

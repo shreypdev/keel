@@ -48,7 +48,7 @@ use syn::{FnArg, ItemImpl, ItemTrait, Pat, ReturnType, TraitItem, Type};
 use super::attrs::{Site, docs, flag, parse_args, root_arg, take};
 use super::check::{Checks, on_unimplemented};
 use super::common::{check_generics, derived, item_root, param_meta, submit};
-use super::diag::{DOCS_BASE, Diag, Errors, code};
+use super::diag::{Diag, Errors, code};
 use super::naming::{fnv1a32, snake_case, unraw};
 use super::object::arg_local;
 use super::paths::Root;
@@ -125,8 +125,45 @@ fn port_param_error(err: super::types::TyErr, method: &str, param: &str) -> syn:
     .into_error()
 }
 
+/// E0007 for an Undra attribute macro on a method of a port trait.
+///
+/// The trait's macro expands first and sees the method's attributes unexpanded, so a query,
+/// mutation or function placed in the trait can be told where it belongs in Undra's words (the
+/// same placement is reported for an `#[undra::api] impl` block in `object.rs`).
+fn reject_undra_macros(
+    attrs: &[syn::Attribute],
+    accessor: &str,
+    method: &str,
+    errors: &mut Errors,
+) {
+    for attr in attrs {
+        let Some(macro_name) = super::object::undra_macro_name(attr) else {
+            continue;
+        };
+        let help = match macro_name.as_str() {
+            "query" | "mutation" => format!(
+                "remove the attribute from `{method}`; a `#[undra::{macro_name}]` is a free `async fn(ctx: &Ctx, ..)` that calls the port as `{accessor}(ctx).{method}(..)`, so write it outside the trait"
+            ),
+            "api" => format!(
+                "remove the attribute from `{method}`; a function the core exposes that calls the port is a free `#[undra::api] fn(ctx: &Ctx, ..)` outside the trait, calling `{accessor}(ctx).{method}(..)`"
+            ),
+            _ => format!("remove the attribute from `{method}`, or move the item out of the trait"),
+        };
+        errors.push(
+            Diag::new(
+                code::E0007,
+                format!("`#[undra::{macro_name}]` on the method `{method}` of a port trait"),
+                "a port is a list of methods the platform implements; the attribute applies to a whole item (a type or a free function), never to a trait method",
+                help,
+            )
+            .on(attr),
+        );
+    }
+}
+
 /// Analyses the methods of a port trait, normalising parameter names.
 fn analyze_method(
+    accessor: &str,
     method: &mut syn::TraitItemFn,
     requested: Requested,
     checks: &mut Checks,
@@ -134,6 +171,7 @@ fn analyze_method(
 ) -> Option<PortMethod> {
     take(&mut method.attrs, Site::NOTHING, errors);
     let name = unraw(&method.sig.ident);
+    reject_undra_macros(&method.attrs, accessor, &name, errors);
     check_generics(&method.sig.generics, &name, errors);
     let docs = docs(&method.attrs);
 
@@ -299,12 +337,15 @@ pub(crate) fn expand_trait(
     let type_docs = docs(&item.attrs);
     let vis = item.vis.clone();
 
+    let accessor = snake_case(&name_str);
     let mut methods: Vec<PortMethod> = Vec::new();
     let mut checks = Checks::new();
     for trait_item in &mut item.items {
         match trait_item {
             TraitItem::Fn(method) => {
-                if let Some(model) = analyze_method(method, requested, &mut checks, &mut errors) {
+                if let Some(model) =
+                    analyze_method(&accessor, method, requested, &mut checks, &mut errors)
+                {
                     methods.push(model);
                 }
             }
@@ -621,21 +662,24 @@ fn call_helpers(
     } else {
         TokenStream::new()
     };
-    let failure_docs = format!("{DOCS_BASE}#{}", code::E0062);
+    // The message has the shape of every other diagnostic (`Diag::runtime_template`), finished
+    // with the port and method of the call: a runtime error reads exactly like a compile error.
+    let failure_template = Diag::runtime_template(code::E0062);
     let failure = quote! {
         #[doc(hidden)]
         #[cold]
         #[inline(never)]
         #[allow(non_snake_case, dead_code)]
         fn #failure_fn(__undra_method: &str, __undra_error: #runtime::PortError) -> ! {
-            let (__undra_what, __undra_how) = match &__undra_error {
+            let (__undra_what, __undra_why, __undra_how) = match &__undra_error {
                 #runtime::PortError::Unavailable => (
                     ::std::format!(
                         "the `{}` port has no adapter registered (method `{}`)",
                         #name_str,
                         __undra_method,
                     ),
-                    "Register one with core.registerPort(..) (TypeScript, Kotlin, Swift) / undra_port_register (C), or bind a Rust implementation (`undra::ports::fakes` in tests)",
+                    "this method has no error channel, so an unavailable port cannot be reported and the call panics; the runtime contains the panic, but on the web it traps the core",
+                    "register an adapter (`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C), bind a Rust implementation (`undra::ports::fakes` in tests), or give the method a `Result<T, E>` return type so it can report the outage",
                 ),
                 #runtime::PortError::Cancelled => (
                     ::std::format!(
@@ -643,7 +687,8 @@ fn call_helpers(
                         #name_str,
                         __undra_method,
                     ),
-                    "A method without an error type cannot report an abandoned call; give it a `Result<T, E>` return type",
+                    "this method has no error channel, so an abandoned call cannot be reported and the call panics; on the web that traps the core",
+                    "give the method a `Result<T, E>` return type so it can report a cancelled call",
                 ),
                 #runtime::PortError::Decode(__undra_why) => (
                     ::std::format!(
@@ -652,7 +697,8 @@ fn call_helpers(
                         __undra_method,
                         __undra_why,
                     ),
-                    "The adapter's reply does not match the schema; check its codec for this method",
+                    "the adapter's reply does not match the schema, and this method has no error channel to report that, so the call panics; on the web that traps the core",
+                    "check the adapter's codec for this method against the schema, or give the method a `Result<T, E>` return type so it can report a bad reply",
                 ),
                 __undra_other => (
                     ::std::format!(
@@ -661,15 +707,11 @@ fn call_helpers(
                         __undra_method,
                         __undra_other,
                     ),
-                    "A method without an error type cannot report a failed call; give it a `Result<T, E>` return type",
+                    "this method has no error channel, so a failed call cannot be reported and the call panics; on the web that traps the core",
+                    "give the method a `Result<T, E>` return type so it can report the failure",
                 ),
             };
-            ::core::panic!(
-                "undra: {}. {}. On the web this traps the core. docs: {}",
-                __undra_what,
-                __undra_how,
-                #failure_docs,
-            )
+            ::core::panic!(#failure_template, __undra_what, __undra_why, __undra_how)
         }
     };
 
@@ -1261,8 +1303,8 @@ mod tests {
         for needle in [
             "fn __undra_port_failure_Http(__undra_method: &str, __undra_error: ::undra::runtime::PortError) -> !",
             "has no adapter registered (method `{}`)",
-            "core.registerPort(..) (TypeScript, Kotlin, Swift) / undra_port_register (C)",
-            "https://shreypdev.github.io/undra/docs/errors.html",
+            "`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C",
+            "https://shreypdev.github.io/undra/docs/errors.html#E0062",
             "__undra_port_failure_Http(\"ping\", __undra_error)",
         ] {
             assert!(has(&out, needle), "missing `{needle}` in {out}");

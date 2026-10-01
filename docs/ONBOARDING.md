@@ -76,12 +76,12 @@ Every suite is local; nothing needs the network after install.
 | Rust workspace | `cargo test --workspace` | 2,100+ pass |
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 890+ pass |
-| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 454 cases, 0 failed |
+| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 527 cases, 0 failed |
 | Kotlin over the real JNI core | `cargo build -p undra-ffi --features jni`, then `UNDRA_NATIVE_LIB_DIR=$PWD/target/debug UNDRA_NATIVE_NAME=undra_ffi runtimes/kotlin/undra-runtime/scripts/test-local.sh` | the JNI smoke cases run |
 | Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 130 pass, 1 skipped (the debug and release variants both run) |
 | Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 112 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
 | Playground Android app on the real adapters (offline queue surviving a killed process) | `bash examples/playground/android/smoke.sh` (needs a booted emulator; it switches airplane mode on and off) | `SMOKE PASSED` |
-| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 328 pass |
+| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 433 pass |
 | wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
 | C host harness | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | ok |
 | Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 54/54 pass |
@@ -89,6 +89,13 @@ Every suite is local; nothing needs the network after install.
 | Distribution: the curl installer against a served release (checksums, tampering, platforms) | `bash packaging/test-install.sh` | all checks pass |
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
+| Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |
+| Device bench report (CI runs it) | `node --test scripts/bench-device-report.test.mjs` | 14 pass |
+
+Gotcha worth knowing: the bindgen tests that compile and run the generated Kotlin, TypeScript and
+Swift (`typecheck_kotlin`, `typecheck_ts`, `run_ts`, `typecheck_swift`) **skip, and pass, when their
+compiler is not found** (`kotlinc`, `tsc`, `swift`). Put `runtimes/ts/@undra/runtime/node_modules/.bin`
+and a JDK 17 on `PATH`, and run with `UNDRA_REQUIRE_TOOLCHAINS=1` so a missing tool fails instead of skipping.
 
 Gotcha worth knowing: the C harness builds `undra-ffi` **without** the `jni` feature and
 overwrites `target/debug/libundra_ffi.dylib`. If you run the Kotlin JNI leg afterwards,
@@ -104,6 +111,10 @@ cd examples/playground/web && npm install && npm run dev       # Chrome
 bash examples/playground/ios/smoke.sh                          # boots a simulator, installs, screenshots
 # Android: bash examples/playground/android/smoke.sh, or see examples/playground/android/README.md (gradlew assembleDebug + the `undra` AVD)
 ```
+
+The live loop (edit Rust, every app picks up the new core, a dropped connection heals itself) is `undra dev`:
+[`docs/DEV_LOOP.md`](DEV_LOOP.md) has the URL of each platform (the Android emulator is `ws://10.0.2.2:<port>`),
+`undra dev --android`, how reconnecting works and a troubleshooting table.
 
 ## 4. Read before you write code
 

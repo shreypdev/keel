@@ -46,6 +46,7 @@ import dev.undra.playground.core.RemoteTodo
 import dev.undra.playground.core.RemoteTodosQueryHandle
 import dev.undra.playground.core.createRemoteTodo
 import dev.undra.playground.core.setRemoteDone
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.adapters.NetKind
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -121,6 +122,8 @@ class RemoteViewModel(app: Application) : AndroidViewModel(app) {
             null
         } catch (e: RemoteError) {
             describe(e)
+        } catch (e: UndraCallError) {
+            e.message
         }
     }
 

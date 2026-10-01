@@ -395,7 +395,7 @@ fn runtime_source(relative: &str) -> Option<String> {
 
 const KOTLIN_RECORDS: &str =
     "kotlin/undra-runtime/runtime/src/main/kotlin/dev/undra/runtime/adapters/StandardRecords.kt";
-const SWIFT_RECORDS: &str = "swift/UndraRuntime/Sources/UndraRuntime/Core/StandardPorts.swift";
+const SWIFT_RECORDS: &str = "swift/UndraRuntime/Sources/UndraRuntime/Core/StandardRecords.swift";
 const TS_TYPES: &str = "ts/@undra/runtime/src/adapters/types.ts";
 const TS_CODECS: &str = "ts/@undra/runtime/src/adapters/codecs.ts";
 
@@ -629,14 +629,14 @@ fn swift_numbering_matches() {
     };
     assert_same(
         "Swift HttpMethod",
-        swift_enum(&swift, "enum PortHttpMethod"),
+        swift_enum(&swift, "public enum HttpMethod"),
         "HttpMethod",
         &[],
     );
-    // Swift spells `None` as `disconnected` so that `PortNetKind?` has no ambiguous `.none`.
+    // Swift spells `None` as `disconnected` so that `NetKind?` has no ambiguous `.none`.
     assert_same(
         "Swift NetKind",
-        swift_enum(&swift, "enum PortNetKind"),
+        swift_enum(&swift, "public enum NetKind"),
         "NetKind",
         &[("none", "disconnected")],
     );
@@ -648,13 +648,13 @@ fn swift_numbering_matches() {
     );
     assert_same(
         "Swift HttpError",
-        swift_error(&swift, "enum PortHttpError"),
+        swift_error(&swift, "public enum HttpError"),
         "HttpError",
         &[],
     );
     assert_same(
         "Swift FsError",
-        swift_error(&swift, "enum PortFsError"),
+        swift_error(&swift, "public enum FsError"),
         "FsError",
         &[],
     );

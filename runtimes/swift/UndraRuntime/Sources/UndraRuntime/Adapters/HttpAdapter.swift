@@ -37,7 +37,7 @@ public final class HttpAdapter: UndraAdapter, @unchecked Sendable {
         return .async([
             StandardPorts.Http.request: { args in
                 var reader = UndraReader(args)
-                let request = try PortHttpRequest.undraDecode(&reader)
+                let request = try HttpRequest.undraDecode(&reader)
                 try reader.finish()
                 return try await HttpAdapter.perform(request, on: session)
             },
@@ -46,7 +46,7 @@ public final class HttpAdapter: UndraAdapter, @unchecked Sendable {
 
     /// Runs `request` and returns the encoded `HttpResponse`, or throws `UndraPortError` carrying
     /// the encoded `HttpError`.
-    static func perform(_ request: PortHttpRequest, on session: URLSession) async throws -> [UInt8] {
+    static func perform(_ request: HttpRequest, on session: URLSession) async throws -> [UInt8] {
         guard let url = URL(string: request.url),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
@@ -71,7 +71,7 @@ public final class HttpAdapter: UndraAdapter, @unchecked Sendable {
             guard let http = response as? HTTPURLResponse else {
                 throw HttpAdapter.portError(.network("the server did not answer with an HTTP response"))
             }
-            let reply = PortHttpResponse(
+            let reply = HttpResponse(
                 status: UInt16(truncatingIfNeeded: http.statusCode),
                 headers: HttpAdapter.headers(of: http),
                 body: [UInt8](data)
@@ -89,14 +89,14 @@ public final class HttpAdapter: UndraAdapter, @unchecked Sendable {
     }
 
     /// The response headers, sorted by name (the dictionary URLSession returns is unordered).
-    static func headers(of response: HTTPURLResponse) -> [PortHeader] {
-        var result: [PortHeader] = []
+    static func headers(of response: HTTPURLResponse) -> [Header] {
+        var result: [Header] = []
         for (key, value) in response.allHeaderFields {
             if let name = key as? String, let text = value as? String {
-                result.append(PortHeader(name: name, value: text))
+                result.append(Header(name: name, value: text))
             }
         }
-        result.sort { (left: PortHeader, right: PortHeader) -> Bool in
+        result.sort { (left: Header, right: Header) -> Bool in
             if left.name != right.name {
                 return left.name < right.name
             }
@@ -105,7 +105,7 @@ public final class HttpAdapter: UndraAdapter, @unchecked Sendable {
         return result
     }
 
-    static func map(_ error: URLError, url: String) -> PortHttpError {
+    static func map(_ error: URLError, url: String) -> HttpError {
         switch error.code {
         case .timedOut:
             return .timeout
@@ -118,7 +118,7 @@ public final class HttpAdapter: UndraAdapter, @unchecked Sendable {
         }
     }
 
-    private static func portError(_ error: PortHttpError) -> UndraPortError {
+    private static func portError(_ error: HttpError) -> UndraPortError {
         return UndraPortError(body: error.undraEncoded())
     }
 }

@@ -9,18 +9,22 @@ import {
   UndraPortError,
   UndraReplyError,
   UndraSchemaMismatchError,
+  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { nextCallId } from "./callid.js";
+import { UndraCallError, UndraUnhandledError } from "./call-error.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
+import { Signal } from "./signal.js";
 import { StreamCall } from "./stream.js";
-import { RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
+import { type ReconnectOptions, RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
 import type { WorkerLike } from "./transport/wasm-worker.js";
 import {
+  ALL_SIGNALS,
   CallTarget,
   type Handle,
   type HelloPayload,
@@ -75,6 +79,22 @@ export interface UndraStats {
   readonly core: Readonly<Record<string, unknown>> | null;
 }
 
+/** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-051), or the connection failed for good. */
+export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
+
+/**
+ * What the connection to the core is doing (`UndraCore.connection`). Only a `remote` core ever
+ * leaves `connected`: it is `reconnecting` (attempt 1, 2, ... with the error that caused it) after
+ * the connection drops, `connected` again once the stores are observed again, and `closed` for
+ * good when the app closes it, its schema changed, the dev server lost its session, or the
+ * transport gave up. A wasm core is `connected` from `load` until it is closed.
+ */
+export type ConnectionState =
+  | { readonly kind: "connecting" }
+  | { readonly kind: "connected" }
+  | { readonly kind: "reconnecting"; readonly attempt: number; readonly error: Error }
+  | { readonly kind: "closed"; readonly reason: ConnectionClosedReason; readonly error?: Error };
+
 /** Options shared by `UndraCore.load` and `UndraCore.attach`. */
 export interface AttachOptions {
   /** The schema hash of the generated bindings (`UndraIds.schemaHash`); a core built from another schema is refused. */
@@ -91,10 +111,21 @@ export interface AttachOptions {
   readonly ports?: Readonly<Record<number, PortImpl>>;
   /** How long `observe` waits for the initial change-set of a remote or worker core before it rejects, in ms. Default 10000; 0 waits forever. */
   readonly observeTimeoutMs?: number;
-  /** Called once when the channel to the core is lost (not when you call `close()`). */
+  /** Called once when the channel to the core is lost for good (not when you call `close()`, and not while a `remote` core is reconnecting: see `onConnectionChange`). */
   readonly onClose?: (error: Error) => void;
-  /** Called with failures that have no caller to reject: a change-set that did not decode, a store whose `_apply` threw, a port that failed. They are also logged. */
-  readonly onError?: (error: unknown) => void;
+  /** Called with every change of {@link UndraCore.connection}, starting with `connecting`, on the thread that changed it. */
+  readonly onConnectionChange?: (state: ConnectionState) => void;
+  /**
+   * Called with every failure that has no caller to reject (ADR-032, amendment A): a generated command (a
+   * synchronous method that returns nothing and has no error type) that failed, a store change that could
+   * not be applied, a malformed change-set, a port that failed. The failure is also logged at error level,
+   * whether or not a handler is set. The handler runs synchronously where the failure was found (inside a
+   * core callback for a malformed change-set or a failed port): keep it short and do not call into Undra
+   * from it. A failure reported while the handler runs is only logged, and so is the failure of a call the
+   * handler started (a command fails after the handler returned), so a handler that calls a failing command
+   * is not called again for it. An exception it throws is logged and dropped.
+   */
+  readonly onError?: (error: UndraUnhandledError) => void;
   /** Make this core `UndraCore.shared` when none is set yet. Default `true`. */
   readonly shared?: boolean;
   /**
@@ -123,6 +154,8 @@ export interface LoadOptions extends AttachOptions {
   readonly handshakeTimeoutMs?: number;
   /** WebSocket implementation for `"remote"`; default the global one. */
   readonly webSocket?: WebSocketFactory;
+  /** Reconnect a `"remote"` core by itself when its connection drops: `false` turns it off, an object tunes the backoff. Default on. See {@link ReconnectOptions}. */
+  readonly reconnect?: boolean | ReconnectOptions;
   /** The Worker for `"wasm-worker"`, or a function creating it; default a module worker on `@undra/runtime/worker`. */
   readonly worker?: WorkerLike | (() => WorkerLike);
 }
@@ -142,6 +175,7 @@ interface PendingStream {
   readonly stream: StreamCall;
 }
 
+const UNLOADED_MESSAGE = "no UndraCore is loaded: call UndraCore.load(...) at app startup, before creating any Undra object, or pass a core explicitly";
 const UNAVAILABLE: PortOutcome = { kind: "unavailable" };
 const ASYNC: PortOutcome = { kind: "async" };
 const NO_BYTES = new Uint8Array(0);
@@ -205,12 +239,54 @@ function mergeAdapters(base: Partial<Adapters>, overrides: AdapterOverrides | un
 export class UndraCore {
   static #shared: UndraCore | null = null;
 
-  /** The core that the generated constructors and functions default to: the first one loaded. Throws `UndraError` (`"state"`) when there is none. */
+  /**
+   * The core that the generated constructors and functions default to: the first one loaded.
+   *
+   * Using it before a successful `load`, or after the shared core was closed, is a programming error but not
+   * a crash (ADR-032, amendment A): it returns a permanently closed placeholder whose calls reject with
+   * `UndraCallError.Unavailable`, whose commands only log, and whose first use logs what to do.
+   * {@link UndraCore.current} still returns `null` in that state, so check it, not this, to learn whether a
+   * core is loaded.
+   */
   static get shared(): UndraCore {
-    if (UndraCore.#shared === null) {
-      throw new UndraError("state", "no UndraCore is loaded; call UndraCore.load(...) first, or pass a core explicitly");
-    }
+    return UndraCore.#shared ?? UndraCore.#placeholder();
+  }
+
+  /** The shared core, or `null` if none is loaded. While it is `null`, {@link UndraCore.shared} is the closed placeholder. */
+  static get current(): UndraCore | null {
     return UndraCore.#shared;
+  }
+
+  static #unloaded: UndraCore | null = null;
+
+  /** The placeholder `shared` returns while no core is loaded: a core that was closed from the start. */
+  static #placeholder(): UndraCore {
+    if (UndraCore.#unloaded === null) {
+      const gone = (): never => {
+        throw new UndraTransportError("closed", UNLOADED_MESSAGE);
+      };
+      const core = new UndraCore(
+        {
+          mode: "wasm-main",
+          synchronous: true,
+          start: () => Promise.reject(new UndraTransportError("closed", UNLOADED_MESSAGE)),
+          send: gone,
+          callSync: gone,
+          close: () => {},
+        },
+        { expectedSchemaHash: 0n, shared: false },
+        {},
+      );
+      core.#closed = true;
+      core.#closedMessage = UNLOADED_MESSAGE;
+      UndraCore.#unloaded = core;
+      consoleLog().log(
+        4,
+        "undra::runtime",
+        "UndraCore.shared was used while no core is loaded (before UndraCore.load(...) succeeds, or after the shared core was closed); calls on it reject with UndraCallError.Unavailable. Load a core at app startup, before creating any Undra object.",
+      );
+    }
+    return UndraCore.#unloaded;
   }
 
   /**
@@ -264,6 +340,7 @@ export class UndraCore {
           ...(options.devtools !== undefined && { devtools: options.devtools }),
           ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
           ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+          ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
         });
         break;
       }
@@ -307,14 +384,25 @@ export class UndraCore {
   readonly #ports = new Map<number, PortImpl>();
   readonly #pending = new Map<number, PendingCall | PendingStream>();
   readonly #handles = new Set<Handle>();
+  /** The signals the app observes, per handle: what a reconnect observes again. */
+  readonly #observed = new Map<Handle, Set<number>>();
+  /** Handles released while the connection was down: released in the core once it is back. */
+  readonly #releasedWhileDown = new Set<Handle>();
+  readonly #connection = new Signal<ConnectionState>({ kind: "connecting" });
   #nextCallId = 0;
   #closed = false;
+  /** What a call on this closed core says; the default is "the core is closed". */
+  #closedMessage = "the core is closed";
+  #reporting = false;
+  /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
+  readonly #handlerFailures = new WeakSet<object>();
   #stopEvents: (() => void) | null = null;
 
   private constructor(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>) {
     this.#transport = transport;
     this.#options = options;
     this.#adapters = adapters;
+    this.#notifyConnection(this.#connection.peek());
     this.#observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
       ...options.mirror,
@@ -339,6 +427,21 @@ export class UndraCore {
   /** Whether the core has been closed, by `close()` or because the channel was lost. */
   get closed(): boolean {
     return this.#closed;
+  }
+
+  /**
+   * What the connection to the core is doing, as a signal: `connecting` until `load` resolves,
+   * `connected`, `reconnecting` with the attempt number after a `remote` connection drops, and
+   * `closed` with its reason. `useSignal(core.connection)` renders it in React.
+   *
+   * While it is `reconnecting`, calls and `observe` fail at once with an `UndraTransportError`
+   * (`"closed"`, which a generated call rejects with as `UndraCallError.Unavailable`); what was in
+   * flight when the connection dropped failed with the same. When it is
+   * `connected` again every store the app observes has been observed again, so the mirrors converge
+   * on the core's current values by themselves.
+   */
+  get connection(): Signal<ConnectionState> {
+    return this.#connection;
   }
 
   // ----- calls -----------------------------------------------------------------------
@@ -394,13 +497,16 @@ export class UndraCore {
 
   /**
    * Runs a constructor (`typeId` names the object type, `methodId` the
-   * constructor) and resolves with the new object's handle. Rejects like `call`.
+   * constructor) and resolves with the new object's handle. Rejects like `call`,
+   * and with {@link UndraTransportError} (`"protocol"`) when the core answers
+   * with the null handle.
    */
   async construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle> {
     const body = await this.#request((callId) =>
       encodeCall({ target: CallTarget.Constructor, typeId, methodId, callId, args }),
     );
     const handle = decodeValue(codecs.u64, body);
+    if (handle === 0n) throw new UndraTransportError("protocol", "the core returned the null handle for a constructor");
     this.#handles.add(handle);
     return handle;
   }
@@ -422,6 +528,7 @@ export class UndraCore {
     } catch (error) {
       return Promise.reject(error);
     }
+    this.#noteObserved(handle, signalId, on);
     if (this.#transport.synchronous) {
       // The core has already delivered the initial change-set; apply it now.
       this.mirror.flush();
@@ -434,11 +541,32 @@ export class UndraCore {
   release(handle: Handle): void {
     this.mirror.unregister(handle);
     this.#handles.delete(handle);
+    this.#observed.delete(handle);
     if (this.#closed) return;
+    if (this.#connection.peek().kind === "reconnecting") {
+      // The core keeps the object for us (ADR-051); it is released when the connection is back.
+      this.#releasedWhileDown.add(handle);
+      return;
+    }
     try {
       this.#transport.send(Kind.Release, encodeRelease({ handle }));
     } catch (error) {
       this.#reportError("release", error);
+    }
+  }
+
+  /** Remembers what the app observes, so that a reconnect can observe it again. */
+  #noteObserved(handle: Handle, signalId: number, on: boolean): void {
+    if (on) {
+      let signals = this.#observed.get(handle);
+      if (signals === undefined) this.#observed.set(handle, (signals = new Set()));
+      signals.add(signalId);
+    } else if (signalId === ALL_SIGNALS) {
+      this.#observed.delete(handle);
+    } else {
+      const signals = this.#observed.get(handle);
+      signals?.delete(signalId);
+      if (signals?.size === 0) this.#observed.delete(handle);
     }
   }
 
@@ -461,6 +589,54 @@ export class UndraCore {
    */
   registerPort(portId: number, impl: PortImpl): void {
     this.#ports.set(portId, impl);
+  }
+
+  /**
+   * Reports a failure that no caller can see (ADR-032, amendment A): logs it at error level and passes it to
+   * `onError`. Generated commands and store `_apply` call it; it never throws and never rejects.
+   *
+   * `error` is mapped the way a rejecting call's error is (`UndraCallError.mapped`), so the handler always
+   * receives an `UndraCallError` inside the {@link UndraUnhandledError} (a failure that is not Undra's is
+   * `Malformed`, with the original as the `cause`). A failure that is a `remote` core's connection being down
+   * (`Unavailable` while {@link UndraCore.connection} is `reconnecting`, or `closed` for a reason other than
+   * `requested`) is only logged, at warning level: the connection state and `onConnectionChange` already report
+   * it, once, and a command tapped meanwhile is not a second failure to hand to a crash reporter. A report made
+   * while the handler runs is only logged,
+   * and so is the failure of a call the handler started: a command the handler calls fails after the
+   * handler returned (every method is asynchronous), and reporting it again would call the handler again,
+   * for ever.
+   *
+   * @param error What the call threw.
+   * @param operation What failed, as TypeScript spells it, for example `"Todos.toggle"`.
+   */
+  report(error: unknown, operation: string): void {
+    const unhandled = new UndraUnhandledError(operation, UndraCallError.asCallError(error), error);
+    if (this.#isConnectionDown(unhandled.error)) {
+      this.#log(3, "undra::runtime", `${unhandled.message} (the connection to the core is down: see UndraCore.connection)`);
+      return;
+    }
+    this.#log(4, "undra::runtime", unhandled.message);
+    const handler = this.#options.onError;
+    if (handler === undefined || this.#reporting || this.#startedByHandler(error)) return;
+    this.#reporting = true;
+    try {
+      handler(unhandled);
+    } catch (thrown) {
+      this.#log(4, "undra::runtime", `the onError handler threw while handling "${unhandled.message}": ${errorMessage(thrown)}`);
+    } finally {
+      this.#reporting = false;
+    }
+  }
+
+  /**
+   * Whether `error` is the connection of a `remote` core being down, which {@link UndraCore.connection} already reports:
+   * the core is `reconnecting`, or `closed` for a reason other than the app's own `close()`. A wasm core that trapped is
+   * not a connection, and a core the app closed is a programming error: both are still reported.
+   */
+  #isConnectionDown(error: UndraCallError): boolean {
+    if (error.kind !== "unavailable" || this.#transport.mode !== "remote") return false;
+    const state = this.#connection.peek();
+    return state.kind === "reconnecting" || (state.kind === "closed" && state.reason !== "requested");
   }
 
   /** Live counters of this core; see {@link UndraStats}. */
@@ -494,6 +670,39 @@ export class UndraCore {
   }
 
   /**
+   * The persisted state of every store (docs/SPEC.md section 5.9), as opaque bytes that `restore`
+   * accepts, also into a core loaded later from the same module. Objects that are not stores are
+   * not part of it. In `wasm-worker` mode the snapshot is taken by the worker behind the messages
+   * sent before it. Rejects with {@link UndraTransportError} when the core is closed, and with
+   * {@link UndraModeError} over a transport that cannot snapshot (`remote`).
+   */
+  async snapshot(): Promise<Uint8Array> {
+    this.#assertOpen();
+    const transport = this.#transport;
+    if (transport.snapshot === undefined) throw new UndraModeError("snapshot", transport.mode);
+    return transport.snapshot();
+  }
+
+  /**
+   * Rebuilds the stores from `bytes` (a `snapshot`); the handles the app holds stay valid. Resolves
+   * after the restored values reached the stores (the core re-delivers the observed signals, and
+   * the mirror is flushed, so code after `await core.restore(..)` reads the restored values). A
+   * call or stream in flight on a store the restore replaced ends as cancelled by the core
+   * (reply status 3, stream error `"cancelled: ..."`); an object that is not a store becomes a
+   * stale handle. Rejects with `UndraRestoreError` when the core refuses the bytes, in which case
+   * it is unchanged and still usable, with {@link UndraTransportError} when the core is closed, and
+   * with {@link UndraModeError} over a transport that cannot restore (`remote`).
+   */
+  async restore(bytes: Uint8Array): Promise<void> {
+    this.#assertOpen();
+    const transport = this.#transport;
+    if (transport.restore === undefined) throw new UndraModeError("restore", transport.mode);
+    await transport.restore(bytes);
+    // Read-your-writes (docs/SPEC.md section 11): what the restore delivered is applied before the caller resumes.
+    this.mirror.flush();
+  }
+
+  /**
    * Closes the core: in-flight calls and streams reject with
    * {@link UndraTransportError}, event sources stop, the transport is released.
    * Idempotent. Later calls reject or throw.
@@ -510,6 +719,7 @@ export class UndraCore {
       throw new UndraSchemaMismatchError(this.#options.expectedSchemaHash, hello.schemaHash);
     }
     this.hello = hello;
+    this.#setConnection({ kind: "connected" });
     if (this.#options.adapters?.timer && this.#transport.mode === "remote") {
       // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
       this.#ports.set(
@@ -529,17 +739,23 @@ export class UndraCore {
   }
 
   #assertOpen(): void {
-    if (this.#closed) throw new UndraTransportError("closed", "the core is closed");
+    if (this.#closed) throw new UndraTransportError("closed", this.#closedMessage);
   }
 
   /** Stops everything. `reason` is what pending work fails with; `null` when there is none (a failed start). */
-  #dispose(reason: Error | null): void {
+  #dispose(reason: Error | null, why: ConnectionClosedReason = reason === null ? "failed" : "requested"): void {
     if (this.#closed) return;
     this.#closed = true;
     if (UndraCore.#shared === this) UndraCore.#shared = null;
     this.#stopEvents?.();
     this.#stopEvents = null;
-    const failure = reason ?? new UndraTransportError("closed", "the core is closed");
+    this.#failInFlight(reason ?? new UndraTransportError("closed", "the core is closed"));
+    this.#setConnection(reason === null || why === "requested" ? { kind: "closed", reason: why } : { kind: "closed", reason: why, error: reason });
+    this.#transport.close();
+  }
+
+  /** Fails every call, stream and `observe` that waits for the core with `failure`. */
+  #failInFlight(failure: Error): void {
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const p of pending) {
@@ -551,17 +767,64 @@ export class UndraCore {
       }
     }
     this.mirror.failWaiters(failure);
-    this.#transport.close();
   }
 
-  /** The channel to the core was lost. */
+  /** The channel to the core was lost for good. */
   #lost(error: Error): void {
     if (this.#closed) return;
-    this.#dispose(error);
+    const why: ConnectionClosedReason =
+      error instanceof UndraSchemaMismatchError ? "schemaMismatch" : error instanceof UndraSessionLostError ? "sessionLost" : "failed";
+    this.#dispose(error, why);
     try {
       this.#options.onClose?.(error);
     } catch (thrown) {
       this.#reportError("onClose", thrown);
+    }
+  }
+
+  /** The connection dropped and the transport reconnects: what was in flight is lost, the core stays open. */
+  #reconnecting(attempt: number, error: Error): void {
+    if (this.#closed) return;
+    if (attempt === 1) {
+      this.#failInFlight(
+        new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }),
+      );
+    }
+    this.#setConnection({ kind: "reconnecting", attempt, error });
+  }
+
+  /**
+   * The connection is back: release what was released meanwhile and observe what the app observes
+   * again. The core answers each `Observe` with the current values, so every mirror converges.
+   */
+  #reconnected(hello: HelloPayload): void {
+    if (this.#closed) return;
+    this.hello = hello;
+    try {
+      for (const handle of this.#releasedWhileDown) this.#transport.send(Kind.Release, encodeRelease({ handle }));
+      this.#releasedWhileDown.clear();
+      for (const [handle, signals] of this.#observed) {
+        for (const signalId of signals) this.#transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
+      }
+    } catch (error) {
+      // The connection dropped again already: not connected after all. The transport reports the loss and the
+      // next reconnect replays.
+      this.#reportError("reconnect", error);
+      return;
+    }
+    this.#setConnection({ kind: "connected" });
+  }
+
+  #setConnection(state: ConnectionState): void {
+    this.#connection._set(state);
+    this.#notifyConnection(state);
+  }
+
+  #notifyConnection(state: ConnectionState): void {
+    try {
+      this.#options.onConnectionChange?.(state);
+    } catch (error) {
+      this.#reportError("onConnectionChange", error);
     }
   }
 
@@ -581,6 +844,31 @@ export class UndraCore {
   }
 
   #request(encode: (callId: number) => Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+    const call = this.#send(encode, signal);
+    if (!this.#reporting) return call;
+    // Started by the `onError` handler: it settles after the handler returned, out of reach of the
+    // synchronous guard, so its failure is remembered and `report` only logs it.
+    return call.catch((error: unknown) => {
+      throw this.#fromHandler(error);
+    });
+  }
+
+  /** `error`, the failure of a call the `onError` handler started, remembered as such. */
+  #fromHandler(error: unknown): unknown {
+    // A transport failure can be one object that every pending call shares (`close()` fails them all with
+    // it): this call gets its own, so the other callers' reports are unaffected.
+    const own =
+      error instanceof UndraTransportError ? new UndraTransportError(error.reason, error.message, { cause: error }) : error;
+    if (typeof own === "object" && own !== null) this.#handlerFailures.add(own);
+    return own;
+  }
+
+  /** Whether `error` is the failure of a call the `onError` handler started. */
+  #startedByHandler(error: unknown): boolean {
+    return typeof error === "object" && error !== null && this.#handlerFailures.has(error);
+  }
+
+  #send(encode: (callId: number) => Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
     try {
       this.#assertOpen();
     } catch (error) {
@@ -632,7 +920,7 @@ export class UndraCore {
       },
     });
     if (this.#closed) {
-      stream.fail(new UndraTransportError("closed", "the core is closed"));
+      stream.fail(new UndraTransportError("closed", this.#closedMessage));
       return stream;
     }
     this.#pending.set(callId, { kind: "stream", stream });
@@ -664,6 +952,13 @@ export class UndraCore {
     closed: (error) => {
       this.#lost(error);
     },
+    reconnecting: (attempt, error) => {
+      this.#reconnecting(attempt, error);
+    },
+    reconnected: (hello) => {
+      this.#reconnected(hello);
+    },
+    holdsObjects: () => this.#handles.size > 0,
   };
 
   #onReply(payload: Uint8Array): void {
@@ -801,12 +1096,8 @@ export class UndraCore {
     }
   }
 
+  /** `report` for the runtime's own failures; `where` names the operation. */
   #reportError(where: string, error: unknown): void {
-    this.#log(4, "undra::runtime", `${where}: ${errorMessage(error)}`);
-    try {
-      this.#options.onError?.(error);
-    } catch {
-      // The reporter itself failed; nothing more can be done.
-    }
+    this.report(error, where);
   }
 }

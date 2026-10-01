@@ -21,13 +21,20 @@ import java.util.concurrent.atomic.AtomicInteger
  * close), standing in for `undra dev` so that the real [dev.undra.runtime.RemoteTransport] can be tested over
  * a real socket. It speaks whatever bytes a test hands it, so tests can also misbehave.
  */
-class WsTestServer : AutoCloseable {
-    private val server = ServerSocket(0, 10, InetAddress.getLoopbackAddress())
+class WsTestServer(port: Int = 0) : AutoCloseable {
+    private val server = ServerSocket(port, 10, InetAddress.getLoopbackAddress())
+    val port: Int get() = server.localPort
     val url: String get() = "ws://127.0.0.1:${server.localPort}"
     val connections = CopyOnWriteArrayList<Conn>()
 
     /** Called on the connection's reader thread once the handshake is done, before any frame is read. */
     @Volatile var onConnect: (Conn) -> Unit = {}
+
+    /** When set, the upgrade is answered with this status line instead of `101` (for example `HTTP/1.1 403 Forbidden`). */
+    @Volatile var rejectWith: String? = null
+
+    /** When `true` the `Sec-WebSocket-Accept` of the upgrade response is wrong. */
+    @Volatile var corruptAccept = false
 
     @Volatile private var closed = false
 
@@ -51,6 +58,23 @@ class WsTestServer : AutoCloseable {
         val closeCodes = LinkedBlockingQueue<Int>()
         @Volatile var onMessage: (ByteArray) -> Unit = {}
         @Volatile var sawTextFrame = false
+
+        /** The request line of the upgrade request (`GET /?undra_session=... HTTP/1.1`). */
+        @Volatile var requestLine: String = ""
+
+        /** The query of the upgrade request's URL, as a map. */
+        val query: Map<String, String>
+            get() = requestLine.split(' ').getOrNull(1)?.substringAfter('?', "")?.split('&')?.filter { it.isNotEmpty() }
+                ?.associate { it.substringBefore('=') to it.substringAfter('=', "") } ?: emptyMap()
+
+        /** When `false` the connection ignores pings, like a peer that is gone but whose socket is still open. */
+        @Volatile var answerPings = true
+
+        /** The payloads of the pongs the client sent. */
+        val pongs = LinkedBlockingQueue<ByteArray>()
+
+        /** How many pings the client sent. */
+        val pingsReceived = AtomicInteger()
         private val out: OutputStream = socket.getOutputStream()
         private val writeLock = Any()
         private val seq = AtomicInteger()
@@ -80,11 +104,18 @@ class WsTestServer : AutoCloseable {
                 if (b < 0) throw IOException("closed during handshake")
                 header.append(b.toChar())
             }
+            requestLine = header.lines().first()
             val key = header.lines().first { it.startsWith("Sec-WebSocket-Key:", ignoreCase = true) }.substringAfter(':').trim()
             val accept = Base64.getEncoder().encodeToString(
                 MessageDigest.getInstance("SHA-1").digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray()),
-            )
+            ).let { if (corruptAccept) "AAAA$it" else it }
             synchronized(writeLock) {
+                val status = rejectWith
+                if (status != null) {
+                    out.write("$status\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                    out.flush()
+                    throw IOException("rejected the upgrade")
+                }
                 out.write(
                     ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: $accept\r\n\r\n")
                         .toByteArray(),
@@ -131,7 +162,11 @@ class WsTestServer : AutoCloseable {
                         frame(8, payload)
                         return
                     }
-                    9 -> frame(10, payload)
+                    9 -> {
+                        pingsReceived.incrementAndGet()
+                        if (answerPings) frame(10, payload)
+                    }
+                    10 -> pongs.add(payload)
                     else -> Unit
                 }
             }
@@ -175,8 +210,22 @@ class WsTestServer : AutoCloseable {
 
         fun sendText(text: String) = frame(1, text.toByteArray())
 
+        /** Sends a ping with [payload]. */
+        fun sendPing(payload: ByteArray = ByteArray(0)) = frame(9, payload)
+
+        /** Sends a close frame with [code] and [reason]. */
+        fun sendClose(code: Int, reason: String) = frame(8, byteArrayOf((code shr 8).toByte(), code.toByte()) + reason.toByteArray())
+
         /** Closes the WebSocket with [code]. */
         fun sendClose(code: Int) = frame(8, byteArrayOf((code shr 8).toByte(), code.toByte()))
+
+        /** Writes [bytes] as they are, framing or not (a server that breaks RFC 6455). */
+        fun sendRaw(bytes: ByteArray) {
+            synchronized(writeLock) {
+                out.write(bytes)
+                out.flush()
+            }
+        }
 
         /** Drops the TCP connection without a close handshake. */
         fun drop() = socket.close()

@@ -5,10 +5,14 @@
 //! call `undra_schema_json`. This is the only module of the CLI that uses `unsafe`: calling into a
 //! library loaded at run time cannot be checked by the compiler, so each call says why it is sound.
 //!
-//! The library returns the **canonical** JSON (docs stripped, no labels, lists sorted) because
-//! that is what the schema hash is computed over. [`parse_schema_json`] accepts that and the full
-//! JSON of `Schema::to_json_pretty` (what a `schema.json` file holds), adding the labels the
-//! canonical form leaves out.
+//! The library returns the whole schema, doc comments and labels included (`Schema::to_json`,
+//! ADR-050), so `undra bindgen --docs` needs no second build. The hash does not cover docs, so the
+//! loader checks the library's own `undra_schema_hash` against the hash of the JSON it parsed.
+//! [`parse_schema_json`] accepts that, the full JSON of `Schema::to_json_pretty` (what a
+//! `schema.json` file holds) and the label-free canonical form (a core built before the export
+//! carried docs), adding the labels the canonical form leaves out. A core of that age still loads,
+//! but not for `--docs`: it has none to give, and bindings without them are refused rather than
+//! written as if the source had no comments.
 
 #![allow(unsafe_code)]
 
@@ -34,14 +38,17 @@ type SchemaHashFn = unsafe extern "C" fn() -> u64;
 type SchemaJsonFn = unsafe extern "C" fn() -> UndraBuf;
 type BufFreeFn = unsafe extern "C" fn(UndraBuf);
 
-/// Loads the core library at `library` and reads its schema. `crate_name` labels the result
-/// (the canonical JSON carries no labels).
+/// Loads the core library at `library` and reads its schema. `crate_name` labels the result: the
+/// library only knows itself as `undra-core`. With `docs` the schema keeps the doc comments the
+/// library exports; without, they are dropped (generated bindings carry none by default).
 ///
 /// # Errors
 ///
 /// `C0006` when the library cannot be loaded, is not an Undra core of this ABI version, reports
-/// JSON that does not parse, or reports a schema whose hash does not match its own.
-pub fn load_from_library(library: &Path, crate_name: &str) -> Result<Schema> {
+/// JSON that is not UTF-8 or does not parse, reports a schema whose hash does not match its own,
+/// or, with `docs`, exports the docless canonical form of a core built before
+/// `undra_schema_json` carried the doc comments.
+pub fn load_from_library(library: &Path, crate_name: &str, docs: bool) -> Result<Schema> {
     let fail = |what: String, why: &str, fix: &str| CliError::new(Code::Schema, what, why, fix);
 
     // SAFETY: loading a library runs its initialisers. The library is the one this process just
@@ -97,12 +104,14 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<Schema> {
     // SAFETY: `undra_schema_json` takes no arguments and returns an owned `UndraBuf`; its bytes are
     // valid for `len` bytes until `undra_buf_free`, which is called below on the same buffer.
     let buf = unsafe { schema_json() };
+    // Copied out (strictly decoded: the docs are not covered by the hash, so a damaged byte in one
+    // would pass the check below) before the buffer goes back to the core.
     let text = if buf.ptr.is_null() {
-        String::new()
+        Ok(String::new())
     } else {
         // SAFETY: `ptr` is non-null and the core promises `len` initialised bytes at it.
         let bytes = unsafe { std::slice::from_raw_parts(buf.ptr, buf.len as usize) };
-        String::from_utf8_lossy(bytes).into_owned()
+        std::str::from_utf8(bytes).map(str::to_owned)
     };
     // SAFETY: `buf` came from `undra_schema_json` of this library and is freed exactly once.
     unsafe { buf_free(buf) };
@@ -111,7 +120,14 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<Schema> {
     // the process is short-lived, so keep the library mapped instead.
     std::mem::forget(lib);
 
-    let schema = parse_schema_json(&text, crate_name).map_err(|e| {
+    let text = text.map_err(|e| {
+        fail(
+            format!("the core library's schema is not UTF-8: {e}"),
+            "`undra_schema_json` returns UTF-8 JSON (docs/SPEC.md 6); the library is damaged or is not what `undra build` wrote",
+            "rebuild the core with `undra build --platform host` and run `undra bindgen` again",
+        )
+    })?;
+    let (schema, export) = from_library_json(&text, crate_name).map_err(|e| {
         fail(
             format!("the core library's schema cannot be read: {}", e.what),
             "`undra_schema_json` returned JSON this undra-cli does not understand (a newer `undra-meta`?)",
@@ -128,7 +144,57 @@ pub fn load_from_library(library: &Path, crate_name: &str) -> Result<Schema> {
             "use the undra-cli that matches the `undra` version of the core",
         ));
     }
-    Ok(schema)
+    with_docs_or_without(schema, export, docs, library)
+}
+
+/// The library's schema with its doc comments when `docs` is asked for, without them otherwise.
+/// A library that exported the canonical form has none to give, and `--docs` says so instead of
+/// writing bindings that look as if the Rust source had no comments.
+fn with_docs_or_without(
+    schema: Schema,
+    export: Export,
+    docs: bool,
+    library: &Path,
+) -> Result<Schema> {
+    match (docs, export) {
+        (false, _) => Ok(schema.without_docs()),
+        (true, Export::Whole) => Ok(schema),
+        (true, Export::Canonical) => Err(CliError::new(
+            Code::Schema,
+            format!(
+                "{} exports its schema without doc comments, so `--docs` has nothing to write",
+                library.display()
+            ),
+            "the core was built with an `undra-ffi` older than this undra-cli: its `undra_schema_json` returns the canonical form the hash covers, which leaves the docs out (ADR-050)",
+            "update the core's `undra` dependency to the version of this undra-cli (`cargo update -p undra`), or run `undra bindgen` without --docs",
+        )),
+    }
+}
+
+/// Which form a core library's `undra_schema_json` returned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Export {
+    /// The whole schema, labels and doc comments included (`Schema::to_json`, ADR-050).
+    Whole,
+    /// The canonical form, without labels or docs: a core built before ADR-050.
+    Canonical,
+}
+
+/// The schema a core library's `undra_schema_json` returned, and which form it came in. Its
+/// `crate_name` label is replaced by `crate_name` (the library's own is the generic
+/// `undra-core`); everything else, docs included, is the library's.
+fn from_library_json(text: &str, crate_name: &str) -> Result<(Schema, Export)> {
+    let mut schema = parse_schema_json(text, crate_name)?;
+    // `Schema::to_json` always writes the `undra_version` label; the canonical form never does.
+    let labelled = serde_json::from_str::<serde_json::Value>(text)
+        .is_ok_and(|value| value.get("undra_version").is_some());
+    crate_name.clone_into(&mut schema.crate_name);
+    let export = if labelled {
+        Export::Whole
+    } else {
+        Export::Canonical
+    };
+    Ok((schema, export))
 }
 
 /// Whether each of `symbols` is an exported, resolvable symbol of the core library at `library`.
@@ -168,8 +234,9 @@ pub fn symbols_present(library: &Path, symbols: &[&str]) -> Result<Vec<bool>> {
     Ok(found)
 }
 
-/// Parses schema JSON: canonical (from `undra_schema_json`) or full (`Schema::to_json_pretty`).
-/// `crate_name` is used when the JSON has no `crate_name` label.
+/// Parses schema JSON: full (`Schema::to_json` from `undra_schema_json`, or `to_json_pretty`) or
+/// canonical (`Schema::canonical_json`). `crate_name` is used when the JSON has no `crate_name`
+/// label.
 ///
 /// # Errors
 ///
@@ -204,8 +271,8 @@ pub fn parse_schema_json(text: &str, crate_name: &str) -> Result<Schema> {
 
 /// Orders the lists whose order is not part of the wire layout the way the canonical form does
 /// (methods, constructors and port methods by name, variants by index), so the same core
-/// generates the same files whichever way its schema was obtained: the canonical JSON of the
-/// library is sorted, the registrations collected by the dev runner are in declaration order.
+/// generates the same files whichever way its schema was obtained: a canonical JSON is sorted, the
+/// registrations in a library's or the dev runner's full JSON are in declaration order.
 pub fn normalize(schema: &mut Schema) {
     for en in &mut schema.enums {
         en.variants.sort_by_key(|v| v.index);
@@ -254,6 +321,61 @@ mod tests {
         let schema = sample();
         let back = parse_schema_json(&schema.to_json_pretty(), "ignored").unwrap();
         assert_eq!(back, schema);
+    }
+
+    #[test]
+    fn a_library_schema_keeps_its_docs_and_takes_the_callers_label() {
+        // What `undra_schema_json` returns: compact, labelled `undra-core`, docs included.
+        let mut schema = sample();
+        "undra-core".clone_into(&mut schema.crate_name);
+        let (back, export) = from_library_json(&schema.to_json(), "demo-core").unwrap();
+        assert_eq!(export, Export::Whole);
+        assert_eq!(back.crate_name, "demo-core");
+        assert_eq!(back.records[0].docs, "An item.");
+        assert_eq!(back.records[0].fields[0].docs, "The title.");
+        assert_eq!(back.hash(), schema.hash(), "the docs are not in the hash");
+        assert_eq!(back.without_docs().hash(), schema.hash());
+        // A core without a single doc comment still exports the whole form: the labels say so.
+        let bare = sample().without_docs();
+        let (_, export) = from_library_json(&bare.to_json(), "demo-core").unwrap();
+        assert_eq!(export, Export::Whole);
+    }
+
+    #[test]
+    fn a_library_from_before_the_export_carried_docs_still_loads() {
+        // `load_from_library` refuses this form for `--docs` (it has none to give) and accepts it
+        // otherwise.
+        let schema = sample();
+        let (back, export) = from_library_json(&schema.canonical_json(), "demo-core").unwrap();
+        assert_eq!(export, Export::Canonical);
+        assert_eq!(back.crate_name, "demo-core");
+        assert_eq!(back.records[0].docs, "");
+        assert_eq!(back.hash(), schema.hash());
+    }
+
+    #[test]
+    fn docs_are_kept_only_when_asked_for_and_refused_when_the_library_has_none() {
+        let library = Path::new("/build/host/libundra_core.dylib");
+        let kept = with_docs_or_without(sample(), Export::Whole, true, library).unwrap();
+        assert_eq!(kept.records[0].docs, "An item.");
+        let dropped = with_docs_or_without(sample(), Export::Whole, false, library).unwrap();
+        assert_eq!(dropped, sample().without_docs());
+        // A core from before ADR-050 still generates its (docless) bindings by default ...
+        let old = sample().without_docs();
+        assert_eq!(
+            with_docs_or_without(old.clone(), Export::Canonical, false, library).unwrap(),
+            old
+        );
+        // ... but `--docs` on it is an error that says why and what to do, not silently docless
+        // bindings.
+        let e = with_docs_or_without(old, Export::Canonical, true, library).unwrap_err();
+        assert_eq!(e.code, Code::Schema);
+        assert!(
+            e.what.contains("--docs") && e.what.contains("libundra_core"),
+            "{e}"
+        );
+        assert!(e.why.contains("older"), "{e}");
+        assert!(e.fix.contains("cargo update -p undra"), "{e}");
     }
 
     #[test]
@@ -317,7 +439,7 @@ mod tests {
 
     #[test]
     fn a_library_that_is_not_there_is_explained() {
-        let e = load_from_library(Path::new("/definitely/not/here.dylib"), "x").unwrap_err();
+        let e = load_from_library(Path::new("/definitely/not/here.dylib"), "x", false).unwrap_err();
         assert_eq!(e.code, Code::Schema);
         assert!(e.what.contains("cannot load"), "{e}");
         assert!(e.fix.contains("undra build --platform host"), "{e}");

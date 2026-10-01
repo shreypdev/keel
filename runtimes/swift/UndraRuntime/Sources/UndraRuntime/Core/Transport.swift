@@ -31,8 +31,29 @@ protocol UndraInbound: AnyObject, Sendable {
     func onPortCall(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome
     /// A log record from the core (remote transport; in process the core logs through the Log port).
     func onLog(level: UInt8, target: String, message: String)
-    /// The connection is gone; every call in flight fails with `error`.
+    /// The connection is gone for good; every call in flight fails with `error`.
     func onDisconnect(_ error: any Error)
+    /// Only for a transport that reconnects (remote, ADR-051): the connection dropped, or a retry
+    /// failed, and the transport will try again. `attempt` counts from 1, and attempt 1 is the
+    /// loss itself: whatever was in flight has failed for good. `onDisconnect` follows only if the
+    /// transport gives up.
+    func onReconnecting(attempt: Int, error: any Error)
+    /// Only for a transport that reconnects: the connection is back and the core's `Hello` was
+    /// checked. The core observes its stores again (the callback must not call into the transport).
+    func onReconnected()
+    /// Only for a transport that reconnects: whether the core holds objects it expects the server
+    /// to still have (it asks the server to resume them).
+    func holdsObjects() -> Bool
+}
+
+extension UndraInbound {
+    func onReconnecting(attempt: Int, error: any Error) {}
+
+    func onReconnected() {}
+
+    func holdsObjects() -> Bool {
+        return false
+    }
 }
 
 /// What a transport learns while starting.

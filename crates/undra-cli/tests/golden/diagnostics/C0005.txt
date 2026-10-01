@@ -1,0 +1,4 @@
+error[undra::C0005]: the core crate `c0005-core` does not depend on Undra
+  = note: without the `undra` crate there are no `#[undra::api]` items to describe, and the schema would be empty
+  = help: add `undra = "0.1"` to the core's [dependencies] (or a `path` to your Undra checkout)
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0005

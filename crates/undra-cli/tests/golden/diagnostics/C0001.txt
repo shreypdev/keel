@@ -1,0 +1,4 @@
+error[undra::C0001]: no undra.toml found in <dir> or any parent directory
+  = note: this command works on an Undra project, and a project is the directory that holds undra.toml
+  = help: run it inside a project, point at one with `-C <dir>`, or create one with `undra init <name>`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0001

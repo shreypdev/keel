@@ -7,6 +7,7 @@ package golden.stdlib
 
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraPortException
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.Mirror
 import dev.undra.runtime.adapters.AppState
@@ -187,10 +188,10 @@ private fun calls() {
 
     core.replies.add(replyError(HttpError.encodeToByteArray(HttpError.Network("down"))))
     expectEq(expectThrows<HttpError.Network>("typed error") { runBlocking { syncer.send(request) } }.reason, "down", "typed error")
-    // Anything but an error reply passes through untouched.
+    // Anything but an error reply maps onto the closed set.
     val panic = UndraReplyException(ReplyStatus.PANIC, ByteArray(0))
     core.replies.add(panic)
-    expect(expectThrows<UndraReplyException>("panic") { runBlocking { syncer.send(request) } } === panic, "panic passes through")
+    expectThrows<UndraCallError.Panicked>("panic") { runBlocking { syncer.send(request) } }
 
     core.replies.add(replyError(FsError.encodeToByteArray(FsError.Denied)))
     expectThrows<FsError.Denied>("fs error") { runBlocking { syncer.save("/tmp/x") } }

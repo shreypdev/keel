@@ -1,0 +1,251 @@
+{
+ "schema": "undra-device-bench/1",
+ "date": "2026-10-01",
+ "finished_at": "2026-10-01T16:38:57.867Z",
+ "target": "web-chromium-headless",
+ "platform": "web",
+ "kind": "browser",
+ "label": "Chromium 153.0.8010.12 headless (Playwright, wasm-main) on Apple M5 Pro",
+ "claim": "Not a device: simulator, emulator or desktop browser on a Mac. Real-device rows are pending hardware, and no claim of meeting a device target is made from this file.",
+ "device": {
+  "model": "chromium (headless, Playwright)",
+  "arch": "arm64",
+  "cores": 18,
+  "browser": "chromium",
+  "browser_version": "153.0.8010.12",
+  "headless": true,
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+  "hardware_concurrency": 18,
+  "cross_origin_isolated": true,
+  "device_pixel_ratio": 1
+ },
+ "host": {
+  "cpu": "Apple M5 Pro",
+  "os": "macOS 26.5 (25F71)",
+  "arch": "arm64",
+  "load_before": 2.28,
+  "load_after": 2.92
+ },
+ "build": {
+  "type": "release",
+  "core": "release-wasm, wasm-opt -Oz",
+  "app": "vite production build, cross-origin isolated (5 µs clock)",
+  "commit": "e0d9560",
+  "dirty": false
+ },
+ "command": "scripts/bench-device.sh --device web --runs 2 --no-render --no-build",
+ "runtime": "wasm-main",
+ "timer": {
+  "kind": "performance.now",
+  "resolution_ns": 4999.995231628418,
+  "overhead_ns": 78.74999940395355
+ },
+ "config": {
+  "batches": 100,
+  "warmupBatches": 10,
+  "batchSize": {
+   "sync_call": 1000,
+   "sync_call_runtime": 5000,
+   "record_1kb": 500,
+   "keyed_insert_10k": 200,
+   "changeset_100": 100
+  },
+  "resetEveryInserts": 1000,
+  "drainFrames": 240,
+  "drainWarmupFrames": 60,
+  "perEntryBatchSize": 20,
+  "reloads": 20
+ },
+ "ops": [
+  {
+   "id": "sync_call",
+   "mode": "batched",
+   "batch": 1000,
+   "samples": 100,
+   "min": 2794.999986886978,
+   "p50": 3484.9999845027924,
+   "p90": 6335.00000834465,
+   "p99": 13735.000014305115,
+   "max": 57439.999997615814,
+   "mean": 4690.999999046326,
+   "note": "`await bench.benchAdd(a, b)`: encode, the call, the reply, decode, through the generated asynchronous binding"
+  },
+  {
+   "id": "sync_call_runtime",
+   "mode": "batched",
+   "batch": 5000,
+   "samples": 100,
+   "min": 3108.9999973773956,
+   "p50": 3545.999997854233,
+   "p90": 5989.999997615814,
+   "p99": 15548.000001907349,
+   "max": 25621.99999690056,
+   "mean": 4543.8999999165535,
+   "note": "`UndraCore.callSync`: the runtime's synchronous entry (no promise), which the generated TypeScript does not use; the blueprint's in-thread row"
+  },
+  {
+   "id": "record_1kb",
+   "mode": "batched",
+   "batch": 500,
+   "samples": 100,
+   "min": 4600.000023841858,
+   "p50": 5299.999952316284,
+   "p90": 6309.999942779541,
+   "p99": 58600.00002384186,
+   "max": 514550.0000119209,
+   "mean": 11428.00000011921,
+   "note": "`await bench.benchEchoBytes(1,024 bytes)`: the payload crosses the boundary twice (a byte string, which is cheaper than a record of the same size)"
+  },
+  {
+   "id": "keyed_insert_10k",
+   "mode": "batched",
+   "batch": 200,
+   "samples": 100,
+   "min": 17650.000005960464,
+   "p50": 22574.999928474426,
+   "p90": 23849.99990463257,
+   "p99": 24500.000029802322,
+   "max": 45450.00001788139,
+   "mean": 22224.999998509884,
+   "note": "`await bench.benchListInsert(5000)` on about 10,000 rows: the call, the core's recorded insert, the one-operation patch, applied to the mirror's list before the call returns"
+  },
+  {
+   "id": "changeset_100",
+   "mode": "batched",
+   "batch": 100,
+   "samples": 100,
+   "min": 86500.00005960464,
+   "p50": 95900.00003576279,
+   "p90": 157549.99995231628,
+   "p99": 163950.00010728836,
+   "max": 234549.999833107,
+   "mean": 109791.0000026226,
+   "note": "`await bench.benchTouchSignals(100)`: one call, one change-set of 100 entries, applied to 100 signals of the mirror before the call returns"
+  }
+ ],
+ "cold": {
+  "launches": [
+   {
+    "fetch_ns": 1839999.9737739563,
+    "compile_ns": 635000.0202655792,
+    "load_ns": 4519999.980926514
+   },
+   {
+    "fetch_ns": 1835000.0083446503,
+    "compile_ns": 719999.9988079071,
+    "load_ns": 4125000
+   },
+   {
+    "fetch_ns": 1715000.0035762787,
+    "compile_ns": 645000.0107288361,
+    "load_ns": 4155000.001192093
+   },
+   {
+    "fetch_ns": 1750000,
+    "compile_ns": 660000.0262260437,
+    "load_ns": 4179999.977350235
+   },
+   {
+    "fetch_ns": 1684999.9725818634,
+    "compile_ns": 685000.0023841858,
+    "load_ns": 4034999.9964237213
+   },
+   {
+    "fetch_ns": 1659999.9964237213,
+    "compile_ns": 694999.9928474426,
+    "load_ns": 4110000.0143051147
+   },
+   {
+    "fetch_ns": 1719999.998807907,
+    "compile_ns": 605000.0190734863,
+    "load_ns": 4224999.9940395355
+   },
+   {
+    "fetch_ns": 1710000.0083446503,
+    "compile_ns": 699999.988079071,
+    "load_ns": 4335000.00834465
+   },
+   {
+    "fetch_ns": 1655000.001192093,
+    "compile_ns": 675000.011920929,
+    "load_ns": 4250000
+   },
+   {
+    "fetch_ns": 1700000.0178813934,
+    "compile_ns": 644999.9809265137,
+    "load_ns": 4085000.0083446503
+   }
+  ],
+  "reload_in_page": {
+   "compile_ns": {
+    "n": 20,
+    "min": 365000.00953674316,
+    "p50": 410000.0262260437,
+    "p90": 444999.9928474426,
+    "p99": 490000.00953674316,
+    "max": 490000.00953674316,
+    "mean": 417000.0031590462
+   },
+   "load_ns": {
+    "n": 20,
+    "min": 494999.9749660492,
+    "p50": 650000.0059604645,
+    "p90": 745000.0047683716,
+    "p99": 1414999.9916553497,
+    "max": 1414999.9916553497,
+    "mean": 685249.9976754189
+   }
+  }
+ },
+ "drain": {
+  "rows": 10000,
+  "updates_per_frame": 1667,
+  "frames": 240,
+  "warmup_frames": 60,
+  "producer": "the page's own thread: one awaited call per frame commits the burst (wasm-main), so the whole burst is main-thread time",
+  "merged": {
+   "frame_ns": {
+    "n": 240,
+    "min": 3074999.988079071,
+    "p50": 4025000.0059604645,
+    "p90": 4539999.99165535,
+    "p99": 6055000.007152557,
+    "max": 6164999.99165535,
+    "mean": 4036645.832285285
+   },
+   "drain_ns": {
+    "n": 240,
+    "min": 560000.0023841858,
+    "p50": 760000.0202655792,
+    "p90": 905000.0011920929,
+    "p99": 954999.9833106995,
+    "max": 989999.9797344208,
+    "mean": 765187.5000447035
+   },
+   "change_sets_per_frame_p50": 1667,
+   "entries_per_frame_p50": 1667,
+   "applied_per_frame_p50": 1,
+   "drains_per_frame_p50": 1
+  },
+  "unmerged_estimate": {
+   "per_entry_ns": {
+    "n": 240,
+    "min": 4999.999701976776,
+    "p50": 6750.001013278961,
+    "p90": 8000.001311302185,
+    "p99": 8749.999105930328,
+    "max": 8750.000596046448,
+    "mean": 6858.333411316077
+   },
+   "frame_ns": 11252251.689136028,
+   "frame_ns_mean": 11432841.7966639,
+   "method": "a call that commits one update (one transaction, one drain of one entry, the list copy) minus a call that commits none, as two batches of 20 after each frame of the experiment so that both are measured in the same minutes (240 batches); times 1667, by the median batch and by the mean batch. The runtime was not reverted: this is what applying every entry on its own would cost, from the entry cost measured here"
+  },
+  "ratio_unmerged_over_merged": 2.7955904776330462,
+  "ratio_unmerged_over_merged_mean": 2.8404575850269453,
+  "note": "merged frame = the awaited burst call of 1,667 transactions plus the drain it ends with, as the page experiences it"
+ },
+ "notes": [
+  "Review annotation (2026-10-01; no number in this file changed): the page was built at Vite's default target, which lowers the runtime's ES2022 `#private` class members to WeakMap/WeakSet helpers, and that lowering is a large share of every row here: the same page built with `build.target: \"es2022\"` measured 1.8 us, 3.3 us, 22.5 us and 31 us for the handle call, the 1 KB round trip, the keyed insert and the 100-signal change-set at a host load of about 27, against 5.6 to 6.0, 8.0 to 8.3, 36 to 37 and 173 us for the default build at a load of about 20 (this file was at 2 to 4). See `.10x/reviews/2026-10-01-device-bench-review.md`."
+ ]
+}

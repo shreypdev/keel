@@ -58,8 +58,13 @@ class DemoServer(context: Context) {
         for (title in listOf("Buy milk", "Walk the dog", "Write Undra")) add("inbox", title)
     }
 
-    /** Starts listening on a free loopback port and returns the base URL to pass to `configureRemote`. */
+    /**
+     * Starts listening on a free loopback port and returns the base URL to pass to `configureRemote`. Called again (a
+     * new core after `undra dev` rebuilt its own) it returns the URL of the server that is already running.
+     */
+    @Synchronized
     fun start(): String {
+        server?.let { return "http://127.0.0.1:${it.localPort}" }
         val socket = ServerSocket(0, BACKLOG, InetAddress.getByName("127.0.0.1"))
         server = socket
         Thread({

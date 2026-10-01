@@ -110,6 +110,19 @@ impl Bridge {
         true
     }
 
+    /// Aborts the attached connection when it belongs to session `token` and is not `except`:
+    /// the client is back on a new socket, so the old one is dead whatever the OS still thinks
+    /// (a phone that changed network leaves a half-open socket that would otherwise hold the
+    /// slot until the keepalive notices).
+    pub(crate) fn evict_session(&self, token: &str, except: u64) -> bool {
+        let Some(old) = self.current() else { return false };
+        if old.id != except && old.session().is_some_and(|s| s.token == token) {
+            old.abort();
+            return true;
+        }
+        false
+    }
+
     /// Whether connection `id` is the attached one.
     pub(crate) fn is_attached(&self, id: u64) -> bool {
         self.active.lock().as_ref().is_some_and(|conn| conn.id == id)

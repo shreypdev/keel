@@ -137,6 +137,8 @@ pub struct QueryDef { pub name: String, pub query_id: u32, pub kind: QueryKind /
 
 Canonical form: `serde_json` with all `Vec`s sorted by `name` (variants keep declaration `index` and are sorted by index), map keys in struct-field order as declared above, no whitespace, `docs` fields **excluded**, `SignalDef.no_coalesce` written only when `true` (so a schema without such a signal hashes as it did before the field existed, ADR-031). `schema_hash = fnv1a64(canonical_bytes)`. `undra-meta` exposes `Schema::canonical_json()` and `Schema::hash()`. Two cores with the same public surface produce the same hash regardless of doc comments or source order of *unordered* things. Ordered (part of the wire layout, kept in declaration order): record fields, variant fields, params, signals (signal_id), variants (index). Unordered (sorted by name in canonical form): the six top-level lists, object methods and constructors, port methods. `crate_name` and `undra_version` are labels and are **excluded** from the canonical form (they do not change the wire).
 
+Exchange form: `Schema::to_json()` (compact) and `Schema::to_json_pretty()` are the *whole* schema, `undra_version` and `crate_name` labels and `docs` included, every list in declaration order; `Schema::from_json` reads either. This is the document `undra_schema_json` returns (§6; ADR-050), `undra-dev-runner --print-schema` prints and a `schema.json` file holds. The hash does not cover docs or labels, so it is the `fnv1a64` of the **canonical** form, not of the exchange form's bytes: a host that wants to check `undra_schema_hash` against the JSON it was given recomputes the canonical form (`Schema::from_json(..).hash()` in Rust; drop `docs` and the labels and sort the unordered lists elsewhere, as `crates/undra-ffi/tests/wasm/raw.test.mjs` does) and hashes that. `Schema::without_docs()` removes every doc and leaves the hash unchanged. Docs reach a binary through the registrations (§2.4), unconditionally: they are `&'static str` fields of the `*Meta` statics, so exporting them adds no data that the core did not already carry.
+
 ### 2.4 Registration (`inventory`)
 
 Each macro emits `inventory::submit! { undra_meta::Registration::Record(&RECORD_DEF) }` etc., where the def is a `static` built from `const` data (`&'static str`, `&'static [..]`). `undra_meta::Registration` is:
@@ -217,6 +219,8 @@ Header size is 23 bytes.
 | 14 | TimerFired | host→core | `timer_id u32` |
 | 15 | Snapshot | core→host | §5.9 |
 | 16 | Restore | host→core | §5.9 |
+
+**The WebSocket URL (ADR-051).** The upgrade request of a `remote` connection may carry `?undra_session=<token>` (1 to 64 characters of `A-Z a-z 0-9 . _ -`, the same on every connection of one host runtime) and, on a reconnect by a host that holds constructed objects, `&undra_resume=1`. They are transport material, not envelope material: nothing above changes, and a server or client that ignores them behaves as before. A server that keeps a dropped host's objects (`undra dev`) hands them back to a connection that presents the token and asks to resume; one that does not hold the session answers the `Hello` and closes with WebSocket code **4001** (`session lost`).
 
 ### 3.3 Call payload
 
@@ -307,7 +311,7 @@ All attribute macros are re-exported from the `undra` facade as `undra::api`, `u
 
 * On `struct` (record): generates `impl Encode`, `impl Decode`, `impl UndraRecord` (type_id), and registers `RecordMeta`. Requires all field types to be wire types. Fields may be `pub` or not; all are encoded.
 * On `enum`: generates `Encode`/`Decode` (u16 index + fields) and registers `EnumMeta`.
-* On `impl Type { .. }` (object): every `pub fn` becomes a method; `pub fn new(..) -> Self`/`Result<Self,E>` and any fn returning `Self` becomes a constructor. Generates the dispatch function (§5.6), `impl UndraObject for Type` (type_id, name), and registers `ObjectMeta`. Receiver must be `&self` (objects are shared: `Arc<Type>`; interior mutability via signals or `Mutex`). `&mut self` is rejected (E0020).
+* On `impl Type { .. }` (object): a type takes one such block (a second is E0007, reported by the compiler through a constant named after the rule; a store's block must hold its constructors, E0011); every `pub fn` becomes a method; `pub fn new(..) -> Self`/`Result<Self,E>` and any fn returning `Self` becomes a constructor. Generates the dispatch function (§5.6), `impl UndraObject for Type` (type_id, name), and registers `ObjectMeta`. Receiver must be `&self` (objects are shared: `Arc<Type>`; interior mutability via signals or `Mutex`). `&mut self` is rejected (E0020).
 * On free `fn`: generates a dispatch entry and registers `FunctionMeta`.
 
 Method rules: parameters are wire types, or `ctx: &Ctx` / `ctx: Ctx` as the first parameter (constructors and free fns only; methods get `Ctx` from the object via `self.ctx` convention or `Ctx::current()`); return type is `T`, `Result<T,E>`, `impl Stream<Item = T>`, or `Result<impl Stream<Item = T>, E>`; `async fn` marks `is_async`.
@@ -429,7 +433,7 @@ typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr
 
 uint32_t undra_abi_version(void);                       // 1
 uint64_t undra_schema_hash(void);
-UndraBuf  undra_schema_json(void);                       // owned copy
+UndraBuf  undra_schema_json(void);                       // owned copy of the whole schema as JSON, doc comments included (§2.3); undra_schema_hash covers its canonical form, not these bytes
 uint32_t undra_init(const uint8_t *cfg, uint32_t len, undra_reply_cb reply, undra_changeset_cb changes, undra_stream_cb stream, void *user); // idempotent per process; cfg = encoded RuntimeConfig record; returns 0 ok
 void     undra_shutdown(void);                          // answers every in-flight call (status 3) and ends every open stream (§5.1 Shutdown) before stopping the threads; then drops the port registrations, waiting for port callbacks still running (host contract 5)
 uint32_t undra_call(const uint8_t *ptr, uint32_t len);  // Call payload (§3.3); returns 0 accepted, 5 bad request. Reply via reply_cb. Works for sync and async methods.
@@ -530,7 +534,7 @@ log(level, ptr, len)            // payload at ptr/len: target String, message St
 now_ms() -> f64                 // Date.now()
 random(ptr, len)                // crypto.getRandomValues into memory
 ```
-The Clock/Rng/Log ports have built-in wasm bindings over these imports so a web app needs no adapter code for them. All ports remain overridable.
+The Clock/Rng/Log ports have built-in wasm bindings over these imports so a web app needs no adapter code for them. All ports remain overridable, except in the TypeScript `wasm-worker` mode, where the worker answers `port_call` for these three with 2 itself so the built-ins serve them (§17.1).
 
 `undra_alloc(len)` never returns 0: it traps (after a level-5 `log` record) when memory is exhausted and when `len` is a size no allocation can have (`>= 0x7fff_fff9` on wasm32); a host that does not check the result would otherwise write at linear address 0, the bottom of the shadow stack (the TypeScript runtime also refuses a 0). `port_call` returning 0 means the host called `undra_port_reply` for **that** `port_call_id` before returning; a reply for some other pending call does not count, and the call then fails instead of staying pending.
 
@@ -556,7 +560,7 @@ Records: `HttpRequest { method: HttpMethod, url: String, headers: Vec<Header>, b
 
 The standard surface (these ten ports and these types, plus `HttpMethod { Get, Post, Put, Delete, Patch, Head, Options }`) ships in each platform runtime (`@undra/runtime`, `dev.undra.runtime.adapters`, `UndraRuntime`), not in generated code: every core links `undra-ports`, so its schema contains all of it and the schema hash covers it, but `undra-bindgen` leaves it out of an app's bindings and the generated code refers to the runtime's own types (section 10.5, ADR-024).
 
-`HttpError` and `FsError` implement `From<PortError>` (§5.7): an unavailable port is `Network("the Http port has no adapter registered")` / `Io("the Fs port has no adapter registered")`, a cancelled call is `Cancelled` / `Io(..)`, a reply that does not decode is `Network("malformed port reply: ..")` / `Io(..)`; the wire layouts are unchanged.
+`HttpError` and `FsError` implement `From<PortError>` (§5.7): an unavailable port is `Network("the Http port has no adapter registered (E0062: register one, see <docs link>)")` / `Io("the Fs port has no adapter registered (E0062: ..)")`, a cancelled call is `Cancelled` / `Io(..)`, a reply that does not decode is `Network("malformed port reply: ..")` / `Io(..)`; the wire layouts are unchanged.
 Fakes (all in `undra-ports::fakes`, `Send + Sync`): `FakeHttp` (script responses by matcher; records calls), `MemKv`, `MemSecureStore`, `MemFs`, `FakeClock` (settable `now`, `advance(d)` fires due timers; implements `Clock` + `Timer`), `SeededRng` (xorshift64\*), `CaptureLog`, `ScriptedConnectivity`, `ScriptedLifecycle`. `TestRuntime::new()` installs all fakes and runs the executor on the test thread (`run_until(fut)` / `run_pending()`).
 
 ---
@@ -614,7 +618,12 @@ public protocol Http: UndraPort { func request(_ req: HttpRequest) async throws(
 ```
 Sync methods in `inproc` mode call `undra_call_sync`. Store initial values are decoded from the change-set emitted by `undra_observe` during `init`.
 
-**Failures (ADR-032; `docs/SWIFT_ERRORS.md` is the short guide).** Generated Swift never stops the process on the outcome of a call: no reply status, transport failure, cancellation or undecodable byte reaches `fatalError`, `precondition` or `assertionFailure`, in any build configuration.
+**Recursive types.** A Swift value type cannot hold itself inline, so bindgen computes the *inline containment graph* of the schema's records, data enums and errors: `A → B` when a field of `A` (a payload field, for an enum) is a `B` or an optional `B`. `Vec`, `Map` and `Bytes` keep their elements on the heap and add no edge. A field whose edge lies on a cycle (`B` reaches `A` again, `A == B` included, so mutual recursion and record/enum cycles are covered) is stored behind a reference; everything else is generated exactly as before.
+* A **record** keeps the public shape `public var next: ListNode?`: a computed property over `private var _next: UndraIndirect<ListNode>?`, whose setter replaces the immutable box, so value semantics, the memberwise `init`, `Hashable`, `Sendable` and the `Codable` JSON shape (a nil child is omitted, a missing key decodes as nil, through a private `CodingKeys` that maps `_next` to `"next"`) are those of a plain optional. `UndraIndirect<Value: Sendable>` is an `internal final class` around a `let`, emitted once into `Types.swift`, and only when some field needs it. (A property wrapper would read better but Swift rejects a public property whose wrapper type is internal, and a public wrapper would put a helper type into every generated module's API.)
+* A **data enum or error** with a payload on a cycle is `indirect` (an array or dictionary payload never makes it so).
+* A store signal's placeholder (the value before the first change-set) is built from the first variant of an enum that does not need the enum itself, and from `nil`, `[]` or `[:]` for an optional, array or map, so recursion ends at the base case.
+
+**Failures (ADR-032; `docs/ERRORS.md` is the short guide).** Generated Swift never stops the process on the outcome of a call: no reply status, transport failure, cancellation or undecodable byte reaches `fatalError`, `precondition` or `assertionFailure`, in any build configuration.
 
 * A generated **call** fails with exactly one of three things: its own error `E` (reply status 1; a `Result<T, E>` in Rust), thrown as `E` itself so `catch TodoError.emptyTitle` works; `CancellationError`, when the calling task was cancelled (async calls); or `UndraCallError` (§17.3) for every failure of the call itself: a panic in the core (status 2), a cancellation by the core (status 3: a restore replaced the receiver, or the core shut down), a refusal (status 5: a closed or stale handle, `E_REENTRANT`, undecodable arguments), an unreachable core (shut down, not loaded, remote connection lost) and a reply the bindings cannot read. A cancellation by the core is not a `CancellationError`: the caller's task was not cancelled, and a write that never landed must not hide behind the quiet-exit idiom.
 * Calls use untyped `throws`; the domain error is named in the `- Throws:` documentation. A synchronous method that returns a value throws (`throws -> Int32`); an `async` method is `async throws`; a constructor is `throws` or `async throws` whether or not it has an `E`; a stream is `AsyncThrowingStream<T, Error>` and ends with the same three outcomes (a stream's consumer being cancelled still ends the iteration quietly).
@@ -630,18 +639,26 @@ enum class Filter(val index: UShort) : UndraEnum { ALL(0u), ACTIVE(1u), DONE(2u)
 sealed interface Shape : UndraEnum { data class Circle(val radius: Double) : Shape; data class Rect(val w: Double, val h: Double) : Shape }
 sealed class TodoError : UndraException() { data object EmptyTitle : TodoError(); data class Http(val cause: HttpError) : TodoError() }
 class Calculator(ctx: UndraCore = UndraCore.shared) : UndraObject(ctx) {
-    fun add(a: Int, b: Int): Int
-    suspend fun fetch(url: String): String            // throws HttpError
-    fun ticks(): Flow<UInt>
+    fun add(a: Int, b: Int): Int                      // throws UndraCallError
+    suspend fun fetch(url: String): String            // throws HttpError, CancellationException or UndraCallError
+    fun ticks(): Flow<UInt>                           // ends with UndraCallError; collector cancellation is CancellationException
+    fun reset()                                       // `fn reset(&self)`: a command, it reports instead of throwing
 }
 class Todos(ctx: UndraCore = UndraCore.shared) : UndraStore(ctx) {
     val todos: StateFlow<List<Todo>>; val filter: StateFlow<Filter>; val visible: StateFlow<List<Todo>>
-    fun setFilter(f: Filter)
-    suspend fun add(title: String): Todo                // throws TodoError
+    fun setFilter(f: Filter)                            // a command
+    suspend fun add(title: String): Todo                // throws TodoError, CancellationException or UndraCallError
 }
 interface Http : UndraPort { suspend fun request(req: HttpRequest): HttpResponse }   // throws HttpError
 ```
 Compose consumers use `collectAsState()` on the `StateFlow`s (no extra module). `UndraStore` and `UndraObject` implement `AutoCloseable`; a `Cleaner` releases leaked handles.
+
+**Failures (ADR-032, amendment A; `docs/ERRORS.md` is the short guide).** Generated Kotlin never throws a raw runtime failure into application code.
+
+* A generated **call** fails with exactly one of three things: its own error `E` (reply status 1; a `Result<T, E>` in Rust), thrown as `E` itself so `catch (e: TodoError)` works; `CancellationException`, when the calling coroutine was cancelled; or `UndraCallError` (§17.2) for every failure of the call itself: `Panicked` (status 2), `CancelledByCore` (status 3: a restore replaced the receiver, or the core shut down), `Refused` (status 5: a closed or stale handle, `E_REENTRANT`, undecodable arguments), `Unavailable` (the core is closed, not loaded, or its connection was lost) and `Malformed` (a reply, result or `E` that does not decode). A cancellation by the core is not a `CancellationException`. `E` and `UndraCallError` are both `UndraException`s, so one `catch (e: UndraException)` handles either. Argument validation is not an outcome of the call: a value the wire cannot represent (`WireException.NegativeDuration`, `DuplicateKey`, `IllegalArgumentException`) is a programming error and propagates unchanged.
+* A synchronous method that returns `Unit` and has no error type is a **command** and never throws, because Compose calls store methods from `onClick` handlers: its body is one `try`/`catch (e: Exception)` that calls `UndraCore.report(e, "Todos.setFilter")`, which logs at error level and calls `LoadOptions.onError` with an `UndraUnhandledError`. A command never writes a `StateFlow`: stores change only from the mirror's change-sets.
+* Every generated call is one `try`/`catch (e: Exception)` that throws `UndraCallError.mapped(e)` (`mapped(e, TodoError)` with an `E`, given the error's companion codec; `mappedStream` for a stream's `Flow.catch`); the mapping lives in the runtime, once. A secondary constructor delegates through `ctx.constructObject(...)`, and a store's `init` calls `observeAll()`, which closes the store and throws an `UndraCallError` when the core is gone. A store's `apply` decodes, checks the value is complete (`reader.finish()`), assigns, and on any failure reports `"<Store>.apply(signal: N)"` and skips the entry.
+* The raw entry points of `UndraCore` (`callSync`, `call`, `stream`, `construct`) keep throwing `UndraReplyException`, `UndraTransportException`, `UndraProtocolException` and `WireException`.
 
 ### 10.3 TypeScript
 
@@ -652,19 +669,27 @@ export type Shape = { kind: "circle"; radius: number } | { kind: "rect"; w: numb
 export class TodoError extends UndraError { readonly kind: "emptyTitle" | "http"; readonly cause?: HttpError }   // subclasses TodoError.EmptyTitle, TodoError.Http for instanceof
 export class Calculator extends UndraObject {
   static create(core?: UndraCore): Promise<Calculator>;
-  add(a: number, b: number): Promise<number>;
-  fetch(url: string): Promise<string>;                    // rejects with HttpError
-  ticks(): AsyncIterable<number>;
+  add(a: number, b: number): Promise<number>;             // rejects with UndraCallError
+  fetch(url: string, signal?: AbortSignal): Promise<string>;   // rejects with HttpError, the signal's reason or UndraCallError
+  ticks(): AsyncIterable<number>;                         // throws UndraCallError; `break` ends it quietly
+  reset(): Promise<void>;                                 // `fn reset(&self)`: a command, it never rejects
 }
 export class Todos extends UndraStore {
   static create(core?: UndraCore): Promise<Todos>;
   readonly todos: Signal<Todo[]>; readonly filter: Signal<Filter>; readonly visible: Signal<Todo[]>;
-  setFilter(f: Filter): Promise<void>;
-  add(title: string): Promise<Todo>;
+  setFilter(f: Filter): Promise<void>;                    // a command
+  add(title: string, signal?: AbortSignal): Promise<Todo>;     // rejects with TodoError, the signal's reason or UndraCallError
 }
 export interface Http extends UndraPort { request(req: HttpRequest): Promise<HttpResponse> }
 ```
-All methods return `Promise` (uniform across main-thread, worker and remote modes). `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@undra/runtime/react` exports `useUndra(Class)` (creates a store on mount, closes it on unmount; `undefined` until it exists) and `useSignal(signal)` (`useSyncExternalStore`, with a server snapshot); `vue` (`useSignal` as a `shallowRef`, `useUndra`), `svelte` (`signalStore`, a `Readable`) and `solid` (`useSignal` as an `Accessor`, `useUndra`) adapters are thin files. The frameworks are optional peer dependencies; the core package imports none of them. `i64`/`u64` → `bigint`; `#[undra(js_number)]` → `number`.
+All methods return `Promise` (uniform across main-thread, worker and remote modes).
+
+**Failures (ADR-032, amendment A; `docs/ERRORS.md` is the short guide).** A generated call never rejects with a raw runtime failure.
+
+* A generated **call** rejects with exactly one of three things: its own error `E` (reply status 1; a `Result<T, E>` in Rust), as `E` itself so `error instanceof TodoError` works; the reason of the `AbortSignal` that cancelled it (an `AbortError` by default); or `UndraCallError` (§17.1) for every failure of the call itself, with `kind` `"panicked"` (status 2), `"cancelledByCore"` (status 3), `"refused"` (status 5), `"unavailable"` (the core is closed, trapped, not loaded, or its connection was lost) or `"malformed"` (a reply, result or `E` that does not decode). A cancellation by the core is not an `AbortError`. `E` and `UndraCallError` are both `UndraError`s. A value the wire cannot represent (`RangeError`, `TypeError` from the writer) is a programming error and rejects unchanged.
+* A synchronous method that returns nothing and has no error type is a **command**: it stays a `Promise<void>` (every method is) but that promise **never rejects**, so `onClick={() => void todos.toggle(id)}` has no unhandled rejection. Its whole body, argument encoding included, is one `try`/`catch` that calls `core.report(error, "Todos.toggle")`, which logs at error level and calls `onError` with an `UndraUnhandledError`. A caller that awaits a command learns that it was sent and answered, not that it succeeded; the effect is read from the store.
+* Every generated call is one `try`/`catch` that throws `UndraCallError.mapped(error)` (`mapped(error, TodoErrorCodec)` with an `E`, `mappedStream` for a stream); the mapping lives in the runtime, once. A store's `create()` ends with `await store._observeAll()`, which closes the store and rejects with an `UndraCallError` when the core is gone. A store's `_apply` reports `"<Store>.apply(signal: N)"` and skips an entry it cannot decode.
+* The raw entry points of `UndraCore` (`call`, `callSync`, `stream`, `construct`) keep rejecting with `UndraReplyError`, `UndraTransportError` and `WireError`. `Signal<T>` has `get()`, `subscribe(fn)`, `peek()`; `@undra/runtime/react` exports `useUndra(Class)` (creates a store on mount, closes it on unmount; `undefined` until it exists) and `useSignal(signal)` (`useSyncExternalStore`, with a server snapshot); `vue` (`useSignal` as a `shallowRef`, `useUndra`), `svelte` (`signalStore`, a `Readable`) and `solid` (`useSignal` as an `Accessor`, `useUndra`) adapters are thin files. The frameworks are optional peer dependencies; the core package imports none of them. `i64`/`u64` → `bigint`; `#[undra(js_number)]` → `number`.
 
 ### 10.4 Codecs
 
@@ -675,7 +700,7 @@ Each runtime ships `UndraWriter`/`UndraReader` mirroring §3.9 and the generated
 The ten standard ports of section 8 and the eight types they exchange (`HttpMethod`, `Header`, `HttpRequest`, `HttpResponse`, `HttpError`, `FsError`, `NetKind`, `AppState`) are in every core's schema but not in an app's bindings: the runtimes already implement the ports and ship the types, and a second `FsError` in the app's namespace would fail native review. The schema keeps them (R1; the schema hash covers them); the generators filter them at generation time (ADR-024).
 
 * **What is standard.** An item is left out only when it is exactly the standard one: same name, same id and same shape (fields, variants and indices, method ids and signatures; documentation is ignored). Ids are derived from names (section 1.1), so a schema item that only shares a name with a standard one has the standard id but another shape and stays the app's own type; one with the name and another id is E0052 (section 12). A standard type is left out only while every standard type it refers to is (a schema with its own `Header` does not get the runtime's `HttpRequest`). The table is `undra_bindgen::stdlib`, with the ids pinned as hex and cross-checked against the registrations of `undra-ports`.
-* **What references become.** A port or type of the app that mentions a standard type refers to the runtime's own: TypeScript imports the type and its `<Name>Codec` from `@undra/runtime`; Kotlin imports `dev.undra.runtime.adapters.<Name>` (spelled in full where a variant of the enclosing sealed type shadows the name); Swift's runtime keeps seven of the eight internal (`PortHttpRequest`, ...), so the generator declares each one that something refers to (and what that one refers to) and spells `AppState` as the runtime's public `UndraAppState`. A typed failure whose error is `HttpError` or `FsError` is decoded by the runtime's codec at the call site instead of the `fromReply` helper of a generated error.
+* **What references become.** A port or type of the app that mentions a standard type refers to the runtime's own: TypeScript imports the type and its `<Name>Codec` from `@undra/runtime`; Kotlin imports `dev.undra.runtime.adapters.<Name>` (spelled in full where a variant of the enclosing sealed type shadows the name); Swift's runtime (`Core/StandardRecords.swift`) exports all eight as public types under the standard names, so Swift refers to them like the other two languages and declares none; the one spelling that differs is `AppState`, which is the runtime's `UndraAppState` (an app's own `AppState` is the commonest type name in Swift, and the runtime has exported that name since v1; ADR-024, amended). A module that declares a type with a standard name but another shape (the app's own `HttpRequest`) shadows the runtime's inside that module, and code that imports both modules qualifies the one it means. A typed failure whose error is `HttpError` or `FsError` is decoded by the runtime's codec at the call site, through the same `UndraCallError.mapped(e, <Name>)` / `mapped(error, <Name>Codec)` / `mapped(_:domain:)` as a generated error (every error type has a codec).
 * **Ports.** The standard ports are never generated. They do not claim names in the generated namespace either, so an app may have a record called `Timer` or `Log`.
 * **Escape hatch.** `Generator::emit_standard_library` declares everything as ordinary items; `undra-ports` uses it to prove its own schema generates.
 
@@ -701,6 +726,10 @@ Default adapters:
 
 On Android all of it is installed by one call, `AndroidPlatformDefaults.install(core, context)` (module `android-adapters`; `android-adapters/README.md`); the runtime alone installs only Clock, Rng, Log and Timer.
 
+### 11.0 The remote transport reconnects (ADR-051)
+
+A `remote` transport reconnects by itself unless told not to. Attempt `n` (from 1) waits `min(maxDelay, initialDelay * 2^(n-1))` less a random share of up to `jitter` of that (defaults 250 ms, 5 s, 0.5; each attempt takes at most 5 s). The core exposes the state `connecting`, `connected`, `reconnecting(attempt)` or `closed(reason)` (reason: `requested`, `schemaMismatch`, `sessionLost`, `failed`), per platform as in section 17. When the connection drops, every call, stream and pending `observe` fails at once with the platform's existing unavailable outcome, and so does anything started while it is down; the core is not closed. After the next successful handshake the host sends `Observe` for every signal it had observed and `Release` for every handle released meanwhile, and only then reports `connected`: the core answers each `Observe` with the current values (5.5), so every mirror converges. The app closing the core, a schema-hash mismatch on the server's `Hello` (reported once, as `UndraSchemaMismatch`) and a lost session (close code 4001, section 3.2) are final: no retry. In TypeScript and Kotlin a protocol error is final too: a text message, a malformed envelope, and in Kotlin (whose WebSocket client is its own) a frame that breaks RFC 6455 or a message over 64 MiB, which it answers with close 1002 or 1009; Swift logs and drops a malformed message. The first connection of `load` is not retried. The session token is an identifier, not a credential: the dev server has no authentication (ADR-051, threat model).
+
 ### 11.1 Delivery: merged per drain, frame-aligned, bounded (ADR-031)
 
 The core hands the host one change-set per transaction per store, in commit order, on the committing thread (§3.5, §5.5). The mirror decides when and how the main thread applies them; none of this changes the wire, the C ABI or the wasm ABI.
@@ -717,46 +746,67 @@ The core hands the host one change-set per transaction per store, in commit orde
 * **Bounded backlog.** The queue is bounded by `maxPendingEntries` (default 65,536) and `maxPendingBytes` (default 16 MiB; an entry counts 17 bytes plus its value). Past either bound the thread that enqueues folds the queue in place with the rules above, every key included (`no_coalesce` ones too: the bound wins over the opt-out), and the next fold waits until the queue has doubled (O(1) amortised per entry). A key whose merged patch then holds more than 4,096 operations **or** more than 1 MiB of operation bytes is dropped and marked *awaiting a full value*: its keyed patches are discarded until a full value arrives, and the next drain re-observes it once (`observe(handle, signal_id, on)` from the main thread; the core answers with the current value, §5.5). Memory is O(observed keys × (value size + 1 MiB)) however long the main thread is blocked or the app is suspended, and it catches up in one drain.
 * **Ordering.** Unchanged on the wire (ADR-019, ADR-020): the state after a drain equals the state after applying every queued change-set in commit order; intermediate states inside one drain are not observable. A transaction that touched several stores arrives as consecutive change-sets and may straddle two drains.
 * **Observable.** Every mirror counts `changeSetsReceived`, `entriesReceived`, `entriesApplied` (after merging), `drains`, `compactions` and `resyncs`, plus the pending entries and bytes and the dropped entries; `UndraCore.stats()` reports them, and drain listeners are called on the main thread after each drain with the change-sets and entries it consumed, the entries it applied and its duration (§17).
-* **TS worker.** In `wasm-worker` mode the worker posts the envelopes one of its tasks produced as one message (`{ t: "envelopes", data: ArrayBuffer[] }`, every buffer transferred, flushed from a microtask); the main thread reads that and the one-envelope shape. The worker protocol is internal to the package (version 2, announced in `init`).
+* **TS worker.** In `wasm-worker` mode the worker posts the envelopes one of its tasks produced as one message (`{ t: "envelopes", data: ArrayBuffer[] }`, every buffer transferred, flushed from a microtask); the main thread reads that and the one-envelope shape. The worker protocol is internal to the package (version 2, announced in `init`); `snapshot` and `restore` are additional request/answer control messages that a worker announces in its `ready` message and a host never sends to one that did not.
 
 ---
 
 ## 12. Diagnostics
 
-Macro errors use stable codes and a fixed shape: `error[undra::E00NN]: <what>` + a note `<why>` + `help: <fix>` + `docs: https://shreypdev.github.io/undra/docs/errors.html#E00NN`. Initial catalogue:
+Every Undra diagnostic has a stable code and a fixed shape: `error[undra::E00NN]: <what>`, a note `<why>`, `help: <fix>` and `docs: https://shreypdev.github.io/undra/docs/errors.html#E00NN`. The shape is the same wherever the diagnostic comes from: a macro (a `compile_error!`, a `#[diagnostic::on_unimplemented]` message, or a `panic!` in a constant that the compiler evaluates), schema validation (`undra build`, `undra bindgen`, a runtime that loads a core) or the runtime (a message a panic carries). Codes are never reused; a code that is retired stays in the table.
 
-| Code | Trigger |
-|---|---|
-| E0001 | unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met) |
-| E0002 | generic parameter on a `#[undra::api]` item |
-| E0003 | lifetime in a public signature |
-| E0004 | trait object / `dyn` / `Box<dyn Fn>` |
-| E0005 | `Result` or `Stream` outside return position |
-| E0006 | map key type not allowed |
-| E0007 | unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block) |
-| E0008 | unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted |
-| E0010 | `#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum |
-| E0011 | `#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block (macros); a store without a constructor (meta, bindgen) |
-| E0012 | trait object in a record field (the blueprint example) |
-| E0013 | store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook |
-| E0020 | `&mut self` receiver |
-| E0021 | `self` by value |
-| E0022 | non-`Send` future in an async method |
-| E0030 | port method with a non-wire parameter |
-| E0031 | event port method with a return type |
-| E0032 | invalid port trait shape (an `async` method on a `sync` port, a parameter that is not a plain name, an associated type or const, no `&self` receiver) |
-| E0033 | the error type of a `Result` port method has no `From<PortError>` (an unavailable port cannot be reported) |
-| E0040 | query without `key` / mutation with `stale` / a query argument of the wrong kind |
-| E0041 | query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`) |
-| E0042 | query whose success value is `()` or an `Option` (a query caches a value; use a mutation for effects) |
-| E0050 | duplicate type name (bindgen) |
-| E0051 | a name that collides after case conversion (`a_b` and `aB`) or is not an identifier in a target language (bindgen) |
-| E0052 | a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids (bindgen) |
-| E0060 | a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit |
-| E0061 | the schema records a name that the type written there does not have: an alias (`type Todo = Item`), a renamed import (`use m::Item as Todo`) or a type that is not declared with `#[undra::api]`; reported by a const assertion comparing `UNDRA_TYPE_ID` |
-| E0062 | a port call had no adapter (runtime message of a method without an error channel; a typed error for one with a `Result`) |
-| E0063 | `Option<Option<T>>` in a public position |
-| E0064 | an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle |
+The catalogue is audited by `crates/undra-macros/tests/catalogue.rs`: every row below has a constant and a row in the code table of `crates/undra-macros/src/impl_/diag.rs` (the site's short meaning), an emitting site in the code (the "raised by" column names it) and a golden that shows the real message (`crates/undra-macros/tests/ui/*.stderr` for the macros, `crates/*/tests/golden/diagnostics/*.txt` for the rest), and every message in a golden has all four parts and the link of its code. `site/scripts/build-errors.mjs` generates the error-codes page from this table and those goldens.
+
+| Code | Raised by | Trigger |
+|---|---|---|
+| E0001 | macros, schema validation, the `Encode`/`Decode` bounds | unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`) |
+| E0002 | macros | generic parameter on a `#[undra::api]` item |
+| E0003 | macros | lifetime in a public signature |
+| E0004 | macros | trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Trait` that is not a stream |
+| E0005 | macros, schema validation | `Result` or `Stream` outside return position |
+| E0006 | macros, schema validation | map key type not allowed |
+| E0007 | macros | unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block |
+| E0008 | macros | unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted |
+| E0010 | macros, schema validation | `#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum |
+| E0011 | macros, schema validation | `#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block and a `#[undra::api(store)]` block without a constructor (a type takes one block; a constructor in another block is not seen); a store without a constructor in the schema |
+| E0012 | macros | trait object in a record field (the blueprint example) |
+| E0013 | macros | store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook |
+| E0020 | macros | `&mut self` receiver |
+| E0021 | macros | `self` by value |
+| E0022 | rustc, named by a macro | non-`Send` future in an async method or query: `rustc`'s own "future cannot be sent between threads safely", pointed at the method by an assertion the macros emit; the last note names the assertion, `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`. Do not hold a non-`Send` value (an `Rc`, a `RefCell` borrow, a `MutexGuard`) across an `.await` |
+| E0030 | macros | port method with a non-wire parameter |
+| E0031 | macros, schema validation | event port method with a return type, or that is `async` |
+| E0032 | macros | invalid port trait shape (an `async` method on a `sync` port, a parameter that is not a plain name, an associated type or const, no `&self` receiver) |
+| E0033 | macros (a bound the compiler checks) | the error type of a `Result` port method has no `From<PortError>` (an unavailable port cannot be reported) |
+| E0040 | macros | query without `key` / mutation with `stale` / a query argument of the wrong kind |
+| E0041 | macros | query or mutation function with an invalid signature (not `async`, no `ctx: &Ctx` first parameter, not returning `Result<T, E>`, a stream result, `self`) |
+| E0042 | macros | query whose success value is `()` or an `Option` (a query caches a value; use a mutation for effects) |
+| E0050 | schema validation | duplicate type name, a type named like something the generated code depends on, two items with one id, two variants with one index |
+| E0051 | schema validation | a name that collides after case conversion (`a_b` and `aB`), shadows a member of the runtime base classes, or is not an identifier in a target language |
+| E0052 | schema validation | a record, enum, error, object or port named like a standard library item (section 8) but with another id: the runtimes implement the standard items under those names and ids |
+| E0060 | macros (a check the compiler runs) | a spelling that looks like a built-in Undra type (`Bytes`, `Uuid`, `String`, `Vec`, ..) is a different type; reported at the field or parameter by the same-type assertion the macros emit |
+| E0061 | macros (a check the compiler runs) | the schema records a name that the type written there does not have: an alias of an Undra type (`type Todo = Item`), a renamed import (`use m::Item as Todo`), or a name that is not a type declared with `#[undra::api]` at all (a plain struct, `type Id = u64`); reported by a const assertion on `UNDRA_TYPE_ID` |
+| E0062 | runtime (the generated port proxy) | a port call that cannot be answered and has no error channel: no adapter registered, a cancelled call, a reply that does not decode. A method without an error channel panics with this message (the runtime contains the panic at the dispatch boundary; on wasm it traps the core); a method returning `Result` reports it as its error type, and `HttpError::Network` / `FsError::Io` carry the code and the link |
+| E0063 | macros | `Option<Option<T>>` in a public position |
+| E0064 | macros (a check the compiler runs) | an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle |
+
+The command line has its own codes, `C0001` to `C0014`, in the same shape and with the same docs page (`undra-cli`, `Code`); they are listed in the second table. Eleven have a golden (`crates/undra-cli/tests/golden/diagnostics/`, made by running the binary: `crates/undra-cli/tests/diagnostics.rs`); C0006 (the schema of a built core), C0012 (a platform this machine is not) and C0013 (a dev server that fails) need more than the binary and are listed as exceptions in the audit.
+
+| Code | Raised by | Trigger |
+|---|---|---|
+| C0001 | `undra` | not inside an Undra project: no `undra.toml` from the working directory up to the filesystem root |
+| C0002 | `undra` | `undra.toml` or a schema file cannot be read or has a value the CLI cannot use |
+| C0003 | `undra` | a tool the command needs is not installed or not on `PATH` |
+| C0004 | `undra` | a build tool ran and failed; its own output follows the diagnostic |
+| C0005 | `undra` | the core crate is missing, or is not an Undra core |
+| C0006 | `undra` | the schema could not be extracted from the built core |
+| C0007 | `undra` | the schema cannot be turned into bindings (the E0001, E0005, E0006, E0010, E0011, E0031, E0050, E0051 and E0052 diagnostics of schema validation follow) |
+| C0008 | `undra` | `undra init` or `undra adopt` would write into a directory that already has files in it |
+| C0009 | `undra` | an argument has a value the command cannot use |
+| C0010 | `undra` | a file or directory operation failed |
+| C0011 | `undra` | the Rust toolchain lacks a compilation target the build needs |
+| C0012 | `undra` | the platform is not available on this machine |
+| C0013 | `undra` | the dev server failed to start or crashed |
+| C0014 | `undra` | the core and the project disagree about where Undra comes from |
 
 ---
 
@@ -785,7 +835,7 @@ contract-tests/                     schema fixture + per-language runners + the 
 bench/                              criterion (Rust), node bench, JVM bench, iOS bench target notes
 ```
 
-Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `undra_schema_json`, and runs bindgen. Fallback: `undra bindgen --schema schema.json`.
+Schema extraction: `undra-cli` builds the core for the host as a cdylib, `dlopen`s it, calls `undra_schema_json` (the whole schema, doc comments included, §2.3), checks its hash against `undra_schema_hash`, and runs bindgen; the generated code carries the doc comments with `undra bindgen --docs` and none without. A core built before ADR-050 exports the canonical form: it still loads, and `--docs` on it is `C0006` rather than docless bindings. Fallback: `undra bindgen --schema schema.json`.
 
 ---
 
@@ -1024,7 +1074,16 @@ Ids are `fnv1a` hashes computed in `undra_meta::ids`: `type_id(name)`, `method_i
 
 Generated code uses absolute paths through the facade: `::undra::wire::{Encode, Decode, Writer, Reader, WireError}`, `::undra::meta::{inventory, Registration, RecordMeta, ObjectMeta, StoreMeta, SignalMeta, .., DispatchCall, DispatchOutcome, ids}`, `::undra::runtime::{Runtime, Ctx, DispatchResult, UndraObject, StoreObject, StoreRestorer, Port, PortDispatcher, PortDispatch, PortError, Stream, Subscription}`, `::undra::signals::{Signal, StoreCell, CellSlot, SignalsError}`, `::undra::query::{QueryDef, MutationDef}`. A `#[undra(crate = "path")]` attribute (or `crate = "path"` in the macro arguments) overrides the root (for undra-ports and tests inside the workspace, which use `::undra_runtime` directly).
 
-Every type position the schema records is also checked against the type it resolves to, at compile time, in the user's crate: built-in mappings by a same-type assertion (E0060), `Named` mappings by comparing the inherent `UNDRA_TYPE_ID` of the type with `type_id` of the recorded name (E0061), with `UNDRA_IS_ERROR` required on the error side of a `Result` and `__UNDRA_IS_OBJECT` refusing an object used as a value (E0064). `impl StoreObject` is written by the `#[undra::api(store)]` impl block next to `impl UndraObject`, forwarding to hidden members of the struct.
+Every type position the schema records is also checked against the type it resolves to, at compile time, in the user's crate: built-in mappings by a same-type assertion (E0060), `Named` mappings by comparing the inherent `UNDRA_TYPE_ID` of the type with `type_id` of the recorded name (E0061; a type without the constant is not declared with Undra at all, `0`, and says so), with `UNDRA_IS_ERROR` required on the error side of a `Result` and `__UNDRA_IS_OBJECT` refusing an object used as a value (E0064). `impl StoreObject` is written by the `#[undra::api(store)]` impl block next to `impl UndraObject`, forwarding to hidden members of the struct.
+
+Diagnostics that need the compiler (v1.x, D1):
+
+* A record carries one hidden member for keyed lists: `__UNDRA_FIELDS: &[&str]`, the field names in declaration order (a constant: nothing is generated per field). `#[undra(key = "id")]` looks the name up in a constant with `undra_meta::keys::index_of`, so a key that names no field is E0008 on the string, listing the fields. The key function then reads the field by name through a reference typed `&<__UndraGate<{ found }> as __UndraPass<Item>>::Out`, which is `&Item` when the check passed and has no type when it failed, so no `rustc` error about an unknown field can follow the diagnostic. A type that is not a record gets an empty list from a fallback trait declared in the key function.
+* A type takes one `#[undra::api] impl` block (§4.1). A macro cannot see another block, so the expansion defines `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one`; a second block redefines it and `rustc` reports that name first. The other items a block defines that are not `impl`s (the dispatcher, the registration, the store probe) live in an anonymous `const _` block, so only what Rust itself forbids conflicts (`impl UndraObject`, `__UNDRA_IS_OBJECT`).
+* A query or mutation cannot see whether it sits in an `impl` block either. Its struct, inherent constants, statics and registrations are declared through a `macro_rules!` named `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block` (`mutation` for a mutation), invoked at once; in an impl block `rustc` then reports a misplaced macro definition and that name as an unknown macro, and nothing else. The `QueryDef` impl (it holds the user's parameter types) and the checks (a named constant, valid in an impl block) stay outside, so an error on a type the user wrote does not name the guard. A signature that names `Self` is reported directly (E0007), for a query and for `#[undra::api] fn`.
+* The assertion that an impl block and its struct agree on being a store (E0011) is the length of an array in the signature of a private function (`fn __undra_store_probe() -> [(); { assert!(..); 0 }]`): `rustc` evaluates it while it checks signatures, before any function body, so E0011 comes before the errors the bodies have because of it (a struct literal patched with `__undra_cell` on a struct that is not a store).
+* The assertion that a future is `Send` is a function named `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`: `rustc` prints the name of the bound it checks, which is how its own error finds its code.
+* The message of a port proxy method without an error channel (E0062) is assembled from the same four-line shape as a compile diagnostic (`Diag::runtime_template`).
 
 `#[undra::store]` and its impl block:
 
@@ -1051,29 +1110,47 @@ Generated code calls only these names. Runtimes implement them; bindgen golden f
 ```ts
 export class UndraCore {
   static load(opts: LoadOptions): Promise<UndraCore>;          // { mode: 'wasm-main' | 'wasm-worker' | 'remote', wasm?: URL | BufferSource, url?: string /* ws:// for remote */, adapters?: Partial<Adapters>, expectedSchemaHash: bigint, mirror?: { schedule?, maxPendingEntries?, maxPendingBytes? } /* §11.1 */ }
-  static get shared(): UndraCore;                               // set by the first load; throws if none
+  static get shared(): UndraCore;                               // set by the first load; with none (or after it closed) a closed placeholder: its calls reject UndraCallError.Unavailable, access never throws
+  static get current(): UndraCore | null;                       // the loaded shared core, or null (then `shared` is the placeholder)
+  report(error: unknown, operation: string): void;              // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); a failure that is a remote core's connection being down (Unavailable while `connection` is reconnecting, or closed for a reason other than "requested") is logged at warning level and not delivered (ADR-051); only logs a failure reported while onError runs or of a call onError started
   callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw UndraModeError; drains the mirror before it returns
   call(target: CallTarget, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;   // resolves with reply body (status ok) or rejects with UndraReplyError { status, body }
   stream(target: CallTarget, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;   // handles credit
   construct(typeId: number, methodId: number, args: Uint8Array): Promise<bigint>;     // returns handle
   observe(handle: bigint, signalId: number, on: boolean): void;
   release(handle: bigint): void;
+  readonly connection: Signal<ConnectionState>;               // ADR-051: { kind: "connecting" } | { kind: "connected" } | { kind: "reconnecting", attempt, error } | { kind: "closed", reason: "requested" | "schemaMismatch" | "sessionLost" | "failed", error? }; LoadOptions.reconnect (false | { initialDelayMs, maxDelayMs, jitter, maxAttempts }), onConnectionChange; UndraSessionLostError
   mirror: Mirror;      // mirror.register(handle, applyFn: (signalId, op, value: Uint8Array) => void, options?: { noCoalesce?: Iterable<number> }); mirror.unregister(handle)
                        // mirror.stats(): MirrorStats; mirror.addDrainListener(fn: (s: DrainStats) => void): () => void  (§11.1)
   registerPort(portId: number, impl: PortImpl): void;          // PortImpl = { methods: Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>, sync: boolean }
   stats(): Promise<UndraStats>;                                // ..., mirror: MirrorStats
+  snapshot(): Promise<Uint8Array>;                             // §5.9: the persisted state of every store, opaque; wasm modes (a socket: UndraModeError)
+  restore(bytes: Uint8Array): Promise<void>;                   // §5.9: rebuilds the stores, same handles; resolves after the restored values reached the stores (the mirror is flushed); a refused snapshot rejects UndraRestoreError { code } and the core is unchanged
 }
 export abstract class UndraObject { protected constructor(core: UndraCore, handle: bigint); readonly core; readonly handle; close(): void; [Symbol.dispose](): void }
-export abstract class UndraStore extends UndraObject { protected constructor(core: UndraCore, handle: bigint, options?: { noCoalesce?: readonly number[] }); protected _signals: Signal<unknown>[]; protected _apply(signalId: number, op: ChangeOp, value: Uint8Array): void /* implemented by generated code */; }
+export abstract class UndraStore extends UndraObject { protected constructor(core: UndraCore, handle: bigint, options?: { noCoalesce?: readonly number[] }); protected _signals: Signal<unknown>[]; protected _apply(signalId: number, op: ChangeOp, value: Uint8Array): void /* implemented by generated code */; protected _observeAll(): Promise<void> /* generated create() calls it: closes the store and rejects UndraCallError when the core is gone */ }
 export interface MirrorStats { changeSetsReceived; entriesReceived; entriesApplied; drains; compactions; resyncs; pendingEntries; pendingBytes; droppedEntries }   // numbers
 export interface DrainStats { changeSets: number; entries: number; appliedEntries: number; durationMs: number }
 export function scheduleFrame(fn: () => void): void;          // the default schedule (§11.1)
 export class Signal<T> { get(): T; peek(): T; subscribe(fn: (v: T) => void): () => void; /* internal */ _set(v: T): void }
-export class UndraError extends Error { readonly kind: string }
-export class UndraReplyError extends UndraError { status: ReplyStatus; body: Uint8Array }
+export class UndraError extends Error { readonly kind: string }   // the root of everything the runtime throws on purpose; WireError (kind 'wire') is one
+export class UndraReplyError extends UndraError { status: ReplyStatus; body: Uint8Array }   // the raw reply failure of call/callSync; generated code maps it
+/// What a generated call rejects with when the failure is neither its own `E` nor the caller's abort (ADR-032, amendment A).
+export abstract class UndraCallError extends UndraError {            // kind: 'cancelledByCore' | 'panicked' | 'refused' | 'unavailable' | 'malformed'
+  static mapped(error: unknown): unknown;                            // generated methods without an `E`: an abort reason or a foreign error stays itself
+  static mapped<E>(error: unknown, domain: Codec<E>): unknown;       // with an `E`: status 1 becomes `E`
+  static mappedStream(error: unknown, domain?: Codec<unknown>): unknown;   // a stream's error item: `E`, else the core's String ("cancelled: ..." is CancelledByCore, anything else Panicked)
+}
+// namespace UndraCallError: CancelledByCore | Panicked { panicMessage, backtrace } | Refused { reason } | Unavailable { transport: UndraTransportError } | Malformed { detail }; type UndraCallFailure = their union
+export class UndraUnhandledError extends UndraError { operation: string; error: UndraCallError }   // kind 'unhandled'; what `onError` receives (`AttachOptions.onError?: (error: UndraUnhandledError) => void`)
+export class UndraRestoreError extends UndraError { code: number }   // kind 'restore'; the non-zero undra_restore code (5 malformed snapshot, 6 core shut down, 2 a store's restore panicked)
 export interface UndraPort {}
 ```
 Ports: generated port interfaces are plain TS interfaces; `core.registerPort(id, generatedAdapter(impl))` wraps an implementation with codecs (bindgen emits the adapter).
+
+Snapshot and restore: `snapshot()` and `restore()` call `undra_snapshot` / `undra_restore` (§7) in `wasm-main` and, as control messages answered in order behind the messages sent before them, in `wasm-worker`; a closed core rejects `UndraTransportError('closed')`, a transport without them (`remote`) `UndraModeError`. Calls and streams in flight across a restore end as §5.9 says (status 3, stream error `"cancelled: ..."`). A snapshot is opaque bytes: one taken in either wasm mode restores into a core loaded in the other, or into a fresh core of the same module.
+
+Ports in `wasm-worker` mode: the core cannot wait for the main thread, so the worker answers the synchronous standard ports itself. `Clock`, `Rng` and `Log` are not sent to the main thread: the worker's `port_call` import returns 2 (§7) and the shell's built-in bindings serve them from the worker's own `Date.now`, `crypto.getRandomValues` and `log` import, whose records the worker relays to the main thread's Log adapter. `adapters.clock`, `adapters.rng`, `adapters.timer` and a `registerPort` of one of these three therefore do not apply in that mode. Every other port crosses to the main thread and is answered asynchronously, as in `wasm-main`; a custom port declared `sync` cannot serve the core's synchronous calls there (the reply arrives after the call failed as unavailable), so the main thread logs a warning once per such port and the port needs `wasm-main`. (The main thread only sees that a port answered inline, so an asynchronous port whose implementation returns bytes directly is warned about too; its reply is delivered and used, and the warning says so.) The `undra init` web template loads `wasm-main`; `wasm-worker` is opt-in (`mode: 'wasm-worker'`).
 
 Generated stores call `super(core, handle)`, or `super(core, handle, { noCoalesce: [ids] })` when the store has `no_coalesce` signals.
 
@@ -1081,12 +1158,16 @@ Generated stores call `super(core, handle)`, or `super(core, handle, { noCoalesc
 
 ```kotlin
 class UndraCore private constructor(...) {
-  companion object { fun load(options: LoadOptions): UndraCore; val shared: UndraCore }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong, mirror = MirrorOptions(...))
+  companion object { fun load(options: LoadOptions): UndraCore; val shared: UndraCore; val current: UndraCore? }   // LoadOptions(mode = Mode.INPROC | Mode.REMOTE, remoteUrl, adapters, expectedSchemaHash: ULong, mirror = MirrorOptions(...), onError: ((UndraUnhandledError) -> Unit)? = null)
+                                                                                            // `shared` with no core loaded (or after it closed) is a closed placeholder: its calls throw UndraTransportException(CLOSED), generated code reports UndraCallError.Unavailable; access never throws; `current` is null then
   fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray            // reply body or throws UndraReplyException; on the main thread, drains the mirror first
   suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray         // cancellable
   fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>
   fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long                        // sync in INPROC
+  fun constructObject(typeId: UInt, methodId: UInt, args: ByteArray): Long                  // construct, its failures mapped onto UndraCallError (what generated secondary constructors call)
+  fun report(error: Throwable, operation: String)                                           // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); an Unavailable of reason CONNECTION_LOST (the remote connection is down, which connectionState reports) is only logged, at warning level (ADR-051)
   fun observe(handle: Long, signalId: UInt, on: Boolean); fun release(handle: Long)
+  val connectionState: StateFlow<ConnectionState>                                           // ADR-051: Connecting | Connected | Reconnecting(attempt, cause) | Closed(reason: REQUESTED | SCHEMA_MISMATCH | SESSION_LOST | FAILED, cause); LoadOptions(reconnect = ReconnectPolicy(), onConnectionChange); UndraSessionLostException
   val mirror: Mirror                                                                        // register(handle) { signalId, op, reader -> }; register(handle, noCoalesce: Set<UInt>) { ... }
                                                                                             // stats(): MirrorStats; addDrainListener { s: DrainStats -> }: AutoCloseable; flush()  (§11.1)
   fun registerPort(portId: UInt, impl: PortImpl)
@@ -1097,9 +1178,27 @@ fun interface FramePacer { fun requestFrame(frame: Runnable) }                  
 class MirrorStats(changeSetsReceived: Long, entriesReceived: Long, entriesApplied: Long, drains: Long, compactions: Long, resyncs: Long, pendingEntries: Int, pendingBytes: Long, droppedEntries: Long)
 class DrainStats(changeSets: Int, entries: Int, appliedEntries: Int, duration: Duration)
 abstract class UndraObject(val core: UndraCore, val handle: Long) : AutoCloseable
-abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<UInt> = emptySet()) : UndraObject(core, handle) { protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader); protected fun <T> signal(initial: T): MutableStateFlow<T> }
-open class UndraException(message: String) : RuntimeException(message)
-class UndraReplyException(val status: ReplyStatus, val body: ByteArray) : UndraException(..)
+abstract class UndraStore(core: UndraCore, handle: Long, noCoalesce: Set<UInt> = emptySet()) : UndraObject(core, handle) { protected abstract fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader); protected fun <T> signal(initial: T): MutableStateFlow<T>; protected fun observeAll() /* closes the store and throws UndraCallError when the core is gone */ }
+open class UndraException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)   // the root of everything the runtime throws on purpose; WireException is one
+class UndraReplyException(val status: ReplyStatus, val body: ByteArray) : UndraException(..)   // the raw reply failure of callSync/call/stream/construct; generated code maps it
+class UndraTransportException(val reason: Reason /* CLOSED, TIMEOUT, CONNECTION_LOST, INTERRUPTED */, message: String, cause: Throwable? = null) : UndraException(..)   // what every transport throws, RemoteTransport included (a connection that is down, failed or reconnecting is CONNECTION_LOST; ADR-051); mapped to UndraCallError.Unavailable
+class UndraProtocolException(message: String, cause: Throwable? = null) : UndraException(..)   // a malformed reply, a reply for another call, the null handle
+class UndraRestoreException(val code: Int) : UndraException(..)                                  // restore refused; the core is unchanged
+/** What a generated call throws when the failure is neither its own `E` nor the caller's cancellation (ADR-032, amendment A). */
+sealed class UndraCallError : UndraException {
+  class CancelledByCore : UndraCallError()                                       // status 3
+  class Panicked(val panicMessage: String, val backtrace: String) : UndraCallError()   // status 2 (a stream panic has an empty backtrace)
+  class Refused(val reason: String) : UndraCallError()                           // status 5, and the re-entrancy refusal (reason E_REENTRANT)
+  class Unavailable(val transport: UndraTransportException) : UndraCallError()   // closed, not loaded, connection lost, timeout (a remote core that changed schema included)
+  class Malformed(val detail: String, cause: Throwable? = null) : UndraCallError()   // a reply, a result or an `E` that does not decode (a bug in Undra after a successful schema check)
+  companion object {
+    fun mapped(error: Throwable): Throwable                                       // generated methods without an `E`; CancellationException and foreign throwables stay themselves
+    fun <E : Throwable> mapped(error: Throwable, domain: UndraCodec<E>): Throwable   // with an `E`: status 1 becomes `E`
+    fun mappedStream(error: Throwable): Throwable                                 // a stream's error item: the core's String ("cancelled: ..." is CancelledByCore, anything else Panicked)
+    fun <E : Throwable> mappedStream(error: Throwable, domain: UndraCodec<E>): Throwable   // `E` first, then the String
+  }
+}
+class UndraUnhandledError(val operation: String, val error: UndraCallError) : UndraException(..)   // what `LoadOptions.onError` receives; runs synchronously on the calling thread (the delivery thread for a malformed change-set or a failed port); must not call into Undra
 interface UndraPort
 ```
 Main-thread delivery through `UndraDispatchers.main` (Android: `Dispatchers.Main.immediate`; JVM: a single-thread executor), at the frames of `MirrorOptions.framePacer` (§11.1). Generated stores extend `UndraStore(core, handle)`, or `UndraStore(core, handle, noCoalesce = setOf(ids))` when the store has `no_coalesce` signals.
@@ -1117,11 +1216,12 @@ public final class UndraCore: @unchecked Sendable {
                                      mapError: @escaping @Sendable (Error) -> Error = { $0 }) -> AsyncThrowingStream<Item, Error>   // what generated stream methods return; decodes on demand so credit follows the consumer (§3.7)
   public func construct(type: UInt32, method: UInt32, args: [UInt8]) throws -> UndraHandle
   public func observe(_ handle: UndraHandle, signal: UInt32, on: Bool); public func release(_ handle: UndraHandle)
+  public var connectionState: UndraConnectionState { get }   // ADR-051: .connecting | .connected | .reconnecting(attempt:) | .closed(UndraClosedReason: .requested | .schemaMismatch | .sessionLost | .failed); also `connection` (@MainActor @Observable, `.state`) and `connectionStates() -> AsyncStream`; LoadOptions.reconnect (UndraReconnectPolicy), onConnectionChange; UndraSessionLostError
   public let mirror: Mirror        // register(handle, noCoalesce: Set<UInt32> = []) { @MainActor (signalId, op, reader) in … }; stats() -> MirrorStats;
                                    // addDrainListener { @MainActor (DrainStats) in … } -> DrainListenerRegistration (remove()); @MainActor flush()  (§11.1)
   public func registerPort(_ id: UInt32, _ impl: PortImpl)   // a shut-down core (and the `shared` placeholder) ignores it, with a warning
   public func stats() -> UndraStats   // ..., mirror: MirrorStats
-  public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it
+  public func report(_ error: any Error, operation: String)   // a failure no caller can see: logs at error level, then calls LoadOptions.onError (ADR-032); generated commands and store `apply` call it; a failure that is a remote core's connection being down (.unavailable while connectionState is .reconnecting, or .closed for a reason other than .requested) is only logged, at warning level (ADR-051)
 }
 public struct MirrorStats: Sendable, Equatable { changeSetsReceived, entriesReceived, entriesApplied, drains, compactions, resyncs, pendingEntries, pendingBytes, droppedEntries: Int }
 public struct DrainStats: Sendable, Equatable { changeSets: Int; entries: Int; appliedEntries: Int; duration: Duration }

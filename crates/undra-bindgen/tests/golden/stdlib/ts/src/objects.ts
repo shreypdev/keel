@@ -9,14 +9,13 @@ import {
   HttpRequestCodec,
   type HttpResponse,
   HttpResponseCodec,
-  ReplyStatus,
+  UndraCallError,
   UndraCore,
   UndraObject,
-  UndraReplyError,
   UndraWriter,
   decodeValue,
 } from "@undra/runtime";
-import { SyncError } from "./errors.js";
+import { SyncErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Endpoint, EndpointCodec } from "./types.js";
 
@@ -26,41 +25,46 @@ export class Syncer extends UndraObject {
     super(core, handle);
   }
 
+  /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
   static async create(core: UndraCore = UndraCore.shared): Promise<Syncer> {
-    const handle = await core.construct(
-      UndraIds.Objects.Syncer.typeId,
-      UndraIds.Objects.Syncer.new,
-      new Uint8Array(0),
-    );
+    let handle: bigint;
+    try {
+      handle = await core.construct(
+        UndraIds.Objects.Syncer.typeId,
+        UndraIds.Objects.Syncer.new,
+        new Uint8Array(0),
+      );
+    } catch (error) {
+      throw UndraCallError.mapped(error);
+    }
     return new Syncer(core, handle);
   }
 
   /**
    * Performs one request.
    * @throws {HttpError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
    */
   async send(request: HttpRequest, signal?: AbortSignal): Promise<HttpResponse> {
     const w = new UndraWriter();
     HttpRequestCodec.encode(w, request);
-    let body: Uint8Array;
     try {
-      body = await this.core.call(
+      const body = await this.core.call(
         { target: CallTarget.ObjectMethod, handle: this.handle },
         UndraIds.Objects.Syncer.send,
         w.finish(),
         signal,
       );
+      return decodeValue(HttpResponseCodec, body);
     } catch (error) {
-      throw error instanceof UndraReplyError && error.status === ReplyStatus.Error
-        ? decodeValue(HttpErrorCodec, error.body)
-        : error;
+      throw UndraCallError.mapped(error, HttpErrorCodec);
     }
-    return decodeValue(HttpResponseCodec, body);
   }
 
   /**
    * Streams the responses of a request that repeats.
-   * @throws {HttpError}
+   * Iterating throws HttpError or UndraCallError; leaving the loop early ends the stream quietly.
    */
   follow(endpoint: Endpoint): AsyncIterable<HttpResponse> {
     const w = new UndraWriter();
@@ -73,16 +77,15 @@ export class Syncer extends UndraObject {
     return decodeStream(
       source,
       HttpResponseCodec,
-      (error) =>
-        error instanceof UndraReplyError && error.status === ReplyStatus.Error
-          ? decodeValue(HttpErrorCodec, error.body)
-          : error,
+      (error) => UndraCallError.mappedStream(error, HttpErrorCodec),
     );
   }
 
   /**
    * Writes the last response to disk.
    * @throws {FsError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
    */
   async save(path: string, signal?: AbortSignal): Promise<void> {
     const w = new UndraWriter();
@@ -95,13 +98,15 @@ export class Syncer extends UndraObject {
         signal,
       );
     } catch (error) {
-      throw error instanceof UndraReplyError && error.status === ReplyStatus.Error
-        ? decodeValue(FsErrorCodec, error.body)
-        : error;
+      throw UndraCallError.mapped(error, FsErrorCodec);
     }
   }
 
-  /** @throws {SyncError} */
+  /**
+   * @throws {SyncError}
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+   */
   async sync(signal?: AbortSignal): Promise<void> {
     try {
       await this.core.call(
@@ -111,16 +116,16 @@ export class Syncer extends UndraObject {
         signal,
       );
     } catch (error) {
-      throw SyncError.fromReply(error);
+      throw UndraCallError.mapped(error, SyncErrorCodec);
     }
   }
 }
 
-/** Decodes every item of a core stream; a failure passes through `mapError`. */
+/** Decodes every item of a core stream; a failure of the stream or of an item goes through `mapError`. */
 async function* decodeStream<T>(
   source: AsyncIterable<Uint8Array>,
   codec: Codec<T>,
-  mapError: (error: unknown) => unknown = (error) => error,
+  mapError: (error: unknown) => unknown,
 ): AsyncGenerator<T, void, undefined> {
   try {
     for await (const body of source) yield decodeValue(codec, body);

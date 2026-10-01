@@ -258,13 +258,22 @@ pub enum FsError {
     Io(String),
 }
 
+/// The text of an unavailable port as a typed error: names the port and carries the code and the
+/// docs link of E0062, like the runtime message of a method that has no error channel to put it in
+/// (generated code, `undra-macros`).
+fn no_adapter(port: &str) -> String {
+    format!(
+        "the {port} port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)"
+    )
+}
+
 /// A port that cannot answer is an ordinary outcome (SPEC 6.3), not a bug: a platform that does
 /// not register `Http` answers "unavailable". `HttpProxy::request` therefore returns the outcome
 /// as an error instead of panicking (which would trap a wasm core):
 ///
 /// | `PortError` | `HttpError` |
 /// |---|---|
-/// | `Unavailable` | `Network("the Http port has no adapter registered")` |
+/// | `Unavailable` | `Network("the Http port has no adapter registered (E0062: ..)")` |
 /// | `Cancelled` | `Cancelled` |
 /// | `Decode(e)` | `Network("malformed port reply: <e>")` |
 /// | `Failed(bytes)` | the decoded `HttpError`, else `Network("the Http port reported an error that does not decode")` |
@@ -279,9 +288,7 @@ impl From<PortError> for HttpError {
             };
         }
         match error {
-            PortError::Unavailable => {
-                HttpError::Network("the Http port has no adapter registered".to_owned())
-            }
+            PortError::Unavailable => HttpError::Network(no_adapter("Http")),
             PortError::Cancelled => HttpError::Cancelled,
             PortError::Decode(why) => HttpError::Network(format!("malformed port reply: {why}")),
             other => HttpError::Network(format!("the Http port call failed: {other}")),
@@ -295,7 +302,7 @@ impl From<PortError> for HttpError {
 ///
 /// | `PortError` | `FsError` |
 /// |---|---|
-/// | `Unavailable` | `Io("the Fs port has no adapter registered")` |
+/// | `Unavailable` | `Io("the Fs port has no adapter registered (E0062: ..)")` |
 /// | `Cancelled` | `Io("the Fs call was cancelled")` |
 /// | `Decode(e)` | `Io("malformed port reply: <e>")` |
 /// | `Failed(bytes)` | the decoded `FsError`, else `Io("the Fs port reported an error that does not decode")` |
@@ -310,9 +317,7 @@ impl From<PortError> for FsError {
             };
         }
         match error {
-            PortError::Unavailable => {
-                FsError::Io("the Fs port has no adapter registered".to_owned())
-            }
+            PortError::Unavailable => FsError::Io(no_adapter("Fs")),
             PortError::Cancelled => FsError::Io("the Fs call was cancelled".to_owned()),
             PortError::Decode(why) => FsError::Io(format!("malformed port reply: {why}")),
             other => FsError::Io(format!("the Fs port call failed: {other}")),
@@ -437,7 +442,9 @@ mod tests {
         };
         assert_eq!(
             HttpError::from(PortError::Unavailable),
-            HttpError::Network("the Http port has no adapter registered".into())
+            HttpError::Network(
+                "the Http port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into()
+            )
         );
         assert_eq!(HttpError::from(PortError::Cancelled), HttpError::Cancelled);
         assert_eq!(
@@ -456,7 +463,9 @@ mod tests {
 
         assert_eq!(
             FsError::from(PortError::Unavailable),
-            FsError::Io("the Fs port has no adapter registered".into())
+            FsError::Io(
+                "the Fs port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into()
+            )
         );
         assert_eq!(
             FsError::from(PortError::Cancelled),

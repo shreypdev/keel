@@ -27,15 +27,46 @@ the dev loop and makes a 96 MB APK (13 MB with the release core). `app/build.gra
 a path relative to the module (`../../build/android/jniLibs`); after every Android build `undra` checks that
 line and says so if the app would not package what it just built.
 
+The **device benchmark** (`scripts/bench-device.sh --device android`) is an instrumented test (`app/src/androidTest`) over the
+`benchmark` build type (`./gradlew :app:assembleBenchmark :app:assembleBenchmarkAndroidTest`: release, not debuggable, signed
+with the debug key); its runner is `app/src/main/kotlin/dev/undra/playground/bench/BenchRunner.kt`, and `UndraApp` records how
+long the first `UndraCore.load` took for the cold-start row.
+
 The Gradle project includes the Kotlin runtime from this checkout (`includeBuild`) and the generated bindings
 as the `:core-bindings` module, so a change to either shows up in the next build.
 
+## Against `undra dev`
+
+Debug builds can run against the core `undra dev` serves instead of the one in the APK: a Rust change needs no
+rebuild of the app, and the native build (`undra build --platform android`) is not needed at all.
+
+```sh
+undra dev -C .. --android                                              # prints the addresses, runs adb reverse for attached devices
+./gradlew :app:installDebug
+adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://10.0.2.2:7443    # emulator
+adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://127.0.0.1:7443   # USB device, after adb reverse
+./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug           # or bake the URL into the debug build
+```
+
+The launch extra wins over the build property; neither does anything in a release build. `10.0.2.2` is the
+emulator's name for your computer; a USB device uses `adb reverse` and `127.0.0.1`. The debug build type has what
+the connection needs and release does not: `app/src/debug/AndroidManifest.xml` (`usesCleartextTraffic`) and the
+`UNDRA_DEV_URL` `BuildConfig` field. A bar above the screens shows the connection
+(`core.connectionState`, a `StateFlow`): green, amber while the runtime reconnects, red when it is over. If the dev
+server cannot be reached at launch, the app says so with a Retry button.
+
+Save a Rust change and the app is on the rebuilt core within a second: the runtime reconnects, finds a new core
+with none of its objects (`Closed(SESSION_LOST)`), and `UndraApp` loads it and restarts the activity on it. A
+dropped connection alone (the emulator slept, adb restarted) is resumed with the same objects.
+
 ## How the app is wired
 
-* `UndraApp` loads the core once (`UndraCore.load`, which checks the schema hash of the bindings against the
-  library's), calls `AndroidPlatformDefaults.install(core, this)` (module `android-adapters`: `Http`, `Kv`, `SecureStore`,
-  `Fs`, `Connectivity` and `Lifecycle` are all the real ones, nothing is faked) and calls `configureRemote`. The persisted query
-  cache and the offline queue live in the app's files, so they survive the process being killed.
+* `UndraApp` loads the core once per process (`UndraCore.load`, which checks the schema hash of the bindings against the
+  library's; `MainActivity` starts it, with the URL of `DevServer`, if any), calls `AndroidPlatformDefaults.install(core, this)`
+  (module `android-adapters`: `Http`, `Kv`, `SecureStore`, `Fs`, `Connectivity` and `Lifecycle` are all the real ones, nothing is
+  faked) and calls `configureRemote`. The persisted query cache and the offline queue live in the app's files, so they survive
+  the process being killed. Against `undra dev` the same adapters stay on the device (the core is on the laptop and calls
+  them over the connection), and a rebuilt core gets a fresh `install`.
 * `remote/DemoServer.kt` is the server of the Remote tab: a small HTTP server on the device's loopback interface (the
   playground has no backend to ship), three seeded items, 300 ms of latency, JSON by hand with `org.json`. The core reaches
   it through the real `Http` adapter and a real socket. Like a host on the internet it is reachable only while the device
