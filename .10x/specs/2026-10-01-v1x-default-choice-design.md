@@ -154,3 +154,17 @@ Each is a product bet with real agent cost; the plan proceeds without them and a
 4. **WebSocket port** (G2) — real-time apps; small.
 5. **Derived keyed lists** (E2) — O(change) filtered/sorted views over large lists; medium.
 6. **Flutter/Dart bindgen** (G4) — after G1 proves the pattern.
+
+## Amendment A — the founder approved all six v1.2 bets (2026-10-01)
+
+"All." Sequencing, chosen for dependencies and machine load (every piece builds Rust; more than
+seven concurrent pieces makes timing-sensitive suites lie):
+
+| Bet | Starts | Depends on | Owner |
+|---|---|---|---|
+| G1 React Native runtime | now (`wt/react-native`) | nothing structural — ADR-038 first, then code | opus design + implement, opus review |
+| E2 derived keyed lists | ADR now (`wt/derived-lists`), code after Track A | ADR-039; Track A lands (same crates) | opus design, opus implement, opus review |
+| G2 WebSocket port | after the first wave merges | ADR-040 (a port with two backpressured streams) | sonnet, opus review |
+| B4 devtools | after `dev-loop` and B3 merge | the dev server, state-preserving reload | opus, opus review |
+| G3 `Db` port (SQLite) | after ADR-037 and G2 | persistence model (ADR-037); the port pattern of G2 | opus design, sonnet implement, opus review |
+| G4 Flutter/Dart bindgen | after G1 proves the fourth-host pattern | G1 | opus design, sonnet implement, opus review |
