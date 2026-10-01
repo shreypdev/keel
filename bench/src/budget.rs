@@ -59,6 +59,19 @@
 //! ```
 //!
 //! `UNDRA_BENCH_SCALE` does not touch a ratio: a slower machine slows both rows.
+//!
+//! A fourth kind of table gates the **size** of a shipped artefact, measured by
+//! `scripts/wasm-size.sh` (ADR-052), not by this crate:
+//!
+//! ```toml
+//! [size."web/hello-wasm"]             # the artefact, quoted (the `artifact` of its JSON line)
+//! budget_gzip_bytes = 120000          # required: gzipped bytes, never more than this
+//! measured_gzip_bytes = 95838         # the record (bench/results/web-size.jsonl)
+//! tolerance = 0.05                    # gate: at most 5% over the record
+//! ```
+//!
+//! The gate is [`SizeBudget::ceiling`]: the budget, or the record plus the tolerance when that is
+//! lower. `UNDRA_BENCH_SCALE` never applies to a size.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -130,6 +143,63 @@ impl RatioBudget {
             Some(m) if m > self.max => vec![format!("measured {m} is over max {}", self.max)],
             _ => Vec::new(),
         }
+    }
+}
+
+/// A shipped artefact's size gate (a `[size."name"]` table), in gzipped bytes (zlib, level 9).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SizeBudget {
+    /// The budget: the gzipped size is never more than this.
+    pub budget_gzip_bytes: f64,
+    /// The recorded gzipped size, if the artefact has been recorded.
+    pub measured_gzip_bytes: Option<f64>,
+    /// How far over the record a measurement may go, as a fraction (`0.05` is 5%).
+    pub tolerance: Option<f64>,
+}
+
+impl SizeBudget {
+    /// The gate: the budget, or `floor(record x (1 + tolerance))` when there is a record and a
+    /// tolerance and that is lower. `scripts/wasm-size.sh` computes the same number.
+    ///
+    /// ```
+    /// use undra_bench::budget::Budgets;
+    ///
+    /// let b = Budgets::parse(
+    ///     "[size.\"web\"]\nbudget_gzip_bytes = 120000\nmeasured_gzip_bytes = 95838\ntolerance = 0.05\n",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(b.sizes["web"].ceiling(), 100_629.0);
+    /// assert!(b.sizes["web"].holds(100_629.0) && !b.sizes["web"].holds(100_630.0));
+    /// ```
+    pub fn ceiling(&self) -> f64 {
+        match (self.measured_gzip_bytes, self.tolerance) {
+            (Some(record), Some(tolerance)) => self
+                .budget_gzip_bytes
+                .min((record * (1.0 + tolerance)).floor()),
+            _ => self.budget_gzip_bytes,
+        }
+    }
+
+    /// Whether a measured gzipped size passes the gate.
+    pub fn holds(&self, gzipped: f64) -> bool {
+        gzipped <= self.ceiling()
+    }
+
+    /// Problems with the table itself: a record already over the budget, a tolerance with no
+    /// record to apply it to.
+    pub fn self_check(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if let Some(record) = self.measured_gzip_bytes {
+            if record > self.budget_gzip_bytes {
+                problems.push(format!(
+                    "measured_gzip_bytes {record} is over budget_gzip_bytes {}",
+                    self.budget_gzip_bytes
+                ));
+            }
+        } else if self.tolerance.is_some() {
+            problems.push("tolerance is set but there is no measured_gzip_bytes".to_owned());
+        }
+        problems
     }
 }
 
@@ -332,6 +402,8 @@ pub struct Budgets {
     pub stress: BTreeMap<String, StressBudget>,
     /// The ratio gates between two layer A rows, by name (`[ratio."name"]`).
     pub ratios: BTreeMap<String, RatioBudget>,
+    /// The size gates of shipped artefacts, by artefact name (`[size."name"]`).
+    pub sizes: BTreeMap<String, SizeBudget>,
 }
 
 /// Why `budgets.toml` could not be read.
@@ -374,6 +446,16 @@ pub enum BudgetError {
         /// The key that is missing.
         missing: &'static str,
     },
+    /// A `[size."name"]` table has no `budget_gzip_bytes`.
+    MissingSizeBudget {
+        /// The artefact the table names.
+        name: String,
+    },
+    /// Two `[size."name"]` tables name the same artefact.
+    DuplicateSize {
+        /// The artefact named twice.
+        name: String,
+    },
     /// Two `[ratio."name"]` tables have the same name.
     DuplicateRatio {
         /// The ratio named twice.
@@ -405,6 +487,15 @@ impl fmt::Display for BudgetError {
             BudgetError::IncompleteRatio { name, missing } => {
                 write!(f, "budgets file: [ratio.\"{name}\"] has no {missing}")
             }
+            BudgetError::MissingSizeBudget { name } => {
+                write!(
+                    f,
+                    "budgets file: [size.\"{name}\"] has no budget_gzip_bytes"
+                )
+            }
+            BudgetError::DuplicateSize { name } => {
+                write!(f, "budgets file: [size.\"{name}\"] appears twice")
+            }
             BudgetError::DuplicateRatio { name } => {
                 write!(f, "budgets file: [ratio.\"{name}\"] appears twice")
             }
@@ -426,6 +517,7 @@ enum Section {
     Bench(String),
     Stress(String),
     Ratio(String),
+    Size(String),
 }
 
 impl Budgets {
@@ -444,6 +536,8 @@ impl Budgets {
         let mut stress_order: Vec<String> = Vec::new();
         let mut ratios: BTreeMap<String, PartialRatio> = BTreeMap::new();
         let mut ratio_order: Vec<String> = Vec::new();
+        let mut sizes: BTreeMap<String, PartialSize> = BTreeMap::new();
+        let mut size_order: Vec<String> = Vec::new();
         for (index, raw) in text.lines().enumerate() {
             let line = index + 1;
             let syntax = |message: &str| BudgetError::Syntax {
@@ -487,10 +581,19 @@ impl Budgets {
                     ratios.insert(name.clone(), PartialRatio::default());
                     ratio_order.push(name.clone());
                     Section::Ratio(name)
+                } else if let Some(name) = header.strip_prefix("size.") {
+                    let name = parse_string(name.trim())
+                        .ok_or_else(|| syntax("a size table is written [size.\"name\"]"))?;
+                    if sizes.contains_key(&name) {
+                        return Err(BudgetError::DuplicateSize { name });
+                    }
+                    sizes.insert(name.clone(), PartialSize::default());
+                    size_order.push(name.clone());
+                    Section::Size(name)
                 } else {
                     return Err(syntax(
-                        "the only tables are [meta], [bench.\"name\"], [stress.\"name\"] and \
-                         [ratio.\"name\"]",
+                        "the only tables are [meta], [bench.\"name\"], [stress.\"name\"], \
+                         [ratio.\"name\"] and [size.\"name\"]",
                     ));
                 };
                 continue;
@@ -553,6 +656,24 @@ impl Budgets {
                         }
                     }
                 }
+                Section::Size(name) => {
+                    let entry = sizes.entry(name.clone()).or_default();
+                    match (key, value) {
+                        ("budget_gzip_bytes", Value::Number(n)) if n > 0.0 => {
+                            entry.budget_gzip_bytes = Some(n);
+                        }
+                        ("measured_gzip_bytes", Value::Number(n)) if n > 0.0 => {
+                            entry.measured_gzip_bytes = Some(n);
+                        }
+                        ("tolerance", Value::Number(n)) => entry.tolerance = Some(n),
+                        _ => {
+                            return Err(syntax(
+                                "a size table takes budget_gzip_bytes and measured_gzip_bytes \
+                                 (positive numbers) and tolerance (a fraction, 0.05 for 5%)",
+                            ));
+                        }
+                    }
+                }
                 Section::Bench(name) => {
                     let entry = pending.entry(name.clone()).or_default();
                     match (key, value) {
@@ -599,6 +720,20 @@ impl Budgets {
             };
             budgets.ratios.insert(name, ratio);
         }
+        for name in size_order {
+            let partial = sizes.remove(&name).unwrap_or_default();
+            let Some(budget_gzip_bytes) = partial.budget_gzip_bytes else {
+                return Err(BudgetError::MissingSizeBudget { name });
+            };
+            budgets.sizes.insert(
+                name,
+                SizeBudget {
+                    budget_gzip_bytes,
+                    measured_gzip_bytes: partial.measured_gzip_bytes,
+                    tolerance: partial.tolerance,
+                },
+            );
+        }
         for name in order {
             let partial = pending.remove(&name).unwrap_or_default();
             let Some(budget_ns) = partial.budget_ns else {
@@ -627,6 +762,13 @@ struct PartialRatio {
     den_div: Option<f64>,
     max: Option<f64>,
     measured: Option<f64>,
+}
+
+#[derive(Default)]
+struct PartialSize {
+    budget_gzip_bytes: Option<f64>,
+    measured_gzip_bytes: Option<f64>,
+    tolerance: Option<f64>,
 }
 
 #[derive(Default)]
@@ -763,6 +905,13 @@ budget_ns = 7
                     table.self_check().is_empty(),
                     "{name}: {:?}",
                     table.self_check()
+                );
+            }
+            for (name, size) in &budgets.sizes {
+                assert!(
+                    size.self_check().is_empty(),
+                    "{name}: {:?}",
+                    size.self_check()
                 );
             }
             for (name, ratio) in &budgets.ratios {
@@ -1086,5 +1235,108 @@ rss_growth_pct = 1
             ..StressBudget::default()
         };
         assert_eq!(t.self_check().len(), 4, "{:?}", t.self_check());
+    }
+
+    #[test]
+    fn parses_a_size_table_and_its_gate() {
+        let b = Budgets::parse(
+            "[size.\"web/hello-wasm\"]\nbudget_gzip_bytes = 120_000\n\
+             measured_gzip_bytes = 95838\ntolerance = 0.05\n",
+        )
+        .expect("parses");
+        let size = &b.sizes["web/hello-wasm"];
+        assert_eq!(size.budget_gzip_bytes, 120_000.0);
+        assert_eq!(size.measured_gzip_bytes, Some(95_838.0));
+        // floor(95,838 x 1.05) = 100,629: the record's tolerance is lower than the budget.
+        assert_eq!(size.ceiling(), 100_629.0);
+        assert!(size.self_check().is_empty());
+
+        // Without a record, or with one so close to the budget that the tolerance would pass it,
+        // the budget is the gate.
+        let b = Budgets::parse("[size.\"a\"]\nbudget_gzip_bytes = 1000\n").unwrap();
+        assert_eq!(b.sizes["a"].ceiling(), 1000.0);
+        let b = Budgets::parse(
+            "[size.\"a\"]\nbudget_gzip_bytes = 1000\nmeasured_gzip_bytes = 990\ntolerance = 0.05\n",
+        )
+        .unwrap();
+        assert_eq!(b.sizes["a"].ceiling(), 1000.0);
+        assert!(!b.sizes["a"].holds(1001.0));
+    }
+
+    #[test]
+    fn a_size_table_is_read_strictly() {
+        let err = Budgets::parse("[size.\"a\"]\nmeasured_gzip_bytes = 4\n").unwrap_err();
+        assert_eq!(err, BudgetError::MissingSizeBudget { name: "a".into() });
+        let err = Budgets::parse(
+            "[size.\"a\"]\nbudget_gzip_bytes = 1\n[size.\"a\"]\nbudget_gzip_bytes = 2\n",
+        )
+        .unwrap_err();
+        assert_eq!(err, BudgetError::DuplicateSize { name: "a".into() });
+        let err = Budgets::parse("[size.\"a\"]\nbudget_bytes = 1\n").unwrap_err();
+        assert!(matches!(err, BudgetError::Syntax { line: 2, .. }), "{err}");
+        let err = Budgets::parse("[size.\"a\"]\nbudget_gzip_bytes = 0\n").unwrap_err();
+        assert!(matches!(err, BudgetError::Syntax { line: 2, .. }), "{err}");
+        let err = Budgets::parse("[size.a]\n").unwrap_err();
+        assert!(matches!(err, BudgetError::Syntax { line: 1, .. }), "{err}");
+        assert!(
+            BudgetError::MissingSizeBudget { name: "a".into() }
+                .to_string()
+                .contains("budget_gzip_bytes")
+        );
+
+        let over =
+            Budgets::parse("[size.\"a\"]\nbudget_gzip_bytes = 10\nmeasured_gzip_bytes = 11\n")
+                .unwrap();
+        assert_eq!(over.sizes["a"].self_check().len(), 1);
+        let dangling =
+            Budgets::parse("[size.\"a\"]\nbudget_gzip_bytes = 10\ntolerance = 0.1\n").unwrap();
+        assert_eq!(dangling.sizes["a"].self_check().len(), 1);
+    }
+
+    /// The number after `"key":` in a flat JSON object, as `scripts/wasm-size.sh` writes them.
+    fn json_number(line: &str, key: &str) -> Option<f64> {
+        let at = line.find(&format!("\"{key}\":"))? + key.len() + 3;
+        let rest = line[at..].trim_start();
+        let end = rest.find([',', '}']).unwrap_or(rest.len());
+        rest[..end].trim().parse().ok()
+    }
+
+    /// The string after `"key":` in a flat JSON object (no escapes needed for artefact names).
+    fn json_string(line: &str, key: &str) -> Option<String> {
+        let at = line.find(&format!("\"{key}\":"))? + key.len() + 3;
+        let rest = line[at..].trim_start().strip_prefix('"')?;
+        Some(rest[..rest.find('"')?].to_owned())
+    }
+
+    #[test]
+    fn the_size_record_is_the_one_the_table_gates_against() {
+        // `scripts/wasm-size.sh --record` writes both; a hand edit of one of them fails here.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let budgets = Budgets::load(&root.join("budgets.toml")).expect("bench/budgets.toml parses");
+        let record = std::fs::read_to_string(root.join("results/web-size.jsonl"))
+            .expect("bench/results/web-size.jsonl exists");
+        for (name, size) in &budgets.sizes {
+            let line = record
+                .lines()
+                .find(|l| json_string(l, "artifact").as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("no line for {name} in web-size.jsonl"));
+            assert_eq!(
+                json_number(line, "gzipped"),
+                size.measured_gzip_bytes,
+                "{name}: the record and measured_gzip_bytes disagree"
+            );
+            assert_eq!(json_number(line, "budget"), Some(size.budget_gzip_bytes));
+            assert_eq!(json_number(line, "ceiling"), Some(size.ceiling()));
+        }
+        // Both artefacts are gated (ADR-052 decision 2), and nothing is recorded without a gate.
+        assert!(budgets.sizes.contains_key("web/hello-wasm"));
+        assert!(budgets.sizes.contains_key("web/hello-runtime-js"));
+        for line in record.lines().filter(|l| !l.trim().is_empty()) {
+            let artifact = json_string(line, "artifact").expect("every line names its artefact");
+            assert!(
+                budgets.sizes.contains_key(&artifact),
+                "{artifact} is recorded in web-size.jsonl but has no [size] table"
+            );
+        }
     }
 }

@@ -13,3 +13,7 @@ readme = "README.md"
 serde = { workspace = true }
 serde_json = { workspace = true }
 inventory = { workspace = true }
+
+[dev-dependencies]
+# The schema sort must order exactly as `slice::sort_by` does (it decides the schema hash).
+proptest = { workspace = true }

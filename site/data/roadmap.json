@@ -105,6 +105,10 @@
         {
           "title": "No manual build step",
           "text": "A Gradle task, an Xcode build phase and a Vite plugin run undra build; undra init emits CI; undra upgrade moves a project in lockstep; undra doctor names every fix."
+        },
+        {
+          "title": "The web bundle under its budget (ADR-052)",
+          "text": "The hello-world core ships at 102.7 KB gzipped against a 120 KB budget, measured and gated in CI; the number on this site comes from the record."
         }
       ]
     },
@@ -130,10 +134,6 @@
         {
           "title": "React Native (ADR-038)",
           "text": "@undra/react-native: a TurboModule over the C ABI under the same TypeScript mirror, for teams that keep React Native for the UI."
-        },
-        {
-          "title": "The web bundle under its budget (ADR-052)",
-          "text": "135 KB gzipped today against a 120 KB budget; the levers, and a size gate so it never creeps back."
         },
         {
           "title": "Persisted-state migrations (ADR-037)",

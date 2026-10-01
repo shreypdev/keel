@@ -12,6 +12,7 @@ mod canonical;
 mod def;
 mod meta;
 mod registry;
+mod sort;
 mod type_ref;
 mod validate;
 

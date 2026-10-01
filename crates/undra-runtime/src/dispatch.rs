@@ -84,13 +84,18 @@ impl fmt::Debug for DispatchResult {
 /// first other answer wins. Layers are consulted in link order, so two layers must not claim
 /// the same id.
 ///
+/// The name identifies the layer: a layer submitted more than once under one name is consulted
+/// once (the first submission linked). That lets the code that needs a layer submit it, rather
+/// than the crate that implements it: every `#[undra::query]` and `#[undra::mutation]` submits
+/// `undra-query`'s, so a core with no queries does not link the query runtime (ADR-052).
+///
 /// ```ignore
 /// inventory::submit! {
 ///     undra_runtime::DispatchLayer { name: "undra-query", dispatch: undra_query::dispatch }
 /// }
 /// ```
 pub struct DispatchLayer {
-    /// Shown in logs.
+    /// Shown in logs, and the layer's identity: one layer per name is consulted.
     pub name: &'static str,
     /// The dispatcher: downcast the `&dyn Any` to [`Runtime`](crate::Runtime), decode
     /// `call.args`, answer with `DispatchOutcome::new(DispatchResult::..)`.
@@ -182,7 +187,7 @@ impl ObjectEntry {
 pub(crate) struct DispatchTable {
     pub(crate) functions: IdMap<&'static FunctionMeta>,
     pub(crate) objects: IdMap<ObjectEntry>,
-    /// The layers that serve what the two maps above miss, in registration order.
+    /// The layers that serve what the two maps above miss, in registration order, one per name.
     pub(crate) layers: Vec<&'static DispatchLayer>,
     /// Ids that more than one registration claimed (first wins); reported at init.
     pub(crate) collisions: Vec<(u32, &'static str, &'static str)>,
@@ -215,7 +220,11 @@ impl DispatchTable {
                 _ => {}
             }
         }
-        table.layers.extend(inventory::iter::<DispatchLayer>);
+        for layer in inventory::iter::<DispatchLayer> {
+            if !table.layers.iter().any(|known| known.name == layer.name) {
+                table.layers.push(layer);
+            }
+        }
         table
     }
 }

@@ -83,22 +83,6 @@ pub(crate) struct Inflight {
     pub(crate) task: TaskId,
 }
 
-/// Makes every use of the query client depend on the two `inventory` registrations of this
-/// crate (the dispatch layer and the init hook).
-///
-/// `inventory` registrations are static initialisers in an object file, and a linker only pulls
-/// an object out of a library if something refers to it. Any program that observes a query calls
-/// `Shared::observe`, so referring to the registrations' functions from here makes the linker keep
-/// them, including in a platform-only app that never calls `ctx.query()` from Rust and reaches
-/// the client only through the runtime's dispatch.
-#[inline(never)]
-fn keep_registrations() {
-    std::hint::black_box((
-        crate::dispatch::dispatch as undra_meta::DispatchFn,
-        crate::init as fn(&Ctx),
-    ));
-}
-
 /// The compiled key template of query or mutation `id`, made on first use.
 fn plan_for(
     plans: &mut HashMap<u32, Arc<KeyPlan>>,
@@ -528,7 +512,6 @@ impl Shared {
         params: Arc<[u8]>,
         sink: Option<(u64, Weak<dyn Sink>)>,
     ) -> (QueryKey, View) {
-        keep_registrations();
         let now = self.now(ctx);
         let key = QueryKey::new(vt.id, params);
         let schema = ctx.runtime().schema();
@@ -761,10 +744,19 @@ impl Shared {
         self.refetch_observed(ctx, true);
     }
 
-    /// Subscribes to the `Connectivity` and `Lifecycle` events, once per runtime.
+    /// Subscribes to the `Connectivity` and `Lifecycle` events, once per runtime, and hydrates
+    /// the cache if no start-up hook will.
+    ///
+    /// The hook ([`crate::__private::HYDRATE`]) is submitted by `#[undra::query]` and
+    /// `#[undra::mutation]` (ADR-052), so a core whose queries are all written by hand does not
+    /// link it: there the first use of the client (this call) reads the persisted entries and
+    /// the offline queue, instead of nothing ever reading them.
     pub(crate) fn start(self: &Arc<Self>, ctx: &Ctx) {
         if self.started.swap(true, Ordering::SeqCst) {
             return;
+        }
+        if !hydrate_hook_linked() {
+            self.spawn_hydration(ctx);
         }
         // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
         // they captured would keep it alive. (`Shared` holds no `Ctx`.)
@@ -780,6 +772,14 @@ impl Shared {
             }
         })
         .detach();
+    }
+
+    /// Starts [`Shared::hydrate`] on the core. The task holds the runtime weakly (ADR-034), so
+    /// an idle runtime whose owner lets go is freed even while hydration still waits for a late
+    /// `Kv` adapter. The start-up hook and [`Shared::start`] share it (one task type, one copy).
+    pub(crate) fn spawn_hydration(self: &Arc<Self>, ctx: &Ctx) {
+        let (shared, weak) = (self.clone(), ctx.downgrade());
+        ctx.spawn(async move { shared.hydrate(&weak).await });
     }
 
     // ----- garbage collection --------------------------------------------------------------
@@ -1208,6 +1208,15 @@ async fn run_persist(shared: Arc<Shared>, weak: WeakCtx, key: QueryKey) {
             }
         }
     }
+}
+
+/// Whether this program links the start-up hook that hydrates the cache, which it does when the
+/// core declares a query or a mutation with the macros (ADR-052). When it does, the runtime (or
+/// the test, for a `TestRuntime`) runs it; when it does not, [`Shared::start`] hydrates.
+fn hydrate_hook_linked() -> bool {
+    undra_runtime::inventory::iter::<undra_runtime::InitHook>
+        .into_iter()
+        .any(|hook| hook.name == crate::__private::HYDRATE.name)
 }
 
 /// The `Shared` of `ctx`'s runtime, created on first use.

@@ -207,7 +207,9 @@ pub(crate) fn mutation_vtable<M: MutationDef>() -> &'static MutationVTable {
 ///
 /// Generated code contains
 /// `inventory::submit! { undra::query::QueryRegistration::of::<TodosQuery>() }`; write it by hand
-/// only for a [`QueryDef`] the macro did not generate.
+/// only for a [`QueryDef`] the macro did not generate, and then submit the query runtime's
+/// dispatch layer next to it (`undra::query::__private::LAYER`, as the macro does, ADR-052):
+/// without the layer no platform call reaches the registration.
 pub struct QueryRegistration {
     vtable: &'static QueryVTable,
 }

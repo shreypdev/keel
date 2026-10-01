@@ -17,13 +17,13 @@
 //! registering them as objects would put them in the schema twice), so this module is a
 //! [`DispatchLayer`](undra_runtime::DispatchLayer): the runtime asks it when its own table has no
 //! answer, and it finds the query or mutation through the registrations `#[undra::query]` and
-//! `#[undra::mutation]` submit.
+//! `#[undra::mutation]` submit. The macros submit the layer itself too
+//! ([`crate::__private::LAYER`]), so a core without queries or mutations does not link it.
 
 use core::any::Any;
 
 use undra_meta::{DispatchCall, DispatchOutcome, ids};
-use undra_runtime::inventory;
-use undra_runtime::{DispatchLayer, DispatchResult, Runtime};
+use undra_runtime::{DispatchResult, Runtime};
 use undra_wire::Encode;
 
 use crate::client::QueryClient;
@@ -42,10 +42,6 @@ pub(crate) fn dispatch(rt: &dyn Any, call: DispatchCall<'_>) -> DispatchOutcome 
         return DispatchOutcome::new(DispatchResult::Unknown);
     };
     DispatchOutcome::new(serve(rt, call))
-}
-
-inventory::submit! {
-    DispatchLayer { name: "undra-query", dispatch }
 }
 
 fn serve(rt: &Runtime, call: DispatchCall<'_>) -> DispatchResult {
