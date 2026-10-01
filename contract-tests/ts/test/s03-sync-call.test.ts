@@ -46,7 +46,9 @@ test("S03 sync call", async ({ task }) => {
     const result: unknown = core.callSync(FREE, UndraIds.Functions.add, addArgs(1, 2));
     expect(result).toBeInstanceOf(Uint8Array);
     expect(typeof (result as { then?: unknown }).then).toBe("undefined");
-    expect(core.mode).toBe("wasm-main");
+    // An in-process transport: `wasm-main`, or `native` when the React Native column runs this file
+    // through @undra/react-native's transport (runtimes/rn/@undra/react-native/vitest.contract.config.ts).
+    expect(["wasm-main", "native"]).toContain(core.mode);
   });
 
   await step("3. 10,000 sync calls: the right sums, and exactly 10,000 crossings", async () => {
