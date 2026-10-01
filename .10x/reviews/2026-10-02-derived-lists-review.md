@@ -75,7 +75,8 @@ first n - 4 cards span 4 for any n >= 7: at eight that is spans 4, 4, 4, 4, 3, 3
 columns (three cards, three, then two with half the row empty). A multiple of four from eight on is now rows of four.
 
 **L6 — README's test counts were stale (fixed, `docs(derived-lists): adversarial review`).** "4,000+ ... Rust 2,168 ·
-TypeScript 931 · Kotlin 500 · Swift 425" is now "4,900+ ... Rust 2,700 · TypeScript 1,132 · Kotlin 617 · Swift 483", in
+TypeScript 931 · Kotlin 500 · Swift 425" is now "4,900+ ... Rust 2,700 · TypeScript 1,132 · Kotlin 617 · Swift 512" (483 here, 512 with `main`'s
+`swift-fs` merged), in
 README and in the landing page's tests card (which carried the same stale numbers).
 
 **I1 — The generated docs say "Computed by the core; read-only.", not "derived" (not changed).** ADR-039 section 7
@@ -149,7 +150,7 @@ commit costs its length. Right for tests; worth remembering when a debug dev loo
 | `bindgen --check --docs`; `schema_docs` + `schema_retention` (ignored) | up to date `0xc5f05c376fde398c`; pass |
 | Budgets (`--test budgets --release`), the nine derived rows and both ratios | pass: p50 `update_visible` 388.7 ns (10k) / 394.2 ns (100k), `toggle_membership` 369.1 ns, `sort_key_change` 569.2 / 597.1 ns, `insert_sorted` 8.29 µs, `param_flip` 221 µs, `rebuild_after_replace` 196 µs, `count_toggle` 373.8 ns, `stress/derived_churn_10k/ops_x1000` 8.78 ms; ratios `derived_sort_scaling` 1.05 (max 4), `derived_vs_keyed_update` 1.42 (max 2.5) |
 | Stress gates (`--test stress --release`), `derived_churn_10k/sustained` | pass (12 gates): `derived_churn_10k/sustained` 111.4 k ops/s, p99 26.1 µs, 93.0 bytes/op |
-| Swift runtime `swift test` | 483 (482 + the new case), 0 failures |
+| Swift runtime `swift test` | 483 (482 + the new case), 0 failures; 512 after merging `main` (`swift-fs`) |
 | Kotlin runtime, kotlinc 2.4.20 and CI's 2.0.21 | 617 cases, 0 failed, 2 skipped (no native library), both compilers |
 | TypeScript runtime `npm test` + typecheck | 1,132 pass; clean |
 | `bash contract-tests/run-all.sh` | 57/57 (Kotlin and Swift 19/19 in the full run, TypeScript 19/19 on its re-run after the S19 step 9b fix) |
