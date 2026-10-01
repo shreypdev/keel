@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # The TypeScript column of the contract scenarios (contract-tests/scenarios.md): @undra/runtime over
-# the real wasm build of the playground core, in wasm-main mode, under vitest on Node.
+# the real wasm build of the playground core, in wasm-main mode (and wasm-worker where a scenario says so),
+# under vitest on Node.
 #
-#   contract-tests/ts/run.sh              # build the core if it is missing or stale, run S01..S18, grade
+#   contract-tests/ts/run.sh              # build the cores if missing or stale, run S01..S21, grade
 #   contract-tests/ts/run.sh -t S07       # extra arguments go to vitest (here: only scenario S07)
 #
 # Builds with the undra CLI (`undra build -C examples/playground --platform web`, which writes
 # examples/playground/build/web/undra_core.wasm) unless UNDRA_PLAYGROUND_WASM points somewhere else.
+# Build B of the two-build steps (scenarios.md, "Two builds": S14 steps 7 to 9, S15 steps 11 to 14) is the
+# same command with UNDRA_PLAYGROUND_V2=1; its wasm is copied to build/b/undra_core.wasm (not committed) before
+# build A is built again, so the default wasm stays build A. UNDRA_PLAYGROUND_WASM_B overrides its path.
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless all eighteen pass.
+# contract-tests/check.sh, so the exit status is non-zero unless all twenty-one pass.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 
@@ -17,27 +21,45 @@ root="$(cd "$here/../.." && pwd)"
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$here"
 
-# 1. The core as wasm: built when the file is missing or older than a source it is built from.
-if [ -z "${UNDRA_PLAYGROUND_WASM:-}" ]; then
-  wasm="$root/examples/playground/build/web/undra_core.wasm"
-  undra="${UNDRA_CLI:-$root/target/debug/undra}"
-  stale=0
-  if [ ! -f "$wasm" ]; then
-    stale=1
-  elif [ -n "$(find "$root/examples/playground/core" "$root/crates" "$root/Cargo.toml" "$root/Cargo.lock" \
+undra="${UNDRA_CLI:-$root/target/debug/undra}"
+ensure_cli() {
+  if [ ! -x "$undra" ]; then
+    echo "==> building the undra CLI" >&2
+    (cd "$root" && cargo build -p undra-cli) >&2
+  fi
+}
+# Whether $1 is missing or older than a source the core is built from.
+stale() {
+  [ ! -f "$1" ] && return 0
+  [ -n "$(find "$root/examples/playground/core" "$root/crates" "$root/Cargo.toml" "$root/Cargo.lock" \
         \( -name target -o -name node_modules \) -prune -o \
-        -type f \( -name '*.rs' -o -name Cargo.toml -o -name Cargo.lock \) -newer "$wasm" -print -quit 2>/dev/null)" ]; then
-    stale=1
-  fi
-  if [ "$stale" = 1 ]; then
-    if [ ! -x "$undra" ]; then
-      echo "==> building the undra CLI" >&2
-      (cd "$root" && cargo build -p undra-cli) >&2
-    fi
-    echo "==> building the playground core for web" >&2
-    "$undra" build -C "$root/examples/playground" --platform web >&2
-  fi
+        -type f \( -name '*.rs' -o -name Cargo.toml -o -name Cargo.lock \) -newer "$1" -print -quit 2>/dev/null)" ]
+}
+
+# 1. The cores as wasm: build B first (kept aside), then build A, each built when missing or stale.
+built="$root/examples/playground/build/web/undra_core.wasm"
+wasm_a="${UNDRA_PLAYGROUND_WASM:-$built}"
+wasm_b="${UNDRA_PLAYGROUND_WASM_B:-$here/build/b/undra_core.wasm}"
+rebuild_a=0
+if [ -z "${UNDRA_PLAYGROUND_WASM_B:-}" ] && stale "$wasm_b"; then
+  ensure_cli
+  echo "==> building build B of the playground core for web (UNDRA_PLAYGROUND_V2=1)" >&2
+  UNDRA_PLAYGROUND_V2=1 "$undra" build -C "$root/examples/playground" --platform web >&2
+  mkdir -p "$(dirname "$wasm_b")"
+  cp "$built" "$wasm_b"
+  # The build directory now holds build B: build A goes back in below.
+  rebuild_a=1
 fi
+if [ -z "${UNDRA_PLAYGROUND_WASM:-}" ] && { [ "$rebuild_a" = 1 ] || stale "$wasm_a"; }; then
+  ensure_cli
+  echo "==> building the playground core for web" >&2
+  "$undra" build -C "$root/examples/playground" --platform web >&2
+fi
+if cmp -s "$wasm_a" "$wasm_b"; then
+  echo "run.sh: build B's wasm ($wasm_b) is identical to build A's ($wasm_a); UNDRA_PLAYGROUND_V2=1 did not reach the core" >&2
+  exit 1
+fi
+export UNDRA_PLAYGROUND_WASM_B="$wasm_b"
 
 # 2. The dependencies (vitest, typescript), from the lockfile.
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
