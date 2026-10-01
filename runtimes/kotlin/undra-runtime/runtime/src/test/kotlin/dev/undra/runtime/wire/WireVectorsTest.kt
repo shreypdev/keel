@@ -94,6 +94,7 @@ class WireVectorsTest : Suite() {
             "reply payload" -> replyPayload(v)
             "changeset payload" -> changeSetPayload(v)
             "stream item payload" -> streamItemPayload(v)
+            "snapshot payload" -> snapshotPayload(v)
             "keyed patch (item i32)" -> keyedPatch(v)
             else -> fnv(v)
         }
@@ -266,6 +267,32 @@ class WireVectorsTest : Suite() {
             Payloads.ReplyStatus.CANCELLED -> assertEq(0, reply.body.size, "${v.name}: a cancellation's body is empty")
             else -> assertEq(failure.message, reply.readBadRequestReason())
         }
+    }
+
+    /**
+     * A `Snapshot` payload in layout 2 (SPEC 5.9, ADR-037): 64-bit values and type ids are decimal strings, a signal's
+     * `value` is its raw bytes. Every backing decodes it, nothing shorter or longer does, and the fingerprint lookup
+     * finds what the type table says.
+     */
+    private fun snapshotPayload(v: WireVector) {
+        val o = v.value.asObj()
+        val types = o["types"].asList().map { t ->
+            val to = t.asObj()
+            Payloads.Snapshot.StoreType(to["type_id"].asLong().toUInt(), to["fingerprint"].asULong())
+        }
+        val stores = o["stores"].asList().map { s ->
+            val so = s.asObj()
+            val signals = so["signals"].asList().map { g ->
+                val go = g.asObj()
+                Payloads.Snapshot.Signal(go["signal_id"].asLong().toUInt(), go["value"].asList().map { it.asInt().toByte() }.toByteArray())
+            }
+            Payloads.Snapshot.Store(Handle(so["handle"].asLong()), so["type_id"].asLong().toUInt(), signals)
+        }
+        val expected = Payloads.Snapshot(o["generation_floor"].asLong().toUInt(), o["schema_hash"].asULong(), types, o["description"].asString(), stores)
+        verify(v, expected, { expected.encode(it) }, { Payloads.Snapshot.decode(it) }, { Payloads.Snapshot.decode(it) })
+        val decoded = Payloads.Snapshot.decode(unhex(v.hex))
+        for (t in types) assertEq(t.fingerprint, decoded.fingerprint(t.typeId), "${v.name}: fingerprint of ${t.typeId}")
+        for (s in stores) assertTrue(decoded.fingerprint(s.typeId) != null, "${v.name}: every store's type is listed")
     }
 
     private fun keyedPatch(v: WireVector) {

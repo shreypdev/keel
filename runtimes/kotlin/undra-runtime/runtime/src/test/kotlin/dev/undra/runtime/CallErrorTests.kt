@@ -419,6 +419,29 @@ class CallErrorTests : Suite() {
             }
         }
 
+        case("restore code 7 is INCOMPATIBLE (ADR-037): named, explained, and still Refused for a generated call") {
+            val t = FakeTransport()
+            t.snapshotBytes = byteArrayOf(1)
+            t.restoreResult = 7
+            attach(t).use { core ->
+                val e = assertThrows<UndraRestoreException> { core.restore(byteArrayOf(1)) }
+                assertEq(UndraRestoreException.INCOMPATIBLE, e.code)
+                assertTrue(e.isIncompatible)
+                assertTrue(e.message!!.contains("code 7") && e.message!!.contains("migrate"), e.message!!)
+                assertTrue(e.message!!.contains("leaves the core unchanged"), e.message!!)
+                assertTrue(UndraCallError.mapped(e) is UndraCallError.Refused)
+            }
+            // The codes match crates/undra-ffi/src/api.rs (restore_code), and only 7 is incompatible.
+            assertEq(listOf(2, 5, 6, 7), listOf(UndraRestoreException.PANICKED, UndraRestoreException.BAD_SNAPSHOT, UndraRestoreException.UNAVAILABLE, UndraRestoreException.INCOMPATIBLE))
+            for (code in listOf(2, 5, 6, 99)) {
+                val e = UndraRestoreException(code)
+                assertTrue(!e.isIncompatible, "code $code")
+                assertTrue(e.message!!.contains("code $code") && e.message!!.contains("leaves the core unchanged"), e.message!!)
+            }
+            assertTrue(UndraRestoreException(5).message!!.contains("malformed"))
+            assertTrue(UndraRestoreException(2).message!!.contains("panicked"))
+        }
+
         // ---- shared --------------------------------------------------------------------------------------
 
         case("shared with no core loaded is a closed placeholder: calls fail Unavailable, nothing throws on access") {

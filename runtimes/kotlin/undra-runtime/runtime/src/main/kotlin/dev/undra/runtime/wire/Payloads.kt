@@ -889,23 +889,61 @@ public object Payloads {
 
     /**
      * core to host (envelope kind SNAPSHOT), and host to core to restore it (kind RESTORE, same
-     * layout): `count u32, generation_floor u32, stores × { handle u64, type_id u32,
-     * signal_count u32, signals × { signal_id u32, len u32, value } }`. Computed signals are
-     * excluded.
+     * layout): layout 2 of SPEC 5.9 (ADR-037), all little-endian,
+     *
+     * ```text
+     * count u32, generation_floor u32,
+     * schema_hash u64,
+     * type_count u32, types × { type_id u32, fingerprint u64 },
+     * description_len u32, description (UTF-8),
+     * count × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value } }
+     * ```
+     *
+     * where `count` is the number of stores. Computed signals are excluded. A host treats a snapshot as
+     * opaque bytes and passes it back to [dev.undra.runtime.UndraCore.restore]; this class exists so tools
+     * and tests can look inside.
+     *
+     * [decode] refuses a store whose type is not in [types] ([WireException.InvalidTag]), a type listed
+     * twice ([WireException.DuplicateKey]) and a description that is not UTF-8 ([WireException.InvalidUtf8]),
+     * so a snapshot in the layout before ADR-037 (`count, generation_floor, stores`) fails with a typed error
+     * instead of decoding as something else. [encode] writes what it is given, valid or not.
      *
      * @property generationFloor the highest handle generation the core had issued when the snapshot
      *   was taken. A restore resumes the core's generation counter above it, so no handle issued before
      *   the snapshot (or between it and the restore) is issued again to another object (ADR-022). Opaque
      *   to the host: pass it back unchanged.
+     * @property schemaHash the schema hash of the core that took the snapshot.
+     * @property types each store type of the snapshot, once, with the fingerprint of its signals.
+     * @property description the canonical JSON description of the store types' signals and the records
+     *   and enums they reach, which a build whose types changed migrates the values by (ADR-037). Opaque
+     *   to hosts.
      * @property stores every snapshotted store.
      */
-    public data class Snapshot(val generationFloor: UInt, val stores: List<Store>) : Payload {
+    public data class Snapshot(
+        val generationFloor: UInt,
+        val schemaHash: ULong,
+        val types: List<StoreType>,
+        val description: String,
+        val stores: List<Store>,
+    ) : Payload {
+
+        /** The fingerprint [types] records for the store type [typeId], or `null` if it is not listed. */
+        public fun fingerprint(typeId: UInt): ULong? = types.firstOrNull { it.typeId == typeId }?.fingerprint
+
+        /**
+         * The identity of one store type in a [Snapshot] (ADR-037).
+         *
+         * @property typeId the store type's id, `fnv1a32("<TypeName>")`.
+         * @property fingerprint `fnv1a64` of the canonical closure of the store's non-computed signals when
+         *   the snapshot was taken; a restore whose build has the same fingerprint decodes the values as they are.
+         */
+        public data class StoreType(val typeId: UInt, val fingerprint: ULong)
 
         /**
          * One store of a [Snapshot].
          *
          * @property handle the store's handle, re-issued unchanged on restore.
-         * @property typeId the store's type id.
+         * @property typeId the store's type id; listed in [Snapshot.types].
          * @property signals the store's persisted signals.
          */
         public data class Store(val handle: Handle, val typeId: UInt, val signals: List<Signal>)
@@ -928,6 +966,13 @@ public object Payloads {
         override fun encode(w: UndraWriter) {
             w.writeLen(stores.size)
             w.writeU32(generationFloor)
+            w.writeU64(schemaHash)
+            w.writeLen(types.size)
+            for (t in types) {
+                w.writeU32(t.typeId)
+                w.writeU64(t.fingerprint)
+            }
+            w.writeStr(description)
             for (s in stores) {
                 w.writeI64(s.handle.raw)
                 w.writeU32(s.typeId)
@@ -946,12 +991,38 @@ public object Payloads {
             /** Smallest encoded signal: signal_id 4 + len 4. */
             private const val MIN_SIGNAL_BYTES = 8
 
-            /** Reads a snapshot from [r], copying every signal value. */
+            /** An encoded store type: type_id 4 + fingerprint 8. */
+            private const val TYPE_BYTES = 12
+
+            /** What [WireException.InvalidTag] names for a store whose type is not in the type table (the Rust decoder's text). */
+            public const val UNLISTED_TYPE: String = "Snapshot store type (not in the type table)"
+
+            /**
+             * Reads a snapshot from [r], copying every signal value.
+             *
+             * @throws WireException.InvalidTag (type [UNLISTED_TYPE], at the store's offset) for a store whose type is
+             *   not listed; [WireException.DuplicateKey] (at the entry's offset) for a type listed twice;
+             *   [WireException.InvalidUtf8] for a description that is not UTF-8; and the reader's own failures for a
+             *   count the input cannot hold or a truncated input.
+             */
             public fun decode(r: UndraReader): Snapshot {
                 val storeCount = r.readLen(MIN_STORE_BYTES)
                 val generationFloor = r.readU32()
+                val schemaHash = r.readU64()
+                val typeCount = r.readLen(TYPE_BYTES)
+                val types = ArrayList<StoreType>(typeCount)
+                val listed = HashSet<UInt>()
+                for (i in 0 until typeCount) {
+                    val at = r.position
+                    val typeId = r.readU32()
+                    val fingerprint = r.readU64()
+                    if (!listed.add(typeId)) throw WireException.DuplicateKey(at)
+                    types.add(StoreType(typeId, fingerprint))
+                }
+                val description = r.readStr()
                 val stores = ArrayList<Store>(storeCount)
                 for (i in 0 until storeCount) {
+                    val at = r.position
                     val handle = Handle(r.readI64())
                     val typeId = r.readU32()
                     val signalCount = r.readLen(MIN_SIGNAL_BYTES)
@@ -960,9 +1031,10 @@ public object Payloads {
                         val signalId = r.readU32()
                         signals.add(Signal(signalId, r.readBytes()))
                     }
+                    if (typeId !in listed) throw WireException.InvalidTag(typeId, at, UNLISTED_TYPE)
                     stores.add(Store(handle, typeId, signals))
                 }
-                return Snapshot(generationFloor, stores)
+                return Snapshot(generationFloor, schemaHash, types, description, stores)
             }
 
             /** Decodes a whole snapshot message. */
