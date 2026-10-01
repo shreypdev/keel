@@ -78,7 +78,9 @@ fn lock(generator: &Mutex<Generator>) -> MutexGuard<'_, Generator> {
 /// playground's stress screen.
 #[undra::store(restore = "Self::assemble")]
 pub struct Stress {
-    ctx: Ctx,
+    /// Weak (ADR-034): the store lives in the object table the runtime owns, so a `Ctx` here
+    /// would keep the runtime alive.
+    ctx: WeakCtx,
     generator: Arc<Mutex<Generator>>,
     /// Written by the firehose mode: one more per transaction.
     value: Signal<u64>,
@@ -119,7 +121,7 @@ impl Stress {
             running.set(false);
         }
         Self {
-            ctx,
+            ctx: ctx.downgrade(),
             generator: Arc::new(Mutex::new(Generator {
                 epoch: 0,
                 active: false,
@@ -163,8 +165,12 @@ impl Stress {
             g.epoch += 1;
             g.epoch
         };
-        // The task holds the signals and a weak reference to the shared state, never the store:
-        // when the store goes away (released, or replaced by a restore) the next tick ends it.
+        // The task holds the signals and weak references to the shared state and the runtime,
+        // never the store or a `Ctx`: when the store goes away (released, or replaced by a
+        // restore) the next tick ends it, and when the runtime goes its sleep ends it (ADR-034).
+        let Ok(ctx) = self.ctx.upgrade() else {
+            return Ok(());
+        };
         let task = Task {
             ctx: self.ctx.clone(),
             generator: Arc::downgrade(&self.generator),
@@ -173,7 +179,7 @@ impl Stress {
             progress: self.progress.clone(),
             generated: self.generated.clone(),
         };
-        self.ctx.spawn(task.run());
+        ctx.spawn(task.run());
         self.running.set(true);
         Ok(())
     }
@@ -201,9 +207,10 @@ fn write(value: &Signal<u64>, progress: &Signal<u32>, mode: StressMode) {
     }
 }
 
-/// The generator task: what [`Stress::start`] spawns.
+/// The generator task: what [`Stress::start`] spawns. It is the periodic-task idiom of ADR-034:
+/// it keeps a `WeakCtx`, sleeps through it and upgrades for one tick at a time.
 struct Task {
-    ctx: Ctx,
+    ctx: WeakCtx,
     generator: Weak<Mutex<Generator>>,
     epoch: u64,
     value: Signal<u64>,
@@ -213,12 +220,18 @@ struct Task {
 
 impl Task {
     async fn run(self) {
-        let clock = self.ctx.clock();
-        let mut last = clock.monotonic_ns();
+        let Ok(ctx) = self.ctx.upgrade() else {
+            return;
+        };
+        let mut last = ctx.clock().monotonic_ns();
+        drop(ctx);
         // Fractions of an update earned and not yet committed, in update-nanoseconds.
         let mut carry: u128 = 0;
-        loop {
-            self.ctx.sleep(TICK).await;
+        // Ends with the runtime (`Err(Gone)`), never pinning it between ticks.
+        while self.ctx.sleep(TICK).await.is_ok() {
+            let Ok(ctx) = self.ctx.upgrade() else {
+                return;
+            };
             let Some(shared) = self.generator.upgrade() else {
                 return;
             };
@@ -229,7 +242,7 @@ impl Task {
                 }
                 (g.mode, g.rate)
             };
-            let now = clock.monotonic_ns();
+            let now = ctx.clock().monotonic_ns();
             carry += u128::from(rate) * u128::from(now.saturating_sub(last));
             last = now;
             // At most 100 ms of work per tick: a stall is not paid back as a burst.

@@ -139,6 +139,58 @@ impl Calculator {
         }
     }
 
+    /// `0..up_to`, ending with `Err(NegativeStart(stop))` once `stop` is reached (ADR-036: a
+    /// stream that ends with its typed error part-way).
+    pub fn counts_until(
+        &self,
+        up_to: u32,
+        stop: u32,
+    ) -> impl Stream<Item = Result<u32, CalcError>> + Send {
+        stream_of(
+            (0..up_to)
+                .map(move |n| {
+                    if n == stop {
+                        Err(CalcError::NegativeStart(i64::from(n)))
+                    } else {
+                        Ok(n)
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// The same, with an opening that can fail with the same error type.
+    pub fn try_counts_until(
+        &self,
+        up_to: i64,
+        stop: u32,
+    ) -> Result<impl Stream<Item = Result<u32, CalcError>> + Send, CalcError> {
+        if up_to < 0 {
+            return Err(CalcError::NegativeStart(up_to));
+        }
+        Ok(self.counts_until(up_to as u32, stop))
+    }
+
+    /// Asynchronous, fallible items.
+    pub async fn later_counts_until(
+        &self,
+        up_to: u32,
+        stop: u32,
+    ) -> impl Stream<Item = Result<u32, CalcError>> + Send {
+        std::future::ready(()).await;
+        self.counts_until(up_to, stop)
+    }
+
+    /// Asynchronous, fallible opening and items.
+    pub async fn try_later_counts_until(
+        &self,
+        up_to: i64,
+        stop: u32,
+    ) -> Result<impl Stream<Item = Result<u32, CalcError>> + Send, CalcError> {
+        std::future::ready(()).await;
+        self.try_counts_until(up_to, stop)
+    }
+
     #[deprecated(note = "kept to prove the dispatcher does not warn about deprecated methods")]
     pub fn old_add(&self, a: i64) -> i64 {
         self.base + a
@@ -463,6 +515,131 @@ fn result_stream_methods_fail_before_the_stream_opens() {
         CalcError::decode_exact(&err).unwrap(),
         CalcError::NegativeStart(-1)
     );
+}
+
+/// ADR-036: `impl Stream<Item = Result<T, E>>` ends the stream with `E` part-way, in all four
+/// shapes (sync or async, with or without a fallible opening); nothing follows the error.
+#[test]
+fn a_stream_of_results_ends_with_its_typed_error_part_way() {
+    let (rt, handle) = runtime_with_calculator();
+    let both = |w: &mut Writer, up_to: i64, stop: u32| {
+        up_to.encode(w);
+        stop.encode(w);
+    };
+    for method in ["counts_until", "later_counts_until"] {
+        let items = rt
+            .call_object(
+                "Calculator",
+                method,
+                handle,
+                &args(|w| {
+                    5_u32.encode(w);
+                    2_u32.encode(w);
+                }),
+            )
+            .run_stream();
+        assert_eq!(
+            u32_items(items),
+            [Ok(0), Ok(1), Err(CalcError::NegativeStart(2))],
+            "{method}"
+        );
+        let items = rt
+            .call_object(
+                "Calculator",
+                method,
+                handle,
+                &args(|w| {
+                    3_u32.encode(w);
+                    9_u32.encode(w);
+                }),
+            )
+            .run_stream();
+        assert_eq!(
+            u32_items(items),
+            [Ok(0), Ok(1), Ok(2)],
+            "{method}: no error"
+        );
+    }
+    let items = rt
+        .call_object(
+            "Calculator",
+            "try_counts_until",
+            handle,
+            &args(|w| both(w, 4, 1)),
+        )
+        .run_stream();
+    assert_eq!(u32_items(items), [Ok(0), Err(CalcError::NegativeStart(1))]);
+    let err = rt
+        .call_object(
+            "Calculator",
+            "try_counts_until",
+            handle,
+            &args(|w| both(w, -2, 1)),
+        )
+        .sync_err();
+    assert_eq!(
+        CalcError::decode_exact(&err).unwrap(),
+        CalcError::NegativeStart(-2)
+    );
+    let items = rt
+        .call_object(
+            "Calculator",
+            "try_later_counts_until",
+            handle,
+            &args(|w| both(w, -2, 1)),
+        )
+        .run_stream();
+    assert_eq!(u32_items(items), [Err(CalcError::NegativeStart(-2))]);
+    let items = rt
+        .call_object(
+            "Calculator",
+            "try_later_counts_until",
+            handle,
+            &args(|w| both(w, 3, 2)),
+        )
+        .run_stream();
+    assert_eq!(
+        u32_items(items),
+        [Ok(0), Ok(1), Err(CalcError::NegativeStart(2))]
+    );
+}
+
+/// ADR-036 decision 4: the new Rust shape is recorded exactly as `Result<Stream<T>, E>`, the
+/// shape a fallible opening has, so the schema, its hash and the generated platform code do not
+/// change.
+#[test]
+fn a_stream_of_results_has_the_schema_of_a_fallible_opening() {
+    let schema = collect_schema("undra-core");
+    let calculator = schema
+        .objects
+        .iter()
+        .find(|o| o.name == "Calculator")
+        .expect("Calculator is registered");
+    let returns = |name: &str| {
+        calculator
+            .methods
+            .iter()
+            .find(|m| m.name == name)
+            .unwrap_or_else(|| panic!("no method {name}"))
+            .returns
+            .clone()
+    };
+    let opening = returns("try_counts");
+    assert_eq!(
+        opening,
+        TypeRef::Result(
+            Box::new(TypeRef::Stream(Box::new(TypeRef::U32))),
+            Box::new(TypeRef::Named("CalcError".into()))
+        )
+    );
+    for name in [
+        "counts_until",
+        "try_counts_until",
+        "later_counts_until",
+        "try_later_counts_until",
+    ] {
+        assert_eq!(returns(name), opening, "{name}");
+    }
 }
 
 #[test]

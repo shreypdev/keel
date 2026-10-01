@@ -286,8 +286,10 @@ pub(crate) fn map_field(ty: &Type, field: &str, self_name: &str) -> Result<KType
     }
 }
 
-/// Maps a return type: `T`, `()`, `Result<T, E>`, `impl Stream<Item = T>` or
-/// `Result<impl Stream<Item = T>, E>`.
+/// Maps a return type: `T`, `()`, `Result<T, E>`, `impl Stream<Item = T>`,
+/// `Result<impl Stream<Item = T>, E>`, and (ADR-036) `impl Stream<Item = Result<T, E>>` or
+/// `Result<impl Stream<Item = Result<T, E>>, E>` (the same `E`), which the schema records exactly
+/// as `Result<Stream<T>, E>`: a stream that can end with its typed error part-way.
 pub(crate) fn map_return(ret: &ReturnType) -> Result<KType, TyErr> {
     match ret {
         ReturnType::Default => Ok(KType::Unit),
@@ -648,6 +650,34 @@ fn map_path(path: &syn::TypePath, ty: &Type, cx: Cx<'_>, allow: Allow) -> Result
                 },
             )?;
             let err = map_error_type(args[1], cx)?;
+            // `Result<impl Stream<Item = Result<T, E>>, E>`: the opening and the items fail with
+            // the same `E`, so the schema shape is the one `Result<Stream<T>, E>` (ADR-036).
+            if let KType::Result(stream, item_err) = ok {
+                if *item_err != err {
+                    let name = |k: &KType| match k {
+                        KType::Named(name) => name.clone(),
+                        other => format!("{other:?}"),
+                    };
+                    return Err(TyErr::new(
+                        ty,
+                        Diag::new(
+                            code::E0005,
+                            format!(
+                                "the items of the stream in `{}` fail with `{}` but its opening fails with `{}`",
+                                ty_string(ty),
+                                name(&item_err),
+                                name(&err)
+                            ),
+                            "a stream method has one error type: the platforms throw it whether the stream fails to open or ends with an error part-way",
+                            format!(
+                                "use the same `#[undra::error]` enum for both (`{}`), or one enum with a variant for each case",
+                                ty_string(args[1])
+                            ),
+                        ),
+                    ));
+                }
+                return Ok(KType::Result(stream, item_err));
+            }
             Ok(KType::Result(Box::new(ok), Box::new(err)))
         }
         ("Result", _) => {
@@ -923,7 +953,44 @@ fn map_impl_trait(
             ),
         ));
     };
+    // `impl Stream<Item = Result<T, E>>` (ADR-036): an `Err(e)` item ends the stream with its
+    // typed error. Recorded as `Result<Stream<T>, E>`, the shape every platform already throws `E`
+    // from, so the schema, its hash and the generated code are those of a fallible opening.
+    if let Some((ok, err)) = result_parts(item) {
+        let ok = map_type(ok, cx, Allow::NONE)?;
+        let err = map_error_type(err, cx)?;
+        return Ok(KType::Result(
+            Box::new(KType::Stream(Box::new(ok))),
+            Box::new(err),
+        ));
+    }
     Ok(KType::Stream(Box::new(map_type(item, cx, Allow::NONE)?)))
+}
+
+/// The `T` and `E` of a type spelled `Result<T, E>` (any path ending in `Result` with two type
+/// arguments).
+pub(crate) fn result_parts(ty: &Type) -> Option<(&Type, &Type)> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    if path.qself.is_some() {
+        return None;
+    }
+    let seg = path.path.segments.last()?;
+    if seg.ident != "Result" {
+        return None;
+    }
+    let PathArguments::AngleBracketed(args) = &seg.arguments else {
+        return None;
+    };
+    let mut types = args.args.iter().filter_map(|arg| match arg {
+        GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    });
+    let (Some(ok), Some(err), None) = (types.next(), types.next(), types.next()) else {
+        return None;
+    };
+    Some((ok, err))
 }
 
 fn impl_trait_error(ty: &Type) -> TyErr {
@@ -1127,6 +1194,48 @@ mod tests {
             )
         );
         assert_eq!(code_of(ret("Result<Todo>")), code::E0001);
+    }
+
+    #[test]
+    fn a_stream_of_results_maps_to_the_fallible_opening_shape() {
+        // ADR-036 decision 4: the schema shape is `Result<Stream<T>, E>` in every spelling.
+        let expected = KType::Result(
+            boxed(KType::Stream(boxed(named("Todo")))),
+            boxed(named("TodoError")),
+        );
+        for src in [
+            "impl Stream<Item = Result<Todo, TodoError>>",
+            "impl Stream<Item = Result<Todo, TodoError>> + Send + 'static",
+            "Result<impl Stream<Item = Result<Todo, TodoError>>, TodoError>",
+            "Result<impl Stream<Item = Todo>, TodoError>",
+        ] {
+            assert_eq!(ret(src).unwrap(), expected, "{src}");
+        }
+        // Two error types for one stream: E0005, naming both.
+        let err = ret("Result<impl Stream<Item = Result<Todo, AError>>, BError>").unwrap_err();
+        assert_eq!(err.diag.code, code::E0005);
+        assert!(
+            err.diag
+                .message()
+                .contains("fail with `AError` but its opening fails with `BError`"),
+            "{}",
+            err.diag.message()
+        );
+        assert!(err.diag.help.contains("BError"), "{}", err.diag.help);
+        // A `Result` item is still an error side: a non-error type there is refused like
+        // anywhere else, and so is a stream of results in a field.
+        assert_eq!(
+            code_of(ret("impl Stream<Item = Result<Todo, String>>")),
+            code::E0001
+        );
+        assert_eq!(
+            code_of(field("impl Stream<Item = Result<Todo, TodoError>>")),
+            code::E0005
+        );
+        assert_eq!(
+            code_of(ret("Vec<impl Stream<Item = Result<Todo, TodoError>>>")),
+            code::E0005
+        );
     }
 
     #[test]

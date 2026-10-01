@@ -155,8 +155,19 @@ impl Checks {
             Type::Paren(inner) => return self.walk(&inner.elem, kty, error),
             Type::Group(inner) => return self.walk(&inner.elem, kty, error),
             Type::ImplTrait(impl_trait) => {
-                if let (KType::Stream(item_kty), Some(item)) = (kty, stream_item(impl_trait)) {
-                    self.walk(item, item_kty, false);
+                match (kty, stream_item(impl_trait)) {
+                    (KType::Stream(item_kty), Some(item)) => self.walk(item, item_kty, false),
+                    // `impl Stream<Item = Result<T, E>>` recorded as `Result<Stream<T>, E>`
+                    // (ADR-036): `T` is the item, `E` the error side.
+                    (KType::Result(ok, err), Some(item)) => {
+                        if let (KType::Stream(item_kty), Some((t, e))) =
+                            (&**ok, super::types::result_parts(item))
+                        {
+                            self.walk(t, item_kty, false);
+                            self.walk(e, err, true);
+                        }
+                    }
+                    _ => {}
                 }
                 return;
             }
@@ -197,6 +208,18 @@ impl Checks {
                 // parts are checked.
                 if !matches!(**ok, KType::Stream(_)) {
                     self.wrapper(ty, Wrapper::Result, &args);
+                }
+                // `Result<impl Stream<Item = Result<T, E>>, E>` (ADR-036): the item's `E` is
+                // checked against the same error type as the opening's.
+                if let (KType::Stream(item_kty), Type::ImplTrait(impl_trait)) = (&**ok, args[0]) {
+                    if let Some((t, e)) =
+                        stream_item(impl_trait).and_then(super::types::result_parts)
+                    {
+                        self.walk(t, item_kty, false);
+                        self.walk(e, err, true);
+                        self.walk(args[1], err, true);
+                        return;
+                    }
                 }
                 self.walk(args[0], ok, false);
                 self.walk(args[1], err, true);
