@@ -17,12 +17,15 @@ set -eu
 main() {
   repo="shreypdev/undra"
   # Where releases live: <base>/v<version>/undra-v<version>-<target>.tar.gz and .../checksums.txt.
-  # UNDRA_INSTALL_BASE_URL replaces it (CI points it at a local web server); only then is plain
-  # http allowed.
+  # UNDRA_INSTALL_BASE_URL replaces it (CI points it at a local web server). Plain http is spoken
+  # only when that URL is itself http://; an https mirror keeps every transfer, the release lookup
+  # included, on TLS.
   base_url=${UNDRA_INSTALL_BASE_URL:-https://github.com/$repo/releases/download}
   api_url=${UNDRA_API_URL:-https://api.github.com/repos/$repo/releases/latest}
   allow_http=0
-  [ -z "${UNDRA_INSTALL_BASE_URL:-}" ] || allow_http=1
+  case "$base_url" in
+    http://*) allow_http=1 ;;
+  esac
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -101,9 +104,10 @@ main() {
   [ -f "$tmp/extract/undra" ] && [ ! -L "$tmp/extract/undra" ] || die "$asset does not contain an undra executable"
 
   mkdir -p "$bin_dir" || die "cannot create $bin_dir"
-  # Copy next to the destination, then rename: the swap is atomic and a running undra is not
-  # overwritten in place.
-  staged=$bin_dir/.undra.$$
+  # Copy into a fresh file next to the destination (mktemp makes it: a new regular file of this
+  # process, never a name something else put there), then rename: the swap is atomic and a running
+  # undra is not overwritten in place.
+  staged=$(mktemp "$bin_dir/.undra.XXXXXX") || die "cannot write to $bin_dir"
   cp "$tmp/extract/undra" "$staged" || die "cannot write to $bin_dir"
   chmod 755 "$staged"
   mv -f "$staged" "$bin_dir/undra" || die "cannot install $bin_dir/undra"

@@ -49,6 +49,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The whole history and every branch: the publish check below asks whether the tagged
+          # commit is on the default branch.
+          fetch-depth: 0
       - name: The tag, the workspace, the runtime and the npm packages agree
         id: version
         env:
@@ -56,6 +59,7 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           PUBLISH_INPUT: ${{ inputs.publish }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # Cargo.toml, the TypeScript runtime and packaging/npm/templates all say one version.
@@ -75,6 +79,13 @@ jobs:
             fi
           elif [ "$publish" = true ]; then
             echo "::error::Publishing needs the workflow to run on a version tag (v$version); this ref is $REF_NAME. Pick the tag under 'Use workflow from', or leave publish off for a dry run."
+            exit 1
+          fi
+
+          # A release is cut from the merged commit on the default branch. A v* tag anywhere else
+          # (a branch, a rewritten history) builds and packages like a dry run but publishes nothing.
+          if [ "$publish" = true ] && ! git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"; then
+            echo "::error::The tag $REF_NAME points at $(git rev-parse --short HEAD), which is not on $DEFAULT_BRANCH. Releases are tagged on the merged commit of $DEFAULT_BRANCH (docs/RELEASING.md); a dry run (publish off) runs from any ref."
             exit 1
           fi
 
@@ -108,11 +119,14 @@ jobs:
             os: macos-15
           - target: x86_64-apple-darwin
             os: macos-15
+          # Ubuntu 22.04 runners on purpose: a binary runs on any glibc at least as new as the one
+          # it was linked against, so the oldest supported image sets the floor (2.35: Ubuntu 22.04,
+          # Debian 12, RHEL 9 and their derivatives). The build job prints the actual floor.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
           # A native arm64 runner; no cross toolchain involved.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
+            os: ubuntu-22.04-arm
     env:
       VERSION: ${{ needs.verify.outputs.version }}
       TARGET: ${{ matrix.target }}
@@ -216,7 +230,8 @@ jobs:
         working-directory: runtimes/ts/@undra/runtime
         run: |
           set -euo pipefail
-          npm ci
+          # The build is `tsc` alone; no dependency's install script gets to run on a release build.
+          npm ci --ignore-scripts
           npm run build
           npm pack --pack-destination "$GITHUB_WORKSPACE/npm/tarballs" --silent
       - name: The seven npm tarballs exist at this version
@@ -225,6 +240,8 @@ jobs:
           for name in undra-runtime undra-cli undra undra-cli-darwin-arm64 undra-cli-darwin-x64 undra-cli-linux-x64 undra-cli-linux-arm64; do
             test -f "npm/tarballs/$name-$VERSION.tgz" || { echo "::error::npm/tarballs/$name-$VERSION.tgz is missing"; exit 1; }
           done
+          # The publish job checks the tarballs it downloads against this list before publishing.
+          (cd npm/tarballs && sha256sum ./*.tgz >SHA256SUMS)
           ls -l npm/tarballs
       # What this proves, on the real artifacts and before anything is published: the launcher
       # package installs with `npm install -g` and runs the Linux x64 binary; the curl installer
@@ -249,7 +266,9 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-tarballs
-          path: npm/tarballs/*.tgz
+          path: |
+            npm/tarballs/*.tgz
+            npm/tarballs/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -296,6 +315,14 @@ jobs:
         with:
           name: homebrew-formula
           path: homebrew
+
+      - name: The artifacts are the bytes the package job tested
+        run: |
+          set -euo pipefail
+          # checksums.txt was written on the runners that built each tarball and verified by the
+          # package job; the npm list was written next to the tarballs the package job installed.
+          (cd release && sha256sum --check --strict checksums.txt)
+          (cd npm && sha256sum --check --strict SHA256SUMS)
 
       - name: Preflight (the secrets exist and work, before anything is published)
         env:
@@ -353,12 +380,20 @@ jobs:
           tag_flags=()
           if [ "$PRERELEASE" = true ]; then tag_flags=(--tag next); fi
           publish() { # <package name> <tarball>
-            if npm view "$1@$VERSION" version >/dev/null 2>&1; then
-              echo "$1@$VERSION is already on npm; skipping"
+            # ./ keeps npm from reading a path with a slash as a GitHub user/repo shorthand
+            local tarball="./npm/$2" published ours
+            # Already on the registry (a re-run of a half-finished release): skip it, but only when
+            # the registry holds these exact bytes. `npm view` of a missing version exits 1.
+            if published=$(npm view "$1@$VERSION" dist.integrity 2>/dev/null) && [ -n "$published" ]; then
+              ours="sha512-$(openssl dgst -sha512 -binary "$tarball" | base64 | tr -d '\n')"
+              if [ "$published" != "$ours" ]; then
+                echo "::error::$1@$VERSION is already on npm with different contents (registry $published, this run $ours). A version is never republished: cut a patch version (docs/RELEASING.md, rollback). If the name belongs to someone else, it has to be claimed or dropped first."
+                exit 1
+              fi
+              echo "$1@$VERSION is already on npm with these exact bytes; skipping"
               return 0
             fi
-            # ./ keeps npm from reading a path with a slash as a GitHub user/repo shorthand
-            npm publish "./npm/$2" --provenance --access public "${tag_flags[@]}"
+            npm publish "$tarball" --provenance --access public "${tag_flags[@]}"
           }
           # Dependencies first: the launchers name the platform packages, which name nothing.
           publish @undra/runtime "undra-runtime-$VERSION.tgz"

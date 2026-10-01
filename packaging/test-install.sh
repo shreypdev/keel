@@ -234,10 +234,13 @@ expect_refused "could not look up the latest release"
 case "$OUT" in *"UNDRA_VERSION"*) ;; *) fail "the lookup failure does not say how to skip it" ;; esac
 pass "latest release: tag_name read from a pretty-printed and a minified reply; a failed lookup says how to pin a version"
 
-# 5. Transport: without the base-URL override only https is spoken, even for the API lookup.
+# 5. Transport: without the base-URL override only https is spoken, even for the API lookup; an
+#    https mirror does not open plain http either.
 run_install sh UNDRA_API_URL="$base/api/latest.json"
 expect_refused "could not look up the latest release"
-pass "plain http is refused unless UNDRA_INSTALL_BASE_URL is set"
+run_install sh UNDRA_INSTALL_BASE_URL="https://127.0.0.1:$port" UNDRA_API_URL="$base/api/latest.json"
+expect_refused "could not look up the latest release"
+pass "plain http is refused unless UNDRA_INSTALL_BASE_URL is itself http://"
 
 # 6. Refusals, each leaving nothing installed.
 run_install sh UNDRA_INSTALL_BASE_URL="$base" UNDRA_VERSION=9.9.9

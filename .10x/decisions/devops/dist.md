@@ -38,7 +38,8 @@ channels. Runbook: `docs/RELEASING.md`.
   cross toolchain). The cost: the binaries need glibc >= 2.39. `ubuntu-22.04` and
   `ubuntu-22.04-arm` would lower it to 2.35 (Ubuntu 22.04, Debian 12 and most current LTS
   hosts); recommended before announcing, one-line change per row, recorded in `RELEASING.md`.
-  The build job prints the actual floor.
+  The build job prints the actual floor. *(Done in the review, `.10x/reviews/2026-09-30-dist-review.md`:
+  both rows are `ubuntu-22.04` / `ubuntu-22.04-arm`.)*
 * **Homebrew `license any_of: ["MIT", "Apache-2.0"]`**, not the string `"MIT OR Apache-2.0"`:
   `brew audit` rejects the string as a non-standard SPDX licence. Same meaning.
 * **Publish from tarballs, not directories.** `upload-artifact` drops the executable bit of the

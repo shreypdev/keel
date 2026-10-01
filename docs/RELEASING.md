@@ -23,7 +23,12 @@ run. Windows and Alpine (musl) are not supported (roadmap).
    scope and to the unscoped package `undra` (a token for "all packages" works for the first
    publish, when the packages do not exist yet), with *bypass two-factor authentication*
    enabled (CI cannot answer a one-time code) and an expiry. Store it as the repository secret
-   **`NPM_TOKEN`** (Settings, Secrets and variables, Actions).
+   **`NPM_TOKEN`** (Settings, Secrets and variables, Actions). Once the first release is out,
+   replace an "all packages" token with one scoped to the `@undra` organisation and the package
+   `undra`, or drop the token altogether: npm's *trusted publishing* lets this workflow publish
+   with its OIDC token alone (configure it per package on npmjs.com, naming this repository,
+   `release.yml` and the `release` environment; it needs npm 11.5 or newer in the job, so add
+   `npm install -g npm@latest` before publishing; check npm's current documentation).
 3. **Homebrew tap.** Create the public repository `shreypdev/homebrew-undra` with a README, so
    it has a default branch (git cannot hold an empty `Formula/` directory; the first release
    creates it). Create a *fine-grained personal access token* for that one repository only,
@@ -40,6 +45,12 @@ move `NPM_TOKEN` and `HOMEBREW_TAP_TOKEN` from the repository secrets into that 
 Then only a run on a version tag can read them, and a manual run of the workflow on some
 branch cannot. Add required reviewers there if a second pair of eyes should approve each
 release.
+
+Second, decide who can create a version tag at all: a *tag ruleset* (Settings, Rules, Rulesets;
+target tags matching `v*`; restrict creation, update and deletion; the bypass list is you). The
+workflow refuses a `v*` tag whose commit is not on `main`, so a tag on a branch or on rewritten
+history builds like a dry run and publishes nothing; the ruleset stops such a tag from being
+pushed in the first place, by anyone else with push access.
 
 ## The dry run
 
@@ -75,9 +86,9 @@ git tag v1.0.0 && git push origin v1.0.0
 gh run watch
 ```
 
-The tag has to be `v` plus the workspace version, on the merged commit. The workflow's first
-job refuses anything else (`scripts/bump-version.sh --check` also fails when any version file
-was missed). It then:
+The tag has to be `v` plus the workspace version, on the merged commit, which has to be on
+`main`. The workflow's first job refuses anything else (`scripts/bump-version.sh --check` also
+fails when any version file was missed). It then:
 
 1. **builds** `undra-cli` with `--release --locked` for the four targets (`UNDRA_BUILD_SHA` is the
    commit, so `undra --version` says which one), checks the version line, and packs
@@ -90,9 +101,12 @@ was missed). It then:
 
 Every publishing step is idempotent, so a release that stopped half-way (an expired token, a
 network error) is completed by re-running the failed job, or
-`gh workflow run release.yml --ref v1.0.0 -f publish=true`. An existing GitHub Release is never
-overwritten: if one exists with different assets the run fails and the answer is a patch
-release.
+`gh workflow run release.yml --ref v1.0.0 -f publish=true`. Nothing is ever overwritten: an
+existing GitHub Release must hold the same `checksums.txt`, and an npm version that already
+exists is skipped only when the registry's tarball has the same bytes (its `dist.integrity`) as
+the one this run built; otherwise the run fails and the answer is a patch release. Before
+anything is published, the publish job checks the downloaded artifacts against the checksums the
+build and package jobs wrote, so what goes out is what was tested.
 
 A version with a suffix (`1.0.0-rc.1`) is a prerelease: a GitHub prerelease (the installer's
 "latest" ignores it), npm tag `next`, and the tap is left alone. Install one with
@@ -142,10 +156,11 @@ Releases are immutable; the answer to a bad release is a patch release (`scripts
 
 ## Maintenance
 
-* **Linux binaries need glibc at least as new as the runner's** (2.39 on `ubuntu-latest`, 24.04;
-  the build job's summary prints the exact floor). To support older distributions, build on
-  `ubuntu-22.04` and `ubuntu-22.04-arm` (glibc 2.35) by changing the two Linux `os:` values
-  in the matrix.
+* **Linux binaries need glibc at least as new as the runner's.** The matrix builds on
+  `ubuntu-22.04` and `ubuntu-22.04-arm` on purpose, so the floor is glibc 2.35 (Ubuntu 22.04,
+  Debian 12, RHEL 9 and derivatives); the build job's summary prints the exact floor. When GitHub
+  retires the 22.04 images, moving the two Linux `os:` values to 24.04 raises the floor to 2.39;
+  keeping 2.35 then means building in a 22.04 container or with `cargo zigbuild`.
 * **macOS binaries are not notarised.** A binary fetched by `curl`, Homebrew or npm carries no
   quarantine flag and runs; one downloaded in a browser needs `xattr -d com.apple.quarantine`.
 * **Action pins.** Every third-party action in `release.yml` is a commit SHA with its version in
