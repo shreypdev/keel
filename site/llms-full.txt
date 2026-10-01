@@ -1515,6 +1515,7 @@ duplicate type name, a type named like something the generated code depends on, 
 | record `Signal` has a name the generated code depends on | the generated bindings use a type called `Signal` (a standard type of Swift, Kotlin or TypeScript, or one of the Undra runtime's), so a type of the schema with the same name would shadow it | rename it, for example `MySignal` |
 | duplicate type id `0x00000007` at the schema (`Alpha` and `Beta` hash to the same id) | names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core | rename one of the two items: ids are hashes of the names, so a different name gives a different id |
 | duplicate variant index `1` at enum Status | names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core | give every variant of the enum an index of its own |
+| duplicate type name `Todo` (declared as record and again as record) | type names must be unique within a core: a type is identified to the platforms by its name (its id is a hash of it), so two declarations cannot share one | rename one of the two `Todo` declarations, or remove the duplicate |
 
 ### `E0051` a name that collides after case conversion or is not an identifier
 
@@ -1559,8 +1560,8 @@ the schema records a name that the type written there does not have: an alias of
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| `Plain` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Plain = u64`, has no definition the platforms could generate | add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used |
-| `Id` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Id = u64`, has no definition the platforms could generate | add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used |
+| `Plain` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate | add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used |
+| `Id` is not a type declared with `#[undra::api]` | Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias (`type Id = u64`), has no definition the platforms could generate | add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used |
 | `Todo` here is an alias or a renamed import of a different Undra type, not the type declared as `Todo` | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Todo = Other` or `use path::Other as Todo` the platforms would be told `Todo` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Todo` if you mean a distinct type |
 | `Entry` here is an alias or a renamed import of a different Undra type, not the type declared as `Entry` | Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Entry = Other` or `use path::Other as Entry` the platforms would be told `Entry` and receive the layout of `Other` | write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Entry` if you mean a distinct type |
 
@@ -1603,7 +1604,9 @@ Raised by `undra`.
 
 not inside an Undra project: no `undra.toml` from the working directory up to the filesystem root
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| no undra.toml found in <dir> or any parent directory | this command works on an Undra project, and a project is the directory that holds undra.toml | run it inside a project, point at one with `-C <dir>`, or create one with `undra init <name>` |
 
 ### `C0002` a configuration or schema file is unusable
 
@@ -1611,7 +1614,9 @@ Raised by `undra`.
 
 `undra.toml` or a schema file cannot be read or has a value the CLI cannot use
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| <dir>/undra.toml: line 2: `name` in [project] is an integer but must be a string | the file drives the build, so a value the CLI cannot understand would make it guess | write it as a string, for example `name = "text"` |
 
 ### `C0003` a tool is not installed
 
@@ -1619,7 +1624,9 @@ Raised by `undra`.
 
 a tool the command needs is not installed or not on `PATH`
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `cargo` was not found | reading the core crate needs `cargo`, and it is not on your PATH | install Rust with rustup: https://rustup.rs (then open a new terminal) run `undra doctor` to check the rest of the toolchain |
 
 ### `C0004` a build tool exited with a failure
 
@@ -1627,7 +1634,9 @@ Raised by `undra`.
 
 a build tool ran and failed; its own output follows the diagnostic
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `cargo metadata` failed while reading the core crate (exit status: 101) | the tool's own output above says what it objected to; Undra cannot continue without its result | fix the problem the tool reported and run the command again; `undra doctor` checks the toolchain |
 
 ### `C0005` the core crate is missing, or is not an Undra core
 
@@ -1635,7 +1644,9 @@ Raised by `undra`.
 
 the core crate is missing, or is not an Undra core
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the core crate `c0005-core` does not depend on Undra | without the `undra` crate there are no `#[undra::api]` items to describe, and the schema would be empty | add `undra = "0.1"` to the core's [dependencies] (or a `path` to your Undra checkout) |
 
 ### `C0006` the schema could not be extracted from the built core
 
@@ -1651,7 +1662,9 @@ Raised by `undra`.
 
 the schema cannot be turned into bindings (the E0001, E0005, E0006, E0010, E0011, E0031, E0050, E0051 and E0052 diagnostics of schema validation follow)
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the schema cannot be turned into bindings (1 problem) | the public surface of the core has to be expressible in Swift, Kotlin and TypeScript, and these items are not | change the items named below in the core (each message says what to do), then run `undra bindgen` again |
 
 ### `C0008` the command would overwrite something it must not
 
@@ -1659,7 +1672,9 @@ Raised by `undra`.
 
 `undra init` or `undra adopt` would write into a directory that already has files in it
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| <dir>/taken already exists and is not empty | `undra init` creates a new project and will not write into a directory that has files in it | choose another name, or another parent with `--dir`; to add Undra to an existing app use `undra adopt <dir>/taken` |
 
 ### `C0009` an argument is unusable
 
@@ -1667,7 +1682,9 @@ Raised by `undra`.
 
 an argument has a value the command cannot use
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `my app` cannot be a project name: it contains characters other than ASCII letters, digits, `-` and `_` | the name becomes a Cargo package (`<name>-core`), a Swift module and a Kotlin package, which are stricter than file names | choose a name like `todo-app` or `acme_notes` you can still call the folder anything: `undra init my-app --dir <parent>` |
 
 ### `C0010` an I/O operation failed
 
@@ -1675,7 +1692,9 @@ Raised by `undra`.
 
 a file or directory operation failed
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| could not create <dir>/afile/demo: Not a directory (os error 20) | the command needs to read or write this path and the operating system refused | check that the path exists and that you may access it, then run the command again |
 
 ### `C0011` the Rust toolchain lacks a compilation target
 
@@ -1683,7 +1702,9 @@ Raised by `undra`.
 
 the Rust toolchain lacks a compilation target the build needs
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| the Rust target `wasm32-unknown-unknown` is not installed | building for this platform needs the standard library compiled for it, and rustup has not installed it | rustup target add wasm32-unknown-unknown |
 
 ### `C0012` the platform is not available on this machine
 
@@ -1707,7 +1728,9 @@ Raised by `undra`.
 
 the core and the project disagree about where Undra comes from
 
-The command prints this diagnostic with the details of the failure that caused it.
+| What you see | Why | Fix |
+| --- | --- | --- |
+| undra.toml says Undra is at /somewhere/else, but the core's `undra` dependency is at <repo> | the library Undra ships is built from the same Undra as the core, and the platform runtimes come from `[undra] path`; if they differ, the core and the apps would speak different wire formats | make them agree: set `path` of the core's `undra` dependency and `[undra] path` in undra.toml to the same checkout (or remove `[undra] path` to use released runtimes) |
 
 Generated by `site/scripts/build-errors.mjs` from `docs/SPEC.md` section 12, the compile-fail tests of the macros crate and the message goldens of the other crates. To change a message, change the code that raises it and regenerate its golden; to change the catalogue, change the specification.
 

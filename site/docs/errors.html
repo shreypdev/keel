@@ -325,6 +325,7 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <tr><td>record <code>Signal</code> has a name the generated code depends on</td><td>the generated bindings use a type called <code>Signal</code> (a standard type of Swift, Kotlin or TypeScript, or one of the Undra runtime's), so a type of the schema with the same name would shadow it</td><td>rename it, for example <code>MySignal</code></td></tr>
 <tr><td>duplicate type id <code>0x00000007</code> at the schema (<code>Alpha</code> and <code>Beta</code> hash to the same id)</td><td>names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core</td><td>rename one of the two items: ids are hashes of the names, so a different name gives a different id</td></tr>
 <tr><td>duplicate variant index <code>1</code> at enum Status</td><td>names and ids identify a type, a method or a variant to the platforms and in the generated code, so each must be unique within a core</td><td>give every variant of the enum an index of its own</td></tr>
+<tr><td>duplicate type name <code>Todo</code> (declared as record and again as record)</td><td>type names must be unique within a core: a type is identified to the platforms by its name (its id is a hash of it), so two declarations cannot share one</td><td>rename one of the two <code>Todo</code> declarations, or remove the duplicate</td></tr>
 </tbody></table></div>
 <h3 id="E0051"><code>E0051</code> a name that collides after case conversion or is not an identifier<a class="anchor" href="#E0051" aria-label="Link to E0051">#</a></h3>
 <p class="tok-dim">Raised by schema validation.</p>
@@ -352,8 +353,8 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <p class="tok-dim">Raised by macros (a check the compiler runs).</p>
 <p>the schema records a name that the type written there does not have: an alias of an Undra type (<code>type Todo = Item</code>), a renamed import (<code>use m::Item as Todo</code>), or a name that is not a type declared with <code>#[undra::api]</code> at all (a plain struct, <code>type Id = u64</code>); reported by a const assertion on <code>UNDRA_TYPE_ID</code></p>
 <div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
-<tr><td><code>Plain</code> is not a type declared with <code>#[undra::api]</code></td><td>Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with <code>#[undra::api]</code> or an error declared with <code>#[undra::error]</code>; anything else, such as a plain struct or an alias like <code>type Plain = u64</code>, has no definition the platforms could generate</td><td>add <code>#[undra::api]</code> to <code>Plain</code>, or, if it is an alias, write the type it stands for where it is used</td></tr>
-<tr><td><code>Id</code> is not a type declared with <code>#[undra::api]</code></td><td>Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with <code>#[undra::api]</code> or an error declared with <code>#[undra::error]</code>; anything else, such as a plain struct or an alias like <code>type Id = u64</code>, has no definition the platforms could generate</td><td>add <code>#[undra::api]</code> to <code>Id</code>, or, if it is an alias, write the type it stands for where it is used</td></tr>
+<tr><td><code>Plain</code> is not a type declared with <code>#[undra::api]</code></td><td>Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with <code>#[undra::api]</code> or an error declared with <code>#[undra::error]</code>; anything else, such as a plain struct or an alias (<code>type Id = u64</code>), has no definition the platforms could generate</td><td>add <code>#[undra::api]</code> to <code>Plain</code>, or, if it is an alias, write the type it stands for where it is used</td></tr>
+<tr><td><code>Id</code> is not a type declared with <code>#[undra::api]</code></td><td>Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with <code>#[undra::api]</code> or an error declared with <code>#[undra::error]</code>; anything else, such as a plain struct or an alias (<code>type Id = u64</code>), has no definition the platforms could generate</td><td>add <code>#[undra::api]</code> to <code>Id</code>, or, if it is an alias, write the type it stands for where it is used</td></tr>
 <tr><td><code>Todo</code> here is an alias or a renamed import of a different Undra type, not the type declared as <code>Todo</code></td><td>Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with <code>type Todo = Other</code> or <code>use path::Other as Todo</code> the platforms would be told <code>Todo</code> and receive the layout of <code>Other</code></td><td>write the type under the name it is declared with (<code>Other</code> in the examples above), or declare a separate <code>#[undra::api] struct Todo</code> if you mean a distinct type</td></tr>
 <tr><td><code>Entry</code> here is an alias or a renamed import of a different Undra type, not the type declared as <code>Entry</code></td><td>Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with <code>type Entry = Other</code> or <code>use path::Other as Entry</code> the platforms would be told <code>Entry</code> and receive the layout of <code>Other</code></td><td>write the type under the name it is declared with (<code>Other</code> in the examples above), or declare a separate <code>#[undra::api] struct Entry</code> if you mean a distinct type</td></tr>
 </tbody></table></div>
@@ -380,23 +381,33 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <h3 id="C0001"><code>C0001</code> no <code>undra.toml</code> from <code>start</code> up to the filesystem root<a class="anchor" href="#C0001" aria-label="Link to C0001">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>not inside an Undra project: no <code>undra.toml</code> from the working directory up to the filesystem root</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>no undra.toml found in &lt;dir&gt; or any parent directory</td><td>this command works on an Undra project, and a project is the directory that holds undra.toml</td><td>run it inside a project, point at one with <code>-C &lt;dir&gt;</code>, or create one with <code>undra init &lt;name&gt;</code></td></tr>
+</tbody></table></div>
 <h3 id="C0002"><code>C0002</code> a configuration or schema file is unusable<a class="anchor" href="#C0002" aria-label="Link to C0002">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p><code>undra.toml</code> or a schema file cannot be read or has a value the CLI cannot use</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>&lt;dir&gt;/undra.toml: line 2: <code>name</code> in [project] is an integer but must be a string</td><td>the file drives the build, so a value the CLI cannot understand would make it guess</td><td>write it as a string, for example <code>name = &quot;text&quot;</code></td></tr>
+</tbody></table></div>
 <h3 id="C0003"><code>C0003</code> a tool is not installed<a class="anchor" href="#C0003" aria-label="Link to C0003">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>a tool the command needs is not installed or not on <code>PATH</code></p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>cargo</code> was not found</td><td>reading the core crate needs <code>cargo</code>, and it is not on your PATH</td><td>install Rust with rustup: https://rustup.rs (then open a new terminal) run <code>undra doctor</code> to check the rest of the toolchain</td></tr>
+</tbody></table></div>
 <h3 id="C0004"><code>C0004</code> a build tool exited with a failure<a class="anchor" href="#C0004" aria-label="Link to C0004">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>a build tool ran and failed; its own output follows the diagnostic</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>cargo metadata</code> failed while reading the core crate (exit status: 101)</td><td>the tool's own output above says what it objected to; Undra cannot continue without its result</td><td>fix the problem the tool reported and run the command again; <code>undra doctor</code> checks the toolchain</td></tr>
+</tbody></table></div>
 <h3 id="C0005"><code>C0005</code> the core crate is missing, or is not an Undra core<a class="anchor" href="#C0005" aria-label="Link to C0005">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>the core crate is missing, or is not an Undra core</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>the core crate <code>c0005-core</code> does not depend on Undra</td><td>without the <code>undra</code> crate there are no <code>#[undra::api]</code> items to describe, and the schema would be empty</td><td>add <code>undra = &quot;0.1&quot;</code> to the core's [dependencies] (or a <code>path</code> to your Undra checkout)</td></tr>
+</tbody></table></div>
 <h3 id="C0006"><code>C0006</code> the schema could not be extracted from the built core<a class="anchor" href="#C0006" aria-label="Link to C0006">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>the schema could not be extracted from the built core</p>
@@ -404,23 +415,33 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <h3 id="C0007"><code>C0007</code> the schema cannot be turned into bindings (bindgen diagnostics)<a class="anchor" href="#C0007" aria-label="Link to C0007">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>the schema cannot be turned into bindings (the E0001, E0005, E0006, E0010, E0011, E0031, E0050, E0051 and E0052 diagnostics of schema validation follow)</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>the schema cannot be turned into bindings (1 problem)</td><td>the public surface of the core has to be expressible in Swift, Kotlin and TypeScript, and these items are not</td><td>change the items named below in the core (each message says what to do), then run <code>undra bindgen</code> again</td></tr>
+</tbody></table></div>
 <h3 id="C0008"><code>C0008</code> the command would overwrite something it must not<a class="anchor" href="#C0008" aria-label="Link to C0008">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p><code>undra init</code> or <code>undra adopt</code> would write into a directory that already has files in it</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>&lt;dir&gt;/taken already exists and is not empty</td><td><code>undra init</code> creates a new project and will not write into a directory that has files in it</td><td>choose another name, or another parent with <code>--dir</code>; to add Undra to an existing app use <code>undra adopt &lt;dir&gt;/taken</code></td></tr>
+</tbody></table></div>
 <h3 id="C0009"><code>C0009</code> an argument is unusable<a class="anchor" href="#C0009" aria-label="Link to C0009">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>an argument has a value the command cannot use</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td><code>my app</code> cannot be a project name: it contains characters other than ASCII letters, digits, <code>-</code> and <code>_</code></td><td>the name becomes a Cargo package (<code>&lt;name&gt;-core</code>), a Swift module and a Kotlin package, which are stricter than file names</td><td>choose a name like <code>todo-app</code> or <code>acme_notes</code> you can still call the folder anything: <code>undra init my-app --dir &lt;parent&gt;</code></td></tr>
+</tbody></table></div>
 <h3 id="C0010"><code>C0010</code> an I/O operation failed<a class="anchor" href="#C0010" aria-label="Link to C0010">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>a file or directory operation failed</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>could not create &lt;dir&gt;/afile/demo: Not a directory (os error 20)</td><td>the command needs to read or write this path and the operating system refused</td><td>check that the path exists and that you may access it, then run the command again</td></tr>
+</tbody></table></div>
 <h3 id="C0011"><code>C0011</code> the Rust toolchain lacks a compilation target<a class="anchor" href="#C0011" aria-label="Link to C0011">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>the Rust toolchain lacks a compilation target the build needs</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>the Rust target <code>wasm32-unknown-unknown</code> is not installed</td><td>building for this platform needs the standard library compiled for it, and rustup has not installed it</td><td>rustup target add wasm32-unknown-unknown</td></tr>
+</tbody></table></div>
 <h3 id="C0012"><code>C0012</code> the platform is not available on this machine<a class="anchor" href="#C0012" aria-label="Link to C0012">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>the platform is not available on this machine</p>
@@ -432,7 +453,9 @@ note: required by a bound in `_undra_error_E0022_the_future_of_an_async_method_m
 <h3 id="C0014"><code>C0014</code> the core and the project disagree about where Undra comes from<a class="anchor" href="#C0014" aria-label="Link to C0014">#</a></h3>
 <p class="tok-dim">Raised by <code>undra</code>.</p>
 <p>the core and the project disagree about where Undra comes from</p>
-<p class="tok-dim">The command prints this diagnostic with the details of the failure that caused it.</p>
+<div class="table-wrap"><table><thead><tr><th>What you see</th><th>Why</th><th>Fix</th></tr></thead><tbody>
+<tr><td>undra.toml says Undra is at /somewhere/else, but the core's <code>undra</code> dependency is at &lt;repo&gt;</td><td>the library Undra ships is built from the same Undra as the core, and the platform runtimes come from <code>[undra] path</code>; if they differ, the core and the apps would speak different wire formats</td><td>make them agree: set <code>path</code> of the core's <code>undra</code> dependency and <code>[undra] path</code> in undra.toml to the same checkout (or remove <code>[undra] path</code> to use released runtimes)</td></tr>
+</tbody></table></div>
 <p class="tok-dim">Generated by <code>site/scripts/build-errors.mjs</code> from <code>docs/SPEC.md</code> section 12, the compile-fail tests of the macros crate and the message goldens of the other crates. To change a message, change the code that raises it and regenerate its golden; to change the catalogue, change the specification.</p>
 <!-- errors:end -->
 <p class="edit"><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md#12-diagnostics" rel="noopener">Generated from the specification and the macro tests: edit those, not this page.</a></p>

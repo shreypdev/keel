@@ -758,7 +758,7 @@ The catalogue is audited by `crates/undra-macros/tests/catalogue.rs`: every row 
 | E0063 | macros | `Option<Option<T>>` in a public position |
 | E0064 | macros (a check the compiler runs) | an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle |
 
-The command line has its own codes, `C0001` to `C0014`, in the same shape and with the same docs page (`undra-cli`, `Code`); they are listed in the second table.
+The command line has its own codes, `C0001` to `C0014`, in the same shape and with the same docs page (`undra-cli`, `Code`); they are listed in the second table. Eleven have a golden (`crates/undra-cli/tests/golden/diagnostics/`, made by running the binary: `crates/undra-cli/tests/diagnostics.rs`); C0006 (the schema of a built core), C0012 (a platform this machine is not) and C0013 (a dev server that fails) need more than the binary and are listed as exceptions in the audit.
 
 | Code | Raised by | Trigger |
 |---|---|---|
