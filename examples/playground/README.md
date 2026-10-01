@@ -33,7 +33,8 @@ The core reads no clock and no random source and starts no thread (R12): identit
 counters, time from the `Clock` port, delays from `Ctx::sleep`, the network from the `Http` port. That is
 why every scenario can be driven with `undra::ports::fakes` in Rust and with an in-memory server on
 each platform. The apps have no server either: each supplies its own in-memory `Http` adapter and tells the
-core where "the server" is with `configure_remote`.
+core where "the server" is with `configure_remote`. (Android is the exception: it runs on the real platform adapters of
+`android-adapters` and talks over a real socket to a small HTTP server inside the app.)
 
 ## Commands
 
@@ -54,13 +55,15 @@ Then run an app:
   (`UNDRA_LINK_CORE=1` in the environment of Xcode, see the project settings), or run `ios/smoke.sh` to
   build, launch every tab on the simulator, screenshot it and run the XCUITest tour.
 * Android: `undra build -C examples/playground --platform android --release`, then `cd android && ./gradlew
-  :app:installDebug` (`android/README.md` has the `adb` commands). `--release` is what you package: a debug
-  core is 42 MB per ABI.
+  :app:installDebug` (`android/README.md` has the `adb` commands), or `android/smoke.sh` to build, install, tour the
+  tabs and drive the offline story. `--release` is what you package: a debug core is 42 MB per ABI.
 
-The apps have no server: each supplies an in-memory `Http` adapter ("a server in a few lines of Swift, Kotlin
-or TypeScript") that answers for `https://playground.undra.test`, and an Offline switch on the Remote tab makes
-it fail every request and tells the core through the `Connectivity` port, so you can watch the offline queue
-hold an optimistic add and replay it.
+The web and iOS apps have no server: each supplies an in-memory `Http` adapter ("a server in a few lines of Swift
+or TypeScript") that answers for `https://playground.undra.test`. The Android app uses the real adapters of
+`android-adapters` and a small HTTP server inside the app on the device's loopback interface (`android/smoke.sh` drives
+it). On every platform an Offline switch on the Remote tab makes the server fail every request and tells the core through
+the `Connectivity` port, so you can watch the offline queue hold an optimistic add and replay it; on Android the queue
+also survives the process being killed, and real airplane mode does the same.
 
 `undra dev -C examples/playground` serves the core over a WebSocket: start an app against it (web:
 `?undra=ws://127.0.0.1:7443`; iOS: the `UNDRA_DEV_URL` environment variable) and edit `core/` to see the

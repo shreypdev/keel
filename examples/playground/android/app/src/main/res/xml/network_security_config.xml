@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android blocks cleartext (http://) traffic unless the app allows it. The Remote tab talks to the demo server on the
+  device's own loopback interface (remote/DemoServer.kt), so that, and nothing else, may use http.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
