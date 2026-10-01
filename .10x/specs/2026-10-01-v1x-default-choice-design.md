@@ -187,3 +187,31 @@ Renumbering: the WebSocket port becomes ADR-047, the `Db` port ADR-048. The post
 the blueprint claims the catalogue found unbacked (time-travel devtools, a worker core by default,
 lazy collections, newtypes, optimistic state surviving restarts, Telemetry/Push ports, `undra adopt`)
 until the code backs them.
+
+## Amendment C — decisions from the gap audit (2026-10-01)
+
+`.10x/specs/2026-10-01-v1x-gaps.md`: 71 gaps (7 block adoption, 40 hurt, 24 polish); ADR-034…037
+drafted and needed. Integrator decisions:
+
+1. **ADR-034, 035, 036, 037 are accepted in direction**; they flip to Accepted with their
+   implementation. ADR-036 (typed stream errors) and ADR-037 (persisted-state migrations, which
+   changes the `Snapshot` payload) ship as **one wire revision** — the last before publication;
+   the earlier architect note ("A4 is the last wire change") is superseded by this amendment.
+2. **New pieces**: A6 web-core crash recovery (restart from the last snapshot, typed outcome to the
+   app); A7 storage ports gain an error channel and worker-mode sync ports work (ADR-049, amending
+   ADR-024/025); PO-4 (`wasm-worker` traps on the first Clock/Rng/Log call) is fixed as a bug in
+   the parity piece if it needs no ADR, else under ADR-049.
+3. **C4 is split**: C4a Android adapters (in flight); C4b the Kotlin and TypeScript failure model
+   to ADR-032's standard (commands never throw into UI callbacks, `onError`, a closed set of
+   error types, wire errors under one base) as a dated ADR-032 amendment; C4c snapshot/restore
+   parity for TypeScript.
+4. **A3** (a panicking computed is isolated per signal) is recorded as a dated ADR-019 amendment
+   before code, inside the Track A piece.
+5. **C3** is covered by ADR-040/042 (boundary-adrs piece); decimals and `uuid`/`chrono` types join
+   ADR-042's scope; the recursive-record compile failure is a bug fixed in the parity piece.
+6. Port cancellation (reopens the 19-function ABI) is deferred to v1.2 as its own ADR.
+7. RX-1/RX-2 (a one-row edit in 10,000 rows ships 192,647 B through a derived `Computed<Vec<T>>`
+   vs 39 B as a keyed patch) is the measured baseline for ADR-039.
+
+Ownership: `runtime-lifecycle` (ADR-034/035/036 + ADR-019 amendment; opus), then
+`persistence-v2` (ADR-037 + A6; opus); `parity` (C4b, C4c, PO-4, TY recursive bug; sonnet, opus review).
