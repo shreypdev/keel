@@ -69,6 +69,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0063 | nested `Option<Option<T>>` (addition) |
 /// | E0064 | an object (`#[undra::api] impl`) used where a value is expected (addition) |
 /// | E0065 | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
+/// | E0066 | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";
@@ -97,6 +98,7 @@ pub(crate) mod code {
     pub(crate) const E0062: &str = "E0062";
     pub(crate) const E0063: &str = "E0063";
     pub(crate) const E0064: &str = "E0064";
+    pub(crate) const E0066: &str = "E0066";
 }
 
 /// A diagnostic under construction: everything except the span it is reported on.

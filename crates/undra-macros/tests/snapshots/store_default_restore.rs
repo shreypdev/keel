@@ -2,6 +2,7 @@ pub struct Counter {
     ctx: Ctx,
     count: Signal<i64>,
     note: String,
+    visits: Signal<u32>,
     #[doc(hidden)]
     pub __undra_cell: ::undra::signals::CellSlot,
 }
@@ -18,6 +19,16 @@ impl Counter {
                 computed: false,
                 key: ::core::option::Option::None,
                 no_coalesce: false,
+                default: false,
+            },
+            ::undra::meta::SignalMeta {
+                name: "visits",
+                signal_id: 1u32,
+                ty: ::undra::meta::TypeRefMeta::U32,
+                computed: false,
+                key: ::core::option::Option::None,
+                no_coalesce: false,
+                default: true,
             },
         ],
     };
@@ -36,6 +47,7 @@ impl Counter {
             ::undra::meta::ids::type_id("Counter"),
         );
         __cell.attach(&self.count, 0u32)?;
+        __cell.attach(&self.visits, 1u32)?;
         ::core::result::Result::Ok(__cell)
     }
     /// Creates the signal cell and attaches every signal (idempotent). Fails when a
@@ -76,6 +88,7 @@ impl Counter {
     ) -> ::core::result::Result<Self, ::undra::wire::WireError> {
         let __count = __r.read_u32()?;
         let mut __slot_count: ::core::option::Option<i64> = ::core::option::Option::None;
+        let mut __slot_visits: ::core::option::Option<u32> = ::core::option::Option::None;
         for _ in 0..__count {
             let __id = __r.read_u32()?;
             let __bytes = __r.read_bytes()?;
@@ -83,6 +96,11 @@ impl Counter {
                 0u32 => {
                     __slot_count = ::core::option::Option::Some(
                         <i64 as ::undra::wire::Decode>::decode_exact(__bytes)?,
+                    );
+                }
+                1u32 => {
+                    __slot_visits = ::core::option::Option::Some(
+                        <u32 as ::undra::wire::Decode>::decode_exact(__bytes)?,
                     );
                 }
                 _ => {}
@@ -98,12 +116,17 @@ impl Counter {
                 });
             }
         };
+        let __value_visits = match __slot_visits {
+            ::core::option::Option::Some(__v) => __v,
+            ::core::option::Option::None => <u32 as ::core::default::Default>::default(),
+        };
         let __value = {
             let _ = &__ctx;
             Self {
                 ctx: ::core::clone::Clone::clone(&__ctx),
                 note: <String as __UndraRestoreDefault_Counter>::__undra_default(),
                 count: ::undra::signals::Signal::<i64>::new(__value_count),
+                visits: ::undra::signals::Signal::<u32>::new(__value_visits),
                 __undra_cell: ::core::default::Default::default(),
             }
         };
@@ -191,5 +214,6 @@ const _: () = {
     {}
     fn __undra_identity() {
         __undra_same::<i64, ::core::primitive::i64>();
+        __undra_same::<u32, ::core::primitive::u32>();
     }
 };

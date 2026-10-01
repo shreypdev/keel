@@ -1,8 +1,8 @@
 //! Undra attribute macros (`docs/SPEC.md` section 4).
 //!
 //! The macros are re-exported by the `undra` facade as `undra::api`, `undra::error`,
-//! `undra::store`, `undra::port`, `undra::query` and `undra::mutation`. Users normally never
-//! depend on this crate directly.
+//! `undra::store`, `undra::port`, `undra::query`, `undra::mutation` and `undra::migrate`. Users
+//! normally never depend on this crate directly.
 //!
 //! | Macro | Applies to | Generates |
 //! |---|---|---|
@@ -14,6 +14,7 @@
 //! | `#[undra::store]` | struct | `StoreObject`, signal table, restore, `StoreMeta` |
 //! | `#[undra::port]` | trait | `Port`, the proxy, the accessor, the Rust-side dispatcher, `PortMeta` |
 //! | `#[undra::query]` / `#[undra::mutation]` | `async fn` | `<Name>Query` / `<Name>Mutation`, `QueryMeta` |
+//! | `#[undra::migrate]` | free `fn` | a `persist::Migration` registration (ADR-037) |
 //!
 //! Generated code names its dependencies through `::undra::{wire, meta, runtime, signals,
 //! query}` (SPEC 16.3). `#[undra(crate = "path")]` on the item, or `crate = "path"` in the
@@ -88,7 +89,8 @@ use proc_macro::TokenStream;
 ///   (`#[undra::api(store)]` for the impl block of a `#[undra::store]` struct);
 /// * on a free `fn`: a function.
 ///
-/// `#[undra(default)]` on a field marks it as having a default in generated constructors.
+/// `#[undra(default)]` on a field marks it as having a default in generated constructors (and lets a
+/// migration fill it when an older value lacks it, ADR-037).
 #[proc_macro_attribute]
 pub fn api(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_api(attr.into(), item.into()).into()
@@ -121,6 +123,25 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn mutation(attr: TokenStream, item: TokenStream) -> TokenStream {
     impl_::expand_query(impl_::query::Flavor::Mutation, attr.into(), item.into()).into()
+}
+
+/// Registers a migration hook for persisted data an older build wrote (ADR-037): snapshot
+/// signals, cached query results and queued mutations whose types changed in a way structural
+/// migration (fields and variants by name, lossless widenings) cannot convert.
+///
+/// * `#[undra::migrate(ty = "Todo")] fn f(old: &DynValue) -> Result<Todo, MigrateError>`: any
+///   persisted `Todo` whose structure changed, at any depth;
+/// * `#[undra::migrate(store = "Profile", signal = "age")] fn f(old: Option<&DynValue>) ->
+///   Result<f32, MigrateError>`: one signal of one store in a snapshot (`None`: the snapshot lacks
+///   it);
+/// * `#[undra::migrate(mutation = "add_todo")] fn f(old: &DynRecord) -> Result<DynRecord,
+///   MigrateError>`: the queued input of one mutation, by parameter name.
+///
+/// `from = "0x.."` restricts a hook to old data with that fingerprint. The function is kept as
+/// written; the runtime calls it under the panic guard. A wrong target or shape is E0066.
+#[proc_macro_attribute]
+pub fn migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    impl_::expand_migrate(attr.into(), item.into()).into()
 }
 
 /// Marks a trait as a port: an interface the platform (or a Rust fake) implements and the core

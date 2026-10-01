@@ -1,0 +1,43 @@
+error[E0080]: evaluation panicked: error[undra::E0066]: the migration hook `crossed` targets `Todo` but returns `Note`
+                = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+                = help: return the current `Todo` (the hook builds today's value from the old one), or target the type it returns: `ty = "Note"`
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_target_type.rs:18:38
+   |
+18 | fn crossed(old: &DynValue) -> Result<Note, MigrateError> {
+   |                                      ^^^^ evaluation of `_::_` failed here
+
+error[E0277]: error[undra::E0001]: `Plain` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/e0066_migrate_target_type.rs:25:1
+   |
+25 | #[undra::migrate(ty = "Plain")]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `Encode` is not implemented for `Plain`
+  --> tests/ui/e0066_migrate_target_type.rs:23:1
+   |
+23 | pub struct Plain;
+   | ^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `Encode`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             Arc<T>
+           and $N others
+   = note: this error originates in the attribute macro `undra::migrate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0080]: evaluation panicked: error[undra::E0066]: the migration hook `not_undra` returns `Plain`, which is not a record or enum declared with `#[undra::api]`
+                = note: a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape
+                = help: a `ty` hook targets and returns a record or enum of the schema: declare `Plain` with `#[undra::api]` if it is one, or return the `#[undra::api]` type `Plain` names
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0066
+  --> tests/ui/e0066_migrate_target_type.rs:26:40
+   |
+26 | fn not_undra(old: &DynValue) -> Result<Plain, MigrateError> {
+   |                                        ^^^^^ evaluation of `_::_` failed here

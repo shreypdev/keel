@@ -18,6 +18,7 @@ pub(crate) mod check;
 pub(crate) mod common;
 pub(crate) mod diag;
 pub(crate) mod error;
+pub(crate) mod migrate;
 pub(crate) mod naming;
 pub(crate) mod object;
 pub(crate) mod paths;
@@ -245,6 +246,14 @@ pub(crate) fn expand_query(
                 &other,
             )),
         }
+    })
+}
+
+/// `#[undra::migrate]`.
+pub(crate) fn expand_migrate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    run(item, &[], |item| match item {
+        syn::Item::Fn(item) => migrate::expand(attr, item),
+        other => Err(wrong_item("migrate", "a free `fn`", &other)),
     })
 }
 

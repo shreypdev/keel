@@ -645,8 +645,13 @@ mod tests {
 
     #[test]
     fn misplaced_option_is_e0008() {
-        let message = first_error(vec![parse_quote!(#[undra(default)])], Site::SIGNAL);
-        assert!(message.contains("`#[undra(default)]` is not valid on a store signal field"));
+        // ADR-037: `default` is valid on a store signal; on a non-signal field it is not.
+        let message = first_error(vec![parse_quote!(#[undra(default)])], Site::STATE_FIELD);
+        assert!(message.contains("`#[undra(default)]` is not valid on a non-signal store field"));
+        let mut attrs = vec![parse_quote!(#[undra(default)])];
+        let mut errors = Errors::new();
+        assert!(take(&mut attrs, Site::SIGNAL, &mut errors).default);
+        assert!(errors.is_empty());
         let message = first_error(vec![parse_quote!(#[undra(key = "id")])], Site::FIELD);
         assert!(message.contains("`#[undra(key)]` is not valid on a record or variant field"));
         let message = first_error(vec![parse_quote!(#[undra(crate = "::k")])], Site::FIELD);
