@@ -1,7 +1,9 @@
 # ADR-039: derived keyed lists: filtered, sorted and mapped views kept up to date from the source's recorded operations
 
-Status: **Proposed** (2026-10-01; v1.2 bet E2, approved by the founder in Amendment A of
-`.10x/specs/2026-10-01-v1x-default-choice-design.md`). Implementation is scheduled after Track A
+Status: **Accepted** (2026-10-01, implemented on `wt/derived-lists`; proposed the same day as v1.2 bet E2,
+approved by the founder in Amendment A of `.10x/specs/2026-10-01-v1x-default-choice-design.md`; open decisions
+1-5 settled at their recommended values by the integrator). See "Implementation notes" at the end for what was
+measured and where the implementation departs from the text. Implementation is scheduled after Track A
 (ADR-034/035 and the A3 amendment to ADR-019), which touches the same files of `undra-signals`. Touches
 SPEC 2.2 (a sentence: what `computed: true` with a `key` means), 3.8 (a third way the core finds a patch),
 4.3 (`DerivedList<T>` store fields), 5.5 and 5.9 (derived slots in commits and snapshots), 10 (a sentence:
@@ -514,3 +516,28 @@ ops fall inside it, so this scenario is not in `BYTES_EXACT`). Layer A row `stre
 3. **Caps**: 4,096 pending ops (both directions) and 256 for a parameter walk; both named constants.
 4. **`count()`** in v1 (recommended: it is what `remaining` and every badge count needs, and it is small).
 5. **Tie order and sort-key changes**: source order, `Move` + `Update` (recommended).
+
+## Implementation notes (2026-10-01)
+
+Built as decided; the record is `.10x/decisions/sde/derived-lists.md`. Every section 11 target is met on the
+reference host (`bench/RESULTS.md`, finding 5): one change of a 10,000-row filtered view costs 333 ns and 158
+bytes in the core (176.5 µs and 353 KB as a computed), 392 ns through the runtime; the sorted view scales
+1.04-1.12x from 10,000 to 100,000 rows; a parameter flip of 2,500 rows is 218 µs; the sustained derived churn
+runs at 122,000 operations a second beside 169,000 for the list alone. Departures from the text:
+
+* Section 5, "A closure that panics in the middle of a drain marks the index for rebuild": done, and with the
+  ADR-019 amendment landed first a derived slot is **isolated** like a computed (held back, listed in
+  `failed_signals`, sent whole when it next evaluates) rather than abandoning the change-set.
+* Section 3 and 4: beyond the decision, ranks are computed only when an op is kept for the host (an unobserved
+  list and a `count()` never compute one), a parameter walk skips rows whose membership and key did not
+  change, and a full value is encoded from the source rows without materialising the view. The first
+  measurement without these missed the `param_flip` target (1.43 ms).
+* Section 11: `[ratio."derived_vs_keyed_update"]` max is 2.5, not 1.15x of a host sample (no runner samples
+  yet); `[ratio."derived_sort_scaling"]` keeps 4 (cache-bound, the fan-out precedent). The rebuild row's fixture
+  swaps in a prebuilt list so it measures the rebuild.
+* Section 7: no bindgen golden changed. The `stores` golden already describes a computed keyed list; the
+  pinning test compares it with a computed list it adds to its own copy of the schema.
+* Consequences, S19: the Kotlin and Swift S11 raw sub-steps now apply `visible`'s patch (they decoded a full
+  value); S19 adds a step 9 that replays 60,000 recorded operations over three views through each runtime's
+  decoder and applier.
+
