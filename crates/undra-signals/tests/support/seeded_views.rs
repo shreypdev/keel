@@ -29,7 +29,7 @@ use std::sync::Arc;
 use undra_signals::testing::CaptureSink;
 use undra_signals::{ALL_SIGNALS, DerivedList, Signal, StoreCell, next_txn_id, txn, with_sink};
 use undra_wire::payload::{ChangeOp, ChangeSet};
-use undra_wire::{Decode, Encode, KeyedPatch, Reader, WireError, Writer};
+use undra_wire::{Decode, Encode, KeyedPatch, PatchOp, Reader, WireError, Writer};
 
 /// A source row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -238,6 +238,17 @@ impl Host {
     }
 }
 
+/// The name of a keyed-patch op, for the prologue's expectations.
+fn op_name<T>(op: &PatchOp<T>) -> &'static str {
+    match op {
+        PatchOp::Insert { .. } => "insert",
+        PatchOp::Remove { .. } => "remove",
+        PatchOp::Update { .. } => "update",
+        PatchOp::Move { .. } => "move",
+        PatchOp::Clear => "clear",
+    }
+}
+
 /// Runs `ops` seeded operations; checks the views after every one and the host after every
 /// commit; returns what happened and, when `record`, the recording.
 pub fn run(seed: u64, ops: usize, record: bool) -> Summary {
@@ -279,6 +290,113 @@ pub fn run(seed: u64, ops: usize, record: bool) -> Summary {
     write_record(payload.as_slice(), &host, &mut records, record_count);
 
     let sink = CaptureSink::new();
+
+    // The scripted prologue (records 2 to 6): the shapes a platform's per-drain merge (ADR-031)
+    // has to get right, at record numbers S19 knows, so that it drains records 3-4 and 5-6
+    // together: one row that moves and changes (a sort-key change: `Move` + `Update` in `ranked`
+    // and `labels`) and is then removed, and a rebuild's full values followed by patches.
+    let shape = |set: &ChangeSet, signal: u32| -> Vec<&'static str> {
+        let e = set
+            .entries
+            .iter()
+            .find(|e| e.signal_id == signal)
+            .expect("the scripted change reaches every view");
+        if e.op == ChangeOp::Full {
+            return vec!["full"];
+        }
+        let mut r = Reader::new(&e.value);
+        if signal == 2 {
+            let patch = KeyedPatch::<Label>::decode(&mut r).expect("a patch decodes");
+            patch.ops.iter().map(op_name).collect()
+        } else {
+            let patch = KeyedPatch::<Row>::decode(&mut r).expect("a patch decodes");
+            patch.ops.iter().map(op_name).collect()
+        }
+    };
+    let mut prologue = |label: &str, f: &dyn Fn(), expect: [&[&str]; 3]| {
+        with_sink(sink.clone(), || txn(f));
+        summary.transactions += 1;
+        let sets = sink.take();
+        assert_eq!(sets.len(), 1, "{label}: one change-set");
+        let set = undra_signals::testing::decode(&sets[0]).unwrap();
+        for (signal, expected) in expect.iter().enumerate() {
+            let signal = u32::try_from(signal).unwrap();
+            assert_eq!(shape(&set, signal), *expected, "{label}: view {signal}");
+        }
+        host.apply_set(&set);
+        summary.change_sets += 1;
+        record_count += 1;
+        write_record(&sets[0], &host, &mut records, record_count);
+    };
+    let scripted = |id: u32, title: &str, rank: u32| Row {
+        id,
+        title: title.into(),
+        done: false,
+        rank,
+    };
+    let seeds = [
+        ("alpha", 1),
+        ("beta", 2),
+        ("gamma", 3),
+        ("delta", 5),
+        ("eps", 6),
+        ("alpha", 7),
+    ];
+    prologue(
+        "six rows",
+        &|| {
+            for (i, (title, rank)) in seeds.iter().enumerate() {
+                v.rows
+                    .push(scripted(next_id + u32::try_from(i).unwrap(), title, *rank));
+            }
+        },
+        [&["insert"; 6], &["insert"; 6], &["insert"; 6]],
+    );
+    next_id += 6;
+    prologue(
+        "row 0 changes its sort keys",
+        &|| {
+            v.rows.update_at(0, |r| {
+                r.rank = 2;
+                r.title = "zeta".into();
+            });
+        },
+        [&["update"], &["move", "update"], &["move", "update"]],
+    );
+    prologue(
+        "row 0 goes",
+        &|| {
+            v.rows.remove(0);
+        },
+        [&["remove"], &["remove"], &["remove"]],
+    );
+    prologue(
+        "a raw write",
+        &|| {
+            let fresh = (0..5_u32)
+                .map(|i| scripted(next_id + i, seeds[i as usize].0, 4 + i))
+                .collect();
+            v.rows.replace(fresh);
+        },
+        [&["full"], &["full"], &["full"]],
+    );
+    next_id += 5;
+    prologue(
+        "patches after the full values",
+        &|| {
+            v.rows.push(scripted(next_id, "beta", 1));
+            v.rows.update_at(1, |r| r.rank = 3);
+            v.rows.move_item(0, 2);
+        },
+        [
+            &["insert", "update", "move"],
+            // The source move keeps row 0 ahead of its equal-key neighbour: no view move.
+            &["insert", "move", "update"],
+            &["insert", "update"],
+        ],
+    );
+    next_id += 1;
+
     let check = |v: &Views, when: &str| {
         let rows = v.rows.get();
         let cut = v.cut.get();

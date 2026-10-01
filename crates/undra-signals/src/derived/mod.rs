@@ -443,7 +443,12 @@ pub struct DerivedStats {
 /// * **Reads** ([`len`](DerivedList::len), [`get`](DerivedList::get),
 ///   [`with`](DerivedList::with)) first replay the source's operations recorded since the last
 ///   read, O(log n) each. `len` is then O(1); `get` and `with` materialise the view, O(n) once and
-///   cached until it changes.
+///   cached until it changes. A read sees the source as it is now, as a [`Signal`] read does:
+///   inside a transaction that includes the writes this transaction already made (they are
+///   recorded as they happen, not at the commit), and the host receives them all at the commit.
+///   Writers never wait for a read's closures: the pipeline runs under the list's own lock, which
+///   no writer takes, and the read holds the source's lock only to take its operations and a
+///   snapshot.
 /// * **In a store** (`#[undra(key = "id")] visible: DerivedList<Todo>`, or
 ///   [`StoreCell::attach_derived`](crate::StoreCell::attach_derived)) the host receives the view
 ///   once in full, then keyed patches: one source operation is at most two ops of the view (a

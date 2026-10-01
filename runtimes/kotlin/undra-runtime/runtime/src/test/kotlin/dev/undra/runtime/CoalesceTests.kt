@@ -262,6 +262,49 @@ class CoalesceTests : Suite() {
             assertEq(2L, mirror.stats().entriesApplied)
         }
 
+        case("a derived list's shapes merge per drain: Move + Update then Remove of one row; a rebuild's full value then patches") {
+            // ADR-039: a sorted view sends a sort-key change as Move + Update and the row's removal as a
+            // Remove at its new rank; a rebuild sends the full value, then patches resume. Delivered one
+            // change-set per drain and merged into one drain, the host ends with the same list.
+            val view = listOf(10u, 20u, 30u, 40u, 50u)
+            val history = listOf(
+                cs(full(1L, 0u, listCodec.encodeToByteArray(view))),
+                cs(patch(1L, 0u, patchBytes(listOf(PatchOp.Move(0u, 3u), PatchOp.Update(3u, 11u))))),
+                cs(patch(1L, 0u, patchBytes(listOf(PatchOp.Remove(3u))))),
+                cs(full(1L, 0u, listCodec.encodeToByteArray(listOf(7u, 8u, 9u)))),
+                cs(patch(1L, 0u, patchBytes(listOf(PatchOp.Insert(1u, 12u), PatchOp.Move(0u, 2u), PatchOp.Update(2u, 13u))))),
+                cs(patch(1L, 0u, patchBytes(listOf(PatchOp.Remove(2u))))),
+            )
+            val expected = listOf(listOf(20u, 30u, 40u, 50u), listOf(12u, 8u, 9u))
+            for ((drains, truth) in listOf(listOf(1..2, 3..5) to expected, listOf(1..5) to listOf(expected[1]))) {
+                val main = ManualMainThread()
+                val mirror = manualMirror(main, NEVER)
+                val host = ListHost(listOf(0), emptyList()) { error("no patch of this history is out of bounds") }
+                mirror.register(1L, host.apply)
+                mirror.submit(history[0])
+                mirror.flushOnThisThread(main)
+                val seen = ArrayList<List<UInt>>()
+                for (range in drains) {
+                    for (i in range) mirror.submit(history[i])
+                    mirror.flushOnThisThread(main)
+                    seen.add(host.lists.getValue(0))
+                }
+                assertEq(truth, seen, "after each drain of $drains")
+            }
+            // One drain of the last four: the last full value once, then the two patches after it merged.
+            val main = ManualMainThread()
+            val mirror = manualMirror(main, NEVER)
+            val host = ListHost(listOf(0), emptyList()) { error("no patch of this history is out of bounds") }
+            mirror.register(1L, host.apply)
+            for (payload in history.take(2)) mirror.submit(payload)
+            mirror.flushOnThisThread(main)
+            val before = host.applies
+            for (payload in history.drop(2)) mirror.submit(payload)
+            mirror.flushOnThisThread(main)
+            assertEq(listOf(12u, 8u, 9u), host.lists.getValue(0))
+            assertEq(2, host.applies - before, "the full value, then one merged patch")
+        }
+
         case("a lazy invalidation supersedes what came before it") {
             val main = ManualMainThread()
             val mirror = manualMirror(main)

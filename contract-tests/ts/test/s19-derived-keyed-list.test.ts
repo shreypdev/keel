@@ -231,11 +231,27 @@ test("S19 derived keyed list", async () => {
     });
     const next = splitmix(19n);
     let drains = 0;
+    // The recording's scripted prologue (seeded_views.rs): records 2-3 are a row's Move + Update in
+    // the sorted views and then its Remove, records 4-5 a rebuild's full values and then patches.
+    // Each pair is drained as one: three views, six entries received, three applied.
+    const scriptedDrains = new Map([
+      [0, 0],
+      [1, 0],
+      [3, 3],
+      [5, 3],
+    ]);
+    let applied = 0;
     for (const [i, record] of records.entries()) {
       mirror.enqueue(record.payload);
-      if (next() % 12 === 0 || i === records.length - 1) {
+      const scripted = i <= 5;
+      if (scripted ? scriptedDrains.has(i) : next() % 12 === 0 || i === records.length - 1) {
         mirror.flush();
         drains++;
+        const merged = scriptedDrains.get(i);
+        if (scripted && merged !== undefined && merged > 0) {
+          expect(mirror.stats().entriesApplied - applied, `the drain of records ${i - 1}-${i} merges`).toBe(merged);
+        }
+        applied = mirror.stats().entriesApplied;
         for (let v = 0; v < 3; v++) {
           if (hashOf(merged[v] as unknown[], VIEW_CODECS[v] as (typeof VIEW_CODECS)[number]) !== record.hashes[v]) {
             throw new Error(`merged view ${v} differs from the core's at change-set ${i}`);
