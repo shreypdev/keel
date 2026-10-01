@@ -10,7 +10,8 @@ generators' entry, the runtimes' table readers (Swift `CoreTable.swift`, `UndraC
 claim; Kotlin `NativeApi`, `NativeLibrary`, `CoreEntry`, `InprocTransport`; TypeScript `UndraCore.unloaded`; React
 Native `UndraApi*.cpp`, `UndraHost`), `undra.h`, `examples/two-cores` and `two-cores.yml` · **Fixes:** `e960303`,
 `a4ed73e`, `655c434`, `9ba4174`, `0213b8f`; `main` merged at `97232f1` (derived-lists), bindings regenerated at
-`f07515b`, the merged contract columns fixed at `939e1a1`; `main` merged again at the end (state files only).
+`f07515b`, the merged contract columns fixed at `939e1a1`; `main` `6db6749` merged again at the end (`07405d7`), the two-core
+packages regenerated for its derived-list doc comment (`40dd40a`).
 
 ## Verdict
 
@@ -168,8 +169,10 @@ the machine is quiet before the number goes into `bench/RESULTS.md`.**
 
 ## Suites (merged tree)
 
-Every suite below ran once on the merged tree (`main` `76f9364` with derived-lists; the final merge of `main`
-`6db6749` touches only `.10x/status.md` and `.10x/handoff.md`).
+Every suite below ran once on the merged tree (`main` `76f9364` with derived-lists). The final merge of `main`
+`6db6749` brought the state files and one bindgen change (a derived list's generated doc comment, no hash moves):
+after it, `cargo test -p undra-bindgen` (139) and `-p undra-cli --lib` (297), `undra bindgen --check --docs` for the
+three packages, and the site build and link check were re-run, all clean.
 
 | Suite | Result |
 |---|---|
