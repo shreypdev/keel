@@ -139,7 +139,7 @@ colon is a field with an empty value); `event` sets the type buffer, `data` appe
 event's `retry_ms`; a blank line dispatches: if the data buffer is empty, reset data/type and dispatch nothing;
 else strip one trailing LF from data, emit `{ id: lastEventIdBuffer or nil, event: type or "message", data,
 retry_ms }`, reset data, type and retry (the id buffer persists). A UTF-8 BOM at the start is skipped. Invalid
-UTF-8 → `Protocol`. Swift: `URLSession.bytes(for:)`; Kotlin: `HttpURLConnection` streaming on a reader thread
+UTF-8 → `Protocol`. Swift: `URLSession.bytes(for:)`; Kotlin: `java.net.http` on the JVM (`HttpURLConnection.disconnect()` does not abort a read blocked on a chunked body on JDK 17), `HttpURLConnection` on Android, each streaming on a reader thread
 (no read while the buffer is full); TS: `fetch` + `body.getReader()` (no `read()` while the buffer is full);
 RN: `fetch` streaming when `response.body` exists, else `XMLHttpRequest` progress events (incremental
 `responseText`).

@@ -461,7 +461,7 @@ core's side is `ws_echo` and the `Live` object of `examples/playground/core/src/
 ### S24 server-sent events (ADR-047)
 
 The opt-in `Sse` port through the platform's default adapter (Swift `URLSession.bytes`, Kotlin
-`HttpURLConnection`, TypeScript `fetch` with a body stream) against the same server (`HTTP` is its
+`java.net.http` on the JVM, TypeScript `fetch` with a body stream) against the same server (`HTTP` is its
 `http://127.0.0.1:<port>`); the core's side is `sse_follow`.
 
 1. `sseFollow("HTTP/sse/feed", null, 10)` returns `ended = true` and four events, parsed as the HTML standard
