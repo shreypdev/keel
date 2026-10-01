@@ -266,6 +266,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             runtimes/rn/@undra/react-native/package-lock.json
+            runtimes/ts/@undra/runtime/package-lock.json
             examples/playground/rn/package-lock.json
       # clang with its sanitizer runtime: the C++ test is built with clang++ (-fsanitize=address,undefined),
       # and the JSI check needs clang's view of React Native's headers. Pinned to 18, the release of 24.04.
@@ -281,6 +282,13 @@ jobs:
           cargo build -p undra-cli
           target/debug/undra build -C examples/playground --platform host
           target/debug/undra build -C examples/playground --platform web
+      # The package's build config (tsconfig.build.json) compiles against @undra/runtime's emitted declarations,
+      # as an app that installs both sees them; dist/ is not committed.
+      - name: The TypeScript runtime's declarations
+        working-directory: runtimes/ts/@undra/runtime
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
       - name: Package dependencies
         working-directory: runtimes/rn/@undra/react-native
         run: npm ci --no-audit --no-fund
