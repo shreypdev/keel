@@ -113,7 +113,7 @@ fn the_table_is_what_undra_ports_registers() {
         assert_eq!(kind, p.kind, "{}", p.name);
     }
     let covered = stdlib::covered(&schema);
-    assert_eq!(covered.types.len(), 8, "{:?}", covered.types);
+    assert_eq!(covered.types.len(), 9, "{:?}", covered.types);
     assert_eq!(covered.ports.len(), 10, "{:?}", covered.ports);
 }
 

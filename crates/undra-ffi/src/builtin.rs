@@ -24,11 +24,23 @@ pub(crate) const LOG_LOG: u32 = ids::port_method_id("Log", "log");
 /// The most bytes one `Rng.fill` call may ask for (the TypeScript runtime's limit).
 pub(crate) const MAX_RNG_BYTES: u32 = 1 << 24;
 
+/// How many extra bytes `Rng.fill` asks the host for, to tell a host that filled the buffer from
+/// one that could not (ADR-049 decision 2.5).
+const CANARY_LEN: usize = 16;
+
+/// What the extra bytes hold before the host fills them. A CSPRNG leaves them equal to this, or
+/// all zero, with probability 2^-127; a host without one (no WebCrypto: its `random` import throws,
+/// and the runtime's guard swallows the throw before it can cross the wasm boundary) leaves them
+/// as they are, and one that "fills" with zeros zeroes them.
+const CANARY: [u8; CANARY_LEN] = *b"undra-rng-canary";
+
 /// What the built-ins need from the embedding environment.
 pub(crate) trait Platform {
     /// Milliseconds since the Unix epoch (`Date.now()`).
     fn now_ms(&self) -> f64;
-    /// Fills `out` with random bytes (`crypto.getRandomValues`).
+    /// Fills `out` with random bytes (`crypto.getRandomValues`). A host without a cryptographic
+    /// random source must leave `out` untouched (the TypeScript `random` import throws, ADR-049);
+    /// the built-in `Rng.fill` then answers "unavailable" instead of predictable bytes.
     fn random(&self, out: &mut [u8]);
     /// Hands a log record to the host: `bytes` is `target String, message String` (SPEC 7).
     fn log(&self, level: u8, bytes: &[u8]);
@@ -94,8 +106,27 @@ pub(crate) fn answer(
             if len > MAX_RNG_BYTES {
                 return None;
             }
-            let mut bytes = vec![0; len as usize];
+            // Randomness never degrades silently (ADR-049, PO-11): the host fills `len` bytes and a
+            // canary; a canary it did not fill means it has no random source, and the port is
+            // unavailable. `Rng` has no error channel, so the core's proxy then panics with E0062:
+            // a loud failure instead of colliding idempotency keys.
+            let len = len as usize;
+            let mut bytes = vec![0; len + CANARY_LEN];
+            bytes[len..].copy_from_slice(&CANARY);
             platform.random(&mut bytes);
+            let canary = &bytes[len..];
+            if canary == CANARY || canary.iter().all(|b| *b == 0) {
+                // Said once per call, before the proxy's E0062 panic: the record names the cause.
+                platform.log(
+                    4,
+                    &log_record(
+                        "undra::rng",
+                        "Rng.fill: the host has no cryptographic random source (the web needs WebCrypto, crypto.getRandomValues); the Rng port answers unavailable instead of predictable bytes",
+                    ),
+                );
+                return None;
+            }
+            bytes.truncate(len);
             let mut body = Writer::with_capacity(4 + bytes.len());
             body.write_bytes(&bytes);
             ok(body.as_slice())
@@ -210,6 +241,36 @@ mod tests {
         );
         assert!(ask(&fake, &mono, RNG_PORT, RNG_FILL, &[1, 0]).is_none());
         assert!(ask(&fake, &mono, RNG_PORT, RNG_FILL, &[1, 0, 0, 0, 0]).is_none());
+    }
+
+    /// A host without a random source (the TS `random` import throws and nothing is written) or
+    /// one that writes zeros: `Rng.fill` is unavailable, never zeros with status 0 (ADR-049, PO-11).
+    #[test]
+    fn rng_fill_is_unavailable_when_the_host_has_no_random_source() {
+        struct Untouched;
+        impl Platform for Untouched {
+            fn now_ms(&self) -> f64 {
+                0.0
+            }
+            fn random(&self, _out: &mut [u8]) {}
+            fn log(&self, _level: u8, _bytes: &[u8]) {}
+        }
+        struct Zeros;
+        impl Platform for Zeros {
+            fn now_ms(&self) -> f64 {
+                0.0
+            }
+            fn random(&self, out: &mut [u8]) {
+                out.fill(0);
+            }
+            fn log(&self, _level: u8, _bytes: &[u8]) {}
+        }
+        let mono = Monotonic::default();
+        for len in [0_u32, 1, 16, 1000] {
+            let args = len.to_le_bytes();
+            assert!(answer(&Untouched, &mono, RNG_PORT, RNG_FILL, 1, &args).is_none(), "{len}");
+            assert!(answer(&Zeros, &mono, RNG_PORT, RNG_FILL, 1, &args).is_none(), "{len}");
+        }
     }
 
     #[test]
