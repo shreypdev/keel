@@ -159,7 +159,7 @@ fn l2_event_helpers_accept_parameters_named_like_generated_locals() {
     let rt = Runtime::new();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
-    let _subscription = on_l2_events_fired(&rt.ctx(), move |w, r, payload| {
+    let _subscription = on_l2_events_fired(&rt.ctx(), move |_ctx, w, r, payload| {
         sink.lock().unwrap().push((w, r, payload));
     });
     rt.event(

@@ -31,6 +31,9 @@ pub(crate) struct Stats {
     pub polls: AtomicU64,
     /// Executor turns executed.
     pub turns: AtomicU64,
+    /// Signal writes refused because the writing thread did not hold this runtime's core lock
+    /// (E0065, ADR-035).
+    pub off_core_writes: AtomicU64,
 }
 
 impl Stats {

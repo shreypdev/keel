@@ -171,6 +171,18 @@ waiting for an event loop.
    `break` out of `for await`, Kotlin cancel the collector, Swift `break` or cancel the task);
    within 1 s `open_streams` is back to its earlier value and `produced` stays below 200.
 5. A short stream ends: `ticks(3)` yields `0,1,2` and completes; `ticks(0)` completes with no items.
+6. A typed error part-way (ADR-036: `impl Stream<Item = Result<T, E>>`, flag 2 carries only the
+   stream's own `E`): `probe.ticks_then_fail(5, 3, 7)` yields `0,1,2` and then fails with the
+   stream's own error, `LabError.Rejected { code: 7, reason: "stopped at 3" }` (Swift
+   `LabError.rejected`, Kotlin `LabError.Rejected`, TypeScript a `LabError` of that variant), never a
+   wire error; `ticks_then_fail(3, 9, 7)` yields `0,1,2` and completes normally.
+7. A stream the core cancels (ADR-036: flag 3, status 3). Take a snapshot; open
+   `probe.ticks_then_fail(1000000, 999999, 1)` (a stream **with** an error type) and read 2 items; then
+   `restore` the snapshot. The probe is not a store, so the restore invalidates it and ends the stream:
+   the iteration fails as **cancelled by the core** (`UndraCallError.cancelledByCore` in Swift,
+   `UndraCallError.CancelledByCore` in Kotlin and TypeScript), not as a `LabError` and
+   not as a wire decode error (Kotlin `WireException`, TypeScript `WireError`), within 1 s; `open_streams`
+   is back to its value before the step. Close the probe.
 
 ### S08 store observe: initial change-set
 
@@ -358,13 +370,25 @@ List `s14`; the server serves `[]`. A handle observes it.
    contains `E_REENTRANT` (Swift `UndraCallError.refused`, the core's own refusal; Kotlin `UndraCallError.Refused`,
    raised by the runtime's guard, which answers with the same reply before the call reaches the core);
    `explode` itself fails as in step 1; afterwards `add(1, 2) == 3`.
-6. Shutdown with a typed call in flight (the last step of the run: it ends the core). Start
+6. Shutdown with a typed call in flight (it ends the core). Start
    `fail_later(5000, 1)`, wait 100 ms, shut the core down: the call fails as **closed** (Swift
    `UndraCallError.unavailable(.closed)`, Kotlin `UndraCallError.Unavailable` with transport reason `CLOSED`)
    within 1 s. Then, on the shut-down core, the generated `add(1, 2)` fails the same way and
    `Counter.increment()` on a store of that core returns (`onError` received `Unavailable`, closed). The
    shut-down core is no longer the shared one: `UndraCore.current` is nil/null, and a generated constructor
    with the default core fails as in S16.5. The process is alive.
+7. Closing ends the core's work, and a new load starts fresh (ADR-034; the last step of the run). Before
+   step 6's shutdown a timer-paced core task is running (`Stress.start`); for 200 ms after the shutdown
+   no port call reaches the runner's adapters (the runner counts the calls its Clock, Log, Http and Kv
+   adapters receive). Then `UndraCore.load` with the same options succeeds again in the same process
+   (Kotlin: `close()` reached the JNI `UndraNative.shutdown`; Swift: `undra_shutdown`), `stats()` of the
+   new core reports no live handles, the generated `add(1, 2) == 3` runs on it, for 200 ms its Clock
+   adapter receives no call (the new core runs no timer-paced task), and it closes cleanly. After each
+   close, the native core reports no thread of its own still running: with no core loaded,
+   `undra_stats_json` (Kotlin `UndraNative.statsJson()`) says `runtime_threads == 0`. That is the check
+   that sees a task which survived the shutdown: its port calls never reach the runner's adapters (Kotlin
+   detaches the transport first; the native shutdown retires the port registrations and the Swift
+   adapters are detached), so the windows alone cannot.
 
 **wasm (TypeScript)** — the shipped wasm profile aborts on panic (SPEC section 7), so containment means
 the host survives and recovers:
@@ -417,10 +441,12 @@ returns; TypeScript awaits them.
   which both wasm modes have (a socket has none yet: `UndraModeError`).
 * The Kotlin runner runs on the JVM with a single-thread "main" executor (`UndraDispatchers`), the Swift
   runner on the main actor; both load the real native library.
-* S17 steps 5 and 6 are native-only (Kotlin and Swift): the wasm core cannot call out of a panic
-  into a synchronous port (step 5) and a trapped core has nothing left to shut down (step 6); the wasm
-  step 5 covers the same ground for a core that is gone. Step 6 ends the core, so it is the last step
-  of the last scenario a native runner runs.
+* S17 steps 5, 6 and 7 are native-only (Kotlin and Swift): the wasm core cannot call out of a panic
+  into a synchronous port (step 5), and a trapped core has nothing left to shut down or reload (steps 6
+  and 7; a fresh `UndraCore.load` after the trap is what wasm step 3 already does); the wasm step 5
+  covers the same ground for a core that is gone. Steps 6 and 7 end and reload the core, so they are the
+  last steps of the last scenario a native runner runs.
+* S07 step 7 restores a snapshot the way S15 does on each platform (TypeScript through the wasm export).
 * Every platform reports a **command** (a synchronous method that returns nothing and has no error type)
   through `LoadOptions.onError` / `onError` instead of throwing or rejecting (ADR-032, and its amendment A for
   Kotlin and TypeScript); each runner records those reports (`UndraUnhandledError`: operation, error), and

@@ -190,4 +190,11 @@ internal class FakeNative : NativeApi {
     }
 
     override fun statsJson(): String = stats
+
+    val shutdowns = AtomicInteger()
+
+    override fun shutdown() {
+        checkNotInCallback("shutdown")
+        shutdowns.incrementAndGet()
+    }
 }

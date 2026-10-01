@@ -147,7 +147,7 @@ fn deliver_lifecycle(rt: &Runtime, state: AppState) {
 ///
 /// let seen = Arc::new(Mutex::new(Vec::new()));
 /// let sink = seen.clone();
-/// let _subscription = on_connectivity_changed(&t.ctx(), move |online, kind| {
+/// let _subscription = on_connectivity_changed(&t.ctx(), move |_ctx, online, kind| {
 ///     sink.lock().unwrap().push((online, kind));
 /// });
 ///
@@ -265,7 +265,7 @@ impl Connectivity for ScriptedConnectivity {
 /// app.attach(t.runtime());
 /// let seen = Arc::new(Mutex::new(Vec::new()));
 /// let sink = seen.clone();
-/// let _subscription = on_lifecycle_changed(&t.ctx(), move |state| sink.lock().unwrap().push(state));
+/// let _subscription = on_lifecycle_changed(&t.ctx(), move |_ctx, state| sink.lock().unwrap().push(state));
 ///
 /// app.set(AppState::Background);
 /// app.set(AppState::Active);
@@ -359,7 +359,7 @@ mod tests {
     fn record_connectivity(t: &TestRuntime) -> Arc<Mutex<Vec<(bool, NetKind)>>> {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
-        crate::on_connectivity_changed(&t.ctx(), move |online, kind| {
+        crate::on_connectivity_changed(&t.ctx(), move |_ctx, online, kind| {
             sink.lock().push((online, kind))
         })
         .detach();
@@ -463,7 +463,7 @@ mod tests {
         let t = TestRuntime::new();
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
-        crate::on_lifecycle_changed(&t.ctx(), move |state| sink.lock().push(state)).detach();
+        crate::on_lifecycle_changed(&t.ctx(), move |_ctx, state| sink.lock().push(state)).detach();
         let app = ScriptedLifecycle::new();
         app.attach(t.runtime());
         app.script([AppState::Inactive, AppState::Background]);

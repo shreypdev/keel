@@ -1,0 +1,8 @@
+error: error[undra::E0005]: the items of the stream in `Result<impl Stream<Item = Result<u32, ItemError>>, OpenError>` fail with `ItemError` but its opening fails with `OpenError`
+         = note: a stream method has one error type: the platforms throw it whether the stream fails to open or ends with an error part-way
+         = help: use the same `#[undra::error]` enum for both (`OpenError`), or one enum with a variant for each case
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0005
+  --> tests/ui/e0005_stream_item_error_mismatch.rs:34:25
+   |
+34 | pub fn ticks(n: u32) -> Result<impl Stream<Item = Result<u32, ItemError>>, OpenError> {
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

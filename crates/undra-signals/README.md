@@ -53,7 +53,7 @@ assert_eq!(double.get(), 22);
 | `CellSlot` | Where a store keeps its `StoreCell`: empty until first use, then one shared cell for the store's life (the hidden field `#[undra::store]` adds). `get_or_init`, `get_or_try_init`. |
 | `SignalsError` | Why a signal could not be attached: already attached, out of order, unknown signal. |
 | `ChangeSink`, `set_sink`, `with_sink` | Where committed change-sets go. |
-| `set_write_checker` | Lets the embedder say which threads may write signals; debug builds assert it on every write that reaches the host or other nodes. |
+| `set_write_checker`, `WriteError` | Lets the embedder say which threads may write the signals of a store owned by which runtime; every build asks it on every write that reaches the host or other nodes and refuses the rest (E0065 panic, or `WriteError` from `try_set` / `try_update`; ADR-035). |
 | `next_txn_id`, `ALL_SIGNALS` | Transaction ids; the "every signal" id. |
 | `testing::CaptureSink` | Records change-sets in tests. |
 

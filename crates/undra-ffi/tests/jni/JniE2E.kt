@@ -224,6 +224,44 @@ fun main() {
         core.release(counter)
     }
 
+    check("close while JVM threads are calling (ADR-034): they end, the native threads exit, a new load works") {
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val unexpected = CopyOnWriteArrayList<Throwable>()
+        val workers = (0 until 4).map { t ->
+            Thread {
+                var i = 0L
+                while (!stop.get()) {
+                    try {
+                        core.callSync(on(calculator, "add"), method("Calculator", "add"), i64(t.toLong()) + i64(i++))
+                        runBlocking { core.call(on(calculator, "add"), method("Calculator", "add"), i64(1) + i64(2)) }
+                    } catch (e: dev.undra.runtime.UndraException) {
+                        // "closed", once close has begun: expected.
+                    } catch (e: Throwable) {
+                        unexpected.add(e)
+                    }
+                }
+            }.also { it.start() }
+        }
+        Thread.sleep(50)
+        val closer = Thread { core.close() }.also { it.start() }
+        core.close()
+        closer.join(10_000)
+        stop.set(true)
+        workers.forEach { it.join(10_000) }
+        expect(unexpected.isEmpty()) { "unexpected failures: $unexpected" }
+        expect(workers.none { it.isAlive } && !closer.isAlive) { "a thread is stuck after close" }
+        val stats = UndraNative.statsJson()
+        expect("\"initialized\":false" in stats && "\"runtime_threads\":0" in stats) { "after close: $stats" }
+        val again = UndraCore.load(LoadOptions(expectedSchemaHash = UndraNative.schemaHash().toULong()))
+        try {
+            val fresh = again.construct(Fnv.fnv1a32("Calculator"), method("Calculator", "new"), i64(7))
+            val sum = again.callSync(CallTarget.ObjectMethod(Handle(fresh), method("Calculator", "add")), method("Calculator", "add"), i64(1) + i64(2))
+            expectEq(10L, Codecs.i64.decodeAll(sum), "add on the fresh core")
+        } finally {
+            again.close()
+        }
+    }
+
     core.close()
     println("---- $passed passed, $failures failed")
     // Exit through the normal path on purpose: the core thread is a daemon and must not keep the JVM alive.

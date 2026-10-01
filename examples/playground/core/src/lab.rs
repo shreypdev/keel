@@ -285,7 +285,9 @@ impl Drop for Flight {
 /// An object that reports how the core saw the calls made on it: what cancellation and stream
 /// backpressure do inside the core, which no amount of watching from the platform can show.
 pub struct Probe {
-    ctx: Ctx,
+    /// Weak (ADR-034): the object table the runtime owns holds the probe, so a `Ctx` here would
+    /// keep the runtime alive; a call upgrades it for as long as the call runs.
+    ctx: WeakCtx,
     shared: Arc<Shared>,
 }
 
@@ -294,7 +296,7 @@ impl Probe {
     /// A probe with every counter at zero.
     pub fn new(ctx: Ctx) -> Self {
         Probe {
-            ctx,
+            ctx: ctx.downgrade(),
             shared: Arc::new(Shared::default()),
         }
     }
@@ -310,7 +312,11 @@ impl Probe {
     /// Waits `ms` milliseconds and returns it. Cancelled before that, it counts as cancelled.
     pub async fn wait(&self, ms: u32) -> u32 {
         let flight = Flight::take_off(&self.shared);
-        self.ctx.sleep(Duration::from_millis(u64::from(ms))).await;
+        // A strong `Ctx` for this call only. The runtime is running while it dispatches the call,
+        // so the upgrade succeeds; if it went since, the shutdown answers the call anyway.
+        if let Ok(ctx) = self.ctx.upgrade() {
+            ctx.sleep(Duration::from_millis(u64::from(ms))).await;
+        }
         flight.land();
         ms
     }
@@ -323,6 +329,26 @@ impl Probe {
             next: 0,
             count,
             shared: self.shared.clone(),
+        }
+    }
+
+    /// The numbers `0..count` like `ticks`, except that it ends with the error `Rejected` (with
+    /// `code`) where the number `fail_at` would come, when `fail_at < count`: a stream that ends
+    /// with its typed error part-way (ADR-036). The items before it arrive first.
+    pub fn ticks_then_fail(
+        &self,
+        count: u32,
+        fail_at: u32,
+        code: i32,
+    ) -> impl Stream<Item = Result<u32, LabError>> {
+        FailingTicks {
+            ticks: Ticks {
+                next: 0,
+                count,
+                shared: self.shared.clone(),
+            },
+            fail_at,
+            code,
         }
     }
 
@@ -356,6 +382,31 @@ struct Ticks {
     shared: Arc<Shared>,
 }
 
+/// The stream behind [`Probe::ticks_then_fail`].
+struct FailingTicks {
+    ticks: Ticks,
+    fail_at: u32,
+    code: i32,
+}
+
+impl Stream for FailingTicks {
+    type Item = Result<u32, LabError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.ticks.next == self.fail_at && self.fail_at < self.ticks.count {
+            // One error, then the stream is over (the runtime ends it on an error item anyway).
+            self.ticks.next = self.ticks.count;
+            return Poll::Ready(Some(Err(LabError::Rejected {
+                code: self.code,
+                reason: format!("stopped at {}", self.fail_at),
+            })));
+        }
+        Pin::new(&mut self.ticks)
+            .poll_next(cx)
+            .map(|item| item.map(Ok))
+    }
+}
+
 impl Stream for Ticks {
     type Item = u32;
 
@@ -376,7 +427,7 @@ mod tests {
     use undra::meta::ids;
     use undra::runtime::testing::TestRuntime;
     use undra::wire::payload::{CallTarget, ReplyStatus, StreamFlag};
-    use undra::wire::{Decode, Encode};
+    use undra::wire::{Decode, Encode, Writer};
 
     use super::*;
 
@@ -643,6 +694,54 @@ mod tests {
         t.run_pending();
         assert_eq!(counters(&t, probe).produced, 21);
         assert_eq!(t.host().take_stream_items().len(), 4);
+    }
+
+    #[test]
+    fn a_stream_of_results_ends_with_its_typed_error_part_way() {
+        // ADR-036: the error item carries the stream's own `LabError` (flag 2), after the items
+        // before it, and nothing follows.
+        let t = TestRuntime::new();
+        let probe = probe(&t);
+        let args = |count: u32, fail_at: u32| {
+            let mut w = Writer::new();
+            count.encode(&mut w);
+            fail_at.encode(&mut w);
+            7_i32.encode(&mut w);
+            w.into_vec()
+        };
+        assert_eq!(t.call(method(probe, "ticks_then_fail"), 3, &args(5, 3)), 0);
+        t.runtime().stream_credit(3, 16);
+        t.run_pending();
+        let items = t.host().take_stream_items();
+        let flags: Vec<StreamFlag> = items.iter().map(|i| i.flag).collect();
+        assert_eq!(
+            flags,
+            [
+                StreamFlag::Item,
+                StreamFlag::Item,
+                StreamFlag::Item,
+                StreamFlag::Error
+            ]
+        );
+        assert_eq!(
+            LabError::decode_exact(&items[3].body).unwrap(),
+            LabError::Rejected {
+                code: 7,
+                reason: "stopped at 3".into()
+            }
+        );
+        // Not reached: a normal end.
+        assert_eq!(t.call(method(probe, "ticks_then_fail"), 4, &args(3, 9)), 0);
+        t.runtime().stream_credit(4, 16);
+        t.run_pending();
+        let flags: Vec<StreamFlag> = t
+            .host()
+            .take_stream_items()
+            .iter()
+            .map(|i| i.flag)
+            .collect();
+        assert_eq!(flags.last(), Some(&StreamFlag::End));
+        assert_eq!(flags.len(), 4);
     }
 
     #[test]

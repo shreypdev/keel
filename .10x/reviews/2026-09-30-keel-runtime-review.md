@@ -211,7 +211,7 @@ Every repro re-run against the checkout, plus new probes (`/private/tmp/keel-rt-
 | L6 | CLOSED | PL6: a cancelled future's `Drop` writes a signal without tripping the checker, whether the core was free or busy (the deferred path). |
 | L7 | CLOSED | PL7: 5,000 abandoned calls leave the set at 4,096. See NF2. |
 | L4 | CLOSED | PL4: `TestRuntime` runs `spawn_blocking` on `keel-blocking-1`, and a signal write there is refused. |
-| L3 | PARTLY | Debug now refuses the unscoped write loudly. Release (C11, `--release`): the write is accepted, 0 change-sets are delivered, and the core holds count=2 that the host never sees. `RuntimeSink::deliver` still drops silently when no runtime is current. |
+| L3 | PARTLY → CLOSED (2026-10-01, ADR-035, `wt/runtime-lifecycle`) | Debug now refuses the unscoped write loudly. Release (C11, `--release`): the write is accepted, 0 change-sets are delivered, and the core holds count=2 that the host never sees. `RuntimeSink::deliver` still drops silently when no runtime is current. *Closed by ADR-035:* the write is refused before it changes anything in every build (E0065), checked against the store's owning runtime, and change-sets are routed by owner, never by the writing thread; `crates/undra-runtime/tests/write_context.rs` runs in both profiles in CI. |
 | L2 | DOCUMENTED ONLY | T3 unchanged: the hook's first port call reaches the host 6/21/52 µs (min/median/p99) after `Runtime::new` returns. SPEC now tells hosts to register ports first. |
 | N5 | CLOSED | Observed is recorded only after the delivery succeeds. N1-N4 and N6-N10 were out of scope and are unchanged. |
 

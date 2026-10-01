@@ -445,7 +445,10 @@ public final class UndraCore: @unchecked Sendable {
     /// consumer's unread window drops below 8, so the core never runs more than about 16 items
     /// ahead of the consumer. Ending the stream early (cancelling the consuming task, or dropping
     /// the stream) cancels it in the core. A stream that fails throws `UndraReplyError` from
-    /// `next()`; typed stream errors arrive as `status == .error` with the encoded `E` in `body`.
+    /// `next()`, in the vocabulary of a failed reply (docs/SPEC.md sections 3.4 and 3.7, ADR-036):
+    /// the stream's own typed error arrives as `status == .error` with the encoded `E` in `body`;
+    /// a stream the core ended itself as `.cancelled`, one that panicked as `.panic` and one the
+    /// core refused as `.badRequest`, each with the body a reply of that status carries.
     public func stream(_ target: CallTarget, method: UInt32, args: [UInt8]) -> AsyncThrowingStream<[UInt8], any Error> {
         return stream(target, method: method, args: args, decode: { $0 })
     }
@@ -462,7 +465,9 @@ public final class UndraCore: @unchecked Sendable {
     ///   - decode: turns the body of one item into the element. If it throws, the stream ends with
     ///     that error (after `mapError`) and is cancelled in the core.
     ///   - mapError: turns a failure of the stream (an `UndraReplyError` carrying a typed error, for
-    ///     instance) into the error the consumer sees. The default passes it through.
+    ///     instance) into the error the consumer sees. The default passes it through; generated
+    ///     code passes `UndraCallError.mapped(streamFailure:)` or
+    ///     `UndraCallError.mapped(streamFailure:domain:)`.
     public func stream<Item: Sendable>(
         _ target: CallTarget,
         method: UInt32,
@@ -1029,7 +1034,27 @@ extension UndraCore: UndraInbound {
             channel.finish(.ended)
         case .error:
             channel.finish(.failed(UndraReplyError(status: .error, body: Array(item.body))))
+        case .failed:
+            // The last item of the stream in the core whatever its body says, so nothing is
+            // cancelled even when the body does not decode.
+            channel.finish(.failed(UndraCore.streamFailureError(item.body)))
         }
+    }
+
+    /// The error a `.failed` stream item ends its stream with (ADR-036): the failed reply it
+    /// stands for, an `UndraReplyError` with the item's status and the docs/SPEC.md section 3.4
+    /// body of that status, so that it maps exactly as a failed reply does. A body that does not
+    /// decode is `UndraProtocolError.malformedMessage`.
+    static func streamFailureError(_ body: ArraySlice<UInt8>) -> any Error {
+        let failure: Wire.StreamFailure
+        do {
+            failure = try Wire.StreamFailure.decode(slice: body)
+        } catch let error as WireError {
+            return UndraProtocolError.malformedMessage(context: "stream failure", error: error)
+        } catch {
+            return error
+        }
+        return UndraReplyError(status: failure.status, body: failure.replyBody())
     }
 
     func onPortCall(portId: UInt32, methodId: UInt32, portCallId: UInt32, args: [UInt8]) -> PortCallOutcome {

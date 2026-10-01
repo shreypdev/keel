@@ -107,6 +107,8 @@ class MalformedInputTests : Suite() {
             assertWire<WireException.InvalidUtf8> { Payloads.Hello.decode(bad) }
             assertWire<WireException.InvalidUtf8> { Payloads.Log.decode(bytesOf(1) + bad) }
             assertWire<WireException.InvalidUtf8> { Payloads.Reply(1u, Payloads.ReplyStatus.BAD_REQUEST, bad).readBadRequestReason() }
+            assertEq(5, assertWire<WireException.InvalidUtf8> { Payloads.StreamFailure.decode(bytesOf(3) + bad + bytesOf(0, 0, 0, 0)) }.at)
+            assertEq(9, assertWire<WireException.InvalidUtf8> { Payloads.StreamFailure.decode(bytesOf(2, 0, 0, 0, 0) + bad) }.at)
         }
 
         case("InvalidTag: every tag-bearing type names itself and the offset of the bad byte") {
@@ -124,7 +126,9 @@ class MalformedInputTests : Suite() {
             tag("Envelope.Kind", 14, 0) { Envelope.decode(validEnvelope.copyOf().also { it[14] = 0 }) }
             tag("ReplyStatus", 4, 6) { Payloads.Reply.decode(bytesOf(0, 0, 0, 0, 6)) }
             tag("PortStatus", 4, 3) { Payloads.PortReply.decode(bytesOf(0, 0, 0, 0, 3)) }
-            tag("StreamFlag", 4, 3) { Payloads.StreamItem.decode(bytesOf(0, 0, 0, 0, 3)) }
+            tag("StreamFlag", 4, 4) { Payloads.StreamItem.decode(bytesOf(0, 0, 0, 0, 4)) }
+            tag("StreamFailure.status", 0, 1) { Payloads.StreamFailure.decode(bytesOf(1, 0, 0, 0, 0, 0, 0, 0, 0)) }
+            tag("StreamFailure.status", 0, 6) { Payloads.StreamFailure.decode(bytesOf(6, 0, 0, 0, 0, 0, 0, 0, 0)) }
             tag("ChangeOp", 24, 3) { Payloads.ChangeSet.decode(unhex("00".repeat(8) + "01000000" + "00".repeat(12) + "03" + "00000000")) }
             tag("CallTarget", 0, 4) { Payloads.Call.decode(bytesOf(4)) }
             tag("PatchOp", 4, 5) { KeyedPatch.decodePatch(bytesOf(1, 0, 0, 0, 5), Codecs.u8) }
@@ -161,6 +165,9 @@ class MalformedInputTests : Suite() {
             assertWire<WireException.TrailingBytes> { Payloads.TimerFired.decode(ByteArray(5)) }
             assertWire<WireException.TrailingBytes> { Payloads.Hello.decode(Payloads.Hello("v", 1uL, "p", "m").toByteArray() + 0) }
             assertWire<WireException.TrailingBytes> { Payloads.Log.decode(Payloads.Log(1u, "t", "m").toByteArray() + 0) }
+            assertWire<WireException.TrailingBytes> {
+                Payloads.StreamFailure.decode(Payloads.StreamFailure(Payloads.ReplyStatus.CANCELLED, "r", "").toByteArray() + 0)
+            }
             assertWire<WireException.TrailingBytes> { Payloads.Snapshot.decode(bytesOf(0, 0, 0, 0, 0, 0, 0, 0, 1)) }
             assertWire<WireException.TrailingBytes> { Payloads.ChangeSet.decode(Payloads.ChangeSet(1u, emptyList()).toByteArray() + 0) }
             assertWire<WireException.TrailingBytes> { KeyedPatch.decodePatch(bytesOf(0, 0, 0, 0, 1), Codecs.u8) }

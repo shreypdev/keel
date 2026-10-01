@@ -30,9 +30,10 @@ pub mod query;
 /// What an application core imports: `use undra::prelude::*;`.
 ///
 /// It brings the reactive primitives (`Signal`, `Computed`, `Effect`, `txn`), the runtime
-/// handle (`Ctx`), the wire scalars a public signature may use (`Bytes`, `Uuid`, `Timestamp`,
-/// `Duration`; `Handle` is the runtime's reference to an object instance and is not a schema
-/// type, so a public signature cannot use it) and the six attribute macros
+/// handles (`Ctx`, and `WeakCtx` with its `Gone` for anything that outlives a call, ADR-034),
+/// the wire scalars a public signature may use (`Bytes`, `Uuid`, `Timestamp`, `Duration`;
+/// `Handle` is the runtime's reference to an object instance and is not a schema type, so a
+/// public signature cannot use it) and the six attribute macros
 /// (`#[undra::api]` and friends are also reachable as `undra::api`, ...). It also brings
 /// [`CtxQuery`](crate::query::CtxQuery), so `ctx.query()` and `ctx.mutate(..)` work, and
 /// [`CtxPorts`](undra_ports::CtxPorts), so `ctx.http()`, `ctx.kv()` and the other standard
@@ -43,7 +44,7 @@ pub mod prelude {
     pub use undra_macros::{api, error, mutation, port, query, store};
     pub use undra_ports::CtxPorts;
     pub use undra_query::CtxQuery;
-    pub use undra_runtime::Ctx;
+    pub use undra_runtime::{Ctx, Gone, WeakCtx};
     pub use undra_signals::{Computed, Effect, Signal, txn};
     pub use undra_wire::{Bytes, Handle, Timestamp, Uuid};
 }

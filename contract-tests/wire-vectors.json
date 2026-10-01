@@ -316,6 +316,56 @@
    },
    "hex": "0200000001000000620200000002000000616101000000",
    "note": "sorted by encoded key bytes, so the u32 length prefix dominates: \"b\" (len 1) precedes \"aa\" (len 2)"
+  },
+  {
+   "name": "stream_item_error_typed",
+   "type": "stream item payload",
+   "value": {
+    "call_id": 7,
+    "flag": 2,
+    "body_hex": "0200"
+   },
+   "hex": "07000000020200",
+   "note": "flag 2 carries only the stream's own E (here enum Filter, variant Done) and ends the stream; ADR-036"
+  },
+  {
+   "name": "stream_item_failed_cancelled",
+   "type": "stream item payload",
+   "value": {
+    "call_id": 7,
+    "flag": 3,
+    "status": 3,
+    "message": "the runtime shut down",
+    "detail": ""
+   },
+   "hex": "070000000303150000007468652072756e74696d65207368757420646f776e00000000",
+   "note": "flag 3: the call failed (status u8, message String, detail String); 3 = cancelled by the core, mapped like a reply with status 3; ADR-036"
+  },
+  {
+   "name": "stream_item_failed_panic",
+   "type": "stream item payload",
+   "value": {
+    "call_id": 9,
+    "flag": 3,
+    "status": 2,
+    "message": "boom",
+    "detail": "at core.rs:1"
+   },
+   "hex": "09000000030204000000626f6f6d0c000000617420636f72652e72733a31",
+   "note": "flag 3, status 2 = panicked: message and detail are exactly the String message + String backtrace body of a status 2 reply; ADR-036"
+  },
+  {
+   "name": "stream_item_failed_refused",
+   "type": "stream item payload",
+   "value": {
+    "call_id": 9,
+    "flag": 3,
+    "status": 5,
+    "message": "stale handle",
+    "detail": ""
+   },
+   "hex": "0900000003050c0000007374616c652068616e646c6500000000",
+   "note": "flag 3, status 5 = refused: message is the reason, as in a status 5 reply; statuses other than 2, 3 and 5 are invalid; ADR-036"
   }
  ]
 }

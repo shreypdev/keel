@@ -20,6 +20,10 @@
 /// statuses (`panic`, `cancelled`, `badRequest`, a stream that opened where a plain reply was
 /// expected) are not part of a method's signature. Generated methods do not expose it: they throw
 /// their own `E`, `CancellationError`, or ``UndraCallError`` (ADR-032).
+///
+/// A stream ends with one too: its own typed error item as `.error` with the encoded `E`, and a
+/// failed item (`Wire.StreamFailure`, ADR-036) as the reply it stands for, with that item's status
+/// and the body a reply of that status carries.
 public struct UndraReplyError: Error, Sendable, Equatable {
     /// The reply status.
     public let status: ReplyStatus

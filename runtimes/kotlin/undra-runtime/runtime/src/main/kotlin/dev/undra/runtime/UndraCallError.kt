@@ -2,7 +2,6 @@ package dev.undra.runtime
 
 import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
-import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.WireException
 import dev.undra.runtime.wire.decodeAll
 import kotlin.coroutines.cancellation.CancellationException
@@ -113,26 +112,25 @@ public sealed class UndraCallError(message: String, cause: Throwable? = null) : 
         /**
          * The error a generated stream method ends with, for a failure of [UndraCore.stream].
          *
-         * A stream's error item carries a `String` when the core ended the stream itself (a restore or a
-         * shutdown: `"cancelled: ..."`, or a panic: the message) and the encoded `E` for a typed error, so a
-         * stream without an error type reads the body as that `String`.
+         * A stream fails in the vocabulary of a failed reply (ADR-036): a stream the core ended itself (a restore
+         * or a shutdown) is [CancelledByCore], one that panicked is [Panicked] with the message and backtrace, one
+         * the core refused is [Refused], exactly as for a call, and one the runtime could not read is [Malformed].
+         * Only a stream with an error type can end with a typed error, so one here (reply status `ERROR`) is
+         * [Malformed].
          */
         public fun mappedStream(error: Throwable): Throwable {
-            if (error is UndraReplyException && error.status == ReplyStatus.ERROR) return fromStreamItem(error.body)
+            if (error is UndraReplyException && error.status == ReplyStatus.ERROR) {
+                return Malformed("a stream without an error type ended with a typed error item (${error.body.size} bytes)")
+            }
             return classify(error)
         }
 
         /**
-         * The same for a stream whose Rust signature carries an error type `E`: the body is tried as `E` first,
-         * then as the core's `String`. The two encodings can overlap for an `E` whose bytes also read as one
-         * `String`; `E` wins (ADR-036 removes the ambiguity with a distinct wire flag).
+         * The same for a stream whose Rust signature carries an error type `E` (a `Result<impl Stream, E>`, or a
+         * stream of `Result<T, E>`): its typed error item is decoded with [domain] and returned as `E`, and one that
+         * does not decode as `E` is [Malformed]. Every other failure maps as for a stream without an error type.
          */
-        public fun <E : Throwable> mappedStream(error: Throwable, domain: UndraCodec<E>): Throwable {
-            if (error is UndraReplyException && error.status == ReplyStatus.ERROR) {
-                return decodeTyped(error.body, domain) ?: fromStreamItem(error.body)
-            }
-            return classify(error)
-        }
+        public fun <E : Throwable> mappedStream(error: Throwable, domain: UndraCodec<E>): Throwable = mapped(error, domain)
 
         /** [error] as the [UndraCallError] a report carries: what [mapped] returns, or [Malformed] for a failure that is not Undra's. */
         internal fun asCallError(error: Throwable): UndraCallError =
@@ -187,17 +185,6 @@ public sealed class UndraCallError(message: String, cause: Throwable? = null) : 
                 ReplyStatus.STREAM_OPENED -> Malformed("the core opened a stream where a single reply was expected")
                 ReplyStatus.OK -> Malformed("the core answered ok as a failure")
             }
-
-        /** A stream error item (flag 2) read as the `String` the core writes when it ends a stream itself. */
-        private fun fromStreamItem(body: ByteArray): UndraCallError {
-            val text = try {
-                val reader = UndraReader(body)
-                reader.readStr().also { reader.finish() }
-            } catch (e: WireException) {
-                return Malformed("a stream error item that does not decode (${body.size} bytes)", e)
-            }
-            return if (text.startsWith("cancelled: ")) CancelledByCore() else Panicked(text, "")
-        }
     }
 }
 

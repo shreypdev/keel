@@ -9,7 +9,9 @@ import dev.undra.runtime.PortImpl
 import dev.undra.runtime.UndraUnhandledError
 import dev.undra.runtime.adapters.ConnectivityEvents
 import dev.undra.runtime.adapters.StandardPorts
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * What a scenario runs against: the one core of this process and the adapters it was loaded with.
@@ -22,6 +24,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  * @property server the `Http` port: the routes and the requests it saw.
  * @property kv the `Kv` port: the writes the core made.
  * @property log the `Log` port: the records the core emitted.
+ * @property portCalls how many calls the four adapters above received (S17.7).
+ * @property options the options [core] was loaded with; S17.7 loads a fresh core with them after the shutdown.
  * @property unhandled what `LoadOptions.onError` received: the failures of commands and of changes that could not be
  *   applied (ADR-032, amendment A). A scenario that causes one asserts it and then calls [takeUnhandled].
  */
@@ -31,6 +35,8 @@ class World(
     val server: FakeServer,
     val kv: MemoryKv,
     val log: CapturingLog,
+    val portCalls: PortCallCounter,
+    val options: LoadOptions,
     val unhandled: CopyOnWriteArrayList<UndraUnhandledError> = CopyOnWriteArrayList(),
 ) {
     /** What `onError` received since the last call, oldest first; the list is empty afterwards. */
@@ -60,8 +66,9 @@ class World(
 }
 
 /**
- * Makes the adapters and loads the core once. The first load of a process claims the native library for
- * good (`UndraCore.load` cannot be undone), so S16 attempts its failing load before it calls [load].
+ * Makes the adapters and loads the core the scenarios share. A load claims the native library until that core
+ * is closed (ADR-034), so S16 attempts its failing load before it calls [load]; S17.7 loads a second core with
+ * [World.options] after closing the first.
  */
 class Bootstrap {
     /** The manual `Clock` port the core is loaded with. */
@@ -76,6 +83,9 @@ class Bootstrap {
     /** The capturing `Log` port the core is loaded with. */
     val log = CapturingLog()
 
+    /** Counts the calls the four adapters above receive. */
+    val portCalls = PortCallCounter()
+
     /** What `LoadOptions.onError` received. */
     val unhandled = CopyOnWriteArrayList<UndraUnhandledError>()
 
@@ -83,19 +93,48 @@ class Bootstrap {
     var world: World? = null
         private set
 
-    /** The adapters of the harness, by port id (`LoadOptions.adapters`). */
+    /** The adapters of the harness, by port id (`LoadOptions.adapters`), each counting its calls in [portCalls]. */
     private fun adapters(): Map<UInt, PortImpl> = mapOf(
-        StandardPorts.Clock.PORT_ID to clock.portImpl(),
-        StandardPorts.Http.PORT_ID to server.portImpl(),
-        StandardPorts.Kv.PORT_ID to kv.portImpl(),
-        StandardPorts.Log.PORT_ID to log.portImpl(),
+        StandardPorts.Clock.PORT_ID to portCalls.counting("Clock", clock.portImpl()),
+        StandardPorts.Http.PORT_ID to portCalls.counting("Http", server.portImpl()),
+        StandardPorts.Kv.PORT_ID to portCalls.counting("Kv", kv.portImpl()),
+        StandardPorts.Log.PORT_ID to portCalls.counting("Log", log.portImpl()),
     )
 
     /** Loads the core with the bindings' schema hash and the harness adapters. */
     fun load(): World {
-        val core = UndraCore.load(
-            LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, adapters = adapters(), onError = { unhandled.add(it) }),
-        )
-        return World(core, clock, server, kv, log, unhandled).also { world = it }
+        val options = LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, adapters = adapters(), onError = { unhandled.add(it) })
+        val core = UndraCore.load(options)
+        return World(core, clock, server, kv, log, portCalls, options, unhandled).also { world = it }
     }
+}
+
+/**
+ * Counts the calls the core makes into the harness adapters, by port name. S17.7 uses it to see that a core that
+ * was shut down calls none of them any more.
+ */
+class PortCallCounter {
+    private val counts = ConcurrentHashMap<String, AtomicLong>()
+
+    /** [impl] with every method counting a call to [port] before it runs. */
+    fun counting(port: String, impl: PortImpl): PortImpl {
+        val count = counts.computeIfAbsent(port) { AtomicLong() }
+        val methods = LinkedHashMap<UInt, suspend (ByteArray) -> ByteArray>()
+        for ((id, method) in impl.methods) {
+            methods[id] = { args ->
+                count.incrementAndGet()
+                method(args)
+            }
+        }
+        return PortImpl(impl.sync, methods)
+    }
+
+    /** The calls [port] has received so far. */
+    fun count(port: String): Long = counts[port]?.get() ?: 0L
+
+    /** The calls every counted port has received so far, by port name. */
+    fun all(): Map<String, Long> = counts.entries.associate { it.key to it.value.get() }.toSortedMap()
+
+    /** The calls all counted ports have received so far. */
+    val total: Long get() = counts.values.sumOf { it.get() }
 }

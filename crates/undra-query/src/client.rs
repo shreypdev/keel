@@ -80,7 +80,7 @@ impl QueryClient {
     /// queue if the client is online. The runtime does this once at start-up; call it yourself
     /// only in a test that installed its fakes late.
     pub async fn hydrate(&self) {
-        self.shared.hydrate(&self.ctx).await;
+        self.shared.hydrate(&self.ctx.downgrade()).await;
     }
 
     /// How long an entry nobody observes stays cached (default 5 minutes). Applies to entries

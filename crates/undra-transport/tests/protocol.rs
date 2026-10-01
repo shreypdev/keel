@@ -149,7 +149,7 @@ fn an_event_reaches_the_subscribers_of_its_port_and_method() {
         .subscribe(
             7,
             9,
-            Box::new(move |payload| sink.lock().unwrap().push(payload.to_vec())),
+            Box::new(move |_ctx, payload| sink.lock().unwrap().push(payload.to_vec())),
         )
         .detach();
     let mut client = f.client();

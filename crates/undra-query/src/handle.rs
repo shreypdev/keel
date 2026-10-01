@@ -33,7 +33,7 @@ use std::any::Any;
 use std::sync::{Arc, OnceLock, Weak};
 
 use parking_lot::Mutex;
-use undra_runtime::{AnyObject, Ctx, UndraObjectDyn};
+use undra_runtime::{AnyObject, Ctx, UndraObjectDyn, WeakCtx};
 use undra_signals::{Signal, SignalsError, StoreCell};
 use undra_wire::Timestamp;
 
@@ -128,7 +128,9 @@ impl<Q: QueryDef> Sink for HandleInner<Q> {
 /// ```
 pub struct QueryHandle<Q: QueryDef> {
     inner: Arc<HandleInner<Q>>,
-    ctx: Ctx,
+    /// Weak (ADR-034): a handle lives in the object table, which the runtime owns, so a strong
+    /// `Ctx` here would keep a dropped runtime alive for as long as the platform holds it.
+    ctx: WeakCtx,
     shared: Arc<Shared>,
     key: QueryKey,
     sink_id: u64,
@@ -150,7 +152,7 @@ impl<Q: QueryDef> QueryHandle<Q> {
         ctx.txn(|| inner.apply(&view));
         QueryHandle {
             inner,
-            ctx: ctx.clone(),
+            ctx: ctx.downgrade(),
             shared: shared.clone(),
             key,
             sink_id,
@@ -184,14 +186,23 @@ impl<Q: QueryDef> QueryHandle<Q> {
     }
 
     /// Fetches again now, even if the data is fresh. A fetch already in flight is joined.
+    ///
+    /// A no-op once the runtime has been shut down or dropped.
     pub fn refetch(&self) {
-        self.shared.refetch(&self.ctx, &self.key);
+        if let Ok(ctx) = self.ctx.upgrade() {
+            self.shared.refetch(&ctx, &self.key);
+        }
     }
 
     /// Marks this entry stale; it refetches now, because this handle observes it.
+    ///
+    /// A no-op once the runtime has been shut down or dropped.
     pub fn invalidate(&self) {
+        let Ok(ctx) = self.ctx.upgrade() else {
+            return;
+        };
         self.shared.invalidate(
-            &self.ctx,
+            &ctx,
             &[Invalidate::Exact {
                 query_id: self.key.query_id,
                 params: self.key.params.to_vec(),
@@ -226,8 +237,9 @@ impl<Q: QueryDef> QueryHandle<Q> {
 
 impl<Q: QueryDef> Drop for QueryHandle<Q> {
     fn drop(&mut self) {
-        if !self.ctx.runtime().is_shut_down() {
-            self.shared.release(&self.ctx, &self.key, self.sink_id);
+        // A runtime that is shutting down or gone drops its cache with it.
+        if let Ok(ctx) = self.ctx.upgrade() {
+            self.shared.release(&ctx, &self.key, self.sink_id);
         }
     }
 }

@@ -267,9 +267,14 @@ PortReply payload: `port_call_id u32, status u8 (0 ok, 1 error, 2 unavailable), 
 
 ```
 call_id  u32
-flag     u8    0 = item, 1 = end, 2 = error
-body     flag 0: item T; flag 2: error E (or String if the stream has no error type)
+flag     u8    0 = item, 1 = end, 2 = error (the stream's own E), 3 = failed
+body     flag 0: item T
+         flag 1: empty
+         flag 2: E, the stream's own typed error
+         flag 3: status u8, message String, detail String
 ```
+Flag 2 carries **only the stream's own `E`** (ADR-036): only a method whose schema return is `Result<Stream<T>, E>` sends it, for an asynchronous opening that failed or an `Err(e)` item of an `impl Stream<Item = Result<T, E>>`; a host that receives flag 2 for a stream without an error type treats it as malformed. Flag 3 says **the call failed**, in the vocabulary of a failed reply (§3.4): `status` is 2 (panicked: `message` is the panic message, `detail` its backtrace), 3 (cancelled by the core: a restore that replaced the receiver, shutdown, or a runtime dropped by its owner; `message` is the reason, `detail` empty) or 5 (refused: `message` is the reason); any other status is invalid (`InvalidTag`, `StreamFailure.status`), as is a flag above 3. Every platform maps a flag-3 item exactly as it maps a failed reply with that status, to the same `UndraCallError` case: status 2 is `panicked` (message and backtrace), 3 is `cancelledByCore`, **5 is `refused`** (the reason), in Swift, Kotlin and TypeScript alike. The raw `stream` entry points end with the failed reply (Swift and TypeScript `UndraReplyError`, Kotlin `UndraReplyException`, with that status and the §3.4 body: message + detail for 2, empty for 3, message for 5) and the generated `mappedStream` / `mapped(streamFailure:)` turns it into the case; an item or a flag-3 body the runtime cannot read ends the stream as `malformed` (`UndraProtocolError`, `UndraProtocolException`, `UndraTransportError("protocol")`), and a flag-2 item on a stream without an error type is `malformed` too. Nothing is ever read from a message's text. Flags 1, 2 and 3 end the stream and need no credit.
+
 Flow control: the core sends at most `credit` items beyond what has been credited; the host grants credit with StreamCredit. Initial credit is 0; generated bindings grant 16 on subscribe and top up when consumption drops below 8. A Cancel with the stream's `call_id` closes it.
 
 ### 3.8 Keyed patch
@@ -314,7 +319,7 @@ All attribute macros are re-exported from the `undra` facade as `undra::api`, `u
 * On `impl Type { .. }` (object): a type takes one such block (a second is E0007, reported by the compiler through a constant named after the rule; a store's block must hold its constructors, E0011); every `pub fn` becomes a method; `pub fn new(..) -> Self`/`Result<Self,E>` and any fn returning `Self` becomes a constructor. Generates the dispatch function (§5.6), `impl UndraObject for Type` (type_id, name), and registers `ObjectMeta`. Receiver must be `&self` (objects are shared: `Arc<Type>`; interior mutability via signals or `Mutex`). `&mut self` is rejected (E0020).
 * On free `fn`: generates a dispatch entry and registers `FunctionMeta`.
 
-Method rules: parameters are wire types, or `ctx: &Ctx` / `ctx: Ctx` as the first parameter (constructors and free fns only; methods get `Ctx` from the object via `self.ctx` convention or `Ctx::current()`); return type is `T`, `Result<T,E>`, `impl Stream<Item = T>`, or `Result<impl Stream<Item = T>, E>`; `async fn` marks `is_async`.
+Method rules: parameters are wire types, or `ctx: &Ctx` / `ctx: Ctx` as the first parameter (constructors and free fns only; methods get `Ctx` from the object via `self.ctx` convention or `Ctx::current()`); return type is `T`, `Result<T,E>`, `impl Stream<Item = T>`, `Result<impl Stream<Item = T>, E>`, `impl Stream<Item = Result<T, E>>` or `Result<impl Stream<Item = Result<T, E>>, E>` (the same `E`; a different one is E0005); `async fn` marks `is_async`. A stream of `Result`s ends with its typed error part-way: an `Err(e)` item is sent as flag 2 and the stream is dropped (§3.7, ADR-036). It is recorded in the schema exactly as `Result<Stream<T>, E>`, so the canonical form, the hash and the generated platform code are those of a stream whose opening can fail.
 
 ### 4.2 `#[undra::error]`
 
@@ -322,7 +327,7 @@ On an enum. Requires `#[error("…")]` per variant (thiserror-style; `{0}`/`{fie
 
 ### 4.3 `#[undra::store]`
 
-On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (`Ctx`, config). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
+On a struct. Fields of type `Signal<T>` and `Computed<T>` are signals (in declaration order); other fields are private state (a `WeakCtx`, config; a `Ctx` field works but keeps the runtime alive until shutdown, ADR-034). `Lazy<T>` is reserved: it is rejected in v1 (E0001, "lazy lists are not available in v1"), as `undra-bindgen` rejects it. Generates `impl StoreObject for Type` (`cell`, `restore`), a `StoreRestorer` registration and the store part of the object meta (the struct must also have a `#[undra::api(store)] impl` block with at least one constructor; §16.3 has the details, including the hidden `CellSlot` field). Attributes: `#[undra(key = "id")]` on `Signal<Vec<T>>` enables keyed patches; `#[undra(no_coalesce)]` forces every commit of this signal to be delivered, and is recorded in its `SignalDef` so the platform mirrors apply every one of them (§11). `#[undra::store(restore = "Self::assemble")]` names the function that rebuilds the store from its plain signals on restore; it is required when the store has a `Computed` field (E0013).
 
 ### 4.4 `#[undra::port]`
 
@@ -346,9 +351,11 @@ The runtime is dependency-light (no tokio). It provides the executor, the core l
 
 * **Core lock.** A `parking_lot::Mutex<Core>` (native) / `RefCell` (wasm). Whoever holds it *is* the core loop. Sync calls from the host run on the caller's thread holding the lock. Async tasks are polled by the core thread holding the lock. This preserves "one mutator" semantics while keeping sync calls at mutex-acquire cost.
 * **Core thread** (native): one `std::thread` named `undra-core` that owns the executor loop: wait for work → lock → poll ready tasks (bounded batch, max 64) → unlock → repeat.
-* **Blocking pool** (native, and the test runtime): `undra_runtime::spawn_blocking(f)` runs `f` on a pool of `min(4, cores)` threads without the lock and resumes the awaiting task via the executor. `f` must not write signals: debug builds refuse such a write (the runtime installs `undra_signals::set_write_checker`, §16.1). The check is an allowlist (ADR-023): a signal write with consequences is allowed on a thread that holds a runtime's core lock (a dispatched call, a task poll, an event subscriber, `observe`, `restore`), on a `TestRuntime` driver thread and inside `testing::unchecked_writes`, and refused on every other thread (a pool worker, a host or embedder thread, a thread inside no runtime). Release builds do not evaluate it; the store's delivery lock (§16.1) keeps an off-core write from being overtaken.
+* **Blocking pool** (native, and the test runtime): `undra_runtime::spawn_blocking(f)` runs `f` on a pool of `min(4, cores)` threads without the lock and resumes the awaiting task via the executor. `f` must not write signals.
+* **The write rule (ADR-035, every build).** A signal write with consequences (the signal is attached to a store, or something depends on it) is allowed only on a thread that holds **the owning runtime's** core lock (a dispatched call, a task poll, an event subscriber, `observe`, `restore`, `Ctx::with_core`), on a `TestRuntime` driver thread and inside `testing::unchecked_writes`; a signal of no published store (owner `0`) accepts any thread that holds *a* core lock. Everything else (a pool worker, a host or embedder thread, a thread inside no runtime, another runtime's core) is refused **before the value changes, in release as in debug**: the write panics with the teaching message E0065 (§12), logged at error level through the owning runtime first and counted in `stats_json`'s `off_core_writes`; inside a dispatched call or a task the panic is contained like any other (status 2). `Signal::try_set` / `try_update` return `WriteError::OffCore { owner }` instead and `Signal::can_write` asks. The runtime records the owner on every store it publishes (`StoreCell::set_owner`) and installs the checker (`undra_signals::set_write_checker`, §16.1). A host thread that must write synchronously uses `Ctx::with_core(|| ..)`, which takes the core lock on the calling thread, makes the runtime current, runs the closure in one transaction and releases (`Err(Reentrant)` from a host callback or the core itself); everything else sends the value to the core (`ctx.spawn`, a call, the result of `spawn_blocking`). Change-sets go to the store's owner (§16.1 `ChangeSink::deliver_from`), never to whichever runtime the committing thread is in or to the global one.
 * **wasm**: single thread; `undra_poll()` export drives the executor; wakers call the `undra_host_schedule()` import (deduplicated per turn).
-* **Shutdown.** `undra_shutdown` / `Runtime::shutdown` first answers every call still in flight with status 3 (`cancelled`) and ends every open stream with a `StreamItem` flag 2 (error) whose `String` body starts `"cancelled: "`, each exactly once; then it stops and joins the core, timer and blocking threads, fails pending port calls with `PortError::Cancelled`, clears event subscribers and Rust port bindings (closures that hold a `Ctx` are reference cycles with the runtime), and drops every task and object under the core lock. Afterwards `call` answers status 5, and `spawn`, `sleep`, `port_call` and `event` on a surviving `Ctx` are no-ops that log a warning (never a panic, never queued). It must not be called from the core thread or a host callback (it would wait for itself); debug builds assert this (ADR-023). `Runtime::extension` values are not cleared. A cancelled task's future is always dropped on the core (with the core lock held), so user `Drop` code never runs concurrently with core code.
+* **Shutdown.** `undra_shutdown` / `Runtime::shutdown` first answers every call still in flight with status 3 (`cancelled`) and ends every open stream with a `StreamItem` flag 3 (failed, status 3 cancelled by the core, message `"the runtime shut down"`; §3.7, ADR-036), each exactly once; then it stops and joins the core, timer and blocking threads, fails pending port calls with `PortError::Cancelled`, clears event subscribers and Rust port bindings (closures that hold a `Ctx` are reference cycles with the runtime), and drops every task and object under the core lock. Afterwards `call` answers status 5, and `spawn`, `sleep`, `port_call` and `event` on a surviving `Ctx` are no-ops that log a warning (never a panic, never queued). It must not be called from the core thread or a host callback (it would wait for itself); debug builds assert this (ADR-023). `Runtime::extension` values are not cleared. A cancelled task's future is always dropped on the core (with the core lock held), so user `Drop` code never runs concurrently with core code. Shutdown first closes the runtime's *lifeline*: `Ctx::closed()`, `WeakCtx::closed()` and a pending `WeakCtx::sleep` complete with `Gone::ShutDown` before anything else happens, and `WeakCtx::upgrade` answers `Err(Gone::ShutDown)` from then on, even while the memory is alive (ADR-034).
+* **Owners and `Drop` (ADR-034).** The `Arc<Runtime>` that `Runtime::new` / `init` return is the owner; the global runtime's owner is the global slot, so `undra_shutdown` stays the only way to end it. The runtime's own call and stream tasks, the blocking pool's queued jobs, `undra-query`'s tasks and its query handles hold the runtime **weakly**, and event subscribers receive the `Ctx` as an argument, so a runtime whose app code keeps only `WeakCtx`s across awaits is freed when its owner drops it. With no runtime loaded, `undra_stats_json` (and JNI `statsJson`) reports `runtime_threads`, the threads `undra-runtime` started in the process that still run: `0` once a shutdown has joined them, which is how the contract runners check that closing ended the core's work instead of only detaching the host (S17.7). `Drop` then does what shutdown does, including answering what is in flight (status 3 for calls, the cancelled stream item for streams, each once: the `Host` is still owned by the runtime while it drops), closes the lifeline with `Gone::Dropped`, and joins the core, timer and blocking threads, except the one it runs on (the last strong reference can be released at the end of a poll on the `undra-core` thread, or by a blocking job). A `Ctx` kept in a long-lived place (a store field, a task that loops, a closure in an extension) still pins the runtime until `shutdown`, and so does a call or task whose future holds a `Ctx` across an await that does not complete: an async method's `ctx` parameter, or a port proxy (`ctx.http()`, `ctx.kv()`, which hold one) waiting on a port that never answers, keeps the runtime until the port answers or `shutdown` (the runtime's own call task holds it weakly, the method's future does not); `stats_json`'s `strong_refs` makes that visible.
 * **Host callbacks** (reply, change-set, port call) are invoked from whatever thread completed the work, **while the core lock may be held**. The host must not call back into the core synchronously from these callbacks except `undra_buf_free`; it enqueues onto its main thread. Violations are detected in every build and reported as `E_REENTRANT`: the runtime marks the calling thread for the duration of **every** host callback (`reply`, `change_set`, `stream_item`, `port_call`, `timer_set`, `log`, `schedule`) and each core-lock entry point refuses a thread that holds that runtime's core lock or is inside one of its callbacks (ADR-023). The second condition matters: a callback delivered on a thread that does not hold the core lock (an off-core commit hands its change-set to the host while holding the store's delivery lock) that waited for the core would deadlock against a core waiting for that delivery lock. `port_reply`, `timer_fired`, `stream_credit` and `stats_json` never take the core lock and stay allowed from callbacks.
 
 ### 5.2 Executor
@@ -368,10 +375,22 @@ impl Ctx {
     pub fn sleep(&self, d: Duration) -> impl Future<Output = ()>; // via Timer port
     pub fn query(&self) -> &QueryClient;                      // undra-query
     pub fn mutate<M: MutationDef>(&self, input: M::Input) -> MutationBuilder<M>;
-    pub fn events(&self) -> &Events;                          // subscribe to Connectivity/Lifecycle events
+    pub fn events(&self) -> &Events;                          // subscribe to Connectivity/Lifecycle events; subscribers receive (&Ctx, payload)
     pub fn current() -> Ctx;                                  // thread-local, valid inside any dispatched call
+    pub fn downgrade(&self) -> WeakCtx;                       // ADR-034
+    pub fn closed(&self) -> Closed;                           // completes (Gone::ShutDown) when shutdown starts, at once if it has
 }
+pub struct WeakCtx(..);                                       // Clone + Send + Sync; a Weak<Runtime>: does not keep the runtime alive
+impl WeakCtx {
+    pub fn upgrade(&self) -> Result<Ctx, Gone>;               // Err(ShutDown) once shutdown began (memory may be alive), Err(Dropped) after the last strong reference went
+    pub fn is_alive(&self) -> bool;                           // cheap, for loop conditions
+    pub fn closed(&self) -> Closed;                           // completes with the reason (the first one: a runtime shut down and then dropped says ShutDown)
+    pub fn sleep(&self, d: Duration) -> WeakSleep;            // Ok(()) after d, Err(Gone) as soon as the runtime goes; holds only the weak reference
+}
+pub enum Gone { ShutDown, Dropped }                           // Copy + Display + Error
 ```
+
+**The rule (ADR-034): a `Ctx` lives for a call or a task step; anything that outlives the call keeps a `WeakCtx`.** A `Ctx` is a strong reference; one kept by something the runtime owns (a task that loops, a subscriber, a store field) is a reference cycle that keeps the runtime and its threads alive until `shutdown`. The periodic-task idiom is `while weak.sleep(d).await.is_ok() { let Ok(ctx) = weak.upgrade() else { break }; work(&ctx).await }`, which ends with a typed outcome instead of spinning or pinning. A surviving strong `Ctx` after shutdown keeps the behaviour of §5.1 (logged no-ops; `Ctx::sleep` completes at once). `#[undra::store]` restores a `WeakCtx` field by downgrading the restore context, as it clones a `Ctx` field.
 
 ### 5.4 Object table
 
@@ -381,7 +400,7 @@ impl Ctx {
 
 * Every signal write outside `ctx.txn` is an implicit single-write transaction.
 * A transaction is thread-local depth + a dirty set `(store_handle, signal_id)`. On commit (depth → 0): for each dirty store, recompute observed dirty computeds (dependency order), build the change-set of **observed** signals only (plus `no_coalesce` signals always), assign `txn_id` (monotonic u64), and invoke the sink. Unobserved dirty signals are recorded in the store's `pending_dirty` so that a later `observe` emits the current value.
-* Writes are applied directly to the signal cell (no overlay) **but** are wrapped in a panic guard at the dispatch boundary: on panic the runtime marks the store `poisoned`, emits `Log(error)` and the dispatch returns status 2. A poisoned store keeps working (values are still consistent per write); poisoning is informational in v1 (ADR-017 explains why a copy-on-write overlay is deferred). A **computed** that panics makes its store's commit abandon the change-set: the affected slots are resent as full values by the next successful commit (ADR-019), so a computed that panics on its *current* inputs holds back that store's deliveries — loudly, via status 2 and an error log — until a later write lets it recover. Per-signal isolation of a failing computed is a v1.x refinement.
+* Writes are applied directly to the signal cell (no overlay) **but** are wrapped in a panic guard at the dispatch boundary: on panic the runtime marks the store `poisoned`, emits `Log(error)` and the dispatch returns status 2. A poisoned store keeps working (values are still consistent per write); poisoning is informational in v1 (ADR-017 explains why a copy-on-write overlay is deferred). A **computed** that panics on its current inputs poisons only itself (ADR-019 amendment): the commit (or observe) evaluates each computed under a panic guard, leaves the failing one out of the change-set and delivers every other signal of the store; the write that triggered it succeeds. The failing signal is *held back*: the host keeps the last value it received, it is not re-evaluated by unrelated commits, and it is evaluated again when its inputs change, its full value delivered when that succeeds. The runtime logs the failure once at error level, marks the store poisoned and reports `poisoned_signals` in `stats_json`; `StoreCell::failed_signals()` is the signal's typed poisoned state. A call that reads such a computed panics as before (status 2). A panicking **encoder** of a plain or keyed slot, or a panicking sink, still abandons the store's change-set and resends its slots in full with the next commit (ADR-019). On wasm (`panic=abort`) any panic traps the core.
 * `undra_observe(handle, signal_id, 1)` immediately emits a change-set with the current value(s) of the newly observed signal(s) (synchronously, before returning, in-process; asynchronously over a transport).
 
 ### 5.6 Dispatch
@@ -412,7 +431,7 @@ Standard ports and their methods are defined in `undra-ports` (§8).
 
 `Snapshot` payload (all little-endian): `count u32, generation_floor u32, stores × { handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value bytes } }` (computed signals excluded; restored by recomputation). `generation_floor` is the highest handle generation the core had issued when the snapshot was taken (`0` if none). Hosts treat a snapshot as opaque bytes and hand it back unchanged.
 
-`undra_restore(bytes)` rebuilds each store via its generated `restore(ctx, values)` and re-issues the same handles (the table is rebuilt from the snapshot, so handles held by the host remain valid). It raises the generation counter to `max(current, generation_floor, every generation in the snapshot)` and never lowers it, so a handle issued before the snapshot, or between the snapshot and the restore, can never be issued again to another object, in this process or a fresh one (ADR-022). A snapshot whose floor, or any store handle's generation, is `u32::MAX` is refused (status 5 / `BAD_SNAPSHOT`): it would leave nothing to issue. A snapshot in the layout without the floor fails to decode. Objects that are not stores are not snapshotted; their handles become invalid after restore (status 5 `stale_handle`). **In-flight calls and streams whose receiver the restore replaced or invalidated are cancelled** (ADR-023): every call made on a store is (each store is rebuilt, so a call still running on the old object would finish on a detached store and report success for a write the restored store never saw). A plain call is answered with status 3 (`cancelled`), exactly once; a stream ends with a `StreamItem` flag 2 (error) whose body is a `String` (`"cancelled: ..."`), the same shape as a stream panic, because the host did not ask for the end; the tasks are dropped. Calls with no receiver (free functions, constructors) carry on. Restore emits change-sets for all observed signals: one per re-observed store, in handle order, each built and delivered under that store's delivery lock through the path `undra_observe` uses (§16.1 `observe_and_deliver`), inside one transaction (ADR-023).
+`undra_restore(bytes)` rebuilds each store via its generated `restore(ctx, values)` and re-issues the same handles (the table is rebuilt from the snapshot, so handles held by the host remain valid). It raises the generation counter to `max(current, generation_floor, every generation in the snapshot)` and never lowers it, so a handle issued before the snapshot, or between the snapshot and the restore, can never be issued again to another object, in this process or a fresh one (ADR-022). A snapshot whose floor, or any store handle's generation, is `u32::MAX` is refused (status 5 / `BAD_SNAPSHOT`): it would leave nothing to issue. A snapshot in the layout without the floor fails to decode. Objects that are not stores are not snapshotted; their handles become invalid after restore (status 5 `stale_handle`). **In-flight calls and streams whose receiver the restore replaced or invalidated are cancelled** (ADR-023): every call made on a store is (each store is rebuilt, so a call still running on the old object would finish on a detached store and report success for a write the restored store never saw). A plain call is answered with status 3 (`cancelled`), exactly once; a stream ends with a `StreamItem` flag 3 (failed, status 3 cancelled by the core; §3.7, ADR-036), because the host did not ask for the end and a clean end would read as success; the tasks are dropped. Calls with no receiver (free functions, constructors) carry on. Restore emits change-sets for all observed signals: one per re-observed store, in handle order, each built and delivered under that store's delivery lock through the path `undra_observe` uses (§16.1 `observe_and_deliver`), inside one transaction (ADR-023).
 
 ### 5.10 Devtools protocol (transport only, optional)
 
@@ -429,7 +448,7 @@ typedef struct { uint8_t *ptr; uint32_t len; uint32_t cap; } UndraBuf;        //
 typedef void (*undra_reply_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);
 typedef void (*undra_changeset_cb)(void *user, const uint8_t *ptr, uint32_t len);
 typedef uint8_t (*undra_port_cb)(void *user, uint32_t port_id, uint32_t method_id, uint32_t port_call_id, const uint8_t *ptr, uint32_t len, UndraBuf *out_reply); // returns 0 = replied synchronously into out_reply, 1 = will reply async, 2 = unavailable
-typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);  // StreamItem payload
+typedef void (*undra_stream_cb)(void *user, uint32_t call_id, const uint8_t *ptr, uint32_t len);  // StreamItem payload (§3.7: flag 0 item, 1 end, 2 the stream's E, 3 failed with a reply status)
 
 uint32_t undra_abi_version(void);                       // 1
 uint64_t undra_schema_hash(void);
@@ -448,7 +467,7 @@ void     undra_event(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, u
 void     undra_timer_fired(uint32_t timer_id);
 UndraBuf  undra_snapshot(void);
 uint32_t undra_restore(const uint8_t *ptr, uint32_t len);
-UndraBuf  undra_stats_json(void);                        // live handles, tasks, txn count, crossings
+UndraBuf  undra_stats_json(void);                        // live handles, tasks, txn count, crossings, strong_refs (ADR-034); with no runtime: {"initialized":false,"live_handles":0,"runtime_threads":N}
 void     undra_buf_free(UndraBuf buf);
 ```
 
@@ -490,6 +509,7 @@ static native void   timerFired(int timerId);
 static native byte[] snapshot();
 static native int    restore(byte[] snapshot);
 static native String statsJson();
+static native void   shutdown();                                  // what undra_shutdown runs; releases the Callbacks global reference (ADR-034). Kotlin's UndraCore.close() of an in-process core calls it (never from a callback) and waits for it (the core's threads are joined and running port callbacks have returned: not under a lock a sync port needs), and a later load starts a fresh core
 ```
 `ByteBuffer`s passed to callbacks are **direct** buffers over core memory valid only during the callback; the Kotlin runtime decodes immediately. `byte[]` arguments are copied once via `GetByteArrayRegion`. The JNI callbacks follow the host contract of §6. In particular a synchronous port is a two-call protocol with hidden per-thread state: the shim calls `portSyncReply()` on the same thread, right after `onPortCall` returned 0, and callbacks run concurrently, so an implementation must carry the reply in thread-local state (the shipped `InprocTransport` does, in a `ThreadLocal`), never in a shared field.
 
@@ -561,6 +581,8 @@ Records: `HttpRequest { method: HttpMethod, url: String, headers: Vec<Header>, b
 The standard surface (these ten ports and these types, plus `HttpMethod { Get, Post, Put, Delete, Patch, Head, Options }`) ships in each platform runtime (`@undra/runtime`, `dev.undra.runtime.adapters`, `UndraRuntime`), not in generated code: every core links `undra-ports`, so its schema contains all of it and the schema hash covers it, but `undra-bindgen` leaves it out of an app's bindings and the generated code refers to the runtime's own types (section 10.5, ADR-024).
 
 `HttpError` and `FsError` implement `From<PortError>` (§5.7): an unavailable port is `Network("the Http port has no adapter registered (E0062: register one, see <docs link>)")` / `Io("the Fs port has no adapter registered (E0062: ..)")`, a cancelled call is `Cancelled` / `Io(..)`, a reply that does not decode is `Network("malformed port reply: ..")` / `Io(..)`; the wire layouts are unchanged.
+`Fs` semantics shared by every adapter: paths are relative to the adapter's root (a leading `/` is ignored) and one that would leave it, through `..` or a symbolic link, is `Denied`; `write` creates missing parent directories and is atomic; `delete` removes a file, or a directory with everything in it (a symbolic link is removed, never followed), and a path that names the root itself is refused (`Denied` on Swift, Android and the JVM, `Io` on the web, which has no handle for its root); `list` returns the names of one directory, sorted.
+
 Fakes (all in `undra-ports::fakes`, `Send + Sync`): `FakeHttp` (script responses by matcher; records calls), `MemKv`, `MemSecureStore`, `MemFs`, `FakeClock` (settable `now`, `advance(d)` fires due timers; implements `Clock` + `Timer`), `SeededRng` (xorshift64\*), `CaptureLog`, `ScriptedConnectivity`, `ScriptedLifecycle`. `TestRuntime::new()` installs all fakes and runs the executor on the test thread (`run_until(fut)` / `run_pending()`).
 
 ---
@@ -717,12 +739,14 @@ Handle lifetime: explicit `close()`/`[Symbol.dispose]`; finalizers (`deinit`, `C
 Default adapters:
 | Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) |
 |---|---|---|---|---|---|
-| Http | URLSession | OkHttp (optional dep) or HttpURLConnection | HttpURLConnection | fetch | fetch |
-| Kv / SecureStore | files in Application Support / Keychain | SharedPreferences-backed files / EncryptedFile (Keystore) | files | IndexedDB / IndexedDB + WebCrypto | files |
-| Fs | FileManager | Context.filesDir | java.io | OPFS | fs |
-| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / Log | same | built-in (§7) | built-in |
-| Timer | DispatchQueue | Handler / ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
-| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ProcessLifecycleOwner | stubs | navigator.onLine / visibilitychange | stubs |
+| Http | URLSession | HttpURLConnection | HttpURLConnection | fetch | fetch |
+| Kv / SecureStore | files in Application Support / Keychain | files in `filesDir` / AES-256-GCM under an Android Keystore key (files in `noBackupFilesDir`) | files | IndexedDB / IndexedDB + WebCrypto | files |
+| Fs | FileManager | `filesDir` | java.io | OPFS | fs |
+| Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / `android.util.Log` | same | built-in (§7) | built-in |
+| Timer | DispatchQueue | ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout |
+| Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ActivityLifecycleCallbacks | stubs | navigator.onLine / visibilitychange | stubs |
+
+On Android all of it is installed by one call, `AndroidPlatformDefaults.install(core, context)` (module `android-adapters`; `android-adapters/README.md`); the runtime alone installs only Clock, Rng, Log and Timer.
 
 ### 11.0 The remote transport reconnects (ADR-051)
 
@@ -772,14 +796,14 @@ The catalogue is audited by `crates/undra-macros/tests/catalogue.rs`: every row 
 | E0002 | macros | generic parameter on a `#[undra::api]` item |
 | E0003 | macros | lifetime in a public signature |
 | E0004 | macros | trait object / `dyn` / `Box<dyn Fn>` / closure / function pointer / an `impl Trait` that is not a stream |
-| E0005 | macros, schema validation | `Result` or `Stream` outside return position |
+| E0005 | macros, schema validation | `Result` or `Stream` outside return position; a `Result<impl Stream<Item = Result<T, E1>>, E2>` whose two error types differ (ADR-036) |
 | E0006 | macros, schema validation | map key type not allowed |
 | E0007 | macros | unsupported item shape (a tuple or unit struct, a record without fields, an empty enum, an impl item that is neither a method nor a constructor, a receiver that is not `&self`, a store that is not a struct with named fields, the reserved field name `__undra_cell`, `#[undra::port]` on an inherent impl, an Undra attribute on the wrong kind of item, `#[undra::api]` on a method, `#[undra::query]` or `#[undra::mutation]` inside an `impl` block or a port trait, a function whose signature uses `Self`, a second `#[undra::api]` impl block for one type). A second impl block is reported by `rustc` as "the name `_undra_error_E0007_<Type>_has_two_undra_api_impl_blocks_merge_them_into_one` is defined multiple times": merge the blocks. A query or mutation inside an impl block that is not `#[undra::api]` cannot be seen by its macro; `rustc` then reports "macro definition is not supported in `trait`s or `impl`s" and "cannot find macro `_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block`", which is this code: move the function out of the block |
 | E0008 | macros | unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted |
 | E0010 | macros, schema validation | `#[undra::error]` variant without `#[error(..)]`, a message with an implicit `{}` (write `{0}` or `{name}`), `#[error]`, `#[from]` or `#[source]` on a plain `#[undra::api]` enum |
 | E0011 | macros, schema validation | `#[undra::store]` and its `#[undra::api(store)]` impl block disagree, including a store with no impl block and a `#[undra::api(store)]` block without a constructor (a type takes one block; a constructor in another block is not seen); a store without a constructor in the schema |
 | E0012 | macros | trait object in a record field (the blueprint example) |
-| E0013 | macros | store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx` nor `Default`, and no `#[undra::store(restore = "..")]` hook |
+| E0013 | macros | store cannot be restored automatically: it has a `Computed` field, or a field that is neither a signal, a `Ctx`, a `WeakCtx` nor `Default`, and no `#[undra::store(restore = "..")]` hook |
 | E0020 | macros | `&mut self` receiver |
 | E0021 | macros | `self` by value |
 | E0022 | rustc, named by a macro | non-`Send` future in an async method or query: `rustc`'s own "future cannot be sent between threads safely", pointed at the method by an assertion the macros emit; the last note names the assertion, `_undra_error_E0022_the_future_of_an_async_method_must_be_Send`. Do not hold a non-`Send` value (an `Rc`, a `RefCell` borrow, a `MutexGuard`) across an `.await` |
@@ -798,6 +822,7 @@ The catalogue is audited by `crates/undra-macros/tests/catalogue.rs`: every row 
 | E0062 | runtime (the generated port proxy) | a port call that cannot be answered and has no error channel: no adapter registered, a cancelled call, a reply that does not decode. A method without an error channel panics with this message (the runtime contains the panic at the dispatch boundary; on wasm it traps the core); a method returning `Result` reports it as its error type, and `HttpError::Network` / `FsError::Io` carry the code and the link |
 | E0063 | macros | `Option<Option<T>>` in a public position |
 | E0064 | macros (a check the compiler runs) | an object (`#[undra::api] impl`) used as a field, parameter or return value: objects cross by handle |
+| E0065 | runtime (the write check of `undra-signals`) | a signal of a store was written from a thread that does not hold the owning runtime's core lock: a blocking-pool worker, a host or embedder thread, a thread inside no runtime, or another runtime's core. A panic with this message, in every build; `Signal::try_set` / `try_update` return it as `WriteError::OffCore` (ADR-035) |
 
 The command line has its own codes, `C0001` to `C0014`, in the same shape and with the same docs page (`undra-cli`, `Code`); they are listed in the second table. Eleven have a golden (`crates/undra-cli/tests/golden/diagnostics/`, made by running the binary: `crates/undra-cli/tests/diagnostics.rs`); C0006 (the schema of a built core), C0012 (a platform this machine is not) and C0013 (a dev server that fails) need more than the binary and are listed as exceptions in the audit.
 
@@ -891,6 +916,8 @@ impl StoreCell {
     pub fn set_no_coalesce(&self, signal_id: u32) -> Result<(), SignalsError>;   // #[undra(no_coalesce)]; called after that signal's attach
     pub fn set_handle(&self, handle: u64);       // the runtime, when the store enters the object table (and restore)
     pub fn handle(&self) -> u64;                 // 0 until published
+    pub fn set_owner(&self, runtime_id: u64);    // the runtime, before set_handle (ADR-035): writes are checked against it, change-sets are delivered to it
+    pub fn owner(&self) -> u64;                  // 0 until published
     pub fn type_id(&self) -> u32;
     pub fn signal_count(&self) -> u32;           // attached signals, computeds included
     pub fn is_observed(&self, signal_id: u32) -> bool;
@@ -902,6 +929,8 @@ impl StoreCell {
     pub fn observe_and_deliver(&self, signal_ids: &[u32] /* ids, or ALL_SIGNALS */, deliver: impl FnOnce(&[u8])) -> u32;
         // observe(on) plus delivery, for callers that must put the values in front of the host themselves (the runtime's `observe` and `restore`, ADR-023): ids are deduplicated and the entries ordered by signal_id; ONE complete change-set (`txn_id u64, count u32, entries`) is built and handed to `deliver` UNDER the store's delivery lock, with the `txn_id` allocated under it and recorded in the store's last txn (so a commit holding an older shared id replaces it). A commit of the same store on another thread therefore delivers completely before it (older values) or waits and delivers after it, and the host's last word is the newest value. Returns the entry count; 0 (for unknown ids) means `deliver` was not called. Same settle loop and transaction as `observe(on)` (leftover writes commit after the lock is released). A panic while encoding or in `deliver` rolls the observe back. `deliver` follows the ChangeSink contract (must not wait for another thread writing this store) and must not call the cell's `observe` family or commit this store from the same thread.
     pub fn encode_signal(&self, signal_id: u32, out: &mut undra_wire::Writer) -> bool;   // full value, no header; false if unknown
+    pub fn failed_signals(&self) -> Vec<(u32, String)>;   // computeds held back because their evaluation panicked, with the message (ADR-019 amendment)
+    pub fn is_failed(&self, signal_id: u32) -> bool;
     pub fn encode_snapshot(&self, out: &mut undra_wire::Writer);   // one store record, §5.9: handle u64, type_id u32, signal_count u32, signals × { signal_id u32, len u32, value }; computeds left out
 }
 pub const ALL_SIGNALS: u32 = u32::MAX;
@@ -933,6 +962,9 @@ impl<T: SignalValue> Signal<T> {
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R;
     pub fn set(&self, value: T);                  // implicit transaction if none is open
     pub fn update(&self, f: impl FnOnce(&mut T));  // f runs with the value write-locked: it must not read or write this signal, nor read a Computed derived from it (transitive); a violation panics instead of deadlocking (ADR-021)
+    pub fn try_set(&self, value: T) -> Result<(), WriteError>;              // ADR-035: a refused write is returned (WriteError::OffCore { owner }) instead of the E0065 panic
+    pub fn try_update(&self, f: impl FnOnce(&mut T)) -> Result<(), WriteError>;
+    pub fn can_write(&self) -> bool;              // whether this thread may write it now
     pub fn ptr_eq(&self, other: &Signal<T>) -> bool;
     pub fn is_attached(&self) -> bool;
 }
@@ -957,16 +989,23 @@ impl<T: SignalValue> Computed<T> {
 }
 pub struct Effect;         // Effect::new(deps, f) runs f after each commit that dirtied a dep; dropped or `cancel(self)` = cancelled
 pub fn txn<R>(f: impl FnOnce() -> R) -> R;        // batch; nested calls join the outer transaction; exception safe
-pub trait ChangeSink: Send + Sync { fn deliver(&self, change_set: &[u8]); fn round_cap_hit(&self, rounds: usize) {} }   // round_cap_hit: default no-op; the runtime's sink logs it at error level (ADR-020)
+pub trait ChangeSink: Send + Sync {
+    fn deliver(&self, change_set: &[u8]);
+    fn deliver_from(&self, owner: u64, change_set: &[u8]) { self.deliver(change_set) }   // what every commit calls, with the store's owner (ADR-035); the runtime's sink routes by it through its registry of live runtimes, and a store with owner 0 delivers nothing
+    fn off_core_write(&self, owner: u64, message: &str) {}   // a refused write, reported just before the E0065 panic; the runtime's sink logs it at error level through the owning runtime
+    fn computed_failed(&self, owner: u64, handle: u64, signal_id: u32, message: &str) {}   // a computed panicked and is held back (ADR-019 amendment); once per transition, outside the delivery lock
+    fn computed_recovered(&self, owner: u64, handle: u64, signal_id: u32) {}
+    fn round_cap_hit(&self, rounds: usize) {}     // default no-op; the runtime's sink logs it at error level (ADR-020)
+}
 pub fn set_sink(sink: Arc<dyn ChangeSink>);      // installed by the runtime; a global, one per process
-pub fn set_write_checker(f: fn() -> bool);       // installed by the runtime; a global. Debug builds assert f() before every write to a signal that is attached or has dependents ("may this thread mutate?"); release builds never call it. The runtime's checker is an allowlist (ADR-023, superseding the pool denylist of ADR-020): core-lock holders, TestRuntime driver threads and testing::unchecked_writes
-pub fn clear_write_checker();
+pub fn set_write_checker(f: fn(owner: u64) -> bool);   // installed by the runtime; a global, the first one installed stays. EVERY build asks f(owner) before every write to a signal that is attached (owner = the cell's owner, 0 until published) or has dependents (owner 0), and refuses the write (E0065 panic, or WriteError from try_set/try_update) when it says no (ADR-035). The runtime's checker is an allowlist (ADR-023): a thread holding that runtime's core lock (any core lock for owner 0), TestRuntime driver threads, testing::unchecked_writes
+pub fn clear_write_checker();                    // stops consulting it (tests)
 pub fn clear_sink();  pub fn with_sink<R>(sink: Arc<dyn ChangeSink>, f: impl FnOnce() -> R) -> R;   // the latter is thread-scoped, for tests
 pub fn next_txn_id() -> u64;
 pub mod testing { pub struct CaptureSink; }      // records change-sets: take(), take_decoded()
 ```
 
-Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries, ordered by `signal_id`, for signals that are observed or `no_coalesce` (keyed lists as a patch when one is possible and worthwhile, else the full value); one `ChangeSet` payload per store per transaction (never split; stores committed by one transaction share a `txn_id`); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery. The claim is transactional (ADR-019): if building or delivering a store's change-set is abandoned (a computed, an encoder or the sink panicked), its slots are remembered as unsent and the keyed baselines among them are dropped, and the next commit that touches the store sends every one of them again as a full value; `observe(on)` of a slot clears its unsent mark. A failed `observe(on)` appends no entries and leaves no target newly observed. An unknown `signal_id` in `observe` is ignored (returns 0) in every build. The only lock held while user code runs is the store's **delivery lock** (ADR-020): a commit takes it when it claims the store's dirty slots and releases it when the sink has returned (`observe_and_deliver` holds it from before the entries are encoded until `deliver` has returned), so the change-sets of one store reach the sink one at a time, in claim order, with strictly increasing `txn_id` (a transaction id shared by several stores is replaced for a store that has already seen a newer one). Sinks and computed closures therefore run under it: a sink must not wait for another thread that writes the same store (writes made on the sink's own thread are queued and are fine), and the runtime's sink only hands the payload to the host. No other lock is held while user code (sink, effect, computed closure, encoder) runs, and effects run after the delivery lock is released. Writes from two threads do not form one transaction: a write to a slot that another thread has dirty in an open transaction ships with that transaction. Signal writes belong on the core; debug builds enforce it through `set_write_checker`. A commit is bounded: after 1000 rounds (effects, computeds or sinks that keep writing signals that trigger themselves) it stops running effects, delivers the changes that are already dirty one last time, drops the still-queued effects from the queue (a later change queues them again), releases whatever that delivery queued (those slots are remembered as unsent, as for an abandoned change-set), and reports `ChangeSink::round_cap_hit(1000)`. Nothing stays claimed by the capped thread, so other threads' writes to those slots and effects work normally.
+Commit algorithm: on outermost `txn` exit (or after a bare `set`), for each dirty `StoreCell` with a handle: recompute observed dirty computeds in dependency order; encode entries, ordered by `signal_id`, for signals that are observed or `no_coalesce` (keyed lists as a patch when one is possible and worthwhile, else the full value); one `ChangeSet` payload per store per transaction (never split; stores committed by one transaction share a `txn_id`); deliver via the sink; run effects; clear dirty bits. Signals that are dirty but unobserved stay marked so `observe(on)` sends fresh values. Writes before `attach`/`set_handle` are plain writes with no delivery. Each computed is evaluated under a panic guard (ADR-019 amendment): one that panics is left out of the change-set and held back (the cell's failed set, reported through `ChangeSink::computed_failed` once), not retried until its inputs change; the other slots are delivered and the writing call does not see the panic. The claim is otherwise transactional (ADR-019): if building or delivering a store's change-set is abandoned (an encoder or the sink panicked), its slots are remembered as unsent and the keyed baselines among them are dropped, and the next commit that touches the store sends every one of them again as a full value; `observe(on)` of a slot clears its unsent mark. A failed `observe(on)` appends no entries and leaves no target newly observed. An unknown `signal_id` in `observe` is ignored (returns 0) in every build. The only lock held while user code runs is the store's **delivery lock** (ADR-020): a commit takes it when it claims the store's dirty slots and releases it when the sink has returned (`observe_and_deliver` holds it from before the entries are encoded until `deliver` has returned), so the change-sets of one store reach the sink one at a time, in claim order, with strictly increasing `txn_id` (a transaction id shared by several stores is replaced for a store that has already seen a newer one). Sinks and computed closures therefore run under it: a sink must not wait for another thread that writes the same store (writes made on the sink's own thread are queued and are fine), and the runtime's sink only hands the payload to the host. No other lock is held while user code (sink, effect, computed closure, encoder) runs, and effects run after the delivery lock is released. Writes from two threads do not form one transaction: a write to a slot that another thread has dirty in an open transaction ships with that transaction. Signal writes belong on the core; every build enforces it through `set_write_checker` (ADR-035). A commit is bounded: after 1000 rounds (effects, computeds or sinks that keep writing signals that trigger themselves) it stops running effects, delivers the changes that are already dirty one last time, drops the still-queued effects from the queue (a later change queues them again), releases whatever that delivery queued (those slots are remembered as unsent, as for an abandoned change-set), and reports `ChangeSink::round_cap_hit(1000)`. Nothing stays claimed by the capped thread, so other threads' writes to those slots and effects work normally.
 
 Keyed lists (SPEC 3.8): the cell keeps the list as the host last saw it (the *baseline*: one clone per *observed* keyed signal; an unobserved `no_coalesce` keyed list keeps none and is delivered as a full value each time) and sends a patch of `Insert`/`Remove`/`Update`/`Move`/`Clear` ops. A commit finds the ops one of two ways, decided by how the list was written (ADR-027):
 
@@ -1011,7 +1050,7 @@ impl Runtime {
     pub fn poll(&self);                              // drive the executor (wasm and manual runtimes); run_pending() runs until idle
     pub fn snapshot(&self) -> Vec<u8>;
     pub fn restore(&self, payload: &[u8]) -> Result<(), RestoreError>;   // all or nothing; cancels in-flight calls on replaced receivers (§5.9); resumes the generation counter above the snapshot's floor (ADR-022)
-    pub fn stats_json(&self) -> String;
+    pub fn stats_json(&self) -> String;              // includes `strong_refs`: strong references besides the global slot (ADR-034)
     pub fn schema(&self) -> &undra_meta::Schema; pub fn schema_hash(&self) -> u64;
     pub fn ctx(&self) -> Ctx;
     // What generated code calls:
@@ -1026,17 +1065,20 @@ impl Runtime {
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;
     pub fn extension<T: Default + Send + Sync + 'static>(&self) -> &T;      // per-runtime state of layered crates (undra-query)
 }
-#[derive(Clone)] pub struct Ctx(..);   // §5.3; an Arc<Runtime>. `Ctx::current()` / `try_current()` read a thread-local set by dispatch, by the executor while polling and by `Ctx::enter()`
+#[derive(Clone)] pub struct Ctx(..);   // §5.3; an Arc<Runtime>. `Ctx::current()` / `try_current()` read a thread-local set by dispatch, by the executor while polling and by `Ctx::enter()`. `downgrade() -> WeakCtx`, `closed() -> Closed` (ADR-034)
+#[derive(Clone)] pub struct WeakCtx(..);   // §5.3; a Weak<Runtime> plus the runtime's lifeline: upgrade() -> Result<Ctx, Gone>, is_alive(), closed(), sleep(d) -> WeakSleep (Output = Result<(), Gone>), runtime_id()
+pub enum Gone { ShutDown, Dropped }
 impl Ctx {
     pub fn txn<R>(&self, f: impl FnOnce() -> R) -> R;                       // one transaction, delivered through this runtime
     pub fn spawn(&self, fut: impl Future<Output = ()> + Send + 'static) -> TaskId;   pub fn cancel_task(&self, id: TaskId);   // the cancelled future is dropped on the core (core lock held, or queued for the core's next turn); after shutdown spawn/sleep/port_call/event are logged no-ops
     pub fn spawn_blocking<T: Send + 'static>(&self, f: impl FnOnce() -> T + Send + 'static) -> BlockingTask<T>;
     pub fn sleep(&self, d: Duration) -> Sleep;                              // through the host's timer or the internal one
-    pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&[u8]) + Send + Sync>) -> Subscription
+    pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&Ctx, &[u8]) + Send + Sync>) -> Subscription; the subscriber gets the runtime's Ctx as an argument so it never captures one (ADR-034)
     pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture;
     pub fn port_call_sync(&self, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;   pub fn bind_port / bind_dyn_port;
     pub fn enter(&self) -> CtxScope;  pub fn runtime(&self) -> &Runtime;
+    pub fn with_core<R>(&self, f: impl FnOnce() -> R) -> Result<R, Reentrant>;   // ADR-035: takes the core lock on the calling thread, runs f in one transaction; the sanctioned synchronous write from a host thread; Err(Reentrant) from a host callback or the core
 }
 // The typed accessors of §5.3 are not methods: `#[undra::port]` generates a free function `<trait_snake>(ctx: &Ctx) -> Arc<dyn Trait>` (the Rust binding, else a proxy to the
 // platform); `ctx.query()` / `ctx.mutate()` come from undra-query as extension traits over `Ctx`.
@@ -1073,7 +1115,7 @@ pub struct InitHook { pub name: &'static str, pub run: fn(&Ctx) }   // submitted
 pub mod object_table;     // ObjectTable, BadHandle, BadHandleReason: generation-tagged slots; Handle issue/lookup/release
 pub mod log;              // level constants TRACE..FATAL and `log::log(level, target, msg)`
 pub mod executor;         // spawn, spawn_blocking, sleep, cancel, yield_now, Notify, TaskId
-pub mod testing;          // TestRuntime: a real Runtime with no core or timer thread, a manual clock, the real blocking pool (run_pending/run_until/advance wait for its closures), a private generation counter and a RecordingHost; unchecked_writes(f) lifts the debug write check on one thread, drive_from_this_thread() marks a harness thread a driver; call_sync_reference(rt, payload) is call_sync through the allocating path (§5.6);
+pub mod testing;          // TestRuntime: a real Runtime with no core or timer thread, a manual clock, the real blocking pool (run_pending/run_until/advance wait for its closures), a private generation counter and a RecordingHost; unchecked_writes(f) lifts the write check on one thread, drive_from_this_thread() marks a harness thread a driver; live_threads() counts the runtime threads still running (ADR-034 tests); call_sync_reference(rt, payload) is call_sync through the allocating path (§5.6);
                           // call / call_sync / run_pending / run_until(fut) / advance(Duration) / take_replies; host(): take_decoded_change_sets, take_stream_items,
                           // take_port_calls, take_timeline, take_logs, script_port*(port_id, method_id, ..); helpers call_payload, decode_reply, port_reply, port_reply_ok, sync_ok
 ```
@@ -1100,7 +1142,7 @@ Diagnostics that need the compiler (v1.x, D1):
 
 * The struct must be marked on its impl block: `#[undra::api(store)] impl Todos { .. }`. The marker is what wires the constructors to the signals; a struct without `#[undra::store]`, or an impl block without the marker, is E0011.
 * The macro appends a hidden field `pub __undra_cell: ::undra::signals::CellSlot`. Struct literals of the type inside its `#[undra::api(store)]` impl block get `__undra_cell: Default::default()` added; struct literals anywhere else must spell it out. The field name is reserved (E0007).
-* `#[undra::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument) or `Default`; a store with a `Computed` field needs the hook (E0013). Snapshots hold the plain signals only.
+* `#[undra::store(restore = "Self::assemble")]` names the function `restore` rebuilds the store with: `fn(ctx: Ctx, <one Signal<T> per non-computed signal, in declaration order>) -> Self`, the same code the constructor uses. Without it the store is rebuilt by a struct literal, which works only when every non-signal field is a `Ctx` (cloned from the argument), a `WeakCtx` (downgraded from it, ADR-034: what a store should keep, since a `Ctx` field is a reference cycle with the runtime until shutdown) or `Default`; a store with a `Computed` field needs the hook (E0013). Snapshots hold the plain signals only.
 * Field kinds: `Signal<T>` and `Computed<T>` are signals, numbered in declaration order; every other field is private state. `Lazy<T>` is rejected in v1 (E0001, "lazy lists are not available in v1"), like `undra-bindgen` rejects it.
 * The signal table is built by a hidden method that calls, per field and in order, `attach` (plain), `attach_keyed` with a generated `fn(&Item) -> u64` (`#[undra(key = "id")]`: `fnv1a64` over the encoded key field, encoded through a per-thread scratch buffer) or `attach_computed`, each followed by `set_no_coalesce(id)` for `#[undra(no_coalesce)]`, all with `?`. `StoreObject::cell()` creates the cell once through `CellSlot::get_or_init`; a store whose attach failed gets an empty cell there rather than a panic.
 * A constructor's dispatch arm first calls `__undra_attach_all()` (`CellSlot::get_or_try_init`); on `Err(SignalsError)` nothing is inserted and the arm answers `DispatchResult::BadRequest("store `Todos` could not attach its signals: <error>")`. Otherwise it inserts the object (`Runtime::insert_object`, which gives the cell its handle) and replies with the handle (`u64`). `restore` fails with `WireError::InvalidTag` if the rebuilt store cannot attach.
@@ -1126,7 +1168,7 @@ export class UndraCore {
   report(error: unknown, operation: string): void;              // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); a failure that is a remote core's connection being down (Unavailable while `connection` is reconnecting, or closed for a reason other than "requested") is logged at warning level and not delivered (ADR-051); only logs a failure reported while onError runs or of a call onError started
   callSync(target: CallTarget, methodId: number, args: Uint8Array): Uint8Array;        // only mode 'wasm-main'; others throw UndraModeError; drains the mirror before it returns
   call(target: CallTarget, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;   // resolves with reply body (status ok) or rejects with UndraReplyError { status, body }
-  stream(target: CallTarget, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;   // handles credit
+  stream(target: CallTarget, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;   // handles credit; ends with UndraReplyError { status 1, body E } for flag 2, or with the status and §3.4 body of a flag-3 item (ADR-036)
   construct(typeId: number, methodId: number, args: Uint8Array): Promise<bigint>;     // returns handle
   observe(handle: bigint, signalId: number, on: boolean): void;
   release(handle: bigint): void;
@@ -1150,7 +1192,7 @@ export class UndraReplyError extends UndraError { status: ReplyStatus; body: Uin
 export abstract class UndraCallError extends UndraError {            // kind: 'cancelledByCore' | 'panicked' | 'refused' | 'unavailable' | 'malformed'
   static mapped(error: unknown): unknown;                            // generated methods without an `E`: an abort reason or a foreign error stays itself
   static mapped<E>(error: unknown, domain: Codec<E>): unknown;       // with an `E`: status 1 becomes `E`
-  static mappedStream(error: unknown, domain?: Codec<unknown>): unknown;   // a stream's error item: `E`, else the core's String ("cancelled: ..." is CancelledByCore, anything else Panicked)
+  static mappedStream(error: unknown, domain?: Codec<unknown>): unknown;   // a stream ends in the vocabulary of a failed reply (ADR-036): flag 3 maps by its status (3 CancelledByCore, 2 Panicked, 5 Refused), flag 2 decodes as `E` (Malformed if it does not, or when there is no `domain`)
 }
 // namespace UndraCallError: CancelledByCore | Panicked { panicMessage, backtrace } | Refused { reason } | Unavailable { transport: UndraTransportError } | Malformed { detail }; type UndraCallFailure = their union
 export class UndraUnhandledError extends UndraError { operation: string; error: UndraCallError }   // kind 'unhandled'; what `onError` receives (`AttachOptions.onError?: (error: UndraUnhandledError) => void`)
@@ -1173,7 +1215,7 @@ class UndraCore private constructor(...) {
                                                                                             // `shared` with no core loaded (or after it closed) is a closed placeholder: its calls throw UndraTransportException(CLOSED), generated code reports UndraCallError.Unavailable; access never throws; `current` is null then
   fun callSync(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray            // reply body or throws UndraReplyException; on the main thread, drains the mirror first
   suspend fun call(target: CallTarget, methodId: UInt, args: ByteArray): ByteArray         // cancellable
-  fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>
+  fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray>          // ends with UndraReplyException(ERROR, E) for flag 2, or with the status and §3.4 body of a flag-3 item (ADR-036)
   fun construct(typeId: UInt, methodId: UInt, args: ByteArray): Long                        // sync in INPROC
   fun constructObject(typeId: UInt, methodId: UInt, args: ByteArray): Long                  // construct, its failures mapped onto UndraCallError (what generated secondary constructors call)
   fun report(error: Throwable, operation: String)                                           // a failure no caller can see: logs at error level, calls onError(UndraUnhandledError); never throws (ADR-032, amendment A); an Unavailable of reason CONNECTION_LOST (the remote connection is down, which connectionState reports) is only logged, at warning level (ADR-051)
@@ -1205,8 +1247,8 @@ sealed class UndraCallError : UndraException {
   companion object {
     fun mapped(error: Throwable): Throwable                                       // generated methods without an `E`; CancellationException and foreign throwables stay themselves
     fun <E : Throwable> mapped(error: Throwable, domain: UndraCodec<E>): Throwable   // with an `E`: status 1 becomes `E`
-    fun mappedStream(error: Throwable): Throwable                                 // a stream's error item: the core's String ("cancelled: ..." is CancelledByCore, anything else Panicked)
-    fun <E : Throwable> mappedStream(error: Throwable, domain: UndraCodec<E>): Throwable   // `E` first, then the String
+    fun mappedStream(error: Throwable): Throwable                                 // a stream without an `E`: flag 3 maps by its status (3 CancelledByCore, 2 Panicked, 5 Refused; ADR-036), a flag-2 item is Malformed
+    fun <E : Throwable> mappedStream(error: Throwable, domain: UndraCodec<E>): Throwable   // a stream with an `E`: flag 2 decodes as `E` (Malformed if it does not), flag 3 as above
   }
 }
 class UndraUnhandledError(val operation: String, val error: UndraCallError) : UndraException(..)   // what `LoadOptions.onError` receives; runs synchronously on the calling thread (the delivery thread for a malformed change-set or a failed port); must not call into Undra
@@ -1243,14 +1285,14 @@ public struct LoadOptions: Sendable { …; public var onError: (@Sendable (Undra
 /// What a generated method throws when the call itself fails: not its own `E`, not `CancellationError` (ADR-032).
 public enum UndraCallError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError {
   case cancelledByCore                                  // status 3
-  case panicked(message: String, backtrace: String)     // status 2 (a stream panic has an empty backtrace)
+  case panicked(message: String, backtrace: String)     // status 2 (a stream panic: a flag-3 item with status 2 carries the backtrace too)
   case refused(reason: String)                          // status 5 and the `undra_call` rejection
   case unavailable(UndraTransportError)                 // this UndraCore is shut down, not loaded, or its connection closed or timed out (a remote core that changed schema included)
   case malformed(String)                                // a reply, a result or an `E` that does not decode (a bug in Undra after a successful schema check)
   public static func mapped(_ error: any Error) -> any Error                                        // generated methods without an `E`
   public static func mapped<E: UndraError>(_ error: any Error, domain: E.Type) -> any Error         // with an `E`: status 1 becomes `E`
-  public static func mapped(streamFailure error: any Error) -> any Error                            // generated stream methods
-  public static func mapped<E: UndraError>(streamFailure error: any Error, domain: E.Type) -> any Error
+  public static func mapped(streamFailure error: any Error) -> any Error                            // generated stream methods: a flag-3 item maps like a failed reply with its status; a flag-2 item on a stream without `E` is .malformed (ADR-036)
+  public static func mapped<E: UndraError>(streamFailure error: any Error, domain: E.Type) -> any Error   // flag 2 decodes as `E` (.malformed if it does not)
 }   // `mapped` returns `E`, `CancellationError` or an `UndraCallError`
 public struct UndraUnhandledError: Error, Sendable, Equatable, CustomStringConvertible, LocalizedError { public let operation: String; public let error: UndraCallError }   // what `onError` receives
 public protocol UndraRecord: UndraCodec, Sendable, Hashable {}; public protocol UndraEnum: UndraCodec, Sendable, Hashable {}; public protocol UndraError: UndraCodec, Error, Sendable, Hashable {}; public protocol UndraPort {}

@@ -427,6 +427,20 @@ pub extern "system" fn Java_dev_undra_runtime_UndraNative_statsJson<'l>(
     )
 }
 
+/// `static native void shutdown()`: what `undra_shutdown` runs (ADR-034, SPEC 6.1). Answers
+/// every call in flight (status 3) and ends every open stream, stops the core, timer and blocking
+/// threads, removes the port registrations and forgets the embedder, which releases the global
+/// reference to its `Callbacks` object; a later `init` starts a new core. Idempotent. The Kotlin
+/// runtime calls it from `UndraCore.close()`, never from inside a callback (it would wait for the
+/// thread it runs on).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_undra_runtime_UndraNative_shutdown<'l>(
+    _env: JNIEnv<'l>,
+    _class: JClass<'l>,
+) {
+    session::stop();
+}
+
 /// Registers every native with `RegisterNatives`. The descriptors are pinned by
 /// `NativeShapeTests` on the Kotlin side.
 fn register(env: &mut JNIEnv<'_>) -> JniResult<()> {
@@ -517,6 +531,11 @@ fn register(env: &mut JNIEnv<'_>) -> JniResult<()> {
             "statsJson",
             "()Ljava/lang/String;",
             Java_dev_undra_runtime_UndraNative_statsJson as *mut c_void,
+        ),
+        native(
+            "shutdown",
+            "()V",
+            Java_dev_undra_runtime_UndraNative_shutdown as *mut c_void,
         ),
     ];
     env.register_native_methods(NATIVE_CLASS, &methods)

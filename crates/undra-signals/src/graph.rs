@@ -90,6 +90,10 @@ pub(crate) struct SlotFlags {
     pub(crate) observed: AtomicBool,
     /// Deliver changes even while unobserved.
     pub(crate) no_coalesce: AtomicBool,
+    /// A computed slot whose last evaluation at a commit or an observe panicked: it is held back
+    /// (the host keeps the last value it received) until an evaluation succeeds, which is tried
+    /// again when its inputs change (ADR-019 amendment).
+    pub(crate) failed: AtomicBool,
 }
 
 /// Where a signal or computed lives inside a store.
@@ -97,6 +101,9 @@ pub(crate) struct Binding {
     pub(crate) cell: Weak<StoreCell>,
     pub(crate) signal_id: u32,
     pub(crate) flags: Arc<SlotFlags>,
+    /// The store's owning runtime (shared with the cell, `0` until it is published): what a write
+    /// is checked against (ADR-035), read without reaching the cell.
+    pub(crate) owner: Arc<AtomicU64>,
 }
 
 /// Notes in the current transaction that the slot behind `binding` changed.

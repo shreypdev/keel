@@ -6,7 +6,7 @@
 //! |---|---|
 //! | the table of the SPEC and the code table of `diag.rs` list the same codes | `docs/SPEC.md`, `src/impl_/diag.rs` |
 //! | every code that a macro emits has a constant, and every constant has a row | `src/impl_/diag.rs` |
-//! | every code is emitted somewhere that is not a test | the macros, `undra-meta`, `undra-bindgen`, `undra-wire` |
+//! | every code is emitted somewhere that is not a test | the macros, `undra-meta`, `undra-bindgen`, `undra-wire`, `undra-signals` |
 //! | every code has a golden that shows its real message | `tests/ui/*.stderr`, `crates/*/tests/golden/diagnostics/*.txt` |
 //! | every message in a golden has what, note, help and the link of its code | the goldens |
 //! | every docs link in the source is the link of a code of the catalogue | `crates/**/*.rs` |
@@ -149,6 +149,8 @@ fn emitters() -> BTreeMap<String, Vec<String>> {
         "crates/undra-meta/src/validate.rs",
         "crates/undra-bindgen/src/validate.rs",
         "crates/undra-wire/src/codec.rs",
+        // E0065: the write check, a runtime message (ADR-035).
+        "crates/undra-signals/src/error.rs",
     ] {
         sources.push(root.join(extra));
     }

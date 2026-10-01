@@ -77,7 +77,7 @@ impl Http for FakeHttp {
 pub fn use_ports(ctx: &Ctx) {
     let _http = http(ctx);
     let _clock = clock(ctx);
-    let _subscription = on_connectivity_changed(ctx, |online, kind| {
+    let _subscription = on_connectivity_changed(ctx, |_ctx, online, kind| {
         let _ = (online, kind);
     });
     let _payload = encode_connectivity_changed_event(true, NetKind::Wifi);

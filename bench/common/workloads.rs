@@ -361,12 +361,38 @@ pub fn signals() -> Vec<Workload> {
         // The same insert on shorter lists: how the cost scales with the list, not the change.
         Workload::new("signals/keyed_1k/insert", || keyed(1_000, KeyedOp::Insert)),
         Workload::new("signals/keyed_100/insert", || keyed(100, KeyedOp::Insert)),
+        // One write and its commit, nobody observing: pins the cost of the write check that
+        // every build runs since ADR-035.
+        Workload::new("signals/set_attached", set_attached),
         Workload::new("signals/computed/recompute_1", computed_recompute_1),
         Workload::new(
             "signals/computed/recompute_chain_10",
             computed_recompute_chain_10,
         ),
     ]
+}
+
+/// One write to a signal of a published store (owner recorded, handle set) and its implicit
+/// commit, with nothing observed: the write check of every build (ADR-035: the checker the
+/// runtime installed, three thread-local reads on a driver thread), the claim and the
+/// nothing-to-send path.
+fn set_attached() -> Box<dyn Bench> {
+    // A runtime installs the process's write checker; this thread plays its core's driver.
+    let (rt, _host) = runtime();
+    drive_from_this_thread();
+    let cell = StoreCell::new(0xBE_C0_03);
+    let value = Signal::new(0_u32);
+    cell.attach(&value, 0).expect("attach");
+    cell.set_owner(rt.id());
+    cell.set_handle(Handle::new(1, 1).0);
+    assert!(value.can_write(), "a driver thread may write");
+    value.set(1);
+    assert_eq!(value.get(), 1);
+    plain(move || {
+        let _keep = &rt;
+        value.update(|n| *n = n.wrapping_add(1));
+        black_box(&value);
+    })
 }
 
 /// 100 signals of one store written in one transaction: build the change-set and hand it to the

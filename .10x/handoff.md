@@ -24,16 +24,14 @@ until after v2.
 **Merged (checkpoints 5–6 in status.md):** gaps + competitive + ADR-039 (design), schema-json (C1, C2),
 device-bench (E1; the honest web size is 135 KB gzipped, over budget — E5), diagnostics (D1), dev-loop
 (B1, B2, ADR-051), parity (C3, C4: the Kotlin/TS error channel), react-native (G1, ADR-038; G1b default
-adapters, E4 Hermes cost and a site page are open). Main `6fe1643`. CI pins Rust 1.98.1
+adapters, E4 Hermes cost and a site page are open), android-adapters (M1 Maven publishing open), runtime-lifecycle (Track A: ADR-034/035/036 + the
+ADR-019 amendment; Lows L2–L5/L8 open). Main `2186bad`. CI pins Rust 1.98.1
 (1.99.0 broke it on 2026-10-01; the bump is a deliberate piece: four workflow pins, `rustup update`,
 `TRYBUILD=overwrite` goldens, bench re-baseline).
 
-**Merge queue, in order (cross-merge main on the branch, full matrix, fast-forward):** `android-adapters` (`AndroidPlatformDefaults.install` + six adapters,
-instrumented tests; hand-merge `UndraApp.kt` keeping dev-loop's start/load/retry skeleton and the
-frame pacer, the adapters replacing the fakes; M1 Maven publishing is an open item) →
-`runtime-lifecycle` (Track A; reviewed, merge after fixes: `.10x/reviews/2026-10-01-runtime-lifecycle-review.md`;
-ADR-034 Amendment A on what a call pins is being written on the branch) → `wasm-size` (E5, ADR-052,
-under review) → `tooling` (D2–D5, implementing). In parallel: `tooling` (D2–D5) and `wasm-size` (E5, ADR-052).
+**Merge queue (cross-merge main on the branch, full matrix, fast-forward):** `wasm-size` (E5, ADR-052,
+under review) → `tooling` (D2–D5, under review) → `dev-reload` (B3, ADR-053 accepted, implementing) →
+`docs-reference` (H3) → `rn-adapters` (G1b, ADR-038 Amendment B). In parallel: `tooling` (D2–D5) and `wasm-size` (E5, ADR-052).
 
 **Next:** wave 0 of `.10x/specs/2026-10-01-boundary-surface-plan.md` (`abi-table` ADR-044 — after
 Track A and RN merge, it rewrites the FFI they touch; `ios-floor` ADR-045 — after parity;

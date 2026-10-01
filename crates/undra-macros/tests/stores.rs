@@ -7,7 +7,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use undra::meta::{TypeRef, collect_schema, ids};
-use undra::prelude::{Computed, Ctx, Signal};
+use undra::prelude::{Computed, Ctx, Signal, WeakCtx};
 use undra::runtime::{StoreObject, StoreRestorer};
 use undra::signals::{ALL_SIGNALS, SignalsError, StoreCell};
 use undra::wire::payload::ChangeOp;
@@ -148,6 +148,29 @@ impl Counter {
 
     pub fn extra_len(&self) -> u32 {
         self.extra.len() as u32
+    }
+}
+
+/// A store that keeps its context as ADR-034 recommends: a `WeakCtx`, restored by downgrading the
+/// restore context (decision 7).
+#[k::store]
+pub struct Keeper {
+    ctx: WeakCtx,
+    count: Signal<i64>,
+}
+
+#[k::api(store)]
+impl Keeper {
+    pub fn new(ctx: &Ctx) -> Self {
+        Keeper {
+            ctx: ctx.downgrade(),
+            count: Signal::new(0),
+        }
+    }
+
+    pub fn bump(&self) -> i64 {
+        self.count.update(|c| *c += 1);
+        self.count.get()
     }
 }
 
@@ -541,6 +564,22 @@ fn restore_without_a_hook_uses_ctx_and_default() {
     assert_eq!(restored.extra_len(), 0);
     let _ = restored.ctx.clone();
     assert_eq!(restored.cell().signal_count(), 2);
+}
+
+#[test]
+fn a_weak_ctx_field_is_restored_from_the_restore_context() {
+    let rt = Runtime::new();
+    let handle = construct(&rt, "Keeper", &[]);
+    let keeper = rt.object::<Keeper>(handle).unwrap();
+    keeper.bump();
+    let body = snapshot_body(&|w| keeper.cell().encode_snapshot(w));
+    let restored = restore::<Keeper>(&rt, "Keeper", &body).unwrap();
+    assert_eq!(restored.count.get(), 1);
+    let ctx = restored
+        .ctx
+        .upgrade()
+        .expect("downgraded from the live restore context");
+    assert_eq!(ctx.runtime().id(), rt.ctx().runtime().id());
 }
 
 #[test]

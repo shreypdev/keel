@@ -447,9 +447,16 @@ internal class ConnectedCore(
     }
 
     override fun close() {
+        // A close the transport refuses (from inside a core callback) must leave the core as it was.
+        if (!closed.get()) transport.checkClose()
         shutDown(null, ClosedReason.REQUESTED)
     }
 
+    /**
+     * Fails everything pending, cancels the scope and closes the transport, in that order. For an in-process
+     * core the last step blocks until the native shutdown has finished (see [UndraCore.close]), which is why
+     * the pending calls are failed first: the shutdown's own answers have nowhere to go.
+     */
     private fun shutDown(cause: Throwable?, reason: ClosedReason) {
         // The cause must be visible before `closed` is, or a caller that sees the closed flag reports no cause.
         synchronized(closeLock) {
@@ -567,16 +574,45 @@ internal class ConnectedCore(
                 }
             }
             StreamFlag.ERROR -> {
+                // The stream's own typed error E: generated code decodes it from the ERROR body.
                 pending.remove(callId.toInt())
                 failStream(stream, UndraReplyException(ReplyStatus.ERROR, body))
             }
+            StreamFlag.FAILED -> {
+                pending.remove(callId.toInt())
+                failStream(stream, streamFailure(callId, body))
+            }
         }
+    }
+
+    /**
+     * What a [StreamFlag.FAILED] item ends its stream with: exactly the failed reply with the same status and
+     * the SPEC 3.4 body (ADR-036), so generated `fromReply` passes it through and [UndraReplyException.panicInfo]
+     * and [UndraReplyException.badRequestReason] read it. A body that does not decode is an [UndraProtocolException]
+     * (generated code reports it as `UndraCallError.Malformed`, as for a reply the bindings cannot read).
+     */
+    private fun streamFailure(callId: UInt, body: ByteArray): Throwable {
+        val failure = try {
+            Payloads.StreamFailure.decode(body)
+        } catch (e: WireException) {
+            return UndraProtocolException("the core sent a malformed stream failure: ${e.message}", e)
+        }
+        // A status 3 body is empty (SPEC 3.4), so the reason would be lost without this.
+        if (failure.status == ReplyStatus.CANCELLED) UndraLog.debug("the core cancelled stream $callId: ${failure.message}")
+        return UndraReplyException(failure.status, failure.replyBody())
     }
 
     override fun onMalformed(callId: UInt, error: UndraProtocolException) {
         val entry = pending.remove(callId.toInt()) ?: return
         if (entry !is Pending.Streaming) liveMirror.drainSoon()
         fail(entry, error)
+        if (entry is Pending.Streaming) {
+            // The collector is told the stream failed, but the core's side did not end: it keeps the stream open and
+            // waits for credit until shutdown, and the collector's own cancel is skipped (`failStream` marks the
+            // stream `coreDone`, which is right for an end the core sent). Cancel it here, off the callback (a native
+            // call from one is refused, SPEC 6 host contract 4), like Swift's `cancelDeferred`.
+            UndraDispatchers.delivery.execute { cancelQuietly(callId) }
+        }
     }
 
     override fun onChangeSet(changeSet: ByteArray) {
