@@ -26,6 +26,7 @@ const FREE = CallTarget.FreeFunction;
 const snapshotOf = (value: number): Uint8Array => Uint8Array.of(...u32(value), 9, 9, 9, 9);
 const REFUSED_MALFORMED = Uint8Array.of(0xff, 0, 0, 0, 0);
 const REFUSED_UNAVAILABLE = Uint8Array.of(0xfe, 0, 0, 0, 0);
+const REFUSED_INCOMPATIBLE = Uint8Array.of(0xfd, 0, 0, 0, 0);
 
 interface Booted {
   readonly core: UndraCore;
@@ -133,6 +134,7 @@ describe.each(["wasm-main", "wasm-worker"] as const)("snapshot and restore in %s
   it.each([
     ["malformed bytes", REFUSED_MALFORMED, 5],
     ["a core that is not available", REFUSED_UNAVAILABLE, 6],
+    ["values that cannot become this build's types (ADR-037)", REFUSED_INCOMPATIBLE, 7],
     ["bytes too short to be a snapshot", Uint8Array.of(1, 2), 5],
     ["no bytes at all", new Uint8Array(0), 5],
   ] as const)("refused bytes (%s) reject with UndraRestoreError carrying the code, and the core is unchanged", async (_name, bytes, code) => {

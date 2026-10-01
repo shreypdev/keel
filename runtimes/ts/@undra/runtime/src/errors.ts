@@ -180,6 +180,14 @@ export class UndraTransportError extends UndraError {
   }
 }
 
+/** What each `undra_restore` code means, for the message of {@link UndraRestoreError}. */
+const RESTORE_CODES: Readonly<Record<number, string>> = {
+  2: "a store's restore panicked",
+  5: "the snapshot is malformed or names something this core does not have",
+  6: "the core is shut down, or the restore was made from inside a core callback",
+  7: "a store's persisted values cannot become this build's types (see the core's error log)",
+};
+
 /**
  * `UndraCore.restore` was refused: the core rejected the snapshot and is unchanged (SPEC 5.9, the
  * `undra_restore` code of SPEC 7). A refused restore changes nothing, so the core and every handle
@@ -187,14 +195,30 @@ export class UndraTransportError extends UndraError {
  */
 export class UndraRestoreError extends UndraError {
   override readonly name: string = "UndraRestoreError";
-  /** The non-zero code `undra_restore` returned: 2 a store's restore panicked, 5 the snapshot is malformed or names something the core does not have, 6 the core is shut down or was called from inside a callback. */
+  /** `undra_restore` code 2: a store's restore function panicked (contained). */
+  static readonly PANICKED = 2;
+  /** `undra_restore` code 5: the snapshot is malformed (also one in a layout before ADR-037), names an unknown store type, has a null or duplicate handle, or a store rejected its values. */
+  static readonly BAD_SNAPSHOT = 5;
+  /** `undra_restore` code 6: no running core, it is shut down, or the restore was made from inside a core callback. */
+  static readonly UNAVAILABLE = 6;
+  /**
+   * `undra_restore` code 7 (ADR-037): a store's persisted values cannot become this build's types; they neither
+   * migrate structurally nor through a `#[undra::migrate]` hook. The reason is in the ERROR record the core logged.
+   */
+  static readonly INCOMPATIBLE = 7;
+  /**
+   * The non-zero code `undra_restore` returned: {@link UndraRestoreError.PANICKED} (2) a store's restore panicked,
+   * {@link UndraRestoreError.BAD_SNAPSHOT} (5) the snapshot is malformed or names something the core does not have,
+   * {@link UndraRestoreError.UNAVAILABLE} (6) the core is shut down or was called from inside a callback,
+   * {@link UndraRestoreError.INCOMPATIBLE} (7) a store's persisted values cannot become this build's types (ADR-037).
+   */
   readonly code: number;
 
   /** @param code The non-zero code `undra_restore` returned. */
   constructor(code: number) {
     super(
       "restore",
-      `the Undra core rejected the snapshot (code ${String(code)}); a rejected restore leaves the core unchanged`,
+      `the Undra core rejected the snapshot (code ${String(code)}${RESTORE_CODES[code] === undefined ? "" : `: ${RESTORE_CODES[code]}`}); a rejected restore leaves the core unchanged`,
     );
     this.code = code;
   }

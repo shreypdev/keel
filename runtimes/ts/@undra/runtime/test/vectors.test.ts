@@ -8,6 +8,7 @@ import {
   type ChangeEntry,
   type PatchOp,
   type ReplyPayload,
+  type SnapshotPayload,
   type StreamFailureStatus,
   type StreamItemPayload,
   CallTarget,
@@ -18,11 +19,13 @@ import {
   decodeChangeSet,
   decodePatch,
   decodeReply,
+  decodeSnapshot,
   decodeStreamItem,
   encodeCall,
   encodeChangeSet,
   encodePatch,
   encodeReply,
+  encodeSnapshot,
   encodeStreamItem,
 } from "../src/wire/payloads.js";
 import { UndraReader } from "../src/wire/reader.js";
@@ -282,6 +285,36 @@ function changeSetCase(v: Vector): Case {
   };
 }
 
+/**
+ * Snapshot layout 2 (ADR-037): u64s (and the type ids) as decimal strings, the description as its text,
+ * signal values as raw bytes.
+ */
+function snapshotCase(v: Vector): Case {
+  const json = v.value as {
+    generation_floor: number;
+    schema_hash: string;
+    types: { type_id: string; fingerprint: string }[];
+    description: string;
+    stores: { handle: string; type_id: string; signals: { signal_id: number; value: number[] }[] }[];
+  };
+  const snapshot: SnapshotPayload = {
+    generationFloor: json.generation_floor,
+    schemaHash: BigInt(json.schema_hash),
+    types: json.types.map((t) => ({ typeId: Number(t.type_id), fingerprint: BigInt(t.fingerprint) })),
+    description: json.description,
+    stores: json.stores.map((s) => ({
+      handle: BigInt(s.handle),
+      typeId: Number(s.type_id),
+      signals: s.signals.map((signal) => ({ signalId: signal.signal_id, value: Uint8Array.from(signal.value) })),
+    })),
+  };
+  return {
+    encode: () => encodeSnapshot(snapshot),
+    check: (bytes) => expect(decodeSnapshot(bytes)).toEqual(snapshot),
+    reencode: (bytes) => encodeSnapshot(decodeSnapshot(bytes)),
+  };
+}
+
 function patchCase(v: Vector): Case {
   const ops = (v.value as { ops: PatchOp<number>[] }).ops;
   const decode = (bytes: Uint8Array): PatchOp<number>[] => {
@@ -369,6 +402,7 @@ function caseFor(v: Vector): Case | undefined {
   if (v.type === "reply payload") return replyCase(v);
   if (v.type === "stream item payload") return streamItemCase(v);
   if (v.type === "changeset payload") return changeSetCase(v);
+  if (v.type === "snapshot payload") return snapshotCase(v);
   if (v.type === "keyed patch (item i32)") return patchCase(v);
   const fnv = /^fnv1a(32|64)\("(.*)"\)$/.exec(v.type);
   if (fnv) return fnvCase(fnv[1] === "32" ? 32 : 64, fnv[2] as string, v);

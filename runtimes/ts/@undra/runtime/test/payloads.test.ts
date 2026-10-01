@@ -676,9 +676,15 @@ describe("Hello, Log and TimerFired", () => {
   });
 });
 
-describe("Snapshot", () => {
+describe("Snapshot (layout 2, ADR-037)", () => {
   const snapshot = {
     generationFloor: 0x01020304,
+    schemaHash: 0x1122334455667788n,
+    types: [
+      { typeId: 0xdeadbeef, fingerprint: 0xfedcba9876543210n },
+      { typeId: 1, fingerprint: 0n },
+    ],
+    description: '{"stores":[]}',
     stores: [
       {
         handle: HANDLE,
@@ -691,10 +697,13 @@ describe("Snapshot", () => {
       { handle: 5n, typeId: 1, signals: [] },
     ],
   };
+  const empty = { generationFloor: 0, schemaHash: 0n, types: [], description: "", stores: [] };
 
-  it("lays out stores and signals per SPEC 5.9", () => {
+  it("lays out the header, the type table, the description, then stores and signals per SPEC 5.9", () => {
     expect(toHex(encodeSnapshot(snapshot))).toBe(
-      "02000000" + "04030201" +
+      "02000000" + "04030201" + "8877665544332211" +
+        "02000000" + "efbeadde" + "1032547698badcfe" + "01000000" + "0000000000000000" +
+        "0d000000" + toHex(new TextEncoder().encode('{"stores":[]}')) +
         "0100000001000000" + "efbeadde" + "02000000" +
         "00000000" + "02000000" + "0102" +
         "02000000" + "00000000" +
@@ -706,8 +715,9 @@ describe("Snapshot", () => {
     const bytes = encodeSnapshot(snapshot);
     expect(decodeSnapshot(bytes)).toEqual(snapshot);
     expect(decodeSnapshot(embedded(bytes))).toEqual(snapshot);
-    expect(toHex(encodeSnapshot({ generationFloor: 0, stores: [] }))).toBe("0000000000000000");
-    expect(decodeSnapshot(encodeSnapshot({ generationFloor: 9, stores: [] }))).toEqual({ generationFloor: 9, stores: [] });
+    expect(toHex(encodeSnapshot(empty))).toBe("00000000" + "00000000" + "0000000000000000" + "00000000" + "00000000");
+    const floor9 = { ...empty, generationFloor: 9, schemaHash: 7n, description: "{}" };
+    expect(decodeSnapshot(encodeSnapshot(floor9))).toEqual(floor9);
   });
 
   it("returns signal values as borrowed views", () => {
@@ -718,14 +728,45 @@ describe("Snapshot", () => {
 
   it("rejects counts that cannot fit in the input", () => {
     expectWireError(() => decodeSnapshot(fromHex("ffffffff 00000000")), "length_too_large");
+    // A type count beyond the input.
+    expectWireError(() => decodeSnapshot(fromHex("00000000 00000000 0000000000000000 ffffffff")), "length_too_large");
+    // A signal count beyond the input.
     expectWireError(
-      () => decodeSnapshot(fromHex("01000000 00000000 0000000000000000 00000000 ffffffff")),
+      () =>
+        decodeSnapshot(
+          fromHex("01000000 00000000 0000000000000000 01000000 02000000 0000000000000000 00000000 0000000000000000 02000000 ffffffff"),
+        ),
       "length_too_large",
     );
   });
 
-  it("refuses a snapshot in the layout before the generation floor existed", () => {
-    // `count u32` only: an empty snapshot of the old layout ends where the floor should be.
+  it("refuses a store whose type is not in the type table", () => {
+    const unlisted = encodeSnapshot({ ...snapshot, types: [{ typeId: 1, fingerprint: 0n }] });
+    expectWireError(() => decodeSnapshot(unlisted), "invalid_tag", { tag: 0xdeadbeef });
+  });
+
+  it("refuses a type listed twice", () => {
+    const twice = encodeSnapshot({ ...snapshot, types: [...snapshot.types, { typeId: 1, fingerprint: 9n }] });
+    expectWireError(() => decodeSnapshot(twice), "duplicate_key");
+  });
+
+  it("refuses a description that is not UTF-8", () => {
+    const bytes = encodeSnapshot({ ...empty, description: "ab" });
+    // The description's two bytes are the last two: make them an invalid UTF-8 sequence.
+    bytes[bytes.length - 2] = 0xc3;
+    bytes[bytes.length - 1] = 0x28;
+    expectWireError(() => decodeSnapshot(bytes), "invalid_utf8");
+  });
+
+  it("refuses a snapshot in the layout before ADR-037 (and the one before the generation floor)", () => {
+    // Layout 1: count, generation_floor, then the stores straight away.
+    const layout1 = fromHex(
+      "01000000" + "03000000" + "0100000001000000" + "efbeadde" + "01000000" + "00000000" + "04000000" + "07000000",
+    );
+    expect(() => decodeSnapshot(layout1)).toThrow(WireError);
+    // An empty one ends where the schema hash should be.
+    expectWireError(() => decodeSnapshot(fromHex("00000000 00000000")), "unexpected_eof");
+    // The layout before the generation floor: `count u32` only.
     expectWireError(() => decodeSnapshot(fromHex("00000000")), "unexpected_eof");
   });
 
@@ -743,7 +784,9 @@ describe("Snapshot", () => {
     const value = ["a", "b\u{1f30a}"];
     const codec = codecs.vec(codecs.string);
     const bytes = encodeSnapshot({
+      ...empty,
       generationFloor: 1,
+      types: [{ typeId: 2, fingerprint: 3n }],
       stores: [{ handle: 1n, typeId: 2, signals: [{ signalId: 0, value: encodeValue(codec, value) }] }],
     });
     const signal = decodeSnapshot(bytes).stores[0]?.signals[0];
