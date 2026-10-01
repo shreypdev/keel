@@ -115,6 +115,11 @@ its throughput halved too). I did not widen anything for that run.
   10 s CI-configuration runs at +0.00% to +0.72%; the six before them (same rule) had one at +1.44%.
   On Linux's per-thread arenas I expect it flat, but CI has not run. If it flakes there, raise the
   limit in the workflow with `--rss-limit-pct`, not in the file.
+* The rate gate ("a second under half its target fails") is the one noisy gate that tripped on its
+  own: one of the last three 60 s runs on the final tree failed on a 47% completions second while
+  another build ran (load average 7 to 9); the other two passed, and a rerun with `--attempts 2`
+  passed on its first attempt. The load is paced and carried at 100% of target in every quiet run;
+  a runner that cannot carry it is a runner the gate should say so about.
 * The firehose p99 inside the soak is 40 to 80 us, not 211 ns: it is the wait for the core lock
   behind a 20-operation churn call or a completion burst, which is what mixed load looks like. The
   drift gate compares second with second, so the number itself is not gated.
@@ -123,3 +128,19 @@ its throughput halved too). I did not widen anything for that run.
   `UNDRA_BENCH_SCALE` moves both.
 * Everything here is the core side. The web numbers, the device numbers and the ADR-031 before and
   after belong to S1b and the device phase and are not in these tables.
+
+## Crossing the rename
+
+`main` had merged the Keel to Undra rename. `git merge main` conflicted in the files this branch
+owns (`bench/budgets.toml`, `bench/common/fixtures.rs`, `bench/common/host.rs`,
+`.github/workflows/bench.yml`; kept this side) and in the sde index (took main's, re-added this
+note's line); `commit_alloc.rs` landed in `crates/undra-ffi/tests/` with the directory. Then
+`scripts/rename-keel-to-undra.sh bench crates/undra-ffi/tests .github/workflows/bench.yml
+.10x/specs/2026-09-30-stress-bench-design.md .10x/adrs/ADR-031-frame-coalesced-delivery.md
+.10x/decisions` (21 files; it also rewrote the three `launch-v2.md` records of other roles because
+naming `.10x/decisions` lifts their exclusion, so those were reverted). Names in this note above are
+the old ones where they describe what was built before the merge. After it: fmt, clippy
+`--workspace --all-targets -D warnings`, `cargo doc`, the workspace tests (2,143 passed, 0 failed,
+10 ignored), the budgets gate (`undra-bench`), the stress gate, the 10 s soak and two 60 s soaks
+ran on the renamed tree; env vars are now `UNDRA_STRESS_SECONDS`, `UNDRA_BENCH_SCALE`,
+`UNDRA_BENCH_FILTER`, `UNDRA_BENCH_BUDGETS`, `UNDRA_STRESS_JSON`.
