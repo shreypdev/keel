@@ -240,7 +240,7 @@ export async function bootRaw(options: BootOptions = {}): Promise<BootedRaw> {
  */
 export async function bootWorker(options: WorkerBootOptions = {}): Promise<BootedWorker> {
   const world = worldOf(options);
-  const posted: unknown[] = [];
+  const posted: unknown[] = options.posted ?? [];
   const closed: Error[] = [];
   const runtimeErrors: unknown[] = [];
   const channel = new MessageChannel();
@@ -293,6 +293,8 @@ export async function bootWorker(options: WorkerBootOptions = {}): Promise<Boote
 export interface WorkerBootOptions extends BootOptions {
   /** The URL of the module of `LoadOptions.worker.ports` (ADR-049): ports that run in the worker. */
   readonly workerPorts?: string;
+  /** Where to record what the main thread posts to the worker (also when the load fails). Default a new array. */
+  readonly posted?: unknown[];
 }
 
 /** A {@link Booted} core in `wasm-worker` mode, and every message the main thread posted to its worker (`init` first). */
