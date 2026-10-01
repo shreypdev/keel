@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://shreypdev.github.io/undra/</loc><lastmod>2026-09-30</lastmod></url>
-  <url><loc>https://shreypdev.github.io/undra/docs/</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/docs/</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/api-kotlin.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/api-swift.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/docs/api-typescript.html</loc><lastmod>2026-10-01</lastmod></url>
@@ -17,5 +17,8 @@
   <url><loc>https://shreypdev.github.io/undra/blog/undra-vs-kotlin-multiplatform/</loc><lastmod>2026-09-30</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/blog/undra-vs-uniffi-and-crux/</loc><lastmod>2026-09-30</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/blog/why-undra-keeps-your-ui-native/</loc><lastmod>2026-09-30</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/reference/kotlin.html</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/reference/swift.html</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://shreypdev.github.io/undra/reference/typescript.html</loc><lastmod>2026-10-01</lastmod></url>
   <url><loc>https://shreypdev.github.io/undra/roadmap/</loc><lastmod>2026-10-01</lastmod></url>
 </urlset>
