@@ -4,6 +4,11 @@
 //! a project needs no network and no files next to the executable. Paths may contain
 //! placeholders (`ios/@@APP@@.xcodeproj/...`); see [`crate::render`].
 //!
+//! The templates of Cargo manifests are called `Cargo.toml.tmpl`: a `Cargo.toml` with `@@...@@`
+//! placeholders in it is not TOML, and Cargo, which searches a whole git repository for the package
+//! a git dependency names, prints a parse error for each one it meets, on every project's first
+//! fetch of Undra.
+//!
 //! The tests render every template with realistic values and fail on a placeholder nothing sets,
 //! and the integration tests build the result with the real toolchains.
 
@@ -11,13 +16,13 @@ use crate::render::{TemplateFile, template};
 
 /// The project's own files: the Cargo workspace and `.gitignore`.
 pub const PROJECT: &[TemplateFile] = &[
-    template!("project/Cargo.toml" => "Cargo.toml"),
+    template!("project/Cargo.toml.tmpl" => "Cargo.toml"),
     template!("project/gitignore" => ".gitignore"),
 ];
 
 /// The core crate.
 pub const CORE: &[TemplateFile] = &[
-    template!("core/Cargo.toml" => "core/Cargo.toml"),
+    template!("core/Cargo.toml.tmpl" => "core/Cargo.toml"),
     template!("core/src/lib.rs" => "core/src/lib.rs"),
 ];
 
