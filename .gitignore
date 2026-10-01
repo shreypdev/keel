@@ -25,3 +25,4 @@ dist
 
 # The staged site (site/ + the playground build): site/scripts/build-local.sh.
 /_site/
+/examples/playground/web/dist-bench
