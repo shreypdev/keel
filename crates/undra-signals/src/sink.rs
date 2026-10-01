@@ -51,6 +51,22 @@ pub trait ChangeSink: Send + Sync {
         let _ = (owner, message);
     }
 
+    /// Reports that the computed at `signal_id` of the store with `handle` (owned by runtime
+    /// `owner`) panicked while a commit or an observe evaluated it: `message` is the panic's. The
+    /// slot is held back, the rest of the store was delivered and the write that triggered the
+    /// commit succeeded (ADR-019 amendment). Called once per transition into the failed state,
+    /// after the store's delivery lock is released. The runtime's sink logs it at error level
+    /// through the owning runtime and marks the store poisoned. The default does nothing.
+    fn computed_failed(&self, owner: u64, handle: u64, signal_id: u32, message: &str) {
+        let _ = (owner, handle, signal_id, message);
+    }
+
+    /// Reports that a computed [`computed_failed`](ChangeSink::computed_failed) reported has been
+    /// evaluated successfully again and its value delivered. The default does nothing.
+    fn computed_recovered(&self, owner: u64, handle: u64, signal_id: u32) {
+        let _ = (owner, handle, signal_id);
+    }
+
     /// Reports that a commit was cut off after `rounds` rounds because effects (or computeds
     /// and sinks) kept writing signals that triggered themselves.
     ///

@@ -154,9 +154,12 @@ impl<T: SignalValue> Signal<T> {
     ///
     /// # Panics
     ///
-    /// Only if something the commit triggered panicked (a sink, an effect, a computed closure
-    /// or an encoder): the value is already written, the commit has run to completion, and the
-    /// first such panic is re-raised. See the crate docs.
+    /// With E0065 if the signal belongs to a store and the calling thread does not hold its
+    /// runtime's core lock (ADR-035; nothing is written, see [`try_set`](Signal::try_set)).
+    /// Otherwise only if something the commit triggered panicked (a sink, an effect or an
+    /// encoder): the value is already written, the commit has run to completion, and the first
+    /// such panic is re-raised. A computed that panics is held back on its own instead (ADR-019
+    /// amendment). See the crate docs.
     pub fn set(&self, value: T) {
         // The replaced value is handed back so it is dropped after the lock is released.
         let _old = self.write_with(|slot| {

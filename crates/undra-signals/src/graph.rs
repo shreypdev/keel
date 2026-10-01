@@ -90,6 +90,10 @@ pub(crate) struct SlotFlags {
     pub(crate) observed: AtomicBool,
     /// Deliver changes even while unobserved.
     pub(crate) no_coalesce: AtomicBool,
+    /// A computed slot whose last evaluation at a commit or an observe panicked: it is held back
+    /// (the host keeps the last value it received) until an evaluation succeeds, which is tried
+    /// again when its inputs change (ADR-019 amendment).
+    pub(crate) failed: AtomicBool,
 }
 
 /// Where a signal or computed lives inside a store.

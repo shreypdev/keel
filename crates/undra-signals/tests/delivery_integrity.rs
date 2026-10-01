@@ -77,24 +77,40 @@ fn bomb_computed<T: undra_signals::SignalValue + 'static>(
 // H1: an abandoned commit or observe must not leave the host silently diverged
 // ---------------------------------------------------------------------------------------------
 
+/// A plain slot whose encoder panics while `armed` (see [`EncodeBomb`]), and how to dirty it.
+fn bomb_signal(armed: &Arc<AtomicBool>) -> Signal<EncodeBomb> {
+    Signal::new(EncodeBomb::new(armed, 7))
+}
+
+fn touch(bomb: &Signal<EncodeBomb>) {
+    bomb.update(|b| b.value = 7);
+}
+
 #[test]
 fn h1_panicked_commit_does_not_strand_a_keyed_list_divergence() {
-    // The review's repro: keyed rows at id 0 and a computed at id 1 that panics once.
+    // The review's repro: keyed rows at id 0 and a slot at 1 whose encoder panics once (a
+    // panicking computed was the review's choice; since the ADR-019 amendment that one is held
+    // back on its own, so the abandon path is exercised with a panicking encoder).
     let rig = Rig::new();
     let rows = Signal::new(todos(2));
     let armed = Arc::new(AtomicBool::new(false));
-    let bomb = bomb_computed(&rows, &armed);
+    let bomb = bomb_signal(&armed);
     rig.cell.attach_keyed(&rows, 0, todo_key).unwrap();
-    rig.cell.attach_computed(&bomb, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
 
     let mut host = Host::default();
     host.apply_entries(&rig.observe_all(), Some(0));
 
     armed.store(true, Ordering::SeqCst);
     let result = catch_unwind(AssertUnwindSafe(|| {
-        rig.run(|| rows.update(|r| r[0].done = true));
+        rig.run(|| {
+            txn(|| {
+                rows.update(|r| r[0].done = true);
+                touch(&bomb);
+            });
+        });
     }));
-    assert!(result.is_err(), "the computed's panic is re-raised");
+    assert!(result.is_err(), "the encoder's panic is re-raised");
     assert!(rig.sets().is_empty(), "nothing is half-sent");
     armed.store(false, Ordering::SeqCst);
 
@@ -114,14 +130,14 @@ fn h1_panicked_commit_does_not_strand_a_keyed_list_divergence() {
 
 #[test]
 fn h1_panicked_commit_does_not_strand_plain_values() {
-    // a (0), a panicking computed (1) and b (2): the review's second repro.
+    // a (0), a slot whose encoder panics (1) and b (2): the review's second repro.
     let rig = Rig::new();
     let a = Signal::new(1_u32);
     let armed = Arc::new(AtomicBool::new(false));
-    let c = bomb_computed(&a, &armed);
+    let bomb = bomb_signal(&armed);
     let b = Signal::new(0_u32);
     rig.cell.attach(&a, 0).unwrap();
-    rig.cell.attach_computed(&c, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
     rig.cell.attach(&b, 2).unwrap();
 
     let mut host = Host::default();
@@ -129,7 +145,13 @@ fn h1_panicked_commit_does_not_strand_plain_values() {
     assert_eq!(host.values[&0], 1);
 
     armed.store(true, Ordering::SeqCst);
-    assert!(catch_unwind(AssertUnwindSafe(|| rig.run(|| a.set(5)))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| rig.run(|| txn(|| {
+            a.set(5);
+            touch(&bomb);
+        }))))
+        .is_err()
+    );
     armed.store(false, Ordering::SeqCst);
 
     for n in 1..=3 {
@@ -138,7 +160,7 @@ fn h1_panicked_commit_does_not_strand_plain_values() {
     }
     assert_eq!(host.values[&2], 3);
     assert_eq!(host.values[&0], 5, "a's abandoned change reached the host");
-    assert_eq!(host.values[&1], 7, "and so did the computed's");
+    assert_eq!(host.values[&1], 7, "and so did the bomb's");
     // The retry rides on one commit only: the next one carries just what changed.
     rig.run(|| b.set(9));
     assert_eq!(ids(&rig.one_set()), vec![2]);
@@ -151,13 +173,19 @@ fn h1_a_write_to_an_abandoned_slot_still_triggers_a_commit() {
     let rig = Rig::new();
     let a = Signal::new(1_u32);
     let armed = Arc::new(AtomicBool::new(false));
-    let c = bomb_computed(&a, &armed);
+    let bomb = bomb_signal(&armed);
     rig.cell.attach(&a, 0).unwrap();
-    rig.cell.attach_computed(&c, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
     rig.observe_all();
 
     armed.store(true, Ordering::SeqCst);
-    assert!(catch_unwind(AssertUnwindSafe(|| rig.run(|| a.set(2)))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| rig.run(|| txn(|| {
+            a.set(2);
+            touch(&bomb);
+        }))))
+        .is_err()
+    );
     armed.store(false, Ordering::SeqCst);
 
     rig.run(|| a.set(3));
@@ -199,14 +227,14 @@ fn h1_a_panicking_sink_makes_the_next_delivery_a_full_value() {
 
 #[test]
 fn h1_a_failed_observe_leaves_nothing_observed_and_no_baseline() {
-    // The review's third repro: a computed panics during `observe(ALL)`; the runtime throws the
+    // The review's third repro: an encoder panics during `observe(ALL)`; the runtime throws the
     // entries away, so no slot may stay observed and no baseline may exist.
     let rig = Rig::new();
     let rows = Signal::new(todos(2));
     let armed = Arc::new(AtomicBool::new(true));
-    let bomb = bomb_computed(&rows, &armed);
+    let bomb = bomb_signal(&armed);
     rig.cell.attach_keyed(&rows, 0, todo_key).unwrap();
-    rig.cell.attach_computed(&bomb, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
 
     let mut out = Writer::new();
     let result = catch_unwind(AssertUnwindSafe(|| {
@@ -235,9 +263,9 @@ fn h1_a_failed_reobserve_of_an_observed_slot_does_not_swallow_its_pending_write(
     let rig = Rig::new();
     let rows = Signal::new(todos(2));
     let armed = Arc::new(AtomicBool::new(false));
-    let bomb = bomb_computed(&rows, &armed);
+    let bomb = bomb_signal(&armed);
     rig.cell.attach_keyed(&rows, 0, todo_key).unwrap();
-    rig.cell.attach_computed(&bomb, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
     let mut host = Host::default();
     host.apply_entries(&rig.observe_on(0), Some(0));
 
@@ -252,7 +280,7 @@ fn h1_a_failed_reobserve_of_an_observed_slot_does_not_swallow_its_pending_write(
             }));
             assert!(result.is_err());
             assert!(rig.cell.is_observed(0), "slot 0 keeps its earlier state");
-            assert!(!rig.cell.is_observed(1), "the computed was never observed");
+            assert!(!rig.cell.is_observed(1), "the bomb was never observed");
         });
     });
     armed.store(false, Ordering::SeqCst);
@@ -270,15 +298,21 @@ fn h1_observing_again_after_an_abandoned_commit_clears_the_retry() {
     let rig = Rig::new();
     let a = Signal::new(1_u32);
     let armed = Arc::new(AtomicBool::new(false));
-    let c = bomb_computed(&a, &armed);
+    let bomb = bomb_signal(&armed);
     let b = Signal::new(0_u32);
     rig.cell.attach(&a, 0).unwrap();
-    rig.cell.attach_computed(&c, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
     rig.cell.attach(&b, 2).unwrap();
     rig.observe_all();
 
     armed.store(true, Ordering::SeqCst);
-    assert!(catch_unwind(AssertUnwindSafe(|| rig.run(|| a.set(2)))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| rig.run(|| txn(|| {
+            a.set(2);
+            touch(&bomb);
+        }))))
+        .is_err()
+    );
     armed.store(false, Ordering::SeqCst);
 
     // The host resynchronises by observing everything: it now has the current values.
@@ -292,32 +326,173 @@ fn h1_observing_again_after_an_abandoned_commit_clears_the_retry() {
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// ADR-019 amendment (gap PC-1): a panicking computed is isolated per signal
+// ---------------------------------------------------------------------------------------------
+
+/// A sink that captures change-sets and the computed failures and recoveries it hears of.
+#[derive(Default)]
+struct Health {
+    capture: Arc<undra_signals::testing::CaptureSink>,
+    failed: Mutex<Vec<(u32, String)>>,
+    recovered: Mutex<Vec<u32>>,
+}
+
+impl ChangeSink for Health {
+    fn deliver(&self, change_set: &[u8]) {
+        self.capture.deliver(change_set);
+    }
+
+    fn computed_failed(&self, _owner: u64, handle: u64, signal_id: u32, message: &str) {
+        assert_eq!(handle, HANDLE);
+        self.failed.lock().push((signal_id, message.to_owned()));
+    }
+
+    fn computed_recovered(&self, _owner: u64, handle: u64, signal_id: u32) {
+        assert_eq!(handle, HANDLE);
+        self.recovered.lock().push(signal_id);
+    }
+}
+
 #[test]
-fn h1_a_computed_that_keeps_panicking_holds_back_its_store_until_it_recovers() {
-    // Documented trade-off: an abandoned change-set is retried by every later commit of the
-    // store, so a computed that cannot be evaluated stalls the store loudly (each commit
-    // re-raises its panic) instead of letting the host drift silently.
+fn pc1_a_panicking_computed_is_held_back_alone_and_the_write_that_triggered_it_succeeds() {
+    // The audit's probe: five unrelated writes used to raise five panics and deliver nothing.
     let rig = Rig::new();
     let a = Signal::new(1_u32);
     let armed = Arc::new(AtomicBool::new(false));
-    let c = bomb_computed(&a, &armed);
+    let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let c = {
+        let (armed, runs) = (armed.clone(), runs.clone());
+        Computed::new(&a, move |v: &u32| {
+            runs.fetch_add(1, Ordering::SeqCst);
+            assert!(!armed.load(Ordering::SeqCst), "computed failure");
+            v * 10
+        })
+    };
     let b = Signal::new(0_u32);
     rig.cell.attach(&a, 0).unwrap();
     rig.cell.attach_computed(&c, 1).unwrap();
     rig.cell.attach(&b, 2).unwrap();
-    rig.observe_all();
+    let health = Arc::new(Health::default());
+    let sink: Arc<dyn ChangeSink> = health.clone();
+    let mut host = Host::default();
+    host.apply_entries(&rig.observe_all(), None);
+    assert_eq!(host.values[&1], 10);
 
     armed.store(true, Ordering::SeqCst);
-    assert!(catch_unwind(AssertUnwindSafe(|| rig.run(|| a.set(2)))).is_err());
-    assert!(catch_unwind(AssertUnwindSafe(|| rig.run(|| b.set(1)))).is_err());
-    assert!(rig.sets().is_empty());
+    // The write that makes the computed panic succeeds, and its own slot is delivered.
+    with_sink(sink.clone(), || a.set(2));
+    let sets = health.capture.take_decoded();
+    assert_eq!(sets.len(), 1);
+    assert_eq!(
+        ids(&sets[0]),
+        vec![0],
+        "the computed is left out, not the store"
+    );
+    host.apply_all(&sets, None);
+    assert!(rig.cell.is_failed(1));
+    assert_eq!(
+        rig.cell.failed_signals(),
+        vec![(1, "computed failure".to_owned())],
+        "the typed poisoned state, with the panic's message"
+    );
+    assert_eq!(
+        health.failed.lock().clone(),
+        [(1, "computed failure".to_owned())]
+    );
 
+    // Unrelated writes are delivered and do not evaluate the failed computed again.
+    let evaluations = runs.load(Ordering::SeqCst);
+    for n in 1..=5 {
+        with_sink(sink.clone(), || b.set(n));
+    }
+    let sets = health.capture.take_decoded();
+    assert_eq!(sets.len(), 5, "five writes, five change-sets");
+    assert!(sets.iter().all(|s| ids(s) == vec![2]));
+    host.apply_all(&sets, None);
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        evaluations,
+        "not retried per commit"
+    );
+    assert_eq!(
+        host.values[&1], 10,
+        "the host keeps the last value it received"
+    );
+    assert_eq!(health.failed.lock().len(), 1, "reported once");
+
+    // A change of its inputs tries again: still failing, it stays held back (no second report).
+    with_sink(sink.clone(), || a.set(3));
+    assert_eq!(ids(&health.capture.take_decoded()[0]), vec![0]);
+    assert_eq!(runs.load(Ordering::SeqCst), evaluations + 1);
+    assert_eq!(health.failed.lock().len(), 1);
+
+    // Once it evaluates, its full value goes out and the state clears.
     armed.store(false, Ordering::SeqCst);
-    rig.run(|| b.set(2));
+    with_sink(sink.clone(), || a.set(4));
+    let sets = health.capture.take_decoded();
+    assert_eq!(ids(&sets[0]), vec![0, 1]);
+    host.apply_all(&sets, None);
+    assert_eq!(host.values[&1], 40);
+    assert!(!rig.cell.is_failed(1));
+    assert!(rig.cell.failed_signals().is_empty());
+    assert_eq!(health.recovered.lock().clone(), [1]);
+}
+
+#[test]
+fn pc1_a_computed_that_reads_a_failing_one_is_held_back_with_it() {
+    let rig = Rig::new();
+    let a = Signal::new(1_u32);
+    let armed = Arc::new(AtomicBool::new(false));
+    let first = bomb_computed(&a, &armed);
+    let second = Computed::new(&first, |v: &u32| v + 1);
+    rig.cell.attach(&a, 0).unwrap();
+    rig.cell.attach_computed(&first, 1).unwrap();
+    rig.cell.attach_computed(&second, 2).unwrap();
+    rig.observe_all();
+    armed.store(true, Ordering::SeqCst);
+    rig.run(|| a.set(2));
+    assert_eq!(ids(&rig.one_set()), vec![0]);
+    assert_eq!(
+        rig.cell
+            .failed_signals()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    armed.store(false, Ordering::SeqCst);
+    rig.run(|| a.set(3));
+    assert_eq!(ids(&rig.one_set()), vec![0, 1, 2]);
+    assert!(rig.cell.failed_signals().is_empty());
+}
+
+#[test]
+fn pc1_an_observe_leaves_a_failing_computed_out_instead_of_failing_the_store() {
+    let rig = Rig::new();
+    let a = Signal::new(1_u32);
+    let armed = Arc::new(AtomicBool::new(true));
+    let c = bomb_computed(&a, &armed);
+    let b = Signal::new(5_u32);
+    rig.cell.attach(&a, 0).unwrap();
+    rig.cell.attach_computed(&c, 1).unwrap();
+    rig.cell.attach(&b, 2).unwrap();
+    let entries = rig.observe_all();
+    assert_eq!(
+        entries.iter().map(|e| e.signal_id).collect::<Vec<_>>(),
+        vec![0, 2],
+        "every signal but the failing computed"
+    );
+    assert!(
+        rig.cell.is_observed(1),
+        "still observed: it is sent when it recovers"
+    );
+    assert!(rig.cell.is_failed(1));
+    armed.store(false, Ordering::SeqCst);
+    rig.run(|| a.set(2));
     let set = rig.one_set();
-    assert_eq!(ids(&set), vec![0, 1, 2]);
-    assert_eq!(value_of::<u32>(entry(&set, 0)), 2);
-    assert_eq!(value_of::<u32>(entry(&set, 2)), 2);
+    assert_eq!(ids(&set), vec![0, 1]);
+    assert_eq!(value_of::<u32>(entry(&set, 1)), 7);
 }
 
 // ---------------------------------------------------------------------------------------------

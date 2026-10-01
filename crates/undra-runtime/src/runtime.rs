@@ -189,6 +189,22 @@ impl ChangeSink for RuntimeSink {
         }
     }
 
+    /// A computed panicked on its current inputs (ADR-019 amendment): it is held back while the
+    /// rest of its store is delivered. Logged once at error level through the owning runtime,
+    /// which marks the store poisoned and lists the signal in `stats_json`.
+    fn computed_failed(&self, owner: u64, handle: u64, signal_id: u32, message: &str) {
+        if let Some(rt) = runtime_by_id(owner) {
+            rt.note_computed_failed(Handle(handle), signal_id, message);
+        }
+    }
+
+    /// A computed that had failed evaluated again and its value was delivered.
+    fn computed_recovered(&self, owner: u64, handle: u64, signal_id: u32) {
+        if let Some(rt) = runtime_by_id(owner) {
+            rt.note_computed_recovered(Handle(handle), signal_id);
+        }
+    }
+
     /// A commit hit `undra-signals`' round cap (effects re-triggering each other): logged at
     /// error level through the runtime the commit belongs to.
     fn round_cap_hit(&self, rounds: usize) {
@@ -402,6 +418,9 @@ pub struct Runtime {
     /// Closed at the top of `shutdown` and in `Drop`: what `Ctx::closed`, `WeakCtx::closed` and
     /// `WeakCtx::sleep` wait on without holding the runtime (ADR-034).
     lifeline: Arc<Lifeline>,
+    /// The computed signals currently held back because they panicked, as `(store handle,
+    /// signal id)` (ADR-019 amendment): what `stats_json` reports as `poisoned_signals`.
+    poisoned_signals: Mutex<HashSet<(u64, u32)>>,
 }
 
 /// Where an object lives: equal addresses are the same object.
@@ -552,6 +571,7 @@ impl Runtime {
             deferred_drops: Mutex::new(Vec::new()),
             core_thread: Mutex::new(None),
             lifeline: Arc::new(Lifeline::default()),
+            poisoned_signals: Mutex::new(HashSet::new()),
         });
 
         register_runtime(rt.id, Arc::downgrade(&rt));
@@ -1339,6 +1359,39 @@ impl Runtime {
     fn reply_bad(&self, call_id: u32, reason: &str) {
         Stats::inc(&self.stats.bad_requests);
         self.send_reply(call_id, ReplyStatus::BadRequest, &string_body(reason));
+    }
+
+    /// A computed of the store at `handle` panicked and is held back (ADR-019 amendment): an
+    /// error log naming the store and the signal, the store marked poisoned, the signal listed.
+    pub(crate) fn note_computed_failed(&self, handle: Handle, signal_id: u32, message: &str) {
+        Stats::inc(&self.stats.panics);
+        self.objects.mark_poisoned(handle);
+        self.poisoned_signals.lock().insert((handle.0, signal_id));
+        let store = self
+            .objects
+            .type_of(handle)
+            .map_or("a store", |(_, name)| name);
+        self.log(
+            ERROR,
+            "undra::signals",
+            &format!(
+                "computed signal {signal_id} of `{store}` ({handle:?}) panicked: {message}; it is held back \
+                 (the host keeps the last value it received, every other signal of the store is still \
+                 delivered) and evaluated again when its inputs change"
+            ),
+        );
+    }
+
+    /// A held-back computed evaluated again and was delivered.
+    pub(crate) fn note_computed_recovered(&self, handle: Handle, signal_id: u32) {
+        self.poisoned_signals.lock().remove(&(handle.0, signal_id));
+        self.log(
+            crate::log::INFO,
+            "undra::signals",
+            &format!(
+                "computed signal {signal_id} of {handle:?} evaluates again; its value was delivered"
+            ),
+        );
     }
 
     /// Accounts for a caught panic: log level 5, counters, store poisoning.
@@ -2369,7 +2422,7 @@ impl Runtime {
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
             self.schema_hash,
             strong_refs,
             self.objects.live(),
@@ -2383,6 +2436,7 @@ impl Runtime {
             self.timers.pending(),
             started,
             max,
+            self.poisoned_signals.lock().len(),
             Stats::get(&s.change_sets),
             Stats::get(&s.panics),
             Stats::get(&s.off_core_writes),
