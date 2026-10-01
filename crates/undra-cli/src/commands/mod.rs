@@ -6,6 +6,7 @@ pub(crate) mod build;
 pub(crate) mod dev;
 pub(crate) mod doctor;
 pub(crate) mod init;
+pub(crate) mod upgrade;
 
 use std::path::PathBuf;
 

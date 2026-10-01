@@ -10,7 +10,7 @@
   },
   "type": "module",
   "sideEffects": false,
-  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.'), and no export may point at a stub. The framework packages are optional peer dependencies: @undra/runtime itself imports none of them, each adapter imports only its own.",
+  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.'), and no export may point at a stub. ./vite is the Vite plugin that runs `undra build --platform web` (Node only, no dependencies, compiled by tsconfig.vite.json because it needs Node's types and the other modules must not). The framework packages are optional peer dependencies: @undra/runtime itself imports none of them, each adapter imports only its own.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -39,6 +39,10 @@
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
     },
     "./package.json": "./package.json"
   },
@@ -72,9 +76,9 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.vite.json",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.vite.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",

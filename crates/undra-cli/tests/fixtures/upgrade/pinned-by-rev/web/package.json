@@ -1,0 +1,7 @@
+{
+  "name": "demo-web",
+  "dependencies": {
+    "@undra/runtime": "^0.0.5",
+    "react": "^19.0.0"
+  }
+}

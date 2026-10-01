@@ -1,0 +1,12 @@
+# undra.toml
+[project]
+name = "demo"
+id = "com.example.demo"
+platforms = ["web"]
+
+[core]
+path = "core"
+
+[undra]
+version = "0.0"
+path = "../undra"

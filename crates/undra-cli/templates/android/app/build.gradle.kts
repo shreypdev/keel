@@ -1,7 +1,75 @@
+import java.io.File
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+/**
+ * Builds the Rust core for Android: `undra build --platform android` (add `--release` for a release variant), which
+ * writes `<abi>/libundra_core.so` where the `sourceSets` block below packages them. Gradle runs it before anything
+ * else (`preBuild` depends on it, see `undraBuild` below) and skips it while the core's sources and the libraries it
+ * wrote are unchanged, so there is no manual `undra build` step.
+ */
+abstract class UndraBuild @Inject constructor(private val execOps: ExecOperations) : DefaultTask() {
+    /** A release core (what a release variant packages: tens of megabytes smaller) instead of a debug one. */
+    @get:Input
+    abstract val release: Property<Boolean>
+
+    /** The directory of undra.toml. */
+    @get:Internal
+    abstract val projectRoot: DirectoryProperty
+
+    /** What the core is built from. Add more with `undraBuild { sources.from("../../shared/src") }`. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sources: ConfigurableFileCollection
+
+    /** Where `undra build` writes the libraries, one directory per ABI. */
+    @get:OutputDirectory
+    abstract val libraries: DirectoryProperty
+
+    /** The Android SDK this build uses, told to `undra` when ANDROID_HOME is not set (Android Studio does not set it). */
+    @get:Internal
+    abstract val sdk: Property<String>
+
+    @TaskAction
+    fun build() {
+        val undra = findUndra() ?: throw GradleException(undraNotFound())
+        if (!File(undra).canExecute()) throw GradleException(undraNotFound("`$undra` (UNDRA_BIN) is not an executable file"))
+        val command = mutableListOf(undra, "-C", projectRoot.get().asFile.absolutePath, "build", "--platform", "android")
+        if (release.get()) command.add("--release")
+        logger.lifecycle("undra: " + command.drop(3).joinToString(" "))
+        try {
+            execOps.exec {
+                commandLine(command)
+                val hasSdk = System.getenv("ANDROID_HOME") != null || System.getenv("ANDROID_SDK_ROOT") != null
+                if (!hasSdk && sdk.isPresent) environment("ANDROID_HOME", sdk.get())
+            }
+        } catch (e: GradleException) {
+            throw GradleException("`" + command.drop(3).joinToString(" ") + "` failed; its output is above. `undra doctor` checks the toolchain.", e)
+        }
+    }
+
+    /** `UNDRA_BIN`, else `undra` on PATH or where the installers put it (a GUI-launched Gradle has a short PATH). */
+    private fun findUndra(): String? {
+        System.getenv("UNDRA_BIN")?.takeIf { it.isNotBlank() }?.let { return it }
+        val home = System.getProperty("user.home")
+        val dirs = System.getenv("PATH").orEmpty().split(File.pathSeparator) +
+            listOf("$home/.undra/bin", "$home/.cargo/bin", "/opt/homebrew/bin", "/usr/local/bin")
+        return dirs.filter { it.isNotBlank() }.map { File(it, "undra") }.firstOrNull { it.isFile && it.canExecute() }?.absolutePath
+    }
+
+    private fun undraNotFound(why: String = "`undra` is not on PATH or in ~/.undra/bin, ~/.cargo/bin or Homebrew's directories"): String = """
+        error[undra::C0003]: `undra` was not found
+          = note: the `undraBuild` task of android/app/build.gradle.kts runs `undra build --platform android` to compile the Rust core into libundra_core.so, and $why
+          = help: curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
+                  then stop the Gradle daemon (./gradlew --stop) and restart Android Studio so they see the new PATH, or set UNDRA_BIN to the executable; `undra doctor` checks the rest of the toolchain
+          = docs: https://shreypdev.github.io/undra/docs/errors.html#C0003
+    """.trimIndent()
 }
 
 android {
@@ -60,6 +128,39 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
+}
+
+// The core is part of this build. Every Gradle build runs `undraBuild` first (`preBuild` depends on it); it does the work
+// only when the core's sources or manifests changed, or the libraries are missing. A release variant gets a release core
+// (`assembleRelease`, `bundleRelease`, ...); anything else a debug one; `-PundraRelease=true|false` overrides. To build the
+// core yourself (CI that builds it in an earlier step, say) skip the task with `-PundraSkipBuild=true` or UNDRA_SKIP_BUILD=1.
+val undraBuild = tasks.register<UndraBuild>("undraBuild") {
+    group = "undra"
+    description = "Builds the Rust core for Android: undra build --platform android."
+    projectRoot.set(layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@"))
+    sources.from(
+        fileTree(layout.projectDirectory.dir("@@CORE_FROM_APP@@")) {
+            include("src/**", "Cargo.toml", "Cargo.lock", "build.rs")
+        },
+        layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@").file("undra.toml"),
+        layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@").file("Cargo.toml"),
+        layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@").file("Cargo.lock"),
+    )
+    libraries.set(layout.projectDirectory.dir("@@JNI_LIBS_PATH@@"))
+    sdk.set(androidComponents.sdkComponents.sdkDirectory.map { it.asFile.absolutePath })
+    release.convention(false)
+    val skip = providers.gradleProperty("undraSkipBuild").map { it.toBoolean() }
+        .orElse(providers.environmentVariable("UNDRA_SKIP_BUILD").map { it == "1" })
+        .orElse(false)
+    onlyIf { !skip.get() }
+}
+
+tasks.named("preBuild") { dependsOn(undraBuild) }
+
+gradle.taskGraph.whenReady {
+    val requested = providers.gradleProperty("undraRelease").map { it.toBoolean() }.orNull
+    val releaseBuild = requested ?: allTasks.any { it.project == project && it.name.contains("Release") }
+    undraBuild.configure { release.set(releaseBuild) }
 }
 
 dependencies {
