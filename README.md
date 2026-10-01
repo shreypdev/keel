@@ -52,12 +52,13 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 
 ## Why you can trust it
 
-* **3,800+ tests across five languages** — Rust 2,110 · TypeScript 897 · Kotlin 454 ·
-  Swift 328 · wasm/C-ABI acceptance suites — all green in one pass.
-* **17 wire-level contract scenarios, run on all three platforms** (51/51): sync/async
+* **4,000+ tests across five languages** — Rust 2,168 · TypeScript 931 · Kotlin 500 ·
+  Swift 425 · wasm/C-ABI acceptance suites — all green in one pass.
+* **18 wire-level contract scenarios, run on all three platforms** (54/54): sync/async
   calls, typed errors, cancellation, stream backpressure, keyed patches, optimistic
   rollback, offline queue replay, snapshot/restore, schema-mismatch rejection, panic
-  containment. See [`contract-tests/`](contract-tests/scenarios.md).
+  containment, and a coalesced 1,000-transaction burst applied in one drain. See
+  [`contract-tests/`](contract-tests/scenarios.md).
 * **Four adversarial reviews** of the core crates (signals, runtime, macros, ffi), every
   High/Medium finding fixed and independently re-verified — the unsafe boundary under
   ASan and Miri. The full reports live in [`.10x/reviews/`](.10x/reviews/).
