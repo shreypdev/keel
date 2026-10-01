@@ -84,7 +84,8 @@ cleanup() {
 trap cleanup EXIT
 
 if [ "$QUICK" = 1 ]; then
-  [ -n "$OUT" ] || OUT="$WORK/results"
+  # Not under $WORK, which the exit trap removes: the message at the end points here.
+  [ -n "$OUT" ] || OUT="$(mktemp -d "${TMPDIR:-/tmp}/undra-bench-device-quick.XXXXXX")"
   RENDER=0
   [ -n "$TAG" ] || TAG="quick"
 fi
@@ -247,9 +248,16 @@ bench_android() {
     fi
   fi
   export ANDROID_SERIAL="$serial"
-  local kind=device
-  case "$serial" in emulator-*) kind=emulator ;; esac
   "$ADB" -s "$serial" get-state >/dev/null 2>&1 || die "adb cannot reach $serial"
+  # An emulator is not always `emulator-NNNN`: one reached with `adb connect` (or Genymotion, or a cloud emulator) has a
+  # host:port serial. Ask the system as well; `finalize` also refuses a device label the runner's own facts contradict.
+  local kind=device qemu boot_qemu hardware
+  qemu="$("$ADB" -s "$serial" shell getprop ro.kernel.qemu 2>/dev/null | tr -d '\r')"
+  boot_qemu="$("$ADB" -s "$serial" shell getprop ro.boot.qemu 2>/dev/null | tr -d '\r')"
+  hardware="$("$ADB" -s "$serial" shell getprop ro.hardware 2>/dev/null | tr -d '\r')"
+  case "$serial" in emulator-*) kind=emulator ;; esac
+  if [ "$qemu" = 1 ] || [ "$boot_qemu" = 1 ]; then kind=emulator; fi
+  case "$hardware" in ranchu|goldfish|vbox86) kind=emulator ;; esac
   local abi model
   abi="$("$ADB" -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r')"
   model="$("$ADB" -s "$serial" shell getprop ro.product.model | tr -d '\r')"
@@ -334,7 +342,9 @@ bench_web() {
     version="$(field "$WORK/raw-$n.json" device.browser_version)"
     label="Chromium $version headless (Playwright, wasm-main) on $(host_cpu)"
     finalize_run "$WORK/raw-$n.json" "web-chromium-headless" browser "$label" "$(run_tag "$n")" \
-      "release-wasm, wasm-opt -Oz" "vite production build, cross-origin isolated (5 µs clock)" "$l1" "$l2"
+      "release-wasm, wasm-opt -Oz" \
+      "vite production build at Vite's default target (the runtime's ES2022 #private class members are lowered to WeakMap/WeakSet helpers, as in any app built with Vite's defaults), cross-origin isolated (5 µs clock)" \
+      "$l1" "$l2"
   done
 }
 

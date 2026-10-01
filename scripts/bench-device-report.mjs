@@ -33,6 +33,9 @@ export const RAW_SCHEMA = "undra-device-bench-raw/1";
 export const SCHEMA = "undra-device-bench/1";
 export const KINDS = ["device", "simulator", "emulator", "browser"];
 export const PLATFORMS = ["ios", "android", "web"];
+/** The kinds a platform's result can have: a web result is never a device, an iOS one never an emulator. */
+export const PLATFORM_KINDS = { ios: ["device", "simulator"], android: ["device", "emulator"], web: ["browser"] };
+export const DEVICE_CLAIM = "Measured on a device.";
 /** The operations every platform's result must carry. */
 export const REQUIRED_OPS = ["sync_call", "record_1kb", "keyed_insert_10k", "changeset_100"];
 export const NOT_A_DEVICE =
@@ -152,6 +155,17 @@ export function validateResult(result) {
   if (result?.kind !== undefined && result.kind !== "device" && result.claim !== NOT_A_DEVICE) {
     problems.push("a result that is not from a device must carry the not-a-device claim verbatim");
   }
+  if (PLATFORMS.includes(result?.platform) && KINDS.includes(result?.kind) && !PLATFORM_KINDS[result.platform].includes(result.kind)) {
+    problems.push(`a ${result.platform} result cannot be of kind ${result.kind} (only ${PLATFORM_KINDS[result.platform].join(" or ")})`);
+  }
+  // The verdict column turns on for `device` only, so the label is checked against what the runner itself saw: a
+  // simulator build, an emulator's hardware or a TCP-attached emulator must never get a verdict.
+  if (result?.kind === "device") {
+    if (result.device?.is_virtual !== false) {
+      problems.push("kind is device, but the runner did not report a physical device (device.is_virtual must be false)");
+    }
+    if (result.claim !== DEVICE_CLAIM) problems.push("a device result must carry the device claim verbatim");
+  }
   return [...problems, ...validateRaw({ ...result, schema: RAW_SCHEMA })];
 }
 
@@ -241,7 +255,7 @@ export function finalize(raw, meta) {
     platform: raw.platform,
     kind: meta.kind,
     label: meta.label,
-    claim: meta.kind === "device" ? "Measured on a device." : NOT_A_DEVICE,
+    claim: meta.kind === "device" ? DEVICE_CLAIM : NOT_A_DEVICE,
     device: raw.device,
     host: meta.host ?? null,
     build: { type: meta.buildType, core: meta.core, app: meta.app, commit: meta.commit, dirty: meta.dirty },
@@ -298,8 +312,15 @@ export function latestPerTarget(files) {
 
 const ROW_ORDER = ["sync_call", "sync_call_runtime", "record_1kb", "keyed_insert_10k", "changeset_100"];
 
-function verdictFor(result, target, p50) {
-  if (result.kind === "device") return target === null ? "no target" : p50 <= target.ns ? "within" : `over, ${(p50 / target.ns).toFixed(1)}x`;
+/** `over` as a ratio rounded up, so a row over its target never reads as `1.0x` (two decimals below 10x). */
+export function overRatio(p50, targetNs) {
+  const x = p50 / targetNs;
+  return x < 10 ? (Math.ceil(x * 100 - 1e-9) / 100).toFixed(2) : (Math.ceil(x * 10 - 1e-9) / 10).toFixed(1);
+}
+
+/** The verdict of a row: only a physical device gets one, on the p50 against the blueprint's target. */
+export function verdictFor(result, target, p50) {
+  if (result.kind === "device") return target === null ? "no target" : p50 <= target.ns ? "within" : `over, ${overRatio(p50, target.ns)}x`;
   if (result.kind === "browser") return "none (no reference machine)";
   return "none (not a device)";
 }
@@ -375,7 +396,7 @@ function range(a, b, fmt) {
 
 function drainTable(groups) {
   const lines = [
-    "| Target | Main-thread cost of a frame, merged (p50 / p99) | Entries received → applied | One entry applied on its own (median / mean) | Unmerged frame, estimated (median to mean entry) | Merging saves | Share of a 60 Hz frame, merged → unmerged |",
+    "| Target | Main-thread cost of a frame, merged (p50 / p99) | Entries received → applied | One entry applied on its own (median / mean) | Unmerged frame, estimated (from the median and the mean entry, lower first) | Merging saves | Share of a 60 Hz frame, merged → unmerged |",
     "|---|---|---|---|---|---|---|",
   ];
   for (const runs of groups) {
@@ -419,7 +440,8 @@ export function renderBlock(files, targets) {
   out.push(
     `**Every row below was measured by \`scripts/bench-device.sh\` and is the file named under its heading** (\`bench/results/device/\`). ` +
       `The blueprint targets are beside the numbers for reference. **A row from a simulator, an emulator or a desktop browser makes no claim about a device target: ` +
-      `the verdict column says so, and only a row from a physical device gets one.**`,
+      `the verdict column says so, and only a row from a physical device gets one** (on its p50; the blueprint gives no percentile). ` +
+      `A row timed in batches has its p50 and p99 over batch means (a batch's time divided by its size), so its p99 is not the tail of a single call.`,
     "",
   );
   for (const runs of groups) {

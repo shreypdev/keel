@@ -207,7 +207,11 @@ coalescing", and the opt-out cannot be honoured: `#[undra(no_coalesce)]` never r
   (the copy and the queue append on the producing thread), so the unmerged figure shows the order of magnitude and is not a
   measurement of the old runtime (the TypeScript probe above, run on the pre-ADR build, is). The runs
   show decision 1 at work on all three runtimes (1,667 entries received, one applied, in one drain); on Kotlin the estimate
-  says the decision is what keeps a 100,000-patch-a-second feed on a large list inside a frame.
+  says the decision is what keeps a 100,000-patch-a-second feed on a large list inside a frame. Review note (same day,
+  `.10x/reviews/2026-10-01-device-bench-review.md`): the web figures are of the page built at Vite's default target,
+  which lowers the runtime's `#private` members to `WeakMap` helpers; the same page built at `es2022` measured a merged
+  frame of 2.4 ms, a drain of 0.59 ms and 4.75 us per entry at a higher host load (about 27, against 2 to 4 here), so
+  the web ratio holds (3.3x) and the web's absolute figures are a property of the build target as much as of the runtime.
 
 ## Acceptance conditions
 

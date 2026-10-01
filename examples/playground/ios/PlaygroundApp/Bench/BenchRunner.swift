@@ -59,14 +59,23 @@ final class BenchRunner {
 
     // MARK: Loading the core
 
+    /// The benchmark's own key-value directory, so the app's is never touched.
+    static var kvDirectory: URL {
+        return FileManager.default.temporaryDirectory.appendingPathComponent("undra-bench-kv", isDirectory: true)
+    }
+
+    /// Empties `kvDirectory`. Called before a timed load, never inside one: removing a directory is the harness's file
+    /// system work (about 10 us when it is absent, 90 us with a file in it), not the app's.
+    static func emptyKvDirectory() {
+        try? FileManager.default.removeItem(at: kvDirectory)
+    }
+
     /// Loads the linked core with the platform's defaults, as the app does, except for the two ports a benchmark does
-    /// not want to wake: connectivity (a path monitor) and the on-disk key-value store, which is emptied.
+    /// not want to wake: connectivity (a path monitor) and the on-disk key-value store, which lives in `kvDirectory`.
     static func loadCore() throws -> UndraCore {
-        let store = FileManager.default.temporaryDirectory.appendingPathComponent("undra-bench-kv", isDirectory: true)
-        try? FileManager.default.removeItem(at: store)
         let adapters = Adapters.platformDefault
             .removing(portId: fnv1a32("port.Connectivity"))
-            .replacing(KvAdapter(directory: store))
+            .replacing(KvAdapter(directory: kvDirectory))
         return try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: { _ in }))
     }
 
@@ -75,6 +84,7 @@ final class BenchRunner {
     /// Runs everything and returns the runner's half of the result file (`undra-device-bench-raw/1`).
     func runFull() async throws -> [String: Any] {
         let timer = BenchClock.facts()
+        BenchRunner.emptyKvDirectory()
         let firstLoadStart = BenchClock.now()
         let core = try BenchRunner.loadCore()
         let firstLoadNs = Double(BenchClock.now() - firstLoadStart)
@@ -114,6 +124,7 @@ final class BenchRunner {
     /// One cold start in a fresh process: the first `UndraCore.load` of the process, then the restore of the snapshot the
     /// full run left behind.
     func runCold() throws -> [String: Any] {
+        BenchRunner.emptyKvDirectory()
         let t0 = BenchClock.now()
         let core = try BenchRunner.loadCore()
         let t1 = BenchClock.now()
@@ -331,6 +342,7 @@ final class BenchRunner {
         var restores: [Double] = []
         for _ in 0 ..< config.reloads {
             core.shutdown()
+            BenchRunner.emptyKvDirectory()
             let t0 = BenchClock.now()
             core = try BenchRunner.loadCore()
             let t1 = BenchClock.now()

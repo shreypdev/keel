@@ -245,5 +245,7 @@
   "ratio_unmerged_over_merged_mean": 2.8404575850269453,
   "note": "merged frame = the awaited burst call of 1,667 transactions plus the drain it ends with, as the page experiences it"
  },
- "notes": []
+ "notes": [
+  "Review annotation (2026-10-01; no number in this file changed): the page was built at Vite's default target, which lowers the runtime's ES2022 `#private` class members to WeakMap/WeakSet helpers; that lowering is most of every row here (the same page built with `build.target: \"es2022\"` measured 1.8 us, 3.3 us and 31 us for the handle call, the 1 KB round trip and the 100-signal change-set at a higher host load). See `.10x/reviews/2026-10-01-device-bench-review.md`."
+ ]
 }

@@ -35,13 +35,13 @@ const targets = readTargets();
 const summary = (p50) => ({ n: 10, min: p50 * 0.9, p50, p90: p50 * 1.2, p99: p50 * 1.5, max: p50 * 2, mean: p50 * 1.05 });
 const op = (id, p50, extra = {}) => ({ id, mode: "each", batch: 1, samples: 100, min: p50 * 0.9, p50, p90: p50 * 1.2, p99: p50 * 1.5, max: p50 * 2, mean: p50 * 1.05, note: `${id} note`, ...extra });
 
-/** A runner's raw result, as a platform runner would write it. */
-function rawFixture(platform = "ios", scale = 1) {
+/** A runner's raw result, as a platform runner would write it (`virtual`: what the runner says about the hardware). */
+function rawFixture(platform = "ios", scale = 1, virtual = undefined) {
   return {
     schema: "undra-device-bench-raw/1",
     platform,
     runtime: "inproc",
-    device: { model: "TestPhone1,1", os: "TestOS 1", arch: "arm64", cores: 6 },
+    device: { model: "TestPhone1,1", os: "TestOS 1", arch: "arm64", cores: 6, ...(virtual === undefined ? {} : { is_virtual: virtual }) },
     timer: { kind: "test clock", resolution_ns: 41, overhead_ns: 10 },
     config: {},
     ops: [op("sync_call", 50 * scale, { mode: "batched", batch: 1000 }), op("record_1kb", 2000 * scale), op("keyed_insert_10k", 15000 * scale), op("changeset_100", 90000 * scale)],
@@ -113,12 +113,12 @@ test("a runner's result must carry every operation, finite numbers and a drain",
 });
 
 test("finalize labels everything that is not a device with the not-a-device claim, and refuses what is not valid", () => {
-  for (const kind of ["simulator", "emulator", "browser"]) {
-    const result = finalize(rawFixture(), meta(kind));
+  for (const [kind, platform] of [["simulator", "ios"], ["emulator", "android"], ["browser", "web"]]) {
+    const result = finalize(rawFixture(platform, 1, platform === "web" ? undefined : true), meta(kind));
     assert.equal(result.claim, NOT_A_DEVICE);
     assert.deepEqual(validateResult(result), []);
   }
-  assert.equal(finalize(rawFixture(), meta("device")).claim, "Measured on a device.");
+  assert.equal(finalize(rawFixture("ios", 1, false), meta("device")).claim, "Measured on a device.");
   assert.throws(() => finalize(rawFixture(), meta("laptop")), /--kind must be one of/);
   const broken = rawFixture();
   broken.ops = [];
@@ -128,6 +128,36 @@ test("finalize labels everything that is not a device with the not-a-device clai
   edited.claim = "Measured on a device.";
   assert.match(validateResult(edited).join("\n"), /not-a-device claim/);
   assert.deepEqual(KINDS, ["device", "simulator", "emulator", "browser"]);
+});
+
+test("a device label is refused unless the runner itself saw a physical device, and a kind must fit its platform", () => {
+  // An emulator reached over `adb connect` has no `emulator-` serial: the script would call it a device, the runner does not.
+  assert.throws(() => finalize(rawFixture("android", 1, true), meta("device")), /did not report a physical device/);
+  assert.throws(() => finalize(rawFixture("ios", 1, true), meta("device")), /did not report a physical device/);
+  assert.throws(() => finalize(rawFixture("ios"), meta("device")), /did not report a physical device/, "silence is not a device");
+  assert.throws(() => finalize(rawFixture("web"), meta("device")), /cannot be of kind device/);
+  assert.throws(() => finalize(rawFixture("ios", 1, true), meta("emulator")), /cannot be of kind emulator/);
+  assert.throws(() => finalize(rawFixture("android", 1, true), meta("browser")), /cannot be of kind browser/);
+  // A file whose kind was edited from simulator to device is caught by the runner's own facts as well as by the claim.
+  const edited = finalize(rawFixture("ios", 1, true), meta("simulator"));
+  edited.kind = "device";
+  edited.claim = "Measured on a device.";
+  assert.match(validateResult(edited).join("\n"), /did not report a physical device/);
+  // No such file renders a verdict: the renderer is only ever given files that validate.
+  for (const { file: name, result } of loadResults()) assert.notEqual(result.kind, "device", `${name}: no device file is committed yet`);
+});
+
+test("a device row's verdict is on its p50, rounded up, so a row just over its target never reads 1.0x", () => {
+  const raw = rawFixture("ios", 1, false);
+  // sync_call 60.4 ns against 60; record 3,000 ns exactly against 3 µs; keyed insert 2.04x; change-set 12.3x over 100 µs.
+  raw.ops = [op("sync_call", 60.4, { mode: "batched", batch: 1000 }), op("record_1kb", 3000), op("keyed_insert_10k", 40_800), op("changeset_100", 1_230_000)];
+  const block = renderBlock([file("dev.json", finalize(assemble([raw, cold(2.99e6, 2e4)]), meta("device", "ios-dev")))], targets);
+  assert.match(block, /Handle method call, primitive args and return \| 60\.4 ns .*\| over, 1\.01x \|/);
+  assert.match(block, /1 KB record, round trip \| 3 µs .*\| within \|/, "on the target is within");
+  assert.match(block, /Keyed patch on a 10,000-item list, one insert \| 40\.8 µs .*\| over, 2\.04x \|/);
+  assert.match(block, /Change-set with 100 dirty signals, applied on the main thread \| 1\.23 ms .*\| over, 12\.3x \|/);
+  assert.match(block, /Core cold start with 100 KB snapshot restore \| 3\.01 ms .*\| over, 1\.01x \|/);
+  assert.doesNotMatch(block, /over, 1\.0x|over, 1\.00x/);
 });
 
 test("assemble puts the cold launches into the full result", () => {
@@ -184,11 +214,11 @@ test("a simulator's rows are never given a verdict; a device's are", () => {
   assert.match(block, /≤ 3 ms/);
   assert.match(block, /Pending hardware/);
 
-  const device = file("dev.json", finalize(assemble([rawFixture("ios", 2), cold(2e6, 5e4)]), meta("device", "ios-dev")));
+  const device = file("dev.json", finalize(assemble([rawFixture("ios", 2, false), cold(2e6, 5e4)]), meta("device", "ios-dev")));
   const deviceBlock = renderBlock([device], targets);
   assert.match(deviceBlock, /A device\./);
   // 50 ns x 2 = 100 ns against 60 ns: over; record 4 µs against 3 µs: over; the cold start 2.05 ms against 3 ms: within.
-  assert.match(deviceBlock, /Handle method call, primitive args and return \| 100 ns .*\| over, 1\.7x \|/);
+  assert.match(deviceBlock, /Handle method call, primitive args and return \| 100 ns .*\| over, 1\.67x \|/);
   assert.match(deviceBlock, /Core cold start with 100 KB snapshot restore \| 2\.05 ms .*\| within \|/);
   assert.doesNotMatch(deviceBlock, /iOS \| iPhone with an A15-class chip \|/, "an iOS device row exists, so iOS is no longer pending");
   assert.match(deviceBlock, /Android \| mid-range Android phone, 2022/);
@@ -243,14 +273,23 @@ test("bench/RESULTS.md's device block is what the committed result files say", (
   assert.equal(replaceBlock(md, renderBlock(loadResults(RESULTS_DIR), targets)), md, "run `node scripts/bench-device-report.mjs render`");
 });
 
-test("the blueprint targets are the ones in docs/blueprint.html section 14", () => {
+test("the blueprint targets are the ones in docs/blueprint.html section 14, row by row and column by column", () => {
   const html = readFileSync(join(ROOT, "docs", "blueprint.html"), "utf8");
   const cell = (ns) => (ns >= 1e6 ? `${ns / 1e6} ms` : ns >= 1e3 ? `${ns / 1e3} µs` : `${ns} ns`);
+  const start = html.indexOf('<span class="sn">§14</span>');
+  const end = html.indexOf('<span class="sn">§15</span>');
+  assert.ok(start >= 0 && end > start, "the blueprint has a section 14 heading followed by section 15's");
+  const section = html.slice(start, end);
+  // The table's columns: Measure | iOS (A15-class) | Android (mid-range 2022) | Web (Chromium) | Why it matters.
+  const rows = [...section.matchAll(/<tr>(.*?)<\/tr>/gs)].map((m) => [...m[1].matchAll(/<t[dh][^>]*>(.*?)<\/t[dh]>/gs)].map((c) => c[1].trim()));
+  assert.match(rows[0]?.slice(1, 4).join(" | ") ?? "", /^iOS.*\| Android.*\| Web/, "the column order is iOS, Android, Web");
   for (const [id, row] of Object.entries(targets.rows)) {
-    for (const platform of ["ios", "android", "web"]) {
-      const text = cell(row[`${platform}_ns`]);
-      assert.ok(html.includes(`≤ ${text}`), `${id}: the blueprint has no "≤ ${text}" (${platform})`);
-    }
+    const cells = rows.find((r) => r[0] === row.row);
+    assert.ok(cells !== undefined, `${id}: no section 14 row named "${row.row}"`);
+    ["ios", "android", "web"].forEach((platform, i) => {
+      const text = `≤ ${cell(row[`${platform}_ns`])}`;
+      assert.ok(cells[i + 1] === text || cells[i + 1].startsWith(`${text} `), `${id}, ${platform}: the blueprint says "${cells[i + 1]}", the targets file "${text}"`);
+    });
   }
 });
 

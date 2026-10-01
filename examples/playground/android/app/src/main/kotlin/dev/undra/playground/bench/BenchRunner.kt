@@ -144,19 +144,27 @@ class BenchRunner(
         val loadNs = (context.applicationContext as UndraApp).coreLoadNanos
         val snapshot = snapshotFile().readBytes()
         val core = UndraCore.shared
-        val t0 = now()
-        main { core.restore(snapshot) }
-        val t1 = now()
+        val restoreNs = timedRestoreOnMain(core, snapshot)
         val stores = core.stats().liveStores
         if (stores != 1) throw BenchCheckException("the restore left $stores live stores, not 1")
         return JSONObject()
             .put("schema", "undra-device-bench-cold/1")
             .put("load_ns", loadNs.toDouble())
-            .put("restore_ns", (t1 - t0).toDouble())
+            .put("restore_ns", restoreNs.toDouble())
             .put("snapshot_bytes", snapshot.size)
     }
 
     private fun snapshotFile(): File = File(context.filesDir, "undra-bench-snapshot.bin")
+
+    /**
+     * A restore on the main thread (with the drain it ends with), timed there: the hop from the instrumentation thread to
+     * the main looper and back (`runOnMainSync`) is the harness's, not the app's, so it stays outside the clock.
+     */
+    private fun timedRestoreOnMain(core: UndraCore, snapshot: ByteArray): Long = main {
+        val t0 = now()
+        core.restore(snapshot)
+        now() - t0
+    }
 
     // ---- the rows --------------------------------------------------------------------------------
 
@@ -361,12 +369,10 @@ class BenchRunner(
         snapshotFile().writeBytes(snapshot)
         val restores = ArrayList<Double>()
         repeat(config.restores) {
-            val t0 = now()
-            main { core.restore(snapshot) }
-            val t1 = now()
+            val restoreNs = timedRestoreOnMain(core, snapshot)
             val stores = core.stats().liveStores
             if (stores != 1) throw BenchCheckException("the restore left $stores live stores, not 1")
-            restores.add((t1 - t0).toDouble())
+            restores.add(restoreNs.toDouble())
         }
         main { todos.close() }
         if (kotlin.math.abs(snapshot.size - 100_000) > 10_000) notes.add("the snapshot is ${snapshot.size} bytes, not about 100,000")
@@ -386,7 +392,8 @@ class BenchRunner(
 
     private fun deviceFacts(): JSONObject {
         val facts = JSONObject()
-        val emulator = Build.FINGERPRINT.startsWith("generic") || Build.HARDWARE in setOf("ranchu", "goldfish") ||
+        // `scripts/bench-device-report.mjs finalize` refuses a device label when this is true, so err towards true.
+        val emulator = Build.FINGERPRINT.startsWith("generic") || Build.HARDWARE in setOf("ranchu", "goldfish", "vbox86") ||
             Build.PRODUCT.contains("sdk") || Build.MODEL.contains("Emulator")
         facts.put("model", "${Build.MANUFACTURER} ${Build.MODEL}")
         facts.put("device", Build.DEVICE)
