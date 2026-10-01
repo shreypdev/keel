@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { applyPageMode, listenForTheme } from "./embed";
-import { startStatsPoster } from "./embed-stats";
+import { StatsChannel, startStatsPoster } from "./embed-stats";
 import "./index.css";
 import { startUndra } from "./undra";
 import { parseParams } from "./url-params";
@@ -14,17 +14,18 @@ applyPageMode(document.documentElement, params);
 // Embedded (`?embed=1` in an iframe), the landing page is the parent: it can restyle this page and reads its stats.
 const parent = params.embed && window.parent !== window ? window.parent : null;
 if (parent !== null) listenForTheme(window, document.documentElement, parent);
+// The landing page embeds this page from the same origin; a frame from any other origin gets no stats.
+const channel = parent === null ? undefined : new StatsChannel(parent, location.origin);
 
 const root = createRoot(document.getElementById("root") as HTMLElement);
 
 startUndra().then(
   (playground) => {
     // After the stores exist, so loading them is not among the measured change-sets.
-    // The landing page embeds this page from the same origin; a frame from any other origin gets no stats.
-    if (parent !== null) startStatsPoster(UndraCore.shared.mirror, parent, () => performance.now(), location.origin);
+    if (channel !== undefined) startStatsPoster(UndraCore.shared.mirror, channel, () => performance.now());
     root.render(
       <StrictMode>
-        <App playground={playground} params={params} />
+        <App playground={playground} params={params} channel={channel} />
       </StrictMode>,
     );
   },
