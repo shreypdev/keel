@@ -2,7 +2,7 @@ import { UndraCore, UndraSessionLostError, type UndraUnhandledError, emitConnect
 import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/undra_core.wasm?url";
-import { showDevConnection } from "./dev-banner";
+import { onDevNotice, showDevConnection } from "./dev-banner";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
 
@@ -36,8 +36,8 @@ function onError(unhandled: UndraUnhandledError): void {
  * By default the core runs in the browser (wasm, on this thread). With `?undra=ws://127.0.0.1:7443`
  * in the page URL (or `VITE_UNDRA_DEV_URL` in the environment) of a development build (`vite dev`; a production
  * build ignores both) it is the core that `undra dev`
- * serves instead: edit the Rust, save, and the page reloads onto the rebuilt core, no rebuild of the page. A
- * dropped connection is reconnected by the runtime; a bar at the top of the page shows what it is doing.
+ * serves instead: edit the Rust, save, and the page is on the rebuilt core with its state, no rebuild or reload of
+ * the page. A dropped connection is reconnected by the runtime; a bar at the top of the page shows what it is doing.
  *
  * The app supplies its own `Http` port (an in-memory server, so the playground needs no backend)
  * and `Kv` port (in memory, so a reload starts from the server's seed again); the other ports are
@@ -58,11 +58,14 @@ export async function startUndra(): Promise<Playground> {
       expectedSchemaHash: UndraIds.schemaHash,
       adapters,
       onError,
-      // A rebuild restarts the core, and the stores of this page belong to the old one: the runtime reconnects,
-      // finds a new core and says so. Reload the page onto it.
+      // `undra dev` carries the core's state across a rebuild and the runtime reconnects by itself, so the page
+      // usually stays where it is. When the state could not be carried (a schema change, a state too big), the
+      // runtime finds a new core and says so: reload the page onto it.
       onClose: (error) => {
         if (error instanceof UndraSessionLostError) location.reload();
       },
+      // What the dev server says about a reload ("Reloaded, state kept"), for the status bar.
+      onDevNotice,
     });
     showDevConnection(core, devUrl);
   } else {

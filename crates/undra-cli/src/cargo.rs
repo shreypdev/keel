@@ -523,8 +523,17 @@ impl Cargo<'_> {
             self.require_target(triple)?;
         }
         let mut cmd = Command::new(&cargo);
-        cmd.arg("rustc")
-            .arg("--manifest-path")
+        cmd.arg("rustc");
+        match self.path_remap(build.profile) {
+            Some(PathRemap::Config(arg)) => {
+                cmd.arg("--config").arg(arg);
+            }
+            Some(PathRemap::EncodedEnv(flags)) => {
+                cmd.env("CARGO_ENCODED_RUSTFLAGS", flags);
+            }
+            None => {}
+        }
+        cmd.arg("--manifest-path")
             .arg(&build.manifest)
             .arg("--target-dir")
             .arg(&build.target_dir)
@@ -614,6 +623,69 @@ impl Cargo<'_> {
         })
     }
 
+    /// How a build of `profile` keeps the builder's directories out of the binary: `None` for a
+    /// dev build (and without a home directory), see [`PathRemap`] otherwise.
+    #[must_use]
+    pub fn path_remap(&self, profile: Profile) -> Option<PathRemap> {
+        if profile == Profile::Dev {
+            return None;
+        }
+        let home = self.sys.home()?;
+        let mut flags = Vec::new();
+        // `CARGO_HOME` is a prefix of its own only when it is not below the home directory, so the
+        // two never overlap.
+        let mut prefixes = vec![(home.clone(), "~".to_owned())];
+        if let Some(cargo_home) = self.sys.env("CARGO_HOME").map(PathBuf::from) {
+            if !cargo_home.starts_with(&home) {
+                prefixes.push((cargo_home, "/cargo".to_owned()));
+            }
+        }
+        for (from, to) in prefixes {
+            // A root or relative "home" would remap every path, or none; neither is wanted.
+            if from.is_absolute() && from.parent().is_some() {
+                flags.push(format!("--remap-path-prefix={}={to}", from.display()));
+            }
+        }
+        if flags.is_empty() {
+            return None;
+        }
+        // Rustc that knows `--remap-path-scope` keeps the real paths in compiler messages (so a
+        // build error still names a file the terminal can open) and remaps only the binary.
+        if let Some(rustc) = self.toolchain.which(self.sys, "rustc") {
+            let env = self.toolchain.env_pairs();
+            if self
+                .sys
+                .run(
+                    &rustc,
+                    &["--remap-path-scope=object", "--print", "sysroot"],
+                    &env,
+                )
+                .is_some_and(|out| out.success)
+            {
+                flags.push("--remap-path-scope=object".to_owned());
+            }
+        }
+        // Cargo ignores `build.rustflags` when either variable is set: extend the variable.
+        if let Some(encoded) = self.sys.env("CARGO_ENCODED_RUSTFLAGS") {
+            return Some(PathRemap::EncodedEnv(
+                std::iter::once(encoded)
+                    .chain(flags)
+                    .collect::<Vec<_>>()
+                    .join("\u{1f}"),
+            ));
+        }
+        if let Some(plain) = self.sys.env("RUSTFLAGS") {
+            let mut all: Vec<String> = plain.split_whitespace().map(str::to_owned).collect();
+            all.extend(flags);
+            return Some(PathRemap::EncodedEnv(all.join("\u{1f}")));
+        }
+        let quoted: Vec<String> = flags.iter().map(|f| toml_string(f)).collect();
+        Some(PathRemap::Config(format!(
+            "build.rustflags=[{}]",
+            quoted.join(", ")
+        )))
+    }
+
     /// Checks that the Rust standard library for `triple` is installed.
     ///
     /// # Errors
@@ -641,6 +713,42 @@ impl Cargo<'_> {
         }
         Ok(())
     }
+}
+
+/// How a release build keeps the builder's directories out of the binary it ships.
+///
+/// Panic locations embed the path of the source file they come from, and the Undra crates, a
+/// path dependency and every registry crate live under the builder's home directory
+/// (`/Users/<name>/...`, `~/.cargo/registry/...`): without a remapping every shipped wasm module,
+/// XCFramework and `.so` carries the user name and the layout of the machine it was built on
+/// (ADR-052). A release build therefore remaps the home directory to `~` (and `CARGO_HOME`, when
+/// it is elsewhere, to `/cargo`) for every crate of the build, not only the shim, through
+/// `build.rustflags`, which Cargo merges with the project's own. Cargo ignores `build.rustflags`
+/// when `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS` is set, so the flags are then appended to that
+/// variable instead. A project that sets `target.<triple>.rustflags` in its Cargo config
+/// overrides `build.rustflags` as well; it adds `--remap-path-prefix` there itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PathRemap {
+    /// The `--config` argument: `build.rustflags=["--remap-path-prefix=..", ..]`.
+    Config(String),
+    /// The value of `CARGO_ENCODED_RUSTFLAGS`: the user's flags, then the remapping.
+    EncodedEnv(String),
+}
+
+/// `text` as a TOML basic string.
+fn toml_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn describe_build(build: &Build) -> String {
@@ -948,5 +1056,96 @@ mod tests {
         let e = cargo.require_target("aarch64-apple-ios").unwrap_err();
         assert_eq!(e.code, Code::MissingTarget);
         assert_eq!(e.fix, "rustup target add aarch64-apple-ios");
+    }
+
+    fn remap_of(sys: &crate::sys::fake::FakeSys, profile: Profile) -> Option<PathRemap> {
+        let tc = Toolchain::default();
+        Cargo {
+            toolchain: &tc,
+            sys,
+        }
+        .path_remap(profile)
+    }
+
+    #[test]
+    fn release_builds_remap_the_home_directory_out_of_the_binary() {
+        use crate::sys::fake::FakeSys;
+        let sys = FakeSys::macos();
+        assert_eq!(
+            remap_of(&sys, Profile::Dev),
+            None,
+            "dev builds keep real paths"
+        );
+        let expected = Some(PathRemap::Config(
+            r#"build.rustflags=["--remap-path-prefix=/Users/dev=~"]"#.to_owned(),
+        ));
+        assert_eq!(remap_of(&sys, Profile::Release), expected);
+        assert_eq!(remap_of(&sys, Profile::ReleaseWasm), expected);
+
+        // A rustc that knows the scope flag remaps the binary only, not its messages.
+        let sys = FakeSys::macos()
+            .with_tool("rustc", "/Users/dev/.cargo/bin/rustc")
+            .with_output("rustc", "--remap-path-scope=object --print sysroot", "/x\n");
+        assert_eq!(
+            remap_of(&sys, Profile::ReleaseWasm),
+            Some(PathRemap::Config(
+                r#"build.rustflags=["--remap-path-prefix=/Users/dev=~", "--remap-path-scope=object"]"#
+                    .to_owned()
+            ))
+        );
+
+        // A CARGO_HOME elsewhere is a second prefix; one under the home directory is not.
+        let sys = FakeSys::linux().with_env("CARGO_HOME", "/opt/cargo");
+        assert_eq!(
+            remap_of(&sys, Profile::Release),
+            Some(PathRemap::Config(
+                r#"build.rustflags=["--remap-path-prefix=/home/dev=~", "--remap-path-prefix=/opt/cargo=/cargo"]"#
+                    .to_owned()
+            ))
+        );
+        let sys = FakeSys::linux().with_env("CARGO_HOME", "/home/dev/.cargo");
+        assert_eq!(
+            remap_of(&sys, Profile::Release),
+            Some(PathRemap::Config(
+                r#"build.rustflags=["--remap-path-prefix=/home/dev=~"]"#.to_owned()
+            ))
+        );
+
+        // No home, or a home that is the root: nothing to remap.
+        let mut sys = FakeSys::linux();
+        sys.home = None;
+        assert_eq!(remap_of(&sys, Profile::Release), None);
+        sys.home = Some(PathBuf::from("/"));
+        assert_eq!(remap_of(&sys, Profile::Release), None);
+    }
+
+    #[test]
+    fn rustflags_in_the_environment_are_extended_not_replaced() {
+        use crate::sys::fake::FakeSys;
+        // Cargo ignores build.rustflags when RUSTFLAGS is set: the remapping joins the user's flags.
+        let sys = FakeSys::macos().with_env("RUSTFLAGS", "-C  target-cpu=native");
+        assert_eq!(
+            remap_of(&sys, Profile::Release),
+            Some(PathRemap::EncodedEnv(
+                "-C\u{1f}target-cpu=native\u{1f}--remap-path-prefix=/Users/dev=~".to_owned()
+            ))
+        );
+        // CARGO_ENCODED_RUSTFLAGS wins over RUSTFLAGS in Cargo, and here.
+        let sys = sys.with_env("CARGO_ENCODED_RUSTFLAGS", "--cfg\u{1f}a b");
+        assert_eq!(
+            remap_of(&sys, Profile::Release),
+            Some(PathRemap::EncodedEnv(
+                "--cfg\u{1f}a b\u{1f}--remap-path-prefix=/Users/dev=~".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_windows_home_is_quoted_for_toml() {
+        assert_eq!(
+            toml_string(r#"--remap-path-prefix=C:\Users\a "b"=~"#),
+            r#""--remap-path-prefix=C:\\Users\\a \"b\"=~""#
+        );
+        assert_eq!(toml_string("\u{7}"), r#""\u0007""#);
     }
 }

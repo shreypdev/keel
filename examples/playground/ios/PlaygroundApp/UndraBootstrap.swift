@@ -26,16 +26,17 @@ enum UndraBootstrap {
     /// except that `Http` is the in-memory server, `Connectivity` is the one the Offline switch
     /// drives (the app's network is simulated, so its connectivity is too) and `Kv` is emptied at launch. In debug builds, when
     /// `UNDRA_DEV_URL` is set (for example `ws://192.168.1.20:7443`), attaches to the core that
-    /// `undra dev` serves instead: edit the Rust, save, and the app is on the rebuilt core within a second, no rebuild
-    /// of the app.
+    /// `undra dev` serves instead: edit the Rust, save, and the app is on the rebuilt core within a second, with its state
+    /// and no rebuild of the app (ADR-053).
     /// The dev server this process uses (`UNDRA_DEV_URL`, debug builds), or `nil` for the in-process core.
     @MainActor static var devURL: String?
 
     /// The core `start()` loaded, so a view can show what its connection is doing (`core.connection`).
     @MainActor static var core: UndraCore?
 
-    /// Called when `undra dev` restarted the core and the objects of this app's core are gone: the app loads the new
-    /// core and starts over on it (`PlaygroundApp.reload`).
+    /// Called when `undra dev` restarted the core and could not carry its state over (a schema change, a state over the
+    /// limit), so the objects of this app's core are gone: the app loads the new core and starts over on it
+    /// (`PlaygroundApp.reload`).
     @MainActor static var coreLost: (() -> Void)?
 
     @MainActor
@@ -62,6 +63,10 @@ enum UndraBootstrap {
                     if case .closed(.sessionLost) = state {
                         Task { @MainActor in coreLost?() }
                     }
+                },
+                // What the dev server says about a reload ("Reloaded, state kept"), for the status bar.
+                onDevNotice: { message in
+                    Task { @MainActor in DevNotice.shared.show(message) }
                 }
             ))
             configureRemote(RemoteConfig(baseUrl: serverURL))

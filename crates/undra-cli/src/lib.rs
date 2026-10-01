@@ -55,6 +55,7 @@ mod fsutil;
 mod migrations;
 mod names;
 mod project;
+mod reload;
 mod render;
 mod runner;
 mod runtimes;

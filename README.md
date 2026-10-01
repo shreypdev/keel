@@ -36,8 +36,8 @@ Reads never cross the language boundary — each platform holds a mirror of your
 updated by compact binary change-sets, once per transaction. Lists cross as O(change)
 patches, not O(list) copies. The numbers below are measured by the benchmark suite in
 [`bench/`](bench/RESULTS.md) on an Apple-Silicon host. The core operations are gated in CI
-against host budgets (a regression fails the build); the sizes are reported by `undra build`,
-and the per-device targets in the "Budget" column are the blueprint's goals, measured on
+against host budgets (a regression fails the build), and so is the web size; the Android size is
+reported by `undra build`, and the per-device targets in the "Budget" column are the blueprint's goals, measured on
 real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS.md)):
 
 | Operation | Measured | Budget |
@@ -47,12 +47,17 @@ real hardware in the device phase (tracked in [`bench/RESULTS.md`](bench/RESULTS
 | One insert into an observed 10,000-row list | **6.3 µs** | ≤ 20 µs |
 | Change-set for 100 dirty signals | **2.3 µs** | ≤ 100 µs |
 | Cold start restoring 100 KB of state | **71 µs** | ≤ 3 ms |
-| Web runtime + hello-world core | **135 KB** gzipped wasm (over budget; see below) | ≤ 120 KB |
+| Web core: Undra's runtime and a hello-world core, one wasm module | **<!--measured:web-size-->102.7 KB<!--/measured-->** gzipped | ≤ 120 KB |
 | Android core (`.so`, per ABI, release) | **831 KB** | ≤ 1.2 MB |
 
-The web size is honest and currently **over its 120 KB budget**: the 85 KB figure from the
-first launch predates the query layer and the ports facade; the lever (a build-time schema hash
-and a host-only schema export) is tracked as piece E5 in `.10x/specs/2026-10-01-v1x-default-choice-design.md`.
+The web size is measured, not typed: [`scripts/wasm-size.sh`](scripts/wasm-size.sh) builds the
+`undra init` template for the web the way an app does (`wasm-opt -Oz`, gzip level 9), and CI fails
+a change that takes it over 120 KB or more than 5% over its record
+([`bench/results/web-size.jsonl`](bench/results/web-size.jsonl), [ADR-052](.10x/adrs/ADR-052-web-bundle-size.md)).
+The JavaScript runtime the page loads with it is gated the same way:
+<!--measured:web-runtime-js-->24.8 KB<!--/measured--> gzipped against a 26 KB budget (the
+blueprint's 8 KB predates the transports, reconnect, coalescing, worker mode and the typed error
+channel; the next piece aims for 16 KB).
 
 ## Why you can trust it
 

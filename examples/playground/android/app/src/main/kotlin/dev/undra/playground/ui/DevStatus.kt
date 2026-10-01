@@ -31,7 +31,7 @@ fun describe(url: String?, state: ConnectionState): String = when (state) {
     is ConnectionState.Reconnecting -> "Reconnecting to $url (attempt ${state.attempt})"
     is ConnectionState.Closed -> when (state.reason) {
         ClosedReason.SESSION_LOST -> "The core was rebuilt: loading the new one"
-        ClosedReason.SCHEMA_MISMATCH -> "The schema changed: run undra bindgen and rebuild the app"
+        ClosedReason.SCHEMA_MISMATCH -> "The schema changed, state reset: run undra bindgen and rebuild the app"
         ClosedReason.REQUESTED -> "Disconnected"
         ClosedReason.FAILED -> "Connection failed: ${state.cause?.message}"
     }
@@ -39,12 +39,14 @@ fun describe(url: String?, state: ConnectionState): String = when (state) {
 
 /**
  * The connection to `undra dev`, as a thin bar above the screens: green while connected, amber while the runtime
- * reconnects, red when the connection is over. Nothing at all for the in-process core.
+ * reconnects, red when the connection is over, and for a few seconds what the dev server says about a reload. Nothing
+ * at all for the in-process core.
  */
 @Composable
 fun DevStatusBar(app: UndraApp) {
     val url = app.devUrl ?: return
     val state by app.connection.collectAsState()
+    val notice by app.devNotice.collectAsState()
     val color = when (state) {
         ConnectionState.Connected -> Color(0xFF2E7D32)
         is ConnectionState.Closed -> Color(0xFFC62828)
@@ -54,7 +56,8 @@ fun DevStatusBar(app: UndraApp) {
         modifier = Modifier.fillMaxWidth().background(color).statusBarsPadding().padding(horizontal = 12.dp, vertical = 4.dp).testTag("dev-status"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(describe(url, state), color = Color.White, fontSize = 12.sp)
+        // What the dev server says about a reload ("Reloaded, state kept") replaces the line for a few seconds.
+        Text(notice ?: describe(url, state), color = Color.White, fontSize = 12.sp)
     }
 }
 

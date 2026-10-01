@@ -1287,6 +1287,7 @@ name = "undra-meta"
 version = "0.1.0"
 dependencies = [
  "inventory",
+ "proptest",
  "serde",
  "serde_json",
 ]
