@@ -4,8 +4,8 @@
 #   bash site/scripts/build-local.sh
 #   python3 -m http.server 8765 --directory _site      # then open http://localhost:8765/undra/
 #
-# Steps: generated site files, the playground's wasm core (undra build), the playground web app
-# (vite, base /undra/playground/), staging, and the link checker on the staged tree.
+# Steps: generated site files, the Rust API reference (rustdoc), the playground's wasm core (undra build),
+# the playground web app (vite, base /undra/playground/), staging, and the link checker on the staged tree.
 # Without binaryen installed, undra build warns and keeps the unoptimised wasm: fine for a preview.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,6 +14,7 @@ cd "$ROOT"
 [ -f scripts/env.sh ] && source scripts/env.sh >/dev/null 2>&1 || true
 
 node site/scripts/build-all.mjs
+bash site/scripts/build-rustdoc.sh
 cargo run -q -p undra-cli -- build --platform web -C examples/playground
 ( cd examples/playground/web && npm ci --no-audit --no-fund && npx vite build --base=/undra/playground/ )
 bash site/scripts/stage.sh
