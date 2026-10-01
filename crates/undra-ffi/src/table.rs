@@ -142,9 +142,9 @@ impl UndraApi {
     }
 }
 
-/// Whether `name` is a valid core namespace: a C identifier (ASCII letter or `_` first, then
-/// letters, digits and `_`) of 1 to [`MAX_NAMESPACE_LEN`] bytes. [`export_core!`](crate::export_core)
-/// checks it at compile time.
+/// Whether `name` is a valid core namespace: a lowercase C identifier (an ASCII lowercase letter
+/// first, then lowercase letters, digits and `_`) of 1 to [`MAX_NAMESPACE_LEN`] bytes, the rule of
+/// `undra.toml`'s `[core] namespace`. [`export_core!`](crate::export_core) checks it at compile time.
 #[must_use]
 pub const fn is_valid_namespace(name: &str) -> bool {
     let bytes = name.as_bytes();
@@ -154,7 +154,7 @@ pub const fn is_valid_namespace(name: &str) -> bool {
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        let ok = b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit());
+        let ok = b.is_ascii_lowercase() || (i > 0 && (b == b'_' || b.is_ascii_digit()));
         if !ok {
             return false;
         }
@@ -178,7 +178,7 @@ pub const fn __namespace(name: &'static str) -> &'static CStr {
     };
     assert!(
         is_valid_namespace(body),
-        "a core namespace is a C identifier of 1 to 32 bytes (undra.toml `[core] namespace`, ADR-044)"
+        "a core namespace is a lowercase C identifier of 1 to 32 bytes that starts with a letter (undra.toml `[core] namespace`, ADR-044)"
     );
     match CStr::from_bytes_with_nul(bytes) {
         Ok(name) => name,
@@ -266,16 +266,11 @@ mod tests {
 
     #[test]
     fn namespaces_are_short_c_identifiers() {
-        for good in [
-            "acme_pay",
-            "a",
-            "_x",
-            "playground_core",
-            "A1_b2",
-            &"n".repeat(32),
-        ] {
+        for good in ["acme_pay", "a", "a1_b2", "playground_core", &"n".repeat(32)] {
             assert!(is_valid_namespace(good), "{good}");
         }
+        // Review (abi-table): the same rule as `undra.toml` (ADR-044's lowercase deviation), so a
+        // hand-written shim cannot export a core the CLI and the bindings could never name.
         for bad in [
             "",
             "1abc",
@@ -284,6 +279,9 @@ mod tests {
             "é",
             &"n".repeat(33),
             "a.b",
+            "_x",
+            "A1_b2",
+            "acmePay",
         ] {
             assert!(!is_valid_namespace(bad), "{bad}");
         }

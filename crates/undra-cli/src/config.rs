@@ -594,7 +594,9 @@ pub const MAX_NAMESPACE_LEN: usize = 32;
 
 /// Checks a core namespace (`[core] namespace`, ADR-044): a lowercase C identifier of 1 to 32
 /// bytes that starts with a letter. Lowercase only, so that `lib<namespace>.so` and
-/// `<namespace>.wasm` never differ by case alone on a case-insensitive file system.
+/// `<namespace>.wasm` never differ by case alone on a case-insensitive file system. Its generated
+/// entry point, `Undra<Namespace>`, must not be a name the runtimes or the generated bindings
+/// declare (`core` would make it `UndraCore`; `undra_bindgen::naming::RESERVED_ENTRIES`).
 ///
 /// # Errors
 ///
@@ -618,6 +620,14 @@ pub fn check_namespace(namespace: &str) -> std::result::Result<(), String> {
     {
         return Err(format!(
             "`{c}` is not allowed (lowercase letters, digits and `_` only)"
+        ));
+    }
+    let names = undra_bindgen::naming::CoreNames::new(namespace);
+    if names.entry_is_reserved() {
+        return Err(format!(
+            "its generated entry point would be `{}`, a name the Undra runtimes or the generated \
+             bindings already declare",
+            names.entry()
         ));
     }
     Ok(())
@@ -837,5 +847,57 @@ mod tests {
         assert_eq!(Platform::parse("WASM").unwrap(), Platform::Web);
         assert!(Platform::parse_list("").is_err());
         assert!(Platform::parse_list("ios,tv").is_err());
+    }
+
+    #[test]
+    fn namespaces_are_lowercase_c_identifiers_of_at_most_32_bytes() {
+        for good in [
+            "acme_pay",
+            "a",
+            "playground_core",
+            "a1",
+            &"n".repeat(32),
+            "fn",
+            "undra",
+        ] {
+            assert!(check_namespace(good).is_ok(), "{good}");
+        }
+        for bad in [
+            "",
+            &"n".repeat(33),
+            "acme-pay",
+            "a.b",
+            "a/b",
+            "../x",
+            "Acme",
+            "_x",
+            "1abc",
+            "\u{e9}t\u{e9}",
+            "a b",
+            "a\0b",
+        ] {
+            assert!(check_namespace(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    /// Review (abi-table): the entry `Undra<Namespace>` is declared in every language beside the
+    /// runtime's own types, so a namespace whose entry is one of them (`core` is `UndraCore`)
+    /// would generate bindings that do not compile. Refused with the reason instead.
+    #[test]
+    fn a_namespace_whose_entry_is_a_runtime_or_generated_name_is_refused() {
+        for (namespace, entry) in [
+            ("core", "UndraCore"),
+            ("ids", "UndraIds"),
+            ("core_native", "UndraCoreNative"),
+            ("core_entry", "UndraCoreEntry"),
+            ("store", "UndraStore"),
+            ("log", "UndraLog"),
+            ("runtime", "UndraRuntime"),
+            ("app", "UndraApp"),
+        ] {
+            let why = check_namespace(namespace).expect_err(namespace);
+            assert!(why.contains(entry), "{namespace}: {why}");
+        }
+        assert!(check_namespace("core_app").is_ok());
     }
 }

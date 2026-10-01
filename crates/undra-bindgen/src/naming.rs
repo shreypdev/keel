@@ -172,7 +172,95 @@ impl CoreNames {
     pub fn jni_class(kotlin_package: &str) -> String {
         format!("{}/UndraCoreNative", kotlin_package.replace('.', "/"))
     }
+
+    /// Whether [`entry`](Self::entry) is a name the generated bindings cannot declare: one of
+    /// [`RESERVED_ENTRIES`] (the namespace `core` would make the entry `UndraCore`, the runtime's
+    /// own type, and the bindings would not compile).
+    #[must_use]
+    pub fn entry_is_reserved(&self) -> bool {
+        RESERVED_ENTRIES.contains(&self.entry().as_str())
+    }
 }
+
+/// The names a core's entry `Undra<Namespace>` must not take: every `Undra…` type, module and
+/// top-level name the Swift, Kotlin, TypeScript and React Native runtimes declare, the ones the
+/// generated bindings declare beside the entry (`UndraIds`, `UndraCoreNative`) and the ones the
+/// `undra init` app templates declare (`UndraApp`, `UndraBootstrap`, `UndraBuild`). The entry is
+/// declared in the same scope as all of them, so a namespace whose entry is one of these
+/// (`core`, `ids`, `store`, ...) is refused by `undra` with this reason rather than producing
+/// bindings that do not compile. A test keeps it in step with the runtimes' sources.
+pub const RESERVED_ENTRIES: &[&str] = &[
+    "UndraAdapter",
+    "UndraApi",
+    "UndraApp",
+    "UndraAppState",
+    "UndraBootstrap",
+    "UndraBuild",
+    "UndraBuildError",
+    "UndraBytes",
+    "UndraCallError",
+    "UndraCallErrorKind",
+    "UndraCallFailure",
+    "UndraClass",
+    "UndraClosedReason",
+    "UndraCodec",
+    "UndraConnection",
+    "UndraConnectionState",
+    "UndraCore",
+    "UndraCoreEntry",
+    "UndraCoreNative",
+    "UndraDispatchers",
+    "UndraDuration",
+    "UndraEnum",
+    "UndraError",
+    "UndraException",
+    "UndraFFI",
+    "UndraHandle",
+    "UndraIds",
+    "UndraInbound",
+    "UndraIndirect",
+    "UndraLifecycle",
+    "UndraLoadError",
+    "UndraLog",
+    "UndraMode",
+    "UndraModeError",
+    "UndraModeException",
+    "UndraNative",
+    "UndraNativeModule",
+    "UndraObject",
+    "UndraPayload",
+    "UndraPluginOptions",
+    "UndraPort",
+    "UndraPortError",
+    "UndraPortException",
+    "UndraProtocolError",
+    "UndraProtocolException",
+    "UndraReactNative",
+    "UndraReader",
+    "UndraReconnectPolicy",
+    "UndraRecord",
+    "UndraReplyError",
+    "UndraReplyException",
+    "UndraRestoreError",
+    "UndraRestoreException",
+    "UndraResult",
+    "UndraRuntime",
+    "UndraSchemaMismatchError",
+    "UndraSchemaMismatchException",
+    "UndraSessionLostError",
+    "UndraSessionLostException",
+    "UndraStats",
+    "UndraStore",
+    "UndraTimestamp",
+    "UndraTransport",
+    "UndraTransportError",
+    "UndraTransportException",
+    "UndraUUID",
+    "UndraUnhandledError",
+    "UndraUnit",
+    "UndraVitePlugin",
+    "UndraWriter",
+];
 
 /// Whether `name` is usable as an identifier in all three languages: ASCII
 /// letters, digits and underscores, not starting with a digit, not empty.
@@ -501,5 +589,90 @@ mod tests {
         assert_eq!(tuple_field(0, 1), "value");
         assert_eq!(tuple_field(0, 2), "value0");
         assert_eq!(tuple_field(1, 2), "value1");
+    }
+
+    #[test]
+    fn a_namespace_whose_entry_is_a_runtime_name_is_reserved() {
+        assert!(CoreNames::new("core").entry_is_reserved());
+        assert!(CoreNames::new("core_native").entry_is_reserved());
+        assert!(!CoreNames::new("acme_pay").entry_is_reserved());
+        assert!(!CoreNames::new("playground_core").entry_is_reserved());
+    }
+
+    /// Every `Undra…` name a runtime or an app template declares is in [`RESERVED_ENTRIES`], so a
+    /// runtime that gains a type cannot silently make some namespace generate uncompilable bindings.
+    /// Skipped when the sources are not beside this crate (a published package).
+    #[test]
+    fn the_reserved_entries_cover_every_name_the_runtimes_declare() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let roots = [
+            "runtimes/swift/UndraRuntime/Sources",
+            "runtimes/kotlin/undra-runtime/runtime/src/main",
+            "runtimes/kotlin/undra-runtime/android-adapters/src/main",
+            "runtimes/ts/@undra/runtime/src",
+            "runtimes/rn/@undra/react-native/src",
+            "crates/undra-cli/templates",
+        ];
+        if !repo.join(roots[0]).is_dir() {
+            return;
+        }
+        const DECLARATIONS: &[&str] = &[
+            "class",
+            "struct",
+            "enum",
+            "protocol",
+            "actor",
+            "typealias",
+            "object",
+            "interface",
+            "const",
+            "function",
+            "type",
+            "let",
+            "var",
+            "val",
+            "fun",
+            "func",
+        ];
+        let mut files = Vec::new();
+        let mut dirs: Vec<std::path::PathBuf> = roots.iter().map(|r| repo.join(r)).collect();
+        while let Some(dir) = dirs.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else {
+                    files.push(path);
+                }
+            }
+        }
+        let mut missing = std::collections::BTreeSet::new();
+        for file in files {
+            let Ok(text) = std::fs::read_to_string(&file) else {
+                continue;
+            };
+            let tokens: Vec<&str> = text
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .filter(|t| !t.is_empty())
+                .collect();
+            for pair in tokens.windows(2) {
+                let name = pair[1];
+                let declared = DECLARATIONS.contains(&pair[0])
+                    && name.len() > "Undra".len()
+                    && name.starts_with("Undra")
+                    && name[5..].starts_with(|c: char| c.is_ascii_uppercase());
+                if declared && !RESERVED_ENTRIES.contains(&name) && name != "UndraPlaygroundCore" {
+                    missing.insert(format!("{name} ({})", file.display()));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "add these to RESERVED_ENTRIES (a namespace whose entry is one of them would generate \
+             bindings that do not compile): {missing:?}"
+        );
     }
 }
