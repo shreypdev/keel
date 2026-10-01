@@ -1,7 +1,7 @@
 import { browserAdapters } from "./adapters/browser.js";
 import { standardPorts, startEventSources, timerPort } from "./adapters/ports.js";
 import { PortIds, standardMethodName } from "./adapters/ids.js";
-import { consoleLog } from "./adapters/system.js";
+import { WEB_CRYPTO_REQUIRED, consoleLog, hasCryptoRandom } from "./adapters/system.js";
 import type { Adapters, AdapterOverrides } from "./adapters/types.js";
 import {
   UndraError,
@@ -298,6 +298,11 @@ export class UndraCore {
    * `UndraSchemaMismatchError` when the core was built from another schema than
    * `expectedSchemaHash`, and with `UndraTransportError` when it cannot be
    * reached or started. The first core loaded becomes {@link UndraCore.shared}.
+   *
+   * The wasm modes need WebCrypto (`crypto.getRandomValues`): without it `load`
+   * rejects with `UndraTransportError("unsupported", "WebCrypto is required ...")`
+   * before anything is instantiated (ADR-049), unless `adapters.rng` supplies the
+   * random source (`wasm-main` only).
    */
   static async load(options: LoadOptions): Promise<UndraCore> {
     const adapters = mergeAdapters(browserAdapters(), options.adapters);
@@ -305,6 +310,9 @@ export class UndraCore {
     switch (options.mode) {
       case "wasm-main": {
         if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-main' needs the `wasm` option");
+        // The core's only random source is the `random` import: refuse before instantiating rather than let its
+        // `Rng` fail at the first idempotency key (ADR-049). An app that supplies its own `rng` adapter has one.
+        if (options.adapters?.rng == null && !hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
         transport = new WasmMainTransport({
           wasm: options.wasm,
           expectedSchemaHash: options.expectedSchemaHash,
@@ -322,6 +330,8 @@ export class UndraCore {
       }
       case "wasm-worker": {
         if (options.wasm === undefined) throw new UndraError("options", "mode 'wasm-worker' needs the `wasm` option");
+        // Checked here, before the worker is spawned; the worker reads its own `crypto` (ADR-049).
+        if (!hasCryptoRandom()) throw new UndraTransportError("unsupported", WEB_CRYPTO_REQUIRED);
         const { WasmWorkerTransport } = await import("./transport/wasm-worker.js");
         transport = new WasmWorkerTransport({
           wasm: options.wasm,

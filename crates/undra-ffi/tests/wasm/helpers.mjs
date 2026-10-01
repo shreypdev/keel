@@ -172,7 +172,11 @@ export function portReply(portCallId, status, body = []) {
 
 /** One instance of the fixture core with every import recorded. */
 export class Instance {
-  constructor(module, { nowMs = () => 1_700_000_000_000.5, portCall } = {}) {
+  /**
+   * `random(view)` fills the bytes the core asked for (default: the deterministic `(i * 7 + 1) & 0xff`); a
+   * host without a random source leaves them alone or throws, and the core answers its `Rng` unavailable.
+   */
+  constructor(module, { nowMs = () => 1_700_000_000_000.5, portCall, random } = {}) {
     this.replies = [];
     this.changes = [];
     this.streams = [];
@@ -206,7 +210,8 @@ export class Instance {
         random: (ptr, len) => {
           this.randomCalls.push(len >>> 0);
           const view = new Uint8Array(this.x.memory.buffer, ptr >>> 0, len >>> 0);
-          for (let i = 0; i < view.length; i++) view[i] = (i * 7 + 1) & 0xff;
+          if (random) random(view);
+          else for (let i = 0; i < view.length; i++) view[i] = (i * 7 + 1) & 0xff;
         },
       },
     });

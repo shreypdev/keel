@@ -23,9 +23,22 @@ export function systemClock(): ClockAdapter {
   };
 }
 
-/** Random bytes from WebCrypto (`crypto.getRandomValues`). Throws when the platform has no WebCrypto. */
+/** The text a missing WebCrypto fails with: `UndraCore.load` rejects with it, and the `random` import reports it (ADR-049). */
+export const WEB_CRYPTO_REQUIRED = "WebCrypto is required: this platform has no crypto.getRandomValues, the only random source a wasm core has";
+
+/** Whether `crypto` (default the global one) can produce cryptographically secure random bytes: `crypto.getRandomValues` exists. */
+export function hasCryptoRandom(crypto: unknown = (globalThis as { crypto?: unknown }).crypto): boolean {
+  return typeof crypto === "object" && crypto !== null && typeof (crypto as { getRandomValues?: unknown }).getRandomValues === "function";
+}
+
+/**
+ * Random bytes from WebCrypto (`crypto.getRandomValues`). Throws when the platform has no WebCrypto, and `fill`
+ * throws when `getRandomValues` fails: randomness never degrades silently (ADR-049). Behind the wasm `random`
+ * import, a throw leaves the core's buffer untouched, so the core answers its `Rng` as unavailable (a loud E0062
+ * failure) instead of using predictable bytes.
+ */
 export function cryptoRng(crypto: Pick<Crypto, "getRandomValues"> | undefined = globalThis.crypto): RngAdapter {
-  if (crypto === undefined) throw new TypeError("crypto.getRandomValues is not available on this platform");
+  if (crypto === undefined || !hasCryptoRandom(crypto)) throw new TypeError(WEB_CRYPTO_REQUIRED);
   return {
     fill(out) {
       for (let at = 0; at < out.length; at += RANDOM_CHUNK) {

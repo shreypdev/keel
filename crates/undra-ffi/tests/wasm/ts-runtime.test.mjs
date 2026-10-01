@@ -316,6 +316,63 @@ test("a panic in the core logs at level 5, then the transport reports a trap and
   assert.throws(() => callSync(core, calc, "add", concat(i64(1), i64(1))), UndraTransportError);
 });
 
+// ----- randomness never degrades silently (ADR-049 decision 2.5, gap PO-11) -------------------------
+
+test("a host without a random source makes Rng.fill unavailable: the core fails loudly (E0062) after an ERROR naming the cause, never zeros", async () => {
+  const log = [];
+  let closed = null;
+  const core = await boot({
+    log,
+    adapters: { rng: { fill: () => {
+      throw new Error("no CSPRNG on this host");
+    } } },
+    onClose: (error) => (closed = error),
+  });
+  const calc = await calculator(core);
+  assert.throws(
+    () => callSync(core, calc, "random_bytes", u32(16)),
+    (e) => e instanceof UndraTransportError && e.reason === "trap",
+  );
+  const cause = log.find((l) => l.level === 4 && l.target === "undra::rng");
+  assert.ok(cause, JSON.stringify(log));
+  assert.match(cause.message, /no cryptographic random source/);
+  // The runtime also says what the import threw.
+  assert.ok(log.some((l) => l.level === 4 && /no CSPRNG on this host/.test(l.message)), JSON.stringify(log));
+  const fatal = log.filter((l) => l.level === 5 && l.target === "undra::panic");
+  assert.equal(fatal.length, 1, JSON.stringify(log));
+  assert.match(fatal[0].message, /E0062/);
+  assert.ok(log.indexOf(cause) < log.indexOf(fatal[0]));
+  await macrotask();
+  assert.ok(closed instanceof UndraTransportError);
+});
+
+test("UndraCore.load refuses both wasm modes without WebCrypto, before anything is instantiated", async () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true, writable: true });
+  try {
+    for (const mode of ["wasm-main", "wasm-worker"]) {
+      let spawned = false;
+      const failure = await UndraCore.load({
+        mode,
+        wasm: module,
+        expectedSchemaHash: SCHEMA_HASH,
+        shared: false,
+        worker: () => {
+          spawned = true;
+          throw new Error("no worker should be spawned");
+        },
+        adapters: { http: null },
+      }).catch((e) => e);
+      assert.ok(failure instanceof UndraTransportError, `${mode}: ${String(failure)}`);
+      assert.equal(failure.reason, "unsupported");
+      assert.match(failure.message, /^WebCrypto is required/);
+      assert.equal(spawned, false);
+    }
+  } finally {
+    Object.defineProperty(globalThis, "crypto", saved);
+  }
+});
+
 // ----- wasm-worker mode: the core on a real worker thread (gap PO-4) ---------------------------------
 
 /** Waits until `probe()` is truthy (the worker's output reaches the main thread through message events). */

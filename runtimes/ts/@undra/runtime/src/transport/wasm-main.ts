@@ -44,7 +44,10 @@ export interface WasmMainOptions {
   readonly logLevel?: number;
   /** Replaces `Date.now` behind the `now_ms` import. */
   readonly clock?: ClockAdapter;
-  /** Replaces `crypto.getRandomValues` behind the `random` import. */
+  /**
+   * Replaces `crypto.getRandomValues` behind the `random` import. It must fill the whole buffer with
+   * cryptographically secure bytes or throw: a throw makes the core's `Rng` unavailable (ADR-049).
+   */
   readonly rng?: RngAdapter;
   /** Replaces `setTimeout` behind the `timer_set` import. */
   readonly timer?: TimerAdapter;
@@ -514,6 +517,8 @@ export class WasmMainTransport implements Transport {
           this.#handler?.log(level & 0xff, target, message);
         }, undefined),
         now_ms: guard(() => this.#clock.nowMs(), 0),
+        // No CSPRNG (no WebCrypto, or an Rng adapter that throws): the guard writes nothing, so the core finds
+        // its canary untouched and answers `Rng.fill` unavailable (ADR-049) instead of using zeros. Never a fallback.
         random: guard((ptr: number, len: number) => {
           const start = ptr >>> 0;
           (this.#rng ??= cryptoRng()).fill(this.#bytes().subarray(start, start + (len >>> 0)));
