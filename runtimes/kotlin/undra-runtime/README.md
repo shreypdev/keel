@@ -82,9 +82,11 @@ waiting (up to 5 s) for the main thread from anywhere else.
   with the schema check. `callSync` and `construct` block the calling thread for a network round trip (up to
   `remoteTimeout`). No snapshots, no statistics. No call into the runtime does network I/O on the calling thread, so
   `load` and the rest may be called from Android's main thread. A dropped connection is reconnected with backoff and
-  jitter (`LoadOptions.reconnect`, a `ReconnectPolicy`; `null` turns it off), what was in flight fails at once, the
-  stores are observed again, and `core.connectionState` (a `StateFlow<ConnectionState>`) says what it is doing; a schema
-  change or a session the dev server lost closes the core for good (ADR-051, `docs/DEV_LOOP.md`).
+  jitter (`LoadOptions.reconnect`, a `ReconnectPolicy`; `null` turns it off), what was in flight fails at once (an
+  `UndraTransportException` of reason `CONNECTION_LOST`, which a generated call throws as `UndraCallError.Unavailable`, and
+  which a command does not hand to `onError`), the stores are observed again, and `core.connectionState` (a
+  `StateFlow<ConnectionState>`) says what it is doing; a schema change or a session the dev server lost closes the core for
+  good (ADR-051, `docs/DEV_LOOP.md`).
 
 ### JNI surface for `undra-ffi`
 
