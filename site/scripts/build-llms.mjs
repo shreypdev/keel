@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Writes site/llms.txt (an index for language-model agents) and site/llms-full.txt (every docs page,
-// the roadmap and every blog post as Markdown, in one fetch).
+// Writes site/llms.txt (an index for language-model agents) and site/llms-full.txt (every docs page, the
+// API reference pages, the roadmap and every blog post as Markdown, in one fetch).
 //
 //   node site/scripts/build-llms.mjs
 import { readdirSync, existsSync } from "node:fs";
@@ -8,7 +8,7 @@ import { join, posix } from "node:path";
 import { SITE, ORIGIN, read, writeIfChanged, innerOf, titleOf, metaOf, textOf, decode, modifiedOf } from "./lib.mjs";
 
 const navData = JSON.parse(read(join(SITE, "data", "docs.json")));
-const DOCS_ORDER = ["index", ...navData.groups.flatMap((g) => g.pages.map((p) => p.file.replace(/\.html$/, "")))];
+const DOCS_ORDER = ["index", ...navData.groups.flatMap((g) => g.pages.filter((p) => !p.external).map((p) => p.file.replace(/\.html$/, "")))];
 
 // ---- a small HTML -> Markdown converter for the subset the site uses
 const VOID = new Set(["br", "hr", "img", "meta", "link", "input", "path", "circle", "rect", "line", "stop", "use"]);
@@ -83,6 +83,10 @@ const pages = [];
 const docs = readdirSync(join(SITE, "docs")).filter((f) => f.endsWith(".html")).map((f) => f.slice(0, -5));
 docs.sort((a, b) => ((DOCS_ORDER.indexOf(a) + 1 || 99) - (DOCS_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
 for (const d of docs) pages.push({ group: "Docs", path: d === "index" ? "docs/" : `docs/${d}.html`, file: `docs/${d}.html` });
+for (const f of navData.also ?? []) { // the generated API reference pages, in the order docs.json lists them
+  const file = posix.normalize(posix.join("docs", f));
+  if (existsSync(join(SITE, file))) pages.push({ group: "Reference", path: file, file });
+}
 if (existsSync(join(SITE, "roadmap/index.html"))) pages.push({ group: "Roadmap", path: "roadmap/", file: "roadmap/index.html" });
 const blogDir = join(SITE, "blog");
 const posts = existsSync(blogDir) ? readdirSync(blogDir, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(blogDir, d.name, "index.html"))).map((d) => d.name) : [];
@@ -97,7 +101,7 @@ for (const p of pages) {
 }
 
 // ---- llms.txt
-const groups = ["Docs", "Roadmap", "Blog"];
+const groups = ["Docs", "Reference", "Roadmap", "Blog"];
 const lines = [
   "# Undra",
   "",
@@ -109,7 +113,8 @@ const lines = [
 for (const g of groups) {
   const list = pages.filter((p) => p.group === g);
   if (!list.length) continue;
-  lines.push(`## ${g}`, "", ...list.map((p) => `- [${p.title}](${p.url}): ${p.desc}`), "");
+  const rust = g === "Reference" ? [`- [Rust API reference](${ORIGIN}reference/rust/undra/index.html): rustdoc for the undra crate and the runtime, signals, query, ports, wire and meta crates it re-exports`] : [];
+  lines.push(`## ${g}`, "", ...list.map((p) => `- [${p.title}](${p.url}): ${p.desc}`), ...rust, "");
 }
 lines.push("## Source and numbers", "", "- [GitHub repository](https://github.com/shreypdev/undra): source, issues and releases", "- [Specification](https://github.com/shreypdev/undra/blob/main/docs/SPEC.md): the binding implementation spec (wire format, ABI, schema)", "- [Benchmark results](https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md): host-measured numbers and budgets", "");
 lines.push("## Optional", "", `- [All documentation in one file](${ORIGIN}llms-full.txt): every docs page, the roadmap and every post as Markdown`, `- [RSS feed](${ORIGIN}feed.xml)`, "");

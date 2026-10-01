@@ -1,0 +1,8 @@
+[workspace]
+members = ["core", "crates/shared"]
+resolver = "3"
+
+[workspace.dependencies]
+undra = "0.0"
+undra-ffi = { version = "=0.0.9", features = ["jni"] }
+serde = { version = "1", features = ["derive"] }

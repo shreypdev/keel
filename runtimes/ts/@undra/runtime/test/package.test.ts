@@ -16,7 +16,7 @@ const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as {
 
 describe("package exports", () => {
   it("lists the subpaths of SPEC section 13 that exist", () => {
-    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./package.json", "./react", "./solid", "./svelte", "./vue", "./wire", "./worker"]);
+    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./package.json", "./react", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
   });
 
   it("points every subpath at the compiled form of a source file that exists", () => {

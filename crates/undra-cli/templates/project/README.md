@@ -11,7 +11,7 @@ core/          the Rust core: `#[undra::api]` records, enums, errors and a `#[un
 generated/     Swift, Kotlin and TypeScript bindings of the core (`undra bindgen`)
 ios/ android/ web/   one small app per platform, using the generated bindings
 build/         what `undra build` produces for the apps to link (not committed)
-```
+@@CI_LINE@@```
 
 ## The loop
 
@@ -19,8 +19,13 @@ build/         what `undra build` produces for the apps to link (not committed)
 undra doctor                    # what this machine has, and what is missing
 undra dev                       # serve the core over a WebSocket; it rebuilds when core/ changes
 undra bindgen                   # after you change a public type or method: regenerate the bindings
-undra build --release           # the libraries the apps link, with their sizes
+undra build --release           # the libraries the apps link, with their sizes (the app builds below run it for you)
+undra upgrade                   # move the project to this `undra`'s version, with the migration notes
 ```
+
+`undra build` is not a manual step: Gradle (`undraBuild`), Xcode (the "Build the Undra core" phase) and Vite (the
+`undra()` plugin) each run it before the app builds, and skip it while the core is unchanged. They find `undra`
+on `PATH` (`undra doctor` checks that).
 
 `core/src/lib.rs` is the whole app logic. Everything marked `#[undra::api]` crosses into the three
 languages; `undra bindgen` reads the core's schema (it builds the core, loads it and asks) and writes

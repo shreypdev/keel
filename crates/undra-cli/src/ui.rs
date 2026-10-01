@@ -55,6 +55,12 @@ impl Ui {
         );
     }
 
+    /// A line about the result that is not part of it (a tally next to output meant for a pipe), on
+    /// stderr.
+    pub fn note(&self, text: &str) {
+        let _ = writeln!(std::io::stderr().lock(), "{text}");
+    }
+
     /// A detail under a step, on stderr.
     pub fn detail(&self, text: &str) {
         let _ = writeln!(std::io::stderr().lock(), "    {text}");

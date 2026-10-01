@@ -28,8 +28,11 @@ GETTING STARTED
 EXISTING APP
     undra adopt ../MyApp                           add an Undra core to an app you already have, step by step
 
+NEW VERSION
+    undra upgrade                                  move the project to this `undra`: every pin, the bindings, the migration notes
+
 CHECK THE MACHINE
-    undra doctor                                   toolchains, SDKs and targets, with the fix for each gap
+    undra doctor                                   every prerequisite, with the exact fix for each gap (--fix, --json)
 
 Errors are printed as `error[undra::C00NN]` with what happened, why, and what to do; every code is
 explained at https://shreypdev.github.io/undra/docs/errors.html#C00NN."
@@ -115,7 +118,14 @@ EXAMPLES
 
 iOS DEBUG BUILDS
     Link the library with -force_load (the generated Xcode project already does), or the core's
-    registrations are dropped by the linker and the schema is empty. Release builds need no flag."
+    registrations are dropped by the linker and the schema is empty. Release builds need no flag.
+
+NOT A MANUAL STEP
+    In a project made by `undra init` the app builds run this for you, each only when the core changed:
+    Gradle's `undraBuild` task (preBuild depends on it; debug or release follows the variant), the
+    \"Build the Undra core\" Run Script phase of the Xcode project (it passes `--configuration
+    $CONFIGURATION`) and the `undra()` Vite plugin (on start, and on every change of core/src under
+    `vite dev`). They find `undra` on PATH; `undra doctor` checks that it is there."
     )]
     Build(BuildArgs),
     /// Serve the core over a WebSocket to running apps, rebuilding when the code changes.
@@ -149,14 +159,29 @@ The server has no authentication. Keep the default loopback address unless a dev
     Dev(DevArgs),
     /// Check the toolchains and SDKs this machine has against what the project needs.
     #[command(
-        long_about = "Checks what the platforms need and prints one line per finding with the fix for each gap: \
-Rust and its targets, Xcode (and whether xcode-select points at it), the Android SDK, NDK and cargo-ndk, \
-Node, wasm-opt and a JDK. Inside a project only the platforms of undra.toml are checked; elsewhere all of \
-them. Exits with status 1 when something the project needs is missing.",
+        long_about = "Checks every prerequisite that `undra init`, `build`, `dev` and the device benchmarks use, and prints \
+one line per finding. Each one says what was found (ok, missing, or the wrong version), the value it saw, the exact \
+command that fixes it and the heading of docs/ONBOARDING.md that explains it. It covers: rustup, stable Rust at the \
+MSRV or newer and the Rust targets of the platforms (wasm32; the iOS device and simulator targets; the Android ABIs \
+of undra.toml); full Xcode against the command line tools and a simulator runtime; the Android SDK, platform-tools, \
+NDK r27, ANDROID_HOME and ANDROID_NDK_HOME, cargo-ndk, JDK 17, adb and whether a device or emulator is attached, and \
+the Gradle wrapper; Node 20+ and npm; wasm-opt (optional: it makes the wasm core 10-20% smaller); free disk space \
+(a warning under 10 GB); and whether `undra` is on PATH, since the Gradle task, the Xcode build phase and the Vite \
+plugin of a project run it by name. Checks for people who work on Undra (the Kotlin compiler, the `undra` emulator) are \
+marked `for contributors`. Inside a project only the platforms of undra.toml are checked; elsewhere all of them. \
+Exits with status 1 when something the project needs is missing.",
         after_long_help = "\
 EXAMPLES
     undra doctor
-    undra doctor --platform ios"
+    undra doctor --platform ios
+    undra doctor --fix                  the commands that close every gap, as one block to paste (nothing is run)
+    undra doctor --json                 the report for tools: state, observed value, fix and docs per finding
+
+STATUS
+    ok         present and fine
+    warn       something is off, builds still work (an optional tool, a variable that is not set)
+    FAIL       a build for a platform in scope cannot work
+    skip       does not apply here (iOS on Linux, a contributor-only tool for everyone else)"
     )]
     Doctor(DoctorArgs),
     /// Add an Undra core to an existing app, without touching the app's own project files.
@@ -176,6 +201,33 @@ WHAT IT DETECTS
     web      package.json (vite, webpack, next, ...)"
     )]
     Adopt(AdoptArgs),
+    /// Move a project to the version of this `undra`: every pin in step, bindings regenerated, migration notes.
+    #[command(
+        long_about = "Reads the Undra version a project pins in every place `undra init` writes it: the core's \
+`undra` dependency in Cargo.toml (a git tag, or a registry version; a dependency pinned by `rev` or `branch` is \
+pinned by the release's tag afterwards), `[undra] version` in undra.toml, \
+`@undra/runtime` (and `@undra/react-native`) in package.json, `dev.undra:runtime` and `dev.undra:android-adapters` in \
+the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It moves them all to the \
+version of this `undra` in one step, shaped as `undra init` would write them (so an upgraded project and a new one \
+agree), regenerates the bindings (`undra bindgen`), and prints the migration notes of every release the project crosses.\n\n\
+Only the version text changes; comments and formatting stay. A version that is not written out (a Gradle variable) \
+is left and named. The files are written all or none. Your app's own project files (the Xcode build \
+phase, the Gradle task, vite.config.ts) are not edited: the notes say what a newer `undra init` adds. A project that \
+depends on a checkout of the Undra repository (`--undra-path`, a `path` dependency) is on whatever that checkout \
+is: the command says so and changes nothing. A project newer than this `undra` is refused (error C0014): update the CLI.",
+        after_long_help = "\
+EXAMPLES
+    undra upgrade                      move the project here, regenerate the bindings, print the notes
+    undra upgrade --dry-run            show the lines that would change and the notes; write nothing
+    undra upgrade --no-bindgen         move the pins only (run `undra bindgen` yourself)
+    undra upgrade --docs               keep the core's doc comments in the regenerated bindings
+
+AFTER
+    git diff                           review what moved
+    cd web && npm install              refresh package-lock.json when the web pin moved
+    Cargo.lock follows at the next build (it fetches the new tag, so it needs the network)"
+    )]
+    Upgrade(UpgradeArgs),
 }
 
 /// Arguments of `undra init`.
@@ -251,6 +303,13 @@ pub struct BuildArgs {
     /// optimized.
     #[arg(long)]
     pub release: bool,
+
+    /// An Xcode build configuration, as the Run Script phase of the generated Xcode project passes
+    /// it (`$CONFIGURATION`): `Release` and names that contain it build release, any other name
+    /// debug. After an iOS build it writes the stamp that tells Xcode which configuration the
+    /// XCFramework is for.
+    #[arg(long, value_name = "NAME", conflicts_with = "release")]
+    pub configuration: Option<String>,
 }
 
 /// Arguments of `undra dev`.
@@ -279,6 +338,31 @@ pub struct DoctorArgs {
     /// Check only these platforms (ios, android, web; comma separated).
     #[arg(long, value_name = "LIST")]
     pub platform: Option<String>,
+
+    /// Print the commands that close the gaps as one block to paste into a shell (nothing is run).
+    #[arg(long, conflicts_with = "json")]
+    pub fix: bool,
+
+    /// Print the report as JSON: every finding with its state, observed value, fix commands and
+    /// documentation anchor.
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments of `undra upgrade`.
+#[derive(Args, Debug)]
+pub struct UpgradeArgs {
+    /// Show the lines that would change and the migration notes; write nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Move the pins but do not regenerate the bindings afterwards.
+    #[arg(long)]
+    pub no_bindgen: bool,
+
+    /// Keep the core's doc comments in the regenerated bindings (`undra bindgen --docs`).
+    #[arg(long)]
+    pub docs: bool,
 }
 
 /// Arguments of `undra adopt`.
@@ -346,6 +430,45 @@ mod tests {
         };
         assert_eq!(args.platform.as_deref(), Some("ios,web"));
         assert!(args.release);
+    }
+
+    #[test]
+    fn build_takes_an_xcode_configuration_instead_of_release() {
+        let cli = Cli::try_parse_from([
+            "undra",
+            "build",
+            "--platform",
+            "ios",
+            "--configuration",
+            "Release",
+        ])
+        .unwrap();
+        let Command::Build(args) = cli.command else {
+            panic!("not build")
+        };
+        assert_eq!(args.configuration.as_deref(), Some("Release"));
+        assert!(!args.release);
+        // The two say the same thing in different words: only one of them.
+        assert!(
+            Cli::try_parse_from(["undra", "build", "--release", "--configuration", "Debug"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn doctor_takes_fix_or_json_but_not_both() {
+        let cli = Cli::try_parse_from(["undra", "doctor", "--fix"]).unwrap();
+        let Command::Doctor(args) = cli.command else {
+            panic!("not doctor")
+        };
+        assert!(args.fix && !args.json);
+        let cli = Cli::try_parse_from(["undra", "doctor", "--json", "--platform", "web"]).unwrap();
+        let Command::Doctor(args) = cli.command else {
+            panic!("not doctor")
+        };
+        assert!(args.json && !args.fix);
+        assert_eq!(args.platform.as_deref(), Some("web"));
+        assert!(Cli::try_parse_from(["undra", "doctor", "--fix", "--json"]).is_err());
     }
 
     #[test]

@@ -218,6 +218,10 @@ pub const UNDRA_VERSION: &str = concat!(
 /// Where the Undra crates are fetched from (until they are on crates.io): this repository.
 pub const UNDRA_REPO_URL: &str = "https://github.com/shreypdev/undra";
 
+/// The Swift package of the runtime a registry-mode Xcode project depends on (`undra init` writes
+/// it; `undra upgrade` moves its requirement and no other package's).
+pub const UNDRA_SWIFT_PACKAGE_URL: &str = "https://github.com/shreypdev/undra-swift";
+
 /// The git tag of this CLI's release, `v<version>`: what `undra init` pins the core's `undra`
 /// dependency to, so the project uses the crates the CLI was released with.
 pub const UNDRA_RELEASE_TAG: &str = concat!("v", env!("CARGO_PKG_VERSION"));

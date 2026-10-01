@@ -1,0 +1,8 @@
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.undra-meta]
+version = "=0.0.9"
+default-features = false

@@ -135,26 +135,43 @@ fn render(template: &str, vars: &Vars) -> Result<String> {
     })
 }
 
+/// The file next to a generated crate's `Cargo.lock` that records which lock file of the project it
+/// was seeded from (a hash of its text).
+const LOCK_SEED: &str = ".undra-lock-seed";
+
 /// Seeds `dir/Cargo.lock` from the project's lock file, or else from the lock file of the Cargo
 /// workspace the core belongs to, so the shim resolves the same dependency versions the core was
 /// tested with (and finds them already compiled in a shared target directory). Cargo completes it
 /// with what the shim adds.
+///
+/// It seeds again whenever that lock file changes (`cargo update`, a pull), so the libraries the apps
+/// link are built from the versions the project's `Cargo.lock` names, not from the ones it named
+/// at the first build; while it is unchanged, what Cargo added is kept.
 fn seed_lockfile(dir: &Path, project_root: &Path, core: &CoreInfo) {
     let target = dir.join("Cargo.lock");
-    if target.exists() {
-        return;
-    }
-    let candidates = std::iter::once(project_root.join("Cargo.lock")).chain(
+    let seed = dir.join(LOCK_SEED);
+    let mut candidates = std::iter::once(project_root.join("Cargo.lock")).chain(
         core.workspace
             .iter()
             .map(|workspace| workspace.root.join("Cargo.lock")),
     );
-    for candidate in candidates {
-        if candidate.is_file() {
-            let _ = std::fs::copy(&candidate, &target);
-            return;
-        }
+    let Some(text) = candidates.find_map(|candidate| std::fs::read(candidate).ok()) else {
+        return;
+    };
+    let hash = format!("{:016x}\n", fnv1a(&text));
+    if target.exists() && std::fs::read_to_string(&seed).is_ok_and(|seeded| seeded == hash) {
+        return;
     }
+    if std::fs::write(&target, &text).is_ok() {
+        let _ = std::fs::write(&seed, hash);
+    }
+}
+
+/// FNV-1a, 64 bits: enough to tell one lock file from another (not a security boundary).
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// What the shim exports the core as (ADR-044).
@@ -324,6 +341,54 @@ mod tests {
             host_lib_target_dir(target, Path::new("/other/app")),
             "per project"
         );
+    }
+
+    #[test]
+    fn the_shim_lock_follows_the_projects_lock_file_and_keeps_what_cargo_added_otherwise() {
+        // Review 2026-10-01: the lock was seeded once, so after `cargo update` in the project the
+        // apps kept linking a core built from the versions of the first build.
+        let target = crate::fsutil::unique_temp_dir("shim-lock-target");
+        let project = crate::fsutil::unique_temp_dir("shim-lock-project");
+        std::fs::create_dir_all(&project).unwrap();
+        let lock = project.join("Cargo.lock");
+        std::fs::write(
+            &lock,
+            "# v1\n[[package]]\nname = \"itoa\"\nversion = \"1.0.18\"\n",
+        )
+        .unwrap();
+        let manifest = write_shim(&target, &project, &core(false), "s").unwrap();
+        let shim_lock = manifest.with_file_name("Cargo.lock");
+        assert_eq!(
+            std::fs::read_to_string(&shim_lock).unwrap(),
+            std::fs::read_to_string(&lock).unwrap()
+        );
+        // Cargo completes the shim's lock with what the shim adds: kept while the project's is unchanged.
+        let completed = "# v1\n[[package]]\nname = \"itoa\"\nversion = \"1.0.18\"\n\n[[package]]\nname = \"shim\"\n";
+        std::fs::write(&shim_lock, completed).unwrap();
+        write_shim(&target, &project, &core(false), "s").unwrap();
+        assert_eq!(std::fs::read_to_string(&shim_lock).unwrap(), completed);
+        // `cargo update -p itoa --precise 1.0.5` in the project: the next build uses it.
+        std::fs::write(
+            &lock,
+            "# v2\n[[package]]\nname = \"itoa\"\nversion = \"1.0.5\"\n",
+        )
+        .unwrap();
+        write_shim(&target, &project, &core(false), "s").unwrap();
+        assert!(
+            std::fs::read_to_string(&shim_lock)
+                .unwrap()
+                .contains("version = \"1.0.5\""),
+            "the shim is built from the project's lock file as it is now"
+        );
+        // The dev runner follows it the same way.
+        let runner = write_runner(&target, &project, &core(false)).unwrap();
+        assert!(
+            std::fs::read_to_string(runner.with_file_name("Cargo.lock"))
+                .unwrap()
+                .contains("1.0.5")
+        );
+        let _ = std::fs::remove_dir_all(target);
+        let _ = std::fs::remove_dir_all(project);
     }
 
     #[test]

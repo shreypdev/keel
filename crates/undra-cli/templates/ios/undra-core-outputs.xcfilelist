@@ -1,0 +1,4 @@
+$(SRCROOT)/@@XCFRAMEWORK_PATH@@/Info.plist
+$(SRCROOT)/@@XCFRAMEWORK_PATH@@/ios-arm64/libundra_core.a
+$(SRCROOT)/@@XCFRAMEWORK_PATH@@/@@SIM_SLICE@@/libundra_core.a
+$(SRCROOT)/@@BUILD_REL@@/ios/.undra-configuration-$(CONFIGURATION)
