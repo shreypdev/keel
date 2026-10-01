@@ -48,6 +48,19 @@ pub(crate) fn by_index<T>(items: &mut [T], key: fn(&T) -> u16) {
     permute(items, stable_order(&keys));
 }
 
+/// Sorts `items` by `key`, stably, with the in-place insertion sort only: for lists that arrive
+/// in order or nearly (a closure's signals by id, an enum's variants by index, the store types of
+/// a snapshot by name), where the merge path of [`by_name`] would be code that never runs. O(n)
+/// on sorted input, O(n^2) at worst.
+pub(crate) fn insertion_by_key<T, K: Ord>(items: &mut [T], key: impl Fn(&T) -> K) {
+    insertion(items, |a, b| key(a) > key(b));
+}
+
+/// [`insertion_by_key`] by a name the item holds.
+pub(crate) fn insertion_by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
+    insertion(items, |a, b| name(a) > name(b));
+}
+
 /// Up to this many items, an in-place insertion sort: no allocation, and fewer steps than the
 /// merge sort's bookkeeping (most schema lists are this short).
 const SMALL: usize = 16;
@@ -245,6 +258,19 @@ mod tests {
             let input: Vec<(u16, usize)> = keys.into_iter().zip(0..).collect();
             let mut ours = input.clone();
             by_index(&mut ours, |i| i.0);
+            let mut std = input;
+            std.sort_by_key(|i| i.0);
+            proptest::prop_assert_eq!(ours, std);
+        }
+
+        /// `insertion_by_key` is `sort_by_key`, on any input.
+        #[test]
+        fn insertion_by_key_is_sort_by_key_on_any_input(
+            keys in proptest::collection::vec(proptest::prop_oneof![0..4_u32, proptest::num::u32::ANY], 0..80),
+        ) {
+            let input: Vec<(u32, usize)> = keys.into_iter().zip(0..).collect();
+            let mut ours = input.clone();
+            insertion_by_key(&mut ours, |i| i.0);
             let mut std = input;
             std.sort_by_key(|i| i.0);
             proptest::prop_assert_eq!(ours, std);

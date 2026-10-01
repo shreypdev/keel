@@ -8,9 +8,10 @@
 //! what `serde_json::to_string` writes for the same values (the tests compare them), so the
 //! fingerprints do not depend on which one computed them.
 //!
-//! The reader accepts any JSON with the closure's shape: whitespace, keys in any order, unknown
-//! keys ignored (as `serde` does), a missing `default` flag read as `false`. Nesting is bounded
-//! ([`MAX_DEPTH`]) and every count is bounded by the input's length.
+//! The reader reads the canonical form only (exactly what the writer writes), so it is the writer
+//! in reverse rather than a JSON parser: a description is only ever written by a core, and a
+//! restore checks it against its fingerprint. Nesting is bounded ([`MAX_DEPTH`]) and every count
+//! is bounded by the input's length.
 
 use core::fmt;
 
@@ -178,6 +179,27 @@ fn type_ref(out: &mut String, ty: &TypeRef) {
     out.push('}');
 }
 
+/// The types without parameters, in the order of [`KINDS`].
+const LEAVES: [TypeRef; 17] = [
+    TypeRef::Bool,
+    TypeRef::I8,
+    TypeRef::I16,
+    TypeRef::I32,
+    TypeRef::I64,
+    TypeRef::U8,
+    TypeRef::U16,
+    TypeRef::U32,
+    TypeRef::U64,
+    TypeRef::F32,
+    TypeRef::F64,
+    TypeRef::String,
+    TypeRef::Bytes,
+    TypeRef::Unit,
+    TypeRef::Duration,
+    TypeRef::Timestamp,
+    TypeRef::Uuid,
+];
+
 /// The `kind` tag of every `TypeRef` variant, in declaration order (`serde`'s `snake_case`).
 const KINDS: [&str; 24] = [
     "bool",
@@ -206,7 +228,7 @@ const KINDS: [&str; 24] = [
     "stream",
 ];
 
-fn kind_name(ty: &TypeRef) -> &'static str {
+pub(crate) fn kind_name(ty: &TypeRef) -> &'static str {
     let at = match ty {
         TypeRef::Bool => 0,
         TypeRef::I8 => 1,
@@ -270,249 +292,84 @@ fn string(out: &mut String, s: &str) {
 // ----- reading ---------------------------------------------------------------------------------
 
 pub(crate) fn read_type_closure(text: &str) -> Result<TypeClosure, ClosureJsonError> {
-    let (value, end) = parse(text)?;
-    let shape = |reason| ClosureJsonError { at: end, reason };
-    let o = value.object().ok_or(shape("a closure is an object"))?;
-    let root = req(o, "root", end)?
-        .object()
-        .ok_or(shape("`root` is an object"))?;
-    let root = match req(root, "kind", end)?.str() {
-        Some("type") => ClosureRoot::Type {
-            ty: type_of(req(root, "ty", end)?, end)?,
-        },
-        Some("params") => ClosureRoot::Params {
-            params: items(req(root, "params", end)?, end, field_of)?,
-        },
-        Some("signals") => ClosureRoot::Signals {
-            signals: items(req(root, "signals", end)?, end, signal_of)?,
-        },
-        _ => return Err(shape("`root.kind` is type, params or signals")),
+    let mut c = Cursor::new(text);
+    c.lit("{\"root\":{\"kind\":")?;
+    let mut closure = TypeClosure {
+        root: ClosureRoot::Params { params: Vec::new() },
+        records: Vec::new(),
+        enums: Vec::new(),
     };
-    Ok(TypeClosure {
-        root,
-        records: items(req(o, "records", end)?, end, record_of)?,
-        enums: items(req(o, "enums", end)?, end, enum_of)?,
-    })
+    match c.string()?.as_str() {
+        "type" => {
+            c.lit(",\"ty\":")?;
+            closure.root = ClosureRoot::Type { ty: c.ty(0)? };
+        }
+        "params" => {
+            c.lit(",\"params\":")?;
+            if let ClosureRoot::Params { params } = &mut closure.root {
+                c.list(params, Cursor::field)?;
+            }
+        }
+        "signals" => {
+            c.lit(",\"signals\":")?;
+            let mut signals = Vec::new();
+            c.list(&mut signals, Cursor::signal)?;
+            closure.root = ClosureRoot::Signals { signals };
+        }
+        _ => return Err(c.err("`root.kind` is type, params or signals")),
+    }
+    c.lit("}")?;
+    c.records_and_enums(&mut closure.records, &mut closure.enums)?;
+    Ok(closure)
 }
 
 pub(crate) fn read_stores_closure(text: &str) -> Result<StoresClosure, ClosureJsonError> {
-    let (value, end) = parse(text)?;
-    let o = value.object().ok_or(ClosureJsonError {
-        at: end,
-        reason: "a description is an object",
+    let mut c = Cursor::new(text);
+    let mut closure = StoresClosure {
+        stores: Vec::new(),
+        records: Vec::new(),
+        enums: Vec::new(),
+    };
+    c.lit("{\"stores\":")?;
+    c.list(&mut closure.stores, |c| {
+        // Filled in place, so a refusal drops one value whatever it holds so far.
+        let mut store = DescribedStore {
+            type_id: 0,
+            name: String::new(),
+            signals: Vec::new(),
+        };
+        c.lit("{\"type_id\":")?;
+        store.type_id = c.u32()?;
+        c.lit(",\"name\":")?;
+        store.name = c.string()?;
+        c.lit(",\"signals\":")?;
+        c.list(&mut store.signals, Cursor::signal)?;
+        c.lit("}")?;
+        Ok(store)
     })?;
-    Ok(StoresClosure {
-        stores: items(req(o, "stores", end)?, end, |v, end| {
-            let o = obj(v, end)?;
-            Ok(DescribedStore {
-                type_id: u32_of(req(o, "type_id", end)?, end)?,
-                name: str_of(req(o, "name", end)?, end)?,
-                signals: items(req(o, "signals", end)?, end, signal_of)?,
-            })
-        })?,
-        records: items(req(o, "records", end)?, end, record_of)?,
-        enums: items(req(o, "enums", end)?, end, enum_of)?,
-    })
+    c.records_and_enums(&mut closure.records, &mut closure.enums)?;
+    Ok(closure)
 }
 
-/// A parsed JSON value.
-enum Json {
-    Null,
-    Bool(bool),
-    /// An unsigned integer: the only numbers a closure holds.
-    Num(u64),
-    Str(String),
-    Arr(Vec<Json>),
-    Obj(Vec<(String, Json)>),
-}
-
-impl Json {
-    fn object(&self) -> Option<&[(String, Json)]> {
-        match self {
-            Json::Obj(o) => Some(o),
-            _ => None,
-        }
-    }
-
-    fn str(&self) -> Option<&str> {
-        match self {
-            Json::Str(s) => Some(s),
-            _ => None,
-        }
-    }
-}
-
-type Obj = [(String, Json)];
-
-/// The member `key` (the last one, as `serde_json` keeps when a key repeats).
-fn get<'a>(o: &'a Obj, key: &str) -> Option<&'a Json> {
-    o.iter().rev().find(|(k, _)| k == key).map(|(_, v)| v)
-}
-
-fn req<'a>(o: &'a Obj, key: &'static str, at: usize) -> Result<&'a Json, ClosureJsonError> {
-    get(o, key).ok_or(ClosureJsonError {
-        at,
-        reason: "a required member is missing",
-    })
-}
-
-fn wrong(at: usize, reason: &'static str) -> ClosureJsonError {
-    ClosureJsonError { at, reason }
-}
-
-fn obj(v: &Json, at: usize) -> Result<&Obj, ClosureJsonError> {
-    v.object().ok_or(wrong(at, "expected an object"))
-}
-
-fn str_of(v: &Json, at: usize) -> Result<String, ClosureJsonError> {
-    v.str()
-        .map(str::to_owned)
-        .ok_or(wrong(at, "expected a string"))
-}
-
-fn u32_of(v: &Json, at: usize) -> Result<u32, ClosureJsonError> {
-    match v {
-        Json::Num(n) => u32::try_from(*n).map_err(|_| wrong(at, "a number out of range")),
-        _ => Err(wrong(at, "expected a number")),
-    }
-}
-
-fn bool_of(v: Option<&Json>, at: usize) -> Result<bool, ClosureJsonError> {
-    match v {
-        None => Ok(false),
-        Some(Json::Bool(b)) => Ok(*b),
-        Some(_) => Err(wrong(at, "expected a boolean")),
-    }
-}
-
-fn items<T>(
-    v: &Json,
-    at: usize,
-    item: impl Fn(&Json, usize) -> Result<T, ClosureJsonError>,
-) -> Result<Vec<T>, ClosureJsonError> {
-    let Json::Arr(values) = v else {
-        return Err(wrong(at, "expected an array"));
-    };
-    values.iter().map(|v| item(v, at)).collect()
-}
-
-fn field_of(v: &Json, at: usize) -> Result<ClosureField, ClosureJsonError> {
-    let o = obj(v, at)?;
-    Ok(ClosureField {
-        name: str_of(req(o, "name", at)?, at)?,
-        ty: type_of(req(o, "ty", at)?, at)?,
-        default: bool_of(get(o, "default"), at)?,
-    })
-}
-
-fn signal_of(v: &Json, at: usize) -> Result<ClosureSignal, ClosureJsonError> {
-    let o = obj(v, at)?;
-    Ok(ClosureSignal {
-        name: str_of(req(o, "name", at)?, at)?,
-        signal_id: u32_of(req(o, "signal_id", at)?, at)?,
-        ty: type_of(req(o, "ty", at)?, at)?,
-        default: bool_of(get(o, "default"), at)?,
-    })
-}
-
-fn record_of(v: &Json, at: usize) -> Result<ClosureRecord, ClosureJsonError> {
-    let o = obj(v, at)?;
-    Ok(ClosureRecord {
-        name: str_of(req(o, "name", at)?, at)?,
-        fields: items(req(o, "fields", at)?, at, field_of)?,
-    })
-}
-
-fn enum_of(v: &Json, at: usize) -> Result<ClosureEnum, ClosureJsonError> {
-    let o = obj(v, at)?;
-    Ok(ClosureEnum {
-        name: str_of(req(o, "name", at)?, at)?,
-        variants: items(req(o, "variants", at)?, at, |v, at| {
-            let o = obj(v, at)?;
-            Ok(ClosureVariant {
-                name: str_of(req(o, "name", at)?, at)?,
-                index: u16::try_from(u32_of(req(o, "index", at)?, at)?)
-                    .map_err(|_| wrong(at, "a variant index out of range"))?,
-                fields: items(req(o, "fields", at)?, at, field_of)?,
-                tuple: bool_of(Some(req(o, "tuple", at)?), at)?,
-            })
-        })?,
-    })
-}
-
-fn type_of(v: &Json, at: usize) -> Result<TypeRef, ClosureJsonError> {
-    let o = obj(v, at)?;
-    let kind = req(o, "kind", at)?
-        .str()
-        .ok_or(wrong(at, "`kind` is a string"))?;
-    let index = KINDS
-        .iter()
-        .position(|k| *k == kind)
-        .ok_or(wrong(at, "an unknown type kind"))?;
-    let of = || req(o, "of", at);
-    let one = || Ok::<_, ClosureJsonError>(Box::new(type_of(of()?, at)?));
-    let two = || match of()? {
-        Json::Arr(pair) if pair.len() == 2 => Ok((
-            Box::new(type_of(&pair[0], at)?),
-            Box::new(type_of(&pair[1], at)?),
-        )),
-        _ => Err(wrong(at, "expected a pair of types")),
-    };
-    Ok(match index {
-        0 => TypeRef::Bool,
-        1 => TypeRef::I8,
-        2 => TypeRef::I16,
-        3 => TypeRef::I32,
-        4 => TypeRef::I64,
-        5 => TypeRef::U8,
-        6 => TypeRef::U16,
-        7 => TypeRef::U32,
-        8 => TypeRef::U64,
-        9 => TypeRef::F32,
-        10 => TypeRef::F64,
-        11 => TypeRef::String,
-        12 => TypeRef::Bytes,
-        13 => TypeRef::Unit,
-        14 => TypeRef::Duration,
-        15 => TypeRef::Timestamp,
-        16 => TypeRef::Uuid,
-        17 => TypeRef::Option(one()?),
-        18 => TypeRef::Vec(one()?),
-        19 => {
-            let (k, v) = two()?;
-            TypeRef::Map(k, v)
-        }
-        20 => TypeRef::Lazy(one()?),
-        21 => TypeRef::Named(str_of(of()?, at)?),
-        22 => {
-            let (k, v) = two()?;
-            TypeRef::Result(k, v)
-        }
-        _ => TypeRef::Stream(one()?),
-    })
-}
-
-/// Parses one JSON value that fills `text` (whitespace around it allowed); gives back the value
-/// and the length of the text.
-fn parse(text: &str) -> Result<(Json, usize), ClosureJsonError> {
-    let mut p = Parser {
-        b: text.as_bytes(),
-        at: 0,
-    };
-    let value = p.value(0)?;
-    p.ws();
-    if p.at != p.b.len() {
-        return Err(p.err("trailing characters after the value"));
-    }
-    Ok((value, p.b.len()))
-}
-
-struct Parser<'a> {
+/// Reads the canonical form and nothing else: the exact text the writer produces (keys in their
+/// order, no whitespace, a `default` flag only when `true`). A description is only ever written
+/// by a core, and a restore checks it against its fingerprint; refusing every other spelling keeps
+/// this reader the writer in reverse, a fraction of a general JSON parser's size.
+struct Cursor<'a> {
+    text: &'a str,
     b: &'a [u8],
     at: usize,
 }
 
-impl Parser<'_> {
+impl Cursor<'_> {
+    fn new(text: &str) -> Cursor<'_> {
+        Cursor {
+            text,
+            b: text.as_bytes(),
+            at: 0,
+        }
+    }
+
     fn err(&self, reason: &'static str) -> ClosureJsonError {
         ClosureJsonError {
             at: self.at,
@@ -520,120 +377,216 @@ impl Parser<'_> {
         }
     }
 
-    fn ws(&mut self) {
-        while let Some(b' ' | b'\t' | b'\n' | b'\r') = self.b.get(self.at) {
-            self.at += 1;
+    /// Whether `text` comes next; consumes it if so. Out of line: called at every key.
+    #[inline(never)]
+    fn eat(&mut self, text: &str) -> bool {
+        let ok = self.b[self.at..].starts_with(text.as_bytes());
+        if ok {
+            self.at += text.len();
         }
+        ok
     }
 
-    fn eat(&mut self, byte: u8) -> bool {
-        self.ws();
-        if self.b.get(self.at) == Some(&byte) {
-            self.at += 1;
-            true
+    #[inline(never)]
+    fn lit(&mut self, text: &str) -> Result<(), ClosureJsonError> {
+        if self.eat(text) {
+            Ok(())
         } else {
-            false
+            Err(self.err("not a closure's canonical JSON"))
         }
     }
 
-    fn literal(&mut self, word: &[u8], value: Json) -> Result<Json, ClosureJsonError> {
-        if self.b[self.at..].starts_with(word) {
-            self.at += word.len();
-            Ok(value)
-        } else {
-            Err(self.err("an unexpected character"))
+    /// A list, its items pushed onto `out`.
+    fn list<T>(
+        &mut self,
+        out: &mut Vec<T>,
+        mut item: impl FnMut(&mut Self) -> Result<T, ClosureJsonError>,
+    ) -> Result<(), ClosureJsonError> {
+        self.lit("[")?;
+        if self.eat("]") {
+            return Ok(());
+        }
+        loop {
+            out.push(item(self)?);
+            if self.eat("]") {
+                return Ok(());
+            }
+            self.lit(",")?;
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<Json, ClosureJsonError> {
+    /// `,"records":[..],"enums":[..]}` and the end of the text.
+    fn records_and_enums(
+        &mut self,
+        records: &mut Vec<ClosureRecord>,
+        enums: &mut Vec<ClosureEnum>,
+    ) -> Result<(), ClosureJsonError> {
+        self.lit(",\"records\":")?;
+        self.list(records, |c| {
+            let mut record = ClosureRecord {
+                name: String::new(),
+                fields: Vec::new(),
+            };
+            c.lit("{\"name\":")?;
+            record.name = c.string()?;
+            c.lit(",\"fields\":")?;
+            c.list(&mut record.fields, Cursor::field)?;
+            c.lit("}")?;
+            Ok(record)
+        })?;
+        self.lit(",\"enums\":")?;
+        self.list(enums, |c| {
+            let mut en = ClosureEnum {
+                name: String::new(),
+                variants: Vec::new(),
+            };
+            c.lit("{\"name\":")?;
+            en.name = c.string()?;
+            c.lit(",\"variants\":")?;
+            c.list(&mut en.variants, |c| {
+                let mut v = ClosureVariant {
+                    name: String::new(),
+                    index: 0,
+                    fields: Vec::new(),
+                    tuple: false,
+                };
+                c.lit("{\"name\":")?;
+                v.name = c.string()?;
+                c.lit(",\"index\":")?;
+                v.index = u16::try_from(c.u32()?).map_err(|_| c.err("a number out of range"))?;
+                c.lit(",\"fields\":")?;
+                c.list(&mut v.fields, Cursor::field)?;
+                v.tuple = c.eat(",\"tuple\":true}");
+                if !v.tuple {
+                    c.lit(",\"tuple\":false}")?;
+                }
+                Ok(v)
+            })?;
+            c.lit("}")?;
+            Ok(en)
+        })?;
+        self.lit("}")?;
+        if self.at != self.b.len() {
+            return Err(self.err("trailing characters after the value"));
+        }
+        Ok(())
+    }
+
+    fn field(&mut self) -> Result<ClosureField, ClosureJsonError> {
+        let mut field = ClosureField {
+            name: String::new(),
+            ty: TypeRef::Unit,
+            default: false,
+        };
+        self.lit("{\"name\":")?;
+        field.name = self.string()?;
+        self.lit(",\"ty\":")?;
+        field.ty = self.ty(0)?;
+        field.default = self.eat(",\"default\":true");
+        self.lit("}")?;
+        Ok(field)
+    }
+
+    fn signal(&mut self) -> Result<ClosureSignal, ClosureJsonError> {
+        let mut signal = ClosureSignal {
+            name: String::new(),
+            signal_id: 0,
+            ty: TypeRef::Unit,
+            default: false,
+        };
+        self.lit("{\"name\":")?;
+        signal.name = self.string()?;
+        self.lit(",\"signal_id\":")?;
+        signal.signal_id = self.u32()?;
+        self.lit(",\"ty\":")?;
+        signal.ty = self.ty(0)?;
+        signal.default = self.eat(",\"default\":true");
+        self.lit("}")?;
+        Ok(signal)
+    }
+
+    fn ty(&mut self, depth: usize) -> Result<TypeRef, ClosureJsonError> {
         if depth > MAX_DEPTH {
             return Err(self.err("nested too deeply"));
         }
-        self.ws();
-        match self.b.get(self.at) {
-            None => Err(self.err("the text ends before the value")),
-            Some(b'{') => {
-                self.at += 1;
-                let mut members = Vec::new();
-                if self.eat(b'}') {
-                    return Ok(Json::Obj(members));
-                }
-                loop {
-                    self.ws();
-                    let key = self.string()?;
-                    if !self.eat(b':') {
-                        return Err(self.err("expected `:`"));
-                    }
-                    members.push((key, self.value(depth + 1)?));
-                    if self.eat(b'}') {
-                        return Ok(Json::Obj(members));
-                    }
-                    if !self.eat(b',') {
-                        return Err(self.err("expected `,` or `}`"));
-                    }
+        self.lit("{\"kind\":")?;
+        let kind = self.string()?;
+        let index = KINDS
+            .iter()
+            .position(|k| *k == kind)
+            .ok_or(self.err("an unknown type kind"))?;
+        let ty = match index {
+            0..=16 => LEAVES[index].clone(),
+            21 => {
+                self.lit(",\"of\":")?;
+                TypeRef::Named(self.string()?)
+            }
+            19 | 22 => {
+                self.lit(",\"of\":[")?;
+                let a = Box::new(self.ty(depth + 1)?);
+                self.lit(",")?;
+                let b = Box::new(self.ty(depth + 1)?);
+                self.lit("]")?;
+                if index == 19 {
+                    TypeRef::Map(a, b)
+                } else {
+                    TypeRef::Result(a, b)
                 }
             }
-            Some(b'[') => {
-                self.at += 1;
-                let mut values = Vec::new();
-                if self.eat(b']') {
-                    return Ok(Json::Arr(values));
-                }
-                loop {
-                    values.push(self.value(depth + 1)?);
-                    if self.eat(b']') {
-                        return Ok(Json::Arr(values));
-                    }
-                    if !self.eat(b',') {
-                        return Err(self.err("expected `,` or `]`"));
-                    }
+            _ => {
+                self.lit(",\"of\":")?;
+                let inner = Box::new(self.ty(depth + 1)?);
+                match index {
+                    17 => TypeRef::Option(inner),
+                    18 => TypeRef::Vec(inner),
+                    20 => TypeRef::Lazy(inner),
+                    _ => TypeRef::Stream(inner),
                 }
             }
-            Some(b'"') => self.string().map(Json::Str),
-            Some(b't') => self.literal(b"true", Json::Bool(true)),
-            Some(b'f') => self.literal(b"false", Json::Bool(false)),
-            Some(b'n') => self.literal(b"null", Json::Null),
-            Some(b'0'..=b'9') => {
-                let start = self.at;
-                let mut n: u64 = 0;
-                while let Some(&d @ b'0'..=b'9') = self.b.get(self.at) {
-                    n = n
-                        .checked_mul(10)
-                        .and_then(|n| n.checked_add(u64::from(d - b'0')))
-                        .ok_or(self.err("a number out of range"))?;
-                    self.at += 1;
-                }
-                if matches!(self.b.get(self.at), Some(b'.' | b'e' | b'E'))
-                    || (self.at - start > 1 && self.b[start] == b'0')
-                {
-                    return Err(self.err("a closure holds only unsigned integers"));
-                }
-                Ok(Json::Num(n))
-            }
-            Some(_) => Err(self.err("an unexpected character")),
-        }
+        };
+        self.lit("}")?;
+        Ok(ty)
     }
 
-    /// A string at `self.at` (which must be its opening quote), unescaped.
-    fn string(&mut self) -> Result<String, ClosureJsonError> {
-        if self.b.get(self.at) != Some(&b'"') {
-            return Err(self.err("expected a string"));
+    /// An unsigned integer as the writer spells it (no sign, no leading zero, no fraction).
+    fn u32(&mut self) -> Result<u32, ClosureJsonError> {
+        let start = self.at;
+        let mut n: u32 = 0;
+        while let Some(&d @ b'0'..=b'9') = self.b.get(self.at) {
+            n = n
+                .checked_mul(10)
+                .and_then(|n| n.checked_add(u32::from(d - b'0')))
+                .ok_or(self.err("a number out of range"))?;
+            self.at += 1;
         }
-        self.at += 1;
-        let mut out = Vec::new();
+        if self.at == start || (self.at - start > 1 && self.b[start] == b'0') {
+            return Err(self.err("not a closure's canonical JSON"));
+        }
+        Ok(n)
+    }
+
+    /// A string, unescaped (every escape JSON has, though the writer uses only some). The text
+    /// between escapes is copied as it is: it is part of a `&str` and splits only at ASCII.
+    fn string(&mut self) -> Result<String, ClosureJsonError> {
+        self.lit("\"")?;
+        let mut out = String::new();
+        let mut run = self.at;
         loop {
             let Some(&byte) = self.b.get(self.at) else {
                 return Err(self.err("an unterminated string"));
             };
-            self.at += 1;
             match byte {
-                b'"' => break,
-                b'\\' => {
+                b'"' | b'\\' => {
+                    out.push_str(&self.text[run..self.at]);
+                    self.at += 1;
+                    if byte == b'"' {
+                        return Ok(out);
+                    }
                     let Some(&esc) = self.b.get(self.at) else {
                         return Err(self.err("an unterminated string"));
                     };
                     self.at += 1;
-                    let c = match esc {
+                    out.push(match esc {
                         b'"' => '"',
                         b'\\' => '\\',
                         b'/' => '/',
@@ -644,26 +597,20 @@ impl Parser<'_> {
                         b't' => '\t',
                         b'u' => self.unicode()?,
                         _ => return Err(self.err("an invalid escape")),
-                    };
-                    let mut buf = [0; 4];
-                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                    });
+                    run = self.at;
                 }
                 0..=0x1f => return Err(self.err("a control character in a string")),
-                _ => out.push(byte),
+                _ => self.at += 1,
             }
         }
-        // The input is a `&str` and escapes produce whole characters, so the bytes are UTF-8.
-        String::from_utf8(out).map_err(|_| self.err("a string that is not UTF-8"))
     }
 
     /// The character of a `\uXXXX` escape (a surrogate pair takes two).
     fn unicode(&mut self) -> Result<char, ClosureJsonError> {
         let high = self.hex4()?;
         let code = if (0xd800..0xdc00).contains(&high) {
-            if !self.b[self.at..].starts_with(b"\\u") {
-                return Err(self.err("a lone surrogate"));
-            }
-            self.at += 2;
+            self.lit("\\u")?;
             let low = self.hex4()?;
             if !(0xdc00..0xe000).contains(&low) {
                 return Err(self.err("a lone surrogate"));
@@ -807,22 +754,34 @@ mod tests {
     }
 
     #[test]
-    fn the_reader_reads_what_serde_json_reads() {
+    fn the_reader_reads_what_serde_json_writes_and_only_that() {
         let c = sample();
         assert_eq!(read_type_closure(&write_type_closure(&c)).unwrap(), c);
-        let pretty = serde_json::to_string_pretty(&c).unwrap();
-        assert_eq!(read_type_closure(&pretty).unwrap(), c, "whitespace");
-        // Keys in another order, an unknown key, an escaped slash and a surrogate pair.
-        let shuffled = r#"{"enums":[],"extra":[1,{"x":null}],"records":[{"fields":[],"name":"R\/\ud83e\udd80"}],
-            "root":{"ty":{"of":{"kind":"u8"},"kind":"vec"},"kind":"type"}}"#;
-        let back = read_type_closure(shuffled).unwrap();
-        assert_eq!(back.records[0].name, "R/🦀");
         assert_eq!(
-            back.root,
+            read_type_closure(&serde_json::to_string(&c).unwrap()).unwrap(),
+            c
+        );
+        // Escapes the writer does not produce still read: a slash and a surrogate pair.
+        let escaped = r#"{"root":{"kind":"type","ty":{"kind":"named","of":"R\/\ud83e\udd80"}},"records":[],"enums":[]}"#;
+        assert_eq!(
+            read_type_closure(escaped).unwrap().root,
             ClosureRoot::Type {
-                ty: TypeRef::vec(TypeRef::U8)
+                ty: TypeRef::named("R/🦀")
             }
         );
+        // Another spelling of the same closure is refused: whitespace, key order, a `false` flag.
+        let pretty = serde_json::to_string_pretty(&c).unwrap();
+        assert_eq!(
+            read_type_closure(&pretty).unwrap_err().reason,
+            "not a closure's canonical JSON"
+        );
+        assert!(
+            read_type_closure(
+                r#"{"records":[],"enums":[],"root":{"kind":"type","ty":{"kind":"u8"}}}"#
+            )
+            .is_err()
+        );
+        assert!(read_type_closure(r#"{"root":{"kind":"params","params":[{"name":"a","ty":{"kind":"u8"},"default":false}]},"records":[],"enums":[]}"#).is_err());
         let stores = StoresClosure {
             stores: vec![DescribedStore {
                 type_id: u32::MAX,
@@ -831,11 +790,11 @@ mod tests {
                     name: "s".into(),
                     signal_id: 3,
                     ty: TypeRef::I32,
-                    default: false,
+                    default: true,
                 }],
             }],
-            records: vec![],
-            enums: vec![],
+            records: c.records.clone(),
+            enums: c.enums.clone(),
         };
         assert_eq!(
             read_stores_closure(&serde_json::to_string(&stores).unwrap()).unwrap(),

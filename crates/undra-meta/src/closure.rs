@@ -22,8 +22,6 @@
 //! `default` flag is written only when it is `true`. It is written and read by hand
 //! (`closure_json.rs`), because every core does both and `serde`'s code for them is large.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use serde::{Deserialize, Serialize};
 
 use crate::ids::fnv1a64;
@@ -349,9 +347,8 @@ impl Schema {
     pub fn stores_closure(&self, type_ids: &[u32]) -> StoresClosure {
         let mut collector = Collector::default();
         let mut stores = Vec::new();
-        let mut seen = BTreeSet::new();
-        for &type_id in type_ids {
-            if !seen.insert(type_id) {
+        for (at, &type_id) in type_ids.iter().enumerate() {
+            if type_ids[..at].contains(&type_id) {
                 continue;
             }
             let Some(object) = self
@@ -371,7 +368,7 @@ impl Schema {
                 signals,
             });
         }
-        stores.sort_by(|a, b| a.name.cmp(&b.name));
+        crate::sort::insertion_by_name(&mut stores, |s| &s.name);
         let (records, enums) = collector.into_parts();
         StoresClosure {
             stores,
@@ -398,7 +395,7 @@ impl Schema {
                 default: s.default,
             })
             .collect();
-        signals.sort_by_key(|s| s.signal_id);
+        crate::sort::insertion_by_key(&mut signals, |s| s.signal_id);
         Some(signals)
     }
 
@@ -420,7 +417,7 @@ impl Schema {
                 tuple: v.tuple,
             })
             .collect();
-        variants.sort_by_key(|v| v.index);
+        crate::sort::insertion_by_key(&mut variants, |v| v.index);
         Some(Reached::Enum(ClosureEnum {
             name: en.name.clone(),
             variants,
@@ -444,11 +441,12 @@ enum Reached {
     Enum(ClosureEnum),
 }
 
-/// Walks types and keeps every record and enum it meets once.
+/// Walks types and keeps every record and enum it meets once, each list sorted by name (kept
+/// sorted as it grows: a closure reaches a handful of types, and this needs no map or sort code).
 #[derive(Default)]
 struct Collector {
-    records: BTreeMap<String, ClosureRecord>,
-    enums: BTreeMap<String, ClosureEnum>,
+    records: Vec<ClosureRecord>,
+    enums: Vec<ClosureEnum>,
 }
 
 impl Collector {
@@ -467,15 +465,17 @@ impl Collector {
                     owned.push((**v).clone());
                 }
                 TypeRef::Named(name) => {
-                    if self.records.contains_key(name) || self.enums.contains_key(name) {
+                    let record_at = self.records.binary_search_by(|r| r.name.cmp(name));
+                    let enum_at = self.enums.binary_search_by(|e| e.name.cmp(name));
+                    let (Err(record_at), Err(enum_at)) = (record_at, enum_at) else {
                         continue;
-                    }
+                    };
                     match lookup(name) {
                         Some(Reached::Record(record)) => {
                             for field in &record.fields {
                                 owned.push(field.ty.clone());
                             }
-                            self.records.insert(name.clone(), record);
+                            self.records.insert(record_at, record);
                         }
                         Some(Reached::Enum(en)) => {
                             for variant in &en.variants {
@@ -483,7 +483,7 @@ impl Collector {
                                     owned.push(field.ty.clone());
                                 }
                             }
-                            self.enums.insert(name.clone(), en);
+                            self.enums.insert(enum_at, en);
                         }
                         None => {}
                     }
@@ -494,10 +494,7 @@ impl Collector {
     }
 
     fn into_parts(self) -> (Vec<ClosureRecord>, Vec<ClosureEnum>) {
-        (
-            self.records.into_values().collect(),
-            self.enums.into_values().collect(),
-        )
+        (self.records, self.enums)
     }
 
     fn finish(self, root: ClosureRoot) -> TypeClosure {
