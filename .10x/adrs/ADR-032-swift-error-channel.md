@@ -1,6 +1,6 @@
 # ADR-032: generated Swift never stops the process: calls throw, commands report
 
-Status: proposed (2026-09-30). Touches SPEC 10.1 (generated Swift shapes) and 17.3 (Swift runtime API:
+Status: accepted (2026-09-30; the integrator's choices on the open decisions are recorded at the end). Touches SPEC 10.1 (generated Swift shapes) and 17.3 (Swift runtime API:
 `UndraCallError`, `UndraUnhandledError`, `LoadOptions.onError`, `UndraCore.report`, `UndraCore.shared`),
 `contract-tests/scenarios.md` (new steps in S05, S06, S15 and S17), the Swift golden files of
 `undra-bindgen`, the playground's generated Swift and its iOS app, and the pages that describe Swift
@@ -407,3 +407,15 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
    violation; the alternative is to hold it for 2.0.
 5. **Names.** `UndraCallError.cancelledByCore` (versus `.cancelled`), `UndraUnhandledError`,
    `LoadOptions.onError` (chosen for parity with TypeScript), `UndraCallError.mapped`.
+
+### Resolved by the integrator (2026-09-30)
+
+1. **Commands report, they do not throw** (the recommended value of open decision 1). Alternative (c) stays
+   recorded as the closest alternative.
+2. **The debug default of `onError` is log-only** (open decision 2): no `assertionFailure` in any build
+   configuration. A team that wants a debug trap installs `onError: { assertionFailure("\($0)") }`.
+3. **The `UndraCore.shared` placeholder ships in this piece** (open decision 3), with decision 7 as written.
+4. **No migration note is needed** (open decision 4): the project has not shipped 1.0, so source
+   compatibility of generated Swift is not yet a promise. The compile errors listed under Consequences
+   are the whole migration.
+5. Names are accepted as proposed (open decision 5).
