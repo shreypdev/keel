@@ -14,4 +14,4 @@ error[E0080]: evaluation panicked: error[undra::E0011]: `Plain` is implemented w
   --> tests/ui/e0011_store_marker_without_store.rs:11:1
    |
 11 | #[k::api(store)]
-   | ^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+   | ^^^^^^^^^^^^^^^^ evaluation of `_::_` failed here

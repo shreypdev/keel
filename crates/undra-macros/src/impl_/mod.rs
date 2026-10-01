@@ -73,11 +73,36 @@ fn run_recovering(
 fn wrong_item(macro_name: &str, expected: &str, item: &syn::Item) -> syn::Error {
     Diag::new(
         code::E0007,
-        format!("`#[undra::{macro_name}]` cannot be applied to this item"),
+        format!(
+            "`#[undra::{macro_name}]` cannot be applied to {}",
+            item_kind(item)
+        ),
         format!("`#[undra::{macro_name}]` applies to {expected}"),
-        "move the attribute to a supported item",
+        format!("move `#[undra::{macro_name}]` onto {expected}, or remove it"),
     )
     .on(item)
+}
+
+/// What an item is, with its article, for a sentence ("a `trait`", "an `enum`").
+fn item_kind(item: &syn::Item) -> &'static str {
+    match item {
+        syn::Item::Const(_) => "a `const`",
+        syn::Item::Enum(_) => "an `enum`",
+        syn::Item::ExternCrate(_) => "an `extern crate` declaration",
+        syn::Item::Fn(_) => "a `fn`",
+        syn::Item::ForeignMod(_) => "an `extern` block",
+        syn::Item::Impl(_) => "an `impl` block",
+        syn::Item::Macro(_) => "a macro invocation",
+        syn::Item::Mod(_) => "a `mod`",
+        syn::Item::Static(_) => "a `static`",
+        syn::Item::Struct(_) => "a `struct`",
+        syn::Item::Trait(_) => "a `trait`",
+        syn::Item::TraitAlias(_) => "a trait alias",
+        syn::Item::Type(_) => "a type alias",
+        syn::Item::Union(_) => "a `union`",
+        syn::Item::Use(_) => "a `use` declaration",
+        _ => "this item",
+    }
 }
 
 /// The `crate = ".."` path of a macro's arguments, for a recovery step that only needs that:
@@ -142,7 +167,7 @@ pub(crate) fn expand_api(attr: TokenStream, item: TokenStream) -> TokenStream {
             syn::Item::Fn(item) => object::expand_fn(root, item),
             other => Err(wrong_item(
                 "api",
-                "structs, enums, `impl` blocks and free functions",
+                "a struct, an enum, an `impl` block or a free `fn`",
                 &other,
             )),
         }
@@ -167,7 +192,7 @@ pub(crate) fn expand_error(attr: TokenStream, item: TokenStream) -> TokenStream 
         })?;
         match item {
             syn::Item::Enum(item) => record::expand_enum(root, item, Mode::Error),
-            other => Err(wrong_item("error", "enums", &other)),
+            other => Err(wrong_item("error", "an enum", &other)),
         }
     })
 }
@@ -187,7 +212,7 @@ pub(crate) fn expand_query(
                     query::Flavor::Query => "query",
                     query::Flavor::Mutation => "mutation",
                 },
-                "`async fn`s",
+                "an `async fn`",
                 &other,
             )),
         }
@@ -212,7 +237,7 @@ pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         other => Err(wrong_item(
             "port",
-            "trait definitions and `impl Trait for Type` blocks",
+            "a trait definition or an `impl Trait for Type` block",
             &other,
         )),
     })
@@ -272,7 +297,7 @@ pub(crate) fn expand_store(attr: TokenStream, item: TokenStream) -> TokenStream 
         )?;
         match item {
             syn::Item::Struct(item) => store::expand_store(root, hook, item),
-            other => Err(wrong_item("store", "structs", &other)),
+            other => Err(wrong_item("store", "a struct", &other)),
         }
     })
 }

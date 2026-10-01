@@ -1,0 +1,29 @@
+error[E0080]: evaluation panicked: error[undra::E0008]: `#[undra(key = "idd")]` on `typo` names no field of `Row`
+                = note: `key` names the field of the list's items that identifies them, and `Row` has the fields `id`, `title`
+                = help: write the name of one of those fields as the key
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/d1_key_names_no_field.rs:24:19
+   |
+24 |     #[undra(key = "idd")]
+   |                   ^^^^^ evaluation of `Rows::__undra_build_cell::__undra_key_typo::__UNDRA_KEY` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/d1_key_names_no_field.rs:24:19
+   |
+24 |     #[undra(key = "idd")]
+   |                   ^^^^^
+
+error[E0080]: evaluation panicked: error[undra::E0008]: `#[undra(key = "n")]` on `not_a_record` names no field of `u32`
+                = note: `key` names the field of the list's items that identifies them, and `u32` has no fields (only a record declared with `#[undra::api]` has any)
+                = help: write the name of one of those fields as the key
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/d1_key_names_no_field.rs:26:19
+   |
+26 |     #[undra(key = "n")]
+   |                   ^^^ evaluation of `Rows::__undra_build_cell::__undra_key_not_a_record::__UNDRA_KEY` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/d1_key_names_no_field.rs:26:19
+   |
+26 |     #[undra(key = "n")]
+   |                   ^^^

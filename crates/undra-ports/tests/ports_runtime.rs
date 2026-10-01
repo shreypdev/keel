@@ -640,11 +640,13 @@ fn h2_request_reply_ports_report_an_unbound_port_as_their_typed_error() {
     assert_eq!(
         t.run_until(http.request(HttpRequest::get("https://api.test/x"))),
         Err(HttpError::Network(
-            "the Http port has no adapter registered".into()
+            "the Http port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into()
         ))
     );
     let fs = FsProxy::new(t.ctx());
-    let expected = FsError::Io("the Fs port has no adapter registered".into());
+    let expected = FsError::Io(
+        "the Fs port has no adapter registered (E0062: register one, see https://shreypdev.github.io/undra/docs/errors.html#E0062)".into(),
+    );
     assert_eq!(t.run_until(fs.read("a".into())), Err(expected.clone()));
     assert_eq!(
         t.run_until(fs.write("a".into(), Bytes(vec![1]))),

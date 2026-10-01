@@ -4,6 +4,8 @@
 
 pub mod dispatch;
 pub mod ids;
+#[doc(hidden)]
+pub mod keys;
 
 mod canonical;
 mod def;

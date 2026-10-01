@@ -74,6 +74,7 @@ pub(crate) mod code {
     pub(crate) const E0013: &str = "E0013";
     pub(crate) const E0020: &str = "E0020";
     pub(crate) const E0021: &str = "E0021";
+    pub(crate) const E0022: &str = "E0022";
     pub(crate) const E0030: &str = "E0030";
     pub(crate) const E0031: &str = "E0031";
     pub(crate) const E0032: &str = "E0032";
@@ -125,6 +126,17 @@ impl Diag {
             what = self.what,
             why = self.why,
             help = self.help,
+        )
+    }
+
+    /// The shape of [`Diag::message`] as a `format!` template with three `{}`: what, why and fix.
+    ///
+    /// For a message that is finished at run time (E0062 names the port and method of the call
+    /// that failed), so a runtime error reads exactly like a compile error: same code, same four
+    /// lines, same docs link.
+    pub(crate) fn runtime_template(code: &str) -> String {
+        format!(
+            "{MESSAGE_PREFIX}[undra::{code}]: {{}}\n  = note: {{}}\n  = help: {{}}\n  = docs: {DOCS_BASE}#{code}"
         )
     }
 
@@ -199,6 +211,19 @@ mod tests {
                 "  = help: fix",
                 "  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001",
             ]
+        );
+    }
+
+    #[test]
+    fn the_runtime_template_is_the_message_with_holes() {
+        let template = Diag::runtime_template(code::E0062);
+        let filled = template
+            .replacen("{}", "what", 1)
+            .replacen("{}", "why", 1)
+            .replacen("{}", "fix", 1);
+        assert_eq!(
+            filled,
+            Diag::new(code::E0062, "what", "why", "fix").message()
         );
     }
 

@@ -109,9 +109,15 @@ const _: () = {
                 "error[undra::E0064]: `NetKind` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
-        if <NetKind>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("NetKind") {
+        let __undra_id = <NetKind>::UNDRA_TYPE_ID;
+        if __undra_id == 0 {
             ::core::panic!(
-                "error[undra::E0061]: the schema records this type as `NetKind`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type NetKind = Other`), a renamed import (`use path::Other as NetKind`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `NetKind` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type NetKind = u64`, has no definition the platforms could generate\n  = help: add `#[undra::api]` to `NetKind`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+        if __undra_id != ::undra::meta::ids::type_id("NetKind") {
+            ::core::panic!(
+                "error[undra::E0061]: `NetKind` here is an alias or a renamed import of a different Undra type, not the type declared as `NetKind`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type NetKind = Other` or `use path::Other as NetKind` the platforms would be told `NetKind` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct NetKind` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
     };

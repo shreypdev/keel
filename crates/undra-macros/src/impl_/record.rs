@@ -124,6 +124,28 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
     } else {
         TokenStream::new()
     };
+    // The field names of a struct, so a keyed list of it does not add "no such field".
+    let field_names: Vec<String> = match item {
+        syn::Item::Struct(item) => match &item.fields {
+            Fields::Named(named) => named
+                .named
+                .iter()
+                .filter_map(|f| f.ident.as_ref().map(unraw))
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    let fields_stub = if is_enum {
+        TokenStream::new()
+    } else {
+        quote! {
+            #[doc(hidden)]
+            pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
+            #[doc(hidden)]
+            pub fn __undra_encode_field<const __I: usize>(&self, __w: &mut #wire::Writer) {}
+        }
+    };
     let error_impls = if is_error {
         quote! {
             impl #impl_generics ::core::fmt::Display for #name #type_generics #where_clause {
@@ -142,6 +164,7 @@ pub(crate) fn recover(args_root: Option<Root>, mode: Mode, item: &mut syn::Item)
             #[doc(hidden)]
             pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
             #is_error_const
+            #fields_stub
         }
         impl #impl_generics #wire::Encode for #name #type_generics #where_clause {
             fn encode(&self, __w: &mut #wire::Writer) {}
@@ -307,6 +330,14 @@ pub(crate) fn expand_struct(
         let ty = &f.ty;
         quote_spanned! {f.ty.span()=> + <#ty as #wire::Decode>::MIN_ENCODED_LEN }
     });
+    // What a keyed list (`#[undra(key = "..")]` in a store) needs of its item: the field names, and
+    // the encoding of one field by index. The store looks the name up in a constant, so a key that
+    // names no field is a branded error, and then calls the field's encoder (`undra_meta::keys`).
+    let field_names = fields.iter().map(|f| &f.name);
+    let encode_by_index = fields.iter().enumerate().map(|(index, f)| {
+        let ident = f.ident.as_ref().expect("named field");
+        quote_spanned! {f.ty.span()=> #index => #wire::Encode::encode(&self.#ident, __w), }
+    });
     let field_metas = fields
         .iter()
         .map(|f| field_meta(&meta, &f.name, &f.kty, f.default, &f.docs));
@@ -324,6 +355,19 @@ pub(crate) fn expand_struct(
         impl #name {
             /// The stable Undra type id: `fnv1a32` of the type name.
             pub const UNDRA_TYPE_ID: u32 = #meta::ids::type_id(#name_str);
+            /// The names of the fields, in declaration order (see `undra_meta::keys`).
+            #[doc(hidden)]
+            pub const __UNDRA_FIELDS: &'static [&'static str] = &[ #(#field_names),* ];
+            /// Encodes the field at index `__I` of `__UNDRA_FIELDS`, as `Encode` does.
+            #[doc(hidden)]
+            #[inline(always)]
+            #[allow(unused_variables)]
+            pub fn __undra_encode_field<const __I: usize>(&self, __w: &mut #wire::Writer) {
+                match __I {
+                    #(#encode_by_index)*
+                    _ => {}
+                }
+            }
         }
 
         #derived

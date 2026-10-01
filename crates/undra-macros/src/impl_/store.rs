@@ -82,8 +82,18 @@ struct SignalField {
     /// The schema type of the signal.
     kty: KType,
     /// `#[undra(key = "..")]`: the key field and the list's item type.
-    key: Option<(String, syn::Ident, syn::Type)>,
+    key: Option<KeyedList>,
     no_coalesce: bool,
+}
+
+/// `#[undra(key = "..")]` on a `Signal<Vec<Item>>`.
+struct KeyedList {
+    /// The field of `Item` that identifies it, as written.
+    name: String,
+    /// The string it was written in, where the error about it is reported.
+    lit: syn::LitStr,
+    /// `Item`, as written (it may be a `Box<Row>`).
+    item_ty: syn::Type,
 }
 
 struct StateField {
@@ -152,6 +162,113 @@ fn is_ctx_type(ty: &syn::Type) -> bool {
     matches!(ty, syn::Type::Path(path)
         if path.qself.is_none()
             && path.path.segments.last().is_some_and(|seg| seg.ident == "Ctx" && seg.arguments.is_none()))
+}
+
+/// `Box<Box<Row>>` -> (`Row`, 2).
+fn peel_box(ty: &syn::Type) -> (&syn::Type, usize) {
+    let mut ty = ty;
+    let mut depth = 0;
+    while let syn::Type::Path(path) = ty {
+        let Some(seg) = path.path.segments.last() else {
+            break;
+        };
+        let syn::PathArguments::AngleBracketed(args) = &seg.arguments else {
+            break;
+        };
+        match (seg.ident == "Box", args.args.first()) {
+            (true, Some(syn::GenericArgument::Type(inner))) if args.args.len() == 1 => {
+                ty = inner;
+                depth += 1;
+            }
+            _ => break,
+        }
+    }
+    (ty, depth)
+}
+
+/// The key function of a keyed list: `fn(&Item) -> u64`, the FNV-1a hash of the encoded key field.
+///
+/// The macro cannot see the fields of `Item`, so the lookup of the key's name happens in constants
+/// in the user's crate: `Item::__UNDRA_FIELDS` (every `#[undra::api]` record has it) is searched
+/// by `undra_meta::keys::index_of`, and a key that names no field panics with a diagnostic that
+/// lists the fields there are (E0008), reported on the string where the key was written. The field
+/// itself is then encoded by index (`Item::__undra_encode_field::<I>`), so no `rustc` error about
+/// an unknown field, with its own suggestion, can follow. A type that is not a record has neither
+/// member: the trait declared in the function gives it empty ones, and the same diagnostic says
+/// it has no fields.
+fn key_function(root: &Root, signal: &SignalField, keyed: &KeyedList) -> TokenStream {
+    let meta = root.meta();
+    let wire = root.wire();
+    let fn_name = format_ident!("__undra_key_{}", signal.ident);
+    let item_ty = &keyed.item_ty;
+    let (core_ty, depth) = peel_box(item_ty);
+    let row = if depth == 0 {
+        quote!(__item)
+    } else {
+        let derefs = (0..=depth).map(|_| quote!(*));
+        quote!((&#(#derefs)* __item))
+    };
+
+    // The message, with the list of fields left for the constant to fill in.
+    const HOLE: &str = "\u{0}";
+    let diag = Diag::new(
+        code::E0008,
+        format!(
+            "`#[undra(key = \"{}\")]` on `{}` names no field of `{}`",
+            keyed.name,
+            signal.name,
+            ty_string(core_ty)
+        ),
+        format!(
+            "`key` names the field of the list's items that identifies them, and `{}` has {HOLE}",
+            ty_string(core_ty)
+        ),
+        "write the name of one of those fields as the key",
+    );
+    let message = diag.message();
+    let (before, after) = message.split_once(HOLE).unwrap_or((&message, ""));
+
+    let span = keyed.lit.span();
+    let key_name = &keyed.name;
+    let check = quote_spanned! {span=>
+        const __UNDRA_FIELDS: &[&str] = <#core_ty>::__UNDRA_FIELDS;
+        const __UNDRA_INDEX: usize = #meta::keys::index_of(__UNDRA_FIELDS, #key_name);
+        const __UNDRA_MESSAGE_LEN: usize = #meta::keys::message_len(#before, __UNDRA_FIELDS, #after);
+        const __UNDRA_MESSAGE: [u8; __UNDRA_MESSAGE_LEN] =
+            #meta::keys::message::<__UNDRA_MESSAGE_LEN>(#before, __UNDRA_FIELDS, #after);
+        const __UNDRA_MESSAGE_TEXT: &str = #meta::keys::as_str(&__UNDRA_MESSAGE);
+        const __UNDRA_KEY: usize = if __UNDRA_INDEX == usize::MAX {
+            ::core::panic!("{}", __UNDRA_MESSAGE_TEXT)
+        } else {
+            __UNDRA_INDEX
+        };
+    };
+    // The call that uses the constant has the string's span too, so rustc's "erroneous constant
+    // encountered" note lands where the error does and not on the list's item type.
+    let encode = quote_spanned! {span=>
+        #row.__undra_encode_field::<{ __UNDRA_KEY }>(&mut __buf);
+    };
+    quote_spanned! {item_ty.span()=>
+        #[allow(non_camel_case_types)]
+        fn #fn_name(__item: &#item_ty) -> u64 {
+            trait __UndraKeyed {
+                const __UNDRA_FIELDS: &'static [&'static str] = &[];
+                fn __undra_encode_field<const __I: usize>(&self, __w: &mut #wire::Writer) {}
+            }
+            impl<__T: ?::core::marker::Sized> __UndraKeyed for __T {}
+            #check
+            ::std::thread_local! {
+                static __UNDRA_KEY_BUF: ::core::cell::RefCell<#wire::Writer> =
+                    ::core::cell::RefCell::new(#wire::Writer::new());
+            }
+            __UNDRA_KEY_BUF.with(|__buf| {
+                let mut __buf = __buf.borrow_mut();
+                __buf.clear();
+                #encode
+                #meta::ids::fnv1a64(__buf.as_slice())
+            })
+        }
+    }
 }
 
 /// Expands `#[undra::store]` on a struct.
@@ -228,25 +345,13 @@ pub(crate) fn expand_store(
                                 );
                                 return None;
                             };
-                            match syn::parse_str::<syn::Ident>(&key_name) {
-                                Ok(mut key_ident) => {
-                                    // A key naming no field is then reported on the literal.
-                                    key_ident.set_span(lit.span());
-                                    Some((key_name, key_ident, item_ty))
-                                }
-                                Err(_) => {
-                                    errors.push(
-                                        Diag::new(
-                                            code::E0008,
-                                            format!("`{key_name}` is not a field name"),
-                                            "`key` names the field of the list's items that identifies them",
-                                            "write the name of a field of the item type, for example `key = \"id\"`",
-                                        )
-                                        .at(lit.span()),
-                                    );
-                                    None
-                                }
-                            }
+                            // Whether `key_name` is a field of the item is checked in the user's
+                            // crate, where the item is visible: see `key_function`.
+                            Some(KeyedList {
+                                name: key_name,
+                                lit,
+                                item_ty,
+                            })
                         });
                         signals.push(SignalField {
                             name: unraw(&ident),
@@ -328,7 +433,10 @@ pub(crate) fn expand_store(
         let ty = s.kty.meta(&meta);
         let computed = s.kind == SigKind::Computed;
         let key = match &s.key {
-            Some((key_name, _, _)) => quote!(::core::option::Option::Some(#key_name)),
+            Some(keyed) => {
+                let key_name = &keyed.name;
+                quote!(::core::option::Option::Some(#key_name))
+            }
             None => quote!(::core::option::Option::None),
         };
         // Recorded in the schema so the platform mirrors apply every entry of the signal (ADR-031).
@@ -341,24 +449,9 @@ pub(crate) fn expand_store(
     // The key of a keyed list: `fn(&Item) -> u64`, the FNV-1a hash of the encoded key field
     // (what `undra_signals::KeyFn` asks for). The encoding goes through a per-thread scratch
     // buffer, because the function runs for every item of an observed list at every commit.
-    let key_fns = signals.iter().filter_map(|s| {
-        let (_, key_ident, item_ty) = s.key.as_ref()?;
-        let fn_name = format_ident!("__undra_key_{}", s.ident);
-        Some(quote_spanned! {item_ty.span()=>
-            fn #fn_name(__item: &#item_ty) -> u64 {
-                ::std::thread_local! {
-                    static __UNDRA_KEY_BUF: ::core::cell::RefCell<#wire::Writer> =
-                        ::core::cell::RefCell::new(#wire::Writer::new());
-                }
-                __UNDRA_KEY_BUF.with(|__buf| {
-                    let mut __buf = __buf.borrow_mut();
-                    __buf.clear();
-                    #wire::Encode::encode(&__item.#key_ident, &mut __buf);
-                    #meta::ids::fnv1a64(__buf.as_slice())
-                })
-            }
-        })
-    });
+    let key_fns = signals
+        .iter()
+        .filter_map(|s| Some(key_function(&root, s, s.key.as_ref()?)));
 
     // One attach per signal, in declaration order; any failure aborts the whole build.
     let attach_stmts = signals.iter().map(|s| {
@@ -869,7 +962,31 @@ mod tests {
             has(&out, "fn __undra_key_rows(__item: &Row) -> u64"),
             "{out}"
         );
-        assert!(has(&out, "Encode::encode(&__item.id, &mut __buf)"), "{out}");
+        // The key field is found by name in a constant (E0008 when there is none) and encoded by
+        // index, so no field access of the user's name reaches `rustc`.
+        assert!(
+            has(
+                &out,
+                "const __UNDRA_INDEX: usize = ::undra::meta::keys::index_of(__UNDRA_FIELDS, \"id\");"
+            ),
+            "{out}"
+        );
+        assert!(has(&out, "<Row>::__UNDRA_FIELDS"), "{out}");
+        assert!(
+            has(
+                &out,
+                "__item.__undra_encode_field::<{ __UNDRA_KEY }>(&mut __buf)"
+            ),
+            "{out}"
+        );
+        assert!(!has(&out, "__item.id"), "{out}");
+        assert!(
+            has(
+                &out,
+                "error[undra::E0008]: `#[undra(key = \\\"id\\\")]` on `rows` names no field of `Row`"
+            ),
+            "{out}"
+        );
         assert!(has(&out, "fnv1a64(__buf.as_slice())"), "{out}");
         assert!(
             has(
@@ -908,7 +1025,11 @@ mod tests {
             message.contains("makes a store signal deliver every commit"),
             "{message}"
         );
-        assert!(message.contains("remove the option"), "{message}");
+        assert!(
+            message
+                .contains("move it to a signal field of a `#[undra::store]` struct, or remove it"),
+            "{message}"
+        );
         assert!(message.contains("= docs: "), "{message}");
     }
 
@@ -922,9 +1043,21 @@ mod tests {
             assert!(message.contains("error[undra::E0008]"), "{message}");
             assert!(message.contains("needs a `Signal<Vec<T>>`"), "{message}");
         }
-        let message =
-            expand("struct S { #[undra(key = \"not a name\")] a: Signal<Vec<Row>> }").unwrap_err();
-        assert!(message.contains("is not a field name"), "{message}");
+    }
+
+    #[test]
+    fn a_boxed_item_is_looked_through() {
+        let out =
+            expand("struct S { #[undra(key = \"id\")] rows: Signal<Vec<Box<Row>>> }").unwrap();
+        assert!(
+            has(&out, "fn __undra_key_rows(__item: &Box<Row>) -> u64"),
+            "{out}"
+        );
+        assert!(has(&out, "<Row>::__UNDRA_FIELDS"), "{out}");
+        assert!(has(&out, "(&** __item).__undra_encode_field"), "{out}");
+        let out =
+            expand("struct S { #[undra(key = \"id\")] rows: Signal<Vec<Box<Box<Row>>>> }").unwrap();
+        assert!(has(&out, "(&*** __item).__undra_encode_field"), "{out}");
     }
 
     #[test]

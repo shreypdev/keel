@@ -54,7 +54,41 @@ impl Todos {
         ::std::sync::Arc<::undra::signals::StoreCell>,
         ::undra::signals::SignalsError,
     > {
+        #[allow(non_camel_case_types)]
         fn __undra_key_rows(__item: &Row) -> u64 {
+            trait __UndraKeyed {
+                const __UNDRA_FIELDS: &'static [&'static str] = &[];
+                fn __undra_encode_field<const __I: usize>(
+                    &self,
+                    __w: &mut ::undra::wire::Writer,
+                ) {}
+            }
+            impl<__T: ?::core::marker::Sized> __UndraKeyed for __T {}
+            const __UNDRA_FIELDS: &[&str] = <Row>::__UNDRA_FIELDS;
+            const __UNDRA_INDEX: usize = ::undra::meta::keys::index_of(
+                __UNDRA_FIELDS,
+                "id",
+            );
+            const __UNDRA_MESSAGE_LEN: usize = ::undra::meta::keys::message_len(
+                "error[undra::E0008]: `#[undra(key = \"id\")]` on `rows` names no field of `Row`\n  = note: `key` names the field of the list's items that identifies them, and `Row` has ",
+                __UNDRA_FIELDS,
+                "\n  = help: write the name of one of those fields as the key\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008",
+            );
+            const __UNDRA_MESSAGE: [u8; __UNDRA_MESSAGE_LEN] = ::undra::meta::keys::message::<
+                __UNDRA_MESSAGE_LEN,
+            >(
+                "error[undra::E0008]: `#[undra(key = \"id\")]` on `rows` names no field of `Row`\n  = note: `key` names the field of the list's items that identifies them, and `Row` has ",
+                __UNDRA_FIELDS,
+                "\n  = help: write the name of one of those fields as the key\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008",
+            );
+            const __UNDRA_MESSAGE_TEXT: &str = ::undra::meta::keys::as_str(
+                &__UNDRA_MESSAGE,
+            );
+            const __UNDRA_KEY: usize = if __UNDRA_INDEX == usize::MAX {
+                ::core::panic!("{}", __UNDRA_MESSAGE_TEXT)
+            } else {
+                __UNDRA_INDEX
+            };
             ::std::thread_local! {
                 static __UNDRA_KEY_BUF : ::core::cell::RefCell < ::undra::wire::Writer >
                 = ::core::cell::RefCell::new(::undra::wire::Writer::new());
@@ -63,7 +97,7 @@ impl Todos {
                 .with(|__buf| {
                     let mut __buf = __buf.borrow_mut();
                     __buf.clear();
-                    ::undra::wire::Encode::encode(&__item.id, &mut __buf);
+                    __item.__undra_encode_field::<{ __UNDRA_KEY }>(&mut __buf);
                     ::undra::meta::ids::fnv1a64(__buf.as_slice())
                 })
         }
@@ -241,9 +275,15 @@ const _: () = {
                 "error[undra::E0064]: `Row` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
-        if <Row>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("Row") {
+        let __undra_id = <Row>::UNDRA_TYPE_ID;
+        if __undra_id == 0 {
             ::core::panic!(
-                "error[undra::E0061]: the schema records this type as `Row`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type Row = Other`), a renamed import (`use path::Other as Row`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `Row` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Row = u64`, has no definition the platforms could generate\n  = help: add `#[undra::api]` to `Row`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+        if __undra_id != ::undra::meta::ids::type_id("Row") {
+            ::core::panic!(
+                "error[undra::E0061]: `Row` here is an alias or a renamed import of a different Undra type, not the type declared as `Row`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Row = Other` or `use path::Other as Row` the platforms would be told `Row` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Row` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
     };

@@ -232,9 +232,15 @@ const _: () = {
                 "error[undra::E0064]: `HttpError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
-        if <HttpError>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("HttpError") {
+        let __undra_id = <HttpError>::UNDRA_TYPE_ID;
+        if __undra_id == 0 {
             ::core::panic!(
-                "error[undra::E0061]: the schema records this type as `HttpError`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type HttpError = Other`), a renamed import (`use path::Other as HttpError`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `HttpError` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type HttpError = u64`, has no definition the platforms could generate\n  = help: add `#[undra::api]` to `HttpError`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+        if __undra_id != ::undra::meta::ids::type_id("HttpError") {
+            ::core::panic!(
+                "error[undra::E0061]: `HttpError` here is an alias or a renamed import of a different Undra type, not the type declared as `HttpError`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type HttpError = Other` or `use path::Other as HttpError` the platforms would be told `HttpError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct HttpError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
     };
@@ -244,9 +250,15 @@ const _: () = {
                 "error[undra::E0064]: `StorageError` is an object and cannot be used as a value\n  = note: an object lives in the core and crosses the boundary as a handle; its contents have no wire representation, so it cannot be a field, a parameter or a return value\n  = help: return a record with the data the platform needs, or construct the object from the platform with one of its constructors\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0064"
             );
         }
-        if <StorageError>::UNDRA_TYPE_ID != ::undra::meta::ids::type_id("StorageError") {
+        let __undra_id = <StorageError>::UNDRA_TYPE_ID;
+        if __undra_id == 0 {
             ::core::panic!(
-                "error[undra::E0061]: the schema records this type as `StorageError`, but the type written here is not that type\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type StorageError = Other`), a renamed import (`use path::Other as StorageError`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout\n  = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+                "error[undra::E0061]: `StorageError` is not a type declared with `#[undra::api]`\n  = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type StorageError = u64`, has no definition the platforms could generate\n  = help: add `#[undra::api]` to `StorageError`, or, if it is an alias, write the type it stands for where it is used\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
+            );
+        }
+        if __undra_id != ::undra::meta::ids::type_id("StorageError") {
+            ::core::panic!(
+                "error[undra::E0061]: `StorageError` here is an alias or a renamed import of a different Undra type, not the type declared as `StorageError`\n  = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type StorageError = Other` or `use path::Other as StorageError` the platforms would be told `StorageError` and receive the layout of `Other`\n  = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct StorageError` if you mean a distinct type\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061"
             );
         }
     };

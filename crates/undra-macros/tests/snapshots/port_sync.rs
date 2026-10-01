@@ -55,14 +55,15 @@ fn __undra_port_failure_Clock(
     __undra_method: &str,
     __undra_error: ::undra::runtime::PortError,
 ) -> ! {
-    let (__undra_what, __undra_how) = match &__undra_error {
+    let (__undra_what, __undra_why, __undra_how) = match &__undra_error {
         ::undra::runtime::PortError::Unavailable => {
             (
                 ::std::format!(
                     "the `{}` port has no adapter registered (method `{}`)", "Clock",
                     __undra_method,
                 ),
-                "Register one with core.registerPort(..) (TypeScript, Kotlin, Swift) / undra_port_register (C), or bind a Rust implementation (`undra::ports::fakes` in tests)",
+                "this method has no error channel, so an unavailable port cannot be reported and the call panics; the runtime contains the panic, but on the web it traps the core",
+                "register an adapter (`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C), bind a Rust implementation (`undra::ports::fakes` in tests), or give the method a `Result<T, E>` return type so it can report the outage",
             )
         }
         ::undra::runtime::PortError::Cancelled => {
@@ -71,7 +72,8 @@ fn __undra_port_failure_Clock(
                     "a call to the `{}` port (method `{}`) was cancelled", "Clock",
                     __undra_method,
                 ),
-                "A method without an error type cannot report an abandoned call; give it a `Result<T, E>` return type",
+                "this method has no error channel, so an abandoned call cannot be reported and the call panics; on the web that traps the core",
+                "give the method a `Result<T, E>` return type so it can report a cancelled call",
             )
         }
         ::undra::runtime::PortError::Decode(__undra_why) => {
@@ -80,7 +82,8 @@ fn __undra_port_failure_Clock(
                     "the `{}` port (method `{}`) replied with bytes that do not decode: {}",
                     "Clock", __undra_method, __undra_why,
                 ),
-                "The adapter's reply does not match the schema; check its codec for this method",
+                "the adapter's reply does not match the schema, and this method has no error channel to report that, so the call panics; on the web that traps the core",
+                "check the adapter's codec for this method against the schema, or give the method a `Result<T, E>` return type so it can report a bad reply",
             )
         }
         __undra_other => {
@@ -89,13 +92,14 @@ fn __undra_port_failure_Clock(
                     "a call to the `{}` port (method `{}`) failed: {}", "Clock",
                     __undra_method, __undra_other,
                 ),
-                "A method without an error type cannot report a failed call; give it a `Result<T, E>` return type",
+                "this method has no error channel, so a failed call cannot be reported and the call panics; on the web that traps the core",
+                "give the method a `Result<T, E>` return type so it can report the failure",
             )
         }
     };
     ::core::panic!(
-        "undra: {}. {}. On the web this traps the core. docs: {}", __undra_what,
-        __undra_how, "https://shreypdev.github.io/undra/docs/errors.html#E0062",
+        "error[undra::E0062]: {}\n  = note: {}\n  = help: {}\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0062",
+        __undra_what, __undra_why, __undra_how
     )
 }
 ///Calls the `Clock` port through the runtime's port table: the platform's binding, or a Rust fake.

@@ -1,0 +1,70 @@
+error[E0277]: error[undra::E0001]: `Plain` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/d1_not_an_undra_type.rs:16:9
+   |
+14 | #[k::api]
+   | --------- required by a bound introduced by this call
+15 | pub struct Holder {
+16 |     pub plain: Plain,
+   |         ^^^^^^^^^^^^ not a type that can cross the boundary
+   |
+help: the trait `Encode` is not implemented for `Plain`
+  --> tests/ui/d1_not_an_undra_type.rs:8:1
+   |
+ 8 | pub struct Plain {
+   | ^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `Encode`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             Arc<T>
+           and $N others
+
+error[E0277]: error[undra::E0001]: `Plain` cannot cross the boundary by value
+                = note: a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value
+                = help: declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0001
+  --> tests/ui/d1_not_an_undra_type.rs:16:16
+   |
+16 |     pub plain: Plain,
+   |                ^^^^^ not a type that can cross the boundary
+   |
+help: the trait `undra::undra_wire::Decode` is not implemented for `Plain`
+  --> tests/ui/d1_not_an_undra_type.rs:8:1
+   |
+ 8 | pub struct Plain {
+   | ^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `undra::undra_wire::Decode`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             AppState
+             BTreeMap<K, V>
+             Box<T>
+           and $N others
+
+error[E0080]: evaluation panicked: error[undra::E0061]: `Plain` is not a type declared with `#[undra::api]`
+                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Plain = u64`, has no definition the platforms could generate
+                = help: add `#[undra::api]` to `Plain`, or, if it is an alias, write the type it stands for where it is used
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
+  --> tests/ui/d1_not_an_undra_type.rs:16:16
+   |
+16 |     pub plain: Plain,
+   |                ^^^^^ evaluation of `_::_` failed here
+
+error[E0080]: evaluation panicked: error[undra::E0061]: `Id` is not a type declared with `#[undra::api]`
+                = note: Undra describes a type to the platforms by the name it is written with, so the name must be a record or enum declared with `#[undra::api]` or an error declared with `#[undra::error]`; anything else, such as a plain struct or an alias like `type Id = u64`, has no definition the platforms could generate
+                = help: add `#[undra::api]` to `Id`, or, if it is an alias, write the type it stands for where it is used
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
+  --> tests/ui/d1_not_an_undra_type.rs:20:19
+   |
+20 | pub fn lookup(id: Id) -> u32 {
+   |                   ^^ evaluation of `_::_` failed here
