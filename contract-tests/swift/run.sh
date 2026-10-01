@@ -45,7 +45,10 @@ stage "$REPO/examples/playground" playground_core
 stage "$REPO/examples/two-cores/a" playground_a
 stage "$REPO/examples/two-cores/b" playground_b
 
-# 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each.
+# 3. The scenarios. The runner prints one `SCENARIO Sxx PASS|FAIL|SKIP <title>` line each. S19 step 9
+#    replays the derived-list recording (written when missing or stale).
+"$REPO/contract-tests/derived-vectors.sh" >&2
+export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$PROJECT/build/derived-vectors.bin}"
 cd "$HERE"
 status=0
 swift test "$@" 2>&1 | tee "$LOG" || status=$?

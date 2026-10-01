@@ -9,7 +9,7 @@
 //! | [`api`], [`error`], [`store`], [`port`], [`query`](macro@query), [`mutation`] | the attribute macros (`undra-macros`) |
 //! | [`prelude`] | what an application core imports: signals, `Ctx`, the wire scalars, the macros |
 //! | [`runtime`] | `undra-runtime`: `Runtime`, `Ctx`, dispatch, ports, the test runtime |
-//! | [`signals`] | `undra-signals`: `Signal`, `Computed`, `Effect`, `txn`, `StoreCell` |
+//! | [`signals`] | `undra-signals`: `Signal`, `Computed`, `DerivedList`, `Effect`, `txn`, `StoreCell` |
 //! | [`wire`] | `undra-wire`: the binary codec |
 //! | [`meta`] | `undra-meta`: the schema every language is generated from |
 //! | [`query`](mod@query) | `undra-query`: the traits `#[undra::query]` and `#[undra::mutation]` implement, and `ctx.query()` / `ctx.mutate(..)` |
@@ -29,7 +29,7 @@ pub mod query;
 
 /// What an application core imports: `use undra::prelude::*;`.
 ///
-/// It brings the reactive primitives (`Signal`, `Computed`, `Effect`, `txn`), the runtime
+/// It brings the reactive primitives (`Signal`, `Computed`, `DerivedList`, `Effect`, `txn`), the runtime
 /// handles (`Ctx`, and `WeakCtx` with its `Gone` for anything that outlives a call, ADR-034),
 /// the wire scalars a public signature may use (`Bytes`, `Uuid`, `Timestamp`, `Duration`;
 /// `Handle` is the runtime's reference to an object instance and is not a schema type, so a
@@ -45,6 +45,6 @@ pub mod prelude {
     pub use undra_ports::CtxPorts;
     pub use undra_query::CtxQuery;
     pub use undra_runtime::{Ctx, Gone, WeakCtx};
-    pub use undra_signals::{Computed, Effect, Signal, txn};
+    pub use undra_signals::{Computed, DerivedList, Effect, Signal, txn};
     pub use undra_wire::{Bytes, Handle, Timestamp, Uuid};
 }

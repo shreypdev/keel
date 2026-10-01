@@ -8,7 +8,7 @@ import kotlin.system.exitProcess
 private const val SCENARIO_LIMIT_MS: Long = 120_000L
 
 /**
- * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S18 and S26 on the JVM
+ * The Kotlin column of the contract tests (`contract-tests/scenarios.md`): runs S01 to S19 and S26 on the JVM
  * over JNI against the real `libplayground_core` of the playground core (and, for S26, `libplayground_a` and
  * `libplayground_b`) and prints one line per scenario,
  * `SCENARIO S07 PASS|FAIL <title>`, which `contract-tests/check.sh kotlin` reads. Exits 1 if any fails.

@@ -1,9 +1,9 @@
 # Kotlin column of the contract tests
 
-`run.sh` runs the eighteen scenarios of `../scenarios.md` on the JVM, through `dev.undra.runtime.UndraCore`
+`run.sh` runs the twenty scenarios of `../scenarios.md` on the JVM, through `dev.undra.runtime.UndraCore`
 over the real JNI shim and the real `libplayground_core` of `examples/playground/core`, and pipes the verdicts
 through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`: one file per scenario
-(`S01Primitives.kt` ... `S18CoalescedBurst.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`) and
+(`S01Primitives.kt` ... `S19DerivedKeyedList.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`) and
 the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`).
 
 ## How it is arranged

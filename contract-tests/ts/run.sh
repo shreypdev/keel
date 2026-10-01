@@ -2,14 +2,14 @@
 # The TypeScript column of the contract scenarios (contract-tests/scenarios.md): @undra/runtime over
 # the real wasm build of the playground core, in wasm-main mode, under vitest on Node.
 #
-#   contract-tests/ts/run.sh              # build the core if it is missing or stale, run S01..S18, grade
+#   contract-tests/ts/run.sh              # build the core if it is missing or stale, run S01..S19, grade
 #   contract-tests/ts/run.sh -t S07       # extra arguments go to vitest (here: only scenario S07)
 #
 # Builds with the undra CLI (`undra build -C examples/playground --platform web`, which writes
 # examples/playground/build/web/playground_core.wasm) unless UNDRA_PLAYGROUND_WASM points somewhere else,
 # and the same core under the namespaces of S26 (examples/two-cores/{a,b}/build/web/playground_{a,b}.wasm).
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless all eighteen pass.
+# contract-tests/check.sh, so the exit status is non-zero unless all nineteen pass.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 
@@ -44,6 +44,10 @@ if [ -z "${UNDRA_PLAYGROUND_WASM:-}" ]; then
 fi
 build_web "$root/examples/two-cores/a" "$root/examples/two-cores/a/build/web/playground_a.wasm"
 build_web "$root/examples/two-cores/b" "$root/examples/two-cores/b/build/web/playground_b.wasm"
+
+# 1b. The derived-list recording S19 replays (crates/undra-signals/examples/derived_vectors.rs), written
+#     when it is missing or older than the signals crate it records.
+"$root/contract-tests/derived-vectors.sh" >&2
 
 # 2. The dependencies (vitest, typescript), from the lockfile.
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then

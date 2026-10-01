@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The Kotlin column of the contract tests: runs S01..S18 and S26 of contract-tests/scenarios.md on the JVM
+# The Kotlin column of the contract tests: runs S01..S19 and S26 of contract-tests/scenarios.md on the JVM
 # over JNI against the real libplayground_core of the playground core (and, for S26, libplayground_a and
-# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks all nineteen passed.
+# libplayground_b: the same core under two more namespaces, examples/two-cores), then checks all twenty passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -80,7 +80,10 @@ if [ ! -f "$STAMP" ] || [ "$OUT/runtime/main.stamp" -nt "$STAMP" ] \
 fi
 
 # --- 4. run, then check the verdicts ------------------------------------------------------------------------
-echo "==> running S01..S18 and S26 against ${LIB#"$REPO"/} (and playground_a, playground_b)"
+# S19 step 9 replays the derived-list recording (written when missing or stale).
+"$REPO/contract-tests/derived-vectors.sh"
+export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$PLAYGROUND/build/derived-vectors.bin}"
+echo "==> running S01..S19 and S26 against ${LIB#"$REPO"/} (and playground_a, playground_b)"
 mkdir -p "$OUT"
 status=0
 java -Xmx1g -Djava.library.path="$LIB_DIR:$LIB_DIR_A:$LIB_DIR_B" \

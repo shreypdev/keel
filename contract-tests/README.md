@@ -1,6 +1,6 @@
 # Contract tests
 
-The definition of "the platforms agree" (SPEC section 14): nineteen scenarios (S01 to S18, and S26), run by each platform
+The definition of "the platforms agree" (SPEC section 14): twenty scenarios (S01 to S19, and S26), run by each platform
 runtime against the **real playground core** (`examples/playground/core`) through the real boundary.
 
 | Directory | Platform | Boundary | Run |

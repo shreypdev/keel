@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reads a contract runner's output (stdin or a file) and fails unless every scenario of
-# scenarios.md (S01 to S18, and S26) reported PASS. A line looks like:  SCENARIO S07 PASS stream with backpressure
+# scenarios.md (S01 to S19, and S26) reported PASS. A line looks like:  SCENARIO S07 PASS stream with backpressure
 #
 #   contract-tests/ts/run.sh 2>&1 | tee /tmp/ts.log | contract-tests/check.sh ts
 #   contract-tests/check.sh kotlin < kotlin.log
@@ -9,8 +9,8 @@
 # failed or skipped (a skip is listed, so it can be told apart from a failure).
 set -euo pipefail
 platform="${1:-runner}"
-# S19 to S25 are held by other ADRs (the boundary-surface plan); S26 is ADR-044's two cores.
-IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S26)
+# S20 to S25 are held by other ADRs (the boundary-surface plan); S26 is ADR-044's two cores.
+IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19 S26)
 log="$(cat "${2:-/dev/stdin}")"
 bad=0
 for id in "${IDS[@]}"; do

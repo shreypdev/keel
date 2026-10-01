@@ -22,7 +22,7 @@ examples/playground/
 
 | Module | Shows | Where the UIs use it |
 |---|---|---|
-| `todos` | a store with a keyed list, a filter and two computed values (`visible`, `remaining`); an `async` command with a typed error | Todos tab |
+| `todos` | a store with a keyed list, a filter and two values derived from it (`visible`, a `DerivedList` sent as keyed patches; `remaining`, its `count()`); an `async` command with a typed error | Todos tab, contract scenario S19 |
 | `counter` | a store whose commands are transactions: one change-set for `count`, `changes` and the computed `parity` | Counter tab |
 | `biglist` | 10,000 keyed rows; insert, update, move and remove of one row each cross as a **one-operation patch** (R5) | 10k tab |
 | `remote` | a query (`remote_todos`), mutations and optimistic commands over the `Http` port: cached per list, fresh for 30 s, persisted, retried, queued while offline and replayed | Remote tab |
@@ -131,5 +131,5 @@ test, `BenchInstrumentedTest`, over a `benchmark` build type: release, not debug
 
 ## Contract tests
 
-`contract-tests/` runs the eighteen scenarios of SPEC section 14 against this core from the TypeScript
+`contract-tests/` runs the nineteen scenarios of SPEC section 14 against this core from the TypeScript
 (wasm), Kotlin (JNI) and Swift (C ABI) runtimes; see `contract-tests/scenarios.md`.

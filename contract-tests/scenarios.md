@@ -1,7 +1,7 @@
 # Contract scenarios
 
-This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): nineteen
-scenarios (S01 to S18, and S26), each run by every platform runtime against the **real playground core**
+This is the definition of "the platforms agree" (SPEC section 14, blueprint section 13): twenty
+scenarios (S01 to S19, and S26), each run by every platform runtime against the **real playground core**
 (`examples/playground/core`, the same Rust crate the apps run), through the real boundary:
 
 | Platform | Runner | Boundary under test |
@@ -11,8 +11,8 @@ scenarios (S01 to S18, and S26), each run by every platform runtime against the 
 | Swift | `contract-tests/swift` (XCTest) | `UndraRuntime` `UndraCore` over the C ABI table of the real core |
 
 Every runner prints one line per scenario, `SCENARIO S07 PASS|FAIL|SKIP <title>`, and
-`contract-tests/check.sh` fails unless all nineteen ids are `PASS` (a `SKIP` needs its reason here,
-in the platform notes of the scenario). S19 to S25 are held by other ADRs (the boundary-surface plan
+`contract-tests/check.sh` fails unless all twenty ids are `PASS` (a `SKIP` needs its reason here,
+in the platform notes of the scenario). S20 to S25 are held by other ADRs (the boundary-surface plan
 numbers them); S26 is ADR-044's.
 
 ## The harness (the same on every platform)
@@ -234,8 +234,9 @@ waiting for an event loop.
 
 1. `Todos` observed. `add("a")`, `add("b")`, `add("c")` (ids counting up); `toggle(b)`.
    `remaining == 2`, `visible == [a, b(done), c]`.
-2. `set_filter(Done)`: the **one** change-set carries `filter = done` and `visible = [b]` (the computed
-   was recomputed in the core), `remaining` does not change.
+2. `set_filter(Done)`: the **one** change-set carries `filter = done` and `visible = [b]` (computed in
+   the core; since ADR-039 `visible` is a derived list, so a raw mirror receives it as the keyed patch
+   that leaves `[b]`), `remaining` does not change.
 3. `set_filter(Active)`: `visible == [a, c]`. `set_filter(All)` restores all three.
 4. `remove(a)`, `clear_done()`: `visible`/`remaining` follow.
 5. `Counter.parity`: after `add(3)` odd, after `add(1)` even, after `add(-1)` odd, after `add(0)`
@@ -435,6 +436,36 @@ returns; TypeScript awaits them.
    heard `1, 2, ..., 10`; a Kotlin `StateFlow` conflates and SwiftUI renders once per frame, so they
    check the mirror's counter only.)
 
+### S19 derived keyed list
+
+`Todos.visible` is a derived list (ADR-039): it reaches the platform as keyed patches, never as a whole
+list after the first; a derived list's patches are ordinary SPEC 3.8 patches, so every runtime's decoder,
+applier and mirror (ADR-031) apply them unchanged.
+
+1. `Todos` observed through a raw mirror: the initial `visible` (signal 2) entry is a full value
+   (`op = 0`), `[]`.
+2. `add("a")`, `add("b")`, `add("c")`: each change-set's `visible` entry is `op = 1` with exactly one
+   `Insert` at index 0, 1, 2; `remaining` is 1, 2, 3.
+3. `toggle(b)` with filter `All`: `visible` is one `Update{index=1}` (b, done); `remaining == 2`.
+4. `set_filter(Active)`: the change-set's `visible` entry is one `Remove{index=1}`; `set_filter(All)`: one
+   `Insert{index=1, b}`.
+5. Under `Active`, `toggle(a)`: one `Remove{index=0}`; `toggle(a)` again: one `Insert{index=0, a}`.
+6. `fill(10000)` (one full value or one patch for `visible`: either is allowed), then `toggle` of a visible
+   item: the `visible` entry is `op = 1`, one op, **under 100 bytes**.
+7. Through the generated class (`Todos.create()` / `Todos()`), the same steps and `fill`, `remove` and
+   `clear_done`: `visible` equals the model (a local list mutated by the same steps) after every step,
+   read-your-writes as in S18.
+8. Reads never cross: reading `visible` 1,000 times leaves `crossings.calls` unchanged.
+9. **Recorded patches.** `contract-tests/derived-vectors.sh` writes (with
+   `cargo run -p undra-signals --example derived_vectors`) a recording of 60,000 seeded operations over
+   three derived views (a filter; a parameter filter and a sort with heavy ties; a map and a sort on a
+   `String`), which the Rust side checks against `filter + stable sort` after every operation: the
+   change-sets a host received (about 24,000) and each view's FNV-1a 64 hash after each of them. The
+   runner decodes and applies every change-set with its runtime's own change-set decoder, `decodePatch`
+   and `applyPatch`, and after **every** change-set the hash of each view's encoding equals the recorded
+   one. (TypeScript also feeds the change-sets through a `Mirror`, drained at seeded points, and checks
+   at every drain: what ADR-031 merges per drain applies to the same views.)
+
 ### S26 two cores
 
 ADR-044: a process can hold several cores, each its own image reached through its own table
@@ -487,5 +518,8 @@ harness adapters.
   Kotlin and TypeScript); each runner records those reports (`UndraUnhandledError`: operation, error), and
   S05.6, S15.9 and S17.6 assert them. A generated call fails with its own `E`, the caller's cancellation
   (`CancellationException`, `AbortError`, `CancellationError`) or `UndraCallError`, on all three.
+* S19 step 9 reads `examples/playground/build/derived-vectors.bin` (`UNDRA_DERIVED_VECTORS` overrides it),
+  which each `run.sh` writes through `contract-tests/derived-vectors.sh` when it is missing or older than the
+  signals crate. Only TypeScript's mirror is public; Kotlin and Swift apply change-set by change-set.
 * Timing constants (50 ms delays, 200 ms quiet windows) are chosen for a loaded CI machine; do not
   shrink them.

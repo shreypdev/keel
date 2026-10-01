@@ -9,9 +9,11 @@ use std::sync::{Arc, OnceLock};
 
 use parking_lot::{Mutex, RwLock};
 use undra_wire::payload::{ChangeEntry, ChangeOp, ChangeSetBuilder, StoreSnapshot};
-use undra_wire::{Handle, KeyedPatch, Writer};
+use undra_wire::{Encode, Handle, KeyedPatch, Writer};
 
 use crate::computed::Computed;
+use crate::derived::DerivedList;
+use crate::derived::slot::{Attached, DerivedSlot, Emitted};
 use crate::error::SignalsError;
 use crate::graph::{Binding, SlotFlags};
 use crate::oplog::{KeyedLog, ListLog, Taken, apply_ops};
@@ -57,6 +59,27 @@ enum SlotKind {
     Plain,
     Keyed(Box<dyn KeyedState>),
     Computed,
+    /// A derived list (ADR-039): a computed that ships keyed patches. Isolated like a computed
+    /// when its closures panic (ADR-019 amendment).
+    Derived(Box<dyn DerivedSlot>),
+}
+
+impl SlotKind {
+    /// A slot evaluated by the core rather than written: left out of snapshots, held back on its
+    /// own when its evaluation panics.
+    fn is_computed(&self) -> bool {
+        matches!(self, SlotKind::Computed | SlotKind::Derived(_))
+    }
+
+    /// Drops whatever the slot keeps about the host's copy (a keyed baseline, a derived list's
+    /// pending ops).
+    fn forget(&self) {
+        match self {
+            SlotKind::Keyed(state) => state.forget(),
+            SlotKind::Derived(state) => state.forget(),
+            SlotKind::Plain | SlotKind::Computed => {}
+        }
+    }
 }
 
 struct Slot {
@@ -294,6 +317,59 @@ impl StoreCell {
             &computed.inner.binding,
             encode,
             SlotKind::Computed,
+        )
+    }
+
+    /// Binds a [`DerivedList`] to the next slot (ADR-039). The host receives its full value when it
+    /// observes it, then keyed patches (SPEC 3.8) made of the list's own derived ops: one source
+    /// operation is at most two ops, a transaction's ops are one patch, and a commit whose
+    /// operations did not change the view adds no entry. A raw write of the source, more pending ops
+    /// than the list keeps, or a parameter change that moves more than 256 rows sends the full value
+    /// instead.
+    ///
+    /// `key` maps a row to the `u64` that identifies it (generated code hashes the encoded key
+    /// field); maintenance never uses it, and debug builds check with it at every full value that
+    /// the view's keys are unique.
+    ///
+    /// Like a computed, a derived list whose closures panic while a commit or an observe evaluates
+    /// it is held back on its own ([`failed_signals`](StoreCell::failed_signals)); it is rebuilt and
+    /// sent as a full value when its inputs next change and the evaluation succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`attach`](StoreCell::attach): a list attaches to one store slot for life.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use undra_signals::{Signal, StoreCell, ALL_SIGNALS};
+    /// use undra_wire::Writer;
+    ///
+    /// let cell = StoreCell::new(7);
+    /// let numbers = Signal::new(vec![1_u32, 2, 3, 4]);
+    /// let even = numbers.derive().filter(|n| n % 2 == 0).build();
+    /// cell.attach_keyed(&numbers, 0, |n| u64::from(*n)).unwrap();
+    /// cell.attach_derived(&even, 1, |n| u64::from(*n)).unwrap();
+    /// cell.set_handle(0x1_0000_0001);
+    /// assert_eq!(cell.observe(ALL_SIGNALS, true, &mut Writer::new()), 2);
+    /// ```
+    pub fn attach_derived<T: SignalValue>(
+        self: &Arc<Self>,
+        list: &DerivedList<T>,
+        signal_id: u32,
+        key: fn(&T) -> u64,
+    ) -> Result<(), SignalsError> {
+        let source = list.clone();
+        let encode: Encoder = Box::new(move |w| source.with(|value| Encode::encode(value, w)));
+        let slot = Attached {
+            node: Arc::clone(&list.inner),
+            key,
+        };
+        self.install(
+            signal_id,
+            list.inner.binding(),
+            encode,
+            SlotKind::Derived(Box::new(slot)),
         )
     }
 
@@ -637,9 +713,7 @@ impl StoreCell {
     fn stop_observing(&self, targets: &[(u32, Arc<Slot>)]) {
         for (_, slot) in targets {
             slot.flags.observed.store(false, Ordering::SeqCst);
-            if let SlotKind::Keyed(state) = &slot.kind {
-                state.forget();
-            }
+            slot.kind.forget();
         }
     }
 
@@ -696,6 +770,24 @@ impl StoreCell {
                             continue;
                         }
                     },
+                    // A derived list is isolated as a computed is.
+                    SlotKind::Derived(state) => {
+                        let resynced = catch_unwind(AssertUnwindSafe(|| {
+                            value.clear();
+                            state.resync(&mut value);
+                        }));
+                        match resynced {
+                            Ok(()) => {
+                                if slot.flags.failed.load(Ordering::SeqCst) {
+                                    health.recovered.push(*id);
+                                }
+                            }
+                            Err(payload) => {
+                                health.failed.push((*id, panic_message(&*payload)));
+                                continue;
+                            }
+                        }
+                    }
                 }
                 ChangeEntry {
                     handle,
@@ -738,13 +830,13 @@ impl StoreCell {
     }
 
     /// Appends this store's body of a snapshot (SPEC 5.9): `handle u64, type_id u32,
-    /// signal_count u32, signals x { signal_id u32, len u32, value }`. Computed signals are
-    /// left out; they are recomputed on restore.
+    /// signal_count u32, signals x { signal_id u32, len u32, value }`. Computed signals and
+    /// derived lists are left out; they are recomputed on restore.
     pub fn encode_snapshot(&self, out: &mut Writer) {
         let slots: Vec<Arc<Slot>> = self.slots.read().clone();
         let mut signals = Vec::with_capacity(slots.len());
         for (index, slot) in slots.iter().enumerate() {
-            if matches!(slot.kind, SlotKind::Computed) {
+            if slot.kind.is_computed() {
                 continue;
             }
             let mut value = Writer::new();
@@ -909,6 +1001,28 @@ impl StoreCell {
                         continue;
                     }
                 },
+                // A derived list sends its pending derived ops, the full value, or nothing at
+                // all (ADR-039); its closures' panics are isolated as a computed's are.
+                SlotKind::Derived(state) => {
+                    let retain = slot.flags.observed.load(Ordering::SeqCst);
+                    let emitted = catch_unwind(AssertUnwindSafe(|| {
+                        scratch.clear();
+                        state.commit(&mut scratch, retain)
+                    }));
+                    let op = match emitted {
+                        Ok(Emitted::Patch) => ChangeOp::KeyedPatch,
+                        Ok(Emitted::Full) => ChangeOp::Full,
+                        Ok(Emitted::Nothing) => continue,
+                        Err(payload) => {
+                            health.failed.push((*id, panic_message(&*payload)));
+                            continue;
+                        }
+                    };
+                    builder.push(handle, *id, op, scratch.as_slice());
+                    if slot.flags.failed.load(Ordering::SeqCst) {
+                        health.recovered.push(*id);
+                    }
+                }
             }
             entries += 1;
         }
@@ -983,9 +1097,7 @@ impl Drop for Abandon<'_> {
             return;
         }
         for (id, slot) in self.claimed {
-            if let SlotKind::Keyed(state) = &slot.kind {
-                state.forget();
-            }
+            slot.kind.forget();
             self.cell.mark_unsent(*id);
         }
     }
@@ -1008,9 +1120,7 @@ impl Drop for ObserveRollback<'_> {
         }
         for (id, slot, was_observed) in &self.touched {
             slot.flags.observed.store(*was_observed, Ordering::SeqCst);
-            if let SlotKind::Keyed(state) = &slot.kind {
-                state.forget();
-            }
+            slot.kind.forget();
             if *was_observed {
                 self.cell.mark_unsent(*id);
             }
