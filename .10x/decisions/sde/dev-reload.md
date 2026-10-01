@@ -85,8 +85,8 @@ core never fires), Kotlin 4 new (the three plus the `Hello` race), Swift 2 new.
 rebuild 0.5 s. The runtime's rows are already budgeted (`snapshot/encode_100kb` 13.8 us, `snapshot/restore_1mb` 260 us); no
 hot path or boundary entry changed, so no new budget row.
 
-**Matrix (on the merged tip):** `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean;
-`cargo test --workspace` 2,563 passed, 0 failed (11 ignored); `contract-tests/run-all.sh` 54/54 (18 x 3); TypeScript 1,132
+**Matrix (on the tip, after merging main twice: tooling at `aa66ce9`, wasm-size at `3e8a304`):** `cargo fmt --check` clean; `cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace --no-fail-fast` (with `UNDRA_REQUIRE_TOOLCHAINS=1` and `tsc` on `PATH`) 2,589 passed, 0 failed (11 ignored); `contract-tests/run-all.sh` 54/54 (18 x 3); TypeScript 1,132
 (`npm run typecheck` clean); Kotlin 616 cases, 0 failed, under kotlinc 2.4.20 **and** 2.0.21 (2 skipped: no native library);
 Swift 482; `crates/undra-transport/interop/run.sh` (the shipped TS and Kotlin transports against the real server) OK; `undra
 bindgen -C examples/playground --check --docs` up to date (hash `0xddcdea47fa95a8d4`); `node site/scripts/build-all.mjs` and
