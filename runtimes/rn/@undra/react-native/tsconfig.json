@@ -34,6 +34,12 @@
       ],
       "@playground/core": [
         "../../../../examples/playground/generated/ts/src/index.ts"
+      ],
+      "vitest": [
+        "./node_modules/vitest"
+      ],
+      "vitest/*": [
+        "./node_modules/vitest/*"
       ]
     }
   },
