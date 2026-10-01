@@ -43,7 +43,10 @@
 //!   connection's calls and observations when it closes, and releases its objects too, unless
 //!   [`ServerConfig::resume_grace`] keeps them for a client that comes back with the same token
 //!   (`&undra_resume=1`). A client that asks to resume objects the server no longer holds (the
-//!   core was restarted) is answered with [`close::SESSION_LOST`]; it has to load a new core.
+//!   core was restarted without carrying its state) is answered with [`close::SESSION_LOST`]; it
+//!   has to load a new core. `undra dev` carries the state of the core it replaces
+//!   ([`Server::suspend`], [`ServerConfig::inherited_session`], ADR-053), so a rebuild keeps the
+//!   session unless the state could not be carried.
 //!
 //! # Which thread runs a call
 //!
