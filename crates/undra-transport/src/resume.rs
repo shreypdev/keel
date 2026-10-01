@@ -1,5 +1,5 @@
 //! Session resume: what the server keeps for a client that dropped, so that it can come back to
-//! the same objects (ADR-034).
+//! the same objects (ADR-051).
 //!
 //! A client that wants this puts a random token in the URL of its WebSocket upgrade
 //! (`?undra_session=<token>`), the same on every connection of one `UndraCore`; a reconnecting

@@ -37,7 +37,7 @@
 //! * The client's `Hello` `mode` decides whether it receives development-mode records
 //!   (SPEC 5.10): `"dev"` gets them, anything else does not. Kotlin and Swift always send
 //!   `"dev"`; TypeScript sends it when its `devtools` option is on.
-//! * The clients **reconnect by themselves** (ADR-034): a closed socket fails what is in flight
+//! * The clients **reconnect by themselves** (ADR-051): a closed socket fails what is in flight
 //!   and the client connects again with backoff, then observes its stores again. A connection
 //!   is a *session* only if its URL says so (`?undra_session=<token>`): the server ends a
 //!   connection's calls and observations when it closes, and releases its objects too, unless

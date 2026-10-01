@@ -35,7 +35,7 @@ internal val RealSleeper: Sleeper = Sleeper { Thread.sleep(it) }
  * envelope must carry that hash, and a server that restarts with another schema ends the connection with
  * an [UndraSchemaMismatchException].
  *
- * **Reconnecting** (ADR-034). With a [ReconnectPolicy], a connection that drops is not the end: the transport
+ * **Reconnecting** (ADR-051). With a [ReconnectPolicy], a connection that drops is not the end: the transport
  * tells its core ([TransportEvents.onReconnecting], and what was in flight fails), waits the policy's backoff
  * on a thread of its own, connects again and tells the core ([TransportEvents.onReconnected]), which observes
  * its stores again. The app closing the transport, a server with another schema, a session the server lost and
@@ -398,7 +398,7 @@ internal class RemoteTransport(
         /** Largest message accepted from the server; a change-set or reply beyond this is a protocol violation. */
         const val MAX_MESSAGE_BYTES: Int = 64 * 1024 * 1024
 
-        /** The close code with which the dev server says it no longer holds this client's session (ADR-034). */
+        /** The close code with which the dev server says it no longer holds this client's session (ADR-051). */
         const val SESSION_LOST: Int = 4001
 
         /** A reconnect attempt (connect and `Hello`) takes at most this long, whatever the blocking timeout is. */

@@ -122,7 +122,7 @@ fn main() {
     }
 
     // A client that drops (a phone that slept, an app the OS suspended) finds its objects again
-    // for ten minutes if it comes back with its session token (ADR-034).
+    // for ten minutes if it comes back with its session token (ADR-051).
     let config = ServerConfig {
         resume_grace: std::time::Duration::from_secs(600),
         ..ServerConfig::default()

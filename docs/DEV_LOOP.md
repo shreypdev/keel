@@ -4,7 +4,7 @@ Edit Rust, save, and the app on every platform is on the new core within a secon
 heals itself: no restart, no relaunch. This page is what `undra dev` does per platform, which URL each
 platform uses, how reconnecting works, and what to check when it does not.
 
-The design is [ADR-034](../.10x/adrs/ADR-034-dev-client-reconnect-and-session-resume.md). The wire is
+The design is [ADR-051](../.10x/adrs/ADR-051-dev-client-reconnect-and-session-resume.md). The wire is
 unchanged (SPEC section 3.2): a client that does none of this still works.
 
 ## What it does

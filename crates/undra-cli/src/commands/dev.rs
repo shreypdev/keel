@@ -2,7 +2,7 @@
 //!
 //! The core runs in the dev runner (a child process, see [`crate::runner`]); this command builds
 //! it, starts it, watches the core's sources and, on a change, rebuilds and swaps the running
-//! runner for the new one on the same address; the clients reconnect by themselves (ADR-034).
+//! runner for the new one on the same address; the clients reconnect by themselves (ADR-051).
 //! While a rebuild is failing the old core keeps serving: a typo does not take the app down.
 
 use std::path::{Path, PathBuf};

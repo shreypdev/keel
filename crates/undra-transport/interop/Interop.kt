@@ -84,7 +84,7 @@ private class Proxy(private val port: Int) : AutoCloseable {
     override fun close() { runCatching { listener.close() }; dropAll() }
 }
 
-/** ADR-034 against the real server: a dropped connection resumes the same objects; a restarted server is a lost session. */
+/** ADR-051 against the real server: a dropped connection resumes the same objects; a restarted server is a lost session. */
 private fun reconnecting(binary: String, hash: ULong, counter: UInt, newId: UInt, addId: UInt) {
     var server = Server(binary, null)
     val port = server.url.substringAfterLast(':').toInt()

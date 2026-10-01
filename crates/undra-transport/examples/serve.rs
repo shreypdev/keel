@@ -59,7 +59,7 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:0".to_owned());
     // Keeps a dropped client's objects for ten minutes, so a client that reconnects (the platform runtimes do)
-    // finds its counter again (ADR-034).
+    // finds its counter again (ADR-051).
     let config = ServerConfig {
         resume_grace: std::time::Duration::from_secs(600),
         ..ServerConfig::default()

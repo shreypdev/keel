@@ -37,7 +37,7 @@ export interface TransportHandler {
   /** The channel is gone (connection closed, worker died, wasm trapped). Not called after the host closed the transport itself. */
   closed(error: Error): void;
   /**
-   * Only for a transport that reconnects by itself (`remote`, ADR-034): the channel dropped (or a
+   * Only for a transport that reconnects by itself (`remote`, ADR-051): the channel dropped (or a
    * retry failed) and the transport will try again. `attempt` counts from 1, and attempt 1 is the
    * loss itself: whatever was in flight has failed for good. `closed` is called only when the
    * transport gives up.

@@ -84,7 +84,7 @@ waiting (up to 5 s) for the main thread from anywhere else.
   `load` and the rest may be called from Android's main thread. A dropped connection is reconnected with backoff and
   jitter (`LoadOptions.reconnect`, a `ReconnectPolicy`; `null` turns it off), what was in flight fails at once, the
   stores are observed again, and `core.connectionState` (a `StateFlow<ConnectionState>`) says what it is doing; a schema
-  change or a session the dev server lost closes the core for good (ADR-034, `docs/DEV_LOOP.md`).
+  change or a session the dev server lost closes the core for good (ADR-051, `docs/DEV_LOOP.md`).
 
 ### JNI surface for `undra-ffi`
 

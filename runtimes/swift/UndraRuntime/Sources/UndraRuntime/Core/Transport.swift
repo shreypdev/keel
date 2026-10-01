@@ -33,7 +33,7 @@ protocol UndraInbound: AnyObject, Sendable {
     func onLog(level: UInt8, target: String, message: String)
     /// The connection is gone for good; every call in flight fails with `error`.
     func onDisconnect(_ error: any Error)
-    /// Only for a transport that reconnects (remote, ADR-034): the connection dropped, or a retry
+    /// Only for a transport that reconnects (remote, ADR-051): the connection dropped, or a retry
     /// failed, and the transport will try again. `attempt` counts from 1, and attempt 1 is the
     /// loss itself: whatever was in flight has failed for good. `onDisconnect` follows only if the
     /// transport gives up.

@@ -45,7 +45,7 @@ public final class UndraCore: @unchecked Sendable {
         /// What the connection is doing (``UndraCore/connectionState``).
         var connection: UndraConnectionState = .connecting
         var watchers: [UUID: AsyncStream<UndraConnectionState>.Continuation] = [:]
-        /// The signals the app observes, per store: observed again after a reconnect (ADR-034).
+        /// The signals the app observes, per store: observed again after a reconnect (ADR-051).
         var observed: [UndraHandle: Set<UInt32>] = [:]
         /// The objects the app's constructors made and it has not released: what the server is asked to keep for it.
         var constructed: Set<UndraHandle> = []
@@ -68,7 +68,7 @@ public final class UndraCore: @unchecked Sendable {
     /// main actor, merged, once per display frame. `register(handle) { signal, op, reader in ... }`.
     public let mirror: Mirror
 
-    /// The connection state, for SwiftUI: an `@Observable` object updated on the main actor (ADR-034).
+    /// The connection state, for SwiftUI: an `@Observable` object updated on the main actor (ADR-051).
     /// ``connectionState`` is the same news for any thread.
     public let connection: UndraConnection
 
@@ -261,7 +261,7 @@ public final class UndraCore: @unchecked Sendable {
         }
     }
 
-    /// What the connection to the core is doing (ADR-034). A remote core is `.reconnecting` while `undra dev` is
+    /// What the connection to the core is doing (ADR-051). A remote core is `.reconnecting` while `undra dev` is
     /// unreachable: calls fail at once with ``UndraCallError/unavailable(_:)``, and what was in flight when the
     /// connection dropped failed with it. When it is `.connected` again every store the app observes has been
     /// observed again, so the mirrors converge on the core's current values by themselves. `.closed` is final.
@@ -616,7 +616,7 @@ public final class UndraCore: @unchecked Sendable {
             current.observed[handle] = nil
             current.constructed.remove(handle)
             if case .reconnecting = current.connection {
-                // The server keeps the object for us (ADR-034); it is released when the connection is back.
+                // The server keeps the object for us (ADR-051); it is released when the connection is back.
                 current.releasedWhileDown.insert(handle)
                 return true
             }

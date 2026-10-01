@@ -1,7 +1,7 @@
 # SDE — the dev loop: Android remote mode and dev-client reconnect (wt/dev-loop, 2026-10-01)
 
 Tracks B1 and B2 of the v1.x design (`.10x/specs/2026-10-01-v1x-default-choice-design.md`). The decision is
-ADR-034 (written first, R11: it touches the dev transport contract and public runtime API; the envelope, the C
+ADR-051 (written first, R11: it touches the dev transport contract and public runtime API; the envelope, the C
 ABI, the wasm ABI, the schema and every generated shape are unchanged, and bindgen goldens are byte-identical).
 `docs/DEV_LOOP.md` is the user-facing page; this note is the record for the integrator.
 
@@ -104,7 +104,7 @@ Layering: the transport owns the socket and the timer; the core owns what is rep
 
 ## Files
 
-New: `.10x/adrs/ADR-034-*`, `docs/DEV_LOOP.md`, `crates/undra-transport/src/resume.rs`, `crates/undra-transport/tests/resume.rs`,
+New: `.10x/adrs/ADR-051-*`, `docs/DEV_LOOP.md`, `crates/undra-transport/src/resume.rs`, `crates/undra-transport/tests/resume.rs`,
 `crates/undra-cli/src/adb.rs`, `runtimes/kotlin/.../WebSocketClient.kt`, `ConnectionState.kt`, Swift `Core/Connection.swift`, the
 Kotlin/TS/Swift reconnect tests, playground and template `DevServer.kt`, `DevStatus.kt`, `DevStatusBar.swift`, `dev-banner.ts`,
 `src/debug/AndroidManifest.xml` (playground and template). Changed: the three runtimes' remote transports and cores,

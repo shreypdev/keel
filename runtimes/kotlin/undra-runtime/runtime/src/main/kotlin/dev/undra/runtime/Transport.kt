@@ -111,7 +111,7 @@ internal interface TransportEvents {
     fun onClosed(cause: Throwable?)
 
     /**
-     * Only for a transport that reconnects (remote, ADR-034): the link dropped (or a retry failed) and the
+     * Only for a transport that reconnects (remote, ADR-051): the link dropped (or a retry failed) and the
      * transport will try again. [attempt] counts from 1, and attempt 1 is the loss itself: whatever was in flight
      * has failed for good. [onClosed] follows only if the transport gives up.
      */

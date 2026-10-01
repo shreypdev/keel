@@ -1,4 +1,4 @@
-// What the connection to a remote core is doing, and how it reconnects (ADR-034).
+// What the connection to a remote core is doing, and how it reconnects (ADR-051).
 //
 // Only a remote core (`undra dev`) ever leaves `.connected`; an in-process core is `.connected`
 // from `load` until `shutdown()`.
@@ -85,7 +85,7 @@ public final class UndraConnection {
     nonisolated init() {}
 }
 
-/// How a remote core reconnects after its connection drops (ADR-034). Attempt `n` (from 1) waits
+/// How a remote core reconnects after its connection drops (ADR-051). Attempt `n` (from 1) waits
 /// `min(maxDelay, initialDelay * 2^(n-1))` seconds, less a random share of up to `jitter` of that,
 /// so many clients of one server do not retry in step. The same schedule in the TypeScript and
 /// Kotlin runtimes.
@@ -137,7 +137,7 @@ public struct UndraReconnectPolicy: Sendable {
     }
 }
 
-/// The dev server no longer holds the objects of this core (ADR-034): it was restarted (`undra
+/// The dev server no longer holds the objects of this core (ADR-051): it was restarted (`undra
 /// dev` rebuilt the core) or the session's grace period passed while the app was away. The
 /// handles of every store and object of this core are dead; load a new core and create them
 /// again. Calls made on the core fail with ``UndraCallError/unavailable(_:)``.

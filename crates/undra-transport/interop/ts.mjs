@@ -110,7 +110,7 @@ assert.equal(decodeValue(codecs.i32, await core.call(target, info.add, i32(1))),
 core.close();
 for (let i = 0; i < 100 && !stderr.join("").includes("client disconnected"); i++) await new Promise((r) => setTimeout(r, 20));
 
-// ---- reconnecting (ADR-034): through a proxy that can cut connections, against the same server ----
+// ---- reconnecting (ADR-051): through a proxy that can cut connections, against the same server ----
 const serverUrl = new URL(info.url);
 const proxyConnections = new Set();
 const proxy = net.createServer((client) => {

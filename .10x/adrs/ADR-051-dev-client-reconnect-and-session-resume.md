@@ -1,11 +1,12 @@
-# ADR-034: The dev clients reconnect, and `undra dev` keeps a dropped client's objects for it
+# ADR-051: The dev clients reconnect, and `undra dev` keeps a dropped client's objects for it
 
 Status: Accepted (implemented on `wt/dev-loop`). Touches the dev/remote transport contract
 (`docs/SPEC.md` section 11, `undra-transport`'s README) and the public API of the three platform
 runtimes (a connection state and a reconnect policy on `UndraCore`; SPEC section 17). It does **not**
 touch the envelope (3.2), any payload, the C ABI, the wasm ABI, the schema or generated code: a client
 that does nothing new keeps working against the new server, and a new client keeps working against an
-old one (it just cannot resume). Constitution R11: decided here, before the code.
+old one (it just cannot resume). Constitution R11: decided here, before the code. (Drafted as ADR-034;
+renumbered 051 at review because ADR-034 is `WeakCtx` on `main`.)
 
 ## Context
 

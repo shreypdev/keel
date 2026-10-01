@@ -119,7 +119,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
                 }
             }
 
-        /** A random token for the dev server to recognise this core's connections by (ADR-034). */
+        /** A random token for the dev server to recognise this core's connections by (ADR-051). */
         private fun newSessionToken(): String {
             val bytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
             return bytes.joinToString("") { "%02x".format(it) }
@@ -133,7 +133,7 @@ public open class UndraCore protected constructor() : AutoCloseable {
 
     /**
      * What the connection to the core is doing: [ConnectionState.Connected] from [load] until the core is closed, and,
-     * for a [Mode.REMOTE] core, [ConnectionState.Reconnecting] while `undra dev` is unreachable (ADR-034). While it is,
+     * for a [Mode.REMOTE] core, [ConnectionState.Reconnecting] while `undra dev` is unreachable (ADR-051). While it is,
      * calls and [observe] fail at once with [UndraException], and what was in flight when the connection dropped
      * failed with it; when it is [ConnectionState.Connected] again every store the app observes has been observed
      * again, so the mirrors converge on the core's current values by themselves. A state that is

@@ -515,7 +515,7 @@ fn session_loop(
         }
     };
     let origin_check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
-        // The session the client announces in the query of its URL (ADR-034).
+        // The session the client announces in the query of its URL (ADR-051).
         if let Some(request) = resume::parse_query(request.uri().query()) {
             conn.set_session(request);
         }

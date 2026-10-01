@@ -9,7 +9,7 @@ import kotlin.time.Duration.Companion.seconds
  * What the connection to the core is doing ([UndraCore.connectionState]). Only a [Mode.REMOTE] core ever
  * leaves [Connected]: it is [Reconnecting] after the connection drops, [Connected] again once its stores
  * are observed again, and [Closed] for good when the app closes it, its schema changed, the dev server lost
- * its session, or the transport gave up (ADR-034).
+ * its session, or the transport gave up (ADR-051).
  *
  * ```kotlin
  * val state by UndraCore.shared.connectionState.collectAsState()
@@ -50,7 +50,7 @@ public enum class ClosedReason {
 }
 
 /**
- * How a remote core reconnects after its connection drops (ADR-034). Attempt `n` (from 1) waits
+ * How a remote core reconnects after its connection drops (ADR-051). Attempt `n` (from 1) waits
  * `min(maxDelay, initialDelay * 2^(n-1))`, less a random share of up to [jitter] of that, so many clients of
  * one server do not retry in step. The same schedule in the TypeScript and Swift runtimes.
  *

@@ -56,7 +56,7 @@ private func makeRemoteCore(_ transport: FakeTransport, log: StateLog) throws ->
     return try UndraCore.connect(transport: transport, options: options)
 }
 
-/// What a transport that reconnects makes of the core: state, what fails, what is observed again (ADR-034).
+/// What a transport that reconnects makes of the core: state, what fails, what is observed again (ADR-051).
 @MainActor
 final class ReconnectCoreTests: XCTestCase {
     private let store = UndraHandle(index: 2, generation: 1)

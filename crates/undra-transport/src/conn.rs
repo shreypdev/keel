@@ -98,7 +98,7 @@ pub(crate) struct Conn {
     /// A handle on the socket used only to abort it.
     tcp: Option<TcpStream>,
     client: OnceLock<ClientInfo>,
-    /// What the upgrade request said about the client's session (ADR-034).
+    /// What the upgrade request said about the client's session (ADR-051).
     session: OnceLock<SessionRequest>,
     /// The server turned this client away after it attached (a session it cannot resume): its
     /// teardown is not worth a log line of its own.

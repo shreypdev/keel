@@ -93,7 +93,7 @@ internal class ConnectedCore(
     }
     private val liveMirror = Mirror(main, mirrorOptions, ::resync)
 
-    // What a reconnect needs to put the core back where the app left it (ADR-034).
+    // What a reconnect needs to put the core back where the app left it (ADR-051).
 
     /** The signals the app observes, per store: observed again after a reconnect. */
     private val observedLock = Any()
@@ -313,7 +313,7 @@ internal class ConnectedCore(
         synchronized(observedLock) { observed.remove(handle) }
         if (closed.get()) return
         if (connection.value is ConnectionState.Reconnecting) {
-            // The server keeps the object for us (ADR-034); it is released when the connection is back.
+            // The server keeps the object for us (ADR-051); it is released when the connection is back.
             releasedWhileDown.add(handle)
             return
         }

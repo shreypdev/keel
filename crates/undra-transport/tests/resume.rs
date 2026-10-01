@@ -1,4 +1,4 @@
-//! Session resume (ADR-034): what the server keeps for a client that dropped, and what a client
+//! Session resume (ADR-051): what the server keeps for a client that dropped, and what a client
 //! that comes back finds.
 #![cfg(feature = "server")]
 

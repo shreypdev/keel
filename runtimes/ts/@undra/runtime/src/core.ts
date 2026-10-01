@@ -78,7 +78,7 @@ export interface UndraStats {
   readonly core: Readonly<Record<string, unknown>> | null;
 }
 
-/** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-034), or the connection failed for good. */
+/** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-051), or the connection failed for good. */
 export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
 
 /**
@@ -482,7 +482,7 @@ export class UndraCore {
     this.#observed.delete(handle);
     if (this.#closed) return;
     if (this.#connection.peek().kind === "reconnecting") {
-      // The core keeps the object for us (ADR-034); it is released when the connection is back.
+      // The core keeps the object for us (ADR-051); it is released when the connection is back.
       this.#releasedWhileDown.add(handle);
       return;
     }

@@ -33,7 +33,7 @@ public enum class Mode {
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
- * @property reconnect how a [Mode.REMOTE] core reconnects by itself when its connection drops (ADR-034):
+ * @property reconnect how a [Mode.REMOTE] core reconnects by itself when its connection drops (ADR-051):
  *   `null` turns it off, and a drop then closes the core. The default is on, with [ReconnectPolicy]'s defaults.
  * @property onConnectionChange called with every change of [UndraCore.connectionState], starting with
  *   [ConnectionState.Connecting], on the thread that changed it (a thread of the runtime's own for a reconnect). It

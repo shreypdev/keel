@@ -30,7 +30,7 @@ export interface WebSocketLike {
 export type WebSocketFactory = new (url: string) => WebSocketLike;
 
 /**
- * How a {@link RemoteTransport} reconnects (ADR-034). Attempt `n` (from 1) waits
+ * How a {@link RemoteTransport} reconnects (ADR-051). Attempt `n` (from 1) waits
  * `min(maxDelayMs, initialDelayMs * 2^(n-1))`, less a random share of up to `jitter` of that, so
  * many clients of one server do not retry in step.
  */
@@ -74,7 +74,7 @@ export interface RemoteOptions {
 /** The longest a single reconnect attempt (connect and `Hello`) may take, whatever `handshakeTimeoutMs` says. */
 const RECONNECT_ATTEMPT_CAP_MS = 5_000;
 
-/** The close code with which the server says it no longer holds this client's session (ADR-034). */
+/** The close code with which the server says it no longer holds this client's session (ADR-051). */
 const SESSION_LOST = 4001;
 
 interface ResolvedPolicy {
@@ -133,7 +133,7 @@ const NORMAL_CLOSURE = 1000;
  * this side; a reply that is ready at once goes back immediately, the rest
  * through `send(Kind.PortReply, ..)`.
  *
- * There is no `callSync`. A connection that drops is **reconnected** (ADR-034): the
+ * There is no `callSync`. A connection that drops is **reconnected** (ADR-051): the
  * handler hears `reconnecting` (and what was in flight fails), the transport retries with
  * backoff and jitter, and `reconnected` follows the next successful handshake. A closed core
  * (`close()`), a core with another schema hash and a session the server lost are final: they

@@ -53,7 +53,7 @@ public struct LoadOptions: Sendable {
     /// options.onError = { assertionFailure("\($0)") }
     /// ```
     public var onError: (@Sendable (UndraUnhandledError) -> Void)?
-    /// How a remote core reconnects by itself when its connection drops (ADR-034); `nil` turns it
+    /// How a remote core reconnects by itself when its connection drops (ADR-051); `nil` turns it
     /// off, and a drop then closes the core. The default is on, with ``UndraReconnectPolicy/default``.
     public var reconnect: UndraReconnectPolicy?
     /// Called with every change of ``UndraCore/connectionState``, starting with `.connecting`, on

@@ -397,7 +397,7 @@ pub enum Received {
     Silence,
 }
 
-/// `url` with the session parameters of ADR-034 in its query.
+/// `url` with the session parameters of ADR-051 in its query.
 pub fn session_url(url: &str, token: &str, resume: bool) -> String {
     format!(
         "{url}/?undra_session={token}{}",
@@ -455,7 +455,7 @@ impl TestClient {
         }
     }
 
-    /// Connects with the session parameters of ADR-034 in the URL (`resume` adds
+    /// Connects with the session parameters of ADR-051 in the URL (`resume` adds
     /// `undra_resume=1`) and completes the handshake as `platform = "test"`, `mode = "dev"`.
     pub fn connect_session(url: &str, schema: u64, token: &str, resume: bool) -> TestClient {
         let mut client = TestClient::connect_raw(&session_url(url, token, resume), schema);

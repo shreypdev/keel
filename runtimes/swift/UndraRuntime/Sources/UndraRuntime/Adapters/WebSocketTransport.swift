@@ -176,7 +176,7 @@ final class DispatchReconnectScheduler: ReconnectScheduler, @unchecked Sendable 
 /// core answers with its own `Hello`, and `start` returns the core's hash for `UndraCore` to
 /// compare. Every later envelope carries the core's hash, and one that does not disconnects.
 ///
-/// **Reconnecting** (ADR-034). With an `UndraReconnectPolicy`, a connection that drops is not the
+/// **Reconnecting** (ADR-051). With an `UndraReconnectPolicy`, a connection that drops is not the
 /// end: the transport tells its core (`onReconnecting`, and what was in flight fails), waits the
 /// policy's backoff, connects again and tells the core (`onReconnected`), which observes its
 /// stores again. The app shutting the core down, a core with another schema, a session the server

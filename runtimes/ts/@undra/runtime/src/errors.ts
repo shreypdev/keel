@@ -136,7 +136,7 @@ export class UndraSchemaMismatchError extends UndraError {
 }
 
 /**
- * The dev server no longer holds the objects of this core (ADR-034): it was restarted (`undra dev`
+ * The dev server no longer holds the objects of this core (ADR-051): it was restarted (`undra dev`
  * rebuilt the core) or the session's grace period passed while the client was away. The handles of
  * every store and object of this core are dead; load a new core and create them again. A core
  * reports this as `closed` with reason `"sessionLost"`; the page of a web app reloads.

@@ -56,7 +56,7 @@ pub struct ServerConfig {
     pub release_on_disconnect: bool,
     /// How long a client that announced a session token (`?undra_session=` in its URL) may be
     /// gone before the objects its constructors made are released; a client that comes back with
-    /// the same token within the time finds them again (ADR-034). They are released earlier when
+    /// the same token within the time finds them again (ADR-051). They are released earlier when
     /// another client attaches. `Duration::ZERO` (the default) keeps nothing: objects are
     /// released at disconnect, as for a client that sends no token. `undra dev` sets ten minutes.
     pub resume_grace: Duration,

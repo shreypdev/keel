@@ -191,7 +191,7 @@ final class FakeTransport: UndraTransport, @unchecked Sendable {
         }
     }
 
-    // MARK: A remote core that can be dropped (ADR-034)
+    // MARK: A remote core that can be dropped (ADR-051)
 
     var isUp: Bool {
         return state.withLock { (current: inout State) -> Bool in
