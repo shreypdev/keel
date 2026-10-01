@@ -50,6 +50,7 @@ fun main() {
         RemoteReconnectTests(),
         AdapterTests(),
         FileAdapterTests(),
+        StorageFailureTests(),
         HttpAdapterTests(),
         ErrorTests(),
         StatsTests(),
