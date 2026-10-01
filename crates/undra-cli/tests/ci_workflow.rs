@@ -373,8 +373,10 @@ fn the_workflow_parses_and_names_every_job() {
                 .get("run")
                 .unwrap()
                 .str()
-                .contains("curl -fsSL https://shreypdev.github.io/undra/install.sh | sh"),
-            "{install:?}"
+                .contains(
+                    "curl -fsSL \"https://raw.githubusercontent.com/shreypdev/undra/v${UNDRA_VERSION}/site/install.sh\" | sh"
+                ),
+            "the installer of the pinned release, from its tag: {install:?}"
         );
         assert!(
             install.get("run").unwrap().str().contains("$GITHUB_PATH"),
@@ -437,6 +439,37 @@ fn the_workflow_parses_and_names_every_job() {
             ),
         "{ios}"
     );
+}
+
+#[test]
+fn the_workflow_holds_no_secret_and_reads_only() {
+    // It runs on pull requests, forks' included: read-only token, no secret, no pull_request_target.
+    let (_dir, root) = init_released("cisafe", "ios,android,web");
+    let (text, yaml) = workflow_of(&root);
+    assert_eq!(
+        yaml.get("permissions")
+            .unwrap()
+            .get("contents")
+            .unwrap()
+            .str(),
+        "read"
+    );
+    assert_eq!(yaml.get("permissions").unwrap().keys(), ["contents"]);
+    for needle in [
+        "secrets.",
+        "pull_request_target",
+        "GITHUB_TOKEN",
+        "write-all",
+    ] {
+        assert!(!text.contains(needle), "{needle} in:\n{text}");
+    }
+    // Nothing is piped to a shell from a moving URL: the installer is the pinned release's.
+    for line in text
+        .lines()
+        .filter(|l| l.contains("| sh") || l.contains("| bash"))
+    {
+        assert!(line.contains("v${UNDRA_VERSION}/"), "{line}");
+    }
 }
 
 #[test]

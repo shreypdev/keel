@@ -1,4 +1,6 @@
       - name: Install undra
+        # The installer of the release UNDRA_VERSION names, read from that release's tag (not the site's
+        # latest): it downloads that undra and checks its sha256 against the release's checksums.txt.
         run: |
-          curl -fsSL https://shreypdev.github.io/undra/install.sh | sh
+          curl -fsSL "https://raw.githubusercontent.com/shreypdev/undra/v${UNDRA_VERSION}/site/install.sh" | sh
           echo "$HOME/.undra/bin" >> "$GITHUB_PATH"

@@ -143,9 +143,16 @@ mod tests {
         assert!(text.contains("\n  UNDRA_VERSION: \"1.2.3\"\n"), "{text}");
         // Every job installs undra the way docs/RELEASING.md says users will.
         assert_eq!(
-            text.matches("curl -fsSL https://shreypdev.github.io/undra/install.sh | sh")
-                .count(),
+            text.matches(
+                "curl -fsSL \"https://raw.githubusercontent.com/shreypdev/undra/v${UNDRA_VERSION}/site/install.sh\" | sh"
+            )
+            .count(),
             4,
+            "{text}"
+        );
+        // Not the site's latest installer: the one of the pinned release.
+        assert!(
+            !text.contains("shreypdev.github.io/undra/install.sh"),
             "{text}"
         );
         assert_eq!(
