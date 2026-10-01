@@ -7,11 +7,12 @@
 //! *and every closure*: sixteen of them came to 58 KB of the 353 KB hello-world web core, its
 //! largest item after the query layer (ADR-052).
 //!
-//! Here the sorting is done once per key type, on indices: [`stable_order`] is a bottom-up merge
-//! sort (O(n log n), stable) over the keys, and [`permute`] moves the items into that order with
-//! swaps. Only the key extraction and the swap loop are generic over the item type, and both are
-//! a few instructions. A list already in order (the canonical form re-sorts what
-//! `collect_schema` sorted) costs one pass over its keys.
+//! Here a list of up to 16 items (most of them) is insertion-sorted in place, and a longer one is
+//! sorted once per key type, on indices: [`stable_order`] is a bottom-up merge sort (O(n log n),
+//! stable) over the keys, and [`permute`] moves the items into that order with swaps. Only the
+//! insertion loop, the key extraction and the swap loop are generic over the item type, and each
+//! is a few instructions. A long list already in order (the canonical form re-sorts what
+//! `collect_schema` sorted) costs one pass over it and no allocation.
 //!
 //! The result is exactly what `slice::sort_by` / `sort_by_key` would produce with the same key
 //! (tests compare them), so the canonical form and the schema hash cannot move. Hashing a schema
@@ -20,10 +21,14 @@
 
 /// Sorts `items` by the name `name` returns, stably (equal names keep their order).
 pub(crate) fn by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
-    let keys: Vec<&str> = items.iter().map(name).collect();
-    if keys.is_sorted() {
+    if items.len() <= SMALL {
+        insertion(items, |a, b| name(a) > name(b));
         return;
     }
+    if items.is_sorted_by(|a, b| name(a) <= name(b)) {
+        return;
+    }
+    let keys: Vec<&str> = items.iter().map(name).collect();
     let order = stable_order(&keys);
     drop(keys);
     permute(items, order);
@@ -31,11 +36,30 @@ pub(crate) fn by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
 
 /// Sorts `items` by the `u16` key `key` returns, stably (enum variants by wire index).
 pub(crate) fn by_index<T>(items: &mut [T], key: fn(&T) -> u16) {
-    let keys: Vec<u16> = items.iter().map(key).collect();
-    if keys.is_sorted() {
+    if items.len() <= SMALL {
+        insertion(items, |a, b| key(a) > key(b));
         return;
     }
+    if items.is_sorted_by(|a, b| key(a) <= key(b)) {
+        return;
+    }
+    let keys: Vec<u16> = items.iter().map(key).collect();
     permute(items, stable_order(&keys));
+}
+
+/// Up to this many items, an in-place insertion sort: no allocation, and fewer steps than the
+/// merge sort's bookkeeping (most schema lists are this short).
+const SMALL: usize = 16;
+
+/// Stable insertion sort with swaps; `after(a, b)` says `a` belongs strictly after `b`.
+fn insertion<T>(items: &mut [T], after: impl Fn(&T, &T) -> bool) {
+    for end in 1..items.len() {
+        let mut at = end;
+        while at > 0 && after(&items[at - 1], &items[at]) {
+            items.swap(at - 1, at);
+            at -= 1;
+        }
+    }
 }
 
 /// The indices of `keys` in stable sorted order: `order[i]` is the index of the `i`-th smallest
@@ -133,7 +157,7 @@ mod tests {
         let words = [
             "Todo", "Todos", "Filter", "add", "remove", "z", "ü", "A", "a", "_",
         ];
-        for len in [0, 1, 2, 3, 31, 64, 65, 200, 1000] {
+        for len in [0, 1, 2, 3, 15, 16, 17, 31, 64, 65, 200, 1000] {
             let input: Vec<Item> = (0..len)
                 .map(|i| {
                     state = state
@@ -166,6 +190,14 @@ mod tests {
         std.sort_by_key(|i| i.0);
         assert_eq!(ours, std);
         assert_eq!(ours[..3], [(0, 'd'), (1, 'b'), (1, 'e')]);
+
+        // Past the insertion-sort threshold: the merge path.
+        let long: Vec<(u16, usize)> = (0..100).map(|i| ((i * 37 % 11) as u16, i)).collect();
+        let mut ours = long.clone();
+        by_index(&mut ours, |i| i.0);
+        let mut std = long;
+        std.sort_by_key(|i| i.0);
+        assert_eq!(ours, std);
     }
 
     #[test]
