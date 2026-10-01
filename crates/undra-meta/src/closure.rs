@@ -651,7 +651,8 @@ mod tests {
     #[test]
     fn every_structural_change_moves_a_fingerprint() {
         let base = profile(&schema());
-        let changes: Vec<(&str, Box<dyn Fn(&mut Schema)>)> = vec![
+        type Change = Box<dyn Fn(&mut Schema)>;
+        let changes: Vec<(&str, Change)> = vec![
             (
                 "a field type",
                 Box::new(|s| s.records[0].fields[1].ty = TypeRef::Bytes),

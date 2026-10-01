@@ -8,7 +8,7 @@ use common::*;
 use undra::wire::Writer;
 use undra_ports::fakes::{Fakes, Matcher, SeededRng};
 use undra_ports::{HttpError, HttpRequest, HttpResponse, NetKind, Rng};
-use undra_query::{CtxQuery, QUEUE_KEY, QueryStatus, backoff_ms};
+use undra_query::{CtxQuery, DEAD_LETTER_KEY, QUEUE_KEY, QUEUE_KEY_V1, QueryStatus, backoff_ms};
 use undra_wire::{Decode, Encode, Reader, Uuid};
 
 fn network_down() -> HttpError {
@@ -22,16 +22,26 @@ fn post_todos() -> Matcher {
 /// One queued mutation as stored: `(mutation id, encoded input, idempotency key)`.
 type Stored = (u32, Vec<u8>, Uuid);
 
-/// Reads the persisted queue back: `(schema hash, items)`.
+/// Reads the persisted queue back (format 2): `(schema hash, items)`; every item carries its
+/// mutation's current fingerprint.
 fn stored_queue(h: &Harness) -> Option<(u64, Vec<Stored>)> {
     let bytes = h.fakes.kv.value(QUEUE_KEY)?;
     let mut r = Reader::new(&bytes);
+    assert_eq!(r.read_u16().unwrap(), 2, "format 2");
     let hash = r.read_u64().unwrap();
     let count = r.read_u32().unwrap();
+    let schema = h.t.runtime().schema().clone();
     let items = (0..count)
         .map(|_| {
+            let id = r.read_u32().unwrap();
+            let fingerprint = r.read_u64().unwrap();
+            assert_eq!(
+                Some(fingerprint),
+                schema.mutation_closure(id).map(|c| c.fingerprint()),
+                "today's fingerprint"
+            );
             (
-                r.read_u32().unwrap(),
+                id,
                 r.read_bytes().unwrap().to_vec(),
                 Uuid::decode(&mut r).unwrap(),
             )
@@ -39,6 +49,28 @@ fn stored_queue(h: &Harness) -> Option<(u64, Vec<Stored>)> {
         .collect();
     r.finish().unwrap();
     Some((hash, items))
+}
+
+/// The dead letters as stored: `(mutation id, reason)`.
+fn stored_dead(h: &Harness) -> Vec<(u32, String)> {
+    let Some(bytes) = h.fakes.kv.value(DEAD_LETTER_KEY) else {
+        return Vec::new();
+    };
+    let mut r = Reader::new(&bytes);
+    assert_eq!(r.read_u16().unwrap(), 2);
+    let _hash = r.read_u64().unwrap();
+    let count = r.read_u32().unwrap();
+    let items = (0..count)
+        .map(|_| {
+            let id = r.read_u32().unwrap();
+            let _fingerprint = r.read_u64().unwrap();
+            let _params = r.read_bytes().unwrap();
+            let _key = Uuid::decode(&mut r).unwrap();
+            (id, r.read_str().unwrap().to_owned())
+        })
+        .collect();
+    r.finish().unwrap();
+    items
 }
 
 /// A runtime that has heard from the platform that it is offline.
@@ -455,8 +487,11 @@ fn a_restored_queue_waits_for_the_network_if_the_platform_says_offline() {
     assert_eq!(bodies(&second), ["eggs"]);
 }
 
+/// A queue of format 1 (before ADR-037) written by another build has items of unknown identity:
+/// they are never replayed with mis-decoded arguments, and never lost either: they become dead
+/// letters (ADR-037 decision 2, 7).
 #[test]
-fn a_queue_written_by_another_build_is_dropped_not_replayed() {
+fn a_queue_of_format_1_written_by_another_build_is_dead_lettered_not_replayed() {
     let fakes = Fakes::new();
     let mut w = Writer::new();
     w.write_u64(0xdead_beef); // not this build's schema hash
@@ -464,7 +499,7 @@ fn a_queue_written_by_another_build_is_dropped_not_replayed() {
     w.write_u32(AddTodoMutation::MUTATION_ID);
     w.write_bytes(&("x".to_owned(),).encode_to_vec());
     Uuid([7; 16]).encode(&mut w);
-    fakes.kv.insert(QUEUE_KEY, w.into_vec());
+    fakes.kv.insert(QUEUE_KEY_V1, w.into_vec());
     fakes.http.respond(post_todos(), ok(&todo(1, "x")));
 
     let h = Harness::with_fakes(fakes);
@@ -475,20 +510,51 @@ fn a_queue_written_by_another_build_is_dropped_not_replayed() {
         0,
         "arguments encoded by another schema are never replayed"
     );
-    assert!(stored_queue(&h).is_none(), "and the stale queue is deleted");
+    assert!(
+        !h.fakes.kv.contains_key(QUEUE_KEY_V1),
+        "the old key is gone"
+    );
+    let dead = h.query().dead_letters();
+    assert_eq!(dead.len(), 1);
+    assert_eq!(dead[0].mutation, "add_todo");
+    assert_eq!(dead[0].idempotency_key, Uuid([7; 16]));
+    assert!(dead[0].reason.contains("format 1"), "{}", dead[0].reason);
+    assert_eq!(stored_dead(&h).len(), 1, "persisted");
 }
 
 #[test]
-fn a_queued_mutation_this_build_does_not_define_is_dropped() {
+fn a_queue_of_format_1_written_by_this_very_build_is_adopted_and_rewritten() {
+    let schema_hash = Harness::new().t.runtime().schema_hash();
+    let fakes = Fakes::new();
+    let mut w = Writer::new();
+    w.write_u64(schema_hash);
+    w.write_len(1);
+    w.write_u32(AddTodoMutation::MUTATION_ID);
+    w.write_bytes(&("x".to_owned(),).encode_to_vec());
+    Uuid([7; 16]).encode(&mut w);
+    fakes.kv.insert(QUEUE_KEY_V1, w.into_vec());
+    let h = Harness::with_fakes(fakes);
+    h.fakes.connectivity.go_offline();
+    h.settle();
+    assert_eq!(h.query().pending_mutations(), 1);
+    let (_, items) = stored_queue(&h).expect("rewritten in format 2");
+    assert_eq!(items[0].2, Uuid([7; 16]));
+    assert!(!h.fakes.kv.contains_key(QUEUE_KEY_V1));
+}
+
+#[test]
+fn a_queued_mutation_this_build_does_not_define_is_dead_lettered() {
     let fakes = Fakes::new();
     let schema_hash = {
         let probe = Harness::new();
         probe.t.runtime().schema_hash()
     };
     let mut w = Writer::new();
+    w.write_u16(2);
     w.write_u64(schema_hash);
     w.write_len(1);
     w.write_u32(0x1234_5678);
+    w.write_u64(99);
     w.write_bytes(&[]);
     Uuid([7; 16]).encode(&mut w);
     fakes.kv.insert(QUEUE_KEY, w.into_vec());
@@ -498,4 +564,12 @@ fn a_queued_mutation_this_build_does_not_define_is_dropped() {
     assert_eq!(h.query().pending_mutations(), 0);
     assert!(stored_queue(&h).is_none());
     assert_eq!(h.http_calls(), 0);
+    assert_eq!(
+        stored_dead(&h),
+        [(
+            0x1234_5678,
+            "this build does not define the mutation".to_owned()
+        )]
+    );
+    assert_eq!(h.query().dead_letters()[0].mutation, "0x12345678");
 }

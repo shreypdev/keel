@@ -1000,6 +1000,11 @@ impl Runtime {
         self.extensions.get_or_init(T::default)
     }
 
+    /// The `T` of [`extension`](Runtime::extension), if something created it; never creates it.
+    pub fn try_extension<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.extensions.get::<T>()
+    }
+
     /// Like [`extension`](Runtime::extension) with an explicit initializer (which may run
     /// more than once if threads race; only one result is kept).
     pub fn extension_with<T: Send + Sync + 'static>(&self, init: impl FnOnce() -> T) -> &T {
@@ -2821,6 +2826,22 @@ impl Runtime {
             Stats::get(&s.bad_requests),
             Stats::get(&s.cancelled),
         ));
+        // Sections of layered crates (`undra-query`'s persistence counters), before the closing
+        // brace of the document.
+        let mut sections = String::new();
+        for section in inventory::iter::<crate::ext::StatsSection> {
+            if let Ok(Some(json)) = guard::guarded(|| (section.json)(self)) {
+                sections.push(',');
+                push_json_string(&mut sections, section.name);
+                sections.push(':');
+                sections.push_str(&json);
+            }
+        }
+        if !sections.is_empty() {
+            out.pop();
+            out.push_str(&sections);
+            out.push('}');
+        }
         out
     }
 

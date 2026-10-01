@@ -4,13 +4,14 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use undra_runtime::Ctx;
-use undra_wire::Encode;
+use undra_wire::{Encode, Uuid};
 
 use crate::defs::{MutationDef, QueryDef};
 use crate::erased::{Erased, query_vtable};
 use crate::handle::QueryHandle;
 use crate::key::{Invalidate, QueryKey};
 use crate::mutation::MutationBuilder;
+use crate::queue::{DeadLetter, RetryError};
 use crate::shared::{Shared, shared_of};
 
 /// The query cache of one runtime, bound to a [`Ctx`]. Get one with
@@ -76,9 +77,11 @@ impl QueryClient {
         self.shared.invalidate(&self.ctx, &[target.into()]);
     }
 
-    /// Reads the persisted entries and the offline queue from the `Kv` port, and replays the
-    /// queue if the client is online. The runtime does this once at start-up; call it yourself
-    /// only in a test that installed its fakes late.
+    /// Reads the persisted entries, the offline queue and its dead letters from the `Kv` port,
+    /// migrating what an older build wrote (ADR-037), and replays the queue if the client is
+    /// online. The runtime does this once at start-up (and reads a queue that could not be read
+    /// again on `Active`, on a background run and after a backoff); call it yourself to read the
+    /// store again, after restoring a backup say, or in a test that installed its fakes late.
     pub async fn hydrate(&self) {
         self.shared.hydrate(&self.ctx.downgrade()).await;
     }
@@ -106,6 +109,39 @@ impl QueryClient {
     /// How many entries the cache holds, observed or not.
     pub fn cached_entries(&self) -> usize {
         self.shared.state.lock().entries.len()
+    }
+
+    /// How many cache entries are kept in the `Kv` store at most (default
+    /// [`DEFAULT_MAX_PERSISTED_ENTRIES`](crate::DEFAULT_MAX_PERSISTED_ENTRIES)); the least
+    /// recently updated are deleted beyond it, when a new entry is written and at hydration
+    /// (ADR-037 decision 8).
+    pub fn set_max_persisted_entries(&self, max: usize) {
+        self.shared.state.lock().storage.max_entries = max;
+    }
+
+    /// The queued mutations that could not be migrated to this build (ADR-037 decision 7): their
+    /// mutation, idempotency key, the reason and their input by parameter name. They are never
+    /// deleted by the client; show them, export them, [retry](Self::retry_dead_letter) or
+    /// [discard](Self::discard_dead_letter) them.
+    pub fn dead_letters(&self) -> Vec<DeadLetter> {
+        self.shared.dead_letters(&self.ctx)
+    }
+
+    /// Runs the migration of the dead letter with `key` again (after an update that added a
+    /// `#[undra::migrate]` hook, say). On success it goes to the end of the offline queue and
+    /// replays when the client is online.
+    ///
+    /// # Errors
+    ///
+    /// [`RetryError::NotFound`] if no dead letter has that key, [`RetryError::Incompatible`] if it
+    /// still does not migrate (it stays a dead letter, with the new reason).
+    pub fn retry_dead_letter(&self, key: Uuid) -> Result<(), RetryError> {
+        self.shared.retry_dead_letter(&self.ctx, key)
+    }
+
+    /// Deletes the dead letter with `key` for good. `false` if there was none.
+    pub fn discard_dead_letter(&self, key: Uuid) -> bool {
+        self.shared.discard_dead_letter(&self.ctx, key)
     }
 }
 
