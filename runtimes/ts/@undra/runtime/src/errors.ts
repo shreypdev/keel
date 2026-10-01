@@ -11,7 +11,7 @@ import { UndraReader, ReplyStatus } from "./wire/index.js";
 /**
  * Base class of every Undra error. `kind` is a short, stable, camelCase
  * discriminant; the runtime's own errors use `"reply"`, `"mode"`,
- * `"schemaMismatch"`, `"port"`, `"transport"`, `"observe"` and `"state"`.
+ * `"schemaMismatch"`, `"sessionLost"`, `"port"`, `"transport"`, `"observe"` and `"state"`.
  */
 export class UndraError extends Error {
   override readonly name: string = "UndraError";
@@ -132,6 +132,21 @@ export class UndraSchemaMismatchError extends UndraError {
     );
     this.expected = expected;
     this.got = got;
+  }
+}
+
+/**
+ * The dev server no longer holds the objects of this core (ADR-034): it was restarted (`undra dev`
+ * rebuilt the core) or the session's grace period passed while the client was away. The handles of
+ * every store and object of this core are dead; load a new core and create them again. A core
+ * reports this as `closed` with reason `"sessionLost"`; the page of a web app reloads.
+ */
+export class UndraSessionLostError extends UndraError {
+  override readonly name: string = "UndraSessionLostError";
+
+  /** @param message The server's reason, when it gave one. */
+  constructor(message = "the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core") {
+    super("sessionLost", message);
   }
 }
 

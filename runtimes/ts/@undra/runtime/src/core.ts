@@ -9,18 +9,21 @@ import {
   UndraPortError,
   UndraReplyError,
   UndraSchemaMismatchError,
+  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { nextCallId } from "./callid.js";
 import { Mirror, type MirrorOptions, type MirrorStats } from "./mirror.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
+import { Signal } from "./signal.js";
 import { StreamCall } from "./stream.js";
-import { RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
+import { type ReconnectOptions, RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
 import type { WorkerLike } from "./transport/wasm-worker.js";
 import {
+  ALL_SIGNALS,
   CallTarget,
   type Handle,
   type HelloPayload,
@@ -75,6 +78,22 @@ export interface UndraStats {
   readonly core: Readonly<Record<string, unknown>> | null;
 }
 
+/** Why a core is `closed`: the app closed it, its schema is not the bindings', the dev server lost its session (ADR-034), or the connection failed for good. */
+export type ConnectionClosedReason = "requested" | "schemaMismatch" | "sessionLost" | "failed";
+
+/**
+ * What the connection to the core is doing (`UndraCore.connection`). Only a `remote` core ever
+ * leaves `connected`: it is `reconnecting` (attempt 1, 2, ... with the error that caused it) after
+ * the connection drops, `connected` again once the stores are observed again, and `closed` for
+ * good when the app closes it, its schema changed, the dev server lost its session, or the
+ * transport gave up. A wasm core is `connected` from `load` until it is closed.
+ */
+export type ConnectionState =
+  | { readonly kind: "connecting" }
+  | { readonly kind: "connected" }
+  | { readonly kind: "reconnecting"; readonly attempt: number; readonly error: Error }
+  | { readonly kind: "closed"; readonly reason: ConnectionClosedReason; readonly error?: Error };
+
 /** Options shared by `UndraCore.load` and `UndraCore.attach`. */
 export interface AttachOptions {
   /** The schema hash of the generated bindings (`UndraIds.schemaHash`); a core built from another schema is refused. */
@@ -91,8 +110,10 @@ export interface AttachOptions {
   readonly ports?: Readonly<Record<number, PortImpl>>;
   /** How long `observe` waits for the initial change-set of a remote or worker core before it rejects, in ms. Default 10000; 0 waits forever. */
   readonly observeTimeoutMs?: number;
-  /** Called once when the channel to the core is lost (not when you call `close()`). */
+  /** Called once when the channel to the core is lost for good (not when you call `close()`, and not while a `remote` core is reconnecting: see `onConnectionChange`). */
   readonly onClose?: (error: Error) => void;
+  /** Called with every change of {@link UndraCore.connection}, starting with `connecting`, on the thread that changed it. */
+  readonly onConnectionChange?: (state: ConnectionState) => void;
   /** Called with failures that have no caller to reject: a change-set that did not decode, a store whose `_apply` threw, a port that failed. They are also logged. */
   readonly onError?: (error: unknown) => void;
   /** Make this core `UndraCore.shared` when none is set yet. Default `true`. */
@@ -123,6 +144,8 @@ export interface LoadOptions extends AttachOptions {
   readonly handshakeTimeoutMs?: number;
   /** WebSocket implementation for `"remote"`; default the global one. */
   readonly webSocket?: WebSocketFactory;
+  /** Reconnect a `"remote"` core by itself when its connection drops: `false` turns it off, an object tunes the backoff. Default on. See {@link ReconnectOptions}. */
+  readonly reconnect?: boolean | ReconnectOptions;
   /** The Worker for `"wasm-worker"`, or a function creating it; default a module worker on `@undra/runtime/worker`. */
   readonly worker?: WorkerLike | (() => WorkerLike);
 }
@@ -264,6 +287,7 @@ export class UndraCore {
           ...(options.devtools !== undefined && { devtools: options.devtools }),
           ...(options.webSocket !== undefined && { webSocket: options.webSocket }),
           ...(options.handshakeTimeoutMs !== undefined && { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+          ...(options.reconnect !== undefined && { reconnect: options.reconnect }),
         });
         break;
       }
@@ -307,6 +331,11 @@ export class UndraCore {
   readonly #ports = new Map<number, PortImpl>();
   readonly #pending = new Map<number, PendingCall | PendingStream>();
   readonly #handles = new Set<Handle>();
+  /** The signals the app observes, per handle: what a reconnect observes again. */
+  readonly #observed = new Map<Handle, Set<number>>();
+  /** Handles released while the connection was down: released in the core once it is back. */
+  readonly #releasedWhileDown = new Set<Handle>();
+  readonly #connection = new Signal<ConnectionState>({ kind: "connecting" });
   #nextCallId = 0;
   #closed = false;
   #stopEvents: (() => void) | null = null;
@@ -315,6 +344,7 @@ export class UndraCore {
     this.#transport = transport;
     this.#options = options;
     this.#adapters = adapters;
+    this.#notifyConnection(this.#connection.peek());
     this.#observeTimeoutMs = options.observeTimeoutMs ?? DEFAULT_OBSERVE_TIMEOUT_MS;
     this.mirror = new Mirror({
       ...options.mirror,
@@ -339,6 +369,20 @@ export class UndraCore {
   /** Whether the core has been closed, by `close()` or because the channel was lost. */
   get closed(): boolean {
     return this.#closed;
+  }
+
+  /**
+   * What the connection to the core is doing, as a signal: `connecting` until `load` resolves,
+   * `connected`, `reconnecting` with the attempt number after a `remote` connection drops, and
+   * `closed` with its reason. `useSignal(core.connection)` renders it in React.
+   *
+   * While it is `reconnecting`, calls and `observe` fail at once with an `UndraTransportError`
+   * (`"closed"`); what was in flight when the connection dropped failed with the same. When it is
+   * `connected` again every store the app observes has been observed again, so the mirrors converge
+   * on the core's current values by themselves.
+   */
+  get connection(): Signal<ConnectionState> {
+    return this.#connection;
   }
 
   // ----- calls -----------------------------------------------------------------------
@@ -422,6 +466,7 @@ export class UndraCore {
     } catch (error) {
       return Promise.reject(error);
     }
+    this.#noteObserved(handle, signalId, on);
     if (this.#transport.synchronous) {
       // The core has already delivered the initial change-set; apply it now.
       this.mirror.flush();
@@ -434,11 +479,32 @@ export class UndraCore {
   release(handle: Handle): void {
     this.mirror.unregister(handle);
     this.#handles.delete(handle);
+    this.#observed.delete(handle);
     if (this.#closed) return;
+    if (this.#connection.peek().kind === "reconnecting") {
+      // The core keeps the object for us (ADR-034); it is released when the connection is back.
+      this.#releasedWhileDown.add(handle);
+      return;
+    }
     try {
       this.#transport.send(Kind.Release, encodeRelease({ handle }));
     } catch (error) {
       this.#reportError("release", error);
+    }
+  }
+
+  /** Remembers what the app observes, so that a reconnect can observe it again. */
+  #noteObserved(handle: Handle, signalId: number, on: boolean): void {
+    if (on) {
+      let signals = this.#observed.get(handle);
+      if (signals === undefined) this.#observed.set(handle, (signals = new Set()));
+      signals.add(signalId);
+    } else if (signalId === ALL_SIGNALS) {
+      this.#observed.delete(handle);
+    } else {
+      const signals = this.#observed.get(handle);
+      signals?.delete(signalId);
+      if (signals?.size === 0) this.#observed.delete(handle);
     }
   }
 
@@ -510,6 +576,7 @@ export class UndraCore {
       throw new UndraSchemaMismatchError(this.#options.expectedSchemaHash, hello.schemaHash);
     }
     this.hello = hello;
+    this.#setConnection({ kind: "connected" });
     if (this.#options.adapters?.timer && this.#transport.mode === "remote") {
       // A native core normally times itself; an explicit Timer adapter is a request to serve its Timer port.
       this.#ports.set(
@@ -533,13 +600,19 @@ export class UndraCore {
   }
 
   /** Stops everything. `reason` is what pending work fails with; `null` when there is none (a failed start). */
-  #dispose(reason: Error | null): void {
+  #dispose(reason: Error | null, why: ConnectionClosedReason = reason === null ? "failed" : "requested"): void {
     if (this.#closed) return;
     this.#closed = true;
     if (UndraCore.#shared === this) UndraCore.#shared = null;
     this.#stopEvents?.();
     this.#stopEvents = null;
-    const failure = reason ?? new UndraTransportError("closed", "the core is closed");
+    this.#failInFlight(reason ?? new UndraTransportError("closed", "the core is closed"));
+    this.#setConnection(reason === null || why === "requested" ? { kind: "closed", reason: why } : { kind: "closed", reason: why, error: reason });
+    this.#transport.close();
+  }
+
+  /** Fails every call, stream and `observe` that waits for the core with `failure`. */
+  #failInFlight(failure: Error): void {
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const p of pending) {
@@ -551,17 +624,62 @@ export class UndraCore {
       }
     }
     this.mirror.failWaiters(failure);
-    this.#transport.close();
   }
 
-  /** The channel to the core was lost. */
+  /** The channel to the core was lost for good. */
   #lost(error: Error): void {
     if (this.#closed) return;
-    this.#dispose(error);
+    const why: ConnectionClosedReason =
+      error instanceof UndraSchemaMismatchError ? "schemaMismatch" : error instanceof UndraSessionLostError ? "sessionLost" : "failed";
+    this.#dispose(error, why);
     try {
       this.#options.onClose?.(error);
     } catch (thrown) {
       this.#reportError("onClose", thrown);
+    }
+  }
+
+  /** The connection dropped and the transport reconnects: what was in flight is lost, the core stays open. */
+  #reconnecting(attempt: number, error: Error): void {
+    if (this.#closed) return;
+    if (attempt === 1) {
+      this.#failInFlight(
+        new UndraTransportError("closed", `the connection to the core was lost (${error.message}); reconnecting`, { cause: error }),
+      );
+    }
+    this.#setConnection({ kind: "reconnecting", attempt, error });
+  }
+
+  /**
+   * The connection is back: release what was released meanwhile and observe what the app observes
+   * again. The core answers each `Observe` with the current values, so every mirror converges.
+   */
+  #reconnected(hello: HelloPayload): void {
+    if (this.#closed) return;
+    this.hello = hello;
+    try {
+      for (const handle of this.#releasedWhileDown) this.#transport.send(Kind.Release, encodeRelease({ handle }));
+      this.#releasedWhileDown.clear();
+      for (const [handle, signals] of this.#observed) {
+        for (const signalId of signals) this.#transport.send(Kind.Observe, encodeObserve({ handle, signalId, on: true }));
+      }
+    } catch (error) {
+      // The connection dropped again already; the transport reports it and the next reconnect replays.
+      this.#reportError("reconnect", error);
+    }
+    this.#setConnection({ kind: "connected" });
+  }
+
+  #setConnection(state: ConnectionState): void {
+    this.#connection._set(state);
+    this.#notifyConnection(state);
+  }
+
+  #notifyConnection(state: ConnectionState): void {
+    try {
+      this.#options.onConnectionChange?.(state);
+    } catch (error) {
+      this.#reportError("onConnectionChange", error);
     }
   }
 
@@ -664,6 +782,13 @@ export class UndraCore {
     closed: (error) => {
       this.#lost(error);
     },
+    reconnecting: (attempt, error) => {
+      this.#reconnecting(attempt, error);
+    },
+    reconnected: (hello) => {
+      this.#reconnected(hello);
+    },
+    holdsObjects: () => this.#handles.size > 0,
   };
 
   #onReply(payload: Uint8Array): void {
