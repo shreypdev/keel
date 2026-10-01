@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { UndraSchemaMismatchError } from "@undra/runtime";
-import { UndraIds, add } from "@playground/core";
+import { UndraCallError, UndraCore, UndraSchemaMismatchError } from "@undra/runtime";
+import { Counter, UndraIds, add } from "@playground/core";
 import { CapturingLog } from "../src/capturing-log.js";
 import { boot, bootRaw } from "../src/harness.js";
 import { MemoryKv } from "../src/memory-kv.js";
@@ -92,5 +92,36 @@ test("S16 schema mismatch rejection", async () => {
     for (const [name, id] of Object.entries(UndraIds.Queries)) {
       expect(schema.queries.find((q) => camel(q.name) === name)?.query_id, `query id of ${name}`).toBe(id);
     }
+  });
+
+  await step("5. with no core loaded, shared is a closed placeholder: calls reject unavailable, nothing throws on access", async () => {
+    // The harness never makes a core shared (`shared: false`), so none is loaded here.
+    expect(UndraCore.current).toBeNull();
+    const shared = UndraCore.shared;
+    expect(UndraCore.current, "the placeholder never becomes the shared core").toBeNull();
+    expect(shared.closed).toBe(true);
+    const outcome = async (run: () => Promise<unknown>): Promise<unknown> => {
+      try {
+        await run();
+      } catch (error) {
+        return error;
+      }
+      throw new Error("expected the call to fail, but it succeeded");
+    };
+    // A generated call and a generated constructor, both with the default core.
+    for (const [what, run] of [
+      ["add(1, 2)", () => add(1, 2)],
+      ["Counter.create()", () => Counter.create()],
+    ] as const) {
+      const failure = await outcome(run);
+      expect(failure, `${what} with no core loaded`).toBeInstanceOf(UndraCallError.Unavailable);
+      expect((failure as UndraCallError.Unavailable).transport.reason).toBe("closed");
+      expect((failure as Error).message, "it says how to fix it").toContain("UndraCore.load");
+    }
+    // A failure reported on the placeholder only logs (it has no `onError`).
+    expect(() => {
+      shared.report(new Error("a command on the placeholder"), "Counter.increment");
+    }).not.toThrow();
+    expect(UndraCore.current).toBeNull();
   });
 });

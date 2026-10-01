@@ -1,3 +1,4 @@
+import { UndraCallError } from "@undra/runtime";
 import { useSignal } from "@undra/runtime/react";
 import { RemoteError, type RemoteTodo, createRemoteTodo, setRemoteDone } from "@playground/core";
 import { useState } from "react";
@@ -25,7 +26,7 @@ export function RemoteView({ playground }: { readonly playground: Playground }) 
   const [inFlight, setInFlight] = useState(0);
 
   const report = (failure: unknown): void => {
-    setProblem(failure instanceof RemoteError ? failure.message : String(failure));
+    setProblem(failure instanceof RemoteError || failure instanceof UndraCallError ? failure.message : String(failure));
   };
 
   /** Runs a mutation without holding the UI: its outcome is the list changing, and a refusal is shown. */
@@ -85,7 +86,14 @@ export function RemoteView({ playground }: { readonly playground: Playground }) 
         </button>
       </form>
       <div className="row wrap">
-        <button data-testid="remote-refresh" onClick={() => inbox.refetch().then(() => setProblem(null), report)}>
+        <button
+          data-testid="remote-refresh"
+          onClick={() => {
+            // A command: it never rejects (a failure is logged and goes to `onError`).
+            setProblem(null);
+            void inbox.refetch();
+          }}
+        >
           Refresh
         </button>
         <label className="switch">

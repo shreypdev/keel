@@ -44,13 +44,35 @@ final class StateLog: @unchecked Sendable {
     }
 }
 
+/// Collects what a core hands to `LoadOptions.onError`, from whichever thread reports it.
+private final class ReportedErrors: @unchecked Sendable {
+    private let items = Guarded<[UndraUnhandledError]>([])
+
+    var all: [UndraUnhandledError] {
+        return items.withLock { (list: inout [UndraUnhandledError]) -> [UndraUnhandledError] in
+            return list
+        }
+    }
+
+    func append(_ item: UndraUnhandledError) {
+        items.withLock { (list: inout [UndraUnhandledError]) -> Void in
+            list.append(item)
+        }
+    }
+}
+
 /// A remote-mode core over a fake transport that can be dropped and brought back.
 @MainActor
-private func makeRemoteCore(_ transport: FakeTransport, log: StateLog) throws -> UndraCore {
+private func makeRemoteCore(
+    _ transport: FakeTransport,
+    log: StateLog,
+    onError: (@Sendable (UndraUnhandledError) -> Void)? = nil
+) throws -> UndraCore {
     let options = LoadOptions.remote(
         url: "ws://fake",
         adapters: Adapters.none,
         expectedSchemaHash: 0x1234,
+        onError: onError,
         onConnectionChange: { log.append($0) }
     )
     return try UndraCore.connect(transport: transport, options: options)
@@ -147,6 +169,55 @@ final class ReconnectCoreTests: XCTestCase {
         XCTAssertThrowsError(try core.construct(type: 1, method: 2, args: []))
         XCTAssertEqual(transport.calls.count, 0, "nothing reached the transport")
         XCTAssertEqual(core.stats().hostPendingCalls, 0)
+    }
+
+    func testACommandThatFailsBecauseTheConnectionIsDownIsNotHandedToOnErrorButAnotherFailureIs() async throws {
+        let log = StateLog()
+        let reports = ReportedErrors()
+        let transport = FakeTransport(directSync: false)
+        let core = try makeRemoteCore(transport, log: log, onError: { reports.append($0) })
+
+        // Connected: a failure that is not the connection reaches the handler.
+        core.report(UndraReplyError(status: .cancelled, body: []), operation: "Todos.toggle")
+        XCTAssertEqual(reports.all.map { $0.operation }, ["Todos.toggle"])
+
+        // Reconnecting: the connection state already says so, so a command tapped meanwhile is only logged.
+        transport.drop()
+        do {
+            _ = try core.callSync(.freeFunction(methodId: 3), method: 3, args: [])
+            XCTFail("a call while reconnecting must fail")
+        } catch {
+            core.report(error, operation: "Todos.toggle")
+        }
+        XCTAssertEqual(reports.all.count, 1, "not reported while reconnecting")
+
+        // The way back: reported again.
+        transport.reconnect()
+        let back = await waitUntil { core.connectionState == .connected }
+        XCTAssertTrue(back)
+        core.report(UndraReplyError(status: .cancelled, body: []), operation: "Todos.toggle")
+        XCTAssertEqual(reports.all.count, 2)
+
+        // Lost for good (the dev server restarted): still the connection's news, though the calls after it say `.closed`.
+        transport.drop()
+        transport.disconnect(UndraSessionLostError(reason: "session lost: no session"))
+        XCTAssertEqual(core.connectionState, .closed(.sessionLost))
+        core.report(UndraTransportError.closed, operation: "Todos.toggle")
+        core.report(UndraSessionLostError(reason: "x"), operation: "Todos.toggle")
+        XCTAssertEqual(reports.all.count, 2, "not reported after the session was lost")
+    }
+
+    func testACallOnACoreTheAppShutDownIsAProgrammingErrorAndIsReported() throws {
+        let reports = ReportedErrors()
+        let transport = FakeTransport(directSync: false)
+        let core = try makeRemoteCore(transport, log: StateLog(), onError: { reports.append($0) })
+        core.shutdown()
+        XCTAssertEqual(core.connectionState, .closed(.requested))
+        core.report(UndraTransportError.closed, operation: "Todos.toggle")
+        XCTAssertEqual(reports.all, [UndraUnhandledError(operation: "Todos.toggle", error: .unavailable(.closed))])
+        // A timeout is not the connection state's news either.
+        core.report(UndraTransportError.timedOut(operation: "callSync"), operation: "Todos.toggle")
+        XCTAssertEqual(reports.all.count, 2)
     }
 
     func testAfterTheWayBackCallsWorkAgain() async throws {

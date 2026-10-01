@@ -1,6 +1,7 @@
 export * from "./fnv.js";
 export * from "./wire/index.js";
 export * from "./core.js";
+export * from "./call-error.js";
 export * from "./errors.js";
 export * from "./mirror.js";
 export * from "./object.js";

@@ -11,17 +11,21 @@ import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.encodeToByteArray
 
-/** Sends the events of this port from the host to the core. */
+/** Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `LoadOptions.onError`; the methods do not throw. */
 class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) {
     fun changed(online: Boolean, kind: NetKind) {
         val w = UndraWriter()
         w.writeBool(online)
         NetKind.encode(w, kind)
-        this.core.event(
-            UndraIds.Ports.Connectivity.PORT_ID,
-            UndraIds.Ports.Connectivity.CHANGED,
-            w.toByteArray(),
-        )
+        try {
+            this.core.event(
+                UndraIds.Ports.Connectivity.PORT_ID,
+                UndraIds.Ports.Connectivity.CHANGED,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "ConnectivityEvents.changed")
+        }
     }
 }
 

@@ -93,9 +93,12 @@ reason is `requested` (you closed the core), `schemaMismatch`, `sessionLost` or 
   do not retry in step: 250, 500, 1000, 2000, 4000, 5000, 5000 ms, jittered. Each attempt gets at most 5 s.
   The first connection of `load` is not retried: it fails fast, as before, with the URL it tried.
 * **In flight.** When the connection drops, every call, stream and pending `observe` fails **at once** with the
-  platform's existing "unavailable" outcome (TypeScript `UndraTransportError("closed")`, Kotlin `UndraException`,
-  Swift `UndraCallError.unavailable(.connectionLost)`). Calls made while reconnecting fail the same way, at once.
-  Nothing waits for the network and nothing is replayed behind your back.
+  platform's "unavailable" outcome (TypeScript `UndraTransportError("closed")`, Kotlin `UndraTransportException`
+  with reason `CONNECTION_LOST`, Swift `UndraTransportError.connectionLost`), which a generated call throws as
+  `UndraCallError.Unavailable` (`docs/ERRORS.md`). Calls made while reconnecting fail the same way, at once.
+  Nothing waits for the network and nothing is replayed behind your back. A command (a method that returns nothing
+  and has no error type) that fails this way is logged at warning level and is **not** handed to `onError`: the
+  connection state already reports the drop.
 * **Resync.** After the handshake the runtime observes every store signal you observed and releases what you
   released meanwhile. The core answers each observation with its current values, so every mirror converges by
   itself. (`connected` is announced after that.)

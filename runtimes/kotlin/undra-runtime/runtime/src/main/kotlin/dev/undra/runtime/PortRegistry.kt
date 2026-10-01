@@ -23,11 +23,13 @@ import kotlinx.coroutines.launch
  *    whole `PortReply` payload; the core is told [PortOutcome.Async] straight away.
  *  - A port or method that is not registered is [PortOutcome.Unavailable].
  *
- * An [UndraPortException] answers with status `ERROR` and its body; any other exception is logged and
- * answers `UNAVAILABLE`, so the core sees a `PortError::Unavailable` rather than a hung call.
+ * An [UndraPortException] answers with status `ERROR` and its body; any other exception is handed to [failed]
+ * (logged and passed to `LoadOptions.onError`) and answers `UNAVAILABLE`, so the core sees a
+ * `PortError::Unavailable` rather than a hung call.
  */
 internal class PortRegistry(
     private val scope: CoroutineScope,
+    private val failed: (error: Throwable, operation: String) -> Unit,
     private val reply: (ByteArray) -> Unit,
 ) {
     private val ports = ConcurrentHashMap<Int, PortImpl>()
@@ -64,7 +66,7 @@ internal class PortRegistry(
         } catch (e: OutOfMemoryError) {
             throw e
         } catch (e: Throwable) {
-            UndraLog.warn("sync port $portId method $methodId failed", e)
+            failed(e, operationName(portId, methodId))
             return PortOutcome.Unavailable
         }
         if (result === COROUTINE_SUSPENDED) {
@@ -96,7 +98,7 @@ internal class PortRegistry(
             } catch (e: OutOfMemoryError) {
                 throw e
             } catch (e: Throwable) {
-                UndraLog.warn("async port $portId method $methodId failed", e)
+                failed(e, operationName(portId, methodId))
                 portReply(portCallId, PortStatus.UNAVAILABLE, EMPTY)
             }
             reply(answer)
@@ -113,6 +115,9 @@ internal class PortRegistry(
 
     private companion object {
         val EMPTY = ByteArray(0)
+
+        /** The operation a failed port is reported as: `port 0x1234abcd method 0x5678cdef`. */
+        fun operationName(portId: UInt, methodId: UInt): String = "port 0x${portId.toString(16)} method 0x${methodId.toString(16)}"
 
         /** A whole `PortReply` payload: `port_call_id u32, status u8, body`. */
         fun portReply(portCallId: UInt, status: PortStatus, body: ByteArray): ByteArray {

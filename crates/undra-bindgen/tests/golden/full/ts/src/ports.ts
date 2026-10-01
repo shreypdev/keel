@@ -21,19 +21,23 @@ import {
   NetKindCodec,
 } from "./types.js";
 
-/** Sends the events of this port from the host to the core. */
+/** Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `onError`; the methods do not throw. */
 export class ConnectivityEvents {
   constructor(private readonly core: UndraCore = UndraCore.shared) {}
 
   changed(online: boolean, kind: NetKind): void {
-    const w = new UndraWriter();
-    w.writeBool(online);
-    NetKindCodec.encode(w, kind);
-    this.core.event(
-      UndraIds.Ports.Connectivity.portId,
-      UndraIds.Ports.Connectivity.changed,
-      w.finish(),
-    );
+    try {
+      const w = new UndraWriter();
+      w.writeBool(online);
+      NetKindCodec.encode(w, kind);
+      this.core.event(
+        UndraIds.Ports.Connectivity.portId,
+        UndraIds.Ports.Connectivity.changed,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "ConnectivityEvents.changed");
+    }
   }
 }
 

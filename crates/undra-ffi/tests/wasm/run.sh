@@ -5,7 +5,9 @@
 #   PROFILE=release-wasm crates/undra-ffi/tests/wasm/run.sh   # size-optimised, panic=abort (what ships)
 #
 # The TypeScript run builds the runtime from source into a scratch directory every time (`npm ci`
-# first when node_modules is missing); see the end of this file.
+# first when node_modules is missing); see the end of this file. It drives the core in both wasm modes:
+# `wasm-main` on the test's own thread and `wasm-worker` on a real `worker_threads` Worker (Clock, Rng and
+# Log answered inside the worker, async host ports through the main thread, snapshot and restore).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../../.." && pwd)"

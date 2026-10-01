@@ -19,6 +19,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
+      "@undra/runtime/worker": ["../../runtimes/ts/@undra/runtime/src/worker.ts"],
       "@undra/runtime": ["../../runtimes/ts/@undra/runtime/src/index.ts"],
       "@playground/core": ["../../examples/playground/generated/ts/src/index.ts"]
     }

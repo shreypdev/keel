@@ -89,10 +89,10 @@ const replyError = (codec, value) => new rt.UndraReplyError(ReplyStatus.Error, e
     syncer.send(request),
     (e) => e instanceof rt.HttpError && e instanceof rt.HttpError.Network && e.value === "down",
   );
-  // Anything but an error reply passes through untouched.
+  // Anything but an error reply maps onto the closed set.
   const panic = new rt.UndraReplyError(ReplyStatus.Panic, new Uint8Array(0));
   core.replies.push(panic);
-  await assert.rejects(syncer.send(request), (e) => e === panic);
+  await assert.rejects(syncer.send(request), (e) => e instanceof rt.UndraCallError.Panicked);
 
   core.replies.push(replyError(rt.FsErrorCodec, new rt.FsError.Denied()));
   await assert.rejects(syncer.save("/tmp/x"), (e) => e instanceof rt.FsError.Denied);

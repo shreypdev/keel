@@ -3,9 +3,11 @@
 
 package golden.full
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraPortException
 import dev.undra.runtime.UndraReplyException
+import dev.undra.runtime.UndraTransportException
 import dev.undra.runtime.Mirror
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
@@ -72,6 +74,8 @@ private class FakeCore : UndraCore() {
     val events = mutableListOf<Triple<UInt, UInt, String>>()
     val replies = ArrayDeque<Any>()
     val streams = ArrayDeque<List<Any>>()
+    /** What generated commands and `apply` reported through `report` (operation, mapped failure). */
+    val reports = mutableListOf<Pair<String, Throwable>>()
     var nextHandle = 7L
     private val fakeMirror = FakeMirror()
     override val mirror: Mirror get() = fakeMirror
@@ -118,6 +122,10 @@ private class FakeCore : UndraCore() {
     }
 
     override fun release(handle: Long) = Unit
+
+    override fun report(error: Throwable, operation: String) {
+        reports += operation to error
+    }
 
     fun deliver(handle: Long, signalId: Int, op: ChangeOp, value: ByteArray) {
         fakeMirror.callbacks.getValue(handle)(signalId.toUInt(), op, UndraReader(value))
@@ -196,10 +204,14 @@ private fun errors() {
     expectEq(TodoError.EmptyTitle.message, "title cannot be empty", "unit variant")
     expectEq(TodoError.Storage("disk").message, "storage failure (disk)", "named field")
 
-    val typed = TodoError.fromReply(replyError(TodoError.encodeToByteArray(TodoError.EmptyTitle)))
+    val typed = UndraCallError.mapped(replyError(TodoError.encodeToByteArray(TodoError.EmptyTitle)), TodoError)
     expectEq(typed, TodoError.EmptyTitle, "typed error from a reply")
     val panic = UndraReplyException(ReplyStatus.PANIC, ByteArray(0))
-    expect(TodoError.fromReply(panic) === panic, "other replies pass through")
+    expect(UndraCallError.mapped(panic, TodoError) is UndraCallError.Panicked, "other replies map onto the closed set")
+    expect(
+        UndraCallError.mapped(UndraReplyException(ReplyStatus.ERROR, byteArrayOf(9, 9, 9)), TodoError) is UndraCallError.Malformed,
+        "a typed body that does not decode",
+    )
 }
 
 private fun objects() {
@@ -223,10 +235,24 @@ private fun objects() {
         expectEq(core.calls.last().args, "13000000" + "68747470733a2f2f6578616d706c652e636f6d", "fetch arguments")
         core.replies.add(Codecs.string.encodeToByteArray("ok"))
         expectEq(calc.fetch("u"), "ok", "suspend method")
-        val panic = UndraReplyException(ReplyStatus.PANIC, ByteArray(0))
+        val panic = UndraReplyException(ReplyStatus.PANIC, panicBody("kaboom", "frame"))
         core.replies.add(panic)
-        val thrown = expectThrows<UndraReplyException>("other failures") { runBlocking { calc.fetch("u") } }
-        expect(thrown === panic, "the same exception")
+        val thrown = expectThrows<UndraCallError.Panicked>("other failures are UndraCallError") { runBlocking { calc.fetch("u") } }
+        expectEq(thrown.panicMessage, "kaboom", "the panic message")
+        expectEq(thrown.backtrace, "frame", "the backtrace")
+        core.replies.add(UndraReplyException(ReplyStatus.CANCELLED, ByteArray(0)))
+        expectThrows<UndraCallError.CancelledByCore>("cancelled by the core") { runBlocking { calc.fetch("u") } }
+        core.replies.add(UndraReplyException(ReplyStatus.BAD_REQUEST, stringBody("stale handle")))
+        expectEq(expectThrows<UndraCallError.Refused>("refused") { runBlocking { calc.fetch("u") } }.reason, "stale handle", "the reason")
+        core.replies.add(UndraTransportException(UndraTransportException.Reason.CLOSED, "this UndraCore is closed"))
+        expectThrows<UndraCallError.Unavailable>("closed core") { runBlocking { calc.fetch("u") } }
+        core.replies.add(Codecs.u32.encodeToByteArray(1u))
+        expectThrows<UndraCallError.Malformed>("a result that does not decode") { runBlocking { calc.fetch("u") } }
+        core.replies.add(kotlinx.coroutines.CancellationException("the caller was cancelled"))
+        expectThrows<kotlinx.coroutines.CancellationException>("cancellation of the caller passes through") { runBlocking { calc.fetch("u") } }
+        // A call without an error type maps the same way.
+        core.replies.add(UndraReplyException(ReplyStatus.PANIC, panicBody("sync boom", "")))
+        expectEq(expectThrows<UndraCallError.Panicked>("sync call") { calc.add(1, 2) }.panicMessage, "sync boom", "sync panic")
 
         core.streams.add(listOf(bytes("01000000"), bytes("02000000")))
         expectEq(calc.ticks().toList(), listOf(1u, 2u), "stream items")
@@ -236,14 +262,51 @@ private fun objects() {
             runBlocking { calc.watch(Priority.HIGH).collect { seen += it } }
         }
         expectEq(seen, listOf(todo), "items before the failure")
+        expectEq(core.calls.last().args, "0200", "stream arguments")
+
+        // The core ending a stream itself: the String of SPEC 5.9, read as `cancelled by the core` or `panicked`.
+        core.streams.add(listOf(replyError(stringBody("cancelled: a restore replaced the receiver"))))
+        expectThrows<UndraCallError.CancelledByCore>("a stream ended by a restore") { runBlocking { calc.watch(Priority.HIGH).collect {} } }
+        core.streams.add(listOf(replyError(stringBody("cancelled: the runtime shut down"))))
+        expectThrows<UndraCallError.CancelledByCore>("a stream without an error type ended by shutdown") { runBlocking { calc.ticks().collect {} } }
+        core.streams.add(listOf(replyError(stringBody("the stream panicked: boom"))))
+        expectEq(
+            expectThrows<UndraCallError.Panicked>("a stream panic") { runBlocking { calc.ticks().collect {} } }.panicMessage,
+            "the stream panicked: boom",
+            "the panic text",
+        )
+        core.streams.add(listOf(UndraTransportException(UndraTransportException.Reason.CLOSED, "closed")))
+        expectThrows<UndraCallError.Unavailable>("a stream on a closed core") { runBlocking { calc.ticks().collect {} } }
+        core.streams.add(listOf(bytes("01")))
+        expectThrows<UndraCallError.Malformed>("a stream item that does not decode") { runBlocking { calc.ticks().collect {} } }
     }
-    expectEq(core.calls.last().args, "0200", "stream arguments")
 
     core.replies.add(Codecs.string.encodeToByteArray("hello"))
     expectEq(greet("undra", core), "hello", "free function")
     expectEq(core.calls.last().target, CallTarget.FreeFunction(UndraIds.Functions.GREET), "function target")
     core.replies.add(replyError(TodoError.encodeToByteArray(TodoError.EmptyTitle)))
     expectThrows<TodoError.EmptyTitle>("function failure") { runBlocking { ping(core) } }
+    core.replies.add(UndraReplyException(ReplyStatus.PANIC, panicBody("later", "")))
+    expectThrows<UndraCallError.Panicked>("function failure with an error type that is not its own") { runBlocking { ping(core) } }
+    core.replies.add(UndraReplyException(ReplyStatus.PANIC, panicBody("sync fn", "")))
+    expectThrows<UndraCallError.Panicked>("free function") { greet("undra", core) }
+
+    // Constructors are calls: refused and closed-core failures are UndraCallError, a typed one is the error.
+    core.replies.add(UndraReplyException(ReplyStatus.BAD_REQUEST, stringBody("undecodable arguments")))
+    expectThrows<UndraCallError.Refused>("constructor") { Calculator(core) }
+    expectThrows<UndraCallError.Refused>("constructor through create") {
+        core.replies.add(UndraReplyException(ReplyStatus.BAD_REQUEST, stringBody("again")))
+        Calculator.create(core)
+    }
+}
+
+private fun stringBody(text: String): ByteArray = Codecs.string.encodeToByteArray(text)
+
+private fun panicBody(message: String, backtrace: String): ByteArray {
+    val w = UndraWriter()
+    w.writeStr(message)
+    w.writeStr(backtrace)
+    return w.toByteArray()
 }
 
 private fun stores() {
@@ -282,6 +345,25 @@ private fun stores() {
 
     store.setFilter(Filter.ALL)
     expectEq(core.calls.last().args, "0000", "store method")
+    expectEq(core.reports.size, 0, "a command that succeeds reports nothing")
+
+    // A command never throws: a failure is reported with the operation as Kotlin spells it, and the call returns.
+    core.replies.add(UndraReplyException(ReplyStatus.BAD_REQUEST, stringBody("stale handle")))
+    store.setFilter(Filter.DONE)
+    core.replies.add(UndraTransportException(UndraTransportException.Reason.CLOSED, "this UndraCore is closed"))
+    store.toggle(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"))
+    expectEq(core.reports.map { it.first }, listOf("TodoStore.setFilter", "TodoStore.toggle"), "reported operations")
+    expect(core.reports[0].second is UndraReplyException, "the raw failure is handed to report, which maps it")
+    core.reports.clear()
+    expectEq(store.filter.value, Filter.DONE, "a failed command changed nothing (the filter was last set by a change-set)")
+
+    // A change that does not decode is reported and skipped, never half applied.
+    core.deliver(9L, 3, ChangeOp.FULL, byteArrayOf(1))
+    expectEq(store.remaining.value, 4u, "an undecodable value is skipped")
+    core.deliver(9L, 3, ChangeOp.FULL, Codecs.u32.encodeToByteArray(7u) + byteArrayOf(0))
+    expectEq(store.remaining.value, 4u, "a value with trailing bytes is skipped whole, not stored then reported")
+    expectEq(core.reports.map { it.first }, listOf("TodoStore.apply(signal: 3)", "TodoStore.apply(signal: 3)"), "reported apply failures")
+    core.reports.clear()
     core.replies.add(replyError(TodoError.encodeToByteArray(TodoError.NotFound("db"))))
     expectThrows<TodoError.NotFound>("fallible async constructor") { runBlocking { TodoStore.open("/tmp/db", core) } }
 

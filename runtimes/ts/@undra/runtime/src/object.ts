@@ -1,6 +1,7 @@
+import { UndraCallError } from "./call-error.js";
 import type { UndraCore } from "./core.js";
 import type { Signal } from "./signal.js";
-import type { ChangeOp, Handle } from "./wire/index.js";
+import { ALL_SIGNALS, type ChangeOp, type Handle } from "./wire/index.js";
 
 /**
  * `Symbol.dispose` where the platform has it (Node 20+, current browsers),
@@ -118,6 +119,22 @@ export abstract class UndraStore extends UndraObject {
    * patch, or a lazy-list invalidation.
    */
   protected abstract _apply(signalId: number, op: ChangeOp, value: Uint8Array): void;
+
+  /**
+   * Starts observing every signal, so the core reports their current values: resolves once they have been
+   * applied. Generated `create()` functions call it after constructing the store. If the core cannot be
+   * reached the store is closed (no handle leaks) and the failure is thrown as an `UndraCallError`.
+   *
+   * @throws {UndraCallError} If the core is closed or unreachable, or never delivers the initial values.
+   */
+  protected async _observeAll(): Promise<void> {
+    try {
+      await this.core.observe(this.handle, ALL_SIGNALS, true);
+    } catch (error) {
+      this.close();
+      throw UndraCallError.mapped(error);
+    }
+  }
 
   /** Stops mirroring, then releases the handle. Idempotent. */
   override close(): void {

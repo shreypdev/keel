@@ -2,8 +2,8 @@
 
 package golden.stores
 
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.UndraStore
 import dev.undra.runtime.wire.Codecs
 import dev.undra.runtime.wire.Handle
@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 
 /** A store with a single signal and a constructor argument. */
@@ -29,26 +30,32 @@ class Clock private constructor(core: UndraCore, handle: Long) : UndraStore(core
     val now: StateFlow<Timestamp> = _now.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _now.value = Codecs.timestamp.decode(reader)
-                    reader.finish()
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.timestamp.decode(reader)
+                        reader.finish()
+                        _now.value = value
+                    }
                 }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "Clock.apply(signal: $signalId)")
         }
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(zone: String, ctx: UndraCore = UndraCore.shared): Clock {
             val w = UndraWriter()
             w.writeStr(zone)
-            val handle = ctx.construct(UndraIds.Objects.Clock.TYPE_ID, UndraIds.Objects.Clock.NEW, w.toByteArray())
+            val handle = ctx.constructObject(UndraIds.Objects.Clock.TYPE_ID, UndraIds.Objects.Clock.NEW, w.toByteArray())
             return Clock(ctx, handle)
         }
     }
@@ -90,173 +97,212 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
     val uuid: StateFlow<UUID> = _uuid.asStateFlow()
 
     init {
-        core.observe(handle, UInt.MAX_VALUE, true)
+        observeAll()
     }
 
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     constructor(ctx: UndraCore = UndraCore.shared) : this(
         ctx,
-        ctx.construct(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0)),
+        ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0)),
     )
 
-    /** Shows only the todos matching `f`. */
+    /**
+     * Shows only the todos matching `f`.
+     * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
+     */
     fun setFilter(f: Filter) {
-        val w = UndraWriter()
-        Filter.encode(w, f)
-        this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.SET_FILTER),
-            UndraIds.Objects.Todos.SET_FILTER,
-            w.toByteArray(),
-        )
+        try {
+            val w = UndraWriter()
+            Filter.encode(w, f)
+            this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.SET_FILTER),
+                UndraIds.Objects.Todos.SET_FILTER,
+                w.toByteArray(),
+            )
+        } catch (e: Exception) {
+            this.core.report(e, "Todos.setFilter")
+        }
     }
 
     /**
      * Adds a todo.
      * @throws TodoError
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     * @throws CancellationException if the calling coroutine is cancelled.
      */
     suspend fun add(title: String): Todo {
         val w = UndraWriter()
         w.writeStr(title)
-        val body = try {
-            this.core.call(
+        try {
+            val body = this.core.call(
                 CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.ADD),
                 UndraIds.Objects.Todos.ADD,
                 w.toByteArray(),
             )
-        } catch (e: UndraReplyException) {
-            throw TodoError.fromReply(e)
+            return Todo.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e, TodoError)
         }
-        return Todo.decodeAll(body)
     }
 
+    /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
     fun remainingAfter(id: UUID): UInt {
         val w = UndraWriter()
         Codecs.uuid.encode(w, id)
-        val body = this.core.callSync(
-            CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.REMAINING_AFTER),
-            UndraIds.Objects.Todos.REMAINING_AFTER,
-            w.toByteArray(),
-        )
-        return Codecs.u32.decodeAll(body)
+        try {
+            val body = this.core.callSync(
+                CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.REMAINING_AFTER),
+                UndraIds.Objects.Todos.REMAINING_AFTER,
+                w.toByteArray(),
+            )
+            return Codecs.u32.decodeAll(body)
+        } catch (e: Exception) {
+            throw UndraCallError.mapped(e)
+        }
     }
 
+    /** Collecting throws UndraCallError; cancelling the collector ends it quietly. */
     fun changes(): Flow<Todo> {
         val stream = this.core.stream(
             CallTarget.ObjectMethod(Handle(this.handle), UndraIds.Objects.Todos.CHANGES),
             UndraIds.Objects.Todos.CHANGES,
             ByteArray(0),
         )
-        return stream.map { bytes -> Todo.decodeAll(bytes) }
+        return stream
+            .map { bytes -> Todo.decodeAll(bytes) }
+            .catch { error ->
+                throw UndraCallError.mappedStream(error)
+            }
     }
 
     override fun apply(signalId: UInt, op: ChangeOp, reader: UndraReader) {
-        when (signalId) {
-            0u -> {
-                if (op == ChangeOp.FULL) {
-                    _todos.value = codecVecTodo.decode(reader)
-                    reader.finish()
-                } else if (op == ChangeOp.PATCH) {
-                    val ops = KeyedPatch.decodePatch(reader, Todo)
-                    reader.finish()
-                    try {
-                        _todos.value = KeyedPatch.applyPatch(_todos.value, ops)
-                    } catch (e: WireException.PatchOutOfBounds) {
-                        resync(0u)
+        try {
+            when (signalId) {
+                0u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecVecTodo.decode(reader)
+                        reader.finish()
+                        _todos.value = value
+                    } else if (op == ChangeOp.PATCH) {
+                        val ops = KeyedPatch.decodePatch(reader, Todo)
+                        reader.finish()
+                        try {
+                            _todos.value = KeyedPatch.applyPatch(_todos.value, ops)
+                        } catch (e: WireException.PatchOutOfBounds) {
+                            resync(0u)
+                        }
                     }
                 }
-            }
-            1u -> {
-                if (op == ChangeOp.FULL) {
-                    _filter.value = Filter.decode(reader)
-                    reader.finish()
-                }
-            }
-            2u -> {
-                if (op == ChangeOp.FULL) {
-                    _visible.value = codecVecTodo.decode(reader)
-                    reader.finish()
-                } else if (op == ChangeOp.PATCH) {
-                    val ops = KeyedPatch.decodePatch(reader, Todo)
-                    reader.finish()
-                    try {
-                        _visible.value = KeyedPatch.applyPatch(_visible.value, ops)
-                    } catch (e: WireException.PatchOutOfBounds) {
-                        resync(2u)
+                1u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Filter.decode(reader)
+                        reader.finish()
+                        _filter.value = value
                     }
                 }
-            }
-            3u -> {
-                if (op == ChangeOp.FULL) {
-                    _remaining.value = Codecs.u32.decode(reader)
-                    reader.finish()
+                2u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecVecTodo.decode(reader)
+                        reader.finish()
+                        _visible.value = value
+                    } else if (op == ChangeOp.PATCH) {
+                        val ops = KeyedPatch.decodePatch(reader, Todo)
+                        reader.finish()
+                        try {
+                            _visible.value = KeyedPatch.applyPatch(_visible.value, ops)
+                        } catch (e: WireException.PatchOutOfBounds) {
+                            resync(2u)
+                        }
+                    }
                 }
-            }
-            4u -> {
-                if (op == ChangeOp.FULL) {
-                    _selected.value = codecOptionTodo.decode(reader)
-                    reader.finish()
+                3u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.u32.decode(reader)
+                        reader.finish()
+                        _remaining.value = value
+                    }
                 }
-            }
-            5u -> {
-                if (op == ChangeOp.FULL) {
-                    _title.value = Codecs.string.decode(reader)
-                    reader.finish()
+                4u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTodo.decode(reader)
+                        reader.finish()
+                        _selected.value = value
+                    }
                 }
-            }
-            6u -> {
-                if (op == ChangeOp.FULL) {
-                    _counter.value = Counter.decode(reader)
-                    reader.finish()
+                5u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.string.decode(reader)
+                        reader.finish()
+                        _title.value = value
+                    }
                 }
-            }
-            7u -> {
-                if (op == ChangeOp.FULL) {
-                    _tags.value = codecMapStringU32.decode(reader)
-                    reader.finish()
+                6u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Counter.decode(reader)
+                        reader.finish()
+                        _counter.value = value
+                    }
                 }
-            }
-            8u -> {
-                if (op == ChangeOp.FULL) {
-                    _lastError.value = codecOptionTodoError.decode(reader)
-                    reader.finish()
+                7u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecMapStringU32.decode(reader)
+                        reader.finish()
+                        _tags.value = value
+                    }
                 }
-            }
-            9u -> {
-                if (op == ChangeOp.FULL) {
-                    _elapsed.value = Codecs.duration.decode(reader)
-                    reader.finish()
+                8u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = codecOptionTodoError.decode(reader)
+                        reader.finish()
+                        _lastError.value = value
+                    }
                 }
-            }
-            10u -> {
-                if (op == ChangeOp.FULL) {
-                    _created.value = Codecs.timestamp.decode(reader)
-                    reader.finish()
+                9u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.duration.decode(reader)
+                        reader.finish()
+                        _elapsed.value = value
+                    }
                 }
-            }
-            11u -> {
-                if (op == ChangeOp.FULL) {
-                    _blob.value = Codecs.bytes.decode(reader)
-                    reader.finish()
+                10u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.timestamp.decode(reader)
+                        reader.finish()
+                        _created.value = value
+                    }
                 }
-            }
-            12u -> {
-                if (op == ChangeOp.FULL) {
-                    _total.value = Codecs.u64.decode(reader)
-                    reader.finish()
+                11u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.bytes.decode(reader)
+                        reader.finish()
+                        _blob.value = value
+                    }
                 }
-            }
-            13u -> {
-                if (op == ChangeOp.FULL) {
-                    _default.value = Codecs.bool.decode(reader)
-                    reader.finish()
+                12u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.u64.decode(reader)
+                        reader.finish()
+                        _total.value = value
+                    }
                 }
-            }
-            14u -> {
-                if (op == ChangeOp.FULL) {
-                    _uuid.value = Codecs.uuid.decode(reader)
-                    reader.finish()
+                13u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.bool.decode(reader)
+                        reader.finish()
+                        _default.value = value
+                    }
                 }
+                14u -> {
+                    if (op == ChangeOp.FULL) {
+                        val value = Codecs.uuid.decode(reader)
+                        reader.finish()
+                        _uuid.value = value
+                    }
+                }
+                else -> Unit
             }
-            else -> Unit
+        } catch (e: Exception) {
+            core.report(e, "Todos.apply(signal: $signalId)")
         }
     }
 
@@ -267,20 +313,26 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
     }
 
     companion object {
+        /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
         fun create(ctx: UndraCore = UndraCore.shared): Todos {
-            val handle = ctx.construct(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0))
+            val handle = ctx.constructObject(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW, ByteArray(0))
             return Todos(ctx, handle)
         }
 
-        /** @throws TodoError */
+        /**
+         * @throws TodoError
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         * @throws CancellationException if the calling coroutine is cancelled.
+         */
         suspend fun open(path: String, ctx: UndraCore = UndraCore.shared): Todos {
             val w = UndraWriter()
             w.writeStr(path)
             val handle = try {
                 Codecs.handle.decodeAll(ctx.call(CallTarget.Constructor(UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.OPEN), UndraIds.Objects.Todos.OPEN, w.toByteArray()))
-            } catch (e: UndraReplyException) {
-                throw TodoError.fromReply(e)
+            } catch (e: Exception) {
+                throw UndraCallError.mapped(e, TodoError)
             }
+            if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
             return Todos(ctx, handle)
         }
     }

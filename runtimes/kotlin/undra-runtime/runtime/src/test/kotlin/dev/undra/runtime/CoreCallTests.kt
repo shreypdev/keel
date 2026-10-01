@@ -454,7 +454,7 @@ class CoreCallTests : Suite() {
             assertEq(0x1234uL, e.got)
             assertTrue(e.message!!.contains("0x691eee0733e4a44f") && e.message!!.contains("0x1234"), e.message!!)
             assertTrue(t.closed, "the transport was closed")
-            assertThrows<UndraException>("shared stays unset") { UndraCore.shared }
+            assertEq(null, UndraCore.current, "shared stays unset")
         }
 
         case("attach wraps a transport failure and closes the transport") {
