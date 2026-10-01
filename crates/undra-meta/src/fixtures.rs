@@ -309,6 +309,7 @@ pub(crate) fn representative_schema() -> Schema {
                 computed: false,
                 key: Some("id".into()),
                 no_coalesce: false,
+                default: false,
             },
             SignalDef {
                 name: "filter".into(),
@@ -317,6 +318,7 @@ pub(crate) fn representative_schema() -> Schema {
                 computed: false,
                 key: None,
                 no_coalesce: false,
+                default: false,
             },
             SignalDef {
                 name: "remaining".into(),
@@ -325,6 +327,7 @@ pub(crate) fn representative_schema() -> Schema {
                 computed: true,
                 key: None,
                 no_coalesce: false,
+                default: false,
             },
             SignalDef {
                 name: "archive".into(),
@@ -333,6 +336,7 @@ pub(crate) fn representative_schema() -> Schema {
                 computed: false,
                 key: None,
                 no_coalesce: false,
+                default: false,
             },
             SignalDef {
                 name: "selected".into(),
@@ -341,6 +345,7 @@ pub(crate) fn representative_schema() -> Schema {
                 computed: false,
                 key: None,
                 no_coalesce: false,
+                default: false,
             },
         ],
     });

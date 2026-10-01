@@ -62,7 +62,7 @@ impl Site {
     pub(crate) const SIGNAL: Site = Site {
         name: "a store signal field",
         root: false,
-        default: false,
+        default: true,
         key: true,
         no_coalesce: true,
         schema: true,
@@ -334,7 +334,9 @@ fn option_home(option: &str) -> &'static str {
         "crate" => {
             "move it to the item: `#[undra(crate = \"path\")]` on a struct, enum, trait or impl block, or `crate = \"path\"` in the macro's arguments"
         }
-        "default" => "move it to a field of a `#[undra::api]` record or enum variant, or remove it",
+        "default" => {
+            "move it to a field of a `#[undra::api]` record or enum variant, or to a `Signal<T>` field of a `#[undra::store]` struct, or remove it"
+        }
         "key" => "move it to a `Signal<Vec<T>>` field of a `#[undra::store]` struct, or remove it",
         "no_coalesce" => "move it to a signal field of a `#[undra::store]` struct, or remove it",
         _ => "remove the option, or move it to where it applies",
@@ -347,7 +349,7 @@ fn option_hint(option: &str) -> &'static str {
             "`crate = \"path\"` is an item-level option: it names the crate that generated code refers to"
         }
         "default" => {
-            "`default` marks a field of a `#[undra::api]` record or enum variant as having a default in generated constructors"
+            "`default` marks a field of a `#[undra::api]` record or enum variant as having a default in generated constructors and in migrations, and a store's `Signal<T>` as restored with `T::default()` when a snapshot lacks it"
         }
         "key" => {
             "`key = \"field\"` turns a store's `Signal<Vec<T>>` into a keyed list that ships patches"

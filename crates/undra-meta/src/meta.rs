@@ -355,6 +355,8 @@ pub struct SignalMeta {
     pub key: Option<&'static str>,
     /// `#[undra(no_coalesce)]`.
     pub no_coalesce: bool,
+    /// `#[undra(default)]` on a plain signal (ADR-037).
+    pub default: bool,
 }
 
 impl From<&SignalMeta> for SignalDef {
@@ -366,6 +368,7 @@ impl From<&SignalMeta> for SignalDef {
             computed: m.computed,
             key: m.key.map(str::to_owned),
             no_coalesce: m.no_coalesce,
+            default: m.default,
         }
     }
 }
@@ -532,6 +535,7 @@ mod tests {
                     computed: false,
                     key: None,
                     no_coalesce: false,
+                    default: false,
                 },
                 SignalMeta {
                     name: "rows",
@@ -540,6 +544,7 @@ mod tests {
                     computed: false,
                     key: Some("id"),
                     no_coalesce: false,
+                    default: false,
                 },
             ],
         }),
