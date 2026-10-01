@@ -98,8 +98,11 @@ done
 list=$(tar -tzf "$cli_tgz" | sort | tr '\n' ' ')
 [ "$list" = "package/LICENSE-APACHE package/LICENSE-MIT package/README.md package/bin/undra.js package/package.json " ] \
   || fail "unexpected files in @undra/cli: $list"
-tar -tvzf "$plat_tgz" | grep -Eq '^-rwxr-xr-x.* package/undra$' \
-  || fail "the binary in $plat_tgz is not executable (mode 0755)"
+# Read the listing first: with pipefail, `tar | grep -q` fails on a successful match when grep
+# closes the pipe and tar dies of SIGPIPE (seen on the Linux runner).
+plat_listing=$(tar -tvzf "$plat_tgz")
+printf '%s\n' "$plat_listing" | grep -E '^-rwxr-xr-x.* package/undra$' >/dev/null \
+  || fail "the binary in $plat_tgz is not executable (expected mode 0755 in the tarball)"
 tar -xzOf "$cli_tgz" package/package.json | node -e '
   const pkg = JSON.parse(require("fs").readFileSync(0, "utf8"));
   const want = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"].map((p) => "@undra/cli-" + p).sort();
