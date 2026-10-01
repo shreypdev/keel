@@ -1,17 +1,18 @@
 // swift-tools-version: 6.0
 //
 // The Swift column of the contract scenarios (contract-tests/scenarios.md): UndraRuntime over the C
-// ABI against the real playground core, through the bindings `undra bindgen` generated.
+// ABI against the real playground core, through the bindings `undra bindgen` generated, and, for S26,
+// the same core under two more namespaces (examples/two-cores/a and b) in the same process.
 //
-// Run it with `contract-tests/swift/run.sh`. It builds the core with the undra CLI, stages
-// the library in `.build/core` and runs `swift test` with `UNDRA_LINK_CORE=1`: that variable makes
-// the runtime package leave its link-time stand-in (`undra_stub.c`) out, so the `undra_*` symbols come
-// from the real core. The linker flags below find the staged library.
+// Run it with `contract-tests/swift/run.sh`. It builds the three cores with the undra CLI and stages
+// the libraries in `.build/core`; each exports one symbol, its table entry (`<namespace>_undra_api`,
+// ADR-044), which the generated packages reference, so the three link side by side. The linker flags
+// below find the staged libraries.
 
 import PackageDescription
 
-/// Where run.sh stages the core library (a copy of build/host/libundra_core.dylib whose install name
-/// is `@rpath/libundra_core.dylib`).
+/// Where run.sh stages the cores (copies of build/host/lib<namespace>.dylib whose install names are
+/// `@rpath/lib<namespace>.dylib`).
 let coreDirectory = Context.packageDirectory + "/.build/core"
 
 let package = Package(
@@ -20,6 +21,8 @@ let package = Package(
     dependencies: [
         .package(path: "../../runtimes/swift/UndraRuntime"),
         .package(path: "Packages/PlaygroundCore"),
+        .package(path: "Packages/PlaygroundA"),
+        .package(path: "Packages/PlaygroundB"),
     ],
     targets: [
         .testTarget(
@@ -27,13 +30,17 @@ let package = Package(
             dependencies: [
                 .product(name: "UndraRuntime", package: "UndraRuntime"),
                 .product(name: "PlaygroundCore", package: "PlaygroundCore"),
+                .product(name: "PlaygroundA", package: "PlaygroundA"),
+                .product(name: "PlaygroundB", package: "PlaygroundB"),
             ],
             path: "Tests/ContractTests",
             linkerSettings: [
-                // The staged core, found at run time through the test bundle's rpath.
+                // The staged cores, found at run time through the test bundle's rpath.
                 .unsafeFlags([
                     "-L", coreDirectory,
-                    "-lundra_core",
+                    "-lplayground_core",
+                    "-lplayground_a",
+                    "-lplayground_b",
                     "-Xlinker", "-rpath", "-Xlinker", coreDirectory,
                 ]),
             ]
