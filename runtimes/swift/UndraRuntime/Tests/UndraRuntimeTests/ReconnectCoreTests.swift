@@ -441,6 +441,47 @@ final class ReconnectCoreTests: XCTestCase {
         XCTAssertEqual(log.names, ["connecting", "connected", "closed:requested"])
     }
 
+    func testADevNoticeFromUndraDevReachesOnDevNoticeOnAQueueOfTheRuntimesOwn() async throws {
+        let notices = Guarded<[String]>([])
+        let transport = FakeTransport(directSync: false)
+        let options = LoadOptions.remote(
+            url: "ws://fake",
+            adapters: Adapters.none,
+            expectedSchemaHash: 0x1234,
+            onDevNotice: { message in
+                notices.withLock { (list: inout [String]) -> Void in
+                    list.append(message)
+                }
+            }
+        )
+        let core = try UndraCore.connect(transport: transport, options: options)
+        transport.deliverLog(level: 2, target: "undra::dev", message: "Reloaded, state kept")
+        transport.deliverLog(level: 2, target: "app", message: "something else")
+        transport.deliverLog(level: 2, target: "undra::dev", message: "Reloaded, state reset: schema changed")
+        let arrived = await waitUntil { notices.withLock { (list: inout [String]) -> Bool in list.count == 2 } }
+        XCTAssertTrue(arrived)
+        XCTAssertEqual(
+            notices.withLock { (list: inout [String]) -> [String] in list },
+            ["Reloaded, state kept", "Reloaded, state reset: schema changed"]
+        )
+        XCTAssertEqual(core.connectionState, .connected)
+    }
+
+    func testAnInProcessCoreNeverFiresOnDevNoticeWhateverItsLogSays() async throws {
+        let notices = Guarded<[String]>([])
+        var options = LoadOptions.inproc(adapters: Adapters.none, expectedSchemaHash: 0x1234)
+        options.onDevNotice = { message in
+            notices.withLock { (list: inout [String]) -> Void in
+                list.append(message)
+            }
+        }
+        let transport = FakeTransport()
+        _ = try UndraCore.connect(transport: transport, options: options)
+        transport.deliverLog(level: 2, target: "undra::dev", message: "Reloaded, state kept")
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(notices.withLock { (list: inout [String]) -> [String] in list }, [])
+    }
+
     func testAPolicyNeverWaitsNothingAndALongOutageStaysAtTheCap() {
         let zero = UndraReconnectPolicy(initialDelay: 0, maxDelay: 0, jitter: 0)
         XCTAssertEqual(zero.delay(forAttempt: 1), 0.001, accuracy: 1e-9)

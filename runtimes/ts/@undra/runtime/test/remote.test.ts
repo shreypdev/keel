@@ -10,7 +10,7 @@ import {
   type UndraUnhandledError,
 } from "../src/index.js";
 import { RemoteTransport, reconnectDelayMs } from "../src/transport/remote.js";
-import type { TransportHandler } from "../src/transport/transport.js";
+import type { Transport, TransportHandler } from "../src/transport/transport.js";
 import {
   ALL_SIGNALS,
   CallTarget,
@@ -22,6 +22,7 @@ import {
   decodeCall,
   decodeObserve,
   decodeRelease,
+  encodeLog,
   encodeStreamItem,
   encodeReply,
 } from "../src/wire/index.js";
@@ -717,3 +718,67 @@ async function observedStore(core: UndraCore, server: FakeServer, handle: bigint
   await vi.advanceTimersByTimeAsync(200);
   return created;
 }
+
+describe("dev notices from `undra dev` (ADR-053)", () => {
+  const notice = (message: string, target = "undra::dev") => encodeLog({ level: 2, target, message });
+
+  it("reach onDevNotice from a remote core, once per record, and the log as well", async () => {
+    const server = new FakeServer();
+    const notices: string[] = [];
+    const log = captureLog();
+    const { core } = await loaded(server, { onDevNotice: (m) => notices.push(m), adapters: { log, http: null, timer: null } });
+    server.current.deliver(Kind.Log, notice("Reloaded, state kept"));
+    server.current.deliver(Kind.Log, encodeLog({ level: 2, target: "app", message: "something else" }));
+    server.current.deliver(Kind.Log, notice("Reloaded, state reset: schema changed"));
+    expect(notices).toEqual(["Reloaded, state kept", "Reloaded, state reset: schema changed"]);
+    expect(log.records.map((r) => r.message)).toEqual(["Reloaded, state kept", "something else", "Reloaded, state reset: schema changed"]);
+    expect(core.closed).toBe(false);
+  });
+
+  it("are heard after a reconnect, which is when a rebuild is announced", async () => {
+    const server = new FakeServer();
+    const notices: string[] = [];
+    await loaded(server, { onDevNotice: (m) => notices.push(m) });
+    server.current.serverClose(1001, "the core is reloading");
+    await vi.advanceTimersByTimeAsync(250);
+    await settle();
+    server.current.deliver(Kind.Log, notice("Reloaded, state kept"));
+    expect(notices).toEqual(["Reloaded, state kept"]);
+  });
+
+  it("never fire for an in-process core, whatever its log says", async () => {
+    // A core in this process (wasm) is not served by `undra dev`: a record with the dev target is an ordinary log line.
+    let handler: TransportHandler | null = null;
+    const transport: Transport = {
+      mode: "wasm-main",
+      synchronous: false,
+      start: (h) => {
+        handler = h;
+        return Promise.resolve({ undraVersion: "test", schemaHash: SCHEMA, platform: "web", mode: "prod" });
+      },
+      send: () => {},
+      close: () => {},
+    };
+    const notices: string[] = [];
+    const log = captureLog();
+    const core = track(await UndraCore.attach(transport, { expectedSchemaHash: SCHEMA, shared: false, adapters: { log }, onDevNotice: (m) => notices.push(m) }));
+    (handler as TransportHandler | null)?.log(2, "undra::dev", "Reloaded, state kept");
+    expect(notices).toEqual([]);
+    expect(log.records.map((r) => r.message)).toEqual(["Reloaded, state kept"]);
+    expect(core.closed).toBe(false);
+  });
+
+  it("a callback that throws is reported and does not break the core", async () => {
+    const server = new FakeServer();
+    const errors: unknown[] = [];
+    const { core } = await loaded(server, {
+      onDevNotice: () => {
+        throw new Error("the bar broke");
+      },
+      onError: (e) => errors.push(e),
+    });
+    server.current.deliver(Kind.Log, notice("Reloaded, state kept"));
+    expect(errors).toHaveLength(1);
+    expect(core.closed).toBe(false);
+  });
+});
