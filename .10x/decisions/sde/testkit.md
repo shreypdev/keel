@@ -42,20 +42,20 @@ SPEC 17.5, `docs/DEV_LOOP.md` (`--record`). No envelope, payload, ABI, schema, g
   web stories in Component Story Format (`stories.html`; Storybook is not a dependency). CI builds all three
   (macos job: Xcode build; android job: `:app:assembleDebug`; new `playground-web` job).
 
-## Verification (final, on the merged tree)
+## Verification (final, on the tree merged with main at `1b9b605`)
 
 | Check | Result |
 |---|---|
 | `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` | clean |
-| `cargo test --workspace` | green (undra-testkit: 22 unit + 1 conformance + 3 fixtures + 3 doc; `undra-transport` tap 4; `undra-cli` dev `--record` 1; playground testkit 4) |
-| Swift `swift test` (UndraRuntime) | 536 tests, 0 failures (512 + 24 in `UndraTestKitTests`) |
-| Kotlin `scripts/test-local.sh` | Kotlin 2.4.20 and 2.0.21 (the CI compiler, separate build dir): 617 runtime cases + 26 kit cases, 0 failed; 2 NativeSmoke skipped as before |
-| TS runtime `npm test`; kit `npm test` + `npm run typecheck` | 1132 tests; kit 26 tests, typecheck clean |
+| `cargo test --workspace --no-fail-fast` | 2,756 passed, 1 failed in the last full run (`naming::the_reserved_entries_cover_every_name_the_runtimes_declare`: the new Kotlin marker `UndraEmbeddingApi` had to be a reserved entry name; fixed, `-p undra-bindgen -p undra-cli` re-run: 522 passed); undra-testkit: 22 unit + 1 conformance + 3 fixtures + 3 doc; `undra-transport` tap 4; `undra-cli` dev `--record` 1; playground testkit 4. The only red in any run is `dev_reload` under load, below |
+| Swift `swift test` (UndraRuntime) | 551 tests, 0 failures (527 runtime + 24 in `UndraTestKitTests`) |
+| Kotlin `scripts/test-local.sh` | Kotlin 2.4.20 and 2.0.21 (the CI compiler, separate build dir): 630 runtime cases + 26 kit cases, 0 failed; 2 NativeSmoke skipped as before |
+| TS runtime `npm test`; kit `npm test` + `npm run typecheck` | 1,133 tests; kit 26 tests, typecheck clean |
 | React Native | no file under `runtimes/rn` or `runtimes/ts/@undra/runtime` differs from main; not re-run (no `node_modules` installed offline) |
-| `bash contract-tests/run-all.sh` | S01..S19 pass on ts, kotlin, swift; kit checks: TS 5, Kotlin 4 (T1-T4), Swift 4 |
+| `bash contract-tests/run-all.sh` | S01..S19 and S26 pass on ts, kotlin, swift (60/60); kit checks: TS 5, Kotlin 4 (T1-T4), Swift 4 |
 | `undra bindgen -C examples/playground --check --docs` | up to date, `0xc5f05c376fde398c` |
 | Playground builds | Xcode Debug (generic iOS Simulator) OK; `./gradlew --offline :app:assembleDebug` OK; web `npm run build` OK |
-| `scripts/wasm-size.sh` | 102.4 KB gzip (record 102.7 KB, gate 107.9 KB); runtime JS 24.9 KB |
+| `scripts/wasm-size.sh` | 102.4 KB gzip (record 102.7 KB, gate 107.9 KB); runtime JS 24.9 KB (measured before the abi-table merge; the testkit adds no code to a core that does not use it) |
 | Site `build-all`, `sync-chrome --check`, `check-links --words` | clean; landing 342 words |
 
 ## Deviations and findings for the integrator
@@ -72,13 +72,19 @@ SPEC 17.5, `docs/DEV_LOOP.md` (`--record`). No envelope, payload, ABI, schema, g
 4. **Android Studio preview rendering was compiled, not rendered** here (the preview pane is a desktop JVM and cannot load the
    app's native core, hence `RecordedCore` there). Gradle's own `:testkit:test` (a JUnit engine) is not runnable offline, so
    the Kotlin kit is verified by its own `TestMain` suites (the way the runtime is), under both compilers.
-5. **A stale golden on main:** `crates/undra-cli/tests/golden/stores/*/Stores.*` still had "Computed by the core; read-only."
-   for the derived `visible` list after `a32d4ec` changed the generated doc. `a_schema_file_generates_the_three_trees` failed on
-   the merged tree; the three golden files are regenerated in this branch (a one-line doc comment each). If main fixes it first
-   the merge is identical.
-6. **Two `dev_reload` tests are load-sensitive:** `no_keep_state_starts_every_rebuilt_core_fresh` and
-   `a_state_over_the_limit_falls_back_to_fresh_state_and_says_so` failed ("a Close frame") once while the Swift and Kotlin suites
-   ran beside `cargo test`; both pass alone (8 of 8) and in the final run.
+5. **abi-table (ADR-044) landed while this branch was in flight** (merged twice). In process, Swift and Kotlin cores now load
+   through the generated entry (`UndraPlaygroundCore.load`), so `PreviewCore.load` takes that function instead of a schema hash
+   (`PreviewCore.load(UndraPlaygroundCore.load, seed:)`; Kotlin `PreviewCore.load(UndraPlaygroundCore::load, seed)`); the web kit
+   is unchanged (it loads wasm itself). The Swift contract kit target links `libplayground_core`; the iOS CI step no longer sets
+   `UNDRA_LINK_CORE`; `UndraEmbeddingApi` joined `RESERVED_ENTRIES`; the playground recordings were re-blessed twice (the
+   schema hash moved to `0xc5f0...` with derived-lists). Docs, SPEC 17.5 and the site page follow.
+6. **`dev_reload` (`crates/undra-cli/tests/dev_reload.rs`) is load-sensitive on this shared machine, on main too:** under a load
+   average of 13 to 29 (other agents' builds) its `expect_close` at `:145` fails ("a Close frame": the connection dropped without
+   one) in 1 to 5 of its 8 tests per run; a pristine checkout of main (`1b9b605`) failed 3, 4, 3 and 5 of 8 in four consecutive
+   runs at the same load, and this branch passes 8/8 when the machine is quieter. The same signature is in
+   `.10x/reviews/2026-10-02-rn-adapters-review.md`. Not this piece's.
+7. The stale `golden/stores` doc line after `a32d4ec` (`a_schema_file_generates_the_three_trees`) was regenerated here and then
+   fixed identically on main (`ee73ddc`); the merge is clean.
 
 ## What the integrator owns
 
