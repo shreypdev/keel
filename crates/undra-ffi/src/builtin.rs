@@ -268,8 +268,14 @@ mod tests {
         let mono = Monotonic::default();
         for len in [0_u32, 1, 16, 1000] {
             let args = len.to_le_bytes();
-            assert!(answer(&Untouched, &mono, RNG_PORT, RNG_FILL, 1, &args).is_none(), "{len}");
-            assert!(answer(&Zeros, &mono, RNG_PORT, RNG_FILL, 1, &args).is_none(), "{len}");
+            assert!(
+                answer(&Untouched, &mono, RNG_PORT, RNG_FILL, 1, &args).is_none(),
+                "{len}"
+            );
+            assert!(
+                answer(&Zeros, &mono, RNG_PORT, RNG_FILL, 1, &args).is_none(),
+                "{len}"
+            );
         }
     }
 
