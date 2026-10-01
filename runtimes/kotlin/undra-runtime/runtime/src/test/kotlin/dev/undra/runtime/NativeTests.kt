@@ -136,7 +136,14 @@ class NativeSmokeTests : Suite() {
                 val stats = core.stats()
                 assertTrue(stats.liveHandles >= 0, "stats: $stats")
                 assertTrue(stats.raw.contains("live_handles"), stats.raw)
-                Payloads.Snapshot.decode(core.snapshot())
+                // Layout 2 (ADR-037): the core's own schema hash travels with the snapshot, and it restores as it is.
+                val snapshotBytes = core.snapshot()
+                val snapshot = Payloads.Snapshot.decode(snapshotBytes)
+                assertEq(UndraNative.schemaHash().toULong(), snapshot.schemaHash)
+                assertTrue(snapshot.stores.all { snapshot.fingerprint(it.typeId) != null }, "every store's type is listed")
+                core.restore(snapshotBytes)
+                // A snapshot in the layout before ADR-037 (count, floor) is refused as malformed, and the core is unchanged.
+                assertEq(UndraRestoreException.BAD_SNAPSHOT, assertThrows<UndraRestoreException> { core.restore(ByteArray(8)) }.code)
                 assertTrue(Codecs.u32.encodeToBytes().isNotEmpty())
             } finally {
                 core.close()
