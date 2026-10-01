@@ -204,7 +204,8 @@ WHAT IT DETECTS
     /// Move a project to the version of this `undra`: every pin in step, bindings regenerated, migration notes.
     #[command(
         long_about = "Reads the Undra version a project pins in every place `undra init` writes it: the core's \
-`undra` dependency in Cargo.toml (a git tag, or a registry version), `[undra] version` in undra.toml, \
+`undra` dependency in Cargo.toml (a git tag, or a registry version; a dependency pinned by `rev` or `branch` is \
+pinned by the release's tag afterwards), `[undra] version` in undra.toml, \
 `@undra/runtime` (and `@undra/react-native`) in package.json, `dev.undra:runtime` and `dev.undra:android-adapters` in \
 the Gradle scripts, the Undra Swift package in the Xcode project, and `UNDRA_VERSION` in the CI workflow. It moves them all to the \
 version of this `undra` in one step, shaped as `undra init` would write them (so an upgraded project and a new one \
