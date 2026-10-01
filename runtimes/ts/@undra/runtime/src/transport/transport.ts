@@ -1,3 +1,4 @@
+import type { PortImpl } from "../port.js";
 import type { RestartResult } from "../recovery.js";
 import type { HelloPayload, Kind, PortCallPayload } from "../wire/index.js";
 
@@ -49,11 +50,10 @@ export interface TransportHandler {
   /** Only for a transport that reconnects: whether the host holds objects it expects the core to still have (it asks the server to resume them). */
   holdsObjects?(): boolean;
   /**
-   * The ids of the ports the host serves with asynchronous methods. A transport whose core runs elsewhere
-   * (`wasm-worker`) reads it when it starts and forwards those ports' calls to the host; every other port is
-   * answered where the core runs (ADR-049).
+   * The ports the host serves. A transport whose core runs elsewhere (`wasm-worker`) reads them when it starts: it
+   * forwards their calls to the host, and refuses a synchronous one, which the core could not wait for (ADR-049).
    */
-  asyncPorts?(): readonly number[];
+  ports?(): ReadonlyMap<number, PortImpl>;
 }
 
 /**
@@ -106,13 +106,11 @@ export interface Transport {
   /** Releases the channel. Idempotent; the handler's `closed` is not called. */
   close(): void;
   /**
-   * `false` when a port served on the host's thread cannot answer the core's synchronous calls, because the core
-   * runs elsewhere and cannot wait for it (`wasm-worker`): `UndraCore` then refuses to register a synchronous port
-   * (ADR-049). Absent means `true`.
+   * The host registers `impl` for `portId` (`registerPort`), before it does. Throws `UndraError("options")` for a port
+   * this transport cannot serve: a synchronous one in `wasm-worker`, whose core cannot wait for the host's thread
+   * (ADR-049); otherwise a started worker is told to forward the port's calls.
    */
-  readonly answersSyncPorts?: boolean;
-  /** The set of the host's asynchronous ports changed after `start` (a `registerPort`): the worker of `wasm-worker` is told. */
-  portsChanged?(asyncPorts: readonly number[]): void;
+  portAdded?(portId: number, impl: PortImpl): void;
   /**
    * Only for a wasm transport loaded with recovery (ADR-049): after the handler heard of a trap (`closed` with an
    * `UndraTransportError("trap")`), brings the core back: the same compiled module instantiated again, initialised,

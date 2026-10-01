@@ -156,7 +156,7 @@ function wasmSource(wasm: WorkerWasm): WasmSource {
  */
 export function runWorker(scope: WorkerScope): () => void {
   let transport: Transport | null = null;
-  /** The transport as a restartable one (the same object), and its snapshots: set when `init` asked for `recovery`. */
+  /** The transport as a restartable one (the same object; a restart replaces both with a twin), and its snapshots: set when `init` asked for `recovery`. */
   let restartable: WasmMainTransport | null = null;
   let keeper: SnapshotKeeper | null = null;
   let schema = 0n;
@@ -293,9 +293,13 @@ export function runWorker(scope: WorkerScope): () => void {
       if (init.recovery !== undefined) {
         // The worker keeps the snapshots (ADR-049 decision 3.3): after the core changed a store, at most one per period.
         restartable = wasm;
-        keeper = keeperOf(init.recovery, wasm, (level, target, message) => {
-          handler.log(level, target, message);
-        });
+        keeper = keeperOf(
+          init.recovery,
+          () => (restartable ?? wasm).takeSnapshot(),
+          (level, target, message) => {
+            handler.log(level, target, message);
+          },
+        );
       }
       const hello = await wasm.start(handler);
       transport = wasm;
@@ -372,7 +376,12 @@ export function runWorker(scope: WorkerScope): () => void {
       return;
     }
     try {
-      const result = await restartHere(restartable, keeper, generationFloor, (level, target, message) => {
+      // A twin of the transport that trapped becomes the transport first: the new instance's own port calls are answered.
+      const twin = restartable.twin();
+      restartable.close();
+      restartable = twin;
+      transport = twin;
+      const result = await restartHere(twin, handler, keeper, generationFloor, (level, target, message) => {
         handler.log(level, target, message);
       });
       post({ t: "restarted", id, hello: result.hello, restoredFromAgeMs: result.restoredFromAgeMs, storeHandles: result.storeHandles === null ? null : [...result.storeHandles] });

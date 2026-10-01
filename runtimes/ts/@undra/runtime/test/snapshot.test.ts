@@ -304,7 +304,7 @@ describe("the worker transport's requests", () => {
         log: () => {},
         closed: () => {},
         // The stub's port is served by this thread, asynchronously (worker protocol 3 forwards only these).
-        asyncPorts: () => [STUB.PORT_ID],
+        ports: () => new Map([[STUB.PORT_ID, { sync: false, methods: {} }]]),
       },
     };
   }

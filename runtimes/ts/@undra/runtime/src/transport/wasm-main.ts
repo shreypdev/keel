@@ -192,10 +192,8 @@ export class WasmMainTransport implements Transport {
   #pollScheduled = false;
   #closed = false;
   #dead: UndraTransportError | null = null;
-  /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049). */
+  /** The compiled module, kept so that a restart instantiates it again without compiling (ADR-049, `twin`). */
   #module: WebAssembly.Module | null = null;
-  /** Bumped by every restart: a timer or poll of an instance that trapped never reaches its successor. */
-  #generation = 0;
 
   /** @param options See {@link WasmMainOptions}. */
   constructor(options: WasmMainOptions) {
@@ -210,38 +208,11 @@ export class WasmMainTransport implements Transport {
     return this.#instance;
   }
 
-  start(handler: TransportHandler): Promise<HelloPayload> {
+  async start(handler: TransportHandler): Promise<HelloPayload> {
     this.#handler = handler;
-    return this.#begin(this.#options.wasm);
-  }
-
-  /** Instantiates `source` (the compiled module is kept: a restart does not compile again) and makes it the core. */
-  async #begin(source: WasmSource): Promise<HelloPayload> {
-    const { module, instance } = await instantiate(source, this.#imports());
+    const { module, instance } = await instantiate(this.#options.wasm, this.#imports());
     if (this.#closed) throw new UndraTransportError("closed", "the core is closed");
     this.#module = module;
-    return this.#adopt(instance);
-  }
-
-  /**
-   * After a trap (ADR-049, `crashRecovery`): the same compiled module instantiated again (no recompile), `_initialize`
-   * and `undra_init` run; the core is empty until the caller restores a snapshot. Rejects with an `UndraTransportError`
-   * (`"trap"` when the new instance traps while it initialises).
-   */
-  reinstantiate(): Promise<HelloPayload> {
-    this.#generation++;
-    this.#exports = null;
-    this.#buffer = null;
-    this.#depth = 0;
-    this.#scratchPtr = 0;
-    this.#scratchCap = 0;
-    this.#pollScheduled = false;
-    this.#dead = null;
-    return this.#begin(this.#module as WebAssembly.Module);
-  }
-
-  /** Checks a fresh instance, initialises it and makes it the core (start and restart). */
-  #adopt(instance: WebAssembly.Instance): HelloPayload {
     this.#instance = instance;
     const exported = instance.exports as unknown as Record<string, unknown>;
     const missing = [
@@ -273,6 +244,14 @@ export class WasmMainTransport implements Transport {
     const code = this.#invoke(config.finish(), (e, ptr, len) => e.undra_init(ptr, len));
     if (code !== 0) throw new UndraTransportError("handshake", `undra_init failed with code ${code}`);
     return { undraVersion: `wasm-abi-${abi}`, schemaHash, platform: "wasm", mode };
+  }
+
+  /**
+   * A new transport over the same compiled module (no recompile) and options, not started: what a restart after a trap
+   * runs on (ADR-049, `crashRecovery`). This one stays dead.
+   */
+  twin(): WasmMainTransport {
+    return new WasmMainTransport({ ...this.#options, wasm: this.#module ?? this.#options.wasm });
   }
 
   send(kind: Kind, payload: Uint8Array): void {
@@ -501,12 +480,7 @@ export class WasmMainTransport implements Transport {
     const dead = new UndraTransportError("trap", `the wasm core trapped: ${errorMessage(error)}`, { cause: error });
     this.#dead = dead;
     const handler = this.#handler;
-    // Not when a restart replaced the instance meanwhile (`#dead` is the successor's then): its trap was handled there.
-    if (handler !== null) {
-      queueMicrotask(() => {
-        if (this.#dead === dead) handler.closed(dead);
-      });
-    }
+    if (handler !== null) queueMicrotask(() => handler.closed(dead));
     return dead;
   }
 
@@ -549,10 +523,8 @@ export class WasmMainTransport implements Transport {
         }, undefined),
         timer_set: guard((timerId: number, delayLo: number, delayHi: number) => {
           const id = timerId >>> 0;
-          const generation = this.#generation;
           this.#timer.set(id, (delayHi >>> 0) * 0x1_0000_0000 + (delayLo >>> 0), (fired) => {
-            // A timer of an instance that trapped and was replaced is not the new one's.
-            if (generation === this.#generation) this.#timerFired(fired);
+            this.#timerFired(fired);
           });
         }, undefined),
         log: guard((level: number, ptr: number, len: number) => {

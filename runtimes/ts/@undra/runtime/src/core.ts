@@ -19,7 +19,7 @@ import { type UndraPanicReport, isTrap, panicReport } from "./panic.js";
 import type { CrashRecovery, UndraCoreRestarted } from "./recovery.js";
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
-import { dispatchPortCall, portOperation, syncPortRefusal } from "./port-dispatch.js";
+import { dispatchPortCall, portOperation } from "./port-dispatch.js";
 import { Signal } from "./signal.js";
 import { StreamCall } from "./stream.js";
 import { type ReconnectOptions, RemoteTransport, type WebSocketFactory } from "./transport/remote.js";
@@ -464,8 +464,6 @@ export class UndraCore {
   /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
   readonly #handlerFailures = new WeakSet<object>();
   #stopEvents: (() => void) | null = null;
-  /** Whether `start` succeeded (the transport is running). */
-  #started = false;
   /** The message of the last FATAL `undra::panic` record: what a trap's panic report says (ADR-046). */
   #lastPanicRecord: string | null = null;
 
@@ -480,7 +478,6 @@ export class UndraCore {
           core: this,
           handles: this.#handles,
           observed: this.#observed,
-          releasedWhileDown: this.#releasedWhileDown,
           failInFlight: (error) => this.#failInFlight(error),
           lose: (error) => {
             this.#lostForGood(error);
@@ -489,9 +486,6 @@ export class UndraCore {
             this.#hand(error);
           },
           panicked: (trap) => this.#panicReport(trap),
-          log: (level, target, message) => {
-            this.#log(level, target, message);
-          },
         },
         options.onCoreRestarted,
       ) ?? transport;
@@ -689,16 +683,8 @@ export class UndraCore {
    * asynchronous port registered after load is announced to the worker.
    */
   registerPort(portId: number, impl: PortImpl): void {
-    if (impl.sync && this.#transport.answersSyncPorts === false) throw new UndraError("options", syncPortRefusal(portId, impl));
+    this.#transport.portAdded?.(portId, impl);
     this.#ports.set(portId, impl);
-    if (!this.#closed && this.#started) this.#transport.portsChanged?.(this.#asyncPortIds());
-  }
-
-  /** The ids of the registered ports whose methods answer asynchronously: what the worker of `wasm-worker` forwards to this thread. */
-  #asyncPortIds(): number[] {
-    const ids: number[] = [];
-    for (const [portId, impl] of this.#ports) if (!impl.sync) ids.push(portId);
-    return ids;
   }
 
   /**
@@ -829,9 +815,12 @@ export class UndraCore {
   // ----- internals -------------------------------------------------------------------
 
   async #start(): Promise<void> {
-    if (this.#transport.answersSyncPorts === false) this.#checkWorkerPorts();
+    // In `wasm-worker` the core's Clock, Rng and timers are the worker's (ADR-049): explicit adapters for them are said not to reach it.
+    const given = (["clock", "rng", "timer"] as const).filter((name) => this.#options.adapters?.[name] != null);
+    if (given.length > 0 && this.#transport.mode === "wasm-worker") {
+      this.#log(3, "undra::worker", `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`);
+    }
     const hello = await this.#transport.start(this.#handler);
-    this.#started = true;
     if (hello.schemaHash !== this.#options.expectedSchemaHash) {
       throw new UndraSchemaMismatchError(this.#options.expectedSchemaHash, hello.schemaHash);
     }
@@ -853,24 +842,6 @@ export class UndraCore {
     this.#stopEvents = startEventSources(this, this.#adapters, (error) => {
       this.#reportError("event", error);
     });
-  }
-
-  /**
-   * A transport whose core cannot wait for this thread (`wasm-worker`): a synchronous port registered here is a
-   * load-time error (ADR-049), and a Clock, Rng or Timer adapter given explicitly is said not to reach the core.
-   */
-  #checkWorkerPorts(): void {
-    for (const [portId, impl] of this.#ports) {
-      if (impl.sync) throw new UndraError("options", syncPortRefusal(portId, impl));
-    }
-    const given = (["clock", "rng", "timer"] as const).filter((name) => this.#options.adapters?.[name] != null);
-    if (given.length > 0) {
-      this.#log(
-        3,
-        "undra::worker",
-        `adapters.${given.join(", adapters.")} are ignored in wasm-worker mode: set them in LoadOptions.worker.ports`,
-      );
-    }
   }
 
   #assertOpen(): void {
@@ -1130,7 +1101,7 @@ export class UndraCore {
       this.#reconnected(hello);
     },
     holdsObjects: () => this.#handles.size > 0,
-    asyncPorts: () => this.#asyncPortIds(),
+    ports: () => this.#ports,
   };
 
   #onReply(payload: Uint8Array): void {

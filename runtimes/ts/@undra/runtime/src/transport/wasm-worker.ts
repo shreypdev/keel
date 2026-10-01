@@ -1,4 +1,5 @@
 import { UndraError, UndraRestoreError, UndraSchemaMismatchError, UndraTransportError } from "../errors.js";
+import { isTrap } from "../panic.js";
 import { errorMessage, hostPlatform } from "../platform.js";
 import {
   type HelloPayload,
@@ -11,6 +12,8 @@ import {
   encodeEnvelope,
   encodePortReply,
 } from "../wire/index.js";
+import type { PortImpl } from "../port.js";
+import { syncPortRefusal } from "../port-dispatch.js";
 import type { RestartResult, SnapshotPolicy } from "../recovery.js";
 import type { PortOutcome, Transport, TransportHandler } from "./transport.js";
 import type { WasmSource } from "./wasm-main.js";
@@ -106,6 +109,19 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
 }
 
 /**
+ * The ids of `ports` the worker forwards to the host's thread. A synchronous port cannot be served from there, because
+ * the core cannot wait for that thread: it is refused, naming it and saying where it belongs (ADR-049).
+ */
+function asyncPortIds(ports: Iterable<readonly [number, PortImpl]> = []): number[] {
+  const ids: number[] = [];
+  for (const [portId, impl] of ports) {
+    if (impl.sync) throw new UndraError("options", syncPortRefusal(portId, impl));
+    ids.push(portId);
+  }
+  return ids;
+}
+
+/**
  * The failure an answer of the worker carries, in a form a caller can use: a transport failure keeps its reason (a
  * trap its stack), anything else, and an answer without what it should carry, is a protocol failure of this exchange.
  */
@@ -149,8 +165,6 @@ function controlFailure(answer: ControlAnswer): Error {
 export class WasmWorkerTransport implements Transport {
   readonly mode = "wasm-worker";
   readonly synchronous = false;
-  /** The core runs in the worker and cannot wait for this thread: a synchronous port cannot be served from here (ADR-049). */
-  readonly answersSyncPorts = false;
 
   readonly #options: WasmWorkerOptions;
   #worker: WorkerLike | null = null;
@@ -164,8 +178,6 @@ export class WasmWorkerTransport implements Transport {
   #canSnapshot = false;
   /** Whether the worker said, in `ready`, that it can restart the core after a trap (and `recovery` is on). */
   #canRestart = false;
-  /** The trap the worker reported, while the core waits for `restart` (recovery only). */
-  #trapped: UndraTransportError | null = null;
   /** Fails a `start` that has not settled yet (a protocol failure before `ready` must not wait for the timeout). */
   #abortStart: ((error: Error) => void) | null = null;
   #detach: (() => void) | null = null;
@@ -179,7 +191,10 @@ export class WasmWorkerTransport implements Transport {
     this.#handler = handler;
     return new Promise<HelloPayload>((resolve, reject) => {
       let worker: WorkerLike;
+      let asyncPorts: number[];
       try {
+        // A synchronous port of this thread is refused before anything is spawned or sent.
+        asyncPorts = asyncPortIds(handler.ports?.());
         worker = this.#createWorker();
       } catch (error) {
         reject(error);
@@ -253,13 +268,10 @@ export class WasmWorkerTransport implements Transport {
           }
           case "closed": {
             const error = failureToError(message.failure);
-            if (this.#canRestart && error instanceof UndraTransportError && error.reason === "trap" && this.#open) {
-              // Recovery: the worker keeps the compiled module and the last snapshot; the core decides to `restart` or `close`.
-              this.#trapped = error;
-              this.#handler?.closed(error);
-              return;
-            }
-            this.#fail(error);
+            // With recovery the worker keeps the compiled module and the last snapshot: the trap is the handler's to
+            // `restart` from (it refuses calls meanwhile), or to `close` on.
+            if (this.#canRestart && isTrap(error)) this.#handler?.closed(error);
+            else this.#fail(error);
             return;
           }
         }
@@ -303,7 +315,7 @@ export class WasmWorkerTransport implements Transport {
         devtools: this.#options.devtools === true,
         logLevel: this.#options.logLevel ?? 2,
         protocol: WORKER_PROTOCOL_VERSION,
-        asyncPorts: [...(handler.asyncPorts?.() ?? [])],
+        asyncPorts,
         ...(this.#options.ports !== undefined && { portsModule: String(this.#options.ports) }),
         ...(this.#options.recovery !== undefined && { recovery: this.#options.recovery }),
       };
@@ -325,9 +337,6 @@ export class WasmWorkerTransport implements Transport {
     if ((!this.#open && !starting) || this.#worker === null) {
       throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
     }
-    // While the worker restarts a trapped core, only the answers to the port calls of the new instance go through (an
-    // init hook that reads the cache); the core drops the replies that belonged to the instance that trapped.
-    if (this.#trapped !== null && kind !== Kind.PortReply) throw this.#trapped;
     this.#post(kind, payload);
   }
 
@@ -338,16 +347,17 @@ export class WasmWorkerTransport implements Transport {
    */
   async restart(generationFloor: number): Promise<RestartResult> {
     const answer = await this.#request(this.#canRestart, "restart", { t: "restart", id: 0, generationFloor: generationFloor >>> 0 });
-    if (answer.t !== "restarted" || answer.failure !== undefined || answer.hello === undefined) throw controlFailure(answer);
-    this.#trapped = null;
-    return { hello: answer.hello, restoredFromAgeMs: answer.restoredFromAgeMs ?? null, storeHandles: answer.storeHandles ?? null };
+    // The answer carries the result's fields (a failure carries no `hello`).
+    if (answer.t !== "restarted" || answer.hello === undefined) throw controlFailure(answer);
+    return answer as RestartResult;
   }
 
-  /** Tells the worker which ports of this thread it forwards calls to (a `registerPort` after load). */
-  portsChanged(asyncPorts: readonly number[]): void {
+  /** Refuses a synchronous port; tells a started worker to forward the calls of an asynchronous one here (a `registerPort`). */
+  portAdded(portId: number, impl: PortImpl): void {
+    const asyncPorts = asyncPortIds([...(this.#handler?.ports?.() ?? []), [portId, impl]]);
     const worker = this.#worker;
     if (!this.#open || worker === null) return;
-    const message: HostToWorker = { t: "ports", asyncPorts: [...asyncPorts] };
+    const message: HostToWorker = { t: "ports", asyncPorts };
     try {
       worker.postMessage(message);
     } catch {
