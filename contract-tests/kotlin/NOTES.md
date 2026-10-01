@@ -46,15 +46,20 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   by 50 ms so that the state in between can be seen.
 * S13: `data` is recorded with a `StateFlow` collector on `Dispatchers.Unconfined` (`Recorder`), so every value
   the store sets is seen; the scenario spaces its changes by the 50 ms network delay.
-* S05.6, S06.6, S15.9, S17.5 and S17.6 (ADR-032) are new coverage of Kotlin behaviour that did not change: every generated
-  shape throws, so closed objects (S05.6) and stale handles (S15.9) are `UndraReplyException(BAD_REQUEST)`, a call in flight
-  across a restore is `UndraReplyException(CANCELLED)` and a cancelled typed call is a `CancellationException`.
+* S05.6, S15.9, S15.10, S16.5, S17.1/2/5/6 (ADR-032, amendment A) read the failure model of the generated bindings: a call
+  fails as `UndraCallError` (closed objects and stale handles are `Refused`, a call in flight across a restore is
+  `CancelledByCore`, a panic is `Panicked`, a closed core is `Unavailable` with transport reason `CLOSED`), a cancelled typed
+  call is a `CancellationException` (S06.6, unchanged), and a command (`Counter.increment()`, `Probe.reset()`) returns and
+  reports to `LoadOptions.onError`: `World.takeUnhandled()` returns what the Bootstrap's handler recorded. The raw statuses
+  of `UndraCore.callSync` and `construct` (S05.4, S15.7) are still `UndraReplyException`.
 * S17.5: a call made from inside the `Log` port is refused by the Kotlin runtime itself (`InprocTransport` knows it is inside
-  a callback and throws an `UndraException` "called from inside a core callback"), before the core can answer it with
-  `E_REENTRANT`; the Swift column sees the core's bad request. The scenario accepts either refusal.
+  a callback and answers with the same bad request the core would: `UndraCallError.Refused`, reason `E_REENTRANT`), before the
+  core can; the Swift column sees the core's own refusal. The scenario asserts `E_REENTRANT` on both.
 * S17.6 ends the core (`core.close()`), and S17 is the last entry of `SCENARIOS`, so nothing runs after it. The generated
-  `add(1, 2)` passes the closed core explicitly, because `UndraCore.shared` is forgotten on close and would fail with
-  "no UndraCore has been loaded" instead of "closed".
+  `add(1, 2)` passes the closed core explicitly; `UndraCore.shared` is forgotten on close and is the closed placeholder
+  afterwards (`UndraCore.current == null`), which the step checks with a generated constructor.
+* S16.5: S16 runs first, so `UndraCore.shared` is still the placeholder after its failing load; the step checks that
+  generated calls with the default core fail `Unavailable` (reason `CLOSED`) and that the placeholder never becomes `current`.
 * S16: the order (S16 first) is described above. Step 2 ("a subsequent load succeeds") is the load every other
   scenario uses.
 

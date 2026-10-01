@@ -1,9 +1,12 @@
 package dev.undra.contract
 
 import dev.undra.playground.core.UndraIds
+import dev.undra.playground.core.Counter
+import dev.undra.playground.core.add
+import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraException
 import dev.undra.runtime.UndraNative
+import dev.undra.runtime.UndraTransportException
 import dev.undra.runtime.UndraSchemaMismatchException
 import dev.undra.runtime.LoadOptions
 
@@ -24,8 +27,7 @@ fun s16SchemaMismatch(boot: Bootstrap) {
     for (hash in listOf(generated xor 1uL, generated)) {
         check("0x${hash.toString(16)}" in message) { "the message does not name 0x${hash.toString(16)}: $message" }
     }
-    val unloaded = expectFails<UndraException>("UndraCore.shared after a failed load") { UndraCore.shared }
-    check("no UndraCore has been loaded" in (unloaded.message ?: "")) { "the failed load left a shared core behind: ${unloaded.message}" }
+    expectNoCoreLoaded()
 
     // 2. The next load, with the right hash, succeeds: the failed one left nothing half-initialised.
     val world = boot.load()
@@ -46,4 +48,21 @@ fun s16SchemaMismatch(boot: Bootstrap) {
     for (port in listOf("Clock", "Connectivity", "Fs", "Http", "Kv", "Lifecycle", "Log", "Rng", "SecureStore", "Timer")) {
         check(port in ports) { "the schema has no standard port $port: $ports" }
     }
+}
+
+/**
+ * S16.5: with no core loaded, `UndraCore.shared` does not throw on access: it is a closed placeholder whose generated
+ * calls fail as `Unavailable`, and `UndraCore.current` stays null. The failed load of step 1 left nothing behind.
+ */
+private fun expectNoCoreLoaded() {
+    check(UndraCore.current == null) { "the failed load left a core behind: ${UndraCore.current}" }
+    val shared = UndraCore.shared
+    check(UndraCore.current == null) { "UndraCore.shared became a loaded core" }
+    val call = expectFails<UndraCallError.Unavailable>("add(1, 2) with no core loaded") { add(1, 2) }
+    expectEq("the transport reason of add(1, 2) with no core loaded", UndraTransportException.Reason.CLOSED, call.transport.reason)
+    check("UndraCore.load" in (call.message ?: "")) { "the failure does not say to load a core: ${call.message}" }
+    val constructor = expectFails<UndraCallError.Unavailable>("Counter.create() with no core loaded") { Counter.create() }
+    expectEq("the transport reason of Counter.create() with no core loaded", UndraTransportException.Reason.CLOSED, constructor.transport.reason)
+    shared.report(call, "Counter.increment")
+    check(UndraCore.current == null) { "the placeholder became the loaded core after a report" }
 }
