@@ -171,6 +171,15 @@ impl FakeWebSocket {
         wake(waker);
     }
 
+    /// Forgets what was sent and pulled on every connection (connections and inboxes stay):
+    /// keeps a fake that serves a long run (a benchmark) from growing.
+    pub fn clear_history(&self) {
+        for c in self.state.lock().conns.values_mut() {
+            c.sent.clear();
+            c.pulls.clear();
+        }
+    }
+
     /// What the core sent on `conn`, in order.
     pub fn sent(&self, conn: u32) -> Vec<WsMessage> {
         self.with(conn, |c| c.sent.clone()).unwrap_or_default()

@@ -167,6 +167,12 @@ impl FakeDb {
             .collect()
     }
 
+    /// Forgets the recorded calls (scripted rules, databases and versions stay): keeps a fake
+    /// that serves a long run (a benchmark) from growing.
+    pub fn clear_calls(&self) {
+        self.state.lock().calls.clear();
+    }
+
     /// Whether a transaction is running on database `db`.
     pub fn in_transaction(&self, db: u32) -> bool {
         self.state

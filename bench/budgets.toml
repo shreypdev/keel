@@ -374,6 +374,21 @@ baseline_tolerance = 2
 budget_ns = 180000
 measured_ns = 34648.1
 
+# The opt-in ports (ADR-047, ADR-048; `bench/common/ports.rs`): the core side of a call through a port
+# proxy with a Rust fake answering, measured on 2026-10-01 on the reference host while other pieces built
+# (best of three, as above; a quiet machine measures less, which only widens the margin).
+[bench."ports/ws_roundtrip"]
+budget_ns = 2100
+measured_ns = 417.0
+
+[bench."db/insert_1k"]
+budget_ns = 1900000
+measured_ns = 373375.0
+
+[bench."db/query_10k"]
+budget_ns = 3700000
+measured_ns = 734791.0
+
 # ---------------------------------------------------------------------------------------------
 # Harsh conditions, layer B: sustained runs (`cargo test -p undra-bench --test stress --release`).
 # Rules in the header. Measured with UNDRA_STRESS_SECONDS=10, best of three runs.
