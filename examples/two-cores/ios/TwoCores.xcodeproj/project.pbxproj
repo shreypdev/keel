@@ -1,0 +1,308 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B0B0B0B0B0B0B0B000000001 /* PlaygroundA in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B0B0B0B0B000000010 /* PlaygroundA */; };
+		B0B0B0B0B0B0B0B000000002 /* PlaygroundB in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B0B0B0B0B000000012 /* PlaygroundB */; };
+		B0B0B0B0B0B0B0B000000003 /* UndraRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = B0B0B0B0B0B0B0B000000011 /* UndraRuntime */; };
+		B0B0B0B0B0B0B0B000000004 /* PlaygroundACore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0B0B0B0B0B0B0B000000020 /* PlaygroundACore.xcframework */; };
+		B0B0B0B0B0B0B0B000000005 /* PlaygroundBCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0B0B0B0B0B0B0B000000022 /* PlaygroundBCore.xcframework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B0B0B0B0B0B0B0B000000020 /* PlaygroundACore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = PlaygroundACore.xcframework; path = "../a/build/ios/PlaygroundACore.xcframework"; sourceTree = SOURCE_ROOT; };
+		B0B0B0B0B0B0B0B000000022 /* PlaygroundBCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = PlaygroundBCore.xcframework; path = "../b/build/ios/PlaygroundBCore.xcframework"; sourceTree = SOURCE_ROOT; };
+		B0B0B0B0B0B0B0B000000030 /* TwoCores.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TwoCores.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		B0B0B0B0B0B0B0B000000040 /* TwoCores */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TwoCores;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B0B0B0B0B0B0B0B000000050 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0B0B0B0B0B0B0B000000001 /* PlaygroundA in Frameworks */,
+				B0B0B0B0B0B0B0B000000002 /* PlaygroundB in Frameworks */,
+				B0B0B0B0B0B0B0B000000003 /* UndraRuntime in Frameworks */,
+				B0B0B0B0B0B0B0B000000004 /* PlaygroundACore.xcframework in Frameworks */,
+				B0B0B0B0B0B0B0B000000005 /* PlaygroundBCore.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B0B0B0B0B0B0B0B000000060 = {
+			isa = PBXGroup;
+			children = (
+				B0B0B0B0B0B0B0B000000040 /* TwoCores */,
+				B0B0B0B0B0B0B0B000000062 /* Frameworks */,
+				B0B0B0B0B0B0B0B000000063 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B0B0B0B0B0B0B0B000000062 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B0B0B0B0B0B0B0B000000020 /* PlaygroundACore.xcframework */,
+				B0B0B0B0B0B0B0B000000022 /* PlaygroundBCore.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B0B0B0B0B0B0B0B000000063 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B0B0B0B0B0B0B0B000000030 /* TwoCores.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B0B0B0B0B0B0B0B000000070 /* TwoCores */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0B0B0B0B0B0B0B000000080 /* Build configuration list for PBXNativeTarget "TwoCores" */;
+			buildPhases = (
+				B0B0B0B0B0B0B0B000000090 /* Sources */,
+				B0B0B0B0B0B0B0B000000050 /* Frameworks */,
+				B0B0B0B0B0B0B0B000000091 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B0B0B0B0B0B0B0B000000040 /* TwoCores */,
+			);
+			name = TwoCores;
+			packageProductDependencies = (
+				B0B0B0B0B0B0B0B000000010 /* PlaygroundA */,
+				B0B0B0B0B0B0B0B000000012 /* PlaygroundB */,
+				B0B0B0B0B0B0B0B000000011 /* UndraRuntime */,
+			);
+			productName = TwoCores;
+			productReference = B0B0B0B0B0B0B0B000000030 /* TwoCores.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B0B0B0B0B0B0B0B000000100 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					B0B0B0B0B0B0B0B000000070 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = B0B0B0B0B0B0B0B000000110 /* Build configuration list for PBXProject "TwoCores" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B0B0B0B0B0B0B0B000000060;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B0B0B0B0B0B0B0B000000120 /* core A's Swift package */,
+				B0B0B0B0B0B0B0B000000122 /* core B's Swift package */,
+				B0B0B0B0B0B0B0B000000121 /* UndraRuntime package */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B0B0B0B0B0B0B0B000000063 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B0B0B0B0B0B0B0B000000070 /* TwoCores */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B0B0B0B0B0B0B0B000000091 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B0B0B0B0B0B0B0B000000090 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B0B0B0B0B0B0B0B000000130 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B0B0B0B0B0B0B0B000000131 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B0B0B0B0B0B0B0B000000132 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Two Cores";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.undra.twocores";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+			};
+			name = Debug;
+		};
+		B0B0B0B0B0B0B0B000000133 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Two Cores";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.undra.twocores";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B0B0B0B0B0B0B0B000000110 /* Build configuration list for PBXProject "TwoCores" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0B0B0B0B0B0B0B000000130 /* Debug */,
+				B0B0B0B0B0B0B0B000000131 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0B0B0B0B0B0B0B000000080 /* Build configuration list for PBXNativeTarget "TwoCores" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0B0B0B0B0B0B0B000000132 /* Debug */,
+				B0B0B0B0B0B0B0B000000133 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B0B0B0B0B0B0B0B000000120 /* core A's Swift package */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Packages/PlaygroundA";
+		};
+		B0B0B0B0B0B0B0B000000122 /* core B's Swift package */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Packages/PlaygroundB";
+		};
+		B0B0B0B0B0B0B0B000000121 /* UndraRuntime package */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../../runtimes/swift/UndraRuntime";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B0B0B0B0B0B0B0B000000010 /* PlaygroundA */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0B0B0B0B0B0B0B000000120 /* core A's Swift package */;
+			productName = PlaygroundA;
+		};
+		B0B0B0B0B0B0B0B000000012 /* PlaygroundB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0B0B0B0B0B0B0B000000122 /* core B's Swift package */;
+			productName = PlaygroundB;
+		};
+		B0B0B0B0B0B0B0B000000011 /* UndraRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B0B0B0B0B0B0B0B000000121 /* UndraRuntime package */;
+			productName = UndraRuntime;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B0B0B0B0B0B0B0B000000100 /* Project object */;
+}
