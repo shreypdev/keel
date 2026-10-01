@@ -1,19 +1,22 @@
 # Undra under React Native
 
 `@undra/react-native` puts your Undra core under a React Native app: the same native library the
-SwiftUI and Compose apps link (`libundra_core.a` on iOS, `libundra_core.so` on Android), reached from
-JavaScript through JSI, with the TypeScript runtime's `UndraCore`, mirror and React hooks on top and
-the bindings `undra bindgen` generates for TypeScript, unchanged. The design is ADR-038
-(`.10x/adrs/ADR-038-react-native-host.md`); the reference app is `examples/playground/rn`.
+SwiftUI and Compose apps link (`lib<namespace>.a` in `<Bundle>.xcframework` on iOS,
+`lib<namespace>.so` on Android; `libplayground_core` for the playground), reached from JavaScript
+through JSI, with the TypeScript runtime's `UndraCore`, mirror and React hooks on top and the bindings
+`undra bindgen` generates for TypeScript, unchanged. An app may hold several cores, each found by its
+namespace (`[core] namespace` in `undra.toml`, ADR-044). The design is ADR-038
+(`.10x/adrs/ADR-038-react-native-host.md`) with ADR-044's per-core table; the reference app is
+`examples/playground/rn`.
 
 ```
  React components ── useSignal / useUndra (@undra/runtime/react)
         │
  generated bindings (@your/core) ── UndraCore, Mirror (@undra/runtime)
         │
- NativeTransport (@undra/react-native) ── JSI host functions (globalThis.__undraNative)
-        │                                       │ one C++ module, iOS and Android
- ───────┴──────────────── C ABI (undra.h) ──────┴───────────────────────────
+ NativeTransport (@undra/react-native) ── JSI host functions (globalThis.__undraNative[namespace])
+        │                                       │ one C++ module, iOS and Android, one object per core
+ ───────┴──────── C ABI v2 (undra.h: the core's UndraApi table) ─┴──────────
                          your Rust core (undra build --platform rn)
 ```
 
@@ -40,12 +43,18 @@ its own once per display frame (ADR-031), exactly as on the web.
    undra build --platform rn --release      # without --release for a debug core (much slower)
    ```
 
-   This is the iOS and Android builds plus `build/ios/UndraCore.podspec`:
+   This is the iOS and Android builds plus the core's pod. For a core whose namespace is `acme_pay`
+   (the bundle name drops a trailing `core`, so `playground_core` is `PlaygroundCore`):
 
    | Under `build/` | Used by |
    |---|---|
-   | `ios/UndraCore.xcframework`, `ios/UndraCore.podspec` | the app's Podfile |
-   | `android/jniLibs/<abi>/libundra_core.so` | the app's Gradle `jniLibs` |
+   | `ios/AcmePayCore.xcframework` (one prelinked `libacme_pay.a` per slice), `ios/AcmePayCore.podspec`, `ios/AcmePayCoreTable.m` | the app's Podfile |
+   | `android/jniLibs/<abi>/libacme_pay.so` | the app's Gradle `jniLibs` |
+
+   Each slice of the XCFramework is one object whose only global symbol is the core's entry,
+   `acme_pay_undra_api`, so it links without `-force_load` and next to other cores (ADR-044). The pod
+   also compiles `AcmePayCoreTable.m`, the class `UndraCoreTable_acme_pay` through which the module
+   finds the core by its namespace (the module is built once for every core, so it names none).
 
 2. **Add the packages** (`@undra/runtime` and `react-native` are its peers) and your generated bindings:
 
@@ -72,13 +81,17 @@ its own once per display frame (ADR-031), exactly as on the web.
 4. **iOS**: point the Podfile at the core's pod, then `pod install`:
 
    ```ruby
-   platform :ios, '17.0'                       # your core's deployment target
+   platform :ios, '17.0'                         # your core's deployment target
    target 'App' do
-     config = use_native_modules!               # links UndraReactNative (autolinking)
-     pod 'UndraCore', :path => '../build/ios'   # written by undra build --platform rn
+     config = use_native_modules!                 # links UndraReactNative (autolinking)
+     pod 'AcmePayCore', :path => '../build/ios'   # written by undra build --platform rn
      use_react_native!(...)
    end
    ```
+
+   The path is relative to the Podfile (`ios/`): `../build/ios` when the app sits next to `build/`,
+   `../../build/ios` for the playground's `rn/ios/Podfile`. One line per core; the pod adds `-ObjC` to
+   the app, which keeps the table class.
 
 5. **Android**: package the core's libraries:
 
@@ -90,7 +103,8 @@ its own once per display frame (ADR-031), exactly as on the web.
    ```
 
    Nothing else: the module is a pure C++ dependency that React Native's Gradle plugin builds into the
-   app's `libappmodules.so`, and it opens `libundra_core.so` from the APK at start.
+   app's `libappmodules.so`, and it opens `lib<namespace>.so` from the APK (`dlopen`, then `dlsym` of
+   `<namespace>_undra_api`) when JavaScript first loads that core.
 
 6. **Import first**: `@undra/react-native` installs `TextDecoder` (Hermes has none) before anything
    loads `@undra/runtime`, so import it at the top of your entry file:
@@ -107,13 +121,12 @@ its own once per display frame (ADR-031), exactly as on the web.
 ```tsx
 import { loadNative } from '@undra/react-native';
 import { useSignal } from '@undra/runtime/react';
-import { Todos, UndraIds } from '@acme/core';          // your generated bindings
+import { Todos, UndraAcmePay } from '@acme/pay-core';   // your generated bindings and their entry
 
-const core = await loadNative({
-  expectedSchemaHash: UndraIds.schemaHash,             // a core from another schema is refused
+const core = await loadNative(UndraAcmePay, {
   adapters: { kv: myKv },                              // see "Adapters"
 });
-const todos = await Todos.create();                    // UndraCore.shared is the native core
+const todos = await Todos.create();                    // on UndraAcmePay.core, which is this core
 
 function TodoCount() {
   const remaining = useSignal(todos.remaining);
@@ -121,10 +134,31 @@ function TodoCount() {
 }
 ```
 
-`loadNative` accepts every option of `UndraCore.attach` (`adapters`, `ports`, `onError`, `onClose`,
-`mirror`) plus `devtools`, `logLevel` and `platform`. It resolves with the same core when called again
-while it is open. `core.close()` shuts the core down; a JavaScript reload in development shuts it down
-and the next `loadNative` starts a fresh one.
+`loadNative(entry, options)` takes the generated entry of your bindings (`Undra<Namespace>`, ADR-044):
+it installs the module of the core `entry.namespace` (`globalThis.__undraNative[namespace]`), checks the
+core's schema hash against `entry.schemaHash` before the core starts (a core from another schema is
+refused with `UndraSchemaMismatchError`), and attaches through `entry.attach`, so the core becomes
+`UndraAcmePay.core`, the default of every generated class and function of those bindings. The first
+core loaded is also `UndraCore.shared` (for `useUndra`). The entry may be just
+`{ namespace, schemaHash }` (`UndraIds.namespace`, `UndraIds.schemaHash`); then the core is not any
+entry's `core`, and generated calls need it passed explicitly.
+
+The options are those of `UndraCore.attach` (`adapters`, `ports`, `onError`, `onClose`, `mirror`,
+`shared`) plus `devtools`, `logLevel` and `platform`. Called again for a namespace whose core is open
+(or loading), `loadNative` resolves with that core. `core.close()` shuts the core down; a JavaScript
+reload in development shuts it down and the next `loadNative` starts a fresh one.
+
+**Several cores.** Each core is its own pod (iOS) and library (Android) and its own `loadNative`:
+
+```ts
+await loadNative(UndraAcmePay, { adapters: { kv: payKv } });
+await loadNative(UndraVendorSdk, { shared: false });   // another namespace: its own module, inbox, threads
+```
+
+They share nothing (no handles, no types, no threads, ADR-044 decision 6); values pass between them
+through your code. `installNative(namespace)` returns a core's JSI object (its `hostCounters()`,
+`statsJson()`) and throws `UndraTransportError("unsupported")`, with the module's reason, when the app
+has no core of that namespace.
 
 ### Adapters
 
@@ -167,12 +201,15 @@ make its methods `async`.
 * Per-call cost is the same JavaScript: a synchronous call is about 0.2 us through JSI and the core,
   about 6 us through `UndraCore.callSync` (4 us of it building the payload), and 15 to 20 us as an
   awaited generated method on the iOS simulator.
-* One Undra core per process (also across languages: not a Swift or Kotlin Undra host next to it)
-  until ADR-044's per-core function table lands. That includes two React Native instances in one
-  process (a brownfield app with two `ReactHost`s): the module cannot tell a second instance from a
-  reloaded one, so the second `loadNative` stops the first instance's core, whose calls then fail
-  with `UndraTransportError("closed")` (`UndraCallError.Unavailable` through the generated bindings, whose
-  `transport.reason` is `closed`); they never reach the other instance's core.
+* One running `UndraCore` per core namespace per process (ADR-044; ADR-038 decision 11 applies per
+  namespace). Several cores, of several namespaces, run side by side. A Swift or Kotlin Undra host in
+  the same process can hold other cores, but not the same one: a core image is initialised once per
+  process. Two React Native instances in one process (a brownfield app with two `ReactHost`s) cannot
+  both load the same core: the module cannot tell a second instance from a reloaded one, so the second
+  `loadNative` of a namespace stops the first instance's core of that namespace, whose calls then fail
+  with `UndraTransportError("closed")` (`UndraCallError.Unavailable` through the generated bindings,
+  whose `transport.reason` is `closed`); they never reach the other instance's core. Cores of other
+  namespaces are not touched.
 * JavaScript-implemented synchronous ports: see "Adapters".
 * `Clock`, `Rng` and `Timer` are native and cannot be replaced from JavaScript.
 
@@ -180,7 +217,7 @@ make its methods `async`.
 
 | Layer | How | Command | In CI |
 |---|---|---|---|
-| The C++ host (inbox, ports, ownership, shutdown), both shims; the JSI layer compiled against React Native 0.87's headers with `-Werror` | against the real core, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` | `ci.yml`, job "React Native (host + model)", every push and pull request (Linux, clang 18) |
+| The C++ host (inbox, ports, ownership, shutdown), both shims: finding a core by namespace and refusing its table (unknown core, ABI 1, too short, another namespace, a missing entry), two real cores side by side (`playground_core` and `playground_a`), one host each; the JSI layer and the TurboModule compiled against React Native 0.87's headers with `-Werror` | against the real cores, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` | `ci.yml`, job "React Native (host + model)", every push and pull request (Linux, clang 18: the dlopen shim; the linked shim needs the Objective-C runtime and runs on macOS) |
 | `NativeTransport`, the frame scheduler, the polyfills, `loadNative` | a fake module, on Node | `npm test` in `runtimes/rn/@undra/react-native` | the same job |
 | Types of the package and its build config | `tsc`, against `@undra/runtime`'s sources and its emitted declarations (`npm run build` in `runtimes/ts/@undra/runtime` first) | `npm run typecheck` | the same job |
 | The contract scenarios S01..S18 | through `NativeTransport` over a stand-in of the module on the wasm core: 17 pass, S17 (native panic containment) is app-tested | `npm run test:contract` | the same job |
@@ -191,6 +228,20 @@ C++ module: that is the C++ host test plus RN01..RN10 on a device. Count it as "
 stand-in", never as a native column next to Swift and Kotlin.
 
 ## What is verified
+
+**After ADR-044's table** (2026-10-01, `wt/abi-table`): the module reaches each core through its `UndraApi`
+table, by namespace. On a Mac (Apple clang, Xcode 26.6):
+
+| What | Where | Result |
+|---|---|---|
+| The C++ host, both shims, ASan + UBSan, against `playground_core` and `playground_a` in one process | `cpp/test/run.sh`, macOS | 21 + 21 checks (the refusals, two cores side by side, the 14 of before, now per core); `UndraJsi.cpp` and `UndraTurboModule.cpp` compile against 0.87's headers |
+| `NativeTransport`, `loadNative` (the generated entry, two namespaces) and friends | `npm test`, `npm run typecheck`, Node 24 | 50 tests; typecheck clean |
+| Contract scenarios through `NativeTransport` | `npm run test:contract` | 17 pass, S17 skipped (app-tested) |
+| The on-device checks, iOS | iPhone 17 Pro simulator (iOS 26.5), release core (`PlaygroundCore` pod, no `-force_load`), Release app | `CHECKS 10/10 passed`; RN01 calls through `UndraPlaygroundCore.core`, RN10 also sees `no_such_core` refused |
+| The on-device checks, Android | `undra` emulator (arm64, API 35), release core (`libplayground_core.so`), release APK | `CHECKS 10/10 passed`, the same lines |
+
+JavaScript reloads were not re-run after the table (the reload logic is the same, keyed by namespace; the
+host test's reload race passes on both shims). The rows below are the record from before it.
 
 Everything below was run on 2026-10-01 at `wt/react-native` with `main` merged in (the schema JSON, device
 bench, diagnostics, dev loop and parity pieces: the typed failure model, `snapshot()` and `restore()`), on a Mac (Apple clang, Xcode 26.6) shared with other agents' builds.
@@ -224,9 +275,12 @@ pending states in a table that the source's destructor empties.
 | `Property 'TextDecoder' doesn't exist` at start | something imported `@undra/runtime` (your bindings) before `@undra/react-native`: import it first (Install, step 6) |
 | `'import.meta' is currently unsupported` from the Hermes compiler | add `@undra/react-native/babel-plugin` (step 3) |
 | `the UndraNative TurboModule is not linked into this app` | the package is not a dependency of the app, or `pod install` / the Gradle sync did not run after adding it |
-| `cannot load the Undra core libundra_core.so` (Android) | the core's `jniLibs` are not packaged (step 5), or not built for the device's ABI |
-| Undefined `_undra_*` symbols when linking (iOS) | the `UndraCore` pod is missing from the Podfile (step 4) |
-| `found architecture 'arm64', required architecture 'x86_64'` for `libundra_core.a`, then undefined `_undra_*` symbols, in a Release build for the simulator | the Release configuration builds every simulator architecture and the core's simulator slice has only `[ios] simulator_archs` (`arm64` by default): build for the active architecture (`ONLY_ACTIVE_ARCH=YES ARCHS=arm64`, as Xcode's Run does) or add `x86_64` to `simulator_archs` |
+| ``cannot load the Undra core `acme_pay`, libacme_pay.so`` (Android) | the core's `jniLibs` are not packaged (step 5), or not built for the device's ABI |
+| ``no Undra core `acme_pay` is linked into this app (there is no class UndraCoreTable_acme_pay)`` (iOS) | the core's pod is missing from the Podfile, or `pod install` did not run after adding it (step 4) |
+| `... speaks C ABI 1, this module speaks 2` | the core was built by an Undra older than `@undra/react-native` (before ADR-044's table): rebuild it with `undra build --platform rn` of the same version |
+| ``the native module is the core `x`, not `y` `` | a `NativeTransport` was given another core's module: pass the module `installNative(namespace)` returns for its own namespace |
+| `found architecture 'arm64', required architecture 'x86_64'` for `lib<namespace>.a`, in a Release build for the simulator | the Release configuration builds every simulator architecture and the core's simulator slice has only `[ios] simulator_archs` (`arm64` by default): build for the active architecture (`ONLY_ACTIVE_ARCH=YES ARCHS=arm64`, as Xcode's Run does) or add `x86_64` to `simulator_archs` |
 | `UndraSchemaMismatchError` | the linked core and the generated bindings come from different schemas: run `undra bindgen` and `undra build --platform rn` again |
-| `another Undra core is running in this process` | `loadNative` (or `NativeTransport.start`) was called while a core is open; use `UndraCore.shared`. The running core is not disturbed. (After a reload, a core whose old runtime is still shutting it down is waited for, up to 5 s, before this is reported.) |
-| `UndraTransportError("closed")`, or `UndraCallError.Unavailable` with `transport.reason` `closed`, in a runtime that did not close its core | another React Native instance of the process (or the reloaded runtime) started a core, which stops this one (Limits) |
+| `UndraError("state")`: the core is already loaded | the generated entry's core was loaded another way (`entry.load`, `entry.attach`) and is still open: close it first, or keep using `entry.core` |
+| `this core is already running in this process (for another JavaScript runtime)` | `NativeTransport.start` for a core that another transport of the process runs; `loadNative` of an open namespace returns its core instead. The running core is not disturbed. (After a reload, a core whose old runtime is still shutting it down is waited for, up to 5 s, before this is reported.) |
+| `UndraTransportError("closed")`, or `UndraCallError.Unavailable` with `transport.reason` `closed`, in a runtime that did not close its core | another React Native instance of the process (or the reloaded runtime) started the same core, which stops this one (Limits) |
