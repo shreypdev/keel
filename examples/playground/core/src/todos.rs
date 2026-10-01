@@ -376,7 +376,11 @@ mod tests {
             item: todo,
         }];
         assert_eq!(ops(&sets[0], TODOS), insert);
-        assert_eq!(ops(&sets[0], VISIBLE), insert, "the view is patched, not sent");
+        assert_eq!(
+            ops(&sets[0], VISIBLE),
+            insert,
+            "the view is patched, not sent"
+        );
     }
 
     #[test]
