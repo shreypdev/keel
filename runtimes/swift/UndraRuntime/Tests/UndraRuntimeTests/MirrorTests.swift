@@ -91,13 +91,16 @@ final class MirrorTests: XCTestCase {
                 transport.deliverChangeSet(set)
             }
         }
-        let finished = await waitUntil { log.events.count == 50 }
-        XCTAssertTrue(finished, "\(log.events.count) of 50 change-sets applied")
-        var expected: [String] = []
-        for index in 0 ..< 50 {
-            expected.append("0:fullValue:\(index)")
-        }
-        XCTAssertEqual(log.events, expected)
+        let finished = await waitUntil { log.events.last == "0:fullValue:49" }
+        XCTAssertTrue(finished, "last applied: \(log.events.last ?? "nothing")")
+        // A drain applies the last value of a signal it holds (ADR-031): the values applied grow
+        // strictly, one per drain at most, and end at the last one committed.
+        let values = log.events.compactMap { Int($0.split(separator: ":")[2]) }
+        XCTAssertEqual(values.count, log.events.count)
+        XCTAssertEqual(values, values.sorted())
+        XCTAssertEqual(Set(values).count, values.count)
+        XCTAssertLessThanOrEqual(values.count, 50)
+        XCTAssertEqual(core.mirror.stats().entriesApplied, values.count)
         XCTAssertTrue(log.onlyOnMainThread)
     }
 

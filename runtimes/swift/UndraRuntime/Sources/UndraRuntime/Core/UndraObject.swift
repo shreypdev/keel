@@ -56,17 +56,27 @@ open class UndraObject: @unchecked Sendable {
 
 /// The base class of every generated store: an object whose signals the mirror keeps up to date.
 ///
-/// `init(core:handle:)` registers the store with the core's mirror; change-set entries for the
-/// store's handle then arrive at `apply(signal:op:reader:)` on the main actor. The generated
-/// subclass (which is `@Observable`) overrides `apply` to decode each signal into its properties.
-/// After `super.init` the generated initializer calls `core.observe(handle, signal:on:)`, which
-/// applies the initial values before it returns.
+/// `init(core:handle:noCoalesce:)` registers the store with the core's mirror; change-set entries
+/// for the store's handle then arrive at `apply(signal:op:reader:)` on the main actor. The
+/// generated subclass (which is `@Observable`) overrides `apply` to decode each signal into its
+/// properties. After `super.init` the generated initializer calls
+/// `core.observe(handle, signal:on:)`, which applies the initial values before it returns.
+///
+/// The mirror applies a store's changes once per display frame, merged: each signal gets its last
+/// full value and the keyed patches that followed it as one patch, so `apply` sees the state after
+/// every change the core committed, not each state in between. Signals declared
+/// `#[undra(no_coalesce)]` get every entry.
 @MainActor
 open class UndraStore: UndraObject, @unchecked Sendable {
     /// Adopts `handle` and registers this store with `core.mirror`.
-    public override init(core: UndraCore, handle: UndraHandle) {
+    ///
+    /// `noCoalesce` lists the ids of the store's signals declared `#[undra(no_coalesce)]`
+    /// (generated code passes them): `apply` receives every value of those, in order, instead of
+    /// the last one per drain. SwiftUI still renders once per frame whatever the model does, so a
+    /// view may not show each intermediate value; the store's properties take every one.
+    public init(core: UndraCore, handle: UndraHandle, noCoalesce: Set<UInt32> = []) {
         super.init(core: core, handle: handle)
-        core.mirror.register(handle) { [weak self] signal, op, reader in
+        core.mirror.register(handle, noCoalesce: noCoalesce) { [weak self] signal, op, reader in
             guard let store = self else {
                 return
             }

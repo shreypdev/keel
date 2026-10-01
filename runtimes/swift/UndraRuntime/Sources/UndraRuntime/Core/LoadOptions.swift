@@ -29,6 +29,13 @@ public struct LoadOptions: Sendable {
     public var connectTimeout: Double
     /// Seconds a blocking `callSync` or `construct` waits for the remote core (`remote` only).
     public var blockingCallTimeout: Double
+    /// The most change-set entries the mirror keeps waiting for a drain. Past it, the thread that
+    /// delivers the next change-set folds the queue in place (docs/SPEC.md section 11). Default
+    /// 65,536.
+    public var maxPendingEntries: Int
+    /// The most bytes those entries may account for (their values plus 17 bytes each) before the
+    /// queue is folded in place. Default 16 MiB.
+    public var maxPendingBytes: Int
 
     /// Creates options with every setting spelled out; prefer `inproc(...)` and `remote(...)`.
     public init(
@@ -37,7 +44,9 @@ public struct LoadOptions: Sendable {
         expectedSchemaHash: UInt64,
         logLevel: UInt8 = 2,
         connectTimeout: Double = 10,
-        blockingCallTimeout: Double = 30
+        blockingCallTimeout: Double = 30,
+        maxPendingEntries: Int = 65_536,
+        maxPendingBytes: Int = 16 * 1024 * 1024
     ) {
         self.mode = mode
         self.adapters = adapters
@@ -45,6 +54,8 @@ public struct LoadOptions: Sendable {
         self.logLevel = logLevel
         self.connectTimeout = connectTimeout
         self.blockingCallTimeout = blockingCallTimeout
+        self.maxPendingEntries = maxPendingEntries
+        self.maxPendingBytes = maxPendingBytes
     }
 
     /// A core linked into this process.
