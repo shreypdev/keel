@@ -270,16 +270,16 @@ fn trailing_bytes() {
 // --- envelope ---------------------------------------------------------------------------------
 
 fn valid_frame() -> Vec<u8> {
-    unhex("4b45454c01000807060504030201010700000003000000aabbcc")
+    unhex("554e445201000807060504030201010700000003000000aabbcc")
 }
 
 #[test]
 fn envelope_bad_magic() {
     let mut frame = valid_frame();
-    frame[..4].copy_from_slice(b"KEEK");
+    frame[..4].copy_from_slice(b"UNDQ");
     assert_eq!(Envelope::parse(&frame), Err(WireError::BadMagic));
     assert_eq!(
-        Envelope::parse(&[0x6B, 0x65, 0x65, 0x6C, 0x01, 0x00]),
+        Envelope::parse(&[0x75, 0x6E, 0x64, 0x72, 0x01, 0x00]),
         Err(WireError::BadMagic)
     );
     assert_eq!(Envelope::parse(&[0; 40]), Err(WireError::BadMagic));
@@ -526,5 +526,5 @@ fn errors_display_usefully() {
     assert!(messages[2].contains("bool") && messages[2].contains('7'));
     // `WireError` is a real error type.
     let boxed: Box<dyn std::error::Error> = Box::new(WireError::BadMagic);
-    assert!(boxed.to_string().contains("4b45454c"));
+    assert!(boxed.to_string().contains("554e4452"));
 }

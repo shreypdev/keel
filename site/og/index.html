@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Undra social card</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=block">
+<style>
+/* 1200x630, rendered to ../assets/og.png by site/scripts/render-og.sh */
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1200px; height: 630px; overflow: hidden; }
+body { position: relative; background: #0a0a0a; color: #ededea; font-family: "Geist", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.glow { position: absolute; inset: -160px -80px auto auto; width: 820px; height: 640px; background: radial-gradient(50% 50% at 50% 50%, rgba(255,106,42,.22), transparent 70%); }
+.card { position: absolute; inset: 0; padding: 72px 80px; display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 18px; font-size: 40px; font-weight: 600; letter-spacing: -.02em; }
+.brand svg { width: 56px; height: 56px; }
+h1 { margin-top: auto; font-size: 92px; line-height: 1.02; font-weight: 600; letter-spacing: -.035em; max-width: 960px; }
+h1 span { color: #ff6a2a; }
+p { margin-top: 24px; font-size: 30px; line-height: 1.35; color: #a4a49e; max-width: 1040px; }
+.foot { margin-top: 40px; display: flex; justify-content: space-between; align-items: center; font: 500 26px "Geist Mono", ui-monospace, monospace; color: #8a8a84; }
+.chips { display: flex; gap: 12px; }
+.chips i { font-style: normal; padding: 8px 18px; border: 1px solid rgba(255,255,255,.16); border-radius: 999px; color: #c9c9c4; background: rgba(255,255,255,.04); }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="card">
+  <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#ff6a2a"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="#0a0a0a" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Undra</div>
+  <h1>The <span>Rust core</span> for native apps</h1>
+  <p>Write your domain once. Your UI stays SwiftUI, Compose and React.</p>
+  <div class="foot"><span>shreypdev.github.io/undra</span><div class="chips"><i>iOS</i><i>Android</i><i>Web</i></div></div>
+</div>
+</body>
+</html>

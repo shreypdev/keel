@@ -1,9 +1,11 @@
-/* Keel site — behaviour shared by every page: theme toggle, tabs, copy buttons,
-   a small syntax highlighter (no dependencies), and scroll reveals.
-   Everything here is progressive enhancement: with JS off the content is readable, dark, and complete. */
+/* Undra site: behaviour shared by every page: theme toggle, mobile menu, tabs, copy buttons on every code
+   block, a small syntax highlighter, scroll reveals, and the lazy loader for the docs search (search.js).
+   Everything here is progressive enhancement: with JS off the content is readable, dark and complete. */
 (function () {
   "use strict";
   var doc = document;
+  var me = doc.currentScript;
+  var assets = me && me.src ? me.src.replace(/site\.js(\?.*)?$/, "") : "";
   var root = doc.documentElement;
   var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   var $$ = function (sel, ctx) { return Array.prototype.slice.call((ctx || doc).querySelectorAll(sel)); };
@@ -13,10 +15,11 @@
     root.dataset.theme = t;
     var meta = doc.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", t === "light" ? "#f7f6f2" : "#0a0a0a");
-    if (persist) { try { localStorage.setItem("keel-theme", t); } catch (e) { /* private mode */ } }
+    if (persist) { try { localStorage.setItem("undra-theme", t); } catch (e) { /* private mode */ } }
     $$("[data-theme-toggle]").forEach(function (b) {
       b.setAttribute("aria-label", t === "light" ? "Switch to dark theme" : "Switch to light theme");
     });
+    doc.dispatchEvent(new CustomEvent("undra:theme", { detail: t }));
   }
   setTheme(root.dataset.theme === "light" ? "light" : "dark", false);
   $$("[data-theme-toggle]").forEach(function (b) {
@@ -45,11 +48,16 @@
     c: [["com", "\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/"], ["str", "\"(?:\\\\.|[^\"\\\\\\n])*\""]]
   };
   RX.tsx = RX.ts; RX.typescript = RX.ts; RX.kt = RX.kotlin; RX.sh = RX.bash; RX.shell = RX.bash;
-  var BASH_CMDS = "keel cargo npm git cd rustup brew source curl swift bash gradlew xcodebuild";
+  var BASH_CMDS = "undra cargo npm git cd rustup brew source curl swift bash gradlew xcodebuild";
 
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function langOf(code) {
+    var l = code.getAttribute("data-lang");
+    if (!l) { var m = /(?:^|\s)language-([\w+-]+)/.exec(code.className || ""); if (m) { l = m[1].toLowerCase(); code.setAttribute("data-lang", l); } }
+    return l;
+  }
   function highlight(code) {
-    var lang = code.getAttribute("data-lang");
+    var lang = langOf(code);
     if (!lang || !RX[lang] || code.getAttribute("data-hl")) return;
     var src = code.textContent, parts = [], names = [];
     RX[lang].forEach(function (r) { names.push(r[0]); parts.push("(" + r[1] + ")"); });
@@ -71,7 +79,7 @@
     code.innerHTML = out + esc(src.slice(last));
     code.setAttribute("data-hl", "1");
   }
-  $$("pre code[data-lang]").forEach(highlight);
+  $$("pre code").forEach(highlight);
 
   /* ---------- copy buttons ---------- */
   var COPY_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>';
@@ -80,7 +88,7 @@
       var label = btn.querySelector("span");
       btn.classList.add("done");
       if (label) label.textContent = "Copied";
-      setTimeout(function () { btn.classList.remove("done"); if (label) label.textContent = "Copy"; }, 1600);
+      setTimeout(function () { btn.classList.remove("done"); if (label) label.textContent = "Copy"; }, 1500);
     }
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done, function () { fallback(); });
@@ -96,10 +104,25 @@
   function makeCopy(getText) {
     var b = doc.createElement("button");
     b.type = "button"; b.className = "copy"; b.setAttribute("aria-label", "Copy code");
-    b.innerHTML = COPY_ICON + "<span>Copy</span>";
+    b.innerHTML = COPY_ICON + '<span aria-live="polite">Copy</span>';
     b.addEventListener("click", function () { copyText(getText(), b); });
     return b;
   }
+  // Every <pre> gets the same frame: a header bar with the language and a copy button.
+  $$("pre").forEach(function (pre) {
+    if (pre.closest(".code, .term, .diag") || pre.classList.contains("diag")) return;
+    var code = pre.querySelector("code"), lang = code && langOf(code);
+    var box = doc.createElement("div"), bar = doc.createElement("div"), l = doc.createElement("span");
+    box.className = "code"; bar.className = "code-bar"; l.className = "lang"; l.textContent = lang || "text";
+    bar.appendChild(l); box.appendChild(bar);
+    pre.parentNode.insertBefore(box, pre); box.appendChild(pre);
+  });
+  // Tables scroll sideways inside a frame instead of breaking the page on a phone.
+  $$("table").forEach(function (t) {
+    if (t.closest(".table-wrap")) return;
+    var w = doc.createElement("div"); w.className = "table-wrap";
+    t.parentNode.insertBefore(w, t); w.appendChild(t);
+  });
   $$(".code").forEach(function (box) {
     var pre = box.querySelector("pre"); if (!pre || box.querySelector(".copy")) return;
     var btn = makeCopy(function () { return pre.textContent.replace(/\n$/, ""); });
@@ -107,7 +130,37 @@
     (bar || box).appendChild(btn);
   });
   $$("[data-copy]").forEach(function (b) {
+    var l = b.querySelector("span"); if (l) l.setAttribute("aria-live", "polite");
     b.addEventListener("click", function () { copyText(b.getAttribute("data-copy"), b); });
+  });
+
+  /* ---------- mobile menu ---------- */
+  var header = doc.querySelector(".site-header"), menu = doc.querySelector("[data-menu]");
+  if (header && menu) {
+    var closeMenu = function () { header.classList.remove("open"); menu.setAttribute("aria-expanded", "false"); };
+    menu.addEventListener("click", function () {
+      var open = header.classList.toggle("open"); menu.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    doc.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenu(); });
+    $$(".nav a", header).forEach(function (a) { a.addEventListener("click", closeMenu); });
+  }
+
+  /* ---------- search: search.js is fetched on first use (click or Cmd/Ctrl-K) ---------- */
+  var searchLoading = null;
+  function withSearch(then) {
+    if (window.UndraSearch) { then(window.UndraSearch); return; }
+    if (!searchLoading) {
+      searchLoading = new Promise(function (ok, fail) {
+        var s = doc.createElement("script"); s.src = assets + "search.js"; s.onload = ok; s.onerror = fail; doc.head.appendChild(s);
+      });
+    }
+    searchLoading.then(function () { then(window.UndraSearch); }, function () { searchLoading = null; });
+  }
+  $$("[data-search-open]").forEach(function (b) { b.addEventListener("click", function () { withSearch(function (k) { k.open(assets + "../"); }); }); });
+  doc.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+      e.preventDefault(); withSearch(function (k) { k.toggle(assets + "../"); });
+    }
   });
 
   /* ---------- tabs ---------- */
@@ -186,17 +239,17 @@
     targets.forEach(reveal);
   }
 
-  /* ---------- docs: mark the current section in the on-this-page list ---------- */
-  var toc = $$(".toc a");
+  /* ---------- mark the current section in the on-this-page list (docs and blog) ---------- */
+  var toc = $$(".toc a[href^='#']");
   if (toc.length && "IntersectionObserver" in window) {
     var map = {};
     toc.forEach(function (a) { map[a.getAttribute("href").slice(1)] = a; });
     var so = new IntersectionObserver(function (entries) {
       entries.forEach(function (en) {
-        var a = map[en.target.id]; if (!a) return;
-        if (en.isIntersecting) { toc.forEach(function (x) { x.removeAttribute("aria-current"); }); a.setAttribute("aria-current", "true"); }
+        var a = map[en.target.id]; if (!a || !en.isIntersecting) return;
+        toc.forEach(function (x) { x.removeAttribute("aria-current"); }); a.setAttribute("aria-current", "true");
       });
     }, { rootMargin: "-80px 0px -70% 0px" });
-    $$("article h2[id], article h3[id]").forEach(function (h) { so.observe(h); });
+    Object.keys(map).forEach(function (id) { var t = doc.getElementById(id); if (t) so.observe(t); });
   }
 })();

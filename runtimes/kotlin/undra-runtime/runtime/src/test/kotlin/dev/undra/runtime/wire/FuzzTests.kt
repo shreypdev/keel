@@ -30,7 +30,7 @@ class FuzzTests : Suite() {
     private class Outcome(val text: String, val value: Any?, val ok: Boolean)
 
     private val iterations = System.getenv("UNDRA_FUZZ_ITERATIONS")?.toIntOrNull() ?: 5000
-    private val seed = System.getenv("UNDRA_FUZZ_SEED")?.toLongOrNull() ?: 0x4B45454CL
+    private val seed = System.getenv("UNDRA_FUZZ_SEED")?.toLongOrNull() ?: 0x554E4452L
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> codecTarget(name: String, codec: UndraCodec<T>) = Target(

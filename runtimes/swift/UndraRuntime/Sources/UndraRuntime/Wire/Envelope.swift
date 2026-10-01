@@ -1,6 +1,6 @@
 // The transport envelope (docs/SPEC.md section 3.2), used on WebSocket and Worker transports.
 //
-//   magic      4 bytes  4B 45 45 4C (fixed by the wire format)
+//   magic      4 bytes  55 4E 44 52, the ASCII of `UNDR` (fixed by the wire format)
 //   version    u16      1
 //   schema     u64      schema_hash of the core that produced/expects this message
 //   kind       u8       see Envelope.Kind
@@ -15,8 +15,8 @@ public enum Envelope {
     /// Size of the envelope header in bytes.
     public static let headerLength = 23
 
-    /// The magic bytes at the start of every envelope: `4B 45 45 4C`.
-    public static let magic: [UInt8] = [0x4B, 0x45, 0x45, 0x4C]
+    /// The magic bytes at the start of every envelope: `55 4E 44 52`, the ASCII of `UNDR`.
+    public static let magic: [UInt8] = [0x55, 0x4E, 0x44, 0x52]
 
     /// The only envelope version this runtime speaks.
     public static let version: UInt16 = 1
@@ -71,7 +71,7 @@ public enum Envelope {
         schemaHash: UInt64,
         payloadLength: Int
     ) {
-        w.writeU32(0x4C45_454B) // the magic as a little-endian u32: bytes 4B 45 45 4C
+        w.writeU32(0x5244_4E55) // the magic as a little-endian u32: bytes 55 4E 44 52
         w.writeU16(version)
         w.writeU64(schemaHash)
         w.writeU8(kind.rawValue)
@@ -122,7 +122,7 @@ public func decodeEnvelope(_ bytes: [UInt8]) throws -> Envelope.Decoded {
 public func decodeEnvelope(slice: ArraySlice<UInt8>) throws -> Envelope.Decoded {
     var r = UndraReader(slice: slice)
     let magic = try r.readU32()
-    if magic != 0x4C45_454B {
+    if magic != 0x5244_4E55 {
         throw WireError.badMagic
     }
     let version = try r.readU16()
