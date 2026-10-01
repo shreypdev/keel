@@ -168,3 +168,73 @@ seven concurrent pieces makes timing-sensitive suites lie):
 | B4 devtools | after `dev-loop` and B3 merge | the dev server, state-preserving reload | opus, opus review |
 | G3 `Db` port (SQLite) | after ADR-037 and G2 | persistence model (ADR-037); the port pattern of G2 | opus design, sonnet implement, opus review |
 | G4 Flutter/Dart bindgen | after G1 proves the fourth-host pattern | G1 | opus design, sonnet implement, opus review |
+
+## Amendment B — findings from the competitive catalogue (2026-10-01)
+
+`.10x/specs/2026-10-01-competitive-limitations.md` (68 sourced limitations, a 36-row matrix,
+18 ranked missing items) adds pieces the first draft did not have. They are scheduled now:
+
+| New piece | Track | What | ADR | Starts |
+|---|---|---|---|---|
+| **Android platform adapters** | C4 → its own piece | real Kv, SecureStore, Fs, Http, Connectivity and Lifecycle adapters in `android-adapters`, installed by default, instrumented tests on the emulator, the playground stops faking them | none (adapters) | now, `wt/android-adapters` |
+| Boundary surface | C3 escalated | objects as parameters and returns (E0064), host callback interfaces / listeners (E0004), newtypes (E0007), limited generics (E0002) | ADR-040 objects, ADR-041 callbacks, ADR-042 newtypes and generics | ADRs now (`wt/boundary-adrs`), code in phase 2 |
+| Data layer completion | A5/E3 re-scoped | interval polling (SPEC §9 promises it), paged and infinite queries with lazy lists, queued offline mutations keep their optimistic state and invalidations across restarts | ADR-043 paged queries and lazy lists; A5's ADR-037 covers the queue | ADR now, code after ADR-037 |
+| Production operations | new Track I | crash-symbol files (dSYM, wasm source maps, Android symbols) from `undra build`, a documented debugging path into Rust on each platform, OS background execution to drain the offline queue (BGTaskScheduler / WorkManager through the Lifecycle port) | ADR-046 | phase 2 |
+| Multiple cores per app | compatibility | per-library symbol namespacing so two Undra libraries can coexist in one process | ADR-044 (decided together with ADR-038) | ADR now |
+| iOS floor | compatibility | an iOS 15/16 mode for generated stores (`ObservableObject` where `Observation` is unavailable) | ADR-045 | ADR now |
+
+Renumbering: the WebSocket port becomes ADR-047, the `Db` port ADR-048. The post must not reuse
+the blueprint claims the catalogue found unbacked (time-travel devtools, a worker core by default,
+lazy collections, newtypes, optimistic state surviving restarts, Telemetry/Push ports, `undra adopt`)
+until the code backs them.
+
+## Amendment C — decisions from the gap audit (2026-10-01)
+
+`.10x/specs/2026-10-01-v1x-gaps.md`: 71 gaps (7 block adoption, 40 hurt, 24 polish); ADR-034…037
+drafted and needed. Integrator decisions:
+
+1. **ADR-034, 035, 036, 037 are accepted in direction**; they flip to Accepted with their
+   implementation. ADR-036 (typed stream errors) and ADR-037 (persisted-state migrations, which
+   changes the `Snapshot` payload) ship as **one wire revision** — the last before publication;
+   the earlier architect note ("A4 is the last wire change") is superseded by this amendment.
+2. **New pieces**: A6 web-core crash recovery (restart from the last snapshot, typed outcome to the
+   app); A7 storage ports gain an error channel and worker-mode sync ports work (ADR-049, amending
+   ADR-024/025); PO-4 (`wasm-worker` traps on the first Clock/Rng/Log call) is fixed as a bug in
+   the parity piece if it needs no ADR, else under ADR-049.
+3. **C4 is split**: C4a Android adapters (in flight); C4b the Kotlin and TypeScript failure model
+   to ADR-032's standard (commands never throw into UI callbacks, `onError`, a closed set of
+   error types, wire errors under one base) as a dated ADR-032 amendment; C4c snapshot/restore
+   parity for TypeScript.
+4. **A3** (a panicking computed is isolated per signal) is recorded as a dated ADR-019 amendment
+   before code, inside the Track A piece.
+5. **C3** is covered by ADR-040/042 (boundary-adrs piece); decimals and `uuid`/`chrono` types join
+   ADR-042's scope; the recursive-record compile failure is a bug fixed in the parity piece.
+6. Port cancellation (reopens the 19-function ABI) is deferred to v1.2 as its own ADR.
+7. RX-1/RX-2 (a one-row edit in 10,000 rows ships 192,647 B through a derived `Computed<Vec<T>>`
+   vs 39 B as a keyed patch) is the measured baseline for ADR-039.
+
+Ownership: `runtime-lifecycle` (ADR-034/035/036 + ADR-019 amendment; opus), then
+`persistence-v2` (ADR-037 + A6; opus); `parity` (C4b, C4c, PO-4, TY recursive bug; sonnet, opus review).
+
+## Amendment D — boundary, compatibility and production ADRs accepted in direction (2026-10-01)
+
+ADR-040…046 and ADR-049 (`.10x/specs/2026-10-01-boundary-surface-plan.md` has the waves and
+sizes) are accepted in direction with the drafters' recommendations on every open decision,
+with these notes: ADR-046's `backtrace` dependency must pass the wasm32/iOS/Android build check
+before it is added (CLAUDE.md), else a lighter path; ADR-044's drop of the `Java_*` exports
+changes the dead-strip guard of ADR-029 (`symbols_present` then checks the table symbol and
+`JNI_OnLoad`'s `RegisterNatives`). Bundling as proposed: **one wire revision** (ADR-036 typed
+stream items, ADR-037 migrations, ADR-040's handle split and `u64` floor, ADR-043's lazy
+encodings), **one standard-surface revision** (`stdlib-v2`: ADR-049 storage errors, ADR-046's
+standard items), **one ABI version** (ADR-044's function table, C ABI v2).
+
+Consequences for pieces in flight: the React Native host (ADR-038) is written against the v1
+global symbols with every reference isolated in one shim file, and migrates to the ADR-044
+table when `abi-table` lands; `android-adapters` adopts `StorageError` when `stdlib-v2` lands.
+Also from device-bench: **E4 — the binding call path** (web 3.2–3.9 µs through the generated
+binding vs 80 ns target; iOS ~300 ns vs 60 ns; the core itself 44 ns) is a new piece after its
+review's cause analysis; the `undra init` template wasm at 135 KB gzipped vs its 120 KB budget
+is a size piece (E5) once the schema review attributes the growth.
+
+Wave 0 starts as the first wave of pieces merges: `abi-table` (ADR-044 enabling half, opus),
+`ios-floor` (ADR-045, sonnet), `newtypes` (ADR-042 half, sonnet).
