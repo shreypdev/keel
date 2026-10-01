@@ -185,20 +185,28 @@ inventory::submit! {
 }
 
 /// The `Connectivity` and `Lifecycle` reports as the core received them: the last of each and how
-/// many there were since the core started. Every report moves the signals in one transaction.
+/// many there were since the core started. Every report moves the signals in one transaction, and
+/// every signal is `no_coalesce`: a platform's mirror applies each report, even several that arrive
+/// in one frame (or while the app is in the background, where React Native on Android pauses the
+/// timers that drain it), so a UI or a check sees `background` even when `active` follows at once.
 #[undra::store(restore = "Self::assemble")]
 pub struct Device {
     /// Keeps the store's own subscriptions; dropped with the store.
     _subscriptions: Vec<Subscription>,
     /// Whether the last `Connectivity` report said online (`true` before any report).
+    #[undra(no_coalesce)]
     online: Signal<bool>,
     /// The kind of network of the last report (`Unknown` before any report).
+    #[undra(no_coalesce)]
     net_kind: Signal<NetKind>,
     /// The last `Lifecycle` report (`Active` before any report).
+    #[undra(no_coalesce)]
     app_state: Signal<AppState>,
     /// How many `Connectivity` reports the core received since it started.
+    #[undra(no_coalesce)]
     connectivity_reports: Signal<u32>,
     /// How many `Lifecycle` reports the core received since it started.
+    #[undra(no_coalesce)]
     lifecycle_reports: Signal<u32>,
 }
 

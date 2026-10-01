@@ -176,6 +176,23 @@ scan_verdict() {
   fi
 }
 
+# lifecycle_back LOG FROM BACKGROUND_LINE: the first `state=active` report after the background one (a later
+# report number), or nothing within 30 s.
+lifecycle_back() {
+  local log="$1" from="$2" bg="$3" n line waited=0
+  [ -n "$bg" ] || return 0
+  n="$(echo "$bg" | sed -E 's/.*reports=([0-9]+).*/\1/')"
+  while [ "$waited" -lt 30 ]; do
+    while IFS= read -r line; do
+      if [ "$(echo "$line" | sed -E 's/.*reports=([0-9]+).*/\1/')" -gt "$n" ]; then
+        echo "$line" | sed -E 's/^.*(UNDRA-RN)/\1/'
+        return 0
+      fi
+    done < <(tail -n +"$((from + 1))" "$log" | grep -E 'UNDRA-RN LIFECYCLE state=active reports=[0-9]+' || true)
+    sleep 1; waited=$((waited + 1))
+  done
+}
+
 # total: the line that counts, and the exit status.
 total() {
   local passed=$((APP_PASSED + OUT_PASSED)) all=$((APP_TOTAL + OUT_TOTAL))
@@ -322,8 +339,9 @@ ios_phases() {
   # simulator's own database): a secret written there must not appear in the app's files.
   nonce="$(grep -E 'UNDRA-RN CHECK RN12 PASS' "$log" | tail -n 1 | sed -E 's/.*marker nonce ([a-z0-9]+).*/\1/')"
   data="$(xcrun simctl get_app_container "$udid" "$IOS_BUNDLE" data)"
-  secret_hits="$(grep -r -l -a -F "UNDRA-SECRET-$nonce" "$data" 2>/dev/null | wc -l | tr -d ' ')"
-  kv_hits="$(grep -r -l -a -F "UNDRA-KVMARK-$nonce" "$data" 2>/dev/null | wc -l | tr -d ' ')"
+  # (`|| true` inside: grep finds nothing on purpose for the secret, which pipefail would make fatal.)
+  secret_hits="$({ grep -r -l -a -F "UNDRA-SECRET-$nonce" "$data" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  kv_hits="$({ grep -r -l -a -F "UNDRA-KVMARK-$nonce" "$data" 2>/dev/null || true; } | wc -l | tr -d ' ')"
   scan_verdict "$nonce" "$secret_hits" "$kv_hits"
 
   # RN18: kill the app, launch it again; it reads what the first launch wrote.
@@ -339,14 +357,15 @@ ios_phases() {
     outside RN18 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
   fi
 
-  # RN19: another app in front (Settings), then this one again.
+  # RN19: another app in front (Settings), then this one again. The Device store's signals are no_coalesce, so
+  # the background report shows even if the app's JavaScript only drains it once it is back.
   wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 60 >/dev/null || true
   mark="$(lines "$log")"
   xcrun simctl launch "$udid" com.apple.Preferences >/dev/null 2>&1 || true
-  bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
-  mark="$(lines "$log")"
+  sleep 4
   xcrun simctl launch "$udid" "$IOS_BUNDLE" >/dev/null
-  fg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 30 || true)"
+  bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
+  fg="$(lifecycle_back "$log" "$mark" "$bg")"
   if [ -n "$bg" ] && [ -n "$fg" ]; then
     outside RN19 "Lifecycle reaches the core" 0 "Settings in front: '$bg'; back: '$fg'"
   else
@@ -426,8 +445,8 @@ android_phases() {
   # release build is not debuggable, so `run-as` cannot).
   nonce="$(grep -E 'UNDRA-RN CHECK RN12 PASS' "$log" | tail -n 1 | sed -E 's/.*marker nonce ([a-z0-9]+).*/\1/')"
   if "$adb" -s "$serial" shell "su 0 true" >/dev/null 2>&1; then
-    secret_hits="$("$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-SECRET-$nonce' $app_dir" 2>/dev/null | tr -d '\r' | grep -c . || true)"
-    kv_hits="$("$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-KVMARK-$nonce' $app_dir" 2>/dev/null | tr -d '\r' | grep -c . || true)"
+    secret_hits="$({ "$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-SECRET-$nonce' $app_dir" 2>/dev/null || true; } | tr -d '\r' | { grep -c . || true; })"
+    kv_hits="$({ "$adb" -s "$serial" shell "su 0 grep -r -l -F 'UNDRA-KVMARK-$nonce' $app_dir" 2>/dev/null || true; } | tr -d '\r' | { grep -c . || true; })"
     scan_verdict "$nonce" "$secret_hits" "$kv_hits"
   else
     outside RN17 "SecureStore is not plain text in the app's files" 1 "no root (su) on $serial: the app's files cannot be read from outside"
@@ -445,14 +464,16 @@ android_phases() {
     outside RN18 "Kv survives the process" 1 "the first launch wrote '${wrote}', the second read '${previous}'"
   fi
 
-  # RN19: Home, then the app again.
+  # RN19: Home, then the app again. React Native pauses the JS timers of a backgrounded Android app, so the
+  # app's mirror applies the core's background report when it is back (the Device store's signals are
+  # no_coalesce: each report is applied, in order); the core itself received it at Home.
   wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 60 >/dev/null || true
   mark="$(lines "$log")"
   "$adb" -s "$serial" shell input keyevent KEYCODE_HOME
-  bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
-  mark="$(lines "$log")"
+  sleep 4
   "$adb" -s "$serial" shell am start -n "$ANDROID_PACKAGE/$ANDROID_ACTIVITY" >/dev/null
-  fg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=active' 30 || true)"
+  bg="$(wait_line "$log" "$mark" 'UNDRA-RN LIFECYCLE state=background' 30 || true)"
+  fg="$(lifecycle_back "$log" "$mark" "$bg")"
   if [ -n "$bg" ] && [ -n "$fg" ]; then
     outside RN19 "Lifecycle reaches the core" 0 "Home: '$bg'; back: '$fg'"
   else

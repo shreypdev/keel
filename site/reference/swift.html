@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xb8dde1419dc06d35</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xefd907be3070520a</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
@@ -607,7 +607,7 @@ public func version(ctx: UndraCore = .shared) throws -&gt; String
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">An <code>@Observable</code> class for each <code>#[undra::store]</code>: its signals, then its methods.</p>
 <p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>194 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>197 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Stores.swift" rel="noopener">Stores.swift</a></span></div><pre><code data-lang="swift">/// The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
 /// exercise the boundary.
 @MainActor @Observable
@@ -723,7 +723,10 @@ public final class Counter: UndraStore, @unchecked Sendable {
 }
 
 /// The `Connectivity` and `Lifecycle` reports as the core received them: the last of each and how
-/// many there were since the core started. Every report moves the signals in one transaction.
+/// many there were since the core started. Every report moves the signals in one transaction, and
+/// every signal is `no_coalesce`: a platform's mirror applies each report, even several that arrive
+/// in one frame (or while the app is in the background, where React Native on Android pauses the
+/// timers that drain it), so a UI or a check sees `background` even when `active` follows at once.
 @MainActor @Observable
 public final class Device: UndraStore, @unchecked Sendable {
     public private(set) var online: Bool
@@ -862,7 +865,7 @@ public func postRemoteTodo(
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
 /// hash to pass to `UndraCore.load` as the expected schema hash.
 public enum UndraIds {
-    public static let schemaHash: UInt64 = 0xb8dde1419dc06d35
+    public static let schemaHash: UInt64 = 0xefd907be3070520a
 
     public enum Objects {
         public enum Probe {
