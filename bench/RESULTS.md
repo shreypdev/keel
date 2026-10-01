@@ -38,9 +38,10 @@ iOS target.
 | 1 KB record, round trip (through a call) | `dispatch/call_sync/echo_record1k` | 139.5 ns | ≤ 3 µs | 0.05x | within |
 | Change-set, 100 dirty signals (core side: write, build, deliver) | `signals/changeset_100/runtime` | 2.30 µs | ≤ 100 µs | 0.02x | within |
 | Keyed patch on 10,000 items, one insert (recorded list operation) | `signals/keyed_10k/insert` | 6.31 µs | ≤ 20 µs | 0.32x | within |
-| Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 70.87 µs | ≤ 3 ms | 0.02x | within |
-| Core cold start, including the `undra-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 79.70 µs | ≤ 3 ms | 0.03x | within |
-| Web crash recovery, 1 MB state (restore) | `snapshot/restore_1mb` | 270.31 µs | ≤ 100 ms | 0.003x | within |
+| Core cold start, 100 KB snapshot restore | `snapshot/cold_start_restore_100kb` | 84.68 µs | ≤ 3 ms | 0.03x | within (70.87 µs before ADR-037: the new runtime now computes the fingerprint of the snapshot's store type once, about 14 µs on this host, see below) |
+| Core cold start, including the `undra-core` thread | `snapshot/cold_start_restore_100kb_core_thread` | 90.27 µs | ≤ 3 ms | 0.03x | within |
+| Web crash recovery, 1 MB state (restore) | `snapshot/restore_1mb` | 286.54 µs | ≤ 100 ms | 0.003x | within |
+| Restore of a 100 KB snapshot an older build wrote (every store migrated by name, ADR-037) | `snapshot/restore_100kb_migrated` | 88.84 µs | ≤ 10x the fast path (`snapshot/restore_100kb`, 30.33 µs) | 2.9x the fast path | within |
 
 Two more rows have a host proxy, which is a data point and not a verdict:
 
@@ -513,15 +514,16 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 
 ### Snapshot and restore
 
-100 KB is four stores of 250 rows of 100 bytes; 1 MB is forty. `cold_start` builds a runtime and restores; the runtime it made is shut down outside the timed region.
+100 KB is four stores of 250 rows of 100 bytes; 1 MB is forty. `cold_start` builds a runtime and restores; the runtime it made is shut down outside the timed region. `restore_100kb_migrated` restores the same 100 KB as an older build wrote it (`Item.id` a `u32`): every store's fingerprint differs, so each one is decoded by name and migrated structurally, streamed (ADR-037). Measured on 2026-10-01 with snapshot layout 2 (ADR-037), the machine shared with other builds; the restore rows read about 10% slower than the earlier run on the same code paths, which is the load, and the cold start pays one fingerprint computation per new runtime.
 
 | Benchmark | Median | 95% CI |
 |---|---|---|
-| `snapshot/encode_100kb` | 13.79 µs | 13.73 µs .. 13.87 µs |
-| `snapshot/restore_100kb` | 26.88 µs | 26.66 µs .. 27.15 µs |
-| `snapshot/restore_1mb` | 270.31 µs | 268.02 µs .. 273.25 µs |
-| `snapshot/cold_start_restore_100kb` | 70.87 µs | 70.12 µs .. 71.58 µs |
-| `snapshot/cold_start_restore_100kb_core_thread` | 79.70 µs | 78.65 µs .. 80.96 µs |
+| `snapshot/encode_100kb` | 13.12 µs | 12.95 µs .. 13.32 µs |
+| `snapshot/restore_100kb` | 30.33 µs | 29.67 µs .. 30.89 µs |
+| `snapshot/restore_1mb` | 286.54 µs | 281.57 µs .. 292.14 µs |
+| `snapshot/restore_100kb_migrated` | 88.84 µs | 86.40 µs .. 93.03 µs |
+| `snapshot/cold_start_restore_100kb` | 84.68 µs | 83.95 µs .. 85.53 µs |
+| `snapshot/cold_start_restore_100kb_core_thread` | 90.27 µs | 88.78 µs .. 91.94 µs |
 
 ### C ABI (`crates/undra-ffi/benches/boundary.rs`)
 
@@ -548,7 +550,7 @@ No row of its own in section 14; kept so regressions in the hot paths are visibl
 
 ## The CI gate
 
-`bench/budgets.toml` holds a host budget for each of the 55 operations the gate runs (the wire round trips,
+`bench/budgets.toml` holds a host budget for each of the 56 operations the gate runs (the wire round trips,
 dispatch, signals, snapshot and the eight per-operation rows of the harsh-conditions scenarios). Each is about **5x** what this machine measures (with a 250 ns floor and two
 significant figures), which is what makes a shared CI runner pass while an operation that became several
 times slower fails. The budgets guard against **regressions on a host**; they are not the section 14 device
