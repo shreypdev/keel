@@ -12,13 +12,13 @@ use undra_bindgen::Generator;
 
 use crate::bindgen::{self, Plan, canonicalize_lenient};
 use crate::cli::InitArgs;
-use crate::config::{Platform, ProjectConfig, UNDRA_VERSION};
+use crate::config::{Platform, ProjectConfig, UNDRA_RELEASE_TAG, UNDRA_REPO_URL, UNDRA_VERSION};
 use crate::error::{CliError, Code, Result};
 use crate::fsutil::{self, create_dir_all, is_empty_dir, make_executable, write_if_changed};
 use crate::names::{Names, portable, relative_path, validate_app_id, validate_project_name};
 use crate::project::{CONFIG_FILE, Project};
 use crate::render::{TemplateFile, Vars};
-use crate::runtimes::{KOTLIN_IN_REPO, RuntimeRef, Runtimes, require_checkout};
+use crate::runtimes::{KOTLIN_IN_REPO, RuntimeRef, Runtimes, enclosing_checkout, require_checkout};
 use crate::schema::parse_schema_json;
 use crate::templates;
 
@@ -109,7 +109,16 @@ fn prepare(env: &Env<'_>, args: &InitArgs) -> Result<Setup> {
             config.undra_path = Some(portable(&shown));
             Some(repo)
         }
-        None => None,
+        // A project created inside a checkout of the Undra repository uses the checkout, as with
+        // `--undra-path`; anywhere else it pins the CLI's release (see `variables`).
+        None => enclosing_checkout(&root).inspect(|repo| {
+            let shown = relative_path(&root, repo).unwrap_or_else(|| repo.clone());
+            config.undra_path = Some(portable(&shown));
+            env.ui.line(&format!(
+                "Using the Undra checkout at {} (the project is inside it); `--undra-path` names another.",
+                repo.display()
+            ));
+        }),
     };
     Ok(Setup {
         root,
@@ -145,7 +154,9 @@ pub(super) fn variables(setup: &Setup) -> Vars {
             "{{ path = {} }}",
             crate::toml_lite::quote(&rel(&root.join("core"), &repo.join("crates/undra")))
         ),
-        None => format!("\"{UNDRA_VERSION}\""),
+        // Not in a checkout: the crates of the release this CLI belongs to, from its git tag
+        // (crates.io publishing is later).
+        None => format!("{{ git = \"{UNDRA_REPO_URL}\", tag = \"{UNDRA_RELEASE_TAG}\" }}"),
     };
     let runtimes = match repo {
         Some(repo) => Runtimes::in_repo(repo),
@@ -389,7 +400,7 @@ fn readme_vars(setup: &Setup, vars: Vars) -> Vars {
             "The core uses the Undra crates, and the apps the Undra runtimes, from the checkout at `{}` (`[undra] path` in undra.toml).",
             repo.display()
         ),
-        None => format!("The core depends on Undra {UNDRA_VERSION} from crates.io; the apps on the matching runtimes (Swift package, Maven artifact, npm package)."),
+        None => format!("The core depends on the Undra crates at the git tag `{UNDRA_RELEASE_TAG}` of {UNDRA_REPO_URL} (core/Cargo.toml); the apps on the matching runtimes (Swift package, Maven artifact, npm package)."),
     });
     vars
 }
@@ -620,7 +631,11 @@ mod tests {
         assert_eq!(project.config.platforms, Platform::ALL.to_vec());
         let core = std::fs::read_to_string(root.join("core/Cargo.toml")).unwrap();
         assert!(
-            core.contains("name = \"todo-app-core\"") && core.contains("undra = \"0.1\""),
+            core.contains("name = \"todo-app-core\"")
+                && core.contains(&format!(
+                    "undra = {{ git = \"https://github.com/shreypdev/undra\", tag = \"v{}\" }}",
+                    env!("CARGO_PKG_VERSION")
+                )),
             "{core}"
         );
         let _ = std::fs::remove_dir_all(parent);
@@ -753,9 +768,15 @@ mod tests {
             "pbxproj"
         );
         let app = std::fs::read_to_string(root.join("android/app/build.gradle.kts")).unwrap();
-        assert!(app.contains("dev.undra:runtime:0.1.0\""), "{app}");
+        assert!(
+            app.contains(&format!("dev.undra:runtime:{UNDRA_VERSION}.0\"")),
+            "{app}"
+        );
         let pkg = std::fs::read_to_string(root.join("web/package.json")).unwrap();
-        assert!(pkg.contains("\"@undra/runtime\": \"^0.1.0\""), "{pkg}");
+        assert!(
+            pkg.contains(&format!("\"@undra/runtime\": \"^{UNDRA_VERSION}.0\"")),
+            "{pkg}"
+        );
         let _ = std::fs::remove_dir_all(parent);
     }
 
@@ -780,5 +801,48 @@ mod tests {
             "{app}"
         );
         let _ = std::fs::remove_dir_all(parent);
+    }
+    #[test]
+    fn a_project_outside_a_checkout_pins_the_release_by_git_tag() {
+        let parent = fsutil::unique_temp_dir("init-pinned");
+        create_dir_all(&parent).unwrap();
+        run(&env(&parent), &args("pinned", "web")).unwrap();
+        let root = parent.canonicalize().unwrap().join("pinned");
+        let core = std::fs::read_to_string(root.join("core/Cargo.toml")).unwrap();
+        let dep = core.lines().find(|l| l.starts_with("undra = ")).unwrap();
+        assert_eq!(
+            dep,
+            format!(
+                "undra = {{ git = \"https://github.com/shreypdev/undra\", tag = \"v{}\" }}",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        let project = Project::open(&root).unwrap();
+        assert_eq!(project.config.undra_path, None);
+        assert_eq!(project.config.undra_version, UNDRA_VERSION);
+        let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
+        assert!(readme.contains(UNDRA_RELEASE_TAG), "{readme}");
+        let _ = std::fs::remove_dir_all(parent);
+    }
+
+    #[test]
+    fn a_project_created_inside_a_checkout_uses_it_by_path() {
+        let checkout = fsutil::unique_temp_dir("init-inside");
+        for file in crate::runtimes::CHECKOUT_FILES {
+            let path = checkout.join(file);
+            create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        let examples = checkout.join("examples");
+        create_dir_all(&examples).unwrap();
+        run(&env(&examples), &args("inside", "web")).unwrap();
+        let root = examples.canonicalize().unwrap().join("inside");
+        let core = std::fs::read_to_string(root.join("core/Cargo.toml")).unwrap();
+        let dep = core.lines().find(|l| l.starts_with("undra = ")).unwrap();
+        assert_eq!(dep, "undra = { path = \"../../../crates/undra\" }");
+        let toml = std::fs::read_to_string(root.join("undra.toml")).unwrap();
+        assert!(toml.contains("path = \"../..\""), "{toml}");
+        assert!(!core.contains("git ="), "{core}");
+        let _ = std::fs::remove_dir_all(checkout);
     }
 }

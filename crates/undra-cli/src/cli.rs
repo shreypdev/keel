@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(
     name = "undra",
-    version,
+    version = crate::version::LINE,
     about = "Undra: one Rust core, native iOS, Android and web apps",
     long_about = "Undra owns everything under the pixels of a native app (domain logic, reactive state, the data \
 layer, persistence) in one Rust core. The UI stays SwiftUI, Compose and React; `undra` generates the bindings \
@@ -54,8 +54,10 @@ pub enum Command {
   core/            the Rust core: a working to-do store with #[undra::store] and #[undra::api]\n\
   generated/       Swift, Kotlin and TypeScript bindings for that core (already generated)\n\
   ios/ android/ web/   one minimal, real app per platform, using the generated bindings\n\n\
-Nothing is downloaded: the templates are part of this binary. Point --undra-path at a checkout of the Undra \
-repository to use its crates and runtimes directly; without it the project depends on released versions.",
+Nothing is downloaded: the templates are part of this binary. The core depends on the Undra crates of the release \
+this binary belongs to (`undra = { git = \"https://github.com/shreypdev/undra\", tag = \"v<version>\" }`) and the \
+apps on the matching runtimes. Point --undra-path at a checkout of the Undra repository to use its crates and \
+runtimes directly instead (a project created inside a checkout does that without the flag).",
         after_long_help = "\
 EXAMPLES
     undra init todo                                   all three platforms
@@ -187,8 +189,8 @@ pub struct InitArgs {
     #[arg(long, value_name = "ID")]
     pub id: Option<String>,
 
-    /// Use the crates and runtimes of this checkout of the Undra repository instead of released
-    /// versions.
+    /// Use the crates and runtimes of this checkout of the Undra repository instead of the release
+    /// of this binary (default: the checkout the project is created inside, if there is one).
     #[arg(long, value_name = "DIR", env = "UNDRA_PATH")]
     pub undra_path: Option<PathBuf>,
 

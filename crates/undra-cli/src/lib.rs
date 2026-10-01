@@ -62,6 +62,7 @@ mod templates;
 mod toml_lite;
 mod toolchain;
 mod ui;
+mod version;
 
 use std::ffi::OsString;
 use std::process::ExitCode;
