@@ -539,6 +539,43 @@ mod tests {
     }
 
     #[test]
+    fn derived_signals_add_no_field() {
+        // ADR-039 decision 7: a derived list is a store signal with `computed: true` and a key, a
+        // combination E0008 refused until then. It needs no new field, so no existing schema
+        // changes (the representative schema's hash is the golden above) and a derived signal's
+        // canonical JSON ends exactly `"computed":true,"key":"id"}`.
+        let mut schema = representative_schema();
+        let store = schema
+            .objects
+            .iter_mut()
+            .find_map(|o| o.store.as_mut())
+            .unwrap();
+        store.signals.push(crate::SignalDef {
+            name: "visible".into(),
+            signal_id: u32::try_from(store.signals.len()).unwrap(),
+            ty: TypeRef::vec(TypeRef::named("Todo")),
+            computed: true,
+            key: Some("id".into()),
+            no_coalesce: false,
+        });
+        let id = store.signals.len() - 1;
+        let canonical = schema.canonical_json();
+        let entry = format!(
+            r#"{{"name":"visible","signal_id":{id},"ty":{{"kind":"vec","of":{{"kind":"named","of":"Todo"}}}},"computed":true,"key":"id"}}"#
+        );
+        assert!(canonical.contains(&entry), "{canonical}");
+        assert_eq!(
+            canonical.matches(r#""computed":true,"key":"id"}"#).count(),
+            1
+        );
+        assert_eq!(Schema::from_json(&schema.to_json_pretty()).unwrap(), schema);
+        // Adding it is a schema change of that store only; the representative schema without it
+        // is untouched.
+        assert_ne!(schema.hash(), representative_schema().hash());
+        assert_eq!(representative_schema().hash(), 0xd5b8_c3a3_afbd_bc33);
+    }
+
+    #[test]
     fn no_coalesce_is_written_only_when_set() {
         // ADR-031 decision 6: a schema without a `no_coalesce` signal serializes, and so hashes,
         // exactly as it did before the field existed (the representative schema's hash is the
