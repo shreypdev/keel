@@ -252,7 +252,7 @@ mod tests {
         assert!(
             describe(&UndraSource::Git {
                 url: "u".into(),
-                rev: None
+                reference: crate::cargo::GitRef::DefaultBranch
             })
             .contains("git")
         );

@@ -4,7 +4,7 @@ The `undra` command: create an Undra app, generate its bindings, build its core 
 the web, and serve the core to a running app while you edit it (`docs/SPEC.md` section 13).
 
 ```sh
-cargo install undra-cli              # or, in a checkout: cargo run -p undra-cli --
+cargo install --git https://github.com/shreypdev/undra undra-cli   # or brew, npm, curl: see the repository README
 undra init todo --platforms ios,android,web
 cd todo
 undra doctor                         # what this machine has, what is missing, how to fix it

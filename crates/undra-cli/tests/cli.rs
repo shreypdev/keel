@@ -63,8 +63,23 @@ fn specific_help_texts_say_what_matters() {
 
 #[test]
 fn the_version_is_printed() {
+    // `undra <semver> (<short sha>)`: the sha comes from UNDRA_BUILD_SHA at build time, `unknown`
+    // for a build without it.
     let out = run_ok(undra().arg("--version"));
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("undra 0."));
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = text.trim_end();
+    let prefix = format!("undra {} (", env!("CARGO_PKG_VERSION"));
+    assert!(line.starts_with(&prefix) && line.ends_with(')'), "{line:?}");
+    let sha = &line[prefix.len()..line.len() - 1];
+    assert!(
+        sha == "unknown" || (sha.len() == 7 && sha.chars().all(|c| c.is_ascii_hexdigit())),
+        "the build sha is `unknown` or seven hex digits, got {sha:?}"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run_ok(undra().arg("-V")).stdout),
+        text,
+        "-V and --version agree"
+    );
 }
 
 #[test]

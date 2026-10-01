@@ -24,9 +24,9 @@ use crate::fsutil::write_if_changed;
 use crate::render::Vars;
 use crate::toml_lite::quote;
 
-const SHIM_MANIFEST: &str = include_str!("../templates/shim/Cargo.toml");
+const SHIM_MANIFEST: &str = include_str!("../templates/shim/Cargo.toml.tmpl");
 const SHIM_LIB: &str = include_str!("../templates/shim/lib.rs");
-const RUNNER_MANIFEST: &str = include_str!("../templates/runner/Cargo.toml");
+const RUNNER_MANIFEST: &str = include_str!("../templates/runner/Cargo.toml.tmpl");
 const RUNNER_MAIN: &str = include_str!("../templates/runner/main.rs");
 
 /// A directory name unique to the project: its folder name and a hash of its full path. The target
