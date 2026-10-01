@@ -17,7 +17,8 @@
 //! The result is exactly what `slice::sort_by` / `sort_by_key` would produce with the same key
 //! (tests compare them), so the canonical form and the schema hash cannot move. Hashing a schema
 //! whose 2,000 records arrive in reverse order takes 239 µs on an Apple M5 Pro (205 µs with
-//! `sort_by`); an insertion sort, 3 KB smaller still, took 9 ms there and was not kept.
+//! `sort_by`); an insertion sort for every length, 3 KB smaller still, took 9 ms there, which is why
+//! only short lists take one.
 
 /// Sorts `items` by the name `name` returns, stably (equal names keep their order).
 pub(crate) fn by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
