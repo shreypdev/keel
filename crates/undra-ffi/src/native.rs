@@ -234,8 +234,10 @@ pub extern "C" fn undra_schema_hash() -> u64 {
     guarded("undra_schema_hash", |_| 0, api::schema_hash)
 }
 
-/// `UndraBuf undra_schema_json(void)`: an owned copy of the canonical schema JSON (UTF-8). Free it
-/// with [`undra_buf_free`]. Works before `undra_init`; `undra-cli` calls it to run bindgen.
+/// `UndraBuf undra_schema_json(void)`: an owned copy of the schema as JSON (UTF-8), doc comments
+/// included (`Schema::to_json`, SPEC 2.3 and 6). It is not the canonical form the hash is computed
+/// over; `Schema::from_json(..)` reads it and its `hash()` is [`undra_schema_hash`]. Free it with
+/// [`undra_buf_free`]. Works before `undra_init`; `undra-cli` calls it to run bindgen.
 #[unsafe(no_mangle)]
 pub extern "C" fn undra_schema_json() -> UndraBuf {
     guarded(
