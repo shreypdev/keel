@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UndraCallError, UndraUnhandledError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import { UndraTransportError } from "../src/errors.js";
-import { Mirror } from "../src/mirror.js";
 import { UndraStore } from "../src/object.js";
 import type { PortImpl } from "../src/port.js";
 import {
@@ -10,14 +9,14 @@ import {
   type RestartResult,
   SnapshotKeeper,
   UndraCoreRestarted,
-  type UndraPanicReport,
   emptySnapshot,
-  panicReport,
+  crashRecovery,
   resolveRecovery,
   snapshotStoreHandles,
   withGenerationFloor,
 } from "../src/recovery.js";
 import { Signal } from "../src/signal.js";
+import { type UndraPanicReport, panicReport } from "../src/panic.js";
 import { WasmMainTransport } from "../src/transport/wasm-main.js";
 import { WasmWorkerTransport } from "../src/transport/wasm-worker.js";
 import {
@@ -117,7 +116,7 @@ class RestartableFake extends FakeCoreTransport {
   }
 }
 
-async function recovering(options: { recovery?: boolean | object; ports?: Record<number, PortImpl> } = {}) {
+async function recovering(options: { recovery?: false | Parameters<typeof crashRecovery>[0]; ports?: Record<number, PortImpl> } = {}) {
   const fake = new RestartableFake();
   const log = captureLog();
   const panics: UndraPanicReport[] = [];
@@ -146,7 +145,7 @@ async function recovering(options: { recovery?: boolean | object; ports?: Record
       expectedSchemaHash: SCHEMA,
       shared: false,
       adapters: { log, http: null, timer: null, kv: null, secureStore: null, fs: null, connectivity: null, lifecycle: null },
-      recovery: options.recovery ?? true,
+      ...(options.recovery !== false && { recovery: crashRecovery(options.recovery) }),
       onPanic: (report) => panics.push(report),
       onCoreRestarted: (event) => restarts.push(event),
       onError: (error) => errors.push(error),
@@ -165,14 +164,25 @@ const until = async (what: string, probe: () => boolean): Promise<void> => {
   throw new Error(`timed out waiting for ${what}`);
 };
 
-describe("LoadOptions.recovery", () => {
-  it("is off by default; true takes the defaults of ADR-049; an object overrides some", () => {
-    expect(resolveRecovery(undefined)).toBeNull();
-    expect(resolveRecovery(false)).toBeNull();
-    expect(resolveRecovery(true)).toEqual({ snapshotEveryMs: 1000, maxSnapshotBytes: 4 * 1024 * 1024, maxRestarts: 3, perMs: 60_000 });
-    expect(DEFAULT_RECOVERY).toEqual(resolveRecovery(true));
+describe("crashRecovery (LoadOptions.recovery)", () => {
+  it("takes the defaults of ADR-049; an object overrides some", () => {
+    expect(resolveRecovery()).toEqual({ snapshotEveryMs: 1000, maxSnapshotBytes: 4 * 1024 * 1024, maxRestarts: 3, perMs: 60_000 });
+    expect(DEFAULT_RECOVERY).toEqual(resolveRecovery());
+    expect(crashRecovery().options).toEqual(DEFAULT_RECOVERY);
+    expect(crashRecovery({ maxRestarts: 1 }).options).toEqual({ ...DEFAULT_RECOVERY, maxRestarts: 1 });
     expect(resolveRecovery({ maxRestarts: 1, snapshotEveryMs: 10 })).toEqual({ ...DEFAULT_RECOVERY, maxRestarts: 1, snapshotEveryMs: 10 });
     expect(resolveRecovery({ perMs: Number.NaN, maxRestarts: -2 })).toEqual({ ...DEFAULT_RECOVERY, maxRestarts: 0 });
+  });
+
+  it("belongs to one core: a second core cannot use the same one", async () => {
+    const recovery = crashRecovery();
+    await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog() }, recovery }).then(track);
+    const second = await UndraCore.attach(new FakeCoreTransport(), { expectedSchemaHash: SCHEMA, shared: false, adapters: { log: captureLog() }, recovery }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(second).toBeInstanceOf(UndraTransportError);
+    expect((second as UndraTransportError).message).toMatch(/one per core/);
   });
 });
 
@@ -318,21 +328,6 @@ describe("the panic report (ADR-046 decision 4.4, minimal)", () => {
       location: "src/lib.rs:12",
     });
     expect(panicReport(null, trapError("stack overflow"), 0n, "wasm-main").message).toBe("RuntimeError: stack overflow");
-  });
-});
-
-describe("Mirror.move", () => {
-  it("moves a registration to a new handle and drops what was pending for the old one", () => {
-    const mirror = new Mirror({ schedule: () => {} });
-    const seen: number[] = [];
-    mirror.register(1n, (_signalId, _op, value) => seen.push(decodeValue(codecs.u32, value)));
-    mirror.move(1n, 2n);
-    expect(mirror.has(1n)).toBe(false);
-    expect(mirror.has(2n)).toBe(true);
-    mirror.move(9n, 10n);
-    expect(mirror.has(10n)).toBe(false);
-    mirror.register(3n, () => {});
-    expect(() => mirror.move(2n, 3n)).toThrow(/already registered/);
   });
 });
 
@@ -512,20 +507,21 @@ describe("the wasm transports restart over the stub core", () => {
     const instantiate = vi.spyOn(WebAssembly, "instantiate");
     const compile = vi.spyOn(WebAssembly, "compile");
     const restarts: UndraCoreRestarted[] = [];
-    const transport = new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH, recovery: { snapshotEveryMs: 0, maxSnapshotBytes: 1024 } });
+    const transport = new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH });
+    const recovery = crashRecovery({ snapshotEveryMs: 0, maxSnapshotBytes: 1024 });
     const core = track(
       await UndraCore.attach(transport, {
         expectedSchemaHash: STUB.SCHEMA_HASH,
         shared: false,
         adapters: { log: captureLog() },
-        recovery: true,
+        recovery,
         onCoreRestarted: (event) => restarts.push(event),
       }),
     );
     // A change-set makes a snapshot due: observing delivers one.
     await core.observe(STUB.HANDLE, ALL_SIGNALS, true);
-    await until("a snapshot", () => transport.keptSnapshot !== null);
-    expect(new Uint8Array(transport.keptSnapshot?.data as ArrayBuffer)).toEqual(STUB.SNAPSHOT);
+    await until("a snapshot", () => recovery.lastSnapshot !== null);
+    expect(new Uint8Array(recovery.lastSnapshot?.data as ArrayBuffer)).toEqual(STUB.SNAPSHOT);
     const pending = core.call(FREE, STUB.ECHO_ASYNC, u32(1));
     const failure = await core.call(FREE, STUB.PANIC, new Uint8Array(0)).catch((e: unknown) => e);
     expect(failure).toMatchObject({ reason: "restarted" });
@@ -574,7 +570,7 @@ describe("the wasm transports restart over the stub core", () => {
       const policy = { snapshotEveryMs: 0, maxSnapshotBytes: 1024 };
       const transport =
         worker === null
-          ? new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH, recovery: policy })
+          ? new WasmMainTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH })
           : new WasmWorkerTransport({ wasm: module, expectedSchemaHash: STUB.SCHEMA_HASH, worker: worker.host, recovery: policy });
       const restarts: UndraCoreRestarted[] = [];
       const core = track(
@@ -583,7 +579,7 @@ describe("the wasm transports restart over the stub core", () => {
           shared: false,
           adapters: { log: captureLog(), http: null, timer: null },
           ports: { [STUB.PORT_ID]: port },
-          recovery: true,
+          recovery: crashRecovery(policy),
           onCoreRestarted: (event) => restarts.push(event),
         }),
       );
@@ -616,7 +612,7 @@ describe("the wasm transports restart over the stub core", () => {
         expectedSchemaHash: STUB.SCHEMA_HASH,
         shared: false,
         adapters: { log: captureLog(), http: null, timer: null },
-        recovery: true,
+        recovery: crashRecovery(),
         onCoreRestarted: (event) => restarts.push(event),
         onClose: (error) => closed.push(error),
       }),

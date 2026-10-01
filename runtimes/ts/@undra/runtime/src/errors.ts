@@ -186,14 +186,6 @@ export class UndraTransportError extends UndraError {
   }
 }
 
-/** What each `undra_restore` code means, for the message of {@link UndraRestoreError}. */
-const RESTORE_CODES: Readonly<Record<number, string>> = {
-  2: "a store's restore panicked",
-  5: "the snapshot is malformed or names something this core does not have",
-  6: "the core is shut down, or the restore was made from inside a core callback",
-  7: "a store's persisted values cannot become this build's types (see the core's error log)",
-};
-
 /**
  * `UndraCore.restore` was refused: the core rejected the snapshot and is unchanged (SPEC 5.9, the
  * `undra_restore` code of SPEC 7). A refused restore changes nothing, so the core and every handle
@@ -224,7 +216,7 @@ export class UndraRestoreError extends UndraError {
   constructor(code: number) {
     super(
       "restore",
-      `the Undra core rejected the snapshot (code ${String(code)}${RESTORE_CODES[code] === undefined ? "" : `: ${RESTORE_CODES[code]}`}); a rejected restore leaves the core unchanged`,
+      `the Undra core rejected the snapshot (code ${String(code)}); a rejected restore leaves the core unchanged`,
     );
     this.code = code;
   }

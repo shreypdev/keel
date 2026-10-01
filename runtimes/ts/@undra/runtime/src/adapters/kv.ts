@@ -59,8 +59,8 @@ export function indexedDbKv(options: IndexedDbKvOptions = {}): KvAdapter {
         if (value === undefined) return null;
         try {
           return toBytes(value);
-        } catch (error) {
-          throw new StorageError.Corrupt(`the value stored under ${JSON.stringify(key)} is not bytes (${error instanceof Error ? error.message : String(error)})`);
+        } catch {
+          throw new StorageError.Corrupt(`${JSON.stringify(key)} is not bytes`);
         }
       }),
     set: (key, value) =>

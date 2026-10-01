@@ -424,14 +424,14 @@ describe("over a real channel, with UndraCore on the main thread", () => {
   });
 
   it.each([
-    ["an app's sync port", STUB.PORT_ID, "port 0xc0dec0de"],
-    ["a Clock", PortIds.Clock.portId, "the Clock port (0xcd99c48e)"],
-  ] as const)("%s registered on the main thread is a load-time error that names it and the fix", async (_name, portId, named) => {
+    ["an app's sync port without a name", STUB.PORT_ID, "port 0xc0dec0de", undefined],
+    ["a Clock (clockPort names it)", PortIds.Clock.portId, "the Clock port (0xcd99c48e)", "Clock"],
+  ] as const)("%s registered on the main thread is a load-time error that names it and the fix", async (_name, portId, named, portName) => {
     const module = await WebAssembly.compile((await compileStub({})) as Uint8Array<ArrayBuffer>);
     const worker = channelWorker();
     let started = false;
     const host: WorkerLike = { ...worker.host, postMessage: (m, t) => ((started = true), worker.host.postMessage(m, t)) };
-    const sync: PortImpl = { sync: true, methods: { [STUB.PORT_METHOD]: (args) => args } };
+    const sync: PortImpl = { ...(portName !== undefined && { name: portName }), sync: true, methods: { [STUB.PORT_METHOD]: (args) => args } };
     const failure = await UndraCore.attach(new WasmWorkerTransport({ wasm: module, expectedSchemaHash: SCHEMA, worker: host }), {
       expectedSchemaHash: SCHEMA,
       shared: false,

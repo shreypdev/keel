@@ -16,17 +16,15 @@ import {
   type Adapters,
   type ClockAdapter,
   type FsAdapter,
-  type FsError,
+  FsError,
   type HttpAdapter,
   HttpError,
   type KvAdapter,
   type LogAdapter,
   type NetKind,
   type RngAdapter,
-  type StorageError,
+  StorageError,
   type TimerAdapter,
-  recognizedFsError,
-  recognizedStorageError,
 } from "./types.js";
 
 /*
@@ -68,6 +66,7 @@ const encodeStorageError = (error: StorageError): Uint8Array => encodeValue(Stor
 /** The `Http` port over an {@link HttpAdapter}. An {@link HttpError} becomes the typed error of `Http.request`. */
 export function httpPort(http: HttpAdapter): PortImpl {
   return {
+    name: "Http",
     sync: false,
     methods: {
       [PortIds.Http.request]: (args) => {
@@ -86,7 +85,7 @@ const stringList = codecs.vec(codecs.string);
 const optionBytes = codecs.option(codecs.bytes);
 
 function kvMethods(ids: typeof PortIds.Kv, kv: KvAdapter): PortImpl["methods"] {
-  const run = <T>(work: () => Promise<T>) => typed(work, recognizedStorageError, encodeStorageError);
+  const run = <T>(work: () => Promise<T>) => typed(work, (e) => (e instanceof StorageError ? e : undefined), encodeStorageError);
   return {
     [ids.get]: (args) => {
       const key = readArgs(args, (r) => r.readStr());
@@ -114,26 +113,27 @@ function kvMethods(ids: typeof PortIds.Kv, kv: KvAdapter): PortImpl["methods"] {
 }
 
 /**
- * The `Kv` port over a {@link KvAdapter}. A {@link StorageError} the adapter rejects with (or a raw
- * `QuotaExceededError`, `ENOSPC` or `SecurityError`, see `StorageError.from`) becomes the typed error of the
- * method (ADR-049); any other failure is reported and answered as unavailable.
+ * The `Kv` port over a {@link KvAdapter}. A {@link StorageError} the adapter rejects with becomes the typed error
+ * of the method (ADR-049; `StorageError.from` maps what a storage API throws); any other failure is reported and
+ * answered as unavailable.
  */
 export function kvPort(kv: KvAdapter): PortImpl {
-  return { sync: false, methods: kvMethods(PortIds.Kv, kv) };
+  return { name: "Kv", sync: false, methods: kvMethods(PortIds.Kv, kv) };
 }
 
 /** The `SecureStore` port (same methods and errors as `Kv`, its own ids) over a {@link KvAdapter}. */
 export function secureStorePort(store: KvAdapter): PortImpl {
-  return { sync: false, methods: kvMethods(PortIds.SecureStore, store) };
+  return { name: "SecureStore", sync: false, methods: kvMethods(PortIds.SecureStore, store) };
 }
 
 /**
- * The `Fs` port over an {@link FsAdapter}. An {@link FsError} (or a raw `QuotaExceededError` or `ENOSPC`, as
- * `Full`) becomes the typed error of the method; any other failure is reported and answered as unavailable.
+ * The `Fs` port over an {@link FsAdapter}. An {@link FsError} becomes the typed error of the method (`fsErrorFrom`
+ * maps what a file API throws); any other failure is reported and answered as unavailable.
  */
 export function fsPort(fs: FsAdapter): PortImpl {
-  const run = <T>(work: () => Promise<T>) => typed(work, recognizedFsError, (e: FsError) => encodeValue(FsErrorCodec, e));
+  const run = <T>(work: () => Promise<T>) => typed(work, (e) => (e instanceof FsError ? e : undefined), (e: FsError) => encodeValue(FsErrorCodec, e));
   return {
+    name: "Fs",
     sync: false,
     methods: {
       [PortIds.Fs.read]: (args) => {
@@ -170,6 +170,7 @@ export function fsPort(fs: FsAdapter): PortImpl {
  */
 export function timerPort(timer: TimerAdapter, fire: (timerId: number) => void): PortImpl {
   return {
+    name: "Timer",
     sync: true,
     methods: {
       [PortIds.Timer.set]: (args) => {
@@ -184,6 +185,7 @@ export function timerPort(timer: TimerAdapter, fire: (timerId: number) => void):
 /** The `Clock` port over a {@link ClockAdapter}; registering it overrides the core's built-in clock. */
 export function clockPort(clock: ClockAdapter): PortImpl {
   return {
+    name: "Clock",
     sync: true,
     methods: {
       [PortIds.Clock.nowMs]: () => encodeValue(codecs.i64, BigInt(Math.trunc(clock.nowMs()))),
@@ -195,6 +197,7 @@ export function clockPort(clock: ClockAdapter): PortImpl {
 /** The `Rng` port over an {@link RngAdapter}; registering it overrides the core's built-in generator. */
 export function rngPort(rng: RngAdapter): PortImpl {
   return {
+    name: "Rng",
     sync: true,
     methods: {
       [PortIds.Rng.fill]: (args) => {
@@ -211,6 +214,7 @@ export function rngPort(rng: RngAdapter): PortImpl {
 /** The `Log` port over a {@link LogAdapter}; registering it overrides the core's built-in log binding. */
 export function logPort(log: LogAdapter): PortImpl {
   return {
+    name: "Log",
     sync: true,
     methods: {
       [PortIds.Log.log]: (args) => {

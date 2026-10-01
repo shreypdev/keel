@@ -181,7 +181,10 @@ export abstract class StorageError extends UndraError {
    * `Io` with its message for anything else. For the adapter of a storage API: `catch (e) { throw StorageError.from(e); }`.
    */
   static from(error: unknown): StorageError {
-    return recognizedStorageError(error) ?? new StorageError.Io(describe(error));
+    if (error instanceof StorageError) return error;
+    const name = nameOf(error);
+    if (name === "QuotaExceededError" || name === "ENOSPC") return new StorageError.Full();
+    return name === "SecurityError" ? new StorageError.Unavailable(describe(error)) : new StorageError.Io(describe(error));
   }
 }
 
@@ -228,60 +231,40 @@ export namespace StorageError {
   }
 }
 
-/** The `name` of a `DOMException` (or of any error object), and the `code` of a Node.js system error. */
-function errorName(error: unknown): { readonly name: unknown; readonly code: unknown } {
-  if (typeof error !== "object" || error === null) return { name: undefined, code: undefined };
-  const e = error as { name?: unknown; code?: unknown };
-  return { name: e.name, code: e.code };
+/** The `name` of a `DOMException` (or of any error object), or the `code` of a Node.js system error (`ENOSPC`). */
+function nameOf(error: unknown): unknown {
+  const e = error as { name?: unknown; code?: unknown } | null;
+  return typeof e?.code === "string" ? e.code : e?.name;
 }
 
 /** The text of a failure, for the `Io` and `Unavailable` variants: its message, else its name. Never throws. */
 function describe(error: unknown): string {
-  const message = errorMessage(error);
-  if (message !== "") return message;
-  const { name } = errorName(error);
-  return typeof name === "string" && name !== "" ? name : "unknown failure";
-}
-
-/**
- * The {@link StorageError} a failure of a storage API stands for when it is one this runtime recognises (a
- * `StorageError`, a quota failure, a refused origin), else `undefined`. The storage ports use it to type what
- * an adapter rejected with; anything it does not recognise is a bug in the adapter (logged, and answered as
- * unavailable).
- */
-export function recognizedStorageError(error: unknown): StorageError | undefined {
-  if (error instanceof StorageError) return error;
-  const { name, code } = errorName(error);
-  if (name === "QuotaExceededError" || code === "ENOSPC" || code === 22 /* QUOTA_EXCEEDED_ERR */) return new StorageError.Full();
-  if (name === "SecurityError") return new StorageError.Unavailable(describe(error));
-  return undefined;
-}
-
-/**
- * The {@link FsError} a failure stands for when it is one `fsPort` recognises without an adapter's help: an
- * `FsError`, or `Full` for a `QuotaExceededError` or an `ENOSPC` failure; else `undefined` (a bug in the
- * adapter: logged and answered as unavailable).
- */
-export function recognizedFsError(error: unknown): FsError | undefined {
-  if (error instanceof FsError) return error;
-  const { name, code } = errorName(error);
-  if (name === "QuotaExceededError" || code === "ENOSPC" || code === 22) return new FsError.Full();
-  return undefined;
+  return errorMessage(error) || String(nameOf(error) ?? "unknown failure");
 }
 
 /**
  * `error` as an {@link FsError}: itself when it is one; `Full` for a `QuotaExceededError` or `ENOSPC`;
  * `NotFound` for a `NotFoundError` or `ENOENT`; `Denied` for a `NotAllowedError`, a `SecurityError`, `EACCES`
- * or `EPERM`; `Io` with its message for anything else.
+ * or `EPERM`; `Io` with its message for anything else. For the adapter of a file API:
+ * `catch (e) { throw fsErrorFrom(e); }`.
  */
 export function fsErrorFrom(error: unknown): FsError {
-  const recognized = recognizedFsError(error);
-  if (recognized !== undefined) return recognized;
-  const { name, code } = errorName(error);
-  if (name === "NotFoundError" || code === "ENOENT") return new FsError.NotFound();
-  if (name === "NotAllowedError" || name === "SecurityError" || code === "EACCES" || code === "EPERM") return new FsError.Denied();
-  if (name === "TypeMismatchError") return new FsError.Io(`wrong kind of entry: ${describe(error)}`);
-  return new FsError.Io(describe(error));
+  if (error instanceof FsError) return error;
+  switch (nameOf(error)) {
+    case "QuotaExceededError":
+    case "ENOSPC":
+      return new FsError.Full();
+    case "NotFoundError":
+    case "ENOENT":
+      return new FsError.NotFound();
+    case "NotAllowedError":
+    case "SecurityError":
+    case "EACCES":
+    case "EPERM":
+      return new FsError.Denied();
+    default:
+      return new FsError.Io(describe(error));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,8 +278,8 @@ export interface HttpAdapter {
 
 /**
  * The `Kv` port, and the `SecureStore` port, which has the same shape. Every method rejects with a
- * {@link StorageError} when the storage fails (ADR-049); `kvPort` also understands a raw `QuotaExceededError`,
- * `ENOSPC` or `SecurityError` (see {@link StorageError.from}). Any other rejection is a bug in the adapter:
+ * {@link StorageError} when the storage fails (ADR-049); {@link StorageError.from} maps what a storage API throws
+ * (`QuotaExceededError`, `ENOSPC`, `SecurityError`, ...) onto it. Any other rejection is a bug in the adapter:
  * it is reported (an error-level log naming the port, and `onError`) and the core sees the port as
  * unavailable for that call.
  */
@@ -312,8 +295,8 @@ export interface KvAdapter {
 }
 
 /**
- * The `Fs` port. Rejects with {@link FsError} (`fsPort` also understands a raw `QuotaExceededError` or
- * `ENOSPC` as `Full`, see {@link fsErrorFrom}). Paths are `/`-separated and relative to the adapter's root.
+ * The `Fs` port. Rejects with {@link FsError} ({@link fsErrorFrom} maps what a file API throws onto it; any
+ * other rejection is reported and answered as unavailable). Paths are `/`-separated and relative to the adapter's root.
  */
 export interface FsAdapter {
   read(path: string): Promise<Uint8Array>;

@@ -24,7 +24,7 @@ export function systemClock(): ClockAdapter {
 }
 
 /** The text a missing WebCrypto fails with: `UndraCore.load` rejects with it, and the `random` import reports it (ADR-049). */
-export const WEB_CRYPTO_REQUIRED = "WebCrypto is required: this platform has no crypto.getRandomValues, the only random source a wasm core has";
+export const WEB_CRYPTO_REQUIRED = "WebCrypto is required (crypto.getRandomValues)";
 
 /** Whether `crypto` (default the global one) can produce cryptographically secure random bytes: `crypto.getRandomValues` exists. */
 export function hasCryptoRandom(crypto: unknown = (globalThis as { crypto?: unknown }).crypto): boolean {

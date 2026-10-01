@@ -17,12 +17,15 @@ export * from "./adapters/index.js";
 export {
   DEFAULT_RECOVERY,
   UndraCoreRestarted,
+  crashRecovery,
   type CoreRestartInfo,
+  type CrashRecovery,
   type KeptSnapshot,
   type RecoveryOptions,
+  type ResolvedRecovery,
   type RestartResult,
   type SnapshotPolicy,
-  type UndraPanicReport,
 } from "./recovery.js";
+export type { UndraPanicReport } from "./panic.js";
 export type { WorkerPortsModule } from "./worker.js";
 export type { UndraClass } from "./lifetime.js";

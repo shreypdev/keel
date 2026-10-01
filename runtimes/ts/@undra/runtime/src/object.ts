@@ -44,40 +44,23 @@ const leaks: FinalizationRegistry<Leak> | null =
 export abstract class UndraObject {
   /** The core this object lives in. */
   readonly core: UndraCore;
-  #handle: Handle;
+  /**
+   * The handle of the object inside the core. It changes only when crash recovery re-creates a query handle
+   * (ADR-049): code that keeps the raw handle instead of the object goes stale then.
+   */
+  readonly handle: Handle;
   #closed = false;
 
   /** @param core The core that issued `handle`. @param handle A live handle the caller owns and hands over. */
   protected constructor(core: UndraCore, handle: Handle) {
     this.core = core;
-    this.#handle = handle;
+    this.handle = handle;
     leaks?.register(this, { core: new WeakRef(core), handle }, this);
-  }
-
-  /**
-   * The handle of the object inside the core. It changes only when the runtime re-creates a query handle after a
-   * crash recovery (ADR-049): code that keeps the raw handle instead of the object goes stale then.
-   */
-  get handle(): Handle {
-    return this.#handle;
   }
 
   /** Whether `close()` has been called. */
   get closed(): boolean {
     return this.#closed;
-  }
-
-  /**
-   * Moves this object to `handle`, a new object the runtime created in the core in its place (a re-created query
-   * handle after a crash recovery, ADR-049). The handle it had is not released: the core that issued it is gone.
-   *
-   * @internal Called by `UndraCore`.
-   */
-  _rebind(handle: Handle): void {
-    if (this.#closed) return;
-    leaks?.unregister(this);
-    this.#handle = handle;
-    leaks?.register(this, { core: new WeakRef(this.core), handle }, this);
   }
 
   /** Releases the handle. Later calls on the object fail in the core with a stale handle. Idempotent. */
@@ -92,6 +75,18 @@ export abstract class UndraObject {
   [DISPOSE](): void {
     this.close();
   }
+}
+
+/**
+ * Moves `object` to `handle`, a new object crash recovery created in the core in its place (a re-created query handle,
+ * ADR-049); the handle it had is not released (the instance that issued it is gone).
+ *
+ * @internal Used by `crashRecovery` only.
+ */
+export function _rebindObject(object: UndraObject, handle: Handle): void {
+  leaks?.unregister(object);
+  (object as { handle: Handle }).handle = handle;
+  leaks?.register(object, { core: new WeakRef(object.core), handle }, object);
 }
 
 /** What a generated store tells its base class about itself. */

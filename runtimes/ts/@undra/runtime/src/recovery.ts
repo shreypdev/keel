@@ -1,16 +1,20 @@
 import { UndraCallError, UndraUnhandledError } from "./call-error.js";
-import { UndraTransportError } from "./errors.js";
+import type { UndraCore } from "./core.js";
+import { UndraRestoreError, UndraTransportError } from "./errors.js";
+import { type RecreateCall, type UndraStore, _rebindObject } from "./object.js";
+import { type UndraPanicReport, isTrap } from "./panic.js";
 import { errorMessage } from "./platform.js";
-import { type Handle, type HelloPayload, decodeSnapshot, encodeSnapshot } from "./wire/index.js";
+import type { Transport } from "./transport/transport.js";
+import { type Handle, type HelloPayload, decodeSnapshot, encodeSnapshot, handleGeneration } from "./wire/index.js";
 
 /*
- * Recovering a web core that trapped (ADR-049 decision 3): the options of `LoadOptions.recovery`, the snapshot
- * keeper that runs where the core runs (the main thread in `wasm-main`, the worker in `wasm-worker`), the panic
- * report built from the core's FATAL record and the trap's stack (ADR-046 decision 4.4, the minimal part), and
- * the event an app hears after a restart.
+ * Recovering a web core that trapped (ADR-049 decision 3): `crashRecovery(options)`, which `LoadOptions.recovery`
+ * takes, and everything it brings: the snapshot keeper that runs where the core runs (the main thread in `wasm-main`,
+ * the worker in `wasm-worker`), the restart sequence, and the event an app hears after a restart. None of it is part
+ * of a core loaded without `recovery`: an app that does not ask for it does not ship it (ADR-052's size gate).
  */
 
-/** `LoadOptions.recovery` as an object: every field is optional. */
+/** What `crashRecovery(options)` takes: every field is optional. */
 export interface RecoveryOptions {
   /** At most one snapshot per this many ms, taken after the core changed a store. Default 1000. */
   readonly snapshotEveryMs?: number;
@@ -42,10 +46,8 @@ export const DEFAULT_RECOVERY: ResolvedRecovery = Object.freeze({
   perMs: 60_000,
 });
 
-/** `true`, an object or nothing, as the settings a core runs with; `null` when recovery is off (the default). */
-export function resolveRecovery(option: boolean | RecoveryOptions | undefined): ResolvedRecovery | null {
-  if (option === undefined || option === false) return null;
-  const given = option === true ? {} : option;
+/** `options` with every default applied. */
+export function resolveRecovery(given: RecoveryOptions = {}): ResolvedRecovery {
   const pick = (value: number | undefined, fallback: number, min: number): number =>
     value === undefined || !Number.isFinite(value) ? fallback : Math.max(min, Math.floor(value));
   return {
@@ -220,62 +222,6 @@ export interface RestartResult {
   readonly storeHandles: readonly Handle[] | null;
 }
 
-// ----- the panic report (ADR-046 decision 4.4, minimal) ----------------------------------------------
-
-/**
- * What the TypeScript runtime knows about a panic that trapped a wasm core (ADR-046 decision 4.4, the part this
- * runtime implements): the panic's own record, which the core logs at FATAL level with target `undra::panic`
- * before it traps, and the stack of the trap. Delivered to `LoadOptions.onPanic` once per trap, before a
- * restart (ADR-049) and whether or not recovery is on.
- */
-export interface UndraPanicReport {
-  /** The panic message from the core's FATAL `undra::panic` record; the trap's own text when the core logged none (a stack overflow, out of memory). */
-  readonly message: string;
-  /** `file:line[:column]` of the panic when the record carried it (a panic before `undra_init`), else `""`. */
-  readonly location: string;
-  /** What the runtime was running when the core trapped, as far as it knows: `"wasm-main"` or `"wasm-worker"`, and the trap's text. */
-  readonly operation: string;
-  /** The frames of the trap's stack that are in the wasm module (`wasm-function[123]:0x4567`, or a name in a build with names), innermost first. */
-  readonly frames: readonly string[];
-  /** The schema hash of the core. */
-  readonly schemaHash: bigint;
-  /** The text of the trap (`RuntimeError: unreachable`, ...). */
-  readonly trap: string;
-}
-
-/** The stack of a trap: the engine's, carried as the `cause` of the transport's error (or its own stack). */
-export function trapStack(error: unknown): string {
-  const cause = (error as { cause?: unknown } | null)?.cause;
-  const stack = (cause as { stack?: unknown } | null | undefined)?.stack ?? (error as { stack?: unknown } | null)?.stack;
-  return typeof stack === "string" ? stack : "";
-}
-
-/** The panic report of a trap, from the core's last FATAL `undra::panic` record (if any) and the trap. */
-export function panicReport(record: string | null, trap: Error, schemaHash: bigint, mode: string): UndraPanicReport {
-  const cause = (trap as { cause?: unknown }).cause;
-  const trapText = cause instanceof Error ? `${cause.name}: ${cause.message}` : trap.message;
-  let message = record ?? trapText;
-  let location = "";
-  // The record of a panic before `undra_init` ends with " at file:line".
-  const at = record === null ? null : /^(.*) at ([^\s]+:\d+(?::\d+)?)$/s.exec(record);
-  if (at !== null) {
-    message = at[1] as string;
-    location = at[2] as string;
-  }
-  // A runtime record is `"<what>: <message>\n<backtrace>"` on native; on wasm it is the message alone.
-  const frames = trapStack(trap)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.includes("wasm-function[") || line.includes(".wasm"))
-    .map((line) => line.replace(/^at\s+/, ""));
-  return { message, location, operation: `${mode}: ${trapText}`, frames, schemaHash, trap: trapText };
-}
-
-/** Whether `error` is the trap of a wasm core. */
-export function isTrap(error: unknown): error is UndraTransportError {
-  return error instanceof UndraTransportError && error.reason === "trap";
-}
-
 /** The failure every call and stream in flight at a trap ends with when the core restarts (ADR-049 decision 3.4.2). */
 export function restartedError(trap: Error): UndraTransportError {
   return new UndraTransportError(
@@ -326,4 +272,391 @@ export class UndraCoreRestarted extends UndraUnhandledError implements CoreResta
     this.rejectedCalls = info.rejectedCalls;
     this.staleObjects = info.staleObjects;
   }
+}
+
+// ----- the restart sequence ----------------------------------------------------------------------------
+
+/**
+ * A transport whose core runs on this thread and can be instantiated again from the same compiled module
+ * (`WasmMainTransport`): the snapshots are kept here, and the restart runs here.
+ */
+export interface Reinstantiable {
+  /** `undra_snapshot`, copied out of wasm memory; throws when the core cannot be asked now (closed, trapped). */
+  takeSnapshot(): Uint8Array;
+  /** The same compiled module instantiated again, `_initialize` and `undra_init` run (no restore). */
+  reinstantiate(): Promise<HelloPayload>;
+  /** `undra_restore`; rejects `UndraRestoreError` for a refused snapshot. */
+  restore(bytes: Uint8Array): Promise<void>;
+}
+
+/** Whether `transport` is {@link Reinstantiable}. */
+function reinstantiable(transport: object): transport is Reinstantiable {
+  return typeof (transport as Partial<Reinstantiable>).reinstantiate === "function";
+}
+
+/**
+ * A snapshot keeper over a core on this thread: `transport.takeSnapshot()`, with a too-large snapshot and a failure
+ * said through `log` (the worker of `wasm-worker` makes one too).
+ */
+export function keeperOf(
+  policy: SnapshotPolicy,
+  transport: Pick<Reinstantiable, "takeSnapshot">,
+  log: (level: number, target: string, message: string) => void,
+): SnapshotKeeper {
+  return new SnapshotKeeper(policy, {
+    take: () => transport.takeSnapshot(),
+    tooLarge: (bytes, limit) => {
+      log(3, "undra::recovery", `a snapshot of ${bytes} bytes was not kept for crash recovery: it is larger than maxSnapshotBytes (${limit}); the previous one stays (said once)`);
+    },
+    failed: (error) => {
+      log(4, "undra::recovery", `a snapshot for crash recovery failed: ${errorMessage(error)}`);
+    },
+  });
+}
+
+/**
+ * The restart of a core on this thread (ADR-049 decision 3.4.3): the same compiled module instantiated again, and the
+ * last snapshot `keeper` kept restored with its generation floor raised to at least `floor`, so that no handle the host
+ * still holds can be issued again to another object (ADR-022). Without a snapshot (or when the core refuses it), an empty
+ * one raises the floor alone and no store comes back.
+ */
+export async function restartHere(transport: Reinstantiable, keeper: SnapshotKeeper, floor: number, log: (level: number, target: string, message: string) => void): Promise<RestartResult> {
+  keeper.pause();
+  try {
+    const hello = await transport.reinstantiate();
+    const kept = keeper.last;
+    if (kept !== null) {
+      const bytes = withGenerationFloor(new Uint8Array(kept.data), floor);
+      try {
+        await transport.restore(bytes);
+        return { hello, restoredFromAgeMs: Math.max(0, Date.now() - kept.takenAt), storeHandles: snapshotStoreHandles(bytes) };
+      } catch (error) {
+        if (!(error instanceof UndraRestoreError)) throw error;
+        log(4, "undra::recovery", `the core refused its last snapshot (code ${error.code}) after the restart; it runs without its stores`);
+      }
+    }
+    try {
+      await transport.restore(emptySnapshot(hello.schemaHash, floor));
+    } catch (error) {
+      if (!(error instanceof UndraRestoreError)) throw error;
+    }
+    return { hello, restoredFromAgeMs: null, storeHandles: [] };
+  } finally {
+    keeper.resume();
+  }
+}
+
+/**
+ * What a core gives its crash recovery: the state and the few operations the restart sequence needs that `UndraCore`
+ * does not offer publicly.
+ *
+ * @internal Made by `UndraCore` for {@link CrashRecovery}.
+ */
+export interface RecoveryHost {
+  /** The core. */
+  readonly core: UndraCore;
+  /** Its transport. */
+  readonly transport: Transport;
+  /** The handles constructed through the core. */
+  readonly handles: Set<Handle>;
+  /** The signals observed, per handle. */
+  readonly observed: Map<Handle, Set<number>>;
+  /** The handles released while the core restarted: released once it is back. */
+  readonly releasedWhileDown: Set<Handle>;
+  /** Fails every call, stream and `observe` in flight with `error`; returns how many calls and streams. */
+  failInFlight(error: Error): number;
+  /** Refuses calls with "restarted" while on; turning it on starts a new epoch (late port replies are dropped). */
+  setRestarting(on: boolean): void;
+  /** Ends the core: the channel is lost for good (`onClose`). */
+  lose(error: Error): void;
+  /** Hands `error` to `onError`, guarded as the core's own reports are. */
+  deliver(error: UndraUnhandledError): void;
+  /** Builds the panic report of `trap` and hands it to `onPanic`. */
+  panicked(trap: Error): UndraPanicReport;
+  /** The core's log. */
+  log(level: number, target: string, message: string): void;
+}
+
+/**
+ * What crash recovery does for one core.
+ *
+ * @internal Driven by `UndraCore`.
+ */
+export interface RecoveryDriver {
+  /** The core emitted a change-set: a snapshot is due. */
+  changed(): void;
+  /** A store to re-create after a restart instead of restoring it (a query handle), with its recorded constructor call. */
+  track(store: UndraStore, call: RecreateCall): void;
+  /** What a caller sees for `error`: a trap the core will recover from is "restarted". */
+  failureOf(error: unknown): unknown;
+  /** The core trapped (the panic report went to `onPanic`): whether the restart takes over. */
+  trapped(trap: UndraTransportError, report: UndraPanicReport): boolean;
+  /** The core closed. */
+  close(): void;
+}
+
+/**
+ * Crash recovery for a web core (ADR-049 decision 3), what `LoadOptions.recovery` takes: make one with
+ * {@link crashRecovery}, one per core.
+ */
+export interface CrashRecovery {
+  /** The settings, defaults applied. */
+  readonly options: ResolvedRecovery;
+  /** The last snapshot kept on this thread (`wasm-main`; in `wasm-worker` mode the worker keeps it), or `null`. For devtools, tests and benchmarks. */
+  readonly lastSnapshot: KeptSnapshot | null;
+  /** Takes and keeps a snapshot now (`wasm-main`), whatever the schedule says: returns its size, or `null` when none could be taken. For tests and benchmarks. */
+  keepSnapshotNow(): number | null;
+  /**
+   * Connects the recovery to the core that loads with it.
+   *
+   * @internal Called by `UndraCore`; throws when this recovery already belongs to a core.
+   */
+  attach(host: RecoveryHost, onCoreRestarted?: (event: UndraCoreRestarted) => void): RecoveryDriver;
+}
+
+/**
+ * Crash recovery for a web core, for `LoadOptions.recovery` (ADR-049 decision 3; off unless given):
+ *
+ * ```ts
+ * await UndraCore.load({ mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.schemaHash, recovery: crashRecovery() });
+ * ```
+ *
+ * The runtime keeps a snapshot of the stores, at most once per `snapshotEveryMs` while they change (none larger than
+ * `maxSnapshotBytes`, in the worker in `wasm-worker` mode). When the core traps: `onPanic` hears the panic; every call and
+ * stream in flight fails with `UndraTransportError("restarted")` (generated calls: `UndraCallError.Unavailable`; it may or
+ * may not have run, and it is not retried); the same compiled module is instantiated again and the snapshot restored
+ * (stores keep their handles); every observed store is observed again; query handles are re-created behind the same
+ * objects; then `onCoreRestarted` and `onError` hear an {@link UndraCoreRestarted}. Lost: store writes after the last
+ * snapshot, objects that are not stores (query handles excepted), the core's running tasks and timers, and whatever the
+ * core held outside its stores (re-apply it in `onCoreRestarted`). Past `maxRestarts` within `perMs` the core stays dead
+ * and `onClose` reports the trap. Wasm modes only (a native core contains its panics). A core loaded without it ships none
+ * of this code.
+ */
+export function crashRecovery(options: RecoveryOptions = {}): CrashRecovery {
+  const settings = resolveRecovery(options);
+  let keeper: SnapshotKeeper | null = null;
+  let attached = false;
+  return {
+    options: settings,
+    get lastSnapshot() {
+      return keeper?.last ?? null;
+    },
+    keepSnapshotNow: () => keeper?.takeNow() ?? null,
+    attach(host, onCoreRestarted) {
+      if (attached) throw new UndraTransportError("unsupported", "this crashRecovery() already belongs to a core: make one per core");
+      attached = true;
+      const here = reinstantiable(host.transport) ? host.transport : null;
+      if (here !== null) keeper = keeperOf(settings, here, host.log);
+      return new Driver(settings, host, here, keeper, onCoreRestarted);
+    },
+  };
+}
+
+/** One core's crash recovery: the restart budget and the restart sequence. */
+class Driver implements RecoveryDriver {
+  readonly #settings: ResolvedRecovery;
+  readonly #host: RecoveryHost;
+  readonly #here: Reinstantiable | null;
+  readonly #keeper: SnapshotKeeper | null;
+  readonly #onRestarted: ((event: UndraCoreRestarted) => void) | undefined;
+  /** When the restarts within the budget's window happened (`Date.now`). */
+  #times: number[] = [];
+  /** Counts recoveries: a re-attach that a newer trap overtook stops. */
+  #run = 0;
+  /** The stores re-created after a restart (query handles), by handle. */
+  readonly #recreatable = new Map<Handle, { readonly ref: WeakRef<UndraStore>; readonly call: RecreateCall }>();
+  #restarting = false;
+
+  constructor(settings: ResolvedRecovery, host: RecoveryHost, here: Reinstantiable | null, keeper: SnapshotKeeper | null, onRestarted: ((event: UndraCoreRestarted) => void) | undefined) {
+    this.#settings = settings;
+    this.#host = host;
+    this.#here = here;
+    this.#keeper = keeper;
+    this.#onRestarted = onRestarted;
+  }
+
+  changed(): void {
+    this.#keeper?.changed();
+  }
+
+  track(store: UndraStore, call: RecreateCall): void {
+    // The stores closed or collected since are forgotten here (a released store's wrapper is closed).
+    for (const [handle, entry] of this.#recreatable) {
+      if (entry.ref.deref()?.closed !== false) this.#recreatable.delete(handle);
+    }
+    this.#recreatable.set(store.handle, { ref: new WeakRef(store), call });
+  }
+
+  failureOf(error: unknown): unknown {
+    return isTrap(error) && (this.#restarting || this.#mayRestart()) ? restartedError(error) : error;
+  }
+
+  trapped(trap: UndraTransportError, report: UndraPanicReport): boolean {
+    if (this.#restarting) return true;
+    if (!this.#mayRestart()) return false;
+    void this.#recover(trap, report);
+    return true;
+  }
+
+  close(): void {
+    this.#keeper?.stop();
+  }
+
+  /** Whether a trap now would be recovered from: the transport can restart, and the budget allows one more. */
+  #mayRestart(): boolean {
+    const transport = this.#host.transport as Transport & { restart?: unknown };
+    if ((this.#here === null && typeof transport.restart !== "function") || this.#host.core.closed) return false;
+    const since = Date.now() - this.#settings.perMs;
+    this.#times = this.#times.filter((at) => at > since);
+    return this.#times.length < this.#settings.maxRestarts;
+  }
+
+  /** The highest handle generation the host holds: the floor a restore must not go below (ADR-022). */
+  #floor(): number {
+    const host = this.#host;
+    let floor = 0;
+    for (const set of [host.handles, host.observed.keys(), this.#recreatable.keys(), host.releasedWhileDown]) {
+      for (const handle of set) floor = Math.max(floor, handleGeneration(handle));
+    }
+    return floor;
+  }
+
+  #restart(floor: number): Promise<RestartResult> {
+    const here = this.#here;
+    if (here !== null && this.#keeper !== null) return restartHere(here, this.#keeper, floor, this.#host.log);
+    return (this.#host.transport as Transport & { restart(floor: number): Promise<RestartResult> }).restart(floor);
+  }
+
+  /**
+   * The restart sequence of ADR-049 decision 3.4: the panic report went to `onPanic` already; every call and stream in
+   * flight fails with "restarted"; the core comes back from the last snapshot; the stores are observed again and the query
+   * handles re-created; then `onCoreRestarted` and `onError`. A trap during it counts against the budget like any other.
+   */
+  async #recover(firstTrap: UndraTransportError, firstReport: UndraPanicReport): Promise<void> {
+    const host = this.#host;
+    const run = ++this.#run;
+    let trap = firstTrap;
+    let report = firstReport;
+    this.#restarting = true;
+    host.setRestarting(true);
+    const rejectedCalls = host.failInFlight(restartedError(trap));
+    let result: RestartResult;
+    for (;;) {
+      this.#times.push(Date.now());
+      try {
+        result = await this.#restart(this.#floor());
+        break;
+      } catch (error) {
+        if (host.core.closed || run !== this.#run) return;
+        if (isTrap(error)) {
+          trap = error;
+          report = host.panicked(error);
+          if (this.#mayRestart()) continue;
+        }
+        this.#restarting = false;
+        host.setRestarting(false);
+        host.log(4, "undra::recovery", `the wasm core could not be restarted: ${errorMessage(error)}`);
+        host.lose(isTrap(error) ? error : trap);
+        return;
+      }
+    }
+    if (host.core.closed || run !== this.#run) return;
+    host.core.hello = result.hello;
+    this.#restarting = false;
+    host.setRestarting(false);
+    let staleObjects: number | null;
+    try {
+      staleObjects = await this.#reattach(result, run);
+    } catch (error) {
+      // A trap while observing again: the transport reported it, and that report starts the next round.
+      if (!overtaken(error) && !host.core.closed) host.core.report(error, "core restart");
+      return;
+    }
+    if (staleObjects === null || host.core.closed || run !== this.#run) return;
+    const event = new UndraCoreRestarted({ report, restoredFromAgeMs: result.restoredFromAgeMs, rejectedCalls, staleObjects }, trap);
+    host.log(3, "undra::recovery", `${event.message}: ${rejectedCalls} call(s) in flight failed, ${staleObjects} object(s) went stale`);
+    try {
+      this.#onRestarted?.(event);
+    } catch (thrown) {
+      host.log(4, "undra::runtime", `the onCoreRestarted handler threw: ${errorMessage(thrown)}`);
+    }
+    host.deliver(event);
+  }
+
+  /**
+   * After a restart: what was released meanwhile is released, the stores the snapshot brought back are observed again
+   * (their values reach the mirror), and the query handles are re-created and their wrappers moved to the new handles.
+   * Returns how many objects went stale, or `null` when a newer trap overtook this round.
+   */
+  async #reattach(result: RestartResult, run: number): Promise<number | null> {
+    const host = this.#host;
+    const core = host.core;
+    const restored = result.storeHandles === null ? null : new Set(result.storeHandles);
+    const recreate = [...this.#recreatable.entries()];
+    const recreated = new Set(recreate.map(([handle]) => handle));
+    let stale = 0;
+    for (const handle of new Set([...host.handles, ...host.observed.keys()])) {
+      if (recreated.has(handle) || restored === null || restored.has(handle)) continue;
+      stale++;
+      host.handles.delete(handle);
+      host.observed.delete(handle);
+    }
+    for (const handle of [...host.releasedWhileDown]) {
+      host.releasedWhileDown.delete(handle);
+      core.release(handle);
+    }
+    const observing: Array<Promise<void>> = [];
+    for (const [handle, signals] of [...host.observed]) {
+      if (recreated.has(handle)) continue;
+      for (const signalId of signals) observing.push(core.observe(handle, signalId, true));
+    }
+    const settled = await Promise.allSettled(observing);
+    if (run !== this.#run || core.closed) return null;
+    const trapped = settled.find((s): s is PromiseRejectedResult => s.status === "rejected" && overtaken(s.reason));
+    if (trapped !== undefined) throw trapped.reason;
+    for (const [old, entry] of recreate) {
+      const store = entry.ref.deref();
+      this.#recreatable.delete(old);
+      if (store === undefined || store.closed || !core.mirror.has(old)) continue;
+      let handle: Handle;
+      try {
+        handle = await core.construct(entry.call.typeId, entry.call.methodId, entry.call.args);
+      } catch (error) {
+        if (run !== this.#run || core.closed) return null;
+        if (overtaken(error)) throw error;
+        stale++;
+        core.report(error, `re-creating a query handle after a restart (type 0x${entry.call.typeId.toString(16)})`);
+        continue;
+      }
+      if (run !== this.#run || core.closed || store.closed) {
+        core.release(handle);
+        if (run !== this.#run || core.closed) return null;
+        continue;
+      }
+      const signals = host.observed.get(old) ?? new Set<number>();
+      host.observed.delete(old);
+      host.handles.delete(old);
+      // The wrapper moves to the new handle, and its mirror registration with it.
+      const ref = entry.ref;
+      core.mirror.unregister(old);
+      core.mirror.register(handle, (signalId, op, value) => {
+        (ref.deref() as unknown as { _apply?: (s: number, o: typeof op, v: Uint8Array) => void } | undefined)?._apply?.(signalId, op, value);
+      });
+      _rebindObject(store, handle);
+      this.#recreatable.set(handle, entry);
+      const outcomes = await Promise.allSettled([...signals].map((signalId) => core.observe(handle, signalId, true)));
+      if (run !== this.#run || core.closed) return null;
+      const failed = outcomes.find((o): o is PromiseRejectedResult => o.status === "rejected");
+      if (failed !== undefined) {
+        if (overtaken(failed.reason)) throw failed.reason;
+        core.report(failed.reason, "observing a re-created query handle after a restart");
+      }
+    }
+    return stale;
+  }
+}
+
+/** Whether `error` means that a newer trap overtook a restart in progress: the trap itself, or what it failed the waiting work with. */
+function overtaken(error: unknown): boolean {
+  return isTrap(error) || (error instanceof UndraTransportError && error.reason === "restarted");
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { UndraCallError, UndraCoreRestarted, UndraTransportError, codecs, encodeValue } from "@undra/runtime";
+import { UndraCallError, UndraCoreRestarted, UndraTransportError, codecs, crashRecovery, encodeValue } from "@undra/runtime";
 import { Counter, Probe, RemoteTodosQueryHandle, UndraIds, add, configureRemote, explode } from "@playground/core";
 import { BASE_URL, boot } from "../src/harness.js";
 import { replies } from "../src/fake-server.js";
@@ -24,7 +24,7 @@ test("S21 a trapped web core restarts from its last snapshot", async () => {
   const restarts: UndraCoreRestarted[] = [];
   const { core, server, kv, closed, runtimeErrors } = await boot({
     load: {
-      recovery: { snapshotEveryMs: 50, maxRestarts: 3, perMs: 60_000 },
+      recovery: crashRecovery({ snapshotEveryMs: 50, maxRestarts: 3, perMs: 60_000 }),
       onCoreRestarted: (event) => {
         restarts.push(event);
       },

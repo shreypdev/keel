@@ -50,6 +50,7 @@ const {
   ReplyStatus,
   clockPort,
   codecs,
+  crashRecovery,
   decodeValue,
   encodeValue,
   rngPort,
@@ -637,7 +638,7 @@ inEachMode("recovery: a trap restarts the core from its last snapshot; calls in 
   const errors = [];
   const closed = [];
   const core = await bootMode({
-    recovery: { snapshotEveryMs: 0 },
+    recovery: crashRecovery({ snapshotEveryMs: 0 }),
     onPanic: (report) => panics.push(report),
     onCoreRestarted: (event) => restarts.push(event),
     onError: (error) => errors.push(error),
@@ -694,7 +695,7 @@ inEachMode("recovery: past maxRestarts within perMs the core stays dead and onCl
   const restarts = [];
   const closed = [];
   const core = await bootMode({
-    recovery: { snapshotEveryMs: 0, maxRestarts: 1 },
+    recovery: crashRecovery({ snapshotEveryMs: 0, maxRestarts: 1 }),
     onCoreRestarted: (event) => restarts.push(event),
     onClose: (error) => closed.push(error),
   });

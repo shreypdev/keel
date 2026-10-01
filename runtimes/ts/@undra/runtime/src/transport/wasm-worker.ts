@@ -61,11 +61,14 @@ export interface WasmWorkerOptions {
   readonly recovery?: SnapshotPolicy;
 }
 
-/** What waits for the worker's answer to a `snapshot`, `restore` or `restart` request. */
-type ControlWaiter =
-  | { readonly kind: "snapshot"; resolve(bytes: Uint8Array): void; reject(error: unknown): void }
-  | { readonly kind: "restore"; resolve(): void; reject(error: unknown): void }
-  | { readonly kind: "restart"; resolve(result: RestartResult): void; reject(error: unknown): void };
+/** The worker's answers to the requests of {@link WasmWorkerTransport}: `stats`, `snapshot`, `restored`, `restarted`. */
+type ControlAnswer = Extract<WorkerToHost, { readonly t: "stats" | "snapshot" | "restored" | "restarted" }>;
+
+/** What waits for the worker's answer to a request: the answer, as it came. */
+interface ControlWaiter {
+  resolve(answer: ControlAnswer): void;
+  reject(error: unknown): void;
+}
 
 /** A transport failure from the worker; a trap keeps the engine's stack as the stack of its `cause` (for the panic report). */
 function transportError(failure: Extract<WorkerFailure, { kind: "transport" }>): UndraTransportError {
@@ -103,18 +106,13 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
 }
 
 /**
- * The failure of a snapshot or restore request in a form a caller can use: a transport failure
- * keeps its reason, anything else is a protocol failure of this exchange.
+ * The failure an answer of the worker carries, in a form a caller can use: a transport failure keeps its reason (a
+ * trap its stack), anything else, and an answer without what it should carry, is a protocol failure of this exchange.
  */
-function controlFailure(failure: WorkerFailure): Error {
-  switch (failure.kind) {
-    case "transport":
-      return transportError(failure);
-    case "schemaMismatch":
-      return new UndraSchemaMismatchError(failure.expected, failure.got);
-    case "error":
-      return new UndraTransportError("protocol", failure.message);
-  }
+function controlFailure(answer: ControlAnswer): Error {
+  const failure = "failure" in answer ? answer.failure : undefined;
+  if (failure === undefined) return new UndraTransportError("protocol", "the worker gave an incomplete answer");
+  return failure.kind === "error" ? new UndraTransportError("protocol", failure.message) : failureToError(failure);
 }
 
 /**
@@ -160,8 +158,6 @@ export class WasmWorkerTransport implements Transport {
   #open = false;
   #closed = false;
   #seq = 0;
-  #nextStatsId = 1;
-  readonly #stats = new Map<number, { resolve(json: string | null): void; reject(error: unknown): void }>();
   #nextControlId = 1;
   readonly #control = new Map<number, ControlWaiter>();
   /** Whether the worker said, in `ready`, that it understands `snapshot` and `restore`. */
@@ -246,40 +242,13 @@ export class WasmWorkerTransport implements Transport {
               this.#receive(data);
             }
             return;
-          case "stats": {
-            const waiting = this.#stats.get(message.id);
-            this.#stats.delete(message.id);
-            waiting?.resolve(message.json);
-            return;
-          }
-          case "snapshot": {
-            const waiting = this.#control.get(message.id);
-            if (waiting?.kind !== "snapshot") return;
-            this.#control.delete(message.id);
-            if (message.failure !== undefined) waiting.reject(controlFailure(message.failure));
-            else if (isArrayBuffer(message.data)) waiting.resolve(new Uint8Array(message.data));
-            else waiting.reject(new UndraTransportError("protocol", "the worker answered a snapshot request without bytes"));
-            return;
-          }
-          case "restored": {
-            const waiting = this.#control.get(message.id);
-            if (waiting?.kind !== "restore") return;
-            this.#control.delete(message.id);
-            if (message.failure !== undefined) waiting.reject(controlFailure(message.failure));
-            else if (message.code !== 0) waiting.reject(new UndraRestoreError(message.code));
-            else waiting.resolve();
-            return;
-          }
+          case "stats":
+          case "snapshot":
+          case "restored":
           case "restarted": {
             const waiting = this.#control.get(message.id);
-            if (waiting?.kind !== "restart") return;
             this.#control.delete(message.id);
-            if (message.failure !== undefined || message.hello === undefined) {
-              waiting.reject(message.failure === undefined ? new UndraTransportError("protocol", "the worker answered a restart without a hello") : failureToError(message.failure));
-            } else {
-              this.#trapped = null;
-              waiting.resolve({ hello: message.hello, restoredFromAgeMs: message.restoredFromAgeMs ?? null, storeHandles: message.storeHandles ?? null });
-            }
+            waiting?.resolve(message);
             return;
           }
           case "closed": {
@@ -367,22 +336,11 @@ export class WasmWorkerTransport implements Transport {
    * and restores the last snapshot it kept, with its generation floor raised to `generationFloor`. Rejects with an
    * `UndraTransportError` (`"trap"`, with the engine's stack, when the new instance traps too).
    */
-  restart(generationFloor: number): Promise<RestartResult> {
-    return new Promise<RestartResult>((resolve, reject) => {
-      const worker = this.#worker;
-      if (!this.#open || worker === null) {
-        reject(new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started"));
-        return;
-      }
-      if (!this.#canRestart) {
-        reject(new UndraTransportError("unsupported", "the worker was not started with recovery, or its script cannot restart the core"));
-        return;
-      }
-      const id = this.#nextControlId++;
-      this.#control.set(id, { kind: "restart", resolve, reject });
-      const message: HostToWorker = { t: "restart", id, generationFloor: generationFloor >>> 0 };
-      this.#sendControl(id, worker, message);
-    });
+  async restart(generationFloor: number): Promise<RestartResult> {
+    const answer = await this.#request(this.#canRestart, "restart", { t: "restart", id: 0, generationFloor: generationFloor >>> 0 });
+    if (answer.t !== "restarted" || answer.failure !== undefined || answer.hello === undefined) throw controlFailure(answer);
+    this.#trapped = null;
+    return { hello: answer.hello, restoredFromAgeMs: answer.restoredFromAgeMs ?? null, storeHandles: answer.storeHandles ?? null };
   }
 
   /** Tells the worker which ports of this thread it forwards calls to (a `registerPort` after load). */
@@ -397,37 +355,23 @@ export class WasmWorkerTransport implements Transport {
     }
   }
 
-  stats(): Promise<string | null> {
-    const worker = this.#worker;
-    if (!this.#open || worker === null) return Promise.reject(new UndraTransportError("closed", "the core is closed"));
-    return new Promise<string | null>((resolve, reject) => {
-      const id = this.#nextStatsId++;
-      this.#stats.set(id, { resolve, reject });
-      const message: HostToWorker = { t: "stats", id };
-      worker.postMessage(message);
-    });
+  async stats(): Promise<string | null> {
+    const answer = await this.#request(true, "stats", { t: "stats", id: 0 });
+    return answer.t === "stats" ? answer.json : null;
   }
 
-  snapshot(): Promise<Uint8Array> {
-    return new Promise<Uint8Array>((resolve, reject) => {
-      const worker = this.#controlWorker("snapshot");
-      const id = this.#nextControlId++;
-      this.#control.set(id, { kind: "snapshot", resolve, reject });
-      const message: HostToWorker = { t: "snapshot", id };
-      this.#sendControl(id, worker, message);
-    });
+  async snapshot(): Promise<Uint8Array> {
+    const answer = await this.#request(this.#canSnapshot, "snapshot", { t: "snapshot", id: 0 });
+    if (answer.t !== "snapshot" || !isArrayBuffer(answer.data)) throw controlFailure(answer);
+    return new Uint8Array(answer.data);
   }
 
-  restore(bytes: Uint8Array): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const worker = this.#controlWorker("restore");
-      const id = this.#nextControlId++;
-      this.#control.set(id, { kind: "restore", resolve, reject });
-      // A private copy is transferred: the caller keeps its bytes.
-      const copy = bytes.slice().buffer as ArrayBuffer;
-      const message: HostToWorker = { t: "restore", id, data: copy };
-      this.#sendControl(id, worker, message, [copy]);
-    });
+  async restore(bytes: Uint8Array): Promise<void> {
+    // A private copy is transferred: the caller keeps its bytes.
+    const copy = bytes.slice().buffer as ArrayBuffer;
+    const answer = await this.#request(this.#canSnapshot, "restore", { t: "restore", id: 0, data: copy }, [copy]);
+    if (answer.t !== "restored" || answer.failure !== undefined) throw controlFailure(answer);
+    if (answer.code !== 0) throw new UndraRestoreError(answer.code);
   }
 
   close(): void {
@@ -439,8 +383,6 @@ export class WasmWorkerTransport implements Transport {
     this.#detach?.();
     const worker = this.#worker;
     this.#worker = null;
-    for (const waiting of this.#stats.values()) waiting.reject(new UndraTransportError("closed", "the core is closed"));
-    this.#stats.clear();
     for (const waiting of this.#control.values()) waiting.reject(new UndraTransportError("closed", "the core is closed"));
     this.#control.clear();
     if (worker === null) return;
@@ -454,29 +396,24 @@ export class WasmWorkerTransport implements Transport {
     else worker.close?.();
   }
 
-  /** The worker a snapshot or restore request goes to; throws when the core is closed or the worker script cannot serve it. */
-  #controlWorker(operation: "snapshot" | "restore"): WorkerLike {
-    if (!this.#open || this.#worker === null) {
-      throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
-    }
-    if (!this.#canSnapshot) {
-      throw new UndraTransportError(
-        "unsupported",
-        `the worker script does not support ${operation}: it was built before snapshots and restores existed; rebuild it from the same @undra/runtime as the host`,
-      );
-    }
-    return this.#worker;
-  }
-
-  /** Posts a control request; a worker that cannot be reached fails it at once. */
-  #sendControl(id: number, worker: WorkerLike, message: HostToWorker, transfer: Transferable[] = []): void {
-    try {
-      worker.postMessage(message, transfer);
-    } catch (error) {
-      const waiting = this.#control.get(id);
-      this.#control.delete(id);
-      waiting?.reject(new UndraTransportError("closed", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
-    }
+  /**
+   * Sends a control request (`message` with a fresh `id`) and resolves with the worker's answer to it. Rejects when the
+   * core is closed, when the worker script cannot serve `operation` (`can` is false), or when the worker is unreachable.
+   */
+  #request(can: boolean, operation: string, message: HostToWorker & { readonly id: number }, transfer: Transferable[] = []): Promise<ControlAnswer> {
+    return new Promise<ControlAnswer>((resolve, reject) => {
+      const worker = this.#worker;
+      if (!this.#open || worker === null) throw new UndraTransportError("closed", this.#closed ? "the core is closed" : "the core is not started");
+      if (!can) throw new UndraTransportError("unsupported", `the worker script cannot ${operation}: rebuild it from the same @undra/runtime as the host`);
+      const id = this.#nextControlId++;
+      this.#control.set(id, { resolve, reject });
+      try {
+        worker.postMessage({ ...message, id }, transfer);
+      } catch (error) {
+        this.#control.delete(id);
+        reject(new UndraTransportError("closed", `could not reach the worker: ${errorMessage(error)}`, { cause: error }));
+      }
+    });
   }
 
   #createWorker(): WorkerLike {

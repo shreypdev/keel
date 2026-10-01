@@ -1,4 +1,4 @@
-import { UndraCore, WasmMainTransport } from "@undra/runtime";
+import { UndraCore, WasmMainTransport, crashRecovery } from "@undra/runtime";
 import { Counter, Todos, UndraIds, explode } from "@playground/core";
 import { memoryKv } from "../memory-kv";
 import { type OpResult, opResult } from "./stats";
@@ -65,17 +65,15 @@ function fail(message: string): never {
 export async function measureRecovery(module: WebAssembly.Module, config: RecoveryBenchConfig, now: () => number): Promise<RecoveryBenchResult> {
   const silent = { log() {} };
   const waiting: Array<() => void> = [];
-  const transport = new WasmMainTransport({
-    wasm: module,
-    expectedSchemaHash: UndraIds.schemaHash,
-    // The bench keeps its snapshots itself (`keepSnapshotNow`), so the schedule never fires during a measurement.
-    recovery: { snapshotEveryMs: 3_600_000, maxSnapshotBytes: 16 * 1024 * 1024 },
-  });
+  const transport = new WasmMainTransport({ wasm: module, expectedSchemaHash: UndraIds.schemaHash });
+  // The bench keeps its snapshots itself (`keepSnapshotNow`), so the schedule never fires during a measurement; the
+  // restart budget is lifted so that every sample restarts.
+  const recovery = crashRecovery({ snapshotEveryMs: 3_600_000, maxSnapshotBytes: 16 * 1024 * 1024, maxRestarts: Number.MAX_SAFE_INTEGER, perMs: 1 });
   const core = await UndraCore.attach(transport, {
     expectedSchemaHash: UndraIds.schemaHash,
     shared: false,
     adapters: { kv: memoryKv(), log: silent, http: null, connectivity: null, lifecycle: null },
-    recovery: { snapshotEveryMs: 3_600_000, maxRestarts: Number.MAX_SAFE_INTEGER, perMs: 1 },
+    recovery,
     onCoreRestarted: () => waiting.shift()?.(),
   });
   try {
@@ -83,23 +81,23 @@ export async function measureRecovery(module: WebAssembly.Module, config: Recove
     for (let i = 0; i < TODOS; i++) await todos.add(titleOf(i));
     const counters = await Promise.all(Array.from({ length: COUNTERS }, () => Counter.create(core)));
     for (const [i, counter] of counters.entries()) for (let k = 0; k <= i; k++) await counter.increment();
-    const bytes = transport.keepSnapshotNow() ?? fail("no snapshot was kept");
+    const bytes = recovery.keepSnapshotNow() ?? fail("no snapshot was kept");
     if (bytes < 95 * 1024 || bytes > 120 * 1024) fail(`the snapshot is ${bytes} bytes, not about 100 KB`);
 
     // ---- snapshot_take_100kb ------------------------------------------------------------------------
     const takes: number[] = [];
     for (let b = 0; b < config.warmupBatches + config.snapshotBatches; b++) {
       const t0 = now();
-      for (let i = 0; i < config.snapshotBatchSize; i++) transport.keepSnapshotNow();
+      for (let i = 0; i < config.snapshotBatchSize; i++) recovery.keepSnapshotNow();
       const t1 = now();
       if (b >= config.warmupBatches) takes.push(((t1 - t0) * 1e6) / config.snapshotBatchSize);
     }
-    if (transport.keptSnapshot?.data.byteLength !== bytes) fail("the kept snapshot changed size");
+    if (recovery.lastSnapshot?.data.byteLength !== bytes) fail("the kept snapshot changed size");
 
     // ---- recovery_restart_100kb ---------------------------------------------------------------------
     const restarts: number[] = [];
     for (let r = 0; r < config.warmupRestarts + config.restarts; r++) {
-      transport.keepSnapshotNow();
+      recovery.keepSnapshotNow();
       const restarted = new Promise<void>((resolve) => waiting.push(resolve));
       const t0 = now();
       await explode("recovery bench", core).then(

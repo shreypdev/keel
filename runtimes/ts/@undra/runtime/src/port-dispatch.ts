@@ -1,4 +1,3 @@
-import { standardMethodName } from "./adapters/ids.js";
 import { UndraPortError } from "./errors.js";
 import type { PortImpl } from "./port.js";
 import type { PortOutcome } from "./transport/transport.js";
@@ -64,22 +63,19 @@ export function portFailureReply(call: PortCallPayload, error: unknown, hooks: P
 }
 
 /**
- * How the runtime names the implementation of a port in what it logs: `Kv.get adapter (port 0x..., method 0x...,
- * ...)` for a standard port, `Locale port (port 0x... method 0x...)` for a custom one with a name, else the ids.
+ * How the runtime names the implementation of a port in what it logs: `Kv adapter (port 0x... method 0x...)` for a
+ * port whose implementation has a name (the standard ports, generated adapters), else the ids.
  */
 export function portOperation(call: Pick<PortCallPayload, "portId" | "methodId">, impl?: Pick<PortImpl, "name">): string {
   const ids = `port 0x${call.portId.toString(16)} method 0x${call.methodId.toString(16)}`;
-  const standard = standardMethodName(call.portId, call.methodId);
-  if (standard !== undefined) return `${standard} adapter (${ids}, answered as unavailable: an adapter must fail with its port's typed error)`;
-  return impl?.name === undefined ? ids : `${impl.name} port (${ids})`;
+  return impl?.name === undefined ? ids : `${impl.name} adapter (${ids})`;
 }
 
 /**
  * The text of the error that refuses a synchronous port on a thread the core cannot wait for (`wasm-worker`, ADR-049):
- * names the port (`impl.name`, the standard port's name, else its id) and the fix.
+ * names the port (`impl.name`, else its id) and the fix.
  */
 export function syncPortRefusal(portId: number, impl?: Pick<PortImpl, "name">): string {
-  const known = impl?.name ?? standardMethodName(portId, 0)?.split(" ")[0];
-  const name = known === undefined ? `port 0x${portId.toString(16)}` : `the ${known} port (0x${portId.toString(16)})`;
-  return `${name} is synchronous (#[undra::port(sync)]), and in wasm-worker mode the core cannot wait for the main thread to answer it: register it in the worker instead, in the module of LoadOptions.worker.ports (its default export maps port ids to implementations), or load the core with mode "wasm-main"`;
+  const name = impl?.name === undefined ? `port 0x${portId.toString(16)}` : `the ${impl.name} port (0x${portId.toString(16)})`;
+  return `${name} is synchronous: in wasm-worker mode the core cannot wait for the main thread; register it in LoadOptions.worker.ports, or use mode "wasm-main"`;
 }

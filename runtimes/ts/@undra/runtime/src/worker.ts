@@ -5,7 +5,8 @@ import { UndraError, UndraReplyError, UndraRestoreError, UndraSchemaMismatchErro
 import { errorMessage } from "./platform.js";
 import type { PortImpl } from "./port.js";
 import { dispatchPortCall, portOperation } from "./port-dispatch.js";
-import { trapStack } from "./recovery.js";
+import { trapStack } from "./panic.js";
+import { type SnapshotKeeper, keeperOf, restartHere } from "./recovery.js";
 import type { Transport, TransportHandler } from "./transport/transport.js";
 import { WasmMainTransport, type WasmSource } from "./transport/wasm-main.js";
 import {
@@ -155,8 +156,9 @@ function wasmSource(wasm: WorkerWasm): WasmSource {
  */
 export function runWorker(scope: WorkerScope): () => void {
   let transport: Transport | null = null;
-  /** The transport as a restartable one (the same object): set when `init` asked for `recovery`. */
+  /** The transport as a restartable one (the same object), and its snapshots: set when `init` asked for `recovery`. */
   let restartable: WasmMainTransport | null = null;
+  let keeper: SnapshotKeeper | null = null;
   let schema = 0n;
   let seq = 0;
   let batching = false;
@@ -205,6 +207,7 @@ export function runWorker(scope: WorkerScope): () => void {
     },
     changeSet: (payload) => {
       postEnvelope(Kind.ChangeSet, payload);
+      keeper?.changed();
     },
     streamItem: (payload) => {
       postEnvelope(Kind.StreamItem, payload);
@@ -283,12 +286,17 @@ export function runWorker(scope: WorkerScope): () => void {
         ...(adapters.clock !== undefined && { clock: adapters.clock }),
         ...(adapters.rng !== undefined && { rng: adapters.rng }),
         ...(adapters.timer !== undefined && { timer: adapters.timer }),
-        ...(init.recovery !== undefined && { recovery: init.recovery }),
         onError: (error) => {
           handler.log(4, "undra::worker", `internal error: ${errorMessage(error)}`);
         },
       });
-      if (init.recovery !== undefined) restartable = wasm;
+      if (init.recovery !== undefined) {
+        // The worker keeps the snapshots (ADR-049 decision 3.3): after the core changed a store, at most one per period.
+        restartable = wasm;
+        keeper = keeperOf(init.recovery, wasm, (level, target, message) => {
+          handler.log(level, target, message);
+        });
+      }
       const hello = await wasm.start(handler);
       transport = wasm;
       post({ t: "ready", hello, features: WORKER_FEATURES });
@@ -351,18 +359,22 @@ export function runWorker(scope: WorkerScope): () => void {
         transport?.close();
         transport = null;
         restartable = null;
+        keeper?.stop();
+        keeper = null;
         break;
     }
   };
 
   /** Answers a `restart` request (ADR-049): the same module again, the kept snapshot restored, after the envelopes it produced. */
   const restart = async (id: number, generationFloor: number): Promise<void> => {
-    if (restartable === null) {
+    if (restartable === null || keeper === null) {
       post({ t: "restarted", id, failure: toFailure(new UndraTransportError("unsupported", "the worker was not started with recovery")) });
       return;
     }
     try {
-      const result = await restartable.restart(generationFloor);
+      const result = await restartHere(restartable, keeper, generationFloor, (level, target, message) => {
+        handler.log(level, target, message);
+      });
       post({ t: "restarted", id, hello: result.hello, restoredFromAgeMs: result.restoredFromAgeMs, storeHandles: result.storeHandles === null ? null : [...result.storeHandles] });
     } catch (error) {
       post({ t: "restarted", id, failure: toFailure(error) });

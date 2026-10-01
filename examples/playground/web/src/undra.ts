@@ -1,6 +1,7 @@
 import {
   UndraCore,
   UndraCoreRestarted,
+  crashRecovery,
   type UndraPanicReport,
   UndraSessionLostError,
   type UndraUnhandledError,
@@ -103,7 +104,7 @@ export async function startUndra(): Promise<Playground> {
       onError,
       onPanic,
       // A panic traps a wasm core: restart it from its last snapshot instead of leaving the page dead (ADR-049).
-      recovery: RECOVERY,
+      recovery: crashRecovery(RECOVERY),
       onCoreRestarted: (event) => {
         restarts.record(event);
         // The stores came back from the snapshot, but what the core held outside them did not: tell the new instance

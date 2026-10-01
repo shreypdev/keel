@@ -99,18 +99,13 @@ export function webCryptoSecureStore(options: WebCryptoSecureStoreOptions = {}):
   const aad = (key: string): Uint8Array => ENCODER.encode(`undra.secure:${key}`);
   const asBuffer = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
 
-  /** Checks the platform before anything touches storage: a missing `crypto.subtle` is the answer even where IndexedDB is missing too. */
-  const available = (): void => {
-    webcrypto();
-    if (factory === undefined && (options.kv === undefined || options.keyStore === undefined)) {
-      throw new StorageError.Unavailable(NEEDS_INDEXED_DB);
-    }
-  };
-
-  /** Runs `work` with every failure as a {@link StorageError}. */
+  /**
+   * Runs `work` with every failure as a {@link StorageError}. A missing `crypto.subtle` is the answer even where IndexedDB
+   * is missing too; without IndexedDB, the stores below answer `Unavailable("needs IndexedDB")` themselves.
+   */
   const storage = async <T>(work: () => Promise<T>): Promise<T> => {
     try {
-      available();
+      webcrypto();
       return await work();
     } catch (error) {
       throw StorageError.from(error);
@@ -123,7 +118,7 @@ export function webCryptoSecureStore(options: WebCryptoSecureStoreOptions = {}):
         const stored = await kv.get(key);
         if (stored === null) return null;
         if (stored.length < 1 + IV_BYTES + 16 || stored[0] !== FORMAT) {
-          throw new StorageError.Corrupt(`the value stored under ${JSON.stringify(key)} is not in the secure-store format`);
+          throw new StorageError.Corrupt(`${JSON.stringify(key)} is not in the secure-store format`);
         }
         const iv = stored.subarray(1, 1 + IV_BYTES);
         const sealed = stored.subarray(1 + IV_BYTES);
@@ -133,9 +128,7 @@ export function webCryptoSecureStore(options: WebCryptoSecureStoreOptions = {}):
           plain = await webcrypto().subtle.decrypt({ name: "AES-GCM", iv: asBuffer(iv), additionalData: asBuffer(aad(key)) }, master, asBuffer(sealed));
         } catch (error) {
           // AES-GCM fails authentication with an `OperationError`: tampered bytes, a value moved from another key, a lost master key.
-          if ((error as { name?: unknown } | null)?.name === "OperationError") {
-            throw new StorageError.Corrupt(`the value stored under ${JSON.stringify(key)} does not decrypt (tampered, moved, or its key was lost)`);
-          }
+          if ((error as { name?: unknown } | null)?.name === "OperationError") throw new StorageError.Corrupt(`${JSON.stringify(key)} does not decrypt`);
           throw error;
         }
         return new Uint8Array(plain);

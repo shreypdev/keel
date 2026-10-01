@@ -166,15 +166,16 @@ describe("every Kv and SecureStore method fails with each StorageError through t
       }
     });
 
-    it(`${port.name}: a raw QuotaExceededError or SecurityError is typed as Full or Unavailable`, async () => {
-      let next: unknown = new DOMException("quota", "QuotaExceededError");
-      const { fake } = await setup({ [port.adapter]: failing(() => next) });
+    it(`${port.name}: an adapter maps a platform's error with StorageError.from (a raw one is not its port's typed error)`, async () => {
+      const errors: UndraUnhandledError[] = [];
+      let next: unknown = StorageError.from(new DOMException("quota", "QuotaExceededError"));
+      const { fake } = await setup({ [port.adapter]: failing(() => next) }, (e) => errors.push(e));
       const full = await fake.callPort(port.ids.portId, port.ids.set, argsOf("set"));
       expect(full.status).toBe(PortStatus.Error);
       expect(decodeValue(StorageErrorCodec, full.body)).toBeInstanceOf(StorageError.Full);
-      next = new DOMException("blocked by the user", "SecurityError");
-      const unavailable = await fake.callPort(port.ids.portId, port.ids.get, argsOf("get"));
-      expect(decodeValue(StorageErrorCodec, unavailable.body)).toEqual(new StorageError.Unavailable("blocked by the user"));
+      next = new DOMException("quota", "QuotaExceededError");
+      expect((await fake.callPort(port.ids.portId, port.ids.set, argsOf("set"))).status, "unmapped: a bug in the adapter").toBe(PortStatus.Unavailable);
+      expect(errors).toHaveLength(1);
     });
 
     it(`${port.name}: an untyped throw is answered unavailable (status 2), logged at error level naming the adapter, and reported`, async () => {
@@ -184,12 +185,12 @@ describe("every Kv and SecureStore method fails with each StorageError through t
         const reply = await fake.callPort(port.ids.portId, port.ids[method], argsOf(method));
         expect(encodePortReply(reply)).toEqual(encodePortReply({ portCallId: reply.portCallId, status: PortStatus.Unavailable, body: new Uint8Array(0) }));
       }
-      expect(errors.map((e) => e.operation.split(" (")[0])).toEqual(METHODS.map((m) => `${port.name}.${m} adapter`));
+      expect(errors.map((e) => e.operation.split(" (")[0])).toEqual(METHODS.map(() => `${port.name} adapter`));
       const records = log.records.filter((r) => r.level === 4);
       expect(records).toHaveLength(4);
-      expect(records[0]?.message).toContain(`${port.name}.get adapter`);
+      expect(records[0]?.message).toContain(`${port.name} adapter (port 0x`);
+      expect(records[0]?.message).toContain(`method 0x${port.ids.get.toString(16)}`);
       expect(records[0]?.message).toContain("adapter bug");
-      expect(records[0]?.message).toContain("typed error");
     });
   }
 
@@ -391,9 +392,9 @@ describe("FsError gains Full and Unavailable (ADR-049)", () => {
     await expect(opfsFs().read("a")).rejects.toEqual(new FsError.Unavailable(NEEDS_OPFS));
   });
 
-  it("the Fs port answers a raw ENOSPC or QuotaExceededError as Full (status 1) and an untyped throw as unavailable", async () => {
+  it("the Fs port answers an FsError (fsErrorFrom maps ENOSPC and quota to Full) as status 1, and an untyped throw as unavailable", async () => {
     const errors: UndraUnhandledError[] = [];
-    let next: unknown = Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+    let next: unknown = fsErrorFrom(Object.assign(new Error("no space left on device"), { code: "ENOSPC" }));
     const { fake } = await setup(
       {
         fs: {
@@ -410,10 +411,10 @@ describe("FsError gains Full and Unavailable (ADR-049)", () => {
     write.writeBytes(new Uint8Array([1]));
     const enospc = await fake.callPort(PortIds.Fs.portId, PortIds.Fs.write, write.finish());
     expect(decodePortReply(encodePortReply(enospc))).toEqual({ portCallId: enospc.portCallId, status: PortStatus.Error, body: expectedBytes(3) });
-    next = new DOMException("q", "QuotaExceededError");
+    next = fsErrorFrom(new DOMException("q", "QuotaExceededError"));
     expect((await fake.callPort(PortIds.Fs.portId, PortIds.Fs.read, encodeValue(codecs.string, "f"))).body).toEqual(expectedBytes(3));
     next = new Error("bug");
     expect((await fake.callPort(PortIds.Fs.portId, PortIds.Fs.read, encodeValue(codecs.string, "f"))).status).toBe(PortStatus.Unavailable);
-    expect(errors.map((e) => e.operation.split(" (")[0])).toEqual(["Fs.read adapter"]);
+    expect(errors.map((e) => e.operation.split(" (")[0])).toEqual(["Fs adapter"]);
   });
 });

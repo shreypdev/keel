@@ -1,4 +1,4 @@
-import { type Codec, WireError, codecs } from "../wire/index.js";
+import { type Codec, type UndraWriter, WireError, codecs } from "../wire/index.js";
 import {
   APP_STATES,
   type AppState,
@@ -130,24 +130,21 @@ export const HttpErrorCodec: Codec<HttpError> = {
   },
 };
 
+/** The `FsError` variants in wire order (`FsErrorCodec`). */
+const FS_ERROR_KINDS: readonly FsError["kind"][] = ["notFound", "denied", "io", "full", "unavailable"];
+
+/** Writes a typed error as its variant's index in `kinds`, then its `value` when it has one. */
+function writeVariant(w: UndraWriter, kinds: readonly string[], v: { readonly kind: string }, name: string): void {
+  const index = kinds.indexOf(v.kind);
+  if (index < 0) throw new TypeError(`unknown ${name} variant: ${v.kind}`);
+  w.writeU16(index);
+  if ("value" in v) w.writeStr((v as { value: string }).value);
+}
+
 /** `FsError { NotFound, Denied, Io(String), Full, Unavailable(String) }`. */
 export const FsErrorCodec: Codec<FsError> = {
   encode(w, v) {
-    if (v instanceof FsError.NotFound) {
-      w.writeU16(0);
-    } else if (v instanceof FsError.Denied) {
-      w.writeU16(1);
-    } else if (v instanceof FsError.Io) {
-      w.writeU16(2);
-      w.writeStr(v.value);
-    } else if (v instanceof FsError.Full) {
-      w.writeU16(3);
-    } else if (v instanceof FsError.Unavailable) {
-      w.writeU16(4);
-      w.writeStr(v.value);
-    } else {
-      throw new TypeError(`unknown FsError variant: ${v.kind}`);
-    }
+    writeVariant(w, FS_ERROR_KINDS, v, "FsError");
   },
   decode(r) {
     const at = r.position;
@@ -172,22 +169,7 @@ export const FsErrorCodec: Codec<FsError> = {
 /** `StorageError { Unavailable(String), Full, Locked, Corrupt(String), Io(String) }` (ADR-049). */
 export const StorageErrorCodec: Codec<StorageError> = {
   encode(w, v) {
-    if (v instanceof StorageError.Unavailable) {
-      w.writeU16(0);
-      w.writeStr(v.value);
-    } else if (v instanceof StorageError.Full) {
-      w.writeU16(1);
-    } else if (v instanceof StorageError.Locked) {
-      w.writeU16(2);
-    } else if (v instanceof StorageError.Corrupt) {
-      w.writeU16(3);
-      w.writeStr(v.value);
-    } else if (v instanceof StorageError.Io) {
-      w.writeU16(4);
-      w.writeStr(v.value);
-    } else {
-      throw new TypeError(`unknown StorageError variant: ${v.kind}`);
-    }
+    writeVariant(w, ["unavailable", "full", "locked", "corrupt", "io"], v, "StorageError");
   },
   decode(r) {
     const at = r.position;

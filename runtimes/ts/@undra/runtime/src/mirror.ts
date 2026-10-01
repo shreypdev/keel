@@ -333,20 +333,6 @@ export class Mirror {
     for (const w of waiters) this.#settle(w, undefined);
   }
 
-  /**
-   * Moves the registration of `from` to `to` (the apply function and its options), dropping what is still pending for
-   * `from`: a query handle that the runtime re-created after a restart keeps its wrapper (ADR-049). Waiters of `from`
-   * are settled as by {@link Mirror.unregister}. Does nothing when `from` is not registered; throws `UndraError`
-   * (`"state"`) when `to` already is.
-   */
-  move(from: Handle, to: Handle): void {
-    const registration = this.#registry.get(from);
-    if (registration === undefined) return;
-    if (this.#registry.has(to)) throw new UndraError("state", `handle ${String(to)} is already registered with the mirror`);
-    this.unregister(from);
-    this.#registry.set(to, registration);
-  }
-
   /** Whether `handle` is registered. */
   has(handle: Handle): boolean {
     return this.#registry.has(handle);
