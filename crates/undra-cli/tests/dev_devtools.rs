@@ -54,11 +54,21 @@ struct App {
 
 impl App {
     fn connect(dev: &Dev) -> App {
+        App::connect_session(dev, false)
+    }
+
+    /// Connects as the same client again after a reload, asking for its session back.
+    fn resume(dev: &Dev) -> App {
+        App::connect_session(dev, true)
+    }
+
+    fn connect_session(dev: &Dev, resume: bool) -> App {
         let tcp = TcpStream::connect(dev.addr()).unwrap();
         tcp.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         let url = format!(
-            "{}/?undra_session=devtools-test",
-            dev.url.trim_end_matches('/')
+            "{}/?undra_session=devtools-test{}",
+            dev.url.trim_end_matches('/'),
+            if resume { "&undra_resume=1" } else { "" }
         );
         let (ws, _) = tungstenite::client(url.as_str(), tcp).expect("the WebSocket upgrade");
         let mut app = App {
@@ -415,4 +425,64 @@ fn with_devtools_off_the_endpoint_does_not_exist() {
     app.add(counter, 2);
     app.observe_all(counter);
     assert_eq!(app.count(counter), 2);
+}
+
+#[test]
+fn a_rebuild_with_a_page_open_replaces_the_runner_and_the_page_finds_the_new_core() {
+    let project = playground_copy("devtools-reload");
+    let dev = Dev::start(&project, &[]);
+    let url = page_url(&dev);
+    let mut app = App::connect(&dev);
+    let counter = app.counter();
+    app.add(counter, 5);
+    app.observe_all(counter);
+    let mut page = Page::connect(&url);
+    let before = page.until("the welcome", |m| match m {
+        ServerMsg::Welcome(w) => Some(w.core_epoch),
+        _ => None,
+    });
+    page.until("the first step", |m| {
+        matches!(m, ServerMsg::Step(_)).then_some(())
+    });
+
+    // An edit: the dev server suspends the old core (closing the page like any client), carries the
+    // state over and starts the new one on the same address.
+    let counter_rs = project.root.join("core/src/counter.rs");
+    let mut source = std::fs::read_to_string(&counter_rs).unwrap();
+    source.push_str("\n// touched\n");
+    std::fs::write(&counter_rs, source).unwrap();
+    dev.wait_line("Restarted: ws://", Duration::from_secs(600));
+    // The page's socket was closed for the reload; it connects again, with the same token, to the
+    // new core: a new epoch, the carried state, and a history that starts again.
+    let mut page = Page::connect(&url);
+    let after = page.until("the new welcome", |m| match m {
+        ServerMsg::Welcome(w) => Some(w.core_epoch),
+        _ => None,
+    });
+    assert_ne!(before, after, "a new core process says so");
+    page.until("the carried counter among the stores", |m| match m {
+        ServerMsg::Stores(s) => s.iter().find(|s| s.handle == counter).map(|_| ()),
+        _ => None,
+    });
+    let step = page.until("a first step", |m| match m {
+        ServerMsg::Step(s) => Some(s.step),
+        _ => None,
+    });
+    assert_eq!(step, 1);
+    // And the app, which reconnects with its session, finds its counter and still drives it: the
+    // page sees the change.
+    let mut app = App::resume(&dev);
+    app.observe_all(counter);
+    assert_eq!(app.count(counter), 5);
+    app.add(counter, 1);
+    page.until("the commit", |m| {
+        matches!(
+            m,
+            ServerMsg::ChangeSet {
+                delivery: Delivery::Commit,
+                ..
+            }
+        )
+        .then_some(())
+    });
 }
