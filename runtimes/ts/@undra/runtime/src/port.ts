@@ -26,3 +26,10 @@ export interface PortImpl {
   /** Implementations by method id. */
   readonly methods: Readonly<Record<number, (args: Uint8Array) => Uint8Array | Promise<Uint8Array>>>;
 }
+
+/**
+ * The base of every generated port interface (SPEC 17.1): `export interface Locale extends UndraPort { hello(): string }`.
+ * It has no members; it marks a type as the host side of a core port, which the generated `<name>PortImpl` adapter
+ * turns into a {@link PortImpl}.
+ */
+export interface UndraPort {}
