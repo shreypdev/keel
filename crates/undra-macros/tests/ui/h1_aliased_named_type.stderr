@@ -1,15 +1,15 @@
-error[E0080]: evaluation panicked: error[undra::E0061]: the schema records this type as `Todo`, but the type written here is not that type
-                = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type Todo = Other`), a renamed import (`use path::Other as Todo`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout
-                = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)
+error[E0080]: evaluation panicked: error[undra::E0061]: `Todo` here is an alias or a renamed import of an Undra type that is declared under another name
+                = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Todo = Other` or `use path::Other as Todo` the platforms would be told `Todo` and receive the layout of `Other`
+                = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Todo` if you mean a distinct type
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
   --> tests/ui/h1_aliased_named_type.rs:19:27
    |
 19 |     pub fn legacy_echo(t: Todo) -> Todo {
    |                           ^^^^ evaluation of `legacy::_::_` failed here
 
-error[E0080]: evaluation panicked: error[undra::E0061]: the schema records this type as `Entry`, but the type written here is not that type
-                = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type the name resolves to; an alias (`type Entry = Other`), a renamed import (`use path::Other as Entry`) or a type that is not declared with `#[undra::api]` makes the two differ, so the platforms would read the wrong layout
-                = help: write the type under its declared name (for an alias or a renamed import, use `Other` here), or declare it with `#[undra::api]` (`#[undra::error]` for errors)
+error[E0080]: evaluation panicked: error[undra::E0061]: `Entry` here is an alias or a renamed import of an Undra type that is declared under another name
+                = note: Undra describes a type to the platforms by the name it is written with, while the generated code encodes the type that name resolves to; with `type Entry = Other` or `use path::Other as Entry` the platforms would be told `Entry` and receive the layout of `Other`
+                = help: write the type under the name it is declared with (`Other` in the examples above), or declare a separate `#[undra::api] struct Entry` if you mean a distinct type
                 = docs: https://shreypdev.github.io/undra/docs/errors.html#E0061
   --> tests/ui/h1_aliased_named_type.rs:28:16
    |

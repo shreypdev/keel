@@ -7,7 +7,7 @@
 /**
  * Base class of every Undra error. `kind` is a short, stable, camelCase
  * discriminant; the runtime's own errors use `"reply"`, `"mode"`,
- * `"schemaMismatch"`, `"port"`, `"transport"`, `"restore"`, `"observe"` and `"state"`.
+ * `"schemaMismatch"`, `"sessionLost"`, `"port"`, `"transport"`, `"restore"`, `"observe"` and `"state"`.
  */
 export class UndraError extends Error {
   override readonly name: string = "UndraError";

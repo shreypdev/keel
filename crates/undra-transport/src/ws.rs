@@ -39,6 +39,10 @@ pub mod close {
     pub const MESSAGE_TOO_BIG: u16 = 1009;
     /// Another client already holds the connection (Undra serves one at a time).
     pub const TRY_AGAIN_LATER: u16 = 1013;
+    /// The client asked to resume a session this core does not hold (the core was restarted, or
+    /// the session's grace passed): its handles are gone and it has to load a new core (ADR-051).
+    /// Application range (RFC 6455 section 7.4.2).
+    pub const SESSION_LOST: u16 = 4001;
 }
 
 /// Where the read side's own writes go.

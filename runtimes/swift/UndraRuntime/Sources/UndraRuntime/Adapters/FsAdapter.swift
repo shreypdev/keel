@@ -143,12 +143,12 @@ public struct FsAdapter: UndraAdapter {
 
     // MARK: Errors
 
-    private static func fail(_ error: PortFsError) -> UndraPortError {
+    private static func fail(_ error: FsError) -> UndraPortError {
         return UndraPortError(body: error.undraEncoded())
     }
 
     /// Maps a Foundation error to `FsError`.
-    static func map(_ error: any Error) -> PortFsError {
+    static func map(_ error: any Error) -> FsError {
         if let cocoa = error as? CocoaError {
             switch cocoa.code {
             case .fileNoSuchFile, .fileReadNoSuchFile:

@@ -1,0 +1,4 @@
+error[undra::C0004]: `cargo metadata` failed while reading the core crate (exit status: 101)
+  = note: the tool's own output above says what it objected to; Undra cannot continue without its result
+  = help: fix the problem the tool reported and run the command again; `undra doctor` checks the toolchain
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0004

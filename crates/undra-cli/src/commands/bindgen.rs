@@ -1,7 +1,6 @@
 //! `undra bindgen`.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use undra_bindgen::Generator;
 use undra_meta::Schema;
@@ -13,7 +12,6 @@ use crate::config::Platform;
 use crate::error::{CliError, Code, Result};
 use crate::names::Names;
 use crate::project::Project;
-use crate::runner;
 use crate::runtimes::Runtimes;
 use crate::schema::{self, parse_schema_json};
 use crate::session::Session;
@@ -38,8 +36,7 @@ pub fn run(env: &Env<'_>, args: &BindgenArgs) -> Result<()> {
     let crate_name = crate_name(session.as_ref(), args);
     let schema = match (&args.schema, &session) {
         (Some(file), _) => read_schema_file(file, &crate_name)?,
-        (None, Some(session)) if args.docs => schema_with_docs(session)?,
-        (None, Some(session)) => schema_from_core(session, args.release)?,
+        (None, Some(session)) => schema_from_core(session, args.release, args.docs)?,
         (None, None) => return Err(CliError::no_project(&env.start_dir()?)),
     };
     if schema_is_empty(&schema) {
@@ -145,37 +142,18 @@ fn read_schema_file(file: &Path, crate_name: &str) -> Result<Schema> {
 }
 
 /// Builds the core as a host library and asks it for its schema.
-fn schema_from_core(session: &Session<'_>, release: bool) -> Result<Schema> {
+///
+/// The library's schema carries the doc comments (the same JSON the dev runner prints, ADR-050),
+/// so `--docs` only decides whether the bindings keep them: without it they are dropped, which is
+/// what generated bindings have always been by default.
+fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<Schema> {
     session
         .ui
         .step("Building the core for this machine to read its schema");
     let library = host::cdylib(session, release)?;
     let core = session.core()?;
     session.ui.step("Reading the schema from the built library");
-    schema::load_from_library(&library, &core.package)
-}
-
-/// Runs the dev runner's `--print-schema`: the full schema, doc comments included.
-fn schema_with_docs(session: &Session<'_>) -> Result<Schema> {
-    session
-        .ui
-        .step("Building the core to read its full schema (with doc comments)");
-    let exe = runner::build(session)?;
-    let output = Command::new(&exe)
-        .arg("--print-schema")
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .output()
-        .map_err(|e| CliError::io("run", &exe, &e))?;
-    if !output.status.success() {
-        return Err(CliError::tool_failed(
-            "undra-dev-runner --print-schema",
-            "reading the schema",
-            &output.status.to_string(),
-        ));
-    }
-    let core = session.core()?;
-    parse_schema_json(&String::from_utf8_lossy(&output.stdout), &core.package)
+    schema::load_from_library(&library, &core.package, docs)
 }
 
 /// The generator configuration and output locations.

@@ -118,6 +118,21 @@ export class UndraSchemaMismatchError extends UndraError {
 }
 
 /**
+ * The dev server no longer holds the objects of this core (ADR-051): it was restarted (`undra dev`
+ * rebuilt the core) or the session's grace period passed while the client was away. The handles of
+ * every store and object of this core are dead; load a new core and create them again. A core
+ * reports this as `closed` with reason `"sessionLost"`; the page of a web app reloads.
+ */
+export class UndraSessionLostError extends UndraError {
+  override readonly name: string = "UndraSessionLostError";
+
+  /** @param message The server's reason, when it gave one. */
+  constructor(message = "the dev server no longer has this core's objects (it was restarted, or the session expired); load a new core") {
+    super("sessionLost", message);
+  }
+}
+
+/**
  * Thrown by a generated port adapter when the implementation fails with the
  * port's typed error. `body` is the encoded error; the runtime answers the
  * port call with status 1 and this body.

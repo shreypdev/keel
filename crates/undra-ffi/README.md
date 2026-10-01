@@ -97,7 +97,8 @@ cargo build -p undra-ffi --target wasm32-unknown-unknown --profile release-wasm 
 
 The library's schema is whatever `#[undra::api]` items are linked into the same binary: a core
 crate depends on `undra-ffi` and builds as a `cdylib` / `staticlib` (its `undra_*` exports come
-along), and `undra-cli` extracts the schema with `undra_schema_json`. `tests/fixture` is exactly
+along), and `undra-cli` extracts the schema with `undra_schema_json` (the whole schema, doc
+comments included; its hash covers the canonical form without them). `tests/fixture` is exactly
 such a core.
 
 ## Tests

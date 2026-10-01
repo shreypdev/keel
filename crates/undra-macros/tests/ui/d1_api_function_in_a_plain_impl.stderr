@@ -1,0 +1,8 @@
+error: error[undra::E0007]: `#[undra::api]` on `new`, which is an associated function: its signature uses `Self`
+         = note: `Self` only exists inside an `impl` block, and `#[undra::api]` on a function exposes a free function; the functions of an object are exposed by putting the attribute on the `impl` block they are in
+         = help: remove `#[undra::api]` from `new` and write `#[undra::api]` above the `impl` block (it exposes every `pub fn` in it)
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0007
+  --> tests/ui/d1_api_function_in_a_plain_impl.rs:12:12
+   |
+12 |     pub fn new() -> Self {
+   |            ^^^

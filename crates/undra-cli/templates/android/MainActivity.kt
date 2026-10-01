@@ -30,20 +30,37 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import @@KOTLIN_PACKAGE@@.Filter
 import @@KOTLIN_PACKAGE@@.TodoError
 import @@KOTLIN_PACKAGE@@.Todos
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    // The store's state lives in the Rust core; closing the store releases its handle.
+    // The store's state lives in the Rust core; closing the store releases its handle. Created only once there is a core.
     private val todos by lazy { Todos() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val app = application as UndraApp
+        app.start(DevServer.requested(intent))
+        // A new core replaced one the dev server lost: this activity's store belongs to the old one, so start over.
+        lifecycleScope.launch {
+            app.epoch.drop(1).collect {
+                finish()
+                startActivity(intent)
+            }
+        }
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) { TodoScreen(todos) }
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    Column {
+                        DevStatusBar(app)
+                        val failure by app.failure.collectAsState()
+                        failure?.let { DevServerProblem(it, onRetry = app::retry) } ?: TodoScreen(todos)
+                    }
+                }
             }
         }
     }

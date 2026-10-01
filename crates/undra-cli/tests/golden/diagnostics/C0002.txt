@@ -1,0 +1,4 @@
+error[undra::C0002]: <dir>/undra.toml: line 2: `name` in [project] is an integer but must be a string
+  = note: the file drives the build, so a value the CLI cannot understand would make it guess
+  = help: write it as a string, for example `name = "text"`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#C0002

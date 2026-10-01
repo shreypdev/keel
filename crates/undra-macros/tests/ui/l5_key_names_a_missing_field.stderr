@@ -1,7 +1,14 @@
-error[E0609]: no field `identifier` on type `&Row`
+error[E0080]: evaluation panicked: error[undra::E0008]: `#[undra(key = "identifier")]` on `rows` names no field of `Row`
+                = note: `key` names the field of the list's items that identifies them, and `Row` has the fields `id`
+                = help: write the name of one of those fields as the key
+                = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
   --> tests/ui/l5_key_names_a_missing_field.rs:17:19
    |
 17 |     #[undra(key = "identifier")]
-   |                   ^^^^^^^^^^^^ unknown field
+   |                   ^^^^^^^^^^^^ evaluation of `Rows::__undra_build_cell::__undra_key_rows::__UNDRA_KEY_IS_A_FIELD` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/l5_key_names_a_missing_field.rs:17:19
    |
-   = note: available field is: `id`
+17 |     #[undra(key = "identifier")]
+   |                   ^^^^^^^^^^^^

@@ -1,0 +1,4 @@
+error[undra::E0052]: record `HttpRequest` has the name of an Undra standard library item but the id 0x00000007 instead of 0xbbbc6e52
+  = note: every platform runtime implements the standard ports and types under those names and ids, and generated code refers to them instead of declaring them, so a different item cannot share the name
+  = help: rename it, for example `MyHttpRequest`, or use the standard one from `undra-ports`
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0052

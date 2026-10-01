@@ -2,6 +2,11 @@
 //! (`runtimes/swift/UndraRuntime`) in the Swift 6 language mode, which is strict concurrency,
 //! and runs the execution checks of `tests/fixtures/swift-run` against it.
 //!
+//! This is also what proves the standard library contract of ADR-024 (amended): the stdlib case
+//! refers to `HttpRequest`, `HttpError`, `NetKind`, ... and declares none of them, so it only
+//! builds if the runtime exports every one of them as public API with the conformances generated
+//! code uses (`UndraRecord`, `UndraError`, `Codable`, public initializers).
+//!
 //! Every case becomes one target of a single scratch SwiftPM package below the target
 //! directory, so that one `swift build` type-checks all of them and nothing is written
 //! into the repository. A compiler error fails the test; warnings do not (the generator

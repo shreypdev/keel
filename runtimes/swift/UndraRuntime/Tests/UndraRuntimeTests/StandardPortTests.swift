@@ -37,55 +37,55 @@ final class StandardPortTests: XCTestCase {
     // MARK: Http
 
     func testHttpRequestEncodesFieldByFieldInDeclarationOrder() {
-        let minimal = PortHttpRequest(method: .get, url: "u", headers: [PortHeader(name: "a", value: "b")], body: nil, timeoutMs: nil)
+        let minimal = HttpRequest(method: .get, url: "u", headers: [Header(name: "a", value: "b")], body: nil, timeoutMs: nil)
         assertCodec(minimal, hex: "0000 01000000 75 01000000 01000000 61 01000000 62 00 00")
-        let full = PortHttpRequest(method: .patch, url: "u", headers: [], body: [1, 2], timeoutMs: 5000)
+        let full = HttpRequest(method: .patch, url: "u", headers: [], body: [1, 2], timeoutMs: 5000)
         assertCodec(full, hex: "0400 01000000 75 00000000 01 02000000 0102 01 88130000")
     }
 
     func testHttpMethodIndicesAndNames() {
-        XCTAssertEqual(PortHttpMethod.allCases.map { $0.rawValue }, [0, 1, 2, 3, 4, 5, 6])
-        XCTAssertEqual(PortHttpMethod.allCases.map { $0.name }, ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+        XCTAssertEqual(HttpMethod.allCases.map { $0.rawValue }, [0, 1, 2, 3, 4, 5, 6])
+        XCTAssertEqual(HttpMethod.allCases.map { $0.name }, ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         expectWireError(.invalidTag(tag: 7, at: 0, type: "HttpMethod")) {
-            _ = try PortHttpMethod.undraDecoded(from: [7, 0])
+            _ = try HttpMethod.undraDecoded(from: [7, 0])
         }
     }
 
     func testHttpResponseEncoding() {
-        let response = PortHttpResponse(status: 200, headers: [], body: [1, 2, 3])
+        let response = HttpResponse(status: 200, headers: [], body: [1, 2, 3])
         assertCodec(response, hex: "c800 00000000 03000000 010203")
-        let withHeader = PortHttpResponse(status: 404, headers: [PortHeader(name: "k", value: "")], body: [])
+        let withHeader = HttpResponse(status: 404, headers: [Header(name: "k", value: "")], body: [])
         assertCodec(withHeader, hex: "9401 01000000 01000000 6b 00000000 00000000")
     }
 
     func testHttpErrorEncoding() {
-        assertCodec(PortHttpError.network("x"), hex: "0000 01000000 78")
-        assertCodec(PortHttpError.timeout, hex: "0100")
-        assertCodec(PortHttpError.cancelled, hex: "0200")
-        assertCodec(PortHttpError.invalidUrl("u"), hex: "0300 01000000 75")
+        assertCodec(HttpError.network("x"), hex: "0000 01000000 78")
+        assertCodec(HttpError.timeout, hex: "0100")
+        assertCodec(HttpError.cancelled, hex: "0200")
+        assertCodec(HttpError.invalidUrl("u"), hex: "0300 01000000 75")
         expectWireError(.invalidTag(tag: 4, at: 0, type: "HttpError")) {
-            _ = try PortHttpError.undraDecoded(from: [4, 0])
+            _ = try HttpError.undraDecoded(from: [4, 0])
         }
     }
 
     func testHttpRecordsRoundTripUnicodeAndLargeBodies() throws {
         let big = [UInt8](repeating: 0xAB, count: 100_000)
-        let request = PortHttpRequest(
+        let request = HttpRequest(
             method: .post,
             url: "https://example.com/caf\u{E9}/\u{1F30A}",
-            headers: [PortHeader(name: "X-\u{E9}", value: "\u{1F30A}"), PortHeader(name: "", value: "")],
+            headers: [Header(name: "X-\u{E9}", value: "\u{1F30A}"), Header(name: "", value: "")],
             body: big,
             timeoutMs: UInt32.max
         )
-        XCTAssertEqual(try PortHttpRequest.undraDecoded(from: request.undraEncoded()), request)
-        let response = PortHttpResponse(status: 65535, headers: [], body: big)
-        XCTAssertEqual(try PortHttpResponse.undraDecoded(from: response.undraEncoded()), response)
+        XCTAssertEqual(try HttpRequest.undraDecoded(from: request.undraEncoded()), request)
+        let response = HttpResponse(status: 65535, headers: [], body: big)
+        XCTAssertEqual(try HttpResponse.undraDecoded(from: response.undraEncoded()), response)
     }
 
     func testTruncatedHttpRecordsThrowWireErrors() {
-        let bytes = PortHttpRequest(method: .get, url: "u", headers: [], body: [1], timeoutMs: 1).undraEncoded()
+        let bytes = HttpRequest(method: .get, url: "u", headers: [], body: [1], timeoutMs: 1).undraEncoded()
         for cut in 0 ..< bytes.count {
-            XCTAssertThrowsError(try PortHttpRequest.undraDecoded(from: Array(bytes[0 ..< cut])), "cut \(cut)") { error in
+            XCTAssertThrowsError(try HttpRequest.undraDecoded(from: Array(bytes[0 ..< cut])), "cut \(cut)") { error in
                 XCTAssertTrue(error is WireError, "\(error)")
             }
         }
@@ -94,22 +94,22 @@ final class StandardPortTests: XCTestCase {
     // MARK: Fs, events, lifecycle
 
     func testFsErrorEncoding() {
-        assertCodec(PortFsError.notFound, hex: "0000")
-        assertCodec(PortFsError.denied, hex: "0100")
-        assertCodec(PortFsError.io("e"), hex: "0200 01000000 65")
+        assertCodec(FsError.notFound, hex: "0000")
+        assertCodec(FsError.denied, hex: "0100")
+        assertCodec(FsError.io("e"), hex: "0200 01000000 65")
         expectWireError(.invalidTag(tag: 3, at: 0, type: "FsError")) {
-            _ = try PortFsError.undraDecoded(from: [3, 0])
+            _ = try FsError.undraDecoded(from: [3, 0])
         }
     }
 
     func testNetKindAndAppStateIndices() {
-        XCTAssertEqual(PortNetKind.allCases.map { $0.rawValue }, [0, 1, 2, 3, 4])
-        assertCodec(PortNetKind.wired, hex: "0200")
-        assertCodec(PortNetKind.disconnected, hex: "0400")
+        XCTAssertEqual(NetKind.allCases.map { $0.rawValue }, [0, 1, 2, 3, 4])
+        assertCodec(NetKind.wired, hex: "0200")
+        assertCodec(NetKind.disconnected, hex: "0400")
         XCTAssertEqual(UndraAppState.allCases.map { $0.rawValue }, [0, 1, 2])
         assertCodec(UndraAppState.background, hex: "0200")
         expectWireError(.invalidTag(tag: 5, at: 0, type: "NetKind")) {
-            _ = try PortNetKind.undraDecoded(from: [5, 0])
+            _ = try NetKind.undraDecoded(from: [5, 0])
         }
         expectWireError(.invalidTag(tag: 3, at: 0, type: "AppState")) {
             _ = try UndraAppState.undraDecoded(from: [3, 0])

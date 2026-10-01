@@ -112,7 +112,7 @@ public object UndraNative {
     @JvmStatic
     public external fun schemaHash(): Long
 
-    /** The core's schema as canonical JSON, UTF-8 encoded. */
+    /** The core's schema as JSON, doc comments included, UTF-8 encoded. */
     @JvmStatic
     public external fun schemaJson(): ByteArray
 

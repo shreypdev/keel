@@ -30,6 +30,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -52,6 +54,7 @@ internal class ConnectedCore(
     initialCallId: Int = 0,
     mirrorOptions: MirrorOptions = MirrorOptions(),
     main: MainThread = UndraDispatchers.mainThread(),
+    private val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     private val onError: ((UndraUnhandledError) -> Unit)? = null,
 ) : UndraCore(), TransportEvents {
 
@@ -91,7 +94,29 @@ internal class ConnectedCore(
     }
     private val liveMirror = Mirror(main, mirrorOptions, ::resync, ::report)
 
+    // What a reconnect needs to put the core back where the app left it (ADR-051).
+
+    /** The signals the app observes, per store: observed again after a reconnect. */
+    private val observedLock = Any()
+    private val observed = HashMap<Long, MutableSet<UInt>>()
+
+    /** The objects the app's constructors made and it has not released: what the server is asked to keep for it. */
+    private val constructed = ConcurrentHashMap.newKeySet<Long>()
+
+    /** Handles released while the connection was down: released at the server once it is back. */
+    private val releasedWhileDown = ConcurrentHashMap.newKeySet<Long>()
+
+    /** Counts the times the connection was lost, so that a replay that a newer loss overtook does not announce a connection. */
+    private val lossEpoch = AtomicInteger(0)
+    private val connection = MutableStateFlow<ConnectionState>(ConnectionState.Connecting)
+
+    init {
+        notifyConnectionChange(ConnectionState.Connecting)
+    }
+
     override val mode: Mode get() = transport.mode
+
+    override val connectionState: StateFlow<ConnectionState> get() = connection
 
     override val mirror: Mirror get() = liveMirror
 
@@ -107,7 +132,25 @@ internal class ConnectedCore(
 
     /** Tears down a core whose start failed. */
     fun abandon() {
-        shutDown(null)
+        shutDown(null, ClosedReason.FAILED)
+    }
+
+    /** The handshake is done and the schema checked: the core is reachable. */
+    fun markConnected() {
+        setConnection(ConnectionState.Connected)
+    }
+
+    private fun setConnection(state: ConnectionState) {
+        connection.value = state
+        notifyConnectionChange(state)
+    }
+
+    private fun notifyConnectionChange(state: ConnectionState) {
+        try {
+            onConnectionChange?.invoke(state)
+        } catch (e: Exception) {
+            UndraLog.warn("LoadOptions.onConnectionChange failed", e)
+        }
     }
 
     // ---- calls -------------------------------------------------------------------------------------------
@@ -196,6 +239,7 @@ internal class ConnectedCore(
             throw UndraProtocolException("the core returned a malformed handle: ${e.message}", e)
         }
         if (handle == 0L) throw UndraProtocolException("the core returned the null handle for a constructor")
+        constructed.add(handle)
         return handle
     }
 
@@ -264,6 +308,7 @@ internal class ConnectedCore(
     override fun observe(handle: Long, signalId: UInt, on: Boolean) {
         ensureOpen()
         transport.observe(handle, signalId, on)
+        noteObserved(handle, signalId, on)
         if (on && transport.isSynchronous && !liveMirror.awaitApplied(OBSERVE_APPLY_TIMEOUT_MILLIS)) {
             UndraLog.warn(
                 "the initial values of ${Handle(handle)} were not applied within " +
@@ -274,8 +319,35 @@ internal class ConnectedCore(
 
     override fun release(handle: Long) {
         liveMirror.unregister(handle)
+        constructed.remove(handle)
+        synchronized(observedLock) { observed.remove(handle) }
         if (closed.get()) return
-        transport.release(handle)
+        if (connection.value is ConnectionState.Reconnecting) {
+            // The server keeps the object for us (ADR-051); it is released when the connection is back.
+            releasedWhileDown.add(handle)
+            return
+        }
+        try {
+            transport.release(handle)
+        } catch (e: UndraException) {
+            if (connection.value is ConnectionState.Reconnecting) releasedWhileDown.add(handle) else throw e
+        }
+    }
+
+    /** Remembers what the app observes, so that a reconnect can observe it again. */
+    private fun noteObserved(handle: Long, signalId: UInt, on: Boolean) {
+        synchronized(observedLock) {
+            if (on) {
+                observed.getOrPut(handle) { HashSet() }.add(signalId)
+            } else if (signalId == UInt.MAX_VALUE) {
+                observed.remove(handle)
+            } else {
+                observed[handle]?.let {
+                    it.remove(signalId)
+                    if (it.isEmpty()) observed.remove(handle)
+                }
+            }
+        }
     }
 
     override fun event(portId: UInt, methodId: UInt, payload: ByteArray) {
@@ -300,6 +372,12 @@ internal class ConnectedCore(
 
     override fun report(error: Throwable, operation: String) {
         val unhandled = UndraUnhandledError(operation, UndraCallError.asCallError(error))
+        if (isLostConnection(unhandled.error)) {
+            // The connection state says it (Reconnecting, or Closed with the cause) and `onConnectionChange` heard it once:
+            // a command tapped while `undra dev` is away is not a second failure to hand to the crash reporter.
+            UndraLog.warn("${unhandled.message} (the connection to the core was lost: see connectionState)")
+            return
+        }
         UndraLog.error(unhandled.message.orEmpty(), error)
         val handler = onError ?: return
         if (reporting.get()) return
@@ -312,6 +390,14 @@ internal class ConnectedCore(
             reporting.set(false)
         }
     }
+
+    /**
+     * Whether [error] is the connection to the core being down, which [connectionState] already reports: every call on a
+     * [Mode.REMOTE] core that is [ConnectionState.Reconnecting] or [ConnectionState.Closed] after a failure fails this way.
+     * A core the app closed itself ([UndraTransportException.Reason.CLOSED]) and a call that timed out are not.
+     */
+    private fun isLostConnection(error: UndraCallError): Boolean =
+        error is UndraCallError.Unavailable && error.transport.reason == UndraTransportException.Reason.CONNECTION_LOST
 
     /**
      * [report] for a failure found on a thread the core may be holding its lock on (a core callback: a malformed
@@ -361,10 +447,10 @@ internal class ConnectedCore(
     }
 
     override fun close() {
-        shutDown(null)
+        shutDown(null, ClosedReason.REQUESTED)
     }
 
-    private fun shutDown(cause: Throwable?) {
+    private fun shutDown(cause: Throwable?, reason: ClosedReason) {
         // The cause must be visible before `closed` is, or a caller that sees the closed flag reports no cause.
         synchronized(closeLock) {
             if (closed.get()) return
@@ -372,6 +458,7 @@ internal class ConnectedCore(
             closed.set(true)
         }
         UndraCore.forget(this)
+        setConnection(ConnectionState.Closed(reason, cause))
         failAll(closedException(cause))
         scope.cancel()
         try {
@@ -504,7 +591,58 @@ internal class ConnectedCore(
     }
 
     override fun onClosed(cause: Throwable?) {
-        shutDown(cause)
+        val reason = when (cause) {
+            null -> ClosedReason.REQUESTED
+            is UndraSchemaMismatchException -> ClosedReason.SCHEMA_MISMATCH
+            is UndraSessionLostException -> ClosedReason.SESSION_LOST
+            else -> ClosedReason.FAILED
+        }
+        shutDown(cause, reason)
+    }
+
+    override fun onReconnecting(attempt: Int, cause: Throwable?) {
+        if (closed.get()) return
+        if (attempt == 1) {
+            lossEpoch.incrementAndGet()
+            // What was in flight fails with the same typed value every later call gets while the connection is down:
+            // `UndraCallError.Unavailable` for a generated call (ADR-032 amendment A, ADR-051).
+            failAll(
+                UndraTransportException(
+                    UndraTransportException.Reason.CONNECTION_LOST,
+                    "the connection to the Undra dev server was lost (${cause?.message}); reconnecting",
+                    cause,
+                ),
+            )
+        }
+        setConnection(ConnectionState.Reconnecting(attempt, cause))
+    }
+
+    override fun onReconnected() {
+        val epoch = lossEpoch.get()
+        // On a thread of ours: the transport's callback must not call back into it.
+        UndraDispatchers.delivery.execute { observeAgain(epoch) }
+    }
+
+    override fun holdsObjects(): Boolean = constructed.isNotEmpty()
+
+    /**
+     * The connection is back: release what was released meanwhile and observe what the app observes again. The core
+     * answers each observation with the current values, so every mirror converges by itself.
+     */
+    private fun observeAgain(epoch: Int) {
+        if (closed.get() || lossEpoch.get() != epoch) return
+        try {
+            for (handle in releasedWhileDown.toList()) {
+                transport.release(handle)
+                releasedWhileDown.remove(handle)
+            }
+            val again = synchronized(observedLock) { observed.entries.map { it.key to it.value.toList() } }
+            for ((handle, signals) in again) for (signal in signals) transport.observe(handle, signal, true)
+        } catch (e: UndraException) {
+            // The connection dropped again already: the transport reports it, and the next reconnect replays.
+            UndraLog.debug("observing again after a reconnect failed (the connection dropped again; the next reconnect replays)")
+        }
+        if (!closed.get() && lossEpoch.get() == epoch) setConnection(ConnectionState.Connected)
     }
 
     private companion object {

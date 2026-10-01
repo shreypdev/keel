@@ -1,0 +1,8 @@
+error: error[undra::E0011]: store `Counter` has no constructor in this `#[undra::api(store)]` block
+         = note: the platforms create a store by calling one of its constructors, and a type takes one `#[undra::api]` impl block, so a constructor in another block is not seen
+         = help: add `pub fn new(ctx: Ctx) -> Self` to this block; if `Counter` has a second `#[undra::api]` block (where the constructor is), move this block's methods into that one
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011
+  --> tests/ui/d1_two_store_blocks.rs:25:6
+   |
+25 | impl Counter {
+   |      ^^^^^^^

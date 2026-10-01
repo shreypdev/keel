@@ -33,6 +33,11 @@ public enum class Mode {
  * @property remoteTimeout how long a blocking call (`callSync`, `construct`) and the connection
  *   handshake wait for the remote core before giving up.
  * @property mirror how change-sets are delivered to stores: the frame pacer and the backlog bounds.
+ * @property reconnect how a [Mode.REMOTE] core reconnects by itself when its connection drops (ADR-051):
+ *   `null` turns it off, and a drop then closes the core. The default is on, with [ReconnectPolicy]'s defaults.
+ * @property onConnectionChange called with every change of [UndraCore.connectionState], starting with
+ *   [ConnectionState.Connecting], on the thread that changed it (a thread of the runtime's own for a reconnect). It
+ *   must return quickly and must not call into the core.
  * @property onError called with every failure that has no caller to throw to (ADR-032, amendment A): a generated
  *   command (a synchronous method that returns nothing and has no error type) that failed, a store change that
  *   could not be applied, a malformed change-set, a port implementation that failed. The failure is also logged at
@@ -51,12 +56,14 @@ public class LoadOptions(
     public val defaultAdapters: Boolean = true,
     public val remoteTimeout: Duration = 30.seconds,
     public val mirror: MirrorOptions = MirrorOptions(),
+    public val reconnect: ReconnectPolicy? = ReconnectPolicy(),
+    public val onConnectionChange: ((ConnectionState) -> Unit)? = null,
     public val onError: ((UndraUnhandledError) -> Unit)? = null,
 ) {
     override fun toString(): String =
         "LoadOptions(mode=$mode, remoteUrl=$remoteUrl, adapters=${adapters.keys.sorted()}, " +
             "expectedSchemaHash=0x${expectedSchemaHash.toString(16)}, defaultAdapters=$defaultAdapters, remoteTimeout=$remoteTimeout, " +
-            "mirror=$mirror, onError=${if (onError == null) "none" else "set"})"
+            "mirror=$mirror, reconnect=$reconnect, onError=${if (onError == null) "none" else "set"})"
 }
 
 /**

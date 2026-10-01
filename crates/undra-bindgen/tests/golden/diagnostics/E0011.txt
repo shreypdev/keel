@@ -1,0 +1,4 @@
+error[undra::E0011]: store `Counter` has no constructor
+  = note: the platforms create a store by calling one of its constructors; without one it can never be instantiated
+  = help: add `pub fn new(ctx: Ctx) -> Self` to its `#[undra::api(store)]` impl block
+  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0011

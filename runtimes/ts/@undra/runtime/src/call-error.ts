@@ -5,6 +5,7 @@ import {
   UndraReplyError,
   UndraRestoreError,
   UndraSchemaMismatchError,
+  UndraSessionLostError,
   UndraTransportError,
 } from "./errors.js";
 import { errorMessage } from "./platform.js";
@@ -55,7 +56,7 @@ export abstract class UndraCallError extends UndraError {
    * | status 3 | `CancelledByCore` |
    * | status 5, `UndraModeError`, `UndraRestoreError` | `Refused` |
    * | status 1 (the method has no error type), 0, 4 | `Malformed` |
-   * | `UndraTransportError` (closed, handshake, trap, timeout, unsupported), `UndraSchemaMismatchError` | `Unavailable` |
+   * | `UndraTransportError` (closed, handshake, trap, timeout, unsupported; also what a `remote` core fails with while it reconnects, ADR-051), `UndraSchemaMismatchError`, `UndraSessionLostError` | `Unavailable` |
    * | `UndraTransportError("protocol")`, `WireError`, `UndraPortError`, an `UndraError` the runtime itself raised | `Malformed` |
    */
   static mapped(error: unknown): unknown;
@@ -152,7 +153,12 @@ export namespace UndraCallError {
     }
   }
 
-  /** The core cannot be reached: it was closed, trapped or never loaded, or the connection to it closed or timed out. */
+  /**
+   * The core cannot be reached: it was closed, trapped or never loaded, or the connection to it closed or timed out.
+   * Over `undra dev` it is also what every call rejects with while the connection is down and `UndraCore.connection`
+   * is `reconnecting` (and what was in flight when it dropped rejects with): the connection state says what the runtime
+   * is doing about it, and a command's failure of that kind is not handed to `onError`.
+   */
   export class Unavailable extends UndraCallError {
     override readonly name: string = "UndraCallError.Unavailable";
     declare readonly kind: "unavailable";
@@ -223,8 +229,9 @@ function classify(error: unknown): unknown {
     // "protocol" is the peer breaking the protocol, not the core being out of reach.
     return error.reason === "protocol" ? new UndraCallError.Malformed(error.message, { cause: error }) : new UndraCallError.Unavailable(error);
   }
-  if (error instanceof UndraSchemaMismatchError) {
-    // A remote core that came back with another schema (`undra dev` rebuilt it): every call in flight fails with this.
+  if (error instanceof UndraSchemaMismatchError || error instanceof UndraSessionLostError) {
+    // A remote core that came back with another schema (`undra dev` rebuilt it) or without this core's objects: the
+    // connection is closed for good and every call in flight fails with this.
     return new UndraCallError.Unavailable(new UndraTransportError("closed", error.message, { cause: error }));
   }
   if (error instanceof WireError) return new UndraCallError.Malformed(`the reply does not decode: ${error.message}`, { cause: error });

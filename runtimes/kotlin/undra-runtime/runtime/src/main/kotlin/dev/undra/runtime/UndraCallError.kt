@@ -56,7 +56,10 @@ public sealed class UndraCallError(message: String, cause: Throwable? = null) : 
 
     /**
      * The core cannot be reached: this [UndraCore] was closed or never loaded, or the remote connection closed
-     * or timed out.
+     * or timed out. Over `undra dev` it is also what every call fails with while the connection is down and the
+     * core is [ConnectionState.Reconnecting] (and what was in flight when it dropped fails with), with a
+     * [transport] reason of [UndraTransportException.Reason.CONNECTION_LOST]: [UndraCore.connectionState] says what the
+     * runtime is doing about it, and a command's failure of that kind is not handed to [LoadOptions.onError].
      *
      * @property transport what happened; also the [cause].
      */
@@ -89,7 +92,7 @@ public sealed class UndraCallError(message: String, cause: Throwable? = null) : 
      * | status `PANIC` | [Panicked] |
      * | status `CANCELLED` | [CancelledByCore] |
      * | status `BAD_REQUEST`, [UndraModeException], [UndraRestoreException] | [Refused] |
-     * | [UndraTransportException], [UndraSchemaMismatchException], a plain [UndraException] (what a transport throws for a lost connection) | [Unavailable] |
+     * | [UndraTransportException] (what every transport throws for a closed core or a lost, reconnecting or timed-out connection, ADR-051), [UndraSchemaMismatchException] and [UndraSessionLostException] (what ended a remote core's connection for good), a plain [UndraException] (a foreign [Transport]'s failure) | [Unavailable] |
      * | [UndraProtocolException], [WireException], [UndraPortException] | [Malformed] |
      */
     public companion object {
@@ -149,9 +152,10 @@ public sealed class UndraCallError(message: String, cause: Throwable? = null) : 
                 is UndraCallError -> error
                 is UndraReplyException -> fromStatus(error)
                 is UndraTransportException -> Unavailable(error)
-                is UndraSchemaMismatchException ->
-                    // A remote core that came back with another schema (`undra dev` rebuilt it): the connection is
-                    // closed and every call in flight fails with this.
+                is UndraSchemaMismatchException, is UndraSessionLostException ->
+                    // A remote core that came back with another schema (`undra dev` rebuilt it) or without this core's
+                    // objects: the connection is closed for good, and `ConnectedCore` fails every call with the
+                    // transport exception that wraps it. This arm is for one that reaches a caller unwrapped.
                     Unavailable(UndraTransportException(UndraTransportException.Reason.CONNECTION_LOST, error.message.orEmpty(), error))
                 is UndraProtocolException -> Malformed(error.message.orEmpty(), error)
                 is WireException -> Malformed("the reply does not decode: ${error.message}", error)
@@ -159,9 +163,10 @@ public sealed class UndraCallError(message: String, cause: Throwable? = null) : 
                 is UndraRestoreException -> Refused(error.message.orEmpty())
                 is UndraPortException -> Malformed("a port implementation's typed failure reached a call (${error.body.size} bytes)", error)
                 else ->
-                    // What the remote transport throws for a lost connection is a plain UndraException: the core cannot
-                    // be reached. Any other throwable (an UndraException subclass such as a typed error, or not Undra's
-                    // at all) is not the runtime's to classify.
+                    // A foreign `Transport` (a test double, another host's) that throws a plain UndraException for a lost
+                    // connection: the core cannot be reached. The runtime's own transports throw UndraTransportException.
+                    // Any other throwable (an UndraException subclass such as a typed error, or not Undra's at all) is not
+                    // the runtime's to classify.
                     if (error.javaClass == UndraException::class.java) {
                         Unavailable(UndraTransportException(UndraTransportException.Reason.CONNECTION_LOST, error.message.orEmpty(), error))
                     } else {

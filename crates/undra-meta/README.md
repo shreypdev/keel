@@ -104,6 +104,6 @@ Two cores with the same public surface therefore hash identically whatever their
 
 ## Validation
 
-`Schema::validate()` returns every violation as a `SchemaError` with a stable code from SPEC section 12 (`E0050` duplicate type name, `E0005` misplaced `Result`/`Stream`, `E0006` bad map key, `E0011` store without constructor, `E0001` unresolved type, misplaced `Lazy`, or misplaced `Unit`).
+`Schema::validate()` returns every violation as a `SchemaError` with a stable code from SPEC section 12 (`E0050` duplicate type name, `E0005` misplaced `Result`/`Stream`, `E0006` bad map key, `E0011` store without constructor, `E0001` unresolved type, misplaced `Lazy`, or misplaced `Unit`). A `SchemaError` prints in the shape of every Undra diagnostic (`diag::message`): the code and what, a note on why, the fix and the docs link of the code.
 
 `Unit` is legal only as a return type (alone, or as a component of a returned `Result` or `Stream`) or as a variant with no fields. It is rejected as a record, variant or parameter type, as a signal type, and inside `Option`, `Vec`, map values or `Lazy`, because zero-width items defeat length validation.

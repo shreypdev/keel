@@ -1,5 +1,5 @@
 // The only file in the wire layer that imports Foundation: bridges between the wire value
-// types and Foundation's `Date` and `UUID`.
+// types and Foundation's `Date`, `UUID` and `LocalizedError`.
 
 import Foundation
 
@@ -88,5 +88,22 @@ extension UUID: UndraCodec {
 
     public func undraEncode(_ w: inout UndraWriter) {
         UndraUUID(self).undraEncode(&w)
+    }
+}
+
+// MARK: - LocalizedError
+
+/// `HttpError` is a `LocalizedError` whose description is its message, as every generated error
+/// is, so `error.localizedDescription` reads the same on every platform.
+extension HttpError: LocalizedError {
+    public var errorDescription: String? {
+        return description
+    }
+}
+
+/// `FsError` is a `LocalizedError` whose description is its message.
+extension FsError: LocalizedError {
+    public var errorDescription: String? {
+        return description
     }
 }

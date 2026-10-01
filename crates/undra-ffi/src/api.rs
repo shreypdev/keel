@@ -82,11 +82,14 @@ pub(crate) fn schema_hash() -> u64 {
     }
 }
 
-/// The canonical schema JSON of this core (what the hash covers), also before `undra_init`.
+/// The schema JSON of this core, also before `undra_init`: the whole schema (`Schema::to_json`),
+/// doc comments and labels included, not the canonical form the hash is computed over. The hash
+/// does not cover docs or labels, so `Schema::from_json(..).hash()` of these bytes is
+/// [`schema_hash`]; hosts that want the hash read it from `undra_schema_hash`.
 pub(crate) fn schema_json() -> Vec<u8> {
     let json = match runtime() {
-        Some(rt) => rt.schema().canonical_json(),
-        None => undra_runtime::undra_meta::collect_schema("undra-core").canonical_json(),
+        Some(rt) => rt.schema().to_json(),
+        None => undra_runtime::undra_meta::collect_schema("undra-core").to_json(),
     };
     json.into_bytes()
 }

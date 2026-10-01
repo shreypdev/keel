@@ -727,3 +727,320 @@ fn error_helpers_are_left_to_another_derive_that_owns_them() {
         "{tokens}"
     );
 }
+
+/// Whether a token stream's text contains `needle`, ignoring whitespace.
+fn squashed(tokens: &TokenStream) -> String {
+    tokens.to_string().split_whitespace().collect()
+}
+
+#[test]
+fn a_query_is_declared_through_a_guard_that_names_the_rule() {
+    // A macro cannot see the block it sits in. The struct, statics and registrations a query adds
+    // next to the function are module-level items, so a plain `impl` block (not `#[undra::api]`,
+    // which is reported above) would get an error for each of them. Declared and invoked through
+    // a `macro_rules!` whose name is the rule, `rustc` reports one parse error and one "cannot
+    // find macro" error that names the rule and the fix.
+    let query = squashed(&impl_::expand_query(
+        Flavor::Query,
+        quote!(key = "todos"),
+        quote!(
+            pub async fn todos(ctx: &Ctx, page: u32) -> Result<Vec<u32>, Failure> {
+                Ok(vec![])
+            }
+        ),
+    ));
+    let guard = "_undra_error_E0007_a_query_is_a_free_function_move_it_out_of_the_impl_block";
+    assert!(query.contains(&format!("macro_rules!{guard}")), "{query}");
+    let invoked = query
+        .find(&format!("{guard}!();"))
+        .expect("the guard is invoked");
+    // The struct and its registrations are inside; the `QueryDef` impl, which names the user's
+    // parameter types, and the checks are not, so an error `rustc` reports on a type the user
+    // wrote does not claim to come from the guard.
+    let defined = query.find("pubstructTodosQuery;").expect("the struct");
+    assert!(defined < invoked, "{query}");
+    let query_def = query
+        .find("implQueryDef")
+        .or_else(|| query.find("::query::QueryDeffor"))
+        .expect("the impl");
+    assert!(query_def > invoked, "{query}");
+    let checks = query
+        .find("const__UNDRA_CHECKS_Todos:()=")
+        .expect("named checks");
+    assert!(checks > invoked, "{query}");
+    let mutation = squashed(&impl_::expand_query(
+        Flavor::Mutation,
+        quote!(),
+        quote!(
+            pub async fn clear(ctx: &Ctx) -> Result<(), Failure> {
+                Ok(())
+            }
+        ),
+    ));
+    assert!(
+        mutation.contains(
+            "_undra_error_E0007_a_mutation_is_a_free_function_move_it_out_of_the_impl_block!();"
+        ),
+        "{mutation}"
+    );
+}
+
+#[test]
+fn a_function_that_names_self_is_an_associated_function() {
+    // `Self` only exists in an `impl` block, so a signature that uses it is the placement a macro
+    // on a function cannot otherwise see.
+    expect(
+        "E0007",
+        api(quote!(
+            pub fn new() -> Self {
+                Calc
+            }
+        )),
+        "fn new",
+    );
+    let message = messages(&api(quote!(
+        pub fn open(path: String) -> Result<Self, Failure> {
+            todo!()
+        }
+    )))
+    .remove(0);
+    assert!(
+        message.contains(
+            "`#[undra::api]` on `open`, which is an associated function: its signature uses `Self`"
+        ),
+        "{message}"
+    );
+    assert!(
+        message.contains("write `#[undra::api]` above the `impl` block"),
+        "{message}"
+    );
+    let message = messages(&impl_::expand_query(
+        Flavor::Query,
+        quote!(key = "k"),
+        quote!(
+            pub async fn first(ctx: &Ctx) -> Result<Vec<Self>, Failure> {
+                todo!()
+            }
+        ),
+    ))
+    .remove(0);
+    assert!(
+        message.contains("`#[undra::query]` on `first`, which is inside an `impl` block: its signature uses `Self`"),
+        "{message}"
+    );
+    // A free function that does not mention `Self` is fine.
+    assert!(
+        messages(&api(quote!(
+            pub fn plain(a: u32) -> u32 {
+                a
+            }
+        )))
+        .is_empty()
+    );
+}
+
+#[test]
+fn two_api_impl_blocks_get_one_constant_that_reads_as_the_rule() {
+    let tokens = squashed(&api(quote!(
+        impl Calc {
+            pub fn new() -> Self {
+                Calc
+            }
+        }
+    )));
+    assert!(
+        tokens.contains(
+            "const_undra_error_E0007_Calc_has_two_undra_api_impl_blocks_merge_them_into_one:()=();"
+        ),
+        "{tokens}"
+    );
+    // Everything else the block names lives in an anonymous constant, so a second block only
+    // conflicts where Rust makes it (`UndraObject` implemented twice).
+    for private in ["fn__undra_dispatch_Calc", "static__UNDRA_META_Calc"] {
+        let at = tokens.find(private).unwrap_or_else(|| panic!("{private}"));
+        let scope = tokens[..at]
+            .rfind("const_:()={")
+            .expect("inside an anonymous constant");
+        assert!(scope < at, "{private}");
+        assert!(
+            !tokens[..scope].contains(private),
+            "{private} is defined once"
+        );
+    }
+}
+
+#[test]
+fn a_store_block_without_a_constructor_says_the_block_is_the_one_that_counts() {
+    let tokens = impl_::expand_api(
+        quote!(store),
+        quote!(
+            impl Counter {
+                pub fn bump(&self) {}
+            }
+        ),
+    );
+    let all = messages(&tokens);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert!(
+        all[0].contains("store `Counter` has no constructor in this `#[undra::api(store)]` block"),
+        "{}",
+        all[0]
+    );
+    assert!(
+        all[0].contains("a constructor in another block is not seen"),
+        "{}",
+        all[0]
+    );
+    assert!(
+        all[0].contains("move this block's methods into that one"),
+        "{}",
+        all[0]
+    );
+}
+
+#[test]
+fn unknown_options_and_arguments_suggest_the_nearest_name() {
+    let message = |tokens: &TokenStream| messages(tokens).remove(0);
+    let tokens = api(quote!(
+        pub struct S {
+            #[undra(defualt)]
+            a: u8,
+        }
+    ));
+    assert!(
+        message(&tokens).contains("did you mean `default`?"),
+        "{tokens}"
+    );
+    let tokens = impl_::expand_store(
+        quote!(restor = "Self::rebuild"),
+        quote!(
+            pub struct S {
+                a: u8,
+            }
+        ),
+    );
+    assert!(
+        message(&tokens).contains("did you mean `restore`?"),
+        "{tokens}"
+    );
+    // Nothing near it: the list instead.
+    let tokens = api(quote!(
+        pub struct S {
+            #[undra(frobnicate)]
+            a: u8,
+        }
+    ));
+    let text = message(&tokens);
+    assert!(
+        text.contains(
+            "remove `frobnicate`, or use one of: `crate`, `default`, `key`, `no_coalesce`"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_wrong_item_names_what_it_is_and_where_the_attribute_goes() {
+    let tokens = impl_::expand_store(
+        quote!(),
+        quote!(
+            pub enum E {
+                A,
+            }
+        ),
+    );
+    let text = messages(&tokens).remove(0);
+    assert!(
+        text.contains("`#[undra::store]` cannot be applied to an `enum`"),
+        "{text}"
+    );
+    assert!(
+        text.contains("move `#[undra::store]` onto a struct, or remove it"),
+        "{text}"
+    );
+    let tokens = impl_::expand_query(
+        Flavor::Query,
+        quote!(key = "k"),
+        quote!(
+            pub struct S;
+        ),
+    );
+    let text = messages(&tokens).remove(0);
+    assert!(
+        text.contains("`#[undra::query]` cannot be applied to a `struct`"),
+        "{text}"
+    );
+    assert!(
+        text.contains("move `#[undra::query]` onto an `async fn`, or remove it"),
+        "{text}"
+    );
+}
+
+#[test]
+fn e0007_a_query_on_a_port_method_is_reported_where_it_is() {
+    let tokens = impl_::expand_port(
+        quote!(),
+        quote!(
+            pub trait Weather {
+                #[undra::query(key = "forecast")]
+                async fn forecast(&self) -> String;
+            }
+        ),
+    );
+    let all = messages(&tokens);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert!(
+        all[0].contains("`#[undra::query]` on the method `forecast` of a port trait"),
+        "{}",
+        all[0]
+    );
+    assert!(all[0].contains("weather(ctx).forecast(..)"), "{}", all[0]);
+    assert!(
+        all[0].contains("so write it outside the trait"),
+        "{}",
+        all[0]
+    );
+    expect("E0007", tokens, "trait Weather");
+}
+
+#[test]
+fn a_keyed_list_looks_its_key_up_in_the_users_crate() {
+    // The macro cannot see the fields of the item type: the lookup is a constant in the user's
+    // crate, and the E0008 for a name that is not a field is raised there (see `store.rs`).
+    let tokens = impl_::expand_store(
+        quote!(),
+        quote!(
+            pub struct Rows {
+                ctx: Ctx,
+                #[undra(key = "idd")]
+                rows: Signal<Vec<Row>>,
+            }
+        ),
+    );
+    let text = squashed(&tokens);
+    assert!(
+        text.contains("::undra::meta::keys::index_of(__UNDRA_FIELDS,\"idd\")"),
+        "{text}"
+    );
+    assert!(text.contains("namesnofieldof`Row`"), "{text}");
+    assert!(
+        !text.contains("__item.idd"),
+        "no field access of the user's spelling: {text}"
+    );
+}
+
+#[test]
+fn a_reference_field_is_reported_once_and_not_again_as_a_missing_lifetime() {
+    // `&str` is E0001 ("use an owned `String`"). The item is still emitted, and without a lifetime
+    // it would add rustc's E0106, whose advice (introduce a lifetime) says the opposite.
+    let tokens = api(quote!(
+        pub struct Profile {
+            pub name: &str,
+            pub tags: Vec<&str>,
+        }
+    ));
+    expect("E0001", tokens.clone(), "struct Profile");
+    let text = squashed(&tokens);
+    assert!(text.contains("pubname:&'staticstr"), "{text}");
+    assert!(text.contains("Vec<&'staticstr>"), "{text}");
+}

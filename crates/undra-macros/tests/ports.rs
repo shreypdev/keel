@@ -214,12 +214,25 @@ fn h2_a_method_without_an_error_channel_panics_with_a_message_that_teaches() {
     }))
     .unwrap_err();
     let message = message_of(panic);
+    // The shape of every diagnostic: the code and what, then why, fix and the docs link.
+    let lines: Vec<&str> = message.lines().collect();
+    assert_eq!(lines.len(), 4, "{message}");
+    assert!(
+        lines[0].starts_with(
+            "error[undra::E0062]: the `Web` port has no adapter registered (method `ping`)"
+        ),
+        "{message}"
+    );
+    assert!(lines[1].starts_with("  = note: "), "{message}");
+    assert!(lines[2].starts_with("  = help: "), "{message}");
+    assert_eq!(
+        lines[3],
+        "  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0062"
+    );
     for needle in [
-        "undra: the `Web` port has no adapter registered (method `ping`)",
-        "Register one with core.registerPort(..) (TypeScript, Kotlin, Swift) / undra_port_register (C)",
-        "or bind a Rust implementation",
-        "On the web this traps the core",
-        "https://shreypdev.github.io/undra/docs/errors.html#E0062",
+        "`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C",
+        "bind a Rust implementation",
+        "on the web it traps the core",
     ] {
         assert!(message.contains(needle), "missing `{needle}` in: {message}");
     }
