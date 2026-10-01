@@ -716,8 +716,12 @@ public final class UndraCore: @unchecked Sendable {
     /// snapshot leaves the core unchanged. Called on the main thread, it applies the restored
     /// values to the stores before it returns, like any synchronous call (docs/SPEC.md section 11).
     ///
-    /// - Throws: `UndraRestoreError` if the core rejects it; `UndraModeError` over the remote
-    ///   transport.
+    /// A snapshot taken by another build restores when its stores' types are unchanged or migrate
+    /// by name (ADR-037); one that cannot is refused as a whole with
+    /// ``UndraRestoreError/incompatible``, and a store type this build no longer has is left out.
+    ///
+    /// - Throws: `UndraRestoreError` if the core rejects it (``UndraRestoreError/badSnapshot``,
+    ///   ``UndraRestoreError/incompatible``, ...); `UndraModeError` over the remote transport.
     public func restore(_ snapshot: [UInt8]) throws {
         try mirror.withImmediateDrain {
             try transport.restore(snapshot)
