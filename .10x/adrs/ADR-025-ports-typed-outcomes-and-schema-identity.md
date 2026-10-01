@@ -103,3 +103,16 @@ an associated function of a plain `impl` (not `#[keel::api]`) is still reported 
 `#[keel::api] impl` block for one type is reported as a duplicate definition of a constant named
 after the rule; a plain object's struct carries no Keel attribute, so its docs are the impl block's
 (a store merges its struct docs first).
+
+## Amendment (2026-10-01, ADR-049): every fallible standard method has an error channel
+
+This ADR made an unavailable port a typed outcome for methods with a `Result` and left the rest to
+"register the optional ports … or give their methods a `Result`". ADR-049 closes that for the
+standard surface by construction: `Kv` and `SecureStore` now return `Result<_, StorageError>`
+(`From<PortError>`: `Unavailable` → `Unavailable(..E0062..)`, `Cancelled` → `Io("cancelled")`,
+`Decode` → `Corrupt(..)`, `Failed(bytes)` → the decoded error), and an unbound `Fs` is
+`FsError::Unavailable` instead of `Io`. The standard methods without an error channel (`Clock`,
+`Rng`, `Log`, `Timer`, the event ports) are answered by built-ins or cannot fail; the E0062 panic of
+a method without one is unchanged and is now shown on `Rng.fill` (the golden). An `Rng` that cannot
+produce randomness is unavailable on purpose (ADR-049 decision 2.5), so that panic is the loud
+outcome instead of predictable bytes.
