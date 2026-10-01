@@ -350,8 +350,26 @@ impl Lifeline {
 /// [`upgrade`](WeakCtx::upgrade) gives a [`Ctx`] for one step of work, or a typed [`Gone`] once
 /// the runtime has started shutting down or has been dropped (a holder never revives a runtime
 /// that is shutting down). [`sleep`](WeakCtx::sleep) and [`closed`](WeakCtx::closed) wait
-/// without holding a strong reference. See the [module documentation](self) for the periodic
-/// task idiom.
+/// without holding a strong reference.
+///
+/// **The rule:** a `Ctx` lives for a call or a task step; anything that outlives the call keeps a
+/// `WeakCtx`. The periodic-task idiom ends with a typed outcome instead of pinning the runtime:
+///
+/// ```
+/// use std::time::Duration;
+/// use undra_runtime::{Ctx, WeakCtx};
+///
+/// fn start_polling(ctx: &Ctx) {
+///     let weak: WeakCtx = ctx.downgrade();
+///     ctx.spawn(async move {
+///         while weak.sleep(Duration::from_secs(30)).await.is_ok() {
+///             let Ok(ctx) = weak.upgrade() else { break };
+///             refresh(&ctx).await; // the strong Ctx lives for this step only
+///         }
+///     });
+/// }
+/// # async fn refresh(_: &Ctx) {}
+/// ```
 #[derive(Clone)]
 pub struct WeakCtx {
     runtime: Weak<Runtime>,
