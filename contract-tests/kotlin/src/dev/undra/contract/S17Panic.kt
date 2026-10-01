@@ -1,5 +1,7 @@
 package dev.undra.contract
 
+import dev.undra.playground.core.UndraCoreNative
+import dev.undra.playground.core.UndraPlaygroundCore
 import dev.undra.playground.core.Counter
 import dev.undra.playground.core.Stress
 import dev.undra.playground.core.StressMode
@@ -9,7 +11,6 @@ import dev.undra.playground.core.explodeLater
 import dev.undra.playground.core.failLater
 import dev.undra.runtime.UndraCallError
 import dev.undra.runtime.UndraCore
-import dev.undra.runtime.UndraNative
 import dev.undra.runtime.UndraTransportException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -131,9 +132,9 @@ fun s17Panic(w: World) {
     stress.close()
     // ... and a new load in this process, with the same options, starts a fresh core: no live handles, and the
     // generated bindings work on it. It is closed again, which ends the run.
-    val fresh = UndraCore.load(w.options)
+    val fresh = UndraPlaygroundCore.load(w.options)
     try {
-        check(fresh !== w.core) { "UndraCore.load after the shutdown returned the closed core" }
+        check(fresh !== w.core) { "UndraPlaygroundCore.load after the shutdown returned the closed core" }
         expectEq("live_handles of the fresh core", 0L, fresh.readStats().liveHandles)
         expectEq("add(1, 2) on the fresh core", 3, add(1, 2, fresh))
         // The fresh core runs no timer-paced task, so its Clock adapter stays quiet.
@@ -147,10 +148,10 @@ fun s17Panic(w: World) {
 
 /**
  * The threads `undra-runtime` started that still run in this process, as the native library reports them while no
- * core is loaded (`runtime_threads` of `UndraNative.statsJson()`); fails if a core is loaded.
+ * core is loaded (`runtime_threads` of the playground core's `statsJson()`); fails if the core is loaded.
  */
 private fun runtimeThreadsLeft(): Long {
-    val raw = UndraNative.statsJson()
+    val raw = UndraCoreNative.statsJson()
     val doc = Json.parseObject(raw)
     check(doc["initialized"] == false) { "a native core is still loaded after close: $raw" }
     return doc["runtime_threads"] as? Long ?: fail("the statistics of no core carry no runtime_threads: $raw")

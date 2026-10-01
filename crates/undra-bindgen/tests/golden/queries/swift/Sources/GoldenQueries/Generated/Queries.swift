@@ -25,7 +25,11 @@ public final class TodoByIdQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(id: UUID, fresh: Bool, ctx: UndraCore = .shared) throws {
+    public convenience init(
+        id: UUID,
+        fresh: Bool,
+        ctx: UndraCore = UndraGoldenQueries.core
+    ) throws {
         var w = UndraWriter()
         id.undraEncode(&w)
         fresh.undraEncode(&w)
@@ -162,7 +166,7 @@ public final class TodoCountQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws {
+    public convenience init(ctx: UndraCore = UndraGoldenQueries.core) throws {
         let handle: UndraHandle
         do {
             handle = try ctx.construct(
@@ -296,7 +300,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
     }
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(page: UInt32, ctx: UndraCore = .shared) throws {
+    public convenience init(page: UInt32, ctx: UndraCore = UndraGoldenQueries.core) throws {
         var w = UndraWriter()
         page.undraEncode(&w)
         let handle: UndraHandle
@@ -413,7 +417,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
 
 /// Runs the `add_todo` mutation.
 /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func addTodo(title: String, ctx: UndraCore = .shared) async throws -> Todo {
+public func addTodo(title: String, ctx: UndraCore = UndraGoldenQueries.core) async throws -> Todo {
     var w = UndraWriter()
     title.undraEncode(&w)
     do {
@@ -430,7 +434,7 @@ public func addTodo(title: String, ctx: UndraCore = .shared) async throws -> Tod
 
 /// Runs the `clear_todos` mutation.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func clearTodos(ctx: UndraCore = .shared) async throws {
+public func clearTodos(ctx: UndraCore = UndraGoldenQueries.core) async throws {
     do {
         _ = try await ctx.call(
             .freeFunction(methodId: UndraIds.Queries.clearTodos),

@@ -55,14 +55,41 @@
   </div>
 </header>
 <div class="wrap docs">
-  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
-  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
   <main id="main" class="prose">
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Swift reference</h1>
 <p class="lede">Every declaration <code>undra bindgen</code> generates in Swift for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xc5f05c376fde398c</code>). <a href="../docs/api-swift.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
+<h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another.</p>
+<p class="ref-names"><code>UndraPlaygroundCore</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>21 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Core.swift" rel="noopener">Core.swift</a></span></div><pre><code data-lang="swift">/// The core these bindings belong to, `playground_core` (`[core] namespace` in undra.toml): `load`
+/// starts it, and `core` is the core every generated type and function of this module uses
+/// unless it is given another one (`ctx:`).
+///
+/// ```swift
+/// let core = try UndraPlaygroundCore.load() // linked into the app
+/// let dev = try UndraPlaygroundCore.load(.remote(url: "ws://127.0.0.1:7878")) // `undra dev`
+/// ```
+public enum UndraPlaygroundCore {
+    /// The core's namespace: it exports `playground_core_undra_api` from `libplayground_core.a`.
+    public static let namespace = "playground_core"
+
+    /// Loads the core (linked into the app unless `options` say otherwise) and makes it
+    /// `core`. Throws `UndraSchemaMismatchError` when the core was built from another schema,
+    /// and `UndraLoadError` when it cannot start or is already loaded.
+    public static func load(_ options: LoadOptions = .inproc()) throws -&gt; UndraCore
+
+    /// The loaded core, or, while none is loaded (or after it was closed), a closed placeholder
+    /// whose calls fail as unavailable.
+    public static var core: UndraCore
+}
+</code></pre></div>
+</details>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A struct for each record, an enum for each enum, with the wire codec beside it.</p>
 <p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
@@ -409,11 +436,11 @@ extension TodoError: CustomStringConvertible, LocalizedError {
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
 <p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>192 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>228 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Objects.swift" rel="noopener">Objects.swift</a></span></div><pre><code data-lang="swift">public final class Probe: UndraObject, @unchecked Sendable {
     /// A probe with every counter at zero.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// What the probe has seen so far.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -450,7 +477,7 @@ extension TodoError: CustomStringConvertible, LocalizedError {
 
 /// Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func add(a: Int32, b: Int32, ctx: UndraCore = .shared) throws -&gt; Int32
+public func add(a: Int32, b: Int32, ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; Int32
 
 /// Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
 /// port.
@@ -459,18 +486,18 @@ public func addLater(
     a: Int32,
     b: Int32,
     delayMs: UInt32,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; Int32
 
 /// The area of a circle or a rectangle. A label and an empty figure have none.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func area(_ figure: Figure, ctx: UndraCore = .shared) throws -&gt; Double
+public func area(_ figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; Double
 
 /// Tells the core where the server is. Call it once at start-up, before anything observes
 /// [`remote_todos`]; calling it again points the core elsewhere (cached data stays until it goes
 /// stale).
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
-public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared)
+public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /// Adds an item to `list` the way a UI wants it: the list shows it at once (an optimistic placeholder), the
 /// server is asked, and the placeholder is taken back if the server refuses. On success the cached
@@ -483,32 +510,41 @@ public func configureRemote(_ config: RemoteConfig, ctx: UndraCore = .shared)
 public func createRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; RemoteTodo
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoComposite(_ value: Composite, ctx: UndraCore = .shared) throws -&gt; Composite
+public func echoComposite(
+    _ value: Composite,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -&gt; Composite
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoFigure(_ value: Figure, ctx: UndraCore = .shared) throws -&gt; Figure
+public func echoFigure(
+    _ value: Figure,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -&gt; Figure
 
 /// Returns `value` unchanged.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func echoPrimitives(_ value: Primitives, ctx: UndraCore = .shared) throws -&gt; Primitives
+public func echoPrimitives(
+    _ value: Primitives,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) throws -&gt; Primitives
 
 /// Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
 /// crash, on the platforms that can unwind (R6).
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func explode(reason: String, ctx: UndraCore = .shared) throws -&gt; UInt32
+public func explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; UInt32
 
 /// Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
 public func explodeLater(
     delayMs: UInt32,
     reason: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; UInt32
 
 /// Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
@@ -517,28 +553,38 @@ public func explodeLater(
 public func failLater(
     delayMs: UInt32,
     code: Int32,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; UInt32
 
 /// Deletes the file or directory `path` of the `Fs` port.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileDelete(path: String, ctx: UndraCore = .shared) async throws
+public func fileDelete(path: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws
 
 /// The names in the directory `dir` of the `Fs` port, sorted.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileList(dir: String, ctx: UndraCore = .shared) async throws -&gt; [String]
+public func fileList(
+    dir: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; [String]
 
 /// The contents of the file `path` of the `Fs` port.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileRead(path: String, ctx: UndraCore = .shared) async throws -&gt; [UInt8]
+public func fileRead(
+    path: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; [UInt8]
 
 /// Writes `data` to the file `path` of the `Fs` port, creating its directories.
 /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func fileWrite(path: String, data: [UInt8], ctx: UndraCore = .shared) async throws
+public func fileWrite(
+    path: String,
+    data: [UInt8],
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws
 
 /// A greeting.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func greet(name: String, ctx: UndraCore = .shared) throws -&gt; String
+public func greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; String
 
 /// `GET url` through the `Http` port, with an optional timeout in milliseconds. Any status is a
 /// response; only a failure to get one is an [`HttpError`].
@@ -546,48 +592,65 @@ public func greet(name: String, ctx: UndraCore = .shared) throws -&gt; String
 public func httpGet(
     url: String,
     timeoutMs: UInt32?,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; HttpResponse
 
 /// The value the `Kv` port has under `key`, if any.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvGet(key: String, ctx: UndraCore = .shared) async throws -&gt; [UInt8]?
+public func kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws -&gt; [UInt8]?
 
 /// The keys of the `Kv` port that start with `prefix`, in ascending order.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvKeys(prefix: String, ctx: UndraCore = .shared) async throws -&gt; [String]
+public func kvKeys(
+    prefix: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; [String]
 
 /// Stores `value` under `key` in the `Kv` port.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async throws
+public func kvPut(
+    key: String,
+    value: [UInt8],
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws
 
 /// Removes `key` from the `Kv` port; a missing key is not an error.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func kvRemove(key: String, ctx: UndraCore = .shared) async throws
+public func kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws
 
 /// Reads an unsigned number of at most nine digits.
 /// - Throws: ``LabError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func parseCount(text: String, ctx: UndraCore = .shared) throws -&gt; UInt32
+public func parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; UInt32
 
 /// Does nothing and returns nothing: a call with neither arguments nor a result.
 /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
-public func ping(ctx: UndraCore = .shared)
+public func ping(ctx: UndraCore = UndraPlaygroundCore.core)
 
 /// The value the `SecureStore` port has under `key`, if any.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretGet(key: String, ctx: UndraCore = .shared) async throws -&gt; [UInt8]?
+public func secretGet(
+    key: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; [UInt8]?
 
 /// The keys of the `SecureStore` port that start with `prefix`, in ascending order.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretKeys(prefix: String, ctx: UndraCore = .shared) async throws -&gt; [String]
+public func secretKeys(
+    prefix: String,
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws -&gt; [String]
 
 /// Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretPut(key: String, value: [UInt8], ctx: UndraCore = .shared) async throws
+public func secretPut(
+    key: String,
+    value: [UInt8],
+    ctx: UndraCore = UndraPlaygroundCore.core
+) async throws
 
 /// Removes `key` from the `SecureStore` port; a missing key is not an error.
 /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
-public func secretRemove(key: String, ctx: UndraCore = .shared) async throws
+public func secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) async throws
 
 /// Marks an item of `list` finished or not, showing the change at once and taking it back if the server
 /// refuses.
@@ -596,12 +659,12 @@ public func setRemoteDone(
     list: String,
     id: UInt32,
     done: Bool,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; RemoteTodo
 
 /// The name and version of the core.
 /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-public func version(ctx: UndraCore = .shared) throws -&gt; String
+public func version(ctx: UndraCore = UndraPlaygroundCore.core) throws -&gt; String
 </code></pre></div>
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
@@ -619,7 +682,7 @@ public final class Bench: UndraStore, @unchecked Sendable {
 
     /// A store with every counter at zero and [`ROWS`] rows numbered from 1.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Adds two numbers: the cheapest call there is, for the handle-call row.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
@@ -665,7 +728,7 @@ public final class BigList: UndraStore, @unchecked Sendable {
 
     /// A list of [`LIST_LEN`] items numbered from 1.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
     /// returns its identity. One keyed `Insert`.
@@ -701,7 +764,7 @@ public final class Counter: UndraStore, @unchecked Sendable {
 
     /// A counter at zero with no changes made.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Adds `amount` (which may be negative) and counts the change: one transaction, so one
     /// change-set for `count`, `changes` and `parity` together. The count saturates instead of
@@ -737,7 +800,7 @@ public final class Device: UndraStore, @unchecked Sendable {
 
     /// The store, showing every report received so far and following the next ones.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 }
 
 /// A store that commits many transactions, for the coalesced-delivery scenarios and the
@@ -751,7 +814,7 @@ public final class Stress: UndraStore, @unchecked Sendable {
 
     /// A store with every signal at its start: zeros, and no generator running.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Commits `transactions` transactions now, each one write of the signal `mode` names: one
     /// change-set per transaction, the way data that arrives in the core on its own does.
@@ -783,7 +846,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
 
     /// An empty list showing every item.
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(ctx: UndraCore = .shared) throws
+    public convenience init(ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Adds an item at the end of the list.
     /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
@@ -836,7 +899,7 @@ public final class RemoteTodosQueryHandle: UndraStore, @unchecked Sendable {
     public private(set) var updatedAt: Date?
 
     /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
-    public convenience init(list: String, ctx: UndraCore = .shared) throws
+    public convenience init(list: String, ctx: UndraCore = UndraPlaygroundCore.core) throws
 
     /// Fetches again now, even if the data is fresh.
     /// - Note: A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
@@ -853,7 +916,7 @@ public func patchRemoteTodo(
     list: String,
     id: UInt32,
     done: Bool,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; RemoteTodo
 
 /// Runs the `post_remote_todo` mutation.
@@ -861,18 +924,19 @@ public func patchRemoteTodo(
 public func postRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = .shared
+    ctx: UndraCore = UndraPlaygroundCore.core
 ) async throws -&gt; RemoteTodo
 </code></pre></div>
 </details>
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
-<p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
+<p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>112 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>113 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/swift/Sources/PlaygroundCore/Generated/Ids.swift" rel="noopener">Ids.swift</a></span></div><pre><code data-lang="swift">/// Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
-/// hash to pass to `UndraCore.load` as the expected schema hash.
+/// hash and the namespace of the core these bindings belong to.
 public enum UndraIds {
     public static let schemaHash: UInt64 = 0xc5f05c376fde398c
+    public static let namespace = "playground_core"
 
     public enum Objects {
         public enum Probe {
@@ -988,7 +1052,7 @@ public enum UndraIds {
   </main>
   <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
 <!-- reference-toc:start -->
-<ul><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
+<ul><li><a href="#core">The core</a></li><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
 <!-- reference-toc:end -->
 </aside>
 </div>

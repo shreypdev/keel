@@ -223,16 +223,18 @@ Every suite is local; nothing needs the network after install.
 | Rust workspace | `cargo test --workspace` | 2,100+ pass |
 | Lints (CI-equivalent) | `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | TypeScript runtime | `cd runtimes/ts/@undra/runtime && npm ci && npm test` | 890+ pass |
-| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 588 cases, 0 failed (2 skipped without a native library) |
+| Kotlin runtime | `runtimes/kotlin/undra-runtime/scripts/test-local.sh` | 630 cases, 0 failed (2 skipped without a native library) |
 | Kotlin runtime under CI's compiler | `kotlinc` 2.0.21 on PATH (CI downloads it; brew's is newer and infers more) — `PATH=<kotlin-2.0.21>/bin:$PATH runtimes/kotlin/undra-runtime/scripts/test-local.sh` | same count; a passing run under brew's Kotlin alone is not proof |
-| Kotlin over the real JNI core | `cargo build -p undra-ffi --features jni`, then `UNDRA_NATIVE_LIB_DIR=$PWD/target/debug UNDRA_NATIVE_NAME=undra_ffi runtimes/kotlin/undra-runtime/scripts/test-local.sh` | the JNI smoke cases run |
+| Kotlin over the real JNI core | `cargo build --manifest-path crates/undra-ffi/tests/fixture/Cargo.toml` (the fixture core, namespace `undra_fixture`), then `UNDRA_NATIVE_LIB_DIR=$PWD/crates/undra-ffi/tests/fixture/target/debug runtimes/kotlin/undra-runtime/scripts/test-local.sh`; `bash crates/undra-ffi/tests/jni/run.sh` is the end-to-end leg | the JNI smoke cases run (1 skipped: the one that needs the library absent) |
 | Android adapters, JVM unit tests (needs the Android SDK) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:test` | 130 pass, 1 skipped (the debug and release variants both run) |
 | Android adapters, instrumented tests (needs a booted emulator or device; set `ANDROID_SERIAL` if several are attached) | `cd runtimes/kotlin/undra-runtime && ./gradlew :android-adapters:connectedAndroidTest` | 112 pass, 1 skipped (the test that switches the device's network off runs only with `-Pandroid.testInstrumentationRunnerArguments.undra.networkToggle=true`) |
 | Playground Android app on the real adapters (offline queue surviving a killed process) | `bash examples/playground/android/smoke.sh` (needs a booted emulator; it switches airplane mode on and off) | `SMOKE PASSED` |
-| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 433 pass |
-| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 29 pass |
-| C host harness | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | ok |
-| Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 57/57 pass |
+| Swift runtime | `cd runtimes/swift/UndraRuntime && swift test` | 527 pass |
+| Swift runtime over the real C ABI table (the fixture core) | `bash crates/undra-ffi/tests/swift/run.sh` | 6 pass |
+| wasm ABI (real module + real TS runtime) | `bash crates/undra-ffi/tests/wasm/run.sh` | 19 + 24 pass |
+| C host harness (through the fixture core's table, `undra_fixture_undra_api`; `two_cores.c` opens two copies of it side by side) | `bash crates/undra-ffi/tests/c/run.sh` (add `UNDRA_C_SANITIZE=1` for ASan) | `c smoke: ok`, `c lifetime: ok`, `c two cores: ok` |
+| Contract scenarios ×3 platforms | `bash contract-tests/run-all.sh` | 60/60 pass (S01 to S19 and S26 "two cores", per platform) |
+| Two cores in one process (ADR-044): the playground core as `playground_a` and `playground_b` | `examples/two-cores/{ios,android,jvm,node}/run.sh` (iOS: the booted simulator, `CONFIGURATION=Release` for the fat-LTO cores; Android: the attached emulator) | `two-cores <platform>: passed` |
 | Build systems of a generated project: Gradle, `xcodebuild` and `npm run build` each build the core with no earlier `undra build` (a clean project, then up-to-date, then a change, then the other variant and back; the app links the new core) | `UNDRA_TEST_BUILD_SYSTEMS=1 cargo test -p undra-cli --test build_systems -- --nocapture` (`UNDRA_REQUIRE_TOOLCHAINS=1` makes a missing toolchain a failure; needs `java` on PATH, which `scripts/env.sh` puts there) | 6 pass; skips, saying why, where a toolchain is missing |
 | `undra upgrade` end to end (regenerates the bindings against a local clone standing in for GitHub) | `UNDRA_TEST_UPGRADE_E2E=1 cargo test -p undra-cli --test upgrade` | 15 pass |
 | Distribution: npm packages (build, pack, `npm install -g`, run) | `bash packaging/npm/test.sh` | all checks pass |
@@ -240,9 +242,9 @@ Every suite is local; nothing needs the network after install.
 | Benchmark budget gate | `cargo test -p undra-bench --test budgets --release` | pass |
 | Benchmarks (numbers for humans) | `cargo bench -p undra-bench` | see `bench/RESULTS.md` |
 | Device bench: the blueprint rows through the generated binding and the mirror, on a simulator, emulator, browser or phone | `scripts/bench-device.sh --device ios`, `--device android` (boots the `undra` AVD if nothing is attached; `--target <serial>` for a phone), `--device web`; add `--quick` to check the plumbing in seconds | writes `bench/results/device/<date>-<target>.json` and the device tables of `bench/RESULTS.md`; needs the iOS simulator + Xcode, the Android SDK + NDK, or Playwright's Chromium (`cd examples/playground/web && npx playwright install chromium`) |
-| React Native runtime: C++ host under ASan + UBSan (both shims) and the JSI layer against React Native's headers | `runtimes/rn/@undra/react-native/cpp/test/run.sh` (needs `npm ci` in `examples/playground/rn` for the headers; `UNDRA_RN_REQUIRE_JSI=1` makes a missing one a failure) | 14 + 14 checks, `UndraJsi.cpp` compiles |
-| React Native runtime: unit tests, typecheck, contract column | in `runtimes/rn/@undra/react-native`: `npm ci`, `npm test`, `npm run typecheck` (build `runtimes/ts/@undra/runtime` first), `npm run test:contract` (needs `undra build -C examples/playground --platform web`, and `contract-tests/derived-vectors.sh` for S19) | 60 pass; clean; 18 pass + S17 skipped |
-| React Native playground app on a device | `scripts/rn-device-checks.sh ios` (the iPhone simulator; CocoaPods) or `scripts/rn-device-checks.sh android --target <serial>` (an emulator such as the `undra-rn` AVD, or a phone) | `UNDRA-RN CHECKS 10/10 passed` |
+| React Native runtime: C++ host under ASan + UBSan (both shims) and the JSI layer against React Native's headers | `runtimes/rn/@undra/react-native/cpp/test/run.sh` (needs `npm ci` in `examples/playground/rn` for the headers, and `undra build --platform host` of the playground and of `examples/two-cores/a`, which it runs when missing; `UNDRA_RN_REQUIRE_JSI=1` makes a missing one a failure) | 15 store checks, then 29 + 29 host checks (the linked shim on macOS only); `UndraJsi.cpp`, `UndraTurboModule.cpp` and (macOS) `UndraPlatformApple.mm` compile |
+| React Native runtime: unit tests, typecheck, contract column | in `runtimes/rn/@undra/react-native`: `npm ci`, `npm test`, `npm run typecheck` (build `runtimes/ts/@undra/runtime` first), `npm run test:contract` (needs `undra build -C examples/playground --platform web`, and `contract-tests/derived-vectors.sh` for S19) | 65 pass; clean; 18 pass + S17 skipped |
+| React Native playground app on a device | `scripts/rn-device-checks.sh ios` (the iPhone simulator; CocoaPods) or `scripts/rn-device-checks.sh android --target <serial>` (an emulator such as the `undra-rn` AVD, or a phone) | `UNDRA-RN CHECKS 19/19 passed` (iOS) or `20/20` (Android) |
 | Device bench report (CI runs it) | `node --test scripts/bench-device-report.test.mjs` | 14 pass |
 
 Gotcha worth knowing: the bindgen tests that compile and run the generated Kotlin, TypeScript and
@@ -250,10 +252,10 @@ Swift (`typecheck_kotlin`, `typecheck_ts`, `run_ts`, `typecheck_swift`) **skip, 
 compiler is not found** (`kotlinc`, `tsc`, `swift`). Put `runtimes/ts/@undra/runtime/node_modules/.bin`
 and a JDK 17 on `PATH`, and run with `UNDRA_REQUIRE_TOOLCHAINS=1` so a missing tool fails instead of skipping.
 
-Gotcha worth knowing: the C harness builds `undra-ffi` **without** the `jni` feature and
-overwrites `target/debug/libundra_ffi.dylib`. If you run the Kotlin JNI leg afterwards,
-rebuild with `--features jni` first. CI jobs are isolated, so only local chained runs hit
-this.
+Gotcha worth knowing: since C ABI version 2 (ADR-044) `undra-ffi` exports nothing of its own;
+every native harness (C, Swift, JNI) runs against the fixture core
+(`crates/undra-ffi/tests/fixture`, namespace `undra_fixture`), which exports its table and, with
+the `jni` feature it always builds with on native targets, `JNI_OnLoad`.
 
 ## 3. Run the reference app
 

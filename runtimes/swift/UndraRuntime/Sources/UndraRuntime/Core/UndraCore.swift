@@ -8,26 +8,27 @@
 // Threading rules this file lives by (docs/SPEC.md section 5.1):
 //  * The core's callbacks (`onReply`, `onChangeSet`, `onStreamItem`, `onPortCall`) may run on any
 //    thread, possibly while the core holds its lock. They copy, queue and resume continuations;
-//    they never call an `undra_*` function. Work that must call into the core from there goes to
-//    `deferredQueue`.
+//    they never call an entry of the core's table. Work that must call into the core from there
+//    goes to `deferredQueue`.
 //  * Nothing here holds a lock while calling out (resuming a continuation, calling the transport,
 //    running a port method).
 
 import Dispatch
 import Foundation
 
-/// One attachment to a Rust core. Load one at startup and pass it (or leave it as
-/// `UndraCore.shared`) to the generated bindings.
+/// One attachment to a Rust core. Load one at startup through the entry generated for the core,
+/// `Undra<Namespace>`; the generated bindings use that entry's core unless they are given another.
 ///
 /// ```swift
-/// let core = try UndraCore.load(.inproc(expectedSchemaHash: UndraIds.schemaHash))
-/// let todos = try TodoStore()            // uses UndraCore.shared
+/// let core = try UndraPlaygroundCore.load()
+/// let todos = try TodoStore()            // uses UndraPlaygroundCore.core
 /// ```
 public final class UndraCore: @unchecked Sendable {
     // MARK: Constants
 
-    /// The C ABI version this runtime implements (`undra_abi_version()` must report it).
-    static let abiVersion: UInt32 = 1
+    /// The C ABI version this runtime implements: the `abi_version` of every core table it loads
+    /// (`UNDRA_ABI_VERSION` of `undra.h`, ADR-044).
+    static let abiVersion: UInt32 = 2
 
     /// The Undra protocol version announced in the remote handshake.
     public static let undraVersion = "1.0.0"
@@ -60,9 +61,9 @@ public final class UndraCore: @unchecked Sendable {
     /// The `Log` target of the messages `undra dev` addresses to the developer (ADR-053).
     private static let devNoticeTarget = "undra::dev"
 
-    /// What `shared` returns when no core is loaded: shut down from the start, over a transport
-    /// that reaches nothing.
-    private static let unloaded = UndraCore(transport: UnloadedTransport(), isShutDown: true)
+    /// What `shared` (and a generated entry's `core`) returns when no core is loaded: shut down
+    /// from the start, over a transport that reaches nothing.
+    static let unloaded = UndraCore(transport: UnloadedTransport(), isShutDown: true)
 
     /// Whether the placeholder's "load a core" message has been logged.
     private static let unloadedWarning = Guarded<Bool>(false)
@@ -129,18 +130,31 @@ public final class UndraCore: @unchecked Sendable {
     /// Attaches to a core, checks its schema hash, registers the adapters, and makes the result
     /// `UndraCore.shared` if none is loaded yet.
     ///
+    /// Apps call the generated entry of their core instead (`UndraPlaygroundCore.load()`), which
+    /// fills in `options.api` and `options.expectedSchemaHash` and makes the result the core of
+    /// its bindings. In process, the table is checked before anything in it is called: its C ABI
+    /// version, its size and entries, then its schema hash, and only then is the core started.
+    /// One core of a namespace runs at a time; cores of different namespaces run side by side.
+    ///
     /// - Throws: `UndraSchemaMismatchError` if the core's schema hash is not
-    ///   `options.expectedSchemaHash`; `UndraLoadError` if the core cannot be reached or
-    ///   initialised (including the link-time stub, see the package README).
+    ///   `options.expectedSchemaHash`; `UndraLoadError` if the options lack the table or the hash,
+    ///   the table is of another ABI version or unusable, the core is already loaded, or it cannot
+    ///   be reached or initialised.
     ///
     /// A remote core is reached with a blocking handshake, so call this once at startup, not on
     /// a hot path.
     @discardableResult
     public static func load(_ options: LoadOptions) throws -> UndraCore {
+        if options.expectedSchemaHash == nil {
+            throw UndraLoadError.missingSchemaHash
+        }
         let transport: any UndraTransport
         switch options.mode {
         case .inproc:
-            transport = InprocTransport()
+            guard let api = options.api else {
+                throw UndraLoadError.missingCoreTable
+            }
+            transport = InprocTransport(table: try CoreTable(reading: api))
         case .remote(let url):
             transport = try WebSocketTransport(
                 urlString: url,
@@ -160,7 +174,9 @@ public final class UndraCore: @unchecked Sendable {
     /// The core that `UndraCore.load(_:)` attached first and which is not shut down, or, when there
     /// is none, a permanently shut-down placeholder.
     ///
-    /// Generated code uses it as the default `ctx`. Using it before a successful `load`, or after
+    /// For app code with one core. Generated code never reads it: its default `ctx` is the core of
+    /// its own generated entry (`UndraPlaygroundCore.core`, ADR-044), so an app with several cores
+    /// gets the right one everywhere. Using it before a successful `load`, or after
     /// `shutdown()`, is a programming error but not a crash: calls on the placeholder fail with
     /// ``UndraCallError/unavailable(_:)`` (`.closed`), constructors throw it, commands only log
     /// (the placeholder has no `LoadOptions.onError`), and the first use logs what to do.
@@ -179,7 +195,7 @@ public final class UndraCore: @unchecked Sendable {
         }
         if first {
             UndraLog.error(
-                "UndraCore.shared was used while no core is loaded (before UndraCore.load(_:) succeeds, or after shutdown()); calls on it fail with UndraCallError.unavailable(.closed). Load a core at app startup, before creating any Undra object."
+                "UndraCore.shared was used while no core is loaded (before a load succeeds, or after shutdown()); calls on it fail with UndraCallError.unavailable(.closed). Load the core at app startup (its generated entry, Undra<Namespace>.load()), before creating any Undra object."
             )
         }
         return unloaded
@@ -201,6 +217,9 @@ public final class UndraCore: @unchecked Sendable {
         options: LoadOptions,
         frameScheduler: (any FrameScheduler)? = nil
     ) throws -> UndraCore {
+        guard let expectedSchemaHash = options.expectedSchemaHash else {
+            throw UndraLoadError.missingSchemaHash
+        }
         let core = UndraCore(
             transport: transport,
             blockingCallTimeout: options.blockingCallTimeout,
@@ -216,12 +235,12 @@ public final class UndraCore: @unchecked Sendable {
             platform: UndraCore.platformName,
             logLevel: options.logLevel,
             connectTimeout: options.connectTimeout,
-            expectedSchemaHash: options.expectedSchemaHash
+            expectedSchemaHash: expectedSchemaHash
         )
         let info = try transport.start(inbound: core, options: startOptions)
-        if info.schemaHash != options.expectedSchemaHash {
+        if info.schemaHash != expectedSchemaHash {
             transport.shutdown()
-            throw UndraSchemaMismatchError(expected: options.expectedSchemaHash, got: info.schemaHash)
+            throw UndraSchemaMismatchError(expected: expectedSchemaHash, got: info.schemaHash)
         }
         core.state.withLock { (current: inout State) -> Void in
             current.schemaHash = info.schemaHash

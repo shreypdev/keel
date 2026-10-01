@@ -55,14 +55,48 @@
   </div>
 </header>
 <div class="wrap docs">
-  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
-  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
+  <details class="mnav"><summary>Docs menu</summary><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></details>
+  <aside class="sidebar"><nav aria-label="Docs"><div class="side-group"><p class="side-title">Start</p><ul><li><a href="../docs/getting-started.html">Getting started</a></li></ul></div><div class="side-group"><p class="side-title">Guides</p><ul><li><a href="../docs/concepts.html">Core concepts</a></li><li><a href="../docs/queries.html">Queries &amp; mutations</a></li><li><a href="../docs/ports.html">Ports &amp; adapters</a></li><li><a href="../docs/several-cores.html">One core or several</a></li><li><a href="../docs/testing.html">Testing your app</a></li></ul></div><div class="side-group"><p class="side-title">Reference</p><ul><li><a href="../docs/cli.html">The CLI</a></li><li><a href="../docs/architecture.html">Architecture</a></li><li><a href="../docs/errors.html">Error codes</a></li><li><a href="rust/undra/index.html">Rust API</a></li></ul></div><div class="side-group"><p class="side-title">API overview</p><ul><li><a href="../docs/api-swift.html">Swift</a></li><li><a href="../docs/api-kotlin.html">Kotlin</a></li><li><a href="../docs/api-typescript.html">TypeScript</a></li></ul></div></nav></aside>
   <main id="main" class="prose">
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Kotlin reference</h1>
 <p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xc5f05c376fde398c</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
+<h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
+<p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another. The internal <code>UndraCoreNative</code> holds the natives the core's library registers over JNI.</p>
+<p class="ref-names"><code>UndraPlaygroundCore</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>28 lines</span></summary>
+<div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Core.kt" rel="noopener">Core.kt</a></span></div><pre><code data-lang="kotlin">/**
+ * The core these bindings belong to, `playground_core` (`[core] namespace` in undra.toml): [load]
+ * starts it, and [core] is the core every generated class and function of this package uses
+ * unless it is given another one (`ctx`).
+ *
+ * ```kotlin
+ * val core = UndraPlaygroundCore.load() // in this process
+ * val dev = UndraPlaygroundCore.load(LoadOptions(Mode.REMOTE, remoteUrl = "ws://10.0.2.2:7878")) // `undra dev`
+ * ```
+ */
+object UndraPlaygroundCore {
+    /** The core's namespace: its library is `libplayground_core.so`. */
+    const val NAMESPACE: String = "playground_core"
+
+    /**
+     * Loads the core (in this process unless [options] say otherwise) and makes it [core].
+     *
+     * @throws UndraSchemaMismatchException if the core was built from another schema.
+     * @throws UndraException if it cannot start, or this core is already loaded.
+     */
+    fun load(options: LoadOptions = LoadOptions()): UndraCore
+
+    /**
+     * The loaded core, or, while none is loaded (or after it was closed), a closed placeholder
+     * whose calls fail with `UndraCallError.Unavailable`.
+     */
+    val core: UndraCore get()
+}
+</code></pre></div>
+</details>
 <h2 id="types">Types<a class="anchor" href="#types" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A data class for each record, an enum or sealed interface for each enum, each with its codec.</p>
 <p class="ref-names"><code>Composite</code> <code>Item</code> <code>Primitives</code> <code>ProbeCounters</code> <code>RemoteConfig</code> <code>RemoteTodo</code> <code>Todo</code> <code>Figure</code> <code>Filter</code> <code>Parity</code> <code>StressMode</code> <code>QueryStatus</code></p>
@@ -310,13 +344,13 @@ sealed class TodoError(message: String) : UndraException(message) {
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
 <p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>285 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>294 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * A probe with every counter at zero.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * What the probe has seen so far.
@@ -365,7 +399,7 @@ sealed class TodoError(message: String) : UndraException(message) {
          * A probe with every counter at zero.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Probe
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Probe
     }
 }
 
@@ -373,7 +407,7 @@ sealed class TodoError(message: String) : UndraException(message) {
  * Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
+fun add(a: Int, b: Int, ctx: UndraCore = UndraPlaygroundCore.core): Int
 
 /**
  * Adds two numbers after `delay_ms` milliseconds: an asynchronous call that waits on the `Timer`
@@ -381,14 +415,19 @@ fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun addLater(a: Int, b: Int, delayMs: UInt, ctx: UndraCore = UndraCore.shared): Int
+suspend fun addLater(
+    a: Int,
+    b: Int,
+    delayMs: UInt,
+    ctx: UndraCore = UndraPlaygroundCore.core,
+): Int
 
 /**
  * The area of a circle or a rectangle. A label and an empty figure have none.
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun area(figure: Figure, ctx: UndraCore = UndraCore.shared): Double
+fun area(figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Double
 
 /**
  * Tells the core where the server is. Call it once at start-up, before anything observes
@@ -396,7 +435,7 @@ fun area(figure: Figure, ctx: UndraCore = UndraCore.shared): Double
  * stale).
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */
-fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraCore.shared)
+fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Adds an item to `list` the way a UI wants it: the list shows it at once (an optimistic placeholder), the
@@ -413,40 +452,44 @@ fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraCore.shared)
 suspend fun createRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo
 
 /**
  * Returns `value` unchanged.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun echoComposite(value: Composite, ctx: UndraCore = UndraCore.shared): Composite
+fun echoComposite(value: Composite, ctx: UndraCore = UndraPlaygroundCore.core): Composite
 
 /**
  * Returns `value` unchanged.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun echoFigure(value: Figure, ctx: UndraCore = UndraCore.shared): Figure
+fun echoFigure(value: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Figure
 
 /**
  * Returns `value` unchanged.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraCore.shared): Primitives
+fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraPlaygroundCore.core): Primitives
 
 /**
  * Panics with `reason`. The boundary turns the panic into a reply (status 2), never into a
  * crash, on the platforms that can unwind (R6).
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun explode(reason: String, ctx: UndraCore = UndraCore.shared): UInt
+fun explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt
 
 /**
  * Panics with `reason` after `delay_ms` milliseconds, inside an asynchronous call.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun explodeLater(delayMs: UInt, reason: String, ctx: UndraCore = UndraCore.shared): UInt
+suspend fun explodeLater(
+    delayMs: UInt,
+    reason: String,
+    ctx: UndraCore = UndraPlaygroundCore.core,
+): UInt
 
 /**
  * Fails with `LabError::Rejected { code, .. }` after `delay_ms` milliseconds: an asynchronous
@@ -455,7 +498,7 @@ suspend fun explodeLater(delayMs: UInt, reason: String, ctx: UndraCore = UndraCo
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraCore.shared): UInt
+suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraPlaygroundCore.core): UInt
 
 /**
  * Deletes the file or directory `path` of the `Fs` port.
@@ -463,7 +506,7 @@ suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraCore.share
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileDelete(path: String, ctx: UndraCore = UndraCore.shared)
+suspend fun fileDelete(path: String, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * The names in the directory `dir` of the `Fs` port, sorted.
@@ -471,7 +514,7 @@ suspend fun fileDelete(path: String, ctx: UndraCore = UndraCore.shared)
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileList(dir: String, ctx: UndraCore = UndraCore.shared): List&lt;String&gt;
+suspend fun fileList(dir: String, ctx: UndraCore = UndraPlaygroundCore.core): List&lt;String&gt;
 
 /**
  * The contents of the file `path` of the `Fs` port.
@@ -479,7 +522,7 @@ suspend fun fileList(dir: String, ctx: UndraCore = UndraCore.shared): List&lt;St
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileRead(path: String, ctx: UndraCore = UndraCore.shared): ByteArray
+suspend fun fileRead(path: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray
 
 /**
  * Writes `data` to the file `path` of the `Fs` port, creating its directories.
@@ -487,13 +530,13 @@ suspend fun fileRead(path: String, ctx: UndraCore = UndraCore.shared): ByteArray
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraCore.shared)
+suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * A greeting.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun greet(name: String, ctx: UndraCore = UndraCore.shared): String
+fun greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String
 
 /**
  * `GET url` through the `Http` port, with an optional timeout in milliseconds. Any status is a
@@ -505,7 +548,7 @@ fun greet(name: String, ctx: UndraCore = UndraCore.shared): String
 suspend fun httpGet(
     url: String,
     timeoutMs: UInt?,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): HttpResponse
 
 /**
@@ -513,69 +556,69 @@ suspend fun httpGet(
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvGet(key: String, ctx: UndraCore = UndraCore.shared): ByteArray?
+suspend fun kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray?
 
 /**
  * The keys of the `Kv` port that start with `prefix`, in ascending order.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraCore.shared): List&lt;String&gt;
+suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): List&lt;String&gt;
 
 /**
  * Stores `value` under `key` in the `Kv` port.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraCore.shared)
+suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Removes `key` from the `Kv` port; a missing key is not an error.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvRemove(key: String, ctx: UndraCore = UndraCore.shared)
+suspend fun kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Reads an unsigned number of at most nine digits.
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun parseCount(text: String, ctx: UndraCore = UndraCore.shared): UInt
+fun parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt
 
 /**
  * Does nothing and returns nothing: a call with neither arguments nor a result.
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */
-fun ping(ctx: UndraCore = UndraCore.shared)
+fun ping(ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * The value the `SecureStore` port has under `key`, if any.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretGet(key: String, ctx: UndraCore = UndraCore.shared): ByteArray?
+suspend fun secretGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray?
 
 /**
  * The keys of the `SecureStore` port that start with `prefix`, in ascending order.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraCore.shared): List&lt;String&gt;
+suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): List&lt;String&gt;
 
 /**
  * Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraCore.shared)
+suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Removes `key` from the `SecureStore` port; a missing key is not an error.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretRemove(key: String, ctx: UndraCore = UndraCore.shared)
+suspend fun secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
@@ -588,14 +631,14 @@ suspend fun setRemoteDone(
     list: String,
     id: UInt,
     done: Boolean,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo
 
 /**
  * The name and version of the core.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun version(ctx: UndraCore = UndraCore.shared): String
+fun version(ctx: UndraCore = UndraPlaygroundCore.core): String
 </code></pre></div>
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
@@ -616,7 +659,7 @@ class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core
      * A store with every counter at zero and [`ROWS`] rows numbered from 1.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds two numbers: the cheapest call there is, for the handle-call row.
@@ -669,7 +712,7 @@ class Bench private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * A store with every counter at zero and [`ROWS`] rows numbered from 1.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Bench
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Bench
     }
 }
 
@@ -683,7 +726,7 @@ class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(co
      * A list of [`LIST_LEN`] items numbered from 1.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Inserts a new row with `label` so that it ends at `index` (`index == len` appends), and
@@ -727,7 +770,7 @@ class BigList private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A list of [`LIST_LEN`] items numbered from 1.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): BigList
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): BigList
     }
 }
 
@@ -742,7 +785,7 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
      * A counter at zero with no changes made.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds `amount` (which may be negative) and counts the change: one transaction, so one
@@ -775,7 +818,7 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * A counter at zero with no changes made.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Counter
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Counter
     }
 }
 
@@ -797,14 +840,14 @@ class Device private constructor(core: UndraCore, handle: Long) : UndraStore(cor
      * The store, showing every report received so far and following the next ones.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     companion object {
         /**
          * The store, showing every report received so far and following the next ones.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Device
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Device
     }
 }
 
@@ -822,7 +865,7 @@ class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(cor
      * A store with every signal at its start: zeros, and no generator running.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Commits `transactions` transactions now, each one write of the signal `mode` names: one
@@ -853,7 +896,7 @@ class Stress private constructor(core: UndraCore, handle: Long) : UndraStore(cor
          * A store with every signal at its start: zeros, and no generator running.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Stress
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Stress
     }
 }
 
@@ -870,7 +913,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
      * An empty list showing every item.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared)
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
 
     /**
      * Adds an item at the end of the list.
@@ -918,7 +961,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
          * An empty list showing every item.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Todos
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Todos
     }
 }
 </code></pre></div>
@@ -928,7 +971,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
 <h2 id="queries">Queries<a class="anchor" href="#queries" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.</p>
 <p class="ref-names"><code>RemoteTodosQueryHandle</code> <code>patchRemoteTodo</code> <code>postRemoteTodo</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>58 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>61 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Queries.kt" rel="noopener">Queries.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Observes the `remote_todos` query (cache key `remote-todos:{list}`).
  * Constructing it registers an observer and fetches when the data is stale or missing.
@@ -959,7 +1002,10 @@ class RemoteTodosQueryHandle private constructor(core: UndraCore, handle: Long) 
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(list: String, ctx: UndraCore = UndraCore.shared): RemoteTodosQueryHandle
+        fun create(
+            list: String,
+            ctx: UndraCore = UndraPlaygroundCore.core,
+        ): RemoteTodosQueryHandle
     }
 }
 
@@ -973,7 +1019,7 @@ suspend fun patchRemoteTodo(
     list: String,
     id: UInt,
     done: Boolean,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo
 
 /**
@@ -985,20 +1031,21 @@ suspend fun patchRemoteTodo(
 suspend fun postRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo
 </code></pre></div>
 </details>
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
-<p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
+<p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>114 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>115 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt" rel="noopener">Ids.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
     const val SCHEMA_HASH: ULong = 0xc5f05c376fde398cuL
+    const val NAMESPACE: String = "playground_core"
 
     object Objects {
         object Probe {
@@ -1114,7 +1161,7 @@ object UndraIds {
   </main>
   <aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p>
 <!-- reference-toc:start -->
-<ul><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
+<ul><li><a href="#core">The core</a></li><li><a href="#types">Types</a></li><li><a href="#errors">Errors</a></li><li><a href="#objects">Objects</a></li><li><a href="#stores">Stores</a></li><li><a href="#ports">Ports</a></li><li><a href="#queries">Queries</a></li><li><a href="#ids">Wire ids</a></li></ul>
 <!-- reference-toc:end -->
 </aside>
 </div>

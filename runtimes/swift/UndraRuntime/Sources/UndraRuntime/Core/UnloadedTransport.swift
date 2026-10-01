@@ -1,6 +1,7 @@
-// The transport behind `UndraCore.shared` when no core is loaded (ADR-032, decision 7).
+// The transport behind `UndraCore.shared` (and a generated entry's `core`) when no core is loaded
+// (ADR-032, decision 7; ADR-044).
 //
-// It reaches nothing and calls no `undra_*` function. The core built over it starts out shut down,
+// It reaches nothing and calls no core's table. The core built over it starts out shut down,
 // so every call fails before it gets here; the transport still answers every requirement with the
 // same "closed" outcome, so a future caller cannot reach a core that is not there.
 

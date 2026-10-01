@@ -2,10 +2,11 @@
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 export const UndraIds = {
   schemaHash: 0xc5f05c376fde398cn,
+  namespace: "playground_core",
   Objects: {
     Probe: {
       typeId: 0x4fdd3051,

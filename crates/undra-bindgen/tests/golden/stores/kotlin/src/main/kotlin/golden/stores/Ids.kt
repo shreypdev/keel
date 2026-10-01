@@ -4,10 +4,11 @@ package golden.stores
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
     const val SCHEMA_HASH: ULong = 0xb38be47d1ea134a1uL
+    const val NAMESPACE: String = "golden_stores"
 
     object Objects {
         object Clock {

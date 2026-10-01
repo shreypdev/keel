@@ -17,7 +17,7 @@ fn the_web_build_produces_a_loadable_wasm_core() {
     let out = run_ok(project.undra().args(["build", "--platform", "web"]));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let wasm = project.root.join("build/web/undra_core.wasm");
+    let wasm = project.root.join("build/web/webbuild_core.wasm");
     assert!(wasm.is_file(), "{stdout}\n{stderr}");
     assert!(
         stdout.contains("web wasm")
@@ -106,17 +106,18 @@ fn a_second_build_reuses_the_first() {
 }
 
 #[test]
-fn the_host_build_is_named_undra_core() {
+fn the_host_build_is_named_after_the_namespace() {
     let _serial = serial();
     let project = init_project("hostbuild", "web");
     let out = run_ok(project.undra().args(["build", "--platform", "host"]));
     let stdout = String::from_utf8_lossy(&out.stdout);
+    // ADR-044: the core's namespace, by default its package name in snake case.
     let name = if cfg!(target_os = "macos") {
-        "libundra_core.dylib"
+        "libhostbuild_core.dylib"
     } else if cfg!(windows) {
-        "undra_core.dll"
+        "hostbuild_core.dll"
     } else {
-        "libundra_core.so"
+        "libhostbuild_core.so"
     };
     assert!(
         project.root.join("build/host").join(name).is_file(),

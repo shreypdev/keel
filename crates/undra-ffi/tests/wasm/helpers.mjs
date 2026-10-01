@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export function fixturePath() {
   if (process.env.UNDRA_FFI_FIXTURE_WASM) return process.env.UNDRA_FFI_FIXTURE_WASM;
   for (const profile of ["release-wasm", "release", "debug"]) {
-    const p = resolve(here, `../fixture/target/wasm32-unknown-unknown/${profile}/undra_core.wasm`);
+    const p = resolve(here, `../fixture/target/wasm32-unknown-unknown/${profile}/undra_fixture.wasm`);
     if (existsSync(p)) return p;
   }
   throw new Error("build the fixture first: see crates/undra-ffi/tests/wasm/README.md");

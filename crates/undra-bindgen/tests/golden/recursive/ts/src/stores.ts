@@ -11,6 +11,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenRecursive } from "./core.js";
 import { type ParseError, ParseErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -54,7 +55,7 @@ export class Outline extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<Outline> {
+  static async create(core: UndraCore = UndraGoldenRecursive.core): Promise<Outline> {
     let handle: bigint;
     try {
       handle = await core.construct(

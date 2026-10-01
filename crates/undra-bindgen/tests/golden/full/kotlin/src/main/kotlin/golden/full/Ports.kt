@@ -12,7 +12,7 @@ import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.encodeToByteArray
 
 /** Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `LoadOptions.onError`; the methods do not throw. */
-class ConnectivityEvents(private val core: UndraCore = UndraCore.shared) {
+class ConnectivityEvents(private val core: UndraCore = UndraPlaygroundCore.core) {
     fun changed(online: Boolean, kind: NetKind) {
         val w = UndraWriter()
         w.writeBool(online)

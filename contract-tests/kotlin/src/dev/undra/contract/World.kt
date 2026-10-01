@@ -1,6 +1,7 @@
 package dev.undra.contract
 
 import dev.undra.playground.core.UndraIds
+import dev.undra.playground.core.UndraPlaygroundCore
 import dev.undra.playground.core.RemoteConfig
 import dev.undra.playground.core.configureRemote
 import dev.undra.runtime.UndraCore
@@ -101,10 +102,10 @@ class Bootstrap {
         StandardPorts.Log.PORT_ID to portCalls.counting("Log", log.portImpl()),
     )
 
-    /** Loads the core with the bindings' schema hash and the harness adapters. */
+    /** Loads the core through the bindings' entry (which brings the schema hash) with the harness adapters. */
     fun load(): World {
-        val options = LoadOptions(expectedSchemaHash = UndraIds.SCHEMA_HASH, adapters = adapters(), onError = { unhandled.add(it) })
-        val core = UndraCore.load(options)
+        val options = LoadOptions(adapters = adapters(), onError = { unhandled.add(it) })
+        val core = UndraPlaygroundCore.load(options)
         return World(core, clock, server, kv, log, portCalls, options, unhandled).also { world = it }
     }
 }

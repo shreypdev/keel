@@ -2,11 +2,13 @@
 //!
 //! | Target | Result below `build/` | How |
 //! |---|---|---|
-//! | `host` | `host/libundra_core.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM); on macOS its install name is `@rpath/libundra_core.dylib`, not a path into `target/` |
-//! | `ios` | `ios/UndraCore.xcframework` | the shim as a staticlib for device and simulator, `xcodebuild -create-xcframework` |
-//! | `android` | `android/jniLibs/<abi>/libundra_core.so` | `cargo ndk`, 16 KB page aligned |
-//! | `web` | `web/undra_core.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present |
-//! | `rn` | `ios/UndraCore.xcframework` + `ios/UndraCore.podspec`, `android/jniLibs/` | the iOS and Android builds and the pod React Native apps link (ADR-038) |
+//! | `host` | `host/lib<ns>.{dylib,so}` | the shim as a cdylib, with the JNI shim (Kotlin on the JVM); on macOS its install name is `@rpath/lib<ns>.dylib`, not a path into `target/` |
+//! | `ios` | `ios/<Ns>Core.xcframework` | the shim as a staticlib for device and simulator, each slice prelinked into one object (`lib<ns>.a`), with `<ns>_undra.h`, `xcodebuild -create-xcframework` |
+//! | `android` | `android/jniLibs/<abi>/lib<ns>.so` | `cargo ndk`, 16 KB page aligned |
+//! | `web` | `web/<ns>.wasm` | the wasm profile of SPEC 7, then `wasm-opt -Oz` when present |
+//! | `rn` | `ios/<Ns>Core.xcframework` + `ios/<Ns>Core.podspec`, `android/jniLibs/` | the iOS and Android builds and the pod React Native apps link (ADR-038) |
+//!
+//! `<ns>` is the core's namespace (`[core] namespace`, ADR-044) and `<Ns>Core` its `CoreNames::bundle`.
 //!
 //! Every target prints the size of what it made, next to the budget of the blueprint.
 
@@ -208,7 +210,7 @@ mod tests {
     fn the_summary_shows_sizes_notes_and_budgets() {
         let a = Artifact {
             label: "web".into(),
-            path: PathBuf::from("/p/build/web/undra_core.wasm"),
+            path: PathBuf::from("/p/build/web/todo_core.wasm"),
             size: 241_000,
             budget: Some("120 KB gzip".into()),
             note: Some("gzip 88.1 KB".into()),
@@ -218,6 +220,6 @@ mod tests {
             text.contains("241.0 KB (gzip 88.1 KB)  [budget 120 KB gzip]"),
             "{text}"
         );
-        assert!(text.contains("build/web/undra_core.wasm"), "{text}");
+        assert!(text.contains("build/web/todo_core.wasm"), "{text}");
     }
 }

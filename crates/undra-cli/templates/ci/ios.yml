@@ -13,9 +13,6 @@
           targets: @@IOS_TARGETS@@
       - uses: Swatinem/rust-cache@v2
 @@INSTALL_UNDRA@@      - name: Build (the "Build the Undra core" Xcode phase builds the core first)
-        env:
-          # The Swift runtime package ships link-time stand-ins for the core; this switches them off.
-          UNDRA_LINK_CORE: "1"
         run: >
           xcodebuild
           -project ios/@@APP@@.xcodeproj

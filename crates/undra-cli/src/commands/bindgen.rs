@@ -152,8 +152,9 @@ fn schema_from_core(session: &Session<'_>, release: bool, docs: bool) -> Result<
         .step("Building the core for this machine to read its schema");
     let library = host::cdylib(session, release)?;
     let core = session.core()?;
+    let namespace = session.namespace()?;
     session.ui.step("Reading the schema from the built library");
-    schema::load_from_library(&library, &core.package, docs)
+    schema::load_from_library(&library, &namespace, &core.package, docs)
 }
 
 /// The generator configuration and output locations.
@@ -172,6 +173,11 @@ fn plan(
         let cfg = &project.config.bindings;
         generator.swift_module = project.swift_module();
         generator.kotlin_package = project.kotlin_package();
+        // The namespace names the generated entry point (ADR-044). From a schema file, without a
+        // core Cargo can describe, the default is derived from the schema's crate name.
+        if project.config.core_namespace.is_some() || session.core().is_ok() {
+            generator.namespace = session.namespace()?;
+        }
         if let Some(scope) = &cfg.ts_scope {
             generator.ts_scope.clone_from(scope);
         }

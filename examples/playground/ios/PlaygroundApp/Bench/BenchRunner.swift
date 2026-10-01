@@ -76,7 +76,7 @@ final class BenchRunner {
         let adapters = Adapters.platformDefault
             .removing(portId: fnv1a32("port.Connectivity"))
             .replacing(KvAdapter(directory: kvDirectory))
-        return try UndraCore.load(.inproc(adapters: adapters, expectedSchemaHash: UndraIds.schemaHash, onError: { _ in }))
+        return try UndraPlaygroundCore.load(.inproc(adapters: adapters, onError: { _ in }))
     }
 
     // MARK: The full run
@@ -121,7 +121,7 @@ final class BenchRunner {
         ]
     }
 
-    /// One cold start in a fresh process: the first `UndraCore.load` of the process, then the restore of the snapshot the
+    /// One cold start in a fresh process: the first `UndraPlaygroundCore.load` of the process, then the restore of the snapshot the
     /// full run left behind.
     func runCold() throws -> [String: Any] {
         BenchRunner.emptyKvDirectory()
@@ -362,7 +362,7 @@ final class BenchRunner {
             "first_load_in_run_ns": firstLoadNs,
             "launches": [] as [[String: Any]],
             "reload_in_process": ["load_ns": BenchSummary(samples: loads).json, "restore_ns": BenchSummary(samples: restores).json],
-            "note": "a 100 KB snapshot is \(config.snapshotTodos) to-dos of \(config.snapshotTitleLength) characters (the host row restores four stores of 250 rows of 100 bytes); load = `UndraCore.load` of the linked core, which starts the runtime and its core thread; the C library is statically linked, so there is no dlopen",
+            "note": "a 100 KB snapshot is \(config.snapshotTodos) to-dos of \(config.snapshotTitleLength) characters (the host row restores four stores of 250 rows of 100 bytes); load = `UndraPlaygroundCore.load` of the linked core, which starts the runtime and its core thread; the C library is statically linked, so there is no dlopen",
         ]
     }
 

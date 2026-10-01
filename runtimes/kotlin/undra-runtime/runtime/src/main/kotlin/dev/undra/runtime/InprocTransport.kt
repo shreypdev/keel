@@ -10,54 +10,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The [UndraNative] entry points as an interface, so that the in-process transport can be exercised
- * against an in-memory fake of the JNI contract when the native library is not around.
- */
-internal interface NativeApi {
-    val isAvailable: Boolean
-    val unavailableReason: Throwable?
-    fun abiVersion(): Int
-    fun schemaHash(): Long
-    fun init(cfg: ByteArray, cb: UndraNative.Callbacks): Int
-    fun call(payload: ByteArray): Int
-    fun callSync(payload: ByteArray): ByteArray
-    fun cancel(callId: Int)
-    fun streamCredit(callId: Int, credit: Int)
-    fun observe(handle: Long, signalId: Int, on: Boolean)
-    fun release(handle: Long)
-    fun portReply(payload: ByteArray)
-    fun event(portId: Int, methodId: Int, payload: ByteArray)
-    fun timerFired(timerId: Int)
-    fun snapshot(): ByteArray
-    fun restore(snapshot: ByteArray): Int
-    fun statsJson(): String
-    fun shutdown()
-}
-
-/** The real thing: straight calls to [UndraNative]. */
-internal object JniNativeApi : NativeApi {
-    override val isAvailable: Boolean get() = UndraNative.isAvailable
-    override val unavailableReason: Throwable? get() = UndraNative.unavailableReason
-    override fun abiVersion(): Int = UndraNative.abiVersion()
-    override fun schemaHash(): Long = UndraNative.schemaHash()
-    override fun init(cfg: ByteArray, cb: UndraNative.Callbacks): Int = UndraNative.init(cfg, cb)
-    override fun call(payload: ByteArray): Int = UndraNative.call(payload)
-    override fun callSync(payload: ByteArray): ByteArray = UndraNative.callSync(payload)
-    override fun cancel(callId: Int) = UndraNative.cancel(callId)
-    override fun streamCredit(callId: Int, credit: Int) = UndraNative.streamCredit(callId, credit)
-    override fun observe(handle: Long, signalId: Int, on: Boolean) = UndraNative.observe(handle, signalId, on)
-    override fun release(handle: Long) = UndraNative.release(handle)
-    override fun portReply(payload: ByteArray) = UndraNative.portReply(payload)
-    override fun event(portId: Int, methodId: Int, payload: ByteArray) = UndraNative.event(portId, methodId, payload)
-    override fun timerFired(timerId: Int) = UndraNative.timerFired(timerId)
-    override fun snapshot(): ByteArray = UndraNative.snapshot()
-    override fun restore(snapshot: ByteArray): Int = UndraNative.restore(snapshot)
-    override fun statsJson(): String = UndraNative.statsJson()
-    override fun shutdown() = UndraNative.shutdown()
-}
-
-/**
- * The core in this process, over JNI ([UndraNative]).
+ * A core in this process, over the JNI natives of its generated `UndraCoreNative` ([native], ADR-044).
  *
  * The callbacks arrive on the core thread, a blocking-pool thread or the calling thread, possibly with
  * the core lock held, and hand out direct buffers that die when the callback returns. So each callback
@@ -66,44 +19,49 @@ internal object JniNativeApi : NativeApi {
  * `E_REENTRANT` reason instead of a deadlock),
  * and it never lets an exception escape into native code.
  *
- * The native runtime is process-global, so the transport claims it on a successful [connect]: a second
- * in-process core is refused while one is loaded. [close] ends the native core's work through
- * [UndraNative.shutdown] (ADR-034: its tasks, timers and port traffic stop, in-flight calls end) and gives
- * the claim back, so a later [UndraCore.load] in the same process starts a fresh core.
+ * Each core's native runtime is global to its library, so the transport claims the core's namespace on a
+ * successful [connect]: a second in-process core with the same namespace is refused while one is loaded, and
+ * cores with different namespaces run side by side. [close] ends the native core's work through
+ * [NativeApi.shutdown] (ADR-034: its tasks, timers and port traffic stop, in-flight calls end) and gives
+ * the claim back, so a later load of the same core in the same process starts a fresh one.
  */
-internal class InprocTransport(private val native: NativeApi = JniNativeApi) : Transport {
+internal class InprocTransport(private val native: NativeApi) : Transport {
     override val mode: Mode get() = Mode.INPROC
     override val isSynchronous: Boolean get() = true
 
     @Volatile
     private var events: TransportEvents? = null
     private val closed = AtomicBoolean(false)
-    /** This transport started the native core (and so owns its shutdown and the claim). */
+    /** The namespace this transport claimed and started the native core under (so it owns the shutdown and the claim), or `null`. */
     @Volatile
-    private var started = false
+    private var started: String? = null
     private val syncReply = ThreadLocal<ByteArray?>()
     private val insideCallback = ThreadLocal.withInitial { false }
 
     override fun connect(events: TransportEvents, expectedSchemaHash: ULong): ULong {
+        val namespace = native.namespace
         if (!native.isAvailable) {
             throw UndraException(
-                "the native Undra core library could not be loaded (${native.unavailableReason?.message}); " +
-                    "put it on java.library.path, or set -D${UndraNative.PATH_PROPERTY}=<file> / -D${UndraNative.NAME_PROPERTY}=<name> " +
-                    "(default ${UndraNative.DEFAULT_NAME}), or use Mode.REMOTE",
+                "the native library of the Undra core `$namespace` could not be loaded (${native.unavailableReason?.message}); " +
+                    "put lib$namespace on java.library.path (Android: jniLibs/<abi>/lib$namespace.so), " +
+                    "or set -D${NativeLibrary.pathProperty(namespace)}=<file>, or use Mode.REMOTE",
                 native.unavailableReason,
             )
         }
         val abi = native.abiVersion()
         if (abi != ABI_VERSION) {
-            throw UndraException("the native Undra core speaks ABI version $abi, but this runtime speaks $ABI_VERSION; use matching builds")
+            throw UndraException(
+                "the native Undra core `$namespace` speaks ABI version $abi, but this runtime speaks $ABI_VERSION; " +
+                    "rebuild the core with the undra-ffi that matches this runtime",
+            )
         }
         // Compare before initializing so that a core built from another schema never starts.
         val got = native.schemaHash().toULong()
         if (got != expectedSchemaHash) return got
-        if (!claimed.add(native)) {
+        if (!claimed.add(namespace)) {
             throw UndraException(
-                "an in-process Undra core is already loaded in this process; " +
-                    "use UndraCore.shared instead of loading it again, or close it (UndraCore.close()) before loading another",
+                "the Undra core `$namespace` is already loaded in this process; use the core its load returned " +
+                    "(its generated Undra<Namespace>.core) instead of loading it again, or close it before loading it again",
             )
         }
         this.events = events
@@ -111,15 +69,15 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
             native.init(encodeConfig(), callbacks)
         } catch (e: Throwable) {
             this.events = null
-            claimed.remove(native)
+            claimed.remove(namespace)
             throw e
         }
         if (code != 0) {
             this.events = null
-            claimed.remove(native)
-            throw UndraException("undra_init failed with code $code")
+            claimed.remove(namespace)
+            throw UndraException("init of the Undra core `$namespace` failed with code $code")
         }
-        started = true
+        started = namespace
         return got
     }
 
@@ -185,7 +143,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
     }
 
     /**
-     * Ends the native core and **waits for it**: [UndraNative.shutdown] returns after the core's threads are joined
+     * Ends the native core and **waits for it**: [NativeApi.shutdown] returns after the core's threads are joined
      * and the port callbacks running on other threads have returned (SPEC 6, host contract 5). Refused from a
      * callback, where it would wait for its own thread.
      */
@@ -197,11 +155,11 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
         // UndraCore above has already failed its pending calls as closed.
         events = null
         // Only the transport that started the core ends it: a failed or refused connect owns nothing.
-        if (!started) return
+        val namespace = started ?: return
         try {
             native.shutdown()
         } finally {
-            claimed.remove(native)
+            claimed.remove(namespace)
         }
     }
 
@@ -231,7 +189,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
         }
     }
 
-    private val callbacks = object : UndraNative.Callbacks {
+    private val callbacks = object : NativeCallbacks {
         override fun onReply(callId: Int, reply: ByteBuffer) = inCallback("reply") {
             val target = events ?: return@inCallback
             try {
@@ -287,14 +245,15 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
     }
 
     private companion object {
-        const val ABI_VERSION: Int = 1
+        /** The native ABI this runtime speaks: version 2 is the per-core function table of ADR-044. */
+        const val ABI_VERSION: Int = 2
         const val PORT_SYNC: Int = 0
         const val PORT_ASYNC: Int = 1
         const val PORT_UNAVAILABLE: Int = 2
         val NO_BYTES = ByteArray(0)
 
-        /** The processes' natives that have a core started on them. */
-        val claimed: MutableSet<NativeApi> = ConcurrentHashMap.newKeySet()
+        /** The namespaces of the cores started in this process (ADR-044: one in-process core per namespace). */
+        val claimed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
         /** Copies the readable bytes of [buffer] without touching its position or limit. */
         fun copy(buffer: ByteBuffer): ByteArray {

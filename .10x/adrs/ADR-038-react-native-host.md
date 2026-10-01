@@ -17,6 +17,12 @@ bind to today's v1 symbols and are **transitional until ADR-044's `abi-table` pi
 migrate is written in each, and the code is arranged so the migration is the two shim files of
 decision 1 plus the pod (ADR-044 §8).
 
+*Landed with `abi-table` (2026-10-01; `.10x/decisions/sde/abi-table.md`):* the transitional notes below are
+what is built, with one difference. On iOS the shim does not call the core's header: the module is compiled
+once for every core and names none, so each core's pod compiles a class `UndraCoreTable_<namespace>` whose
+`+api` returns the table, and the shim looks the class up by name (`objc_getClass`). Android `dlsym`s
+`<namespace>_undra_api` in `lib<namespace>.so` as written.
+
 ## Context
 
 Teams that keep React Native for their UI cannot put Undra under it today:

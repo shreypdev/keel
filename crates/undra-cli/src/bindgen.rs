@@ -92,6 +92,7 @@ pub fn plan_files(schema: &Schema, plan: &Plan) -> Result<Vec<GeneratedFile>> {
             path: "swift/Package.swift".into(),
             contents: swift_package(
                 &plan.generator.swift_module,
+                &plan.generator.core_names().ffi_module(),
                 &plan.runtimes.swift,
                 &plan.swift_dir(),
             ),
@@ -141,9 +142,15 @@ fn bindgen_failure(errors: Vec<BindgenError>) -> CliError {
 }
 
 /// `Package.swift` of the generated Swift package: the bindings as a library that depends on the
-/// `UndraRuntime` package.
+/// `UndraRuntime` package and on `ffi_module`, the C target that declares the core's entry
+/// (`<namespace>_undra_api`, ADR-044; the function itself is linked into the app with the core).
 #[must_use]
-pub fn swift_package(module: &str, runtime: &RuntimeRef, package_dir: &Path) -> String {
+pub fn swift_package(
+    module: &str,
+    ffi_module: &str,
+    runtime: &RuntimeRef,
+    package_dir: &Path,
+) -> String {
     let (dependency, package_id) = match runtime {
         RuntimeRef::Path(dir) => {
             let rel = relative_path(package_dir, dir).unwrap_or_else(|| dir.clone());
@@ -174,9 +181,14 @@ pub fn swift_package(module: &str, runtime: &RuntimeRef, package_dir: &Path) -> 
          \x20   products: [.library(name: \"{module}\", targets: [\"{module}\"])],\n\
          \x20   dependencies: [{dependency}],\n\
          \x20   targets: [\n\
+         \x20       // Declares the core's entry point; the core itself is linked into the app.\n\
+         \x20       .target(name: \"{ffi_module}\", path: \"Sources/{ffi_module}\"),\n\
          \x20       .target(\n\
          \x20           name: \"{module}\",\n\
-         \x20           dependencies: [.product(name: \"UndraRuntime\", package: \"{package_id}\")],\n\
+         \x20           dependencies: [\n\
+         \x20               \"{ffi_module}\",\n\
+         \x20               .product(name: \"UndraRuntime\", package: \"{package_id}\"),\n\
+         \x20           ],\n\
          \x20           path: \"Sources/{module}\"\n\
          \x20       ),\n\
          \x20   ],\n\
@@ -421,6 +433,7 @@ mod tests {
         let runtimes = Runtimes::in_repo(Path::new("/src/undra"));
         let text = swift_package(
             "DemoCore",
+            "DemoCoreFFI",
             &runtimes.swift,
             Path::new("/proj/generated/swift"),
         );
@@ -430,12 +443,18 @@ mod tests {
         );
         assert!(text.contains("package: \"UndraRuntime\""), "{text}");
         assert!(text.contains("path: \"Sources/DemoCore\""), "{text}");
+        // ADR-044: the C target declaring the core's entry, which the bindings depend on.
+        assert!(
+            text.contains(".target(name: \"DemoCoreFFI\", path: \"Sources/DemoCoreFFI\")"),
+            "{text}"
+        );
     }
 
     #[test]
     fn the_registry_flavours_name_the_published_packages() {
         let swift = swift_package(
             "DemoCore",
+            "DemoCoreFFI",
             &RuntimeRef::Registry {
                 version: "0.1".into(),
             },

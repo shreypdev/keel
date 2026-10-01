@@ -1,12 +1,14 @@
-//! Regression guard for ADR-029: a cdylib `undra build` produces keeps the app core's schema
-//! registrations and undra-ffi's JNI exports when it is *loaded* (not linked against).
+//! Regression guard for ADR-029 and ADR-044: a cdylib `undra build` produces keeps the app core's
+//! schema registrations when it is *loaded* (not linked against), and exports exactly the core's
+//! entry, `<namespace>_undra_api`, and `JNI_OnLoad` -- none of C ABI version 1's global `undra_*`
+//! functions and no `Java_*` natives.
 //!
-//! The platform runtimes load `libundra_core` with no link-time reference to it: `undra bindgen`
-//! dlopens it for the schema, and the Kotlin runtime `System.loadLibrary`s it and binds the JNI
-//! natives. An incremental build on macOS dead-strips the app core's `inventory::submit!` statics
-//! (the schema, SPEC 2.4) and undra-ffi's `#[no_mangle]` JNI exports (SPEC 6.1) because they live in
-//! dependency rlibs the linker prunes. This test builds the playground core through the real `undra`
-//! binary and asserts, on the loaded library, that neither was stripped.
+//! The platform runtimes load the core with no link-time reference to it: `undra bindgen` dlopens it
+//! for the schema, and the generated Kotlin `UndraCoreNative` `System.loadLibrary`s it and has its
+//! `JNI_OnLoad` register the natives. An incremental build on macOS dead-strips the app core's
+//! `inventory::submit!` statics (the schema, SPEC 2.4) because they live in a dependency rlib the
+//! linker prunes. This test builds the playground core through the real `undra` binary and asserts,
+//! on the loaded library, that nothing was stripped and nothing else is exported.
 //!
 //! `#[ignore]` because it runs a full `undra build` (compiles the core and the shim cdylib); run it
 //! with `--ignored`, as CI does. It deliberately does not pin `CARGO_INCREMENTAL`: `undra build`
@@ -24,9 +26,16 @@ fn playground() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/playground")
 }
 
+/// The playground's namespace: the default, its package name in snake case.
+const NAMESPACE: &str = "playground_core";
+
 fn built_core(project: &Path) -> Option<PathBuf> {
     let host = project.join("build/host");
-    for name in ["libundra_core.dylib", "libundra_core.so", "undra_core.dll"] {
+    for name in [
+        "libplayground_core.dylib",
+        "libplayground_core.so",
+        "playground_core.dll",
+    ] {
         let candidate = host.join(name);
         if candidate.is_file() {
             return Some(candidate);
@@ -53,11 +62,12 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
         .expect("spawn `undra build`");
     assert!(status.success(), "`undra build --platform host` failed");
 
-    let lib = built_core(&project).expect("undra build did not leave build/host/libundra_core.*");
+    let lib =
+        built_core(&project).expect("undra build did not leave build/host/libplayground_core.*");
 
     // The schema: reading it through the CLI's own loader also checks the library's self-reported
     // hash against its JSON. It must be the real schema, not the empty one a strip leaves behind.
-    let schema = undra_cli::schema::load_from_library(&lib, "playground-core", true)
+    let schema = undra_cli::schema::load_from_library(&lib, NAMESPACE, "playground-core", true)
         .expect("the built core library is not a readable Undra core");
     let empty = schema.records.is_empty()
         && schema.enums.is_empty()
@@ -81,22 +91,42 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
         "the loaded core reports the empty-schema hash {EMPTY_SCHEMA_HASH:#018x}: registrations stripped"
     );
 
-    // The JNI exports: `System.loadLibrary` must be able to bind them, and `JNI_OnLoad` must run.
-    let wanted = [
-        "undra_abi_version",
-        "undra_schema_hash",
-        "JNI_OnLoad",
-        "Java_dev_undra_runtime_UndraNative_abiVersion",
-        // ADR-034: Kotlin's `UndraCore.close()` ends an in-process core through it.
-        "Java_dev_undra_runtime_UndraNative_shutdown",
-    ];
+    // ADR-044 changes the C ABI, not the wire: the schema hash is the one the committed bindings
+    // were generated for.
+    let ids = std::fs::read_to_string(project.join("generated/ts/src/ids.ts"))
+        .expect("the playground's committed TypeScript bindings");
+    let committed = format!("0x{:016x}n", schema.hash());
+    assert!(
+        ids.contains(&committed),
+        "the loaded core's schema hash {committed} is not the one of the committed bindings"
+    );
+
+    // The exports: the table entry and `JNI_OnLoad` (whose registration the generated
+    // `UndraCoreNative` relies on), nothing of C ABI version 1.
+    let wanted = ["playground_core_undra_api", "JNI_OnLoad"];
     let present =
         undra_cli::schema::symbols_present(&lib, &wanted).expect("could not load the core");
     for (name, ok) in wanted.iter().zip(present) {
         assert!(
             ok,
-            "the built core does not export `{name}`: undra-ffi's exports were dead-stripped from the \
-             loaded library (ADR-029), so `System.loadLibrary` would fail with UnsatisfiedLinkError"
+            "the built core does not export `{name}`: the shim's `export_core!` entry points were \
+             lost, so neither a host nor `System.loadLibrary` could reach the core (ADR-044)"
+        );
+    }
+    let gone = [
+        "undra_abi_version",
+        "undra_schema_hash",
+        "undra_init",
+        "undra_call_sync",
+        "Java_dev_undra_runtime_UndraNative_abiVersion",
+        "Java_dev_undra_runtime_UndraNative_shutdown",
+    ];
+    let present = undra_cli::schema::symbols_present(&lib, &gone).expect("could not load the core");
+    for (name, exported) in gone.iter().zip(present) {
+        assert!(
+            !exported,
+            "the built core still exports `{name}`: a core exports one namespaced entry (ADR-044), \
+             or two cores in one process would bind each other's symbols"
         );
     }
 }

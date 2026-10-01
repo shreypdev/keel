@@ -428,7 +428,7 @@ class CallErrorTests : Suite() {
             assertEq(null, UndraCore.current, "the placeholder never becomes the shared core")
             val sync = assertThrows<UndraTransportException> { shared.callSync(TARGET, METHOD, ARGS) }
             assertEq(UndraTransportException.Reason.CLOSED, sync.reason)
-            assertTrue(sync.message!!.contains("UndraCore.load"), "the message says how to fix it: ${sync.message}")
+            assertTrue(sync.message!!.contains("Undra<Namespace>.load()"), "the message says how to fix it: ${sync.message}")
             assertThrows<UndraTransportException> { runBlocking { shared.call(TARGET, METHOD, ARGS) } }
             assertThrows<UndraTransportException> { runBlocking { shared.stream(TARGET, METHOD, ARGS).collect {} } }
             val constructor = assertThrows<UndraCallError.Unavailable> { shared.constructObject(1u, 2u, ARGS) }

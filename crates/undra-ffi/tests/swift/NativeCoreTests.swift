@@ -1,10 +1,13 @@
-// The real C ABI driven by the real Swift runtime (UndraCore over InprocTransport), against the
-// fixture core (crates/undra-ffi/tests/fixture) linked as a static library. It is not part of the
-// Swift package: run.sh copies the package to a scratch directory, adds this file and links the
-// core, so the Swift tree is untouched. Skips itself when the linked ABI is the stub.
+// The real C ABI (version 2: one `UndraApi` table per core, ADR-044) driven by the real Swift
+// runtime (UndraCore over InprocTransport), against the fixture core
+// (crates/undra-ffi/tests/fixture, namespace `undra_fixture`). It is not part of the Swift package:
+// run.sh builds a scratch package that depends on the runtime, declares the fixture's
+// `undra_fixture_undra_api` in the C module `UndraFixtureCoreFFI` (what bindgen generates for a
+// core) and links the fixture, so the Swift tree is untouched.
 
 import Foundation
 import UndraFFI
+import UndraFixtureCoreFFI
 import XCTest
 
 @testable import UndraRuntime
@@ -43,6 +46,63 @@ private func readU32(_ bytes: [UInt8], at offset: Int = 0) -> UInt32 {
 private func readI64(_ bytes: [UInt8]) throws -> Int64 {
     var r = UndraReader(bytes)
     return try r.readI64()
+}
+
+/// What `undra_fixture_undra_api()` returns: the fixture core's table.
+private var fixtureTable: UnsafeRawPointer {
+    return undra_fixture_undra_api()
+}
+
+/// The fixture core's table, copied.
+private var fixtureApi: UndraApi {
+    return fixtureTable.load(as: UndraApi.self)
+}
+
+/// The schema hash the fixture was built from, read from its table.
+private var fixtureHash: UInt64 {
+    return fixtureApi.schema_hash
+}
+
+/// The version call every check below makes: proves the core behind a load is running.
+private func coreVersion(_ core: UndraCore) throws -> String {
+    let bytes = try core.callSync(.freeFunction(methodId: fnv("fn.version")), method: fnv("fn.version"), args: [])
+    var reader = UndraReader(bytes)
+    return try reader.readString()
+}
+
+/// A copy of the fixture's table (same namespace, same entries) whose `init` counts its calls before
+/// it forwards to the fixture's own, and whose header fields a test may change: what proves a
+/// refused load never reached `init` of the real core.
+private final class CountingTable {
+    static let initCalls = Guarded<Int>(0)
+
+    let api: UnsafeMutablePointer<UndraApi>
+
+    var pointer: UnsafeRawPointer {
+        return UnsafeRawPointer(api)
+    }
+
+    init(abiVersion: UInt32 = UndraCore.abiVersion) {
+        var table = fixtureApi
+        table.abi_version = abiVersion
+        table.`init` = { cfg, len, reply, changes, stream, user in
+            CountingTable.initCalls.withLock { $0 += 1 }
+            let real = undra_fixture_undra_api().load(as: UndraApi.self).`init`!
+            return real(cfg, len, reply, changes, stream, user)
+        }
+        api = UnsafeMutablePointer<UndraApi>.allocate(capacity: 1)
+        api.initialize(to: table)
+        CountingTable.initCalls.withLock { $0 = 0 }
+    }
+
+    var inits: Int {
+        return CountingTable.initCalls.withLock { $0 }
+    }
+
+    deinit {
+        api.deinitialize(count: 1)
+        api.deallocate()
+    }
 }
 
 private final class Records: @unchecked Sendable {
@@ -84,21 +144,115 @@ final class NativeCoreTests: XCTestCase {
             .replacing(portId: portId("Log"), with: log)
     }
 
+    /// Loads the fixture through `table` and shuts it down when the test ends.
+    private func load(_ table: UnsafeRawPointer, expected: UInt64? = nil) throws -> UndraCore {
+        let core = try UndraCore.load(.inproc(api: table, adapters: Adapters.none, expectedSchemaHash: expected ?? fixtureHash))
+        addTeardownBlock { core.shutdown() }
+        return core
+    }
+
+    // MARK: The table
+
+    func testTheFixtureExportsAVersion2TableNamedAfterItsNamespace() throws {
+        let api = fixtureApi
+        XCTAssertEqual(api.abi_version, 2)
+        XCTAssertEqual(api.abi_version, UndraCore.abiVersion)
+        XCTAssertEqual(Int(api.size), MemoryLayout<UndraApi>.size, "the header's UndraApi and the core's agree in size")
+        XCTAssertNotEqual(api.schema_hash, 0)
+        XCTAssertEqual(api.name_space.map { String(cString: $0) }, "undra_fixture")
+        XCTAssertTrue(undra_fixture_undra_api() == fixtureTable, "one immutable table per core")
+        let table = try CoreTable(reading: fixtureTable)
+        XCTAssertEqual(table.namespace, "undra_fixture")
+        XCTAssertEqual(table.schemaHash, api.schema_hash)
+    }
+
+    // MARK: Refusals before init
+
+    func testATableOfAnotherVersionIsRefusedBeforeInit() throws {
+        for version: UInt32 in [1, 3] {
+            let table = CountingTable(abiVersion: version)
+            XCTAssertThrowsError(try load(table.pointer), "version \(version)") { error in
+                XCTAssertEqual(error as? UndraLoadError, UndraLoadError.abiMismatch(expected: 2, got: version))
+            }
+            XCTAssertEqual(table.inits, 0, "version \(version): init of the core must not run")
+        }
+        XCTAssertFalse(InprocTransport.isClaimed("undra_fixture"))
+        XCTAssertEqual(try coreVersion(try load(fixtureTable)), "undra-ffi test core 1", "the core is still free to load")
+    }
+
+    func testASchemaMismatchIsRefusedBeforeInit() throws {
+        let table = CountingTable()
+        XCTAssertThrowsError(try load(table.pointer, expected: fixtureHash &+ 1)) { error in
+            XCTAssertEqual(error as? UndraSchemaMismatchError, UndraSchemaMismatchError(expected: fixtureHash &+ 1, got: fixtureHash))
+        }
+        XCTAssertEqual(table.inits, 0, "init of the core must not run for bindings of another schema")
+        XCTAssertFalse(InprocTransport.isClaimed("undra_fixture"))
+
+        let core = try load(table.pointer)
+        XCTAssertEqual(table.inits, 1, "the counting table does reach the core's init")
+        XCTAssertEqual(try coreVersion(core), "undra-ffi test core 1")
+    }
+
+    // MARK: One core per namespace
+
+    func testASecondLoadOfTheNamespaceIsRefusedWhileItIsLoadedAndAllowedAfterClose() throws {
+        let core = try load(fixtureTable)
+        XCTAssertTrue(InprocTransport.isClaimed("undra_fixture"))
+
+        XCTAssertThrowsError(try load(fixtureTable), "the same table again") { error in
+            XCTAssertEqual(error as? UndraLoadError, UndraLoadError.alreadyLoaded)
+        }
+        let copy = CountingTable()
+        XCTAssertThrowsError(try load(copy.pointer), "another table of the same namespace") { error in
+            XCTAssertEqual(error as? UndraLoadError, UndraLoadError.alreadyLoaded)
+        }
+        XCTAssertEqual(copy.inits, 0, "a refused load never reaches init")
+        XCTAssertEqual(try coreVersion(core), "undra-ffi test core 1", "the loaded core is unaffected")
+
+        core.shutdown()
+        XCTAssertFalse(InprocTransport.isClaimed("undra_fixture"))
+        let again = try load(fixtureTable)
+        XCTAssertEqual(try coreVersion(again), "undra-ffi test core 1", "shutdown leaves the core ready for init")
+    }
+
+    // MARK: The generated entry's runtime half
+
+    func testTheEntryFillsInTheTableAndTheHashAndHandsOutThePlaceholderAfterClose() throws {
+        let entry = UndraCoreEntry(namespace: "undra_fixture", schemaHash: fixtureHash, api: { undra_fixture_undra_api() })
+        XCTAssertTrue(entry.core === UndraCore.unloaded, "before load: the closed placeholder")
+
+        let core = try entry.load(.inproc(adapters: Adapters.none))
+        XCTAssertTrue(entry.core === core)
+        XCTAssertEqual(core.schemaHash, fixtureHash)
+        XCTAssertEqual(try coreVersion(entry.core), "undra-ffi test core 1")
+
+        core.shutdown()
+        XCTAssertTrue(entry.core === UndraCore.unloaded, "after close: the closed placeholder UndraCore.shared returns too")
+        XCTAssertTrue(entry.core.isShutDown)
+        XCTAssertThrowsError(try coreVersion(entry.core)) { error in
+            XCTAssertEqual(UndraCallError.mapped(error) as? UndraCallError, .unavailable(.closed))
+        }
+
+        let again = try entry.load(.inproc(adapters: Adapters.none))
+        addTeardownBlock { again.shutdown() }
+        XCTAssertTrue(entry.core === again)
+        XCTAssertEqual(try coreVersion(again), "undra-ffi test core 1")
+    }
+
+    // MARK: The whole ABI
+
     func testRealCoreOverTheCABI() async throws {
-        try XCTSkipUnless(InprocTransport.linkedABIVersion == 1, "the real core is not linked")
-        let hash = undra_schema_hash()
+        let hash = fixtureHash
         XCTAssertNotEqual(hash, 0)
         let records = Records()
 
-        // Load, use, shut down, load again: undra_shutdown must leave the process ready for undra_init.
+        // Load, use, shut down, load again: shutdown must leave the process ready for init.
         for round in 1 ... 2 {
-            let core = try UndraCore.load(.inproc(adapters: adapters(records), expectedSchemaHash: hash))
+            let core = try UndraCore.load(.inproc(api: fixtureTable, adapters: adapters(records), expectedSchemaHash: hash))
             XCTAssertEqual(core.schemaHash, hash, "round \(round)")
 
             // A free function and a constructor.
-            let version = try core.callSync(.freeFunction(methodId: fnv("fn.version")), method: fnv("fn.version"), args: [])
-            var vr = UndraReader(version)
-            XCTAssertEqual(try vr.readString(), "undra-ffi test core 1")
+            XCTAssertEqual(try coreVersion(core), "undra-ffi test core 1")
             let calc = try core.construct(type: fnv("Calculator"), method: mid("Calculator", "new"), args: i64(100))
             func on(_ name: String) -> CallTarget { .objectMethod(handle: calc, methodId: mid("Calculator", name)) }
 

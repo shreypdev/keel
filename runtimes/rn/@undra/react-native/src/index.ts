@@ -1,4 +1,4 @@
-// `@undra/react-native`: the native Undra core under a React Native app (ADR-038).
+// `@undra/react-native`: native Undra cores under a React Native app (ADR-038, ADR-044).
 //
 // The polyfills come first: `@undra/runtime` creates its UTF-8 decoders when its modules load, and
 // Hermes may not have `TextDecoder`. Import this package before anything that imports
@@ -8,7 +8,7 @@ import "./polyfills.js";
 export { appStateLifecycle, lifecycleState, nativeDefaultPorts, reactNativeAdapters } from "./adapters.js";
 export { isHttpUrl, reactNativeHttp, type ReactNativeHttpOptions } from "./http.js";
 export { nativeFrameScheduler, type FrameSchedulerOptions } from "./frame.js";
-export { installNative, loadNative, nativePlatformDefaults, type NativeLoadOptions } from "./load.js";
+export { installNative, loadNative, nativePlatformDefaults, type NativeCoreEntry, type NativeLoadOptions } from "./load.js";
 export {
   NativeStartCode,
   RecordKind,

@@ -12,6 +12,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenQueries } from "./core.js";
 import { type TodoError, TodoErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import {
@@ -48,7 +49,7 @@ export class TodoByIdQueryHandle extends UndraStore {
   static async create(
     id: string,
     fresh: boolean,
-    core: UndraCore = UndraCore.shared,
+    core: UndraCore = UndraGoldenQueries.core,
   ): Promise<TodoByIdQueryHandle> {
     const w = new UndraWriter();
     w.writeUuid(id);
@@ -159,7 +160,7 @@ export class TodoCountQueryHandle extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(core: UndraCore = UndraCore.shared): Promise<TodoCountQueryHandle> {
+  static async create(core: UndraCore = UndraGoldenQueries.core): Promise<TodoCountQueryHandle> {
     let handle: bigint;
     try {
       handle = await core.construct(
@@ -266,7 +267,10 @@ export class TodosQueryHandle extends UndraStore {
   }
 
   /** @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached. */
-  static async create(page: number, core: UndraCore = UndraCore.shared): Promise<TodosQueryHandle> {
+  static async create(
+    page: number,
+    core: UndraCore = UndraGoldenQueries.core,
+  ): Promise<TodosQueryHandle> {
     const w = new UndraWriter();
     w.writeU32(page);
     let handle: bigint;
@@ -361,7 +365,7 @@ export class TodosQueryHandle extends UndraStore {
  */
 export async function addTodo(
   title: string,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraGoldenQueries.core,
   signal?: AbortSignal,
 ): Promise<Todo> {
   const w = new UndraWriter();
@@ -385,7 +389,7 @@ export async function addTodo(
  * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
  */
 export async function clearTodos(
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraGoldenQueries.core,
   signal?: AbortSignal,
 ): Promise<void> {
   try {

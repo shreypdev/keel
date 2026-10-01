@@ -62,8 +62,8 @@ android {
     sourceSets {
         // The recordings the Compose previews play (testkit/fixtures at the root of the repository; debug builds only).
         getByName("debug").assets.srcDir("../../../../testkit/fixtures")
-        // `undra build --platform android --release` writes libundra_core.so for every ABI here. The
-        // Kotlin runtime loads it with System.loadLibrary("undra_core"). Like any path in this file
+        // `undra build --platform android --release` writes libplayground_core.so for every ABI here.
+        // The bindings load it with System.loadLibrary("playground_core"). Like any path in this file
         // it is relative to this module (android/app), not to android/; Gradle ignores a
         // directory that does not exist, so `undra build` checks this line after building.
         getByName("main").jniLibs.srcDir("../../build/android/jniLibs")

@@ -3,30 +3,21 @@
 // UndraRuntime: the Swift platform runtime for Undra (docs/SPEC.md sections 6.2, 10 and 11).
 //
 // Targets
-//   UndraFFI           C target: `include/undra.h` (the C ABI of SPEC section 6) and its module map.
-//                     `undra_stub.c` provides link-time stand-ins for every `undra_*` symbol and is
-//                     compiled only when `UNDRA_STUB_FFI` is defined (see below).
+//   UndraFFI           C target: `include/undra.h` (the C ABI of SPEC section 6: the `UndraApi`
+//                     table and the callback types, no functions) and its module map. It declares
+//                     types only and references no symbol, so the package links without any core.
 //   UndraRuntime       Swift target: the wire layer, the runtime core (UndraCore, the in-process and
 //                     WebSocket transports, mirror, objects, stores, ports) and the default adapters.
 //   UndraTestKit       Swift target: the testing kit (PreviewCore, RecordedCore, PortRecorder, Replayer, the deterministic fakes).
-//   UndraRuntimeTests  XCTest target. Runs with `swift test` and needs neither the Rust core nor
-//                     the XCFramework (a scripted fake core stands in for it).
+//   UndraRuntimeTests  XCTest target. Runs with `swift test` and needs no Rust core (a scripted fake
+//                     core table stands in for it).
 //
-// The UNDRA_STUB_FFI switch
-//   The real core (libundra_ffi, shipped later as an XCFramework) is not linked yet. Until it is,
-//   this manifest defines `UNDRA_STUB_FFI` through `cSettings`, so `undra_stub.c` supplies the
-//   symbols and the package builds and tests on any Mac without the core. The stub reports ABI
-//   version 0 and fails every call, so a runtime that reaches it fails loudly at attach time.
-//   Set `UNDRA_LINK_CORE=1` in the environment to build WITHOUT the stub (the linker must then be
-//   given the real core, otherwise duplicate/missing symbols are the correct failure). The
-//   XCFramework wiring task flips this default; see README.md.
+// The core is not a dependency of this package (ADR-044). Each core exports one function,
+// `<namespace>_undra_api()`, returning its table; the bindings generated for it declare that
+// function (module `<Namespace>CoreFFI`) and hand it to `UndraCoreEntry`, and the app links the
+// core (`lib<namespace>.a` from its XCFramework). Several cores can therefore share a process.
 
 import PackageDescription
-import Foundation
-
-let linkRealCore = ProcessInfo.processInfo.environment["UNDRA_LINK_CORE"] == "1"
-
-let ffiCSettings: [CSetting] = linkRealCore ? [] : [.define("UNDRA_STUB_FFI")]
 
 let package = Package(
     name: "UndraRuntime",
@@ -42,8 +33,7 @@ let package = Package(
         .target(
             name: "UndraFFI",
             path: "Sources/UndraFFI",
-            publicHeadersPath: "include",
-            cSettings: ffiCSettings
+            publicHeadersPath: "include"
         ),
         .target(
             name: "UndraRuntime",

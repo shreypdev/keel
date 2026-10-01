@@ -4,10 +4,11 @@ package golden.enums
 
 /**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
- * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
+ * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
     const val SCHEMA_HASH: ULong = 0x2533f60443b3d23buL
+    const val NAMESPACE: String = "golden_enums"
 
     object Objects {}
 

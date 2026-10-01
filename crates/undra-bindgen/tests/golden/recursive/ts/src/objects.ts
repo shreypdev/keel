@@ -8,6 +8,7 @@ import {
   codecs,
   decodeValue,
 } from "@undra/runtime";
+import { UndraGoldenRecursive } from "./core.js";
 import { ParseErrorCodec } from "./errors.js";
 import { UndraIds } from "./ids.js";
 import { type Expr, ExprCodec, type ListNode, ListNodeCodec } from "./types.js";
@@ -20,7 +21,7 @@ import { type Expr, ExprCodec, type ListNode, ListNodeCodec } from "./types.js";
  */
 export async function evaluate(
   expr: Expr,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraGoldenRecursive.core,
   signal?: AbortSignal,
 ): Promise<number> {
   const w = new UndraWriter();
@@ -44,7 +45,7 @@ export async function evaluate(
  */
 export async function reverse(
   list: ListNode,
-  core: UndraCore = UndraCore.shared,
+  core: UndraCore = UndraGoldenRecursive.core,
 ): Promise<ListNode> {
   const w = new UndraWriter();
   ListNodeCodec.encode(w, list);

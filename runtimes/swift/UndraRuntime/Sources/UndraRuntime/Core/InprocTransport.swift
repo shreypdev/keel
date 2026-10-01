@@ -1,10 +1,10 @@
-// The in-process transport: the native C ABI of docs/SPEC.md section 6, called through the
-// `UndraFFI` module.
+// The in-process transport: one core's native C ABI (docs/SPEC.md section 6), called through the
+// entries of its `UndraApi` table (`CoreTable`, ADR-044).
 //
 // Callback discipline (SPEC 5.1 and 6): the core invokes the reply, change-set, stream and port
 // callbacks on its own threads or on the caller's, possibly while it holds its lock. The
-// trampolines below copy the bytes and hand them to `UndraInbound`; they never call an `undra_*`
-// function (except `undra_buf_free` on memory the core gave us, and only outside callbacks).
+// trampolines below copy the bytes and hand them to `UndraInbound`; they never call an entry of
+// the table (except `buf_free` on memory the core gave us, and only outside callbacks).
 
 import UndraFFI
 
@@ -14,11 +14,12 @@ import Darwin
 import Glibc
 #endif
 
-/// Calls the linked core through the C ABI. There is one core per process, so there is at most
-/// one started `InprocTransport`.
+/// Calls one core through its C ABI table. A core runs at most once per process, so there is at
+/// most one started `InprocTransport` per core namespace; cores of different namespaces (two
+/// independent cores, ADR-044) run side by side, each with its own transport.
 final class InprocTransport: UndraTransport, @unchecked Sendable {
-    /// The started transport, if any. Also what keeps the `user` pointer of the callbacks valid.
-    private static let active = Guarded<InprocTransport?>(nil)
+    /// The started transports, by the namespace of their core.
+    private static let active = Guarded<[String: InprocTransport]>([:])
 
     private struct State {
         var inbound: (any UndraInbound)? = nil
@@ -28,36 +29,20 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         var user: UnsafeMutableRawPointer? = nil
     }
 
-    /// The functions of the linked core that `start` calls before there is a transport to talk
-    /// through. Tests replace them to script the order in which `start` uses them; the shipped
-    /// value calls the C ABI.
-    struct CoreEntry: Sendable {
-        /// `undra_abi_version()`.
-        var abiVersion: @Sendable () -> UInt32
-        /// `undra_schema_hash()`, which works before `undra_init`.
-        var schemaHash: @Sendable () -> UInt64
-        /// `undra_init` with the encoded `RuntimeConfig` and the `user` pointer of every callback;
-        /// returns its status code (0 when the core is running).
-        var initialize: @Sendable (_ config: [UInt8], _ user: UnsafeMutableRawPointer) -> UInt32
-
-        /// The core behind `UndraFFI`.
-        static let linked = CoreEntry(
-            abiVersion: { undra_abi_version() },
-            schemaHash: { undra_schema_hash() },
-            initialize: { InprocTransport.initializeLinkedCore(config: $0, user: $1) }
-        )
-    }
-
     private let state = Guarded<State>(State())
-    private let entry: CoreEntry
+    /// The core's entry points, read from its table once.
+    private let table: CoreTable
 
-    init(entry: CoreEntry = .linked) {
-        self.entry = entry
+    /// A transport over the core whose checked table is `table`.
+    init(table: CoreTable) {
+        self.table = table
     }
 
-    /// The ABI version of whatever is linked behind `UndraFFI` (0 for the link-time stub).
-    static var linkedABIVersion: UInt32 {
-        return undra_abi_version()
+    /// Whether a transport over the core of `namespace` is started in this process.
+    static func isClaimed(_ namespace: String) -> Bool {
+        return active.withLock { (claims: inout [String: InprocTransport]) -> Bool in
+            return claims[namespace] != nil
+        }
     }
 
     var mode: UndraMode {
@@ -71,25 +56,22 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
     // MARK: Start and stop
 
     func start(inbound: any UndraInbound, options: TransportStartOptions) throws -> TransportInfo {
-        let abi = entry.abiVersion()
-        if abi != UndraCore.abiVersion {
-            throw UndraLoadError.abiMismatch(expected: UndraCore.abiVersion, got: abi)
-        }
-        // The schema hash is compared before the core is initialised (docs/SPEC.md section 11:
-        // the check is at attach). `undra_schema_hash` needs no running core, so bindings generated
-        // for another schema are refused without `undra_init` having run, which matters when the
-        // core is already initialised by someone else (a second `undra_init` is refused, and the
-        // caller would see `coreInitFailed` instead of the mismatch) and saves starting a core
-        // only to shut it down.
-        let schemaHash = entry.schemaHash()
+        // The ABI version was checked when the table was read (`CoreTable(reading:)`). The schema
+        // hash is compared before the core is initialised (docs/SPEC.md section 11: the check is
+        // at attach). It is plain data in the table, so bindings generated for another schema are
+        // refused without `init` having run, which matters when the core is already running for
+        // someone else (a second `init` is refused, and the caller would see `coreInitFailed`
+        // instead of the mismatch) and saves starting a core only to shut it down.
+        let schemaHash = table.schemaHash
         if schemaHash != options.expectedSchemaHash {
             throw UndraSchemaMismatchError(expected: options.expectedSchemaHash, got: schemaHash)
         }
-        let claimed = InprocTransport.active.withLock { (slot: inout InprocTransport?) -> Bool in
-            if slot != nil {
+        let namespace = table.namespace
+        let claimed = InprocTransport.active.withLock { (claims: inout [String: InprocTransport]) -> Bool in
+            if claims[namespace] != nil {
                 return false
             }
-            slot = self
+            claims[namespace] = self
             return true
         }
         if !claimed {
@@ -112,19 +94,21 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
             blockingThreads: 0,
             logLevel: options.logLevel
         ).undraEncoded()
-        let code = entry.initialize(config, user)
+        let code = initializeCore(config: config, user: user)
         if code != 0 {
-            InprocTransport.active.withLock { (slot: inout InprocTransport?) -> Void in
-                slot = nil
+            state.withLock { (current: inout State) -> Void in
+                current.isShutDown = true
+                current.inbound = nil
             }
+            releaseClaim()
             throw UndraLoadError.coreInitFailed(code: code)
         }
         return TransportInfo(schemaHash: schemaHash)
     }
 
-    /// `undra_init` with the trampolines that route the core's callbacks to the transport that
-    /// `user` points to.
-    private static func initializeLinkedCore(config: [UInt8], user: UnsafeMutableRawPointer) -> UInt32 {
+    /// The table's `init` with the trampolines that route the core's callbacks to the transport
+    /// that `user` points to.
+    private func initializeCore(config: [UInt8], user: UnsafeMutableRawPointer) -> UInt32 {
         let replyCallback: undra_reply_cb = { userData, callId, ptr, len in
             InprocTransport.deliverReply(userData, callId, ptr, len)
         }
@@ -134,8 +118,9 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         let streamCallback: undra_stream_cb = { userData, callId, ptr, len in
             InprocTransport.deliverStreamItem(userData, callId, ptr, len)
         }
+        let initialize = table.initialize
         return config.withUnsafeBufferPointer { (buffer: UnsafeBufferPointer<UInt8>) -> UInt32 in
-            return undra_init(
+            return initialize(
                 buffer.baseAddress,
                 UInt32(buffer.count),
                 replyCallback,
@@ -143,6 +128,16 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
                 streamCallback,
                 user
             )
+        }
+    }
+
+    /// Gives up this transport's claim on its core's namespace.
+    private func releaseClaim() {
+        let namespace = table.namespace
+        InprocTransport.active.withLock { (claims: inout [String: InprocTransport]) -> Void in
+            if claims[namespace] === self {
+                claims[namespace] = nil
+            }
         }
     }
 
@@ -157,12 +152,8 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         if !wasRunning {
             return
         }
-        undra_shutdown()
-        InprocTransport.active.withLock { (slot: inout InprocTransport?) -> Void in
-            if slot === self {
-                slot = nil
-            }
-        }
+        table.shutdown()
+        releaseClaim()
     }
 
     private var isRunning: Bool {
@@ -184,7 +175,7 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
             return false
         }
         let code = payload.withUnsafeBufferPointer { (buffer: UnsafeBufferPointer<UInt8>) -> UInt32 in
-            return undra_call(buffer.baseAddress, UInt32(truncatingIfNeeded: buffer.count))
+            return table.call(buffer.baseAddress, UInt32(truncatingIfNeeded: buffer.count))
         }
         return code == 0
     }
@@ -194,32 +185,32 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
             throw UndraTransportError.closed
         }
         let buffer = payload.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> UndraBuf in
-            return undra_call_sync(bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
+            return table.callSync(bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
         }
-        return InprocTransport.takeBytes(buffer)
+        return takeBytes(buffer)
     }
 
     func cancel(callId: UInt32) {
         if isRunning {
-            undra_cancel(callId)
+            table.cancel(callId)
         }
     }
 
     func streamCredit(callId: UInt32, credit: UInt32) {
         if isRunning {
-            undra_stream_credit(callId, credit)
+            table.streamCredit(callId, credit)
         }
     }
 
     func observe(handle: UndraHandle, signal: UInt32, on: Bool) {
         if isRunning {
-            undra_observe(handle.rawValue, signal, on ? 1 : 0)
+            table.observe(handle.rawValue, signal, on ? 1 : 0)
         }
     }
 
     func release(handle: UndraHandle) {
         if isRunning {
-            undra_release(handle.rawValue)
+            table.release(handle.rawValue)
         }
     }
 
@@ -238,7 +229,7 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         let portCallback: undra_port_cb = { userData, callPortId, methodId, portCallId, ptr, len, outReply in
             return InprocTransport.deliverPortCall(userData, callPortId, methodId, portCallId, ptr, len, outReply)
         }
-        undra_port_register(portId, portCallback, user)
+        table.portRegister(portId, portCallback, user)
     }
 
     func portReply(_ payload: [UInt8]) {
@@ -246,7 +237,7 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
             return
         }
         payload.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> Void in
-            undra_port_reply(bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
+            table.portReply(bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
         }
     }
 
@@ -255,13 +246,13 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
             return
         }
         payload.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> Void in
-            undra_event(portId, methodId, bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
+            table.event(portId, methodId, bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
         }
     }
 
     func timerFired(_ timerId: UInt32) {
         if isRunning {
-            undra_timer_fired(timerId)
+            table.timerFired(timerId)
         }
     }
 
@@ -271,7 +262,7 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         if !isRunning {
             throw UndraTransportError.closed
         }
-        return InprocTransport.takeBytes(undra_snapshot())
+        return takeBytes(table.snapshot())
     }
 
     func restore(_ payload: [UInt8]) throws {
@@ -279,7 +270,7 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
             throw UndraTransportError.closed
         }
         let code = payload.withUnsafeBufferPointer { (bytes: UnsafeBufferPointer<UInt8>) -> UInt32 in
-            return undra_restore(bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
+            return table.restore(bytes.baseAddress, UInt32(truncatingIfNeeded: bytes.count))
         }
         if code != 0 {
             throw UndraRestoreError(code: code)
@@ -290,20 +281,20 @@ final class InprocTransport: UndraTransport, @unchecked Sendable {
         if !isRunning {
             return nil
         }
-        let bytes = InprocTransport.takeBytes(undra_stats_json())
+        let bytes = takeBytes(table.statsJSON())
         return String(decoding: bytes, as: UTF8.self)
     }
 
     // MARK: Memory
 
-    /// Copies a core-owned buffer into an array and frees it.
-    private static func takeBytes(_ buffer: UndraBuf) -> [UInt8] {
+    /// Copies a core-owned buffer into an array and frees it with the table's `buf_free`.
+    private func takeBytes(_ buffer: UndraBuf) -> [UInt8] {
         let mutablePointer: UnsafeMutablePointer<UInt8>? = buffer.ptr
         let readablePointer: UnsafePointer<UInt8>? = mutablePointer.map { (pointer: UnsafeMutablePointer<UInt8>) -> UnsafePointer<UInt8> in
             return UnsafePointer(pointer)
         }
-        let copy = copyBytes(readablePointer, buffer.len)
-        undra_buf_free(buffer)
+        let copy = InprocTransport.copyBytes(readablePointer, buffer.len)
+        table.bufFree(buffer)
         return copy
     }
 

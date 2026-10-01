@@ -216,7 +216,7 @@ fn gradle_builds_the_core_before_the_app_and_skips_it_while_nothing_changed() {
         "{log}"
     );
     for abi in ["arm64-v8a", "x86_64"] {
-        let lib = jni.join(abi).join("libundra_core.so");
+        let lib = jni.join(abi).join("libgradleproof_core.so");
         assert!(lib.is_file(), "{abi}: no library\n{log}");
         eprintln!("android debug {abi}: {} bytes", size(&lib));
     }
@@ -277,7 +277,7 @@ fn gradle_builds_the_core_before_the_app_and_skips_it_while_nothing_changed() {
         log.contains("undra: build --platform android --release\n"),
         "{log}"
     );
-    let release_size = size(&jni.join("arm64-v8a/libundra_core.so"));
+    let release_size = size(&jni.join("arm64-v8a/libgradleproof_core.so"));
     eprintln!("android release arm64-v8a: {release_size} bytes");
     assert!(
         release_size < 5_000_000,
@@ -294,7 +294,7 @@ fn gradle_builds_the_core_before_the_app_and_skips_it_while_nothing_changed() {
     );
     assert!(ok, "{log}");
     assert!(log.contains("undra: build --platform android\n"), "{log}");
-    let debug_again = size(&jni.join("arm64-v8a/libundra_core.so"));
+    let debug_again = size(&jni.join("arm64-v8a/libgradleproof_core.so"));
     assert!(
         debug_again > 4 * release_size,
         "the debug core is back: {debug_again} bytes against the release core's {release_size}"
@@ -307,7 +307,7 @@ fn gradle_builds_the_core_before_the_app_and_skips_it_while_nothing_changed() {
         .unwrap_or_default();
     if let Some(line) = packaged
         .lines()
-        .find(|l| l.contains("arm64-v8a/libundra_core.so"))
+        .find(|l| l.contains("arm64-v8a/libgradleproof_core.so"))
     {
         assert!(
             line.trim_start().starts_with(&debug_again.to_string()),
@@ -399,8 +399,6 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
             .arg("-derivedDataPath")
             .arg(derived.path())
             .arg("build")
-            // The runtime package ships link-time stand-ins for the core; this switches them off.
-            .env("UNDRA_LINK_CORE", "1")
             .env("PATH", path_with_undra())
             .env("CARGO_TARGET_DIR", common::shared_target());
         logged(&mut cmd)
@@ -446,11 +444,12 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
                 .expect("the app was compiled"),
         "the core is built before the app is compiled"
     );
-    let xcframework = project.root.join("build/ios/UndraCore.xcframework");
-    assert!(xcframework.join("ios-arm64/libundra_core.a").is_file());
+    // ADR-044: named after the namespace `xcodeproof_core`, prelinked, linked without -force_load.
+    let xcframework = project.root.join("build/ios/XcodeproofCore.xcframework");
+    assert!(xcframework.join("ios-arm64/libxcodeproof_core.a").is_file());
     assert!(
         xcframework
-            .join("ios-arm64-simulator/libundra_core.a")
+            .join("ios-arm64-simulator/libxcodeproof_core.a")
             .is_file()
     );
     assert!(
@@ -534,7 +533,7 @@ fn xcode_builds_the_core_in_a_build_phase_and_skips_it_while_nothing_changed() {
     );
 
     // 4. Another configuration builds the other kind of core, and switching back runs the phase again.
-    let simulator_lib = xcframework.join("ios-arm64-simulator/libundra_core.a");
+    let simulator_lib = xcframework.join("ios-arm64-simulator/libxcodeproof_core.a");
     let debug_lib = size(&simulator_lib);
     let (ok, log) = build("Release");
     evidence(
@@ -622,7 +621,6 @@ fn xcode_without_undra_says_how_to_install_it() {
         ])
         .arg(derived.path())
         .arg("build")
-        .env("UNDRA_LINK_CORE", "1")
         .env("PATH", path_without_undra());
     let (ok, log) = logged(&mut cmd);
     evidence("xcodebuild, no undra", &log, &["error:", "BUILD "]);
@@ -681,7 +679,7 @@ fn npm_run_build_builds_the_core_through_the_vite_plugin() {
         "{log}"
     );
     assert!(log.contains("web wasm"), "{log}");
-    let wasm = project.root.join("build/web/undra_core.wasm");
+    let wasm = project.root.join("build/web/viteproof_core.wasm");
     assert!(wasm.is_file(), "{log}");
     eprintln!("web wasm: {} bytes", size(&wasm));
     let bundled = std::fs::read_dir(web.join("dist/assets"))

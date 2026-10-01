@@ -57,14 +57,16 @@ fn adopting_adds_one_directory_that_is_a_working_project() {
 
     // The guide has the real paths in it.
     let guide = std::fs::read_to_string(app.join("undra/UNDRA_ADOPT.md")).unwrap();
+    // ADR-044: the core's artefacts are named after its namespace (`myapp_core`), the app loads it
+    // through the generated entry, and the prelinked iOS library needs no -force_load.
     assert!(
-        guide.contains(
-            "-force_load $(SRCROOT)/../undra/build/ios/UndraCore.xcframework/ios-arm64/libundra_core.a"
-        ),
+        guide.contains("`../undra/build/ios/MyappCore.xcframework`")
+            && guide.contains("try UndraMyappCore.load()"),
         "{guide}"
     );
+    assert!(!guide.contains("-force_load $("), "{guide}");
     assert!(
-        guide.contains("## Web") && guide.contains("../undra/build/web/undra_core.wasm"),
+        guide.contains("## Web") && guide.contains("../undra/build/web/myapp_core.wasm"),
         "{guide}"
     );
 }

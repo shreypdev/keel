@@ -45,12 +45,13 @@ fn specific_help_texts_say_what_matters() {
     let build =
         String::from_utf8_lossy(&run_ok(undra().args(["build", "--help"])).stdout).into_owned();
     assert!(
-        build.contains("UndraCore.xcframework")
-            && build.contains("jniLibs")
-            && build.contains("undra_core.wasm"),
+        build.contains("<Namespace>Core.xcframework")
+            && build.contains("jniLibs/<abi>/lib<namespace>.so")
+            && build.contains("<namespace>.wasm")
+            && build.contains("[core] namespace"),
         "{build}"
     );
-    assert!(build.contains("-force_load"), "{build}");
+    assert!(build.contains("no -force_load"), "{build}");
     let dev = String::from_utf8_lossy(&run_ok(undra().args(["dev", "--help"])).stdout).into_owned();
     assert!(
         dev.contains("127.0.0.1:7443") && dev.contains("no authentication"),

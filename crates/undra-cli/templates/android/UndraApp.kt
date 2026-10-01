@@ -4,7 +4,7 @@ import android.app.Application
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import @@KOTLIN_PACKAGE@@.UndraIds
+import @@KOTLIN_PACKAGE@@.@@CORE_ENTRY@@
 import dev.undra.android.AndroidPlatform
 import dev.undra.android.AndroidPlatformDefaults
 import dev.undra.android.ChoreographerFramePacer
@@ -13,7 +13,6 @@ import dev.undra.runtime.ConnectionState
 import dev.undra.runtime.LoadOptions
 import dev.undra.runtime.MirrorOptions
 import dev.undra.runtime.Mode
-import dev.undra.runtime.UndraCore
 import dev.undra.runtime.UndraException
 import dev.undra.runtime.UndraSchemaMismatchException
 import kotlin.time.Duration.Companion.seconds
@@ -22,7 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Attaches the app to its Rust core once per process, before any store is created ([start], from the activity). The
- * core is `libundra_core.so`, which `undra build --platform android` writes to `build/android/jniLibs`.
+ * core is `lib@@NAMESPACE@@.so`, which `undra build --platform android` writes to `build/android/jniLibs`; the bindings'
+ * entry, [@@CORE_ENTRY@@], loads it and checks it was built from their schema.
  *
  * `AndroidPlatformDefaults.install` gives the core every platform capability in one call: `Http` over
  * `HttpURLConnection`, `Kv` and `Fs` in the app's files, `SecureStore` under an Android Keystore key, and the
@@ -94,11 +94,10 @@ class UndraApp : Application() {
     private fun load(): Boolean {
         val url = devUrl
         return try {
-            val core = UndraCore.load(
+            val core = @@CORE_ENTRY@@.load(
                 LoadOptions(
                     mode = if (url == null) Mode.INPROC else Mode.REMOTE,
                     remoteUrl = url,
-                    expectedSchemaHash = UndraIds.SCHEMA_HASH,
                     mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
                     remoteTimeout = 5.seconds,
                     onConnectionChange = ::onConnection,

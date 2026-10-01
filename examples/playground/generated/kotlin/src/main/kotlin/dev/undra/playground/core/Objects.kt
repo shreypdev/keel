@@ -22,7 +22,7 @@ class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(cor
      * A probe with every counter at zero.
      * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
      */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.Probe.TYPE_ID, UndraIds.Objects.Probe.NEW, ByteArray(0)),
     )
@@ -147,7 +147,7 @@ class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(cor
          * A probe with every counter at zero.
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
-        fun create(ctx: UndraCore = UndraCore.shared): Probe {
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Probe {
             val handle = ctx.constructObject(UndraIds.Objects.Probe.TYPE_ID, UndraIds.Objects.Probe.NEW, ByteArray(0))
             return Probe(ctx, handle)
         }
@@ -158,7 +158,7 @@ class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(cor
  * Adds two numbers, wrapping on overflow: a synchronous call with primitive arguments.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int {
+fun add(a: Int, b: Int, ctx: UndraCore = UndraPlaygroundCore.core): Int {
     val w = UndraWriter()
     w.writeI32(a)
     w.writeI32(b)
@@ -180,7 +180,12 @@ fun add(a: Int, b: Int, ctx: UndraCore = UndraCore.shared): Int {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun addLater(a: Int, b: Int, delayMs: UInt, ctx: UndraCore = UndraCore.shared): Int {
+suspend fun addLater(
+    a: Int,
+    b: Int,
+    delayMs: UInt,
+    ctx: UndraCore = UndraPlaygroundCore.core,
+): Int {
     val w = UndraWriter()
     w.writeI32(a)
     w.writeI32(b)
@@ -202,7 +207,7 @@ suspend fun addLater(a: Int, b: Int, delayMs: UInt, ctx: UndraCore = UndraCore.s
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun area(figure: Figure, ctx: UndraCore = UndraCore.shared): Double {
+fun area(figure: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Double {
     val w = UndraWriter()
     Figure.encode(w, figure)
     try {
@@ -223,7 +228,7 @@ fun area(figure: Figure, ctx: UndraCore = UndraCore.shared): Double {
  * stale).
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */
-fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraCore.shared) {
+fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraPlaygroundCore.core) {
     try {
         val w = UndraWriter()
         RemoteConfig.encode(w, config)
@@ -252,7 +257,7 @@ fun configureRemote(config: RemoteConfig, ctx: UndraCore = UndraCore.shared) {
 suspend fun createRemoteTodo(
     list: String,
     title: String,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo {
     val w = UndraWriter()
     w.writeStr(list)
@@ -273,7 +278,7 @@ suspend fun createRemoteTodo(
  * Returns `value` unchanged.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun echoComposite(value: Composite, ctx: UndraCore = UndraCore.shared): Composite {
+fun echoComposite(value: Composite, ctx: UndraCore = UndraPlaygroundCore.core): Composite {
     val w = UndraWriter()
     Composite.encode(w, value)
     try {
@@ -292,7 +297,7 @@ fun echoComposite(value: Composite, ctx: UndraCore = UndraCore.shared): Composit
  * Returns `value` unchanged.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun echoFigure(value: Figure, ctx: UndraCore = UndraCore.shared): Figure {
+fun echoFigure(value: Figure, ctx: UndraCore = UndraPlaygroundCore.core): Figure {
     val w = UndraWriter()
     Figure.encode(w, value)
     try {
@@ -311,7 +316,7 @@ fun echoFigure(value: Figure, ctx: UndraCore = UndraCore.shared): Figure {
  * Returns `value` unchanged.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraCore.shared): Primitives {
+fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraPlaygroundCore.core): Primitives {
     val w = UndraWriter()
     Primitives.encode(w, value)
     try {
@@ -331,7 +336,7 @@ fun echoPrimitives(value: Primitives, ctx: UndraCore = UndraCore.shared): Primit
  * crash, on the platforms that can unwind (R6).
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun explode(reason: String, ctx: UndraCore = UndraCore.shared): UInt {
+fun explode(reason: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt {
     val w = UndraWriter()
     w.writeStr(reason)
     try {
@@ -351,7 +356,11 @@ fun explode(reason: String, ctx: UndraCore = UndraCore.shared): UInt {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun explodeLater(delayMs: UInt, reason: String, ctx: UndraCore = UndraCore.shared): UInt {
+suspend fun explodeLater(
+    delayMs: UInt,
+    reason: String,
+    ctx: UndraCore = UndraPlaygroundCore.core,
+): UInt {
     val w = UndraWriter()
     w.writeU32(delayMs)
     w.writeStr(reason)
@@ -374,7 +383,7 @@ suspend fun explodeLater(delayMs: UInt, reason: String, ctx: UndraCore = UndraCo
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraCore.shared): UInt {
+suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraPlaygroundCore.core): UInt {
     val w = UndraWriter()
     w.writeU32(delayMs)
     w.writeI32(code)
@@ -396,7 +405,7 @@ suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraCore.share
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileDelete(path: String, ctx: UndraCore = UndraCore.shared) {
+suspend fun fileDelete(path: String, ctx: UndraCore = UndraPlaygroundCore.core) {
     val w = UndraWriter()
     w.writeStr(path)
     try {
@@ -416,7 +425,7 @@ suspend fun fileDelete(path: String, ctx: UndraCore = UndraCore.shared) {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileList(dir: String, ctx: UndraCore = UndraCore.shared): List<String> {
+suspend fun fileList(dir: String, ctx: UndraCore = UndraPlaygroundCore.core): List<String> {
     val w = UndraWriter()
     w.writeStr(dir)
     try {
@@ -437,7 +446,7 @@ suspend fun fileList(dir: String, ctx: UndraCore = UndraCore.shared): List<Strin
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileRead(path: String, ctx: UndraCore = UndraCore.shared): ByteArray {
+suspend fun fileRead(path: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray {
     val w = UndraWriter()
     w.writeStr(path)
     try {
@@ -458,7 +467,7 @@ suspend fun fileRead(path: String, ctx: UndraCore = UndraCore.shared): ByteArray
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraCore.shared) {
+suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core) {
     val w = UndraWriter()
     w.writeStr(path)
     w.writeBytes(data)
@@ -477,7 +486,7 @@ suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraCore.
  * A greeting.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
+fun greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String {
     val w = UndraWriter()
     w.writeStr(name)
     try {
@@ -502,7 +511,7 @@ fun greet(name: String, ctx: UndraCore = UndraCore.shared): String {
 suspend fun httpGet(
     url: String,
     timeoutMs: UInt?,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): HttpResponse {
     val w = UndraWriter()
     w.writeStr(url)
@@ -524,7 +533,7 @@ suspend fun httpGet(
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvGet(key: String, ctx: UndraCore = UndraCore.shared): ByteArray? {
+suspend fun kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray? {
     val w = UndraWriter()
     w.writeStr(key)
     try {
@@ -544,7 +553,7 @@ suspend fun kvGet(key: String, ctx: UndraCore = UndraCore.shared): ByteArray? {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraCore.shared): List<String> {
+suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): List<String> {
     val w = UndraWriter()
     w.writeStr(prefix)
     try {
@@ -564,7 +573,7 @@ suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraCore.shared): List<Stri
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraCore.shared) {
+suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core) {
     val w = UndraWriter()
     w.writeStr(key)
     w.writeBytes(value)
@@ -584,7 +593,7 @@ suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraCore.shar
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun kvRemove(key: String, ctx: UndraCore = UndraCore.shared) {
+suspend fun kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) {
     val w = UndraWriter()
     w.writeStr(key)
     try {
@@ -603,7 +612,7 @@ suspend fun kvRemove(key: String, ctx: UndraCore = UndraCore.shared) {
  * @throws LabError
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun parseCount(text: String, ctx: UndraCore = UndraCore.shared): UInt {
+fun parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt {
     val w = UndraWriter()
     w.writeStr(text)
     try {
@@ -622,7 +631,7 @@ fun parseCount(text: String, ctx: UndraCore = UndraCore.shared): UInt {
  * Does nothing and returns nothing: a call with neither arguments nor a result.
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */
-fun ping(ctx: UndraCore = UndraCore.shared) {
+fun ping(ctx: UndraCore = UndraPlaygroundCore.core) {
     try {
         ctx.callSync(
             CallTarget.FreeFunction(UndraIds.Functions.PING),
@@ -639,7 +648,7 @@ fun ping(ctx: UndraCore = UndraCore.shared) {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretGet(key: String, ctx: UndraCore = UndraCore.shared): ByteArray? {
+suspend fun secretGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray? {
     val w = UndraWriter()
     w.writeStr(key)
     try {
@@ -659,7 +668,7 @@ suspend fun secretGet(key: String, ctx: UndraCore = UndraCore.shared): ByteArray
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraCore.shared): List<String> {
+suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): List<String> {
     val w = UndraWriter()
     w.writeStr(prefix)
     try {
@@ -679,7 +688,7 @@ suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraCore.shared): List<
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraCore.shared) {
+suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core) {
     val w = UndraWriter()
     w.writeStr(key)
     w.writeBytes(value)
@@ -699,7 +708,7 @@ suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraCore.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun secretRemove(key: String, ctx: UndraCore = UndraCore.shared) {
+suspend fun secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core) {
     val w = UndraWriter()
     w.writeStr(key)
     try {
@@ -724,7 +733,7 @@ suspend fun setRemoteDone(
     list: String,
     id: UInt,
     done: Boolean,
-    ctx: UndraCore = UndraCore.shared,
+    ctx: UndraCore = UndraPlaygroundCore.core,
 ): RemoteTodo {
     val w = UndraWriter()
     w.writeStr(list)
@@ -746,7 +755,7 @@ suspend fun setRemoteDone(
  * The name and version of the core.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
-fun version(ctx: UndraCore = UndraCore.shared): String {
+fun version(ctx: UndraCore = UndraPlaygroundCore.core): String {
     try {
         val body = ctx.callSync(
             CallTarget.FreeFunction(UndraIds.Functions.VERSION),

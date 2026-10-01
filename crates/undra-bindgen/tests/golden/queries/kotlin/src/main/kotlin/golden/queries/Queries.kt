@@ -125,7 +125,7 @@ class TodoByIdQueryHandle private constructor(core: UndraCore, handle: Long) : U
         fun create(
             id: UUID,
             fresh: Boolean,
-            ctx: UndraCore = UndraCore.shared,
+            ctx: UndraCore = UndraGoldenQueries.core,
         ): TodoByIdQueryHandle {
             val w = UndraWriter()
             Codecs.uuid.encode(w, id)
@@ -162,7 +162,7 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
     }
 
     /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-    constructor(ctx: UndraCore = UndraCore.shared) : this(
+    constructor(ctx: UndraCore = UndraGoldenQueries.core) : this(
         ctx,
         ctx.constructObject(UndraIds.Objects.TodoCountQueryHandle.TYPE_ID, UndraIds.Objects.TodoCountQueryHandle.NEW, ByteArray(0)),
     )
@@ -246,7 +246,7 @@ class TodoCountQueryHandle private constructor(core: UndraCore, handle: Long) : 
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(ctx: UndraCore = UndraCore.shared): TodoCountQueryHandle {
+        fun create(ctx: UndraCore = UndraGoldenQueries.core): TodoCountQueryHandle {
             val handle = ctx.constructObject(UndraIds.Objects.TodoCountQueryHandle.TYPE_ID, UndraIds.Objects.TodoCountQueryHandle.NEW, ByteArray(0))
             return TodoCountQueryHandle(ctx, handle)
         }
@@ -357,7 +357,7 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
 
     companion object {
         /** @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached. */
-        fun create(page: UInt, ctx: UndraCore = UndraCore.shared): TodosQueryHandle {
+        fun create(page: UInt, ctx: UndraCore = UndraGoldenQueries.core): TodosQueryHandle {
             val w = UndraWriter()
             w.writeU32(page)
             val handle = ctx.constructObject(UndraIds.Objects.TodosQueryHandle.TYPE_ID, UndraIds.Objects.TodosQueryHandle.NEW, w.toByteArray())
@@ -372,7 +372,7 @@ class TodosQueryHandle private constructor(core: UndraCore, handle: Long) : Undr
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun addTodo(title: String, ctx: UndraCore = UndraCore.shared): Todo {
+suspend fun addTodo(title: String, ctx: UndraCore = UndraGoldenQueries.core): Todo {
     val w = UndraWriter()
     w.writeStr(title)
     try {
@@ -392,7 +392,7 @@ suspend fun addTodo(title: String, ctx: UndraCore = UndraCore.shared): Todo {
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  * @throws CancellationException if the calling coroutine is cancelled.
  */
-suspend fun clearTodos(ctx: UndraCore = UndraCore.shared) {
+suspend fun clearTodos(ctx: UndraCore = UndraGoldenQueries.core) {
     try {
         ctx.call(
             CallTarget.FreeFunction(UndraIds.Queries.CLEAR_TODOS),

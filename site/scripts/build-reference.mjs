@@ -26,6 +26,10 @@ const SOURCE = `${GITHUB}/blob/main/examples/playground/generated`;
 /** The generated files in the order of the TypeScript barrel (index.ts), and what each holds. `ts` and `native` are the wording per language. */
 const SECTIONS = [
   { id: "entry", title: "Entry point", stem: "index", only: "ts", blurb: { ts: "The package entry: it re-exports every file below." } },
+  { id: "core", title: "The core", stem: "core", blurb: {
+    swift: "The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another.",
+    kotlin: "The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another. The internal <code>UndraCoreNative</code> holds the natives the core's library registers over JNI.",
+    ts: "The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another." } },
   { id: "types", title: "Types", stem: "types", blurb: {
     swift: "A struct for each record, an enum for each enum, with the wire codec beside it.",
     kotlin: "A data class for each record, an enum or sealed interface for each enum, each with its codec.",
@@ -51,9 +55,9 @@ const SECTIONS = [
     kotlin: "A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>.",
     ts: "A handle for each <code>#[undra::query]</code>, a function for each <code>#[undra::mutation]</code>." } },
   { id: "ids", title: "Wire ids", stem: "ids", blurb: {
-    swift: "The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.",
-    kotlin: "The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.",
-    ts: "The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>." } },
+    swift: "The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.",
+    kotlin: "The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.",
+    ts: "The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load." } },
 ];
 
 /** What a language's generated code is called on its page. `source` is the directory of the generated files, `manifest` the prefix in `.undra-generated`. */
