@@ -6,7 +6,8 @@
     { "title": "Guides", "pages": [
       { "file": "concepts.html", "title": "Core concepts" },
       { "file": "queries.html", "title": "Queries & mutations" },
-      { "file": "ports.html", "title": "Ports & adapters" }
+      { "file": "ports.html", "title": "Ports & adapters" },
+      { "file": "updates.html", "title": "Shipping an update" }
     ] },
     { "title": "Reference", "pages": [
       { "file": "cli.html", "title": "The CLI" },

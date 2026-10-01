@@ -511,7 +511,7 @@ Stamps are compared, never contents, so two writes of equal data are still disti
 
 ## The offline queue
 
-A mutation marked `idempotent` that fails with a network error while the `Connectivity` port says the device is offline is not lost. It is appended to a persisted queue (the `Kv` key `undra.query.queue`) with its parameters and an idempotency key, and replayed in order when connectivity returns. The request carries an `Idempotency-Key` header that stays the same across retries and replays, so a server can tell a repeat from a second item.
+A mutation marked `idempotent` that fails with a network error while the `Connectivity` port says the device is offline is not lost. It is appended to a persisted queue (the `Kv` key `undra.query.queue2`) with its parameters, the fingerprint of their types and an idempotency key, and replayed in order when connectivity returns. The request carries an `Idempotency-Key` header that stays the same across retries and replays, so a server can tell a repeat from a second item.
 
 rust
 
@@ -528,9 +528,13 @@ pub async fn post_remote_todo(ctx: &Ctx, list: String, title: String) -> Result<
 
 A mutation that is not `idempotent` fails immediately when offline. While a queued call waits, the optimistic placeholder stays visible, and the caller's `await` keeps waiting until the network returns and the request is replayed.
 
+A queued call survives an app update: its input is migrated by parameter name, or by a `#[undra::migrate]` hook. One that cannot be migrated is never dropped; it moves to the **dead letters**, which `ctx.query().dead_letters()` lists and `retry_dead_letter` or `discard_dead_letter` settle. [Shipping an update](https://shreypdev.github.io/undra/docs/updates.html) has the rules.
+
 ## Persistence
 
-Entries marked `persist` are written to the `Kv` port after each successful fetch (debounced, 250 ms) and read back when the core starts. Each entry stores the schema hash it was written under, and an entry from a different schema is dropped rather than decoded wrongly.
+Entries marked `persist` are written to the `Kv` port after each successful fetch (debounced, 250 ms) and read back when the core starts. Each entry carries the fingerprint of its type, so an unrelated change to the core keeps the cache, and an entry whose type changed is migrated by name or, if it cannot be, dropped and refetched. At most 1,000 entries are kept (`set_max_persisted_entries`), least recently updated first out.
+
+Storage can fail: a quota runs out, a device is locked. The `Kv` port reports it as a `StorageError`, and the client treats storage as best-effort: a failed write is logged once and retried, a failed read starts the entry empty, and an offline queue that cannot be read is never overwritten or replayed until it can be.
 
 ## Testing without a network
 
@@ -710,6 +714,106 @@ assert_eq!(http.call_count(), 3);
 Time works the same way. `FakeClock` is the single source of time for both `Clock` and `Timer`, so `ctx.sleep` asks for a timer and advancing the fake clock serves it: sleeps wake at exactly their deadline. On a runtime with the fakes installed, advance time with `Fakes::advance`, not `TestRuntime::advance`.
 
 The platforms get the same treatment. The [contract scenarios](https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md) run every platform runtime against the real core with a manual clock, an in-memory `Http` server, an in-memory `Kv` and a test that emits connectivity events itself.
+
+---
+
+Source: https://shreypdev.github.io/undra/docs/updates.html
+
+# Shipping an update
+
+An app update changes the core's types while the device still holds data the old version wrote. Undra reads it by name, converts what it can, and refuses the rest out loud.
+
+## What outlives a build
+
+Three things an app writes can be read by the next version of the app: a **snapshot** of its stores (crash recovery on the web, `undra dev`'s reload, an app that saves one), the **cached results** of `persist` queries, and the **offline queue** of idempotent mutations. Each records the *fingerprint* of its types: a hash of exactly the records, enums and fields it holds. A change elsewhere in the core (a new method, a new query, a doc comment) does not move it, so the data is used as it is, with no work at all.
+
+When a fingerprint did change, Undra reads the old bytes with the description that was stored next to them and converts them to the new types **by name**. It never guesses: data that cannot be converted is refused with a typed outcome you can show, never decoded into the wrong values.
+
+## What migrates for free
+
+These changes need no code. They are the ones most updates are made of:
+
+| Change | What the old data becomes |
+| --- | --- |
+| Fields or signals reordered | matched by name; order is irrelevant |
+| A field added as an `Option` | `None` |
+| A field added with `#[undra(default)]` | its zero value: `false`, `0`, `""`, empty, the nil UUID, the epoch |
+| A store signal added with `#[undra(default)]` | `T::default()` |
+| A field, variant or signal removed | dropped |
+| Enum variants added or renumbered | matched by name |
+| An integer widened (`i32` to `i64`, `u8` to `u32`, `u16` to `i32`), `f32` to `f64` | the same value |
+| `T` to `Option<T>`, `Bytes` to `Vec<u8>` or back | the same value |
+| Any of these inside a `Vec`, an `Option` or a map | applied to every item |
+
+Anything else is not structural: a narrowing (`i64` to `i32`), a type change (`i32` to `String`), a renamed field, variant or signal, a variant the new type no longer has, or a new field with no default. Those need a hook.
+
+## Writing a hook
+
+A hook is a plain function marked `#[undra::migrate]`. It receives the old value as a `DynValue` (fields and variants by name) and returns the new one, or a `MigrateError` to refuse it. There are three kinds:
+
+rust
+
+```rust
+use undra::prelude::*;
+
+// Any persisted `Todo` whose structure changed, wherever it is.
+#[undra::migrate(ty = "Todo")]
+fn todo_from_name(old: &DynValue) -> Result<Todo, MigrateError> {
+    let title = old.field("name").and_then(DynValue::as_str)
+        .ok_or_else(|| MigrateError::new("a todo without a name"))?;
+    Ok(Todo { title: title.to_owned(), done: false })
+}
+
+// One signal of one store in a snapshot (`None`: the snapshot has no such signal).
+#[undra::migrate(store = "Profile", signal = "age")]
+fn age(old: Option<&DynValue>) -> Result<f32, MigrateError> {
+    match old.and_then(DynValue::as_i64) {
+        Some(age) if age >= 0 => Ok(age as f32),
+        Some(age) => Err(MigrateError::new(format!("{age} is not an age"))),
+        None => Ok(18.0),
+    }
+}
+
+// The queued input of one mutation, by parameter name.
+#[undra::migrate(mutation = "add_todo")]
+fn add_todo(old: &DynRecord) -> Result<DynRecord, MigrateError> {
+    let mut new = old.clone();
+    new.rename("name", "title");
+    Ok(new)
+}
+```
+
+Structural migration is tried first, then the hook. Hooks run in the core, under the panic guard: a hook that panics is a failed migration, logged with its name. `from = "0x…"` restricts a hook to one old fingerprint, when you need to tell two older versions apart. A target that does not exist, or a function of the wrong shape, is [E0066](https://shreypdev.github.io/undra/docs/errors.html#E0066).
+
+## When nothing converts
+
+Each kind of data has its own refusal, and none of them loses data silently:
+
+| Data | Outcome |
+| --- | --- |
+| A snapshot | the restore fails as a whole with `RestoreError::Incompatible { store, signal, reason }` (restore code 7 on the platforms: `UndraRestoreError` / `UndraRestoreException`), the core is unchanged, and the reason is logged. One exception: a store *type* the new build removed is left out (its handles go stale) and reported. |
+| A cached query result | deleted, because it can be fetched again; a WARN names the query and the reason |
+| A queued mutation | never deleted: it moves to the dead letters, and the rest of the queue replays |
+
+The dead letters are yours to show, export or settle:
+
+rust
+
+```rust
+let query = ctx.query();
+for letter in query.dead_letters() {
+    log::warn!("{} could not be sent: {}", letter.mutation, letter.reason);
+    // letter.params: the input by parameter name; letter.raw: the bytes as stored
+}
+query.retry_dead_letter(key)?;   // after an update that added a hook
+query.discard_dead_letter(key);  // for good
+```
+
+`ctx.query().persist_stats()` counts what was migrated, dropped and dead-lettered, and the runtime's statistics carry the same numbers under `query.persist`.
+
+## Testing an update
+
+Build the old and the new core, write the data with one and read it with the other. The playground does exactly this in its contract scenarios: `UNDRA_PLAYGROUND_V2=1 undra build` builds a second core whose stores, records and mutations changed the way an update does, and every platform checks that a snapshot and a queue written by the first are read by name by the second, and that an incompatible change is refused or dead-lettered. In Rust, a `TestRuntime` restores a snapshot you build from an edited `Schema` (its `stores_closure` is the description an older build would have written).
 
 ---
 
@@ -1207,6 +1311,7 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 | [`E0063`](https://shreypdev.github.io/undra/docs/errors.html#E0063) | nested `Option<Option<T>>` |
 | [`E0064`](https://shreypdev.github.io/undra/docs/errors.html#E0064) | an object (`#[undra::api] impl`) used where a value is expected |
 | [`E0065`](https://shreypdev.github.io/undra/docs/errors.html#E0065) | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
+| [`E0066`](https://shreypdev.github.io/undra/docs/errors.html#E0066) | a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition) |
 
 ## Types and shapes
 
@@ -1581,7 +1686,7 @@ a port call that cannot be answered and has no error channel: no adapter registe
 
 | What you see | Why | Fix |
 | --- | --- | --- |
-| the `Kv` port has no adapter registered (method `get`) | this method has no error channel, so an unavailable port cannot be reported and the call panics; the runtime contains the panic, but on the web it traps the core | register an adapter (`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C), bind a Rust implementation (`undra::ports::fakes` in tests), or give the method a `Result<T, E>` return type so it can report the outage |
+| the `Rng` port has no adapter registered (method `fill`) | this method has no error channel, so an unavailable port cannot be reported and the call panics; the runtime contains the panic, but on the web it traps the core | register an adapter (`core.registerPort(..)` in TypeScript, Kotlin and Swift, `undra_port_register` in C), bind a Rust implementation (`undra::ports::fakes` in tests), or give the method a `Result<T, E>` return type so it can report the outage |
 
 ### `E0063` nested `Option<Option<T>>`
 
@@ -1613,6 +1718,21 @@ a signal of a store was written from a thread that does not hold the owning runt
 | What you see | Why | Fix |
 | --- | --- | --- |
 | a signal of a store owned by runtime 5 was written from a thread that does not hold its core lock | signal writes belong on the core: the runtime delivers each change-set to its host in commit order under its core lock, so a write from any other thread (a blocking-pool worker, a host or embedder thread, another runtime's core) would be delivered unordered, to the wrong host, or not at all | return the value to the task or call that awaits it (`ctx.spawn`, a dispatched call, the result of `spawn_blocking`), or wrap the write in `ctx.with_core(\|\| ..)` on a host thread; `Signal::try_set` reports this as a `WriteError` instead of panicking |
+
+### `E0066` a `#[undra::migrate]` hook with a wrong target or shape (ADR-037; addition)
+
+Raised by macros, runtime (start-up check of the registered hooks).
+
+a `#[undra::migrate]` hook with a wrong target or shape (ADR-037): no target or more than one, `signal` without `store`, a `from` that is not a 64-bit hex fingerprint, a function that is not a plain non-generic `fn` taking the target's old value (`&DynValue`, `Option<&DynValue>` or `&DynRecord`) and returning `Result<_, MigrateError>`, a `ty = "X"` hook that does not return the `#[undra::api]` type `X` (a const assertion the compiler runs); a store, signal or mutation the core does not have, or a signal hook returning another type than the signal's, is logged at ERROR with this code when a runtime starts (the macro cannot see those items)
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| `#[undra::migrate]` needs a target | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | name exactly one target: `ty = "Todo"`, `store = "Profile", signal = "age"` or `mutation = "add_todo"` |
+| `#[undra::migrate]` names more than one target | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | name exactly one target: `ty = "Todo"`, `store = "Profile", signal = "age"` or `mutation = "add_todo"` |
+| `signal = ".."` needs `store = ".."` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | name the store the signal belongs to: `store = "Profile", signal = "age"` |
+| the migration hook `wrong_parameter` must take one parameter, `old: Option<&DynValue>` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write `fn wrong_parameter(old: Option<&DynValue>) -> Result<T, MigrateError>`, where `T` is the signal's value type (`old` is `None` when the snapshot lacks the signal): a plain, non-generic, non-async function |
+| the migration hook `wrong_return` must return `Result<DynRecord, MigrateError>` | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write `fn wrong_return(old: &DynRecord) -> Result<DynRecord, MigrateError>`: a plain, non-generic, non-async function |
+| `from = "not-hex"` is not a fingerprint | a migration hook converts persisted data of one record or enum, one signal of one store, or one mutation's queued input to this build's types; the runtime finds it by that target and calls it with the old value in a fixed shape | write the 64-bit fingerprint of the old type in hex, as the runtime's log or `undra.types.<fingerprint>` key shows it: `from = "0x0123456789abcdef"`, or leave `from` out to take every old version |
 
 ## The command line
 
