@@ -5,8 +5,8 @@ import { applySeed, parseSeed, type Seed } from "./seed.js";
 
 /** Options of {@link PreviewCore.load}. */
 export interface PreviewOptions extends Pick<AttachOptions, "onError" | "shared" | "mirror"> {
-  /** The app's own core, built for the web (`undra build --platform web`): a URL, its bytes or a compiled module. */
-  readonly wasm: WasmSource;
+  /** The app's own core, built for the web (`undra build --platform web`): a URL (a string is resolved against the page), its bytes or a compiled module. */
+  readonly wasm: WasmSource | string;
   /** The schema hash of the bindings (`UndraIds.schemaHash`). */
   readonly expectedSchemaHash: bigint;
   /** The starting state of the fakes: a {@link Seed} or its JSON text (`testkit/fixtures/seed.json` is an example). */
@@ -52,7 +52,7 @@ export class PreviewCore {
     if (options.seed !== undefined) applySeed(fakes, typeof options.seed === "string" ? parseSeed(options.seed) : options.seed);
     const core = await UndraCore.load({
       mode: "wasm-main",
-      wasm: options.wasm,
+      wasm: typeof options.wasm === "string" ? new URL(options.wasm, (globalThis as { location?: { href: string } }).location?.href ?? "file:///") : options.wasm,
       expectedSchemaHash: options.expectedSchemaHash,
       adapters: {
         clock: fakes.clock,

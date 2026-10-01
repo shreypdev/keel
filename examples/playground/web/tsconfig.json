@@ -34,6 +34,9 @@
       ],
       "@undra/runtime": [
         "../../../runtimes/ts/@undra/runtime/src/index.ts"
+      ],
+      "@undra/testkit": [
+        "../../../runtimes/ts/@undra/testkit/src/index.ts"
       ]
     },
     "noUnusedLocals": true,
