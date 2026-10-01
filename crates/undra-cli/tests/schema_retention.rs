@@ -70,6 +70,11 @@ fn a_loaded_core_keeps_its_schema_and_jni_exports() {
         "the loaded core reports an EMPTY schema: its `inventory` registrations were dead-stripped \
          (ADR-029). Restore the shim's non-incremental build."
     );
+    assert!(
+        schema.records.iter().any(|r| !r.docs.is_empty()),
+        "the loaded core's schema has no doc comments: `undra_schema_json` must carry them \
+         (SPEC 2.3), or `undra bindgen --docs` has nothing to write"
+    );
     assert_ne!(
         schema.hash(),
         EMPTY_SCHEMA_HASH,
