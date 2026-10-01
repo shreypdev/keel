@@ -377,7 +377,7 @@ What differs from the text above, and what was measured.
 
 ## Review amendments (2026-10-02, the adversarial review)
 
-The review (`.10x/reviews/2026-10-02-dev-reload-review.md`) changed four things; none touches the envelope, a payload,
+The review (`.10x/reviews/2026-10-02-dev-reload-review.md`) changed four things and added tests; none touches the envelope, a payload,
 the ABI, the schema, the generated code or `undra-runtime`.
 
 * **A call the reload cut off is counted, and the notice says so.** Section 1.3.2 stops running calls during the settle;
@@ -400,6 +400,11 @@ the ABI, the schema, the generated code or `undra-runtime`.
   a failed snapshot at once (fresh state, with the reason) instead of a megabyte line printed to the terminal and a 15 s
   wait; a protocol line glued to the core's `print!` output without a newline is still recognised; and `undra dev` checks
   the 16 MiB limit itself before it decodes the hex.
+* **A call is decided under the connection's lock.** The reader checked "frozen" and then recorded the call in two
+  steps, while `suspend` set the flag and then counted the open calls: a call recorded between the count and the Close
+  frame ran without being waited for (a sync write could land in the snapshot and lose its reply; an async one was
+  cancelled without being counted). `Conn::begin_call` now reads the flag under the lock the count takes, so every call
+  is either waited for (answered before the Close, or cancelled and counted) or not run (counted).
 * **Tests added for the failure matrix with real cores**: a rebuilt core that exits at start (an init hook that calls
   `exit`), a restore the new core refuses (a restore hook that panics, the same schema hash), a second save during a
   reload (two swaps, the state carried twice, the second time from a core whose client had not come back), the generation

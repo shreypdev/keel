@@ -699,3 +699,76 @@ fn with_two_clients_only_the_attached_one_has_a_session_to_hand_over() {
         })
     );
 }
+
+#[test]
+fn every_tap_racing_the_suspend_is_answered_or_not_run_and_only_answered_ones_are_in_the_state() {
+    // Taps pipelined against the start of the suspend, with no call open (so the settle ends at once:
+    // the narrowest window). A call is decided under the connection's lock, the lock the suspend takes
+    // to count the open calls after it froze the server, so each tap either runs and is answered
+    // before the Close frame, or is not run (counted, or arrives after the close). What must never
+    // happen: a tap that ran (its write is in the snapshot) and whose reply was lost.
+    for round in 0..30_u64 {
+        let f = resuming();
+        let mut client = f.session_client(&format!("tok-race-{round}"), false);
+        let counter = client.new_counter(0);
+        let (answered, sent, suspended) = std::thread::scope(|scope| {
+            let suspend = scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(3 + round % 11));
+                f.server.suspend(Duration::from_millis(200))
+            });
+            let (mut answered, mut sent) = (0_i32, 0_u32);
+            'taps: loop {
+                for _ in 0..4 {
+                    let id = client.next_call_id();
+                    let call = undra::runtime::testing::call_payload(
+                        undra::wire::payload::CallTarget::Method {
+                            handle: undra::wire::Handle(counter),
+                            method_id: ADD,
+                        },
+                        id,
+                        &enc(&1_i32),
+                    );
+                    if !client.try_send(Kind::Call, &call) {
+                        break 'taps;
+                    }
+                    sent += 1;
+                }
+                loop {
+                    match client.recv_within(Duration::from_millis(20)) {
+                        Received::Frame(frame) if frame.kind == Kind::Reply => {
+                            let reply = undra::wire::payload::Reply::decode(&mut Reader::new(
+                                &frame.payload,
+                            ))
+                            .unwrap();
+                            assert_eq!(reply.status, ReplyStatus::Ok);
+                            answered += 1;
+                        }
+                        Received::Frame(_) => {}
+                        Received::Silence => break,
+                        Received::Closed(_) => break 'taps,
+                    }
+                }
+            }
+            (answered, sent, suspend.join().unwrap())
+        });
+        let revived = start();
+        revived.rt.restore(&f.rt.snapshot()).unwrap();
+        let mut other = revived.client();
+        let (status, body) = other.method(counter, GET, &[]);
+        assert_eq!(status, ReplyStatus::Ok);
+        assert_eq!(
+            dec::<i32>(&body),
+            answered,
+            "round {round}: the state holds exactly the answered taps ({answered} of {sent} sent, {suspended:?})"
+        );
+        assert!(
+            u32::try_from(answered).unwrap() + u32::try_from(suspended.dropped_calls).unwrap()
+                <= sent,
+            "round {round}: {answered} answered + {suspended:?} > {sent} sent"
+        );
+        assert_eq!(
+            suspended.cancelled_calls, 0,
+            "round {round}: no call was open at the deadline"
+        );
+    }
+}

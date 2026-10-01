@@ -110,6 +110,19 @@ pub(crate) struct Conn {
     last_rx: AtomicU64,
 }
 
+/// What [`Conn::begin_call`] decided about a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Begin {
+    /// Recorded: hand it to the runtime.
+    Started,
+    /// The server is being suspended for a reload (ADR-053): not run.
+    Frozen,
+    /// The connection is closing: not run.
+    Closing,
+    /// A call with this id is still open: not run.
+    Duplicate,
+}
+
 impl Conn {
     /// A connection whose envelopes carry `schema`. Returns the receiving end of the outbound
     /// queue for the writer thread. `tcp` is only used by [`Conn::abort`].
@@ -311,10 +324,27 @@ impl Conn {
     // ----- what the session tells the tracker -------------------------------------------
 
     /// Records a call before it is handed to the runtime (a sync method replies before
-    /// `Runtime::call` returns). `false` for a duplicate id or a closing connection.
-    pub(crate) fn begin_call(&self, call_id: u32, constructor: bool) -> bool {
+    /// `Runtime::call` returns), unless the server is being suspended (`frozen`), the connection
+    /// is closing or the id is open already.
+    ///
+    /// `frozen` is read under this connection's lock, the lock [`open_plain_calls`] takes, and
+    /// [`Server::suspend`](crate::Server::suspend) sets it before it counts the open calls: a call
+    /// is therefore either recorded before that count (and waited for, so its reply goes out
+    /// before the Close frame) or sees the flag and is not run. Without that, a call recorded
+    /// between the count and the Close would run, land in the snapshot, and lose its reply.
+    ///
+    /// [`open_plain_calls`]: Conn::open_plain_calls
+    pub(crate) fn begin_call(&self, call_id: u32, constructor: bool, frozen: &AtomicBool) -> Begin {
         let mut state = self.state.lock();
-        !state.closing && state.tracker.begin_call(call_id, constructor)
+        if frozen.load(Ordering::Acquire) {
+            Begin::Frozen
+        } else if state.closing {
+            Begin::Closing
+        } else if state.tracker.begin_call(call_id, constructor) {
+            Begin::Started
+        } else {
+            Begin::Duplicate
+        }
     }
 
     /// Forgets a call that was cancelled or refused.

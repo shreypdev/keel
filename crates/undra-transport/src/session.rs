@@ -42,7 +42,7 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
 
 use crate::bridge::{Bridge, ClientInfo};
-use crate::conn::{Conn, Item};
+use crate::conn::{Begin, Conn, Item};
 use crate::notice::{self, NOTICE_TARGET, Notices};
 use crate::resume::{self, Resume, short_token};
 use crate::server::{Shared, ServerConfig};
@@ -390,26 +390,34 @@ impl Session {
 
     fn on_call(&self, payload: &[u8]) -> Result<(), Violation> {
         let call = decode(payload, "Call", Call::decode)?;
-        if self.hooks.frozen.load(Ordering::Acquire) {
-            // The server is being suspended (ADR-053): the core is about to be replaced, so a
-            // call that starts now would run on state the snapshot may already have missed. It
-            // is not answered; the client fails it as unavailable when the socket closes, and it
-            // is counted, so that `undra dev` can say its write was lost.
-            self.hooks.dropped.fetch_add(1, Ordering::AcqRel);
-            self.note(
-                DEBUG,
-                &format!("not running call {}: the core is being reloaded", call.call_id),
-            );
-            return Ok(());
-        }
         let constructor = matches!(call.target, CallTarget::Constructor { .. });
         // Recorded before the runtime sees it: a sync method replies before `call` returns.
-        if !self.conn.begin_call(call.call_id, constructor) {
-            self.note(
-                WARN,
-                &format!("ignoring a call that reuses the open call id {}", call.call_id),
-            );
-            return Ok(());
+        match self
+            .conn
+            .begin_call(call.call_id, constructor, &self.hooks.frozen)
+        {
+            Begin::Started => {}
+            Begin::Frozen => {
+                // The server is being suspended (ADR-053): the core is about to be replaced, so
+                // a call that starts now would run on state the snapshot may already have missed.
+                // It is not answered; the client fails it as unavailable when the socket closes,
+                // and it is counted, so that `undra dev` can say its write was lost.
+                self.hooks.dropped.fetch_add(1, Ordering::AcqRel);
+                self.note(
+                    DEBUG,
+                    &format!("not running call {}: the core is being reloaded", call.call_id),
+                );
+                return Ok(());
+            }
+            // The client fails it when the socket closes, a moment from now.
+            Begin::Closing => return Ok(()),
+            Begin::Duplicate => {
+                self.note(
+                    WARN,
+                    &format!("ignoring a call that reuses the open call id {}", call.call_id),
+                );
+                return Ok(());
+            }
         }
         if self.rt.call(payload) != 0 {
             // Refused without a reply (call id 0, a runtime shutting down): answer for it, or
