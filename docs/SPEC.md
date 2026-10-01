@@ -15,11 +15,11 @@ In scope: everything under the pixels.
 * Generated bindings for records, enums, errors, objects, stores, ports, sync/async methods, streams, signals.
 * Reactive state: signals, computed, transactions, change-sets, keyed list patches, observation.
 * Data layer: query cache, mutations with optimistic patches and rollback, invalidation, retry, persistence, offline queue.
-* Ports: Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle. Default adapters on each platform and Rust fakes.
+* Ports: Http, Kv, SecureStore, Fs, Clock, Rng, Log, Timer, Connectivity, Lifecycle; opt-in (v1.2, behind cargo features): WebSocket, Sse, Db (§8.1). Default adapters on each platform and Rust fakes.
 * Dev loop: `undra dev` remote core over WebSocket; devtools protocol messages (inspector UI is a stretch goal).
 * Playground app on all three platforms, benchmarks, contract tests.
 
-Out of scope for v1: sync engine, hosted services, desktop targets beyond macOS-via-Swift, shared UI of any kind, Rust-owned SQLite (Kv is a foreign port in v1, see ADR-014).
+Out of scope for v1: sync engine, hosted services, desktop targets beyond macOS-via-Swift, shared UI of any kind, Rust-owned SQLite (Kv is a foreign port in v1, see ADR-014; SQL arrives in v1.2 as the foreign, opt-in `Db` port of §8.1, ADR-048).
 
 Toolchain baseline: Rust 1.85+ (edition 2024), Swift 6.0 / iOS 17+, Kotlin 2.0 / Android API 26+ (NDK r27, 16 KB pages), TypeScript 5.5 / ES2022, Node 20+.
 
@@ -589,6 +589,41 @@ The standard surface (these ten ports and these types, plus `HttpMethod { Get, P
 
 Fakes (all in `undra-ports::fakes`, `Send + Sync`): `FakeHttp` (script responses by matcher; records calls), `MemKv`, `MemSecureStore`, `MemFs`, `FakeClock` (settable `now`, `advance(d)` fires due timers; implements `Clock` + `Timer`), `SeededRng` (xorshift64\*), `CaptureLog`, `ScriptedConnectivity`, `ScriptedLifecycle`. `TestRuntime::new()` installs all fakes and runs the executor on the test thread (`run_until(fut)` / `run_pending()`).
 
+### 8.1 Opt-in ports: `WebSocket`, `Sse` (ADR-047) and `Db` (ADR-048)
+
+Three more standard ports live in `undra-ports` behind cargo features of it and of the facade (`undra = { features = ["websocket", "sse", "db"] }`), **off by default**: a core that does not enable one has the schema, the schema hash and the wasm it has without it (their registrations come from `#[undra::port]` inside `undra-ports`, so only a feature keeps them out). Every method is `async` with an error channel; no wire, C ABI or wasm ABI change.
+
+```rust
+#[undra::port] pub trait WebSocket {
+    async fn connect(&self, url: String, protocols: Vec<String>, headers: Vec<Header>) -> Result<WsOpened, WsError>;
+    async fn send(&self, conn: u32, message: WsMessage) -> Result<(), WsError>;
+    async fn receive(&self, conn: u32, max: u32) -> Result<Vec<WsMessage>, WsError>;
+    async fn close(&self, conn: u32, code: u16, reason: String) -> Result<(), WsError>;
+}
+#[undra::port] pub trait Sse {
+    async fn open(&self, url: String, headers: Vec<Header>, last_event_id: Option<String>) -> Result<u32, SseError>;
+    async fn next(&self, stream: u32, max: u32) -> Result<Vec<SseEvent>, SseError>;
+    async fn close(&self, stream: u32) -> Result<(), SseError>;
+}
+#[undra::port] pub trait Db {
+    async fn open(&self, name: String, migrations: Vec<DbMigration>) -> Result<DbOpened, DbError>;
+    async fn execute(&self, db: u32, sql: String, params: Vec<DbValue>) -> Result<DbExecuted, DbError>;
+    async fn query(&self, db: u32, sql: String, params: Vec<DbValue>) -> Result<DbRows, DbError>;
+    async fn begin(&self, db: u32) -> Result<u32, DbError>;
+    async fn commit(&self, tx: u32) -> Result<(), DbError>;
+    async fn rollback(&self, tx: u32) -> Result<(), DbError>;
+    async fn close(&self, db: u32) -> Result<(), DbError>;
+}
+```
+Records: `WsOpened { conn: u32, protocol: String }`, `WsMessage { Text(String), Binary(Bytes) }`, `WsError { Refused { status: Option<u16>, message: String }, Network(String), Protocol(String), Closed { code: u16, reason: String } }`, `SseEvent { id: Option<String>, event: String, data: String, retry_ms: Option<u32> }`, `SseError { Refused { status: Option<u16>, message: String }, Network(String), Protocol(String), Ended }`, `DbMigration { version: u32, sql: String }`, `DbOpened { db: u32, version: u32 }`, `DbValue { Null, Integer(i64), Real(f64), Text(String), Blob(Bytes) }`, `DbExecuted { changes: u64, last_insert_id: i64 }`, `DbRows { columns: Vec<String>, rows: Vec<Vec<DbValue>> }`, `DbConstraint { Unique, NotNull, ForeignKey, Check, Other }`, `DbError { Busy, Constraint { kind: DbConstraint, message: String }, Corrupt(String), Full, Unavailable(String), Sql { message: String }, Migration { version: u32, message: String } }`. Each error implements `From<PortError>` (`Unavailable` is `WsError::Network` / `SseError::Network` / `DbError::Unavailable` naming E0062; a reply that does not decode is `Protocol` / `Sql`).
+
+* **Inbound is pulled; the pull is the credit (§3.7's numbers).** `receive` / `next` answer as soon as at least one item is buffered, with at most `max`; `Ok([])` means the core closed it; an `Err` ends it. At most one pull is outstanding per connection. The platform's binding reads ahead at most `max` items of the latest pull (16 before the first): where the platform can pause reading (URLSession, the Kotlin client, an HTTP body stream) the socket stops; where it cannot (the browser's, Node's and React Native's `WebSocket`) a connection buffers up to 4,096 messages or 16 MiB, then closes with 1008 and ends with `Closed { code: 1008, reason: "the core did not keep up" }`. The Rust streams (`undra_ports::ws::WsMessages`, `undra_ports::sse::SseEvents`) keep one pull of 16 in flight and issue the next while they hold fewer than 8. `send` completes when the platform accepted the message and its outbound buffer is under 1 MiB.
+* **Ends are typed:** the core's `close` ends the stream cleanly; a peer close frame (1000 included) is `Closed { code, reason }`; a drop without one is `Network`; an RFC 6455 violation or invalid UTF-8 is `Protocol`; a refused upgrade or SSE request is `Refused { status }` (`None` where the platform hides it); the end of an SSE body is `Ended`. A browser cannot send WebSocket headers: its adapter refuses a connect that has any. SSE is parsed by the HTML standard's algorithm (an event without `id` keeps the last one; one without data is not dispatched).
+* **Reconnection is the core's**, never the port's: `undra_ports::Backoff` (§11.0's formula, jitter from `Rng`) and a loop over `WeakCtx::sleep` (ADR-034); resume SSE with the last id.
+* **Db.** Every open database has one connection and one serial worker owned by the adapter (the core only awaits replies). `open` checks the name (`":memory:"`, or 1-64 of `A-Z a-z 0-9 . _ -` not starting with `.`; else `Unavailable`) and that migration versions strictly increase from 1, opens with `foreign_keys = ON`, `busy_timeout = 5000` and WAL (not on the web), and runs every migration above `PRAGMA user_version` in **one** transaction (a failure rolls all of them back: `Migration { version }`; a database newer than the newest migration is refused). `begin` waits for a running transaction and starts one (`BEGIN IMMEDIATE`); statements on the transaction id run inside it; statements on the database id wait for it to end, at most the busy timeout, then `Busy`. `execute` / `query` take exactly one statement with positional parameters (more SQL, or a wrong parameter count, is `Sql`). Errors follow SQLite's result code, never its text (Android, which has no code, parses its `(code NNNN ...)` suffix): `BUSY`/`LOCKED` → `Busy`, `CONSTRAINT_*` → `Constraint` (`UNIQUE` and `PRIMARYKEY` are `Unique`), `CORRUPT`/`NOTADB` → `Corrupt`, `FULL` → `Full`, `CANTOPEN`/`PERM`/`READONLY`/`IOERR` → `Unavailable`, the rest `Sql`. Files: iOS `Application Support/undra/db/<name>.sqlite`, Android `getDatabasePath("undra-<name>.sqlite")` (React Native uses the native shell's file on each OS), JVM `<dataDir>/db/<name>.sqlite`, web OPFS `undra/db/<name>`. SQL time functions read the adapter's clock: deterministic code binds `ctx.clock()` values.
+* **Rust surface:** `ws::WsConnection::connect(ctx, url, WsOptions)` (`send`, `send_text`, `send_binary`, `messages()`, `close`), `sse::subscribe(ctx, url, headers, last_event_id)`, `db::Database::open(ctx, name, &[Migration])` (`execute`/`query` take SQL as `&'static str` so values only travel as parameters, `execute_dynamic`/`query_dynamic` take a `String`; `transaction(|tx| async move { .. })` commits on `Ok` and rolls back on `Err` or when dropped), `params![..]`, `DbRow::get::<T>(column)`; `undra_ports::next(&mut stream)`. A connection, stream, database or transaction dropped without closing is closed (rolled back) fire-and-forget through a `WeakCtx`.
+* **Fakes** (with the features): `FakeWebSocket` (accepts every `ws(s)://` URL unless `refuse`d, `push`, `close_from_server`, `drop_connection`, `break_protocol`, `echo`; records sends, every pull's `max` and what was `delivered`), `FakeSse` (`push`, `end`, `fail`; records each open's `Last-Event-ID`), `FakeDb` (replies scripted by SQL fragment, `fail_next`, migrations and transactions tracked as an adapter runs them; an outer statement during a transaction is `Busy` at once). `fakes::install` binds them.
+
 ---
 
 ## 9. Query (`undra-query`)
@@ -729,6 +764,7 @@ The ten standard ports of section 8 and the eight types they exchange (`HttpMeth
 * **What references become.** A port or type of the app that mentions a standard type refers to the runtime's own: TypeScript imports the type and its `<Name>Codec` from `@undra/runtime`; Kotlin imports `dev.undra.runtime.adapters.<Name>` (spelled in full where a variant of the enclosing sealed type shadows the name); Swift's runtime (`Core/StandardRecords.swift`) exports all eight as public types under the standard names, so Swift refers to them like the other two languages and declares none; the one spelling that differs is `AppState`, which is the runtime's `UndraAppState` (an app's own `AppState` is the commonest type name in Swift, and the runtime has exported that name since v1; ADR-024, amended). A module that declares a type with a standard name but another shape (the app's own `HttpRequest`) shadows the runtime's inside that module, and code that imports both modules qualifies the one it means. A typed failure whose error is `HttpError` or `FsError` is decoded by the runtime's codec at the call site, through the same `UndraCallError.mapped(e, <Name>)` / `mapped(error, <Name>Codec)` / `mapped(_:domain:)` as a generated error (every error type has a codec).
 * **Ports.** The standard ports are never generated. They do not claim names in the generated namespace either, so an app may have a record called `Timer` or `Log`.
 * **Escape hatch.** `Generator::emit_standard_library` declares everything as ordinary items; `undra-ports` uses it to prove its own schema generates.
+* **Opt-in ports (§8.1).** The table also holds `WebSocket`, `Sse`, `Db` and their twelve types (`WsOpened`, `WsMessage`, `WsError`, `SseEvent`, `SseError`, `DbMigration`, `DbOpened`, `DbValue`, `DbExecuted`, `DbRows`, `DbConstraint`, `DbError`), which a schema contains only when its core enables the features. The runtimes ship all twelve whatever a core enables, under these names in all three languages, so the rules above apply to them unchanged.
 
 ---
 
@@ -749,6 +785,14 @@ Default adapters:
 | Clock, Rng, Log | Foundation / SecRandom / os_log | System / SecureRandom / `android.util.Log` | same | built-in (§7) | built-in | native in the module |
 | Timer | DispatchQueue | ScheduledExecutor | ScheduledExecutor | setTimeout | setTimeout | the core's own |
 | Connectivity / Lifecycle | NWPathMonitor / scenePhase | ConnectivityManager / ActivityLifecycleCallbacks | stubs | navigator.onLine / visibilitychange | stubs | NWPathMonitor or ConnectivityManager, native / AppState |
+
+The opt-in ports of §8.1, where a core declares them:
+
+| Port | Swift | Kotlin (Android) | Kotlin (JVM) | TS (browser) | TS (node) | React Native |
+|---|---|---|---|---|---|---|
+| WebSocket | URLSessionWebSocketTask | the runtime's own RFC 6455 client | the same | `WebSocket` (opt-in `@undra/runtime/realtime`) | the global `WebSocket` (opt-in) | the `WebSocket` global |
+| Sse | URLSession bytes | HttpURLConnection | HttpURLConnection | `fetch` body stream (opt-in) | `fetch` (opt-in) | `fetch` body stream, else `XMLHttpRequest` progress |
+| Db | SQLite3 C API | `android.database.sqlite` | JDBC (`java.sql`; the app adds a SQLite driver) | wa-sqlite in a worker on OPFS (opt-in `@undra/runtime/db`) | `node:sqlite` (opt-in) | native: the system SQLite on iOS, `android.database.sqlite` through JNI on Android |
 
 On Android all of it is installed by one call, `AndroidPlatformDefaults.install(core, context)` (module `android-adapters`; `android-adapters/README.md`); the runtime alone installs only Clock, Rng, Log and Timer.
 
@@ -859,7 +903,7 @@ crates/undra-wire        no unsafe; deps: none (proptest dev-dep)
 crates/undra-macros      proc-macro; deps: syn 2 (full), quote, proc-macro2
 crates/undra-signals     no unsafe; deps: undra-wire, parking_lot
 crates/undra-runtime     no unsafe; deps: undra-meta, undra-wire, undra-signals, parking_lot, slab, inventory, futures-core, pin-project-lite
-crates/undra-ports       no unsafe; deps: undra-runtime, undra-macros (uses its own macros)
+crates/undra-ports       no unsafe; deps: undra-runtime, undra-macros (uses its own macros), futures-core; features websocket, sse, db (§8.1, off by default)
 crates/undra-query       no unsafe; deps: undra-runtime, undra-ports
 crates/undra-ffi         unsafe allowed; deps: undra-runtime; features: jni (jni crate), wasm
 crates/undra-transport   no unsafe; deps: undra-runtime, tungstenite (feature server); WebSocket server + framing
@@ -890,7 +934,7 @@ Build-system integration (a project made by `undra init`; `undra build` is never
 * `#![forbid(unsafe_code)]` in every crate except `undra-ffi`.
 * proptest round-trips for every wire type; byte-fuzz on `Reader`, `Envelope::parse`, change-set and patch decoders.
 * Golden tests for bindgen (three languages).
-* Contract scenarios (`contract-tests/scenarios.md`) executed by each runtime's test suite against the playground core: primitives round-trip, records/enums/errors, sync call, async call, error propagation, cancellation, stream with backpressure, store observe → initial change-set, transaction → single change-set, keyed patch, computed, query fetch/stale/refetch, optimistic mutation rollback, offline queue replay, snapshot/restore, schema mismatch rejection, panic containment.
+* Contract scenarios (`contract-tests/scenarios.md`) executed by each runtime's test suite against the playground core: primitives round-trip, records/enums/errors, sync call, async call, error propagation, cancellation, stream with backpressure, store observe → initial change-set, transaction → single change-set, keyed patch, computed, query fetch/stale/refetch, optimistic mutation rollback, offline queue replay, snapshot/restore, schema mismatch rejection, panic containment; and for the opt-in ports of §8.1, WebSocket (S23), server-sent events (S24) and Db (S25), against the platforms' real adapters.
 * Size (ADR-052): the hello-world web core (the `undra init` template, `undra build --platform web`, `wasm-opt -Oz`) gzipped with zlib at level 9 is at most 120,000 bytes and at most 5% over its recorded size (`scripts/wasm-size.sh`, `[size."web/hello-wasm"]` in `bench/budgets.toml`, the `size` job of `bench.yml`); what the same app ships of `@undra/runtime` (Vite production build, worker script excluded) is at most 26,000 bytes and 5% over its record (`[size."web/hello-runtime-js"]`); a run that cannot measure either fails. The record, `bench/results/web-size.jsonl`, is the number the README and the site publish, and the shipped module must not contain the builder's home directory.
 * Benchmarks (criterion): wire encode/decode per type, dispatch overhead, change-set build for 100 signals, keyed patch on 10k items. Cross-boundary benchmarks per runtime with the numbers written to `bench/RESULTS.md`.
 * Every `pub` item documented. Every crate has a README with a 30-line example.
