@@ -23,10 +23,16 @@ use undra_meta::{
 use crate::emit::CodeWriter;
 use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
 use crate::naming;
+use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
 
 /// The package of the standard types the Kotlin runtime provides (`StandardRecords.kt`).
 const RUNTIME_ADAPTERS: &str = "dev.undra.runtime.adapters";
+
+/// The placeholder of a type that has no finite value (every way to build it needs itself). No
+/// Rust type that crosses can be like this (a store could not hold its initial value), so the text
+/// is never part of a working core; it is the one place the generator has nothing to write.
+const UNINHABITED: &str = "error(\"recursive default\")";
 
 /// The `@throws` line every call that can fail carries (ADR-032, amendment A).
 const THROWS_CALL: &str =
@@ -459,8 +465,16 @@ impl<'a> Ctx<'a> {
 
     /// The zero value used as a signal's placeholder until the initial
     /// change-set arrives.
-    fn zero(&mut self, t: &TypeRef, depth: usize) -> String {
-        match t {
+    fn zero(&mut self, t: &TypeRef) -> String {
+        self.zero_in(t, &mut ZeroState::new())
+            .unwrap_or_else(|| UNINHABITED.to_owned())
+    }
+
+    /// The zero value of `t`, or `None` when every way to build it needs a type that is already
+    /// being built (see `crate::zero`): a recursive enum's placeholder is its base case, wherever
+    /// the schema lists it.
+    fn zero_in(&mut self, t: &TypeRef, state: &mut ZeroState) -> Option<String> {
+        Some(match t {
             TypeRef::Bool => "false".to_owned(),
             TypeRef::I8 => "0.toByte()".to_owned(),
             TypeRef::I16 => "0.toShort()".to_owned(),
@@ -489,64 +503,81 @@ impl<'a> Ctx<'a> {
             TypeRef::Option(_) => "null".to_owned(),
             TypeRef::Vec(_) => "emptyList()".to_owned(),
             TypeRef::Map(..) => "emptyMap()".to_owned(),
-            TypeRef::Named(name) => self.zero_named(name, depth),
+            TypeRef::Named(name) => return self.zero_named(name, state),
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "Unit".to_owned()
             }
-        }
+        })
     }
 
-    fn zero_named(&mut self, name: &str, depth: usize) -> String {
+    fn zero_named(&mut self, name: &str, state: &mut ZeroState) -> Option<String> {
+        state.named(name, |state| self.zero_declared(name, state))
+    }
+
+    fn zero_declared(&mut self, name: &str, state: &mut ZeroState) -> Option<String> {
         let model = self.model();
-        if depth > 8 {
-            return "error(\"recursive default\")".to_owned();
-        }
         let shown = self.named(name, &Shadow::new());
         match model.kind(name) {
             Some(NamedKind::Record) => {
                 let Some(record) = model.record(name) else {
-                    return String::new();
+                    return Some(String::new());
                 };
-                let args: Vec<String> = record
-                    .fields
-                    .iter()
-                    .map(|f| format!("{} = {}", ident(&f.name), self.zero(&f.ty, depth + 1)))
-                    .collect();
-                format!("{shown}({})", args.join(", "))
+                let mut args = Vec::new();
+                for f in &record.fields {
+                    args.push(format!(
+                        "{} = {}",
+                        ident(&f.name),
+                        self.zero_in(&f.ty, state)?
+                    ));
+                }
+                Some(format!("{shown}({})", args.join(", ")))
             }
-            Some(NamedKind::UnitEnum) => model
-                .enum_def(name)
-                .and_then(|e| e.variants.first())
-                .map(|v| format!("{shown}.{}", naming::upper_snake(&v.name)))
-                .unwrap_or_default(),
+            Some(NamedKind::UnitEnum) => Some(
+                model
+                    .enum_def(name)
+                    .and_then(|e| e.variants.first())
+                    .map(|v| format!("{shown}.{}", naming::upper_snake(&v.name)))
+                    .unwrap_or_default(),
+            ),
             Some(NamedKind::DataEnum | NamedKind::Error) => {
                 let en = model.enum_def(name).or_else(|| model.error_def(name));
-                let Some(variant) = en.and_then(|e| e.variants.first()) else {
-                    return String::new();
+                let Some(en) = en.filter(|e| !e.variants.is_empty()) else {
+                    return Some(String::new());
                 };
-                if variant.fields.is_empty() {
-                    format!("{shown}.{}", variant.name)
-                } else if model.external(name).is_some() {
-                    // The runtime names the payload as it likes; positional arguments do not
-                    // depend on it.
-                    let args: Vec<String> = variant
-                        .fields
-                        .iter()
-                        .map(|f| self.zero(&f.ty, depth + 1))
-                        .collect();
-                    format!("{shown}.{}({})", variant.name, args.join(", "))
-                } else {
-                    let names = self.variant_props(en, variant);
-                    let args: Vec<String> = names
-                        .iter()
-                        .zip(&variant.fields)
-                        .map(|(n, f)| format!("{n} = {}", self.zero(&f.ty, depth + 1)))
-                        .collect();
-                    format!("{shown}.{}({})", variant.name, args.join(", "))
-                }
+                // The first variant that can be built without the enum itself.
+                en.variants
+                    .iter()
+                    .find_map(|variant| self.zero_variant(name, &shown, en, variant, state))
             }
-            Some(NamedKind::Object) | None => String::new(),
+            Some(NamedKind::Object) | None => Some(String::new()),
         }
+    }
+
+    fn zero_variant(
+        &mut self,
+        name: &str,
+        shown: &str,
+        en: &EnumDef,
+        variant: &VariantDef,
+        state: &mut ZeroState,
+    ) -> Option<String> {
+        if variant.fields.is_empty() {
+            return Some(format!("{shown}.{}", variant.name));
+        }
+        let mut args = Vec::new();
+        if self.model().external(name).is_some() {
+            // The runtime names the payload as it likes; positional arguments do not
+            // depend on it.
+            for f in &variant.fields {
+                args.push(self.zero_in(&f.ty, state)?);
+            }
+        } else {
+            let names = self.variant_props(Some(en), variant);
+            for (n, f) in names.iter().zip(&variant.fields) {
+                args.push(format!("{n} = {}", self.zero_in(&f.ty, state)?));
+            }
+        }
+        Some(format!("{shown}.{}({})", variant.name, args.join(", ")))
     }
 
     // ----- variant fields -----------------------------------------------------
@@ -837,7 +868,7 @@ impl<'a> Ctx<'a> {
             | TypeRef::Uuid
             | TypeRef::Option(_)
             | TypeRef::Vec(_)
-            | TypeRef::Map(..) => Some(self.zero(t, 0)),
+            | TypeRef::Map(..) => Some(self.zero(t)),
             _ => None,
         }
     }
@@ -1338,7 +1369,7 @@ impl<'a> Ctx<'a> {
         self.import("kotlinx.coroutines.flow.asStateFlow");
         let none = Shadow::new();
         let ty = self.ty(&g.ty, &none);
-        let zero = self.zero(&g.ty, 0);
+        let zero = self.zero(&g.ty);
         let name = ident(&g.name);
         let backing = format!("_{}", naming::camel(&g.name));
         w.line(format!(
@@ -1406,6 +1437,13 @@ impl<'a> Ctx<'a> {
                 w.line(format!("}} catch ({failure}: Exception) {{"));
                 w.indented(|w| w.line(format!("throw {mapped}")));
                 w.line("}");
+                if c.is_async {
+                    // `construct` checks this for the synchronous shapes; an async constructor
+                    // decodes the handle itself (Swift's generated `isNull` check).
+                    w.line(format!(
+                        "if ({handle} == 0L) throw UndraCallError.Malformed(\"the core returned the null handle for a constructor\")"
+                    ));
+                }
             }
             w.line(format!("return {}({ctx}, {handle})", o.name));
         });

@@ -372,6 +372,33 @@ class CallErrorTests : Suite() {
             assertTrue(failure.message!!.contains("socket reset"), failure.message!!)
         }
 
+        case("a reply or stream item the transport cannot decode fails the call as a protocol failure, which maps to Malformed") {
+            val t = FakeTransport()
+            attach(t).use { core ->
+                t.onCall = { call -> t.onCore { t.events.onMalformed(call.callId, UndraProtocolException("the core sent a malformed reply: test")) } }
+                val failure = runBlocking {
+                    try {
+                        core.call(TARGET, METHOD, ARGS)
+                        null
+                    } catch (e: Exception) {
+                        e
+                    }
+                }
+                assertTrue(failure is UndraProtocolException, "got $failure")
+                assertTrue(UndraCallError.mapped(failure!!) is UndraCallError.Malformed, "maps to Malformed")
+                val streamFailure = runBlocking {
+                    try {
+                        core.stream(TARGET, METHOD, ARGS).collect {}
+                        null
+                    } catch (e: Exception) {
+                        e
+                    }
+                }
+                assertTrue(streamFailure is UndraProtocolException, "got $streamFailure")
+                assertTrue(UndraCallError.mappedStream(streamFailure!!) is UndraCallError.Malformed, "maps to Malformed")
+            }
+        }
+
         case("a refused snapshot is an UndraRestoreException with the core's code") {
             val t = FakeTransport()
             t.snapshotBytes = byteArrayOf(1)

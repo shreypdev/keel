@@ -213,7 +213,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
                 target.onReply(id, status, r.readRemaining())
             } catch (e: WireException) {
                 // The call id is known from the JNI argument, so the caller can still be told.
-                target.onReply(callId.toUInt(), ReplyStatus.BAD_REQUEST, reasonBody("the core sent a malformed reply: ${e.message}"))
+                target.onMalformed(callId.toUInt(), UndraProtocolException("the core sent a malformed reply: ${e.message}", e))
             }
         }
 
@@ -230,7 +230,7 @@ internal class InprocTransport(private val native: NativeApi = JniNativeApi) : T
                 val flag = StreamFlag.fromByte(r.readU8(), at)
                 target.onStreamItem(id, flag, r.readRemaining())
             } catch (e: WireException) {
-                target.onStreamItem(callId.toUInt(), StreamFlag.ERROR, reasonBody("the core sent a malformed stream item: ${e.message}"))
+                target.onMalformed(callId.toUInt(), UndraProtocolException("the core sent a malformed stream item: ${e.message}", e))
             }
         }
 

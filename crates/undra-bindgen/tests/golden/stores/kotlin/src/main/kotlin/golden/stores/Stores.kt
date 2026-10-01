@@ -332,6 +332,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
             } catch (e: Exception) {
                 throw UndraCallError.mapped(e, TodoError)
             }
+            if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
             return Todos(ctx, handle)
         }
     }

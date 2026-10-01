@@ -884,11 +884,12 @@ fn swift_makes_an_enum_indirect_when_a_payload_lies_on_a_cycle() {
     assert!(file(&files, "Errors.swift").contains("public indirect enum Failure: UndraError"));
 }
 
-#[test]
-fn swift_placeholders_of_a_recursive_type_use_its_base_case() {
-    // A signal is initialised with a placeholder until the core's first change-set arrives. The
-    // placeholder of a recursive type is built from its first variant that does not need the
-    // type itself, wherever the schema lists it, and never from an optional, array or map.
+/// Store signals whose types recurse: an enum whose base case is its last variant, a record that
+/// holds it, and two enums that need each other unless one takes its other variant. A signal is
+/// initialised with a placeholder until the core's first change-set arrives; the placeholder of a
+/// recursive type is built from the first variant that does not need the type itself, wherever the
+/// schema lists it, and never from an optional, array or map.
+fn recursive_placeholders() -> Schema {
     let mut s = Schema::new("t");
     s.enums.push(common::enum_def(
         "Sum",
@@ -939,6 +940,15 @@ fn swift_placeholders_of_a_recursive_type_use_its_base_case() {
             ("right", common::named("Right"), false, None),
         ],
     ));
+    s
+}
+
+#[test]
+fn swift_placeholders_of_a_recursive_type_use_its_base_case() {
+    // A signal is initialised with a placeholder until the core's first change-set arrives. The
+    // placeholder of a recursive type is built from its first variant that does not need the
+    // type itself, wherever the schema lists it, and never from an optional, array or map.
+    let s = recursive_placeholders();
     let files = Generator::for_crate("t").swift(&s).unwrap();
     let stores = file(&files, "Stores.swift");
     assert!(
@@ -965,6 +975,108 @@ fn swift_placeholders_of_a_recursive_type_use_its_base_case() {
             assert!(!f.contents.contains(trap), "{}: `{trap}`", f.path);
         }
     }
+}
+
+#[test]
+fn kotlin_and_typescript_placeholders_of_a_recursive_type_use_its_base_case() {
+    // The same search as Swift's (`crate::zero`). Before it, Kotlin expanded the first variant of
+    // `Sum` exponentially until a depth guard wrote `error("recursive default")`, which throws
+    // when the store is created, and TypeScript overflowed the generator's stack.
+    let s = recursive_placeholders();
+    let kotlin = Generator::for_crate("t").kotlin(&s).unwrap();
+    let stores = file(&kotlin, "Stores.kt");
+    for expected in [
+        "private val _sum: MutableStateFlow<Sum> = signal(Sum.Zero)\n",
+        "private val _frame: MutableStateFlow<Frame> = signal(Frame(sum = Sum.Zero, next = null, kids = emptyList()))\n",
+        "private val _left: MutableStateFlow<Left> = signal(Left.Done)\n",
+        "private val _right: MutableStateFlow<Right> = signal(Right.Over(value = Left.Done))\n",
+    ] {
+        assert!(stores.contains(expected), "{expected}\n{stores}");
+    }
+    let ts = Generator::for_crate("t").typescript(&s).unwrap();
+    let stores = file(&ts, "stores.ts");
+    for expected in [
+        "readonly sum: Signal<Sum> = new Signal<Sum>({ kind: \"zero\" });\n",
+        "readonly frame: Signal<Frame> = new Signal<Frame>({ sum: { kind: \"zero\" }, next: null, kids: [] });\n",
+        "readonly left: Signal<Left> = new Signal<Left>({ kind: \"done\" });\n",
+        "readonly right: Signal<Right> = new Signal<Right>({ kind: \"over\", value: { kind: \"done\" } });\n",
+    ] {
+        assert!(stores.contains(expected), "{expected}\n{stores}");
+    }
+    for f in kotlin.iter().chain(&ts) {
+        assert!(!f.contents.contains("recursive default"), "{}", f.path);
+        assert!(!f.contents.contains("as never"), "{}", f.path);
+    }
+}
+
+#[test]
+fn kotlin_placeholders_of_deeply_nested_records_are_built_whole() {
+    // The old depth guard stopped at nine levels and wrote a trap for a type that is not recursive
+    // at all; the path-based search has no depth limit.
+    let mut s = Schema::new("t");
+    s.records.push(record_of("L0", vec![("v", TypeRef::I32)]));
+    for level in 1..12 {
+        let inner = format!("L{}", level - 1);
+        s.records.push(record_of(
+            &format!("L{level}"),
+            vec![("inner", common::named(&inner))],
+        ));
+    }
+    s.objects.push(common::store(
+        common::object(
+            "Deep",
+            "",
+            vec![common::ctor("Deep", "new", vec![], false)],
+            vec![],
+        ),
+        vec![("top", common::named("L11"), false, None)],
+    ));
+    let kotlin = Generator::for_crate("t").kotlin(&s).unwrap();
+    let stores = file(&kotlin, "Stores.kt");
+    assert!(!stores.contains("recursive default"), "{stores}");
+    assert!(
+        stores.contains("signal(L11(inner = L10(inner = L9("),
+        "{stores}"
+    );
+    assert!(stores.contains("L0(v = 0)"), "{stores}");
+}
+
+#[test]
+fn kotlin_and_typescript_survive_a_type_that_has_no_value_at_all() {
+    // As for Swift: a schema is data, and a type every way to build which needs itself must
+    // neither loop nor overflow the generator's stack. No Rust core can have such a store.
+    let mut s = Schema::new("t");
+    s.enums.push(common::enum_def(
+        "Never2",
+        "",
+        vec![common::tuple_variant(
+            "Again",
+            0,
+            vec![common::named("Never2")],
+        )],
+    ));
+    s.records
+        .push(record_of("Own", vec![("again", common::named("Own"))]));
+    s.objects.push(common::store(
+        common::object(
+            "Holder",
+            "",
+            vec![common::ctor("Holder", "new", vec![], false)],
+            vec![],
+        ),
+        vec![
+            ("never", common::named("Never2"), false, None),
+            ("own", common::named("Own"), false, None),
+        ],
+    ));
+    let kotlin = Generator::for_crate("t").kotlin(&s).unwrap();
+    assert!(file(&kotlin, "Stores.kt").contains("class Holder"));
+    let ts = Generator::for_crate("t").typescript(&s).unwrap();
+    let stores = file(&ts, "stores.ts");
+    assert!(
+        stores.contains("new Signal<Never2>(undefined as never)"),
+        "{stores}"
+    );
 }
 
 #[test]

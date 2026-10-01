@@ -181,6 +181,7 @@ class TodoStore private constructor(core: UndraCore, handle: Long) : UndraStore(
             } catch (e: Exception) {
                 throw UndraCallError.mapped(e, TodoError)
             }
+            if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
             return TodoStore(ctx, handle)
         }
     }

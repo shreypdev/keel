@@ -28,6 +28,7 @@ use undra_meta::{
 use crate::emit::CodeWriter;
 use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, is_unit_enum, parse_message};
 use crate::naming;
+use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
 
 const FILES: [&str; 7] = [
@@ -116,28 +117,6 @@ fn stored_id(name: &str) -> String {
 /// Rust type that crosses can be like this, so the text is never part of a working core; it is
 /// the one place the generator has nothing to write.
 const UNINHABITED: &str = "fatalError(\"recursive default\")";
-
-/// How many named types [`Types::zero`] visits before it gives up on a type.
-const ZERO_STEPS: usize = 10_000;
-
-/// The state of one search for a placeholder value.
-struct ZeroState {
-    /// The types being built, outermost first.
-    path: Vec<String>,
-    /// The placeholder of every type built so far.
-    built: HashMap<String, String>,
-    steps: usize,
-}
-
-impl ZeroState {
-    fn new() -> ZeroState {
-        ZeroState {
-            path: Vec::new(),
-            built: HashMap::new(),
-            steps: ZERO_STEPS,
-        }
-    }
-}
 
 /// The inline containment graph of the schema's records, data enums and errors: type `A` holds
 /// type `B` inline when a field of `A` (a payload field, for an enum) is a `B` or an optional
@@ -365,22 +344,9 @@ impl Types<'_> {
     }
 
     fn zero_named(&self, name: &str, state: &mut ZeroState) -> Option<String> {
-        if let Some(built) = state.built.get(name) {
-            return Some(built.clone());
-        }
-        // A type that is being built further up cannot be part of its own placeholder; the
-        // step budget bounds the search through a schema of types that have no finite value.
-        if state.path.iter().any(|p| p == name) || state.steps == 0 {
-            return None;
-        }
-        state.steps -= 1;
-        state.path.push(name.to_owned());
-        let built = self.zero_declared(name, state);
-        state.path.pop();
-        if let Some(built) = &built {
-            state.built.insert(name.to_owned(), built.clone());
-        }
-        built
+        // A type that is being built further up cannot be part of its own placeholder (see
+        // `crate::zero`).
+        state.named(name, |state| self.zero_declared(name, state))
     }
 
     fn zero_declared(&self, name: &str, state: &mut ZeroState) -> Option<String> {

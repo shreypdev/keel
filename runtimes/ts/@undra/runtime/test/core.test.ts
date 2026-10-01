@@ -1,5 +1,6 @@
 import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { UndraCallError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import { UndraError, UndraModeError, UndraReplyError, UndraSchemaMismatchError, UndraTransportError } from "../src/errors.js";
 import type { Transport } from "../src/transport/transport.js";
@@ -332,6 +333,21 @@ describe("construct", () => {
       r.ok(u32(1));
     });
     await expect(core.construct(1, M.ADD, new Uint8Array(0))).rejects.toBeInstanceOf(WireError);
+  });
+
+  it("rejects the null handle as a protocol failure, which generated code reports as Malformed", async () => {
+    const { fake, core } = await setup();
+    fake.on(M.ADD, (_c, r) => {
+      r.ok(encodeValue(codecs.u64, 0n));
+    });
+    const failure = await core.construct(1, M.ADD, new Uint8Array(0)).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(failure).toBeInstanceOf(UndraTransportError);
+    expect((failure as UndraTransportError).reason).toBe("protocol");
+    expect(UndraCallError.mapped(failure)).toBeInstanceOf(UndraCallError.Malformed);
+    expect((await core.stats()).liveHandles).toBe(0);
   });
 
   it("counts handles when the core reports no statistics of its own", async () => {

@@ -22,7 +22,14 @@ use undra_meta::{
 use crate::emit::CodeWriter;
 use crate::model::{self, Model, MsgPart, NamedKind, Ret, doc_lines, parse_message};
 use crate::naming;
+use crate::zero::ZeroState;
 use crate::{GeneratedFile, Generator};
+
+/// The placeholder of a type that has no finite value (every way to build it needs itself). No
+/// Rust type that crosses can be like this (a store could not hold its initial value), so the text
+/// is never part of a working core; it type-checks and is the one place the generator has nothing
+/// to write.
+const UNINHABITED: &str = "undefined as never";
 
 /// The `@throws` line every call that can fail carries (ADR-032, amendment A).
 const THROWS_CALL: &str = "@throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.";
@@ -713,7 +720,15 @@ impl<'a> Ctx<'a> {
     /// The zero value used as a signal's placeholder until the initial
     /// change-set arrives.
     fn zero(&mut self, t: &TypeRef) -> String {
-        match t {
+        self.zero_in(t, &mut ZeroState::new())
+            .unwrap_or_else(|| UNINHABITED.to_owned())
+    }
+
+    /// The zero value of `t`, or `None` when every way to build it needs a type that is already
+    /// being built (see `crate::zero`): a recursive enum's placeholder is its base case, wherever
+    /// the schema lists it.
+    fn zero_in(&mut self, t: &TypeRef, state: &mut ZeroState) -> Option<String> {
+        Some(match t {
             TypeRef::Bool => "false".to_owned(),
             TypeRef::I64 | TypeRef::U64 if !self.g.cfg.ts_js_number => "0n".to_owned(),
             TypeRef::I8
@@ -734,70 +749,100 @@ impl<'a> Ctx<'a> {
             TypeRef::Option(_) => "null".to_owned(),
             TypeRef::Vec(_) => "[]".to_owned(),
             TypeRef::Map(..) => "new Map()".to_owned(),
-            TypeRef::Named(name) => self.zero_named(name),
+            TypeRef::Named(name) => return self.zero_named(name, state),
             TypeRef::Unit | TypeRef::Lazy(_) | TypeRef::Result(..) | TypeRef::Stream(_) => {
                 "undefined".to_owned()
             }
-        }
+        })
     }
 
-    fn zero_named(&mut self, name: &str) -> String {
+    fn zero_named(&mut self, name: &str, state: &mut ZeroState) -> Option<String> {
+        state.named(name, |state| self.zero_declared(name, state))
+    }
+
+    fn zero_declared(&mut self, name: &str, state: &mut ZeroState) -> Option<String> {
         let model = self.model();
         match model.kind(name) {
             Some(NamedKind::Record) => {
                 let Some(record) = model.record(name) else {
-                    return "undefined".to_owned();
+                    return Some("undefined".to_owned());
                 };
-                let fields: Vec<String> = record
-                    .fields
-                    .iter()
-                    .map(|f| format!("{}: {}", naming::camel(&f.name), self.zero(&f.ty)))
-                    .collect();
-                if fields.is_empty() {
+                let mut fields = Vec::new();
+                for f in &record.fields {
+                    fields.push(format!(
+                        "{}: {}",
+                        naming::camel(&f.name),
+                        self.zero_in(&f.ty, state)?
+                    ));
+                }
+                Some(if fields.is_empty() {
                     "{}".to_owned()
                 } else {
                     format!("{{ {} }}", fields.join(", "))
-                }
+                })
             }
-            Some(NamedKind::UnitEnum) => model
-                .enum_def(name)
-                .and_then(|e| e.variants.first())
-                .map(|v| js_string(&naming::camel(&v.name)))
-                .unwrap_or_else(|| "undefined".to_owned()),
+            Some(NamedKind::UnitEnum) => Some(
+                model
+                    .enum_def(name)
+                    .and_then(|e| e.variants.first())
+                    .map(|v| js_string(&naming::camel(&v.name)))
+                    .unwrap_or_else(|| "undefined".to_owned()),
+            ),
             Some(NamedKind::DataEnum) => {
-                let Some(variant) = model.enum_def(name).and_then(|e| e.variants.first()) else {
-                    return "undefined".to_owned();
+                let Some(en) = model.enum_def(name).filter(|e| !e.variants.is_empty()) else {
+                    return Some("undefined".to_owned());
                 };
-                let mut parts = vec![format!(
-                    "kind: {}",
-                    js_string(&naming::camel(&variant.name))
-                )];
-                let names = self.variant_props(model.enum_def(name), variant);
-                for (prop, field) in names.iter().zip(&variant.fields) {
-                    parts.push(format!("{prop}: {}", self.zero(&field.ty)));
-                }
-                format!("{{ {} }}", parts.join(", "))
+                // The first variant that can be built without the enum itself.
+                en.variants
+                    .iter()
+                    .find_map(|variant| self.zero_data_variant(en, variant, state))
             }
             Some(NamedKind::Error) => {
-                let Some(en) = model.error_def(name) else {
-                    return "undefined".to_owned();
-                };
-                let Some(variant) = en.variants.first() else {
-                    return "undefined".to_owned();
+                let Some(en) = model.error_def(name).filter(|e| !e.variants.is_empty()) else {
+                    return Some("undefined".to_owned());
                 };
                 self.use_value(name, name);
-                let args: Vec<String> = variant.fields.iter().map(|f| self.zero(&f.ty)).collect();
-                format!(
-                    "new {name}.{}({})",
-                    variant_class(&variant.name),
-                    args.join(", ")
-                )
+                en.variants
+                    .iter()
+                    .find_map(|variant| self.zero_error_variant(name, variant, state))
             }
-            Some(NamedKind::Object) | None => "undefined".to_owned(),
+            Some(NamedKind::Object) | None => Some("undefined".to_owned()),
         }
     }
 
-    // ----- variant fields ---------------------------------------------------
+    fn zero_data_variant(
+        &mut self,
+        en: &EnumDef,
+        variant: &VariantDef,
+        state: &mut ZeroState,
+    ) -> Option<String> {
+        let mut parts = vec![format!(
+            "kind: {}",
+            js_string(&naming::camel(&variant.name))
+        )];
+        let names = self.variant_props(Some(en), variant);
+        for (prop, field) in names.iter().zip(&variant.fields) {
+            parts.push(format!("{prop}: {}", self.zero_in(&field.ty, state)?));
+        }
+        Some(format!("{{ {} }}", parts.join(", ")))
+    }
+
+    fn zero_error_variant(
+        &mut self,
+        name: &str,
+        variant: &VariantDef,
+        state: &mut ZeroState,
+    ) -> Option<String> {
+        let mut args = Vec::new();
+        for f in &variant.fields {
+            args.push(self.zero_in(&f.ty, state)?);
+        }
+        Some(format!(
+            "new {name}.{}({})",
+            variant_class(&variant.name),
+            args.join(", ")
+        ))
+    }
 
     /// The property names of a variant's fields. Data enums reserve `kind`;
     /// error classes also reserve the `Error` members and use binding-safe

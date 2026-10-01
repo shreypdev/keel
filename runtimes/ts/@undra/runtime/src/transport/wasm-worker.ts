@@ -118,7 +118,10 @@ function controlFailure(failure: WorkerFailure): Error {
  *   `wasm-main`. A custom port declared `sync` is the exception: it cannot be
  *   served here. When one answers a call, this transport logs a warning (once
  *   per port) through the handler's log, and the core's call has already failed
- *   as unavailable; use `wasm-main` for such a port.
+ *   as unavailable; use `wasm-main` for such a port. (The transport only sees
+ *   that a port answered inline, so an asynchronous port whose implementation
+ *   returned bytes directly is warned about too; its reply is delivered and
+ *   used, and the warning says so.)
  *
  * `snapshot()` and `restore()` travel as control messages and are answered in
  * the order the worker handles them, behind the messages sent before them; a
@@ -460,10 +463,13 @@ export class WasmWorkerTransport implements Transport {
   }
 
   /**
-   * A port answered inline, which only a port declared `sync` does. If the core called it
+   * A port answered inline, which a port declared `sync` does. If the core called it
    * synchronously the reply is too late and the call already failed as unavailable (the core
    * cannot wait for this thread); say so once, because the core's own panic message only names
-   * the port.
+   * the port. The transport cannot tell how the core called: an asynchronous port whose
+   * implementation answered inline (a hand-written `PortImpl` that returns bytes, or a failure
+   * thrown before its first `await`) gets the same warning, and its reply is still delivered and
+   * used. The warning says both; it is logged once per port, so the false alarm costs one line.
    */
   #warnSyncPort(portId: number, handler: TransportHandler): void {
     if (this.#warnedPorts.has(portId)) return;
@@ -471,7 +477,7 @@ export class WasmWorkerTransport implements Transport {
     handler.log(
       3,
       "undra::worker",
-      `port 0x${portId.toString(16)} answered synchronously on the main thread, but in wasm-worker mode the core cannot wait for the main thread: a synchronous call to a port (one declared #[undra::port(sync)]) has already failed as unavailable and this reply is discarded; load the core with mode "wasm-main" to use such a port (Clock, Rng and Log are answered inside the worker)`,
+      `port 0x${portId.toString(16)} answered inline on the main thread, as a port declared #[undra::port(sync)] does, but in wasm-worker mode the core cannot wait for the main thread: if the core called it synchronously, that call has already failed as unavailable and this reply comes too late; load the core with mode "wasm-main" to use such a port (Clock, Rng and Log are answered inside the worker). If the port is not declared sync, the reply was delivered and this warning can be ignored`,
     );
   }
 

@@ -1592,7 +1592,8 @@ fn full() -> Schema {
 }
 
 /// Types that hold themselves: a linked record, a tree, two records that hold each other, a record
-/// and an enum that hold each other, an enum and an error enum that hold themselves, and a store,
+/// and an enum that hold each other, an enum and an error enum that hold themselves, an enum whose
+/// base case is its last variant (a signal's placeholder must find it), and a store,
 /// a method and a function that take and return them (SPEC section 10.1, recursive types).
 fn recursive() -> Schema {
     let mut s = Schema::new("golden-recursive");
@@ -1662,6 +1663,15 @@ fn recursive() -> Schema {
             ),
         ],
     ));
+    s.enums.push(enum_def(
+        "Sum",
+        "A term whose base case is its last variant: a placeholder cannot start from `Add`.",
+        vec![
+            tuple_variant("Add", 0, vec![named("Sum"), named("Sum")]),
+            tuple_variant("Neg", 1, vec![named("Sum")]),
+            unit_variant("Zero", 2),
+        ],
+    ));
     s.enums.push(error_def(
         "ParseError",
         "A parse failure that can wrap the failure it came from.",
@@ -1723,6 +1733,7 @@ fn recursive() -> Schema {
             ("expr", named("Expr"), false, None),
             ("path", named("Path"), false, None),
             ("last_error", opt(named("ParseError")), false, None),
+            ("total", named("Sum"), false, None),
         ],
     ));
     s.functions.push(function(

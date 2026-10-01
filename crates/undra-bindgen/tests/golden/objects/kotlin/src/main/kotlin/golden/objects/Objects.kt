@@ -262,6 +262,7 @@ class Calculator private constructor(core: UndraCore, handle: Long) : UndraObjec
             } catch (e: Exception) {
                 throw UndraCallError.mapped(e, CalcError)
             }
+            if (handle == 0L) throw UndraCallError.Malformed("the core returned the null handle for a constructor")
             return Calculator(ctx, handle)
         }
     }

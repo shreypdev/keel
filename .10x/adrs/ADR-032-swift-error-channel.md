@@ -454,8 +454,10 @@ TypeScript shapes change (R11: decided here before the code). Swift is unchanged
    (the table of decision 2 above applies unchanged): `CancelledByCore`, `Panicked(message, backtrace)`,
    `Refused(reason)`, `Unavailable(transport error)`, `Malformed(detail)`.
    * **Kotlin:** `sealed class UndraCallError : UndraException`, the five cases nested (`CancelledByCore` a
-     `data object`; `Panicked.panicMessage` and `.backtrace`; `Refused.reason`; `Unavailable.transport`, an
-     `UndraTransportException`, also its `cause`; `Malformed.detail`). A property is not called `message` because
+     class without fields, not a `data object`: a singleton `Throwable` would share one stack trace and one list of
+     suppressed exceptions across every throw (corrected in the review); `Panicked.panicMessage` and
+     `.backtrace`; `Refused.reason`; `Unavailable.transport`, an `UndraTransportException`, also its `cause`;
+     `Malformed.detail`). A property is not called `message` because
      `Throwable.message` is the one-line description an app shows (`error.message` reads like Swift's
      `localizedDescription`).
    * **TypeScript:** `abstract class UndraCallError extends UndraError` merged with a namespace of the five final

@@ -486,6 +486,12 @@ internal class ConnectedCore(
         }
     }
 
+    override fun onMalformed(callId: UInt, error: UndraProtocolException) {
+        val entry = pending.remove(callId.toInt()) ?: return
+        if (entry !is Pending.Streaming) liveMirror.drainSoon()
+        fail(entry, error)
+    }
+
     override fun onChangeSet(changeSet: ByteArray) {
         liveMirror.submit(changeSet)
     }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { UndraCallError, type UndraCallFailure, UndraUnhandledError } from "../src/call-error.js";
 import { UndraCore } from "../src/core.js";
 import {
@@ -286,6 +286,66 @@ describe("UndraCore.report", () => {
     expect(seen).toEqual(["outer", "later"]);
   });
 
+  it("a handler that calls a failing command is not called again for it, though the command fails after the handler returned", async () => {
+    // Shaped like a generated command: its whole body is one try/catch around an awaited call.
+    const command = async (on: UndraCore): Promise<void> => {
+      try {
+        await on.call(FREE, M, new Uint8Array(0));
+      } catch (error) {
+        on.report(error, "Lab.poke");
+      }
+    };
+    const seen: string[] = [];
+    const holder: { core?: UndraCore } = {};
+    const { core, log } = await setup((e) => {
+      seen.push(e.operation);
+      // Bounded so that a broken guard fails the test instead of looping on the microtask queue for ever.
+      if (seen.length < 50 && holder.core !== undefined) void command(holder.core);
+    });
+    holder.core = core;
+    core.close();
+    await command(core);
+    await macrotask();
+    expect(seen).toEqual(["Lab.poke"]);
+    // The nested failure was logged, not lost.
+    expect(log.records.filter((r) => r.message.startsWith("Lab.poke failed")).length).toBe(2);
+    // The guard is about the calls the handler started, not about later, unrelated failures.
+    await command(core);
+    await macrotask();
+    expect(seen).toEqual(["Lab.poke", "Lab.poke"]);
+  });
+
+  it("the failure the handler's call shares with other pending calls still reaches the handler for them", async () => {
+    const seen: string[] = [];
+    const holder: { core?: UndraCore } = {};
+    const { fake, core } = await setup((e) => {
+      seen.push(e.operation);
+      // The first report starts a call that stays pending until the core closes.
+      if (seen.length === 1 && holder.core !== undefined) void holder.core.call(FREE, M, new Uint8Array(0)).catch(() => {});
+    });
+    holder.core = core;
+    fake.on(M, () => {}); // never answered
+    const pending = core.call(FREE, M, new Uint8Array(0)).catch((error: unknown) => {
+      core.report(error, "Lab.pending");
+    });
+    core.report(new UndraTransportError("closed", "closed"), "Lab.first");
+    core.close();
+    await pending;
+    await macrotask();
+    expect(seen).toEqual(["Lab.first", "Lab.pending"]);
+  });
+
+  it("a thrown value without a string form is still reported, and report does not throw", async () => {
+    const reports: UndraUnhandledError[] = [];
+    const { core } = await setup((e) => reports.push(e));
+    const odd: unknown = Object.create(null);
+    expect(() => {
+      core.report(odd, "Lab.odd");
+    }).not.toThrow();
+    expect(reports[0]?.error).toBeInstanceOf(UndraCallError.Malformed);
+    expect((reports[0]?.error as UndraCallError.Malformed).detail).toBe("[object Object]");
+  });
+
   it("a handler that throws is contained and logged; report never throws", async () => {
     const { core, log } = await setup(() => {
       throw new Error("the handler is broken");
@@ -365,12 +425,19 @@ describe("UndraCore.shared with no core loaded", () => {
   });
 
   it("a command on it only logs", async () => {
-    const records: string[] = [];
+    // The placeholder has no log adapter and no handler of its own: the report goes to the console's error level.
+    // (Its first use logs the teaching message once, so take it before counting.)
     const shared = UndraCore.shared;
-    shared.report(new UndraTransportError("closed", "no core"), "Todos.toggle");
-    // (The placeholder has no log adapter of its own: the report goes to the console log and must not throw.)
-    records.push("ok");
-    expect(records).toEqual(["ok"]);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(() => {
+        shared.report(new UndraTransportError("closed", "no core"), "Todos.toggle");
+      }).not.toThrow();
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(String(errors.mock.calls[0]?.[0])).toContain("Todos.toggle failed: the Undra core is unavailable");
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 

@@ -208,6 +208,61 @@
       "docs": "A path whose steps hold the rest of it."
     },
     {
+      "name": "Sum",
+      "type_id": 1071174216,
+      "is_error": false,
+      "variants": [
+        {
+          "name": "Add",
+          "index": 0,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "Sum"
+              },
+              "default": false
+            },
+            {
+              "name": "1",
+              "ty": {
+                "kind": "named",
+                "of": "Sum"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Neg",
+          "index": 1,
+          "fields": [
+            {
+              "name": "0",
+              "ty": {
+                "kind": "named",
+                "of": "Sum"
+              },
+              "default": false
+            }
+          ],
+          "tuple": true,
+          "message": null
+        },
+        {
+          "name": "Zero",
+          "index": 2,
+          "fields": [],
+          "tuple": false,
+          "message": null
+        }
+      ],
+      "docs": "A term whose base case is its last variant: a placeholder cannot start from `Add`."
+    },
+    {
       "name": "ParseError",
       "type_id": 2448244154,
       "is_error": true,
@@ -412,6 +467,16 @@
                 "kind": "named",
                 "of": "ParseError"
               }
+            },
+            "computed": false,
+            "key": null
+          },
+          {
+            "name": "total",
+            "signal_id": 7,
+            "ty": {
+              "kind": "named",
+              "of": "Sum"
             },
             "computed": false,
             "key": null

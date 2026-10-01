@@ -113,7 +113,8 @@ UndraCallError`) to the `onError` you gave `UndraCore.load`, and returns. A comm
 signal itself (stores change only from the core's change-sets), so a refused command leaves the screen showing exactly
 what the core holds: there is nothing to roll back. A caller that awaits a TypeScript command learns that it was sent and
 answered, not that it succeeded; read the effect from the store. A command's arguments are encoded inside its own
-`try`/`catch` in Kotlin and TypeScript, so a value the wire cannot represent is reported, not thrown into the handler.
+`try`/`catch` in Kotlin and TypeScript, so a value the wire cannot represent is reported (as `Malformed`, whose `cause` is
+the `IllegalArgumentException`, `WireException` or `RangeError`), not thrown into the handler.
 
 ```swift
 try UndraCore.load(.inproc(expectedSchemaHash: UndraIds.schemaHash,
@@ -133,13 +134,16 @@ What reaches `onError`, on every platform: a failed command, and a change from t
 malformed change-set (dropped whole) and a port implementation that failed (operation `"port 0x... method 0x..."`).
 
 The handler runs synchronously on the thread (Swift: the task) that made the call: the main actor for a store, the main
-thread for a Compose click. Keep it short, and do not call into Undra from it: a failure reported while a handler runs on
-the same thread is only logged, so a handler that calls a failing command cannot recurse (a task-local in Swift, a
-thread-local in Kotlin, a flag in TypeScript). A failure found inside a core callback (a malformed change-set, a failed
-port) reaches a Kotlin handler on the runtime's delivery thread, never on the core's. An exception the handler throws is
-logged and dropped (Kotlin: an `Error` propagates, so a debug build can crash on purpose). The default, no handler, logs
-and returns. To stop at the failing line in a debug build: Swift `onError: { assertionFailure("\($0)") }`, Kotlin
-`onError = { throw AssertionError(it) }`.
+thread for a Compose click. Keep it short, and do not call into Undra from it: a failure reported while a handler runs
+on the same thread is only logged, so a handler that calls a failing command cannot recurse (a task-local in Swift, a
+thread-local in Kotlin; in TypeScript, where a command fails after the handler returned, the runtime remembers the calls
+the handler started and only logs their failures). Work the handler schedules for later is outside the guard, except a
+Swift `Task { }`, which inherits the task-local: a Kotlin coroutine it launches or a TypeScript timer it sets that calls
+a failing command is reported again, and loops if it does the same again. A failure found inside a core callback (a
+malformed change-set, a failed port) reaches a Kotlin handler on the runtime's delivery thread, never on the core's. An
+exception the handler throws is logged and dropped (Kotlin: an `Error` propagates, so a debug build can crash on
+purpose). The default, no handler, logs and returns. To stop at the failing line in a debug build: Swift `onError: {
+assertionFailure("\($0)") }`, Kotlin `onError = { throw AssertionError(it) }`.
 
 ## Before a core is loaded
 

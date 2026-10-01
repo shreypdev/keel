@@ -209,3 +209,14 @@ base-case-first enums, so it does not hit it.
 * A7 (ADR-049): worker protocol 3, `worker.ports`, load-time error for main-thread sync ports; rename the snapshot field to `data`.
 * A swift-side `onError` for a malformed change-set and a failed port (parity table).
 * `UndraCore.stats()` shapes, Kotlin `isClosed`, close semantics and connection status stay with PA-6, PA-7, PA-8.
+
+## After the review (2026-10-01)
+
+`.10x/reviews/2026-10-01-parity-review.md`. Fixed there: the TypeScript `onError` guard now also covers the calls a
+handler starts (a TypeScript command fails after the handler returned, so a handler that called a failing command looped on
+the microtask queue); the latent placeholder bug above (the Swift search moved to `crates/undra-bindgen/src/zero.rs` and
+Kotlin and TypeScript use it; the `recursive` golden gained a base-case-last `Sum` signal); the null handle of a Kotlin async
+constructor and of every TypeScript constructor is `Malformed`; a malformed JNI reply or stream item is `Malformed`
+(`TransportEvents.onMalformed`) instead of a fake status 5 or flag-2 String; the worker's sync-port warning says what it can
+know; `errorMessage` never throws. Follow-ups: ADR-049 field and protocol names, Swift `onError` for ports and change-sets,
+PA-6/7/8, and a validation error for a type with no finite value.

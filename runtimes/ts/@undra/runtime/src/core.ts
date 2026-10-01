@@ -100,8 +100,9 @@ export interface AttachOptions {
    * not be applied, a malformed change-set, a port that failed. The failure is also logged at error level,
    * whether or not a handler is set. The handler runs synchronously where the failure was found (inside a
    * core callback for a malformed change-set or a failed port): keep it short and do not call into Undra
-   * from it. A failure reported while the handler runs is only logged, and an exception it throws is logged
-   * and dropped.
+   * from it. A failure reported while the handler runs is only logged, and so is the failure of a call the
+   * handler started (a command fails after the handler returned), so a handler that calls a failing command
+   * is not called again for it. An exception it throws is logged and dropped.
    */
   readonly onError?: (error: UndraUnhandledError) => void;
   /** Make this core `UndraCore.shared` when none is set yet. Default `true`. */
@@ -364,6 +365,8 @@ export class UndraCore {
   /** What a call on this closed core says; the default is "the core is closed". */
   #closedMessage = "the core is closed";
   #reporting = false;
+  /** The failures of calls the `onError` handler started (see `report`): reported, they are only logged. */
+  readonly #handlerFailures = new WeakSet<object>();
   #stopEvents: (() => void) | null = null;
 
   private constructor(transport: Transport, options: AttachOptions, adapters: Partial<Adapters>) {
@@ -449,13 +452,16 @@ export class UndraCore {
 
   /**
    * Runs a constructor (`typeId` names the object type, `methodId` the
-   * constructor) and resolves with the new object's handle. Rejects like `call`.
+   * constructor) and resolves with the new object's handle. Rejects like `call`,
+   * and with {@link UndraTransportError} (`"protocol"`) when the core answers
+   * with the null handle.
    */
   async construct(typeId: number, methodId: number, args: Uint8Array): Promise<Handle> {
     const body = await this.#request((callId) =>
       encodeCall({ target: CallTarget.Constructor, typeId, methodId, callId, args }),
     );
     const handle = decodeValue(codecs.u64, body);
+    if (handle === 0n) throw new UndraTransportError("protocol", "the core returned the null handle for a constructor");
     this.#handles.add(handle);
     return handle;
   }
@@ -524,8 +530,10 @@ export class UndraCore {
    *
    * `error` is mapped the way a rejecting call's error is (`UndraCallError.mapped`), so the handler always
    * receives an `UndraCallError` inside the {@link UndraUnhandledError} (a failure that is not Undra's is
-   * `Malformed`, with the original as the `cause`). A report made while the handler runs (a handler that
-   * calls a failing command) is only logged.
+   * `Malformed`, with the original as the `cause`). A report made while the handler runs is only logged,
+   * and so is the failure of a call the handler started: a command the handler calls fails after the
+   * handler returned (every method is asynchronous), and reporting it again would call the handler again,
+   * for ever.
    *
    * @param error What the call threw.
    * @param operation What failed, as TypeScript spells it, for example `"Todos.toggle"`.
@@ -534,7 +542,7 @@ export class UndraCore {
     const unhandled = new UndraUnhandledError(operation, UndraCallError.asCallError(error), error);
     this.#log(4, "undra::runtime", unhandled.message);
     const handler = this.#options.onError;
-    if (handler === undefined || this.#reporting) return;
+    if (handler === undefined || this.#reporting || this.#startedByHandler(error)) return;
     this.#reporting = true;
     try {
       handler(unhandled);
@@ -696,6 +704,31 @@ export class UndraCore {
   }
 
   #request(encode: (callId: number) => Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+    const call = this.#send(encode, signal);
+    if (!this.#reporting) return call;
+    // Started by the `onError` handler: it settles after the handler returned, out of reach of the
+    // synchronous guard, so its failure is remembered and `report` only logs it.
+    return call.catch((error: unknown) => {
+      throw this.#fromHandler(error);
+    });
+  }
+
+  /** `error`, the failure of a call the `onError` handler started, remembered as such. */
+  #fromHandler(error: unknown): unknown {
+    // A transport failure can be one object that every pending call shares (`close()` fails them all with
+    // it): this call gets its own, so the other callers' reports are unaffected.
+    const own =
+      error instanceof UndraTransportError ? new UndraTransportError(error.reason, error.message, { cause: error }) : error;
+    if (typeof own === "object" && own !== null) this.#handlerFailures.add(own);
+    return own;
+  }
+
+  /** Whether `error` is the failure of a call the `onError` handler started. */
+  #startedByHandler(error: unknown): boolean {
+    return typeof error === "object" && error !== null && this.#handlerFailures.has(error);
+  }
+
+  #send(encode: (callId: number) => Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
     try {
       this.#assertOpen();
     } catch (error) {
