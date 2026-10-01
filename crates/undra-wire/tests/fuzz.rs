@@ -17,7 +17,8 @@ use common::{Rng, hex};
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, Cancel, ChangeEntry, ChangeOp, ChangeSet, ChangeSetBuilder,
     ChangeSetRef, Event, Hello, Log, Observe, PortCall, PortReply, Release, Reply, ReplyStatus,
-    Restore, Snapshot, StoreSnapshot, StreamCredit, StreamFailure, StreamItem, TimerFired,
+    Restore, Snapshot, SnapshotType, StoreSnapshot, StreamCredit, StreamFailure, StreamItem,
+    TimerFired,
 };
 use undra_wire::{
     Bytes, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp, Uuid,
@@ -333,6 +334,18 @@ fn seeds() -> Vec<Vec<u8>> {
 
     let snapshot = Snapshot {
         generation_floor: 4,
+        schema_hash: 0x1234,
+        types: vec![
+            SnapshotType {
+                type_id: 0xabcd,
+                fingerprint: 1,
+            },
+            SnapshotType {
+                type_id: 0xdcba,
+                fingerprint: 2,
+            },
+        ],
+        description: r#"{"stores":[]}"#.to_owned(),
         stores: vec![
             StoreSnapshot {
                 handle: Handle::new(1, 1),
