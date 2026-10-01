@@ -320,3 +320,16 @@ amendment, implemented, opus review running) → `react-native` (G1, implemented
 `tooling` (D2–D5) and `wasm-size` (E5, ADR-052) started in parallel. After those: wave 0 of the
 boundary plan (`abi-table` ADR-044, `ios-floor` ADR-045, `newtypes` ADR-042), `persistence-v2`
 (ADR-037/049), `dev-reload` (B3), `testkit` (F), derived lists (ADR-039), then the v1.2 bets.
+
+### Checkpoint 6 (2026-10-01, late afternoon) — parity landed; Rust 1.99.0 handled
+
+| Piece | Merge | Verdict |
+|---|---|---|
+| Rust 1.99.0 reached stable and failed every CI job on `a0d638f` (`fetch_update` deprecated, const-eval panic wording changed under the trybuild goldens) | `d59b486`, `43348eb` | `cas_update` (MSRV-safe CAS loop) replaces the three call sites; CI pins `1.98.1` in ci/bench/site/release.yml; the deliberate bump is an open item (header comment in `ci.yml` says how) |
+| the schema-docs test (CI-only, `--ignored`) pinned the playground hash by hand and went stale when device-bench moved it | `3a2ff1f` | the test reads the hash from the committed bindings |
+| C3+C4 parity: Kotlin/TS `UndraCallError` closed sets, `UndraTransportException` under `UndraException`, non-throwing commands with `onError`/`report`, `onError` silent for a drop the connection state reports, TS snapshot/restore, worker-mode fix, recursive records, `docs/ERRORS.md` (replaces `SWIFT_ERRORS.md`), interop scripts assert the typed failure | `143b72a` | opus review (parity) + the cross-merge record in `.10x/decisions/sde/parity.md`; Rust 2,349 · Kotlin 585 · TS 1,049 · Swift 467 · wasm 24 · contracts 54/54 |
+
+Matrix at checkpoint 6: Rust 2,349 · TS 1,049 · Kotlin 585 · Swift 467 · wasm 24 · contracts 54/54.
+In flight: `android-adapters` (crossing main), `runtime-lifecycle` (opus review), `react-native`
+(cross-merge + CI jobs + Android reload re-check), `tooling` (D2–D5), `wasm-size` (E5, ADR-052),
+`site-errors` (API pages for the Kotlin/TS error channel).
