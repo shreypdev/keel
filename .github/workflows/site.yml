@@ -1,7 +1,9 @@
 name: Site
 
-# Publishes the static site in `site/` to GitHub Pages (https://shreypdev.github.io/undra/).
-# There is no build step: `site/` is plain HTML, CSS and JS and is uploaded as is.
+# Builds the static site in `site/` and the real web playground (the Rust core as wasm plus the React
+# app), stages both into `_site/`, checks them, and publishes them to GitHub Pages
+# (https://shreypdev.github.io/undra/). Pull requests run the same build and checks without deploying.
+# How it all fits together, and what the founder does by hand: docs/SITE.md.
 #
 # One-time repository setting: Settings > Pages > Build and deployment > Source = "GitHub Actions".
 
@@ -10,8 +12,22 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "examples/playground/**"
+      - "runtimes/ts/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/site.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "examples/playground/**"
+      - "runtimes/ts/**"
       - ".github/workflows/site.yml"
   workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
 
 # `id-token: write` is what deploy-pages needs to prove the deployment's origin (OIDC);
 # it grants no write access to the repository.
@@ -21,23 +37,87 @@ permissions:
   id-token: write
 
 # Let an in-flight deployment finish; a newer push waits its turn instead of cancelling it.
+# Pull request builds are disposable and cancel each other.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('site-pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: examples/playground/web/package-lock.json
+      # wasm-opt: `undra build` runs it over the core when it is installed.
+      - name: Install binaryen
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
+      # 1. The playground: one Rust core, compiled to wasm, under a React UI.
+      - name: Build the playground core (wasm32)
+        run: cargo run -p undra-cli -- build --platform web -C examples/playground
+      - name: Build the playground web app
+        working-directory: examples/playground/web
+        run: |
+          npm ci
+          npx vite build --base=/undra/playground/
+
+      # 2. The site's generated files (benchmark table, roadmap, blog index, feed, sitemap, search
+      #    index, llms.txt) must be what is committed. If this fails, run
+      #    `node site/scripts/build-all.mjs` locally and commit the result.
+      - name: Generated files are up to date
+        run: |
+          node site/scripts/build-all.mjs
+          if [ -n "$(git status --porcelain site/)" ]; then
+            git --no-pager diff --stat site/
+            echo "::error::site/ is stale. Run 'node site/scripts/build-all.mjs' and commit the result."
+            exit 1
+          fi
+
+      # 3. Stage and check: every internal link and fragment resolves, every page has its title,
+      #    description, canonical, Open Graph card and JSON-LD, and the shared header and footer match.
+      - name: Check the source tree
+        run: node site/scripts/check-links.mjs
+      - name: Stage _site/ (site plus playground)
+        run: bash site/scripts/stage.sh
+      - name: Check the staged site
+        run: node site/scripts/check-links.mjs --root _site
+
+      - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
+
   deploy:
     name: Deploy to GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      # Tell Bing, Yandex and DuckDuckGo about the pages (IndexNow). Google discovers the sitemap
+      # through Search Console, a one-time founder action described in docs/SITE.md. A failure here
+      # never fails the deployment.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Submit the sitemap's URLs to IndexNow
+        continue-on-error: true
+        run: node site/scripts/indexnow.mjs
