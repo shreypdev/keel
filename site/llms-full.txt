@@ -270,7 +270,8 @@ pub struct Todos {
     #[undra(key = "id")]
     todos: Signal<Vec<Todo>>,              // signal 0
     filter: Signal<Filter>,                // signal 1
-    visible: Computed<Vec<Todo>>,          // signal 2, derived
+    #[undra(key = "id")]
+    visible: DerivedList<Todo>,            // signal 2, a view of todos
     remaining: Computed<u32>,              // signal 3, derived
 }
 
@@ -285,7 +286,7 @@ impl Todos {
 
 A few rules worth knowing up front:
 
-- **Signals are the fields of type `Signal<T>` and `Computed<T>`**, numbered in declaration order (0, 1, 2, …). Other fields are private state: a `Ctx`, a counter, configuration.
+- **Signals are the fields of type `Signal<T>`, `Computed<T>` and `DerivedList<T>`**, numbered in declaration order (0, 1, 2, …). Other fields are private state: a `Ctx`, a counter, configuration.
 - **A store needs a constructor**, a `pub fn` returning `Self` or `Result<Self, E>`. Generated code calls it to create the object in the core and gets back a handle.
 - **Receivers are `&self`.** Objects are shared, so mutation goes through signals or a lock. `&mut self` is rejected with a teaching error (`E0020`).
 - **Method arguments and results are wire types**: numbers, strings, bytes, options, vectors, maps, your records and enums, and `Result<T, E>` where `E` is a `#[undra::error]` enum.
@@ -311,13 +312,13 @@ A `Computed<T>` is a value derived from signals. You name its inputs and give it
 rust
 
 ```rust
-let visible = Computed::new((&todos, &filter), |(todos, filter)| {
-    todos.iter().filter(|t| filter.matches(t)).cloned().collect()
-});
-let remaining = Computed::new(&todos, |todos| todos.iter().filter(|t| !t.done).count() as u32);
+let parity = Computed::new(&count, |n| if n % 2 == 0 { Parity::Even } else { Parity::Odd });
+let summary = Computed::new((&count, &changes), |(n, changes)| format!("{n} after {changes} changes"));
 ```
 
 Inputs are `&Signal<A>` or `&Computed<A>`, or a tuple of up to six of them, and the closure receives references. A computed is recomputed in the core, in dependency order, and **pushed in the same change-set as the write that caused it**. The UI never derives anything itself, so it cannot disagree with the core about, say, how many items are left.
+
+A computed list is recomputed and sent whole on every change of its inputs. For a filtered or sorted view of a keyed list, use a [derived list](https://shreypdev.github.io/undra/docs/concepts.html#derived-lists), which costs the change instead.
 
 Because a store with computeds cannot be rebuilt from its plain signals automatically, you name a function that assembles it: `#[undra::store(restore = "Self::assemble")]`. The macro tells you when you forget (`E0013`).
 
@@ -343,7 +344,7 @@ Transactions nest: an inner `txn` joins the outer one. A change-set is never spl
 A platform does not receive everything. It **observes** signals, and only observed signals that changed are sent. Two details follow from that:
 
 - **Observing sends the current value right away**, before the call returns in-process, so a store's initial state arrives as an ordinary change-set. A signal written while unobserved is remembered as pending and sent when someone starts observing it.
-- **Only what changed is sent.** Writing `filter` in the to-do store ships `filter` and the recomputed `visible`, and nothing else, because `todos` did not change.
+- **Only what changed is sent.** Writing `filter` in the to-do store ships `filter` and the rows that entered or left `visible`, and nothing else, because `todos` did not change.
 
 A signal marked `#[undra(no_coalesce)]` is delivered on every commit instead of being folded into the latest value. A change-set is a compact binary structure, described on the [architecture page](https://shreypdev.github.io/undra/docs/architecture.html#the-wire).
 
@@ -394,6 +395,27 @@ The difference is measured. On a 10,000-row observed list, median times from the
 What remains at 10,000 rows is the memory move of the vector's tail, which `Vec::insert` needs in the core and which is paid twice (the list and its baseline): about 0.6 ns per row. The same insert into 100 rows is 359 ns and into 1,000 rows is 770 ns. The decision record is [ADR-027](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md).
 
 **Rule of thumb.** Inside a store, reach for `push`, `insert`, `remove`, `update_at` and `move_item` when you change one row. Use `set` or `update` when you genuinely replace the list (a refresh from the server) or make an edit no recorded operation can express. A transaction that mixes both is diffed as a whole.
+
+## Derived lists
+
+A `DerivedList<T>` is a filtered, sorted or mapped view of a keyed list, and it costs the change, not the list. You build it from the list with a pipeline:
+
+core/src/todos.rs
+
+```rust
+let visible = todos.derive().filter_with(&filter, |filter, todo| filter.matches(todo)).build();
+let remaining = todos.derive().filter(|todo| !todo.done).count();   // a Computed<u32>
+```
+
+Its value is always the obvious one: the rows that pass, mapped, then sorted stably by key (`filter`, `filter_with`, `map`, at most one `sort_by_key`; equal keys keep the list's order). But it is never recomputed. It replays the list's [recorded operations](https://shreypdev.github.io/undra/docs/concepts.html#why-a-list-write-costs-the-change-not-the-list) on an index of its own, O(log n) each, and the platform receives each as at most two patch operations: a row that enters or leaves the filter is an `Insert` or a `Remove`, a row whose sort key changes a `Move` and an `Update` (so lists animate it), a change the filter hides nothing at all. The platforms see a read-only keyed list, generated exactly like a computed list.
+
+| One row changed in 10,000 | Computed list | Derived list |
+| --- | --- | --- |
+| Core, per change | 176.5 µs | **333 ns** |
+| Sent to the platform | 352.6 KB | **158 bytes** |
+| Applied on the web (TypeScript) | 1.07 ms | **1.6 µs** |
+
+**Rule of thumb.** Write the source list with the recorded operations: a raw write (`set`, `update`, `replace`) rebuilds every view of it and sends them whole. Keep pipeline closures pure functions of the row (debug builds panic when one reads a signal); a value the view depends on besides its rows is a parameter (`filter_with`, `sort_by_key_with`). Host-measured, Apple M5 Pro; the decision record is [ADR-039](https://github.com/shreypdev/undra/blob/main/.10x/adrs/ADR-039-derived-keyed-lists.md).
 
 ## What the platforms see
 
@@ -1244,16 +1266,16 @@ error[undra::E0004]: trait object `dyn Fn(u32)` cannot cross the boundary
 
 Raised by macros, schema validation, the `Encode`/`Decode` bounds.
 
-unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
+unsupported type in a public position (lists the type and the allowed set); includes `Lazy<T>` (lazy lists are not available in v1), a `DerivedList` field without its row type (ADR-039), `Handle` (no schema type; objects cross through constructors), a `Result` whose error type is not a `#[undra::error]` enum, a `Ctx` parameter that is misplaced (on a method, not first, or `&mut`), and a type used as a value that cannot cross (an `Encode`/`Decode` bound that is not met: a struct without `#[undra::api]`)
 
 | What you see | Why | Fix |
 | --- | --- | --- |
 | `Plain` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Plain` with `#[undra::api]`, or return a record with the data the platform needs |
+| `DerivedList` needs the type of its rows | a derived list is a `Vec` of rows the platforms mirror, so the schema needs the row type, written as the one type argument | write `DerivedList<Row>` for `visible`, with the type the pipeline's `build()` produces |
 | `Lazy<Row>` is not available in v1: lazy lists cannot be mirrored yet | a `Lazy<T>` signal is a list the platform pages through on demand; the platform runtimes have no API for it yet (SPEC section 17), so no language could observe it | expose the items as a `Signal<Vec<T>>` (keyed with `#[undra(key = "..")]` if they have an id) or as a paged method that takes an offset and a limit |
 | `&str` cannot cross the boundary | references have no wire representation; every value crosses by copy | use an owned `String` |
 | `usize` cannot cross the boundary | its width differs between platforms (32-bit wasm, 64-bit iOS and Android), so the wire layout would too | use a fixed-width integer such as `u32` or `u64` |
 | `Ctx` parameter on method `touch` | methods reach the runtime through the object: `Ctx` is only injected into constructors, free functions, queries and mutations | keep a `WeakCtx` (`ctx.downgrade()`) in the object when it is constructed and upgrade it in the method, or use `Ctx::current()` |
-| `Uuid` cannot cross the boundary by value | a value crosses as a scalar, `String`, `Bytes`, `Vec`, `Option`, a map, `Duration`, `Timestamp`, `Uuid`, or a type declared with `#[undra::api]` (records, enums) or `#[undra::error]`; an object (`#[undra::api] impl`) crosses by handle, never as a value | declare `Uuid` with `#[undra::api]`, or return a record with the data the platform needs |
 
 ### `E0002` generic parameter
 
@@ -1334,7 +1356,7 @@ unsupported item shape (a tuple or unit struct, a record without fields, an empt
 
 Raised by macros.
 
-unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>`, `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
+unknown or misplaced `#[undra(..)]` attribute or macro argument (an unknown key, with the nearest name suggested, a value of the wrong kind or a value on a flag, `key` on a signal that is not a `Signal<Vec<T>>` or a `DerivedList<T>` (a keyed `Computed` is pointed at `DerivedList<T>`), a `DerivedList<T>` without `key` (ADR-039), `key` naming no field of the list's items, `#[cfg]` on a public item, an invalid `crate = ".."` path); a `cfg_attr` whose attributes are all documentation or lint levels is accepted
 
 | What you see | Why | Fix |
 | --- | --- | --- |
@@ -2478,7 +2500,7 @@ Source: https://shreypdev.github.io/undra/reference/swift.html
 
 # Swift reference
 
-Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Swift for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x933d362fb48d39ac`). [The API overview](https://shreypdev.github.io/undra/docs/api-swift.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2530,7 +2552,7 @@ Source: https://shreypdev.github.io/undra/reference/kotlin.html
 
 # Kotlin reference
 
-Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in Kotlin for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x933d362fb48d39ac`). [The API overview](https://shreypdev.github.io/undra/docs/api-kotlin.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
@@ -2582,7 +2604,7 @@ Source: https://shreypdev.github.io/undra/reference/typescript.html
 
 # TypeScript reference
 
-Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0xddcdea47fa95a8d4`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
+Every declaration `undra bindgen` generates in TypeScript for the [playground](https://github.com/shreypdev/undra/tree/main/examples/playground) (schema hash `0x933d362fb48d39ac`). [The API overview](https://shreypdev.github.io/undra/docs/api-typescript.html) explains how it is shaped.
 
 Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.
 
