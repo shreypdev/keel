@@ -32,8 +32,14 @@ export class RemoteTodosQueryHandle extends UndraStore {
   /** When `data` was last updated. */
   readonly updatedAt: Signal<Timestamp | null> = new Signal<Timestamp | null>(null);
 
-  private constructor(core: UndraCore, handle: bigint) {
-    super(core, handle);
+  private constructor(core: UndraCore, handle: bigint, args: Uint8Array) {
+    super(core, handle, {
+      recreate: {
+        typeId: UndraIds.Objects.RemoteTodosQueryHandle.typeId,
+        methodId: UndraIds.Objects.RemoteTodosQueryHandle.new,
+        args,
+      },
+    });
     this._signals = [this.data, this.status, this.error, this.fetching, this.updatedAt];
   }
 
@@ -44,17 +50,18 @@ export class RemoteTodosQueryHandle extends UndraStore {
   ): Promise<RemoteTodosQueryHandle> {
     const w = new UndraWriter();
     w.writeStr(list);
+    const args = w.finish();
     let handle: bigint;
     try {
       handle = await core.construct(
         UndraIds.Objects.RemoteTodosQueryHandle.typeId,
         UndraIds.Objects.RemoteTodosQueryHandle.new,
-        w.finish(),
+        args,
       );
     } catch (error) {
       throw UndraCallError.mapped(error);
     }
-    const store = new RemoteTodosQueryHandle(core, handle);
+    const store = new RemoteTodosQueryHandle(core, handle, args);
     await store._observeAll();
     return store;
   }
