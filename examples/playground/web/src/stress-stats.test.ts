@@ -686,12 +686,38 @@ describe("StressMeter on the runtime's real Mirror", () => {
     expect(s.receivedTotal).toBe(600);
     meter.stop();
   });
+
+  test("a backlog past the mirror's bound is folded before a frame comes, and the snapshot says how often", () => {
+    const scheduled: Array<() => void> = [];
+    const mirror = new Mirror({ schedule: (fn) => scheduled.push(fn), maxPendingEntries: 100 });
+    mirror.register(STORE, () => {});
+    const clock = fakeClock();
+    const meter = new StressMeter({ mirror, generated: () => 0, now: clock.now, heapBytes: () => null });
+    meter.start();
+    expect(meter.snapshot().compactions).toBe(0);
+    // 1,000 change-sets for one signal before any frame: the queue passes 100 entries and is folded in place.
+    for (let i = 0; i < 1000; i++) mirror.enqueue(changeSet(i));
+    expect(mirror.stats().compactions).toBeGreaterThan(0);
+    expect(mirror.pending).toBeLessThan(1000);
+    clock.advance(500);
+    (scheduled.shift() as () => void)();
+    const s = meter.snapshot();
+    expect(s.compactions).toBe(mirror.stats().compactions);
+    expect(s.receivedTotal).toBe(1000);
+    expect(s.appliedTotal).toBe(1);
+    // A reset measures from now: the folds so far are forgotten, later ones are counted.
+    meter.reset();
+    expect(meter.snapshot().compactions).toBe(0);
+    meter.stop();
+  });
 });
 
 describe("formatters", () => {
   test("formatDuration says 'under' at or below the clock's step", () => {
     expect(formatDuration(0, 100)).toBe("< 0.1 ms");
     expect(formatDuration(100, 100)).toBe("< 0.1 ms");
+    // One clock step as the drain window computes it (0.10000000000000853 ms x 1000) is still one step.
+    expect(formatDuration(0.10000000000000853 * 1000, 100)).toBe("< 0.1 ms");
     expect(formatDuration(101, 100)).toBe("101 µs");
     expect(formatDuration(0, 1000)).toBe("< 1 ms");
     expect(formatDuration(0, 5)).toBe("< 5 µs");

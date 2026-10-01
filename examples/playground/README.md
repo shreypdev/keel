@@ -79,7 +79,8 @@ every time. `generated` and `running` are signals the UI reads; `stop()` ends th
 The web screen (`web/src/views/StressView.tsx`, math in `web/src/stress-stats.ts`) offers firehose or progress at
 1k, 10k, 50k or 100k updates a second and reports generated, received and applied updates a second (and the merge
 ratio), drains a second with p50 and p99 duration, nanoseconds per change-set, dropped frames and the JS heap
-(Chrome only). `?screen=stress&rate=100000&mode=firehose&autostart=1` starts it on load; embedded (`embed=1`) it
+(Chrome only). `?screen=stress&rate=100000&mode=firehose&autostart=1` starts it on load (`rate` takes `1..=1000000`
+or a count of thousands such as `100k`; a rate the chips do not offer gets a chip of its own); embedded (`embed=1`) it
 posts the same numbers to the landing page as the `undra-stats` message. `docs/HIGH_FREQUENCY.md` explains the
 numbers; the iOS and Android screens are the device phase.
 

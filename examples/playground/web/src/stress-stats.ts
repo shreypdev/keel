@@ -50,6 +50,8 @@ export interface MirrorCounters {
   readonly entriesReceived: number;
   readonly entriesApplied: number;
   readonly drains: number;
+  /** Times the backlog passed its bound and was folded in place (ADR-031 decision 3); 0 when the mirror does not say. */
+  readonly compactions?: number;
 }
 
 /** The part of the runtime's `Mirror` that the meter uses. */
@@ -494,6 +496,8 @@ export interface StressSnapshot {
   readonly generatedTotal: number;
   readonly receivedTotal: number;
   readonly appliedTotal: number;
+  /** Times since the last reset the mirror folded its backlog before a frame came (the queue passed its bound). */
+  readonly compactions: number;
   /** How many times each watched signal notified its subscribers since the last reset. */
   readonly applies: Readonly<Record<string, number>>;
 }
@@ -517,7 +521,7 @@ export class StressMeter {
   #counts: Record<string, number> = {};
   #stops: Array<() => void> = [];
   /** The counters at the last reset: totals are measured from them. */
-  #base: { generated: number; received: number; applied: number };
+  #base: { generated: number; received: number; applied: number; compactions: number };
 
   /** @param options See {@link StressMeterOptions}. */
   constructor(options: StressMeterOptions) {
@@ -599,13 +603,19 @@ export class StressMeter {
       generatedTotal: generated - this.#base.generated,
       receivedTotal: counters.changeSetsReceived - this.#base.received,
       appliedTotal: counters.entriesApplied - this.#base.applied,
+      compactions: (counters.compactions ?? 0) - this.#base.compactions,
       applies: { ...this.#counts },
     };
   }
 
-  #readBase(): { generated: number; received: number; applied: number } {
+  #readBase(): { generated: number; received: number; applied: number; compactions: number } {
     const counters = this.#mirror.stats();
-    return { generated: this.#generated(), received: counters.changeSetsReceived, applied: counters.entriesApplied };
+    return {
+      generated: this.#generated(),
+      received: counters.changeSetsReceived,
+      applied: counters.entriesApplied,
+      compactions: counters.compactions ?? 0,
+    };
   }
 }
 
@@ -621,7 +631,9 @@ export class StressMeter {
  */
 export function formatDuration(us: number, stepUs: number): string {
   if (!Number.isFinite(us) || us < 0) return "–";
-  if (stepUs > 0 ? us <= Math.round(stepUs * 10) / 10 : us < 1) return `< ${formatStep(stepUs > 0 ? stepUs : 1)}`;
+  // Both to a tenth: a drain of one clock step is 0.1 ms x 1000 = 100.00000000000853 µs, and that is "under".
+  const rounded = Math.round(us * 10) / 10;
+  if (stepUs > 0 ? rounded <= Math.round(stepUs * 10) / 10 : rounded < 1) return `< ${formatStep(stepUs > 0 ? stepUs : 1)}`;
   return us >= 1000 ? `${(us / 1000).toFixed(us >= 10_000 ? 1 : 2)} ms` : `${Math.round(us)} µs`;
 }
 

@@ -29,8 +29,11 @@ const MODES = [
   { id: "progress", label: "Progress", note: "writes `progress`: every entry applied" },
 ] as const satisfies readonly { readonly id: StressMode; readonly label: string; readonly note: string }[];
 
-/** `10,000` as `10k`. */
-const shortRate = (rate: number): string => (rate >= 1000 && rate % 1000 === 0 ? `${rate / 1000}k` : rate.toLocaleString("en-US"));
+/** `10,000` as `10k`, `1,000,000` as `1M`. */
+const shortRate = (rate: number): string => {
+  if (rate >= 1_000_000 && rate % 1_000_000 === 0) return `${rate / 1_000_000}M`;
+  return rate >= 1000 && rate % 1000 === 0 ? `${rate / 1000}k` : rate.toLocaleString("en-US");
+};
 
 /**
  * The stress screen: the core generates updates by itself (a task paced by the `Timer` port, one
@@ -206,8 +209,18 @@ function StressPanel({
 
       <dl className="tiles" aria-label="Measured in this browser">
         <Tile label="Generated" unit="/ s" value={s ? formatCount(s.generatedPerSec) : "–"} note={`target ${formatCount(rate)} · ${s ? formatCount(s.generatedTotal) : 0} so far`} testId="stress-generated" />
-        <Tile label="Received" unit="/ s" value={s ? formatCount(s.receivedPerSec) : "–"} note="change-sets, one per update" testId="stress-received" />
-        <Tile label="Applied" unit="/ s" value={s ? formatCount(s.appliedPerSec) : "–"} note={s ? `entries, ${formatMerge(s.mergeRatio)}` : "entries"} testId="stress-applied" />
+        <Tile
+          label="Received"
+          unit="/ s"
+          value={s ? formatCount(s.receivedPerSec) : "–"}
+          note={
+            s !== null && s.compactions > 0
+              ? `change-sets, one per update · backlog folded ${formatCount(s.compactions)} times before a frame came`
+              : "change-sets: one per update, one per 10 ms for the counter"
+          }
+          testId="stress-received"
+        />
+        <Tile label="Applied" unit="/ s" value={s ? formatCount(s.appliedPerSec) : "–"} note={s ? `entries after merging, ${formatMerge(s.mergeRatio)}` : "entries after merging"} testId="stress-applied" />
         <Tile label="Drains" unit="/ s" value={s ? formatCount(s.drainsPerSec) : "–"} note="once per frame" testId="stress-drains" />
         <Tile
           label="Drain p50 / p99"
@@ -215,7 +228,7 @@ function StressPanel({
           note={step > 0 ? `clock step ${formatStep(step)}` : "per drain"}
           testId="stress-drain"
         />
-        <Tile label="Per change-set" unit="ns" value={s ? formatCount(s.nsPerChangeSet) : "–"} note="drain time ÷ change-sets" testId="stress-per-changeset" />
+        <Tile label="Per change-set" unit="ns" value={s ? formatCount(s.nsPerChangeSet) : "–"} note="drain time ÷ change-sets; the parse on arrival is outside the drain" testId="stress-per-changeset" />
         <Tile
           label="Dropped frames"
           value={s ? formatCount(s.droppedFrames) : "–"}

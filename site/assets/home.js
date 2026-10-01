@@ -20,7 +20,7 @@
     var theme = function () { return doc.documentElement.dataset.theme === "light" ? "light" : "dark"; };
     var fmt = function (us) {
       if (!isFinite(us) || us < 0) return "–";
-      if (step > 0 ? us <= step : us < 1) return "< " + (step >= 1000 ? (step / 1000) + " ms" : (step || 1) + " µs"); // below the clock's resolution
+      if (step > 0 ? us <= step : us < 1) return "< " + (step >= 100 ? (step / 1000) + " ms" : (step || 1) + " µs"); // below the clock's resolution, written as the playground writes it (0.1 ms)
       return us >= 1000 ? (us / 1000).toFixed(us >= 10000 ? 1 : 2) + " ms" : Math.round(us) + " µs";
     };
     var count = function (n) { return isFinite(n) ? Math.round(n).toLocaleString("en-US") : "–"; };
@@ -59,7 +59,8 @@
       if (stress) {
         stat.gen.textContent = count(g);
         stat.rate.textContent = count(applied);
-        stat.merge.textContent = isFinite(ratio) && isFinite(received) && received > 0 ? (ratio * 100).toFixed(ratio < 0.01 ? 2 : 1) + " % of " + count(received) + " received" : "";
+        // Say what happened to the rest: 10,000 received and 120 applied is the merge, not a loss.
+        stat.merge.textContent = isFinite(ratio) && isFinite(received) && received > 0 ? count(received) + " received, merged into " + (ratio * 100).toFixed(ratio < 0.01 ? 2 : 1) + " %" : "";
         stat.dropped.textContent = isFinite(dropped) ? count(dropped) : "–";
       } else {
         stat.rate.textContent = r.toFixed(1);

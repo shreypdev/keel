@@ -34,6 +34,7 @@ const SNAPSHOT: StressSnapshot = {
   generatedTotal: 40_000,
   receivedTotal: 40_080,
   appliedTotal: 248,
+  compactions: 0,
   applies: { value: 120, progress: 40_000 },
 };
 

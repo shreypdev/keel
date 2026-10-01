@@ -154,8 +154,8 @@ The screen shows, from the runtime's own numbers (`mirror.stats()`, `mirror.addD
 | Tile | Where it comes from |
 |---|---|
 | Generated / s | the core's `generated` counter |
-| Received / s | `changeSetsReceived`: one per update |
-| Applied / s | `entriesApplied`, after the mirror merged what arrived between two frames, and the **merge ratio** (applied over received) |
+| Received / s | `changeSetsReceived`: one per update, plus the generator's own write of `generated` once per 10 ms tick (100 a second, which is why it reads a little above Generated) |
+| Applied / s | `entriesApplied`, after the mirror merged what arrived between two frames, and the **merge ratio** (applied over received). In firehose mode this is about 120 a second whatever the rate: `value` and `generated` once per frame each. Nothing is lost: each apply carries the latest value of everything merged into it |
 | Drains / s, drain p50 / p99 | the drain listener's `durationMs`: how long the mirror held the main thread each time it ran |
 | Per change-set | all drain time over all change-sets: the average that survives the clock rounding below |
 | Dropped frames | a `requestAnimationFrame` loop: a gap over 1.5 frame intervals drops `round(gap / interval) - 1` frames |
@@ -170,7 +170,12 @@ second of 10,000 updates a second, `value` has been applied about 60 times (once
 
 **Run it.** Choose firehose or progress, 1k to 100k updates a second, Start, and "Burst 1,000" for a thousand
 transactions at once. The page takes `?screen=stress&rate=100000&mode=firehose&autostart=1` (`rate` is a number
-or a count of thousands, `100k`), which is what the landing page's "Push it" button opens in its iframe. Embedded
+or a count of thousands, `100k`, up to the core's maximum of 1,000,000), which is what the landing page's "Push it"
+button opens in its iframe (at 10,000). Above what the main thread can carry the screen stays honest rather than
+pretty: at `rate=1000000` on the reference machine the generator reaches about 675,000 a second (each 10 ms tick
+commits at most 100 ms of work, and the 100,000 wasm-to-JS crossings of one tick take longer than that), the
+Generated tile shows the shortfall against its target, Dropped frames climbs by about 40 a second, and the Received
+tile reports how often the mirror folded its backlog before a frame came (ADR-031 decision 3). Embedded
 (`embed=1`) it posts what it shows to the parent as the `undra-stats` message, the base fields of the list demo
 plus `generatedPerSec`, `entriesReceivedPerSec`, `entriesAppliedPerSec`, `mergeRatio`, `drainsPerSec`,
 `applyNsPerChangeSet`, `droppedFrames`, `longestFrameMs` and a few more (`examples/playground/web/src/embed-stats.ts`).
