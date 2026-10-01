@@ -2,7 +2,7 @@
 # Runs the Swift column of the contract scenarios (contract-tests/scenarios.md): the Swift runtime
 # over the C ABI, against the real playground core, through the generated bindings.
 #
-#   contract-tests/swift/run.sh                 all eighteen, then the check
+#   contract-tests/swift/run.sh                 all twenty-one, then the check
 #   contract-tests/swift/run.sh --filter ContractScenarios/testS07_streamWithBackpressure
 #
 # What it does:
@@ -14,7 +14,8 @@
 #      A dynamic library (not the static one the apps link) keeps the linker from dropping the
 #      object files whose constructors register the core's items, so no -force_load is needed,
 #   4. pipes the `SCENARIO` lines through contract-tests/check.sh.
-# The exit status is non-zero if the tests fail or any of the eighteen scenarios is not a PASS.
+# The exit status is non-zero if the tests fail or any of the twenty-one scenarios is not a PASS.
+# S23 and S24 start contract-tests/servers/realtime-server.mjs with Node (it exits with this run).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"

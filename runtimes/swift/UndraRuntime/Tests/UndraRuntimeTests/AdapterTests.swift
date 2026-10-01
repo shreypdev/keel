@@ -98,6 +98,8 @@ final class AdapterSetTests: XCTestCase {
             StandardPorts.Http.portId, StandardPorts.Kv.portId, StandardPorts.SecureStore.portId,
             StandardPorts.Fs.portId, StandardPorts.Clock.portId, StandardPorts.Rng.portId,
             StandardPorts.Log.portId, StandardPorts.Timer.portId, StandardPorts.Connectivity.portId,
+            // The opt-in ports (ADR-047, ADR-048), for the cores that enable them.
+            StandardPorts.WebSocket.portId, StandardPorts.Sse.portId, StandardPorts.Db.portId,
         ]
         XCTAssertEqual(Set(ids), expected)
         XCTAssertFalse(ids.contains(StandardPorts.Lifecycle.portId))
@@ -140,6 +142,7 @@ final class AdapterSetTests: XCTestCase {
             StandardPorts.Http.portId, StandardPorts.Kv.portId, StandardPorts.SecureStore.portId,
             StandardPorts.Fs.portId, StandardPorts.Clock.portId, StandardPorts.Rng.portId,
             StandardPorts.Log.portId, StandardPorts.Timer.portId,
+            StandardPorts.WebSocket.portId, StandardPorts.Sse.portId, StandardPorts.Db.portId,
         ]
         XCTAssertEqual(registered, expected, "Connectivity has no methods the core calls")
         core.shutdown()
