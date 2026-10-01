@@ -456,7 +456,7 @@ impl ProjectConfig {
              # kotlin_package = \"com.example.todo.core\"\n\
              # ts_scope = \"app\"\n\
              # ts_js_number = false        # i64/u64 as `number` instead of `bigint`\n\
-             # swift_typed_throws = true   # `throws(E)`; false emits plain `throws`"
+             # swift_typed_throws = true   # port requirements: `throws(E)`; false emits plain `throws`"
         );
         if let Some(v) = &self.bindings.swift_module {
             let _ = writeln!(out, "swift_module = {}", quote(v));

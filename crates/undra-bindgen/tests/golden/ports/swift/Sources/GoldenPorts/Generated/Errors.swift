@@ -46,16 +46,6 @@ extension FsError: CustomStringConvertible, LocalizedError {
     }
 }
 
-extension FsError {
-    /// The typed error that a failed call carries, or `nil` for any other failure.
-    static func undraFromReply(_ error: any Error) -> FsError? {
-        guard let reply = error as? UndraReplyError, reply.status == .error else {
-            return nil
-        }
-        return try? FsError.undraDecoded(from: reply.body)
-    }
-}
-
 public enum HttpError: UndraError, Error, Sendable, Hashable {
     case timeout
     case network(String)
@@ -97,21 +87,4 @@ extension HttpError: CustomStringConvertible, LocalizedError {
     public var errorDescription: String? {
         return description
     }
-}
-
-extension HttpError {
-    /// The typed error that a failed call carries, or `nil` for any other failure.
-    static func undraFromReply(_ error: any Error) -> HttpError? {
-        guard let reply = error as? UndraReplyError, reply.status == .error else {
-            return nil
-        }
-        return try? HttpError.undraDecoded(from: reply.body)
-    }
-}
-
-/// Stops the process for a failure that the shape of the API cannot express: a core panic,
-/// a malformed reply, or schema drift. Such a failure means the core and the bindings disagree,
-/// so it is reported loudly instead of masquerading as a domain error.
-func undraUnexpected(_ error: any Error, file: StaticString = #fileID, line: UInt = #line) -> Never {
-    fatalError("Undra: unexpected failure of a core call: \(error)", file: file, line: line)
 }

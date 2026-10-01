@@ -24,14 +24,20 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(page: UInt32, ctx: UndraCore = .shared) throws {
         var w = UndraWriter()
         page.undraEncode(&w)
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.TodosQueryHandle.typeId,
-            method: UndraIds.Objects.TodosQueryHandle.new,
-            args: w.finish()
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.TodosQueryHandle.typeId,
+                method: UndraIds.Objects.TodosQueryHandle.new,
+                args: w.finish()
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
@@ -44,7 +50,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "TodosQueryHandle.refetch")
         }
     }
 
@@ -57,7 +63,7 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "TodosQueryHandle.invalidate")
         }
     }
 
@@ -122,14 +128,14 @@ public final class TodosQueryHandle: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of TodosQueryHandle: \(error)")
+            self.core.report(error, operation: "TodosQueryHandle.apply(signal: \(signal))")
         }
     }
 }
 
 /// Runs the `add_todo` mutation.
-/// - Throws: ``TodoError``.
-public func addTodo(title: String, ctx: UndraCore = .shared) async throws(TodoError) -> Todo {
+/// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func addTodo(title: String, ctx: UndraCore = .shared) async throws -> Todo {
     var w = UndraWriter()
     title.undraEncode(&w)
     do {
@@ -140,7 +146,6 @@ public func addTodo(title: String, ctx: UndraCore = .shared) async throws(TodoEr
         )
         return try Todo.undraDecoded(from: body)
     } catch {
-        guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: TodoError.self)
     }
 }

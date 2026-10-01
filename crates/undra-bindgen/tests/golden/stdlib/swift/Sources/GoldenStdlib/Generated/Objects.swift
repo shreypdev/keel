@@ -9,18 +9,24 @@ public final class Syncer: UndraObject, @unchecked Sendable {
         super.init(core: core, handle: handle)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Syncer.typeId,
-            method: UndraIds.Objects.Syncer.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Syncer.typeId,
+                method: UndraIds.Objects.Syncer.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
     /// Performs one request.
-    /// - Throws: ``HttpError``.
-    public func send(_ request: HttpRequest) async throws(HttpError) -> HttpResponse {
+    /// - Throws: ``HttpError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func send(_ request: HttpRequest) async throws -> HttpResponse {
         var w = UndraWriter()
         request.undraEncode(&w)
         do {
@@ -31,13 +37,11 @@ public final class Syncer: UndraObject, @unchecked Sendable {
             )
             return try HttpResponse.undraDecoded(from: body)
         } catch {
-            guard let typed = HttpError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: HttpError.self)
         }
     }
 
     /// Streams the responses of a request that repeats.
-    /// - Throws: ``HttpError``.
     public func follow(_ endpoint: Endpoint) -> AsyncThrowingStream<HttpResponse, Error> {
         var w = UndraWriter()
         endpoint.undraEncode(&w)
@@ -46,13 +50,13 @@ public final class Syncer: UndraObject, @unchecked Sendable {
             method: UndraIds.Objects.Syncer.follow,
             args: w.finish(),
             decode: { try HttpResponse.undraDecoded(from: $0) },
-            mapError: { HttpError.undraFromReply($0) ?? $0 }
+            mapError: { UndraCallError.mapped(streamFailure: $0, domain: HttpError.self) }
         )
     }
 
     /// Writes the last response to disk.
-    /// - Throws: ``FsError``.
-    public func save(path: String) async throws(FsError) {
+    /// - Throws: ``FsError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func save(path: String) async throws {
         var w = UndraWriter()
         path.undraEncode(&w)
         do {
@@ -62,13 +66,12 @@ public final class Syncer: UndraObject, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = FsError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: FsError.self)
         }
     }
 
-    /// - Throws: ``SyncError``.
-    public func sync() async throws(SyncError) {
+    /// - Throws: ``SyncError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func sync() async throws {
         do {
             _ = try await self.core.call(
                 .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Syncer.sync),
@@ -76,8 +79,7 @@ public final class Syncer: UndraObject, @unchecked Sendable {
                 args: []
             )
         } catch {
-            guard let typed = SyncError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: SyncError.self)
         }
     }
 }

@@ -6,14 +6,17 @@
 //! the output sticks to plain constructs: no clever generics, every type
 //! written out.
 //!
-//! Failure policy. A method that returns `Result<T, E>` throws `E`
-//! (`throws(E)` unless [`Generator::swift_typed_throws`] is off). Any other
-//! failure of the call (a core panic, a malformed reply, schema drift) cannot
-//! be expressed as `E`; in typed mode it stops the process through
-//! `undraUnexpected`, in untyped mode it is rethrown as it is. Synchronous
-//! methods without a `Result` do not throw, as SPEC section 10.1 shows, so they
-//! stop the same way. Asynchronous methods without a `Result` use plain
-//! `throws` so that task cancellation and transport failures propagate.
+//! Failure policy (ADR-032). A generated method fails with exactly one of three
+//! things: its own error `E` (the reply's status 1), `CancellationError`, or
+//! `UndraCallError` for every failure of the call itself. Calls use plain
+//! `throws`; the mapping lives in the runtime
+//! (`UndraCallError.mapped(_:domain:)`), so the generated code is one
+//! `do`/`catch` per call. A synchronous method that returns `()` and has no
+//! error type is a command: it cannot throw, so it reports through
+//! `UndraCore.report(_:operation:)` (the log and `LoadOptions.onError`) and
+//! returns. Typed throws remain on port requirements only
+//! ([`Generator::swift_typed_throws`]), where the host is the implementer.
+//! Nothing generated traps.
 
 use std::collections::HashSet;
 
@@ -362,7 +365,7 @@ impl SwiftGen<'_> {
         w
     }
 
-    /// Whether the typed-throws form is in use.
+    /// Whether port requirements use typed throws.
     fn typed(&self) -> bool {
         self.cfg.swift_typed_throws
     }
@@ -635,15 +638,6 @@ impl SwiftGen<'_> {
             self.error(&mut w, en);
             w.blank();
         }
-        w.line("/// Stops the process for a failure that the shape of the API cannot express: a core panic,");
-        w.line("/// a malformed reply, or schema drift. Such a failure means the core and the bindings disagree,");
-        w.line("/// so it is reported loudly instead of masquerading as a domain error.");
-        w.block(
-            "func undraUnexpected(_ error: any Error, file: StaticString = #fileID, line: UInt = #line) -> Never",
-            |w| {
-                w.line("fatalError(\"Undra: unexpected failure of a core call: \\(error)\", file: file, line: line)");
-            },
-        );
         w.finish()
     }
 
@@ -761,30 +755,6 @@ impl SwiftGen<'_> {
                 });
             },
         );
-        w.blank();
-        w.block(format!("extension {}", en.name), |w| {
-            doc(
-                w,
-                "The typed error that a failed call carries, or `nil` for any other failure.",
-                &[],
-            );
-            w.block(
-                format!(
-                    "static func undraFromReply(_ error: any Error) -> {}?",
-                    en.name
-                ),
-                |w| {
-                    w.block(
-                        "guard let reply = error as? UndraReplyError, reply.status == .error else",
-                        |w| w.line("return nil"),
-                    );
-                    w.line(format!(
-                        "return try? {}.undraDecoded(from: reply.body)",
-                        en.name
-                    ));
-                },
-            );
-        });
     }
 
     // ===== callables =========================================================
@@ -828,24 +798,35 @@ impl SwiftGen<'_> {
         format!("{writer}.finish()")
     }
 
-    /// The error-mapping `catch` of a call that can fail with `err`.
-    fn catch_typed(&self, w: &mut CodeWriter, err: &str) {
+    /// The `catch` of a call that throws: the runtime maps the failure onto `E`,
+    /// `CancellationError` or `UndraCallError` (ADR-032).
+    fn catch_mapped(&self, w: &mut CodeWriter, err: Option<&str>) {
         w.line("} catch {");
-        w.indented(|w| {
-            if self.typed() {
-                w.line(format!(
-                    "guard let typed = {err}.undraFromReply(error) else {{ undraUnexpected(error) }}"
-                ));
-                w.line("throw typed");
-            } else {
-                w.line(format!("throw {err}.undraFromReply(error) ?? error"));
-            }
+        w.indented(|w| match err {
+            Some(err) => w.line(format!(
+                "throw UndraCallError.mapped(error, domain: {err}.self)"
+            )),
+            None => w.line("throw UndraCallError.mapped(error)"),
         });
         w.line("}");
     }
 
-    /// `throws`, `throws(E)` or nothing.
-    fn throws_clause(&self, err: Option<&str>) -> String {
+    /// The `catch` of a command: the failure is logged and handed to
+    /// `LoadOptions.onError` through `core.report`, and the method returns.
+    fn catch_report(&self, w: &mut CodeWriter, core: &str, operation: &str) {
+        w.line("} catch {");
+        w.indented(|w| {
+            w.line(format!(
+                "{core}.report(error, operation: {})",
+                swift_string(operation)
+            ));
+        });
+        w.line("}");
+    }
+
+    /// `throws(E)` when typed throws are on, `throws` otherwise, or nothing:
+    /// the clause of a port requirement, where the host is the implementer.
+    fn port_throws_clause(&self, err: Option<&str>) -> String {
         match err {
             Some(err) if self.typed() => format!(" throws({err})"),
             Some(_) => " throws".to_owned(),
@@ -920,6 +901,7 @@ impl SwiftGen<'_> {
                     &Callable::from_method(m),
                     &Site::Method {
                         id: format!("{ids}.{}", id(&m.name)),
+                        owner: o.name.clone(),
                     },
                 );
             }
@@ -944,16 +926,12 @@ impl SwiftGen<'_> {
         params.push(format!("{ctx}: UndraCore = .shared"));
         // A lone unlabeled parameter is still followed by `ctx`, which is labeled.
         let is_new = c.name == "new";
-        let mut extra = Vec::new();
-        if let Some(err) = &err {
-            extra.push(format!("- Throws: ``{err}``."));
-        }
+        let extra = [throws_doc(err.as_deref(), c.is_async)];
         doc(w, &c.docs, &extra);
         let asyncw = if c.is_async { " async" } else { "" };
-        let throws = match &err {
-            Some(err) => self.throws_clause(Some(err)),
-            None => " throws".to_owned(),
-        };
+        // Every constructor throws: the error type of a `Result<Self, E>` is one of the three
+        // outcomes of a call (ADR-032), and a failure of the call itself is another.
+        let throws = " throws";
         let ids = format!("UndraIds.Objects.{}", o.name);
         let member = id(&c.name);
         let (prefix, suffix) = if is_new {
@@ -999,14 +977,10 @@ impl SwiftGen<'_> {
                     );
                 }
             };
-            if let Some(err) = &err {
-                w.line(format!("let {handle}: UndraHandle"));
-                w.line("do {");
-                w.indented(|w| obtain(w, &format!("{handle} = ")));
-                self.catch_typed(w, err);
-            } else {
-                obtain(w, &format!("let {handle} = "));
-            }
+            w.line(format!("let {handle}: UndraHandle"));
+            w.line("do {");
+            w.indented(|w| obtain(w, &format!("{handle} = ")));
+            self.catch_mapped(w, err.as_deref());
             if is_new {
                 w.line(format!("self.init(adopting: {handle}, core: {ctx})"));
             } else {
@@ -1031,18 +1005,24 @@ impl SwiftGen<'_> {
         let taken_refs: Vec<&str> = taken.iter().map(String::as_str).collect();
         let writer = naming::avoid("w", &taken_refs);
         let body = naming::avoid("body", &taken_refs);
-        let (core, target, mid, is_function) = match site {
-            Site::Method { id } => (
+        let name = id(c.name);
+        // The operation a command reports names the method as a person would, without the
+        // backticks that escape a keyword.
+        let plain_name = name.trim_matches('`').to_owned();
+        let (core, target, mid, is_function, operation) = match site {
+            Site::Method { id, owner } => (
                 "self.core".to_owned(),
                 format!(".objectMethod(handle: self.handle, methodId: {id})"),
                 id.clone(),
                 false,
+                format!("{owner}.{plain_name}"),
             ),
             Site::Function { id } => (
                 naming::avoid("ctx", &taken_refs),
                 format!(".freeFunction(methodId: {id})"),
                 id.clone(),
                 true,
+                plain_name.clone(),
             ),
         };
         let mut params = self.param_decls(c.params);
@@ -1050,30 +1030,30 @@ impl SwiftGen<'_> {
             params.push(format!("{core}: UndraCore = .shared"));
         }
         let err = ret.error().map(str::to_owned);
-        let mut extra = Vec::new();
-        if let Some(err) = &err {
-            extra.push(format!("- Throws: ``{err}``."));
-        }
-        doc(w, c.docs, &extra);
-        let name = id(c.name);
         let head = format!("public func {name}");
 
         if let Ret::Stream(item) | Ret::ResultStream { item, .. } = &ret {
+            // A stream is not `throws`: its failures end the iteration, mapped like a call's.
+            doc(w, c.docs, &[]);
             let item_ty = t.ty(item);
             let suffix = format!(" -> AsyncThrowingStream<{item_ty}, Error>");
             w.call_block(head, &params, suffix, false, |w| {
                 let args = self.encode_args(w, c.params, &writer);
                 // `UndraCore.stream` decodes an item when the consumer asks for it, which is what
                 // makes the core's credit follow the consumer (docs/SPEC.md section 3.7).
-                let mut call_args = vec![
+                let map_error = match &err {
+                    Some(err) => format!(
+                        "mapError: {{ UndraCallError.mapped(streamFailure: $0, domain: {err}.self) }}"
+                    ),
+                    None => "mapError: { UndraCallError.mapped(streamFailure: $0) }".to_owned(),
+                };
+                let call_args = vec![
                     target.clone(),
                     format!("method: {mid}"),
                     format!("args: {args}"),
                     format!("decode: {{ try {} }}", t.decode_all(item, "$0")),
+                    map_error,
                 ];
-                if let Some(err) = &err {
-                    call_args.push(format!("mapError: {{ {err}.undraFromReply($0) ?? $0 }}"));
-                }
                 w.call(format!("return {core}.stream"), &call_args, "", false);
             });
             return;
@@ -1083,14 +1063,16 @@ impl SwiftGen<'_> {
             Ret::Plain(ty) | Ret::Result { ok: ty, .. } => (Some(*ty), matches!(ty, TypeRef::Unit)),
             Ret::Stream(_) | Ret::ResultStream { .. } => (None, true),
         };
+        // A synchronous method that returns nothing and has no error type is a command: it cannot
+        // throw, so it reports (ADR-032, decision 4).
+        let is_command = !c.is_async && err.is_none() && is_unit;
+        if is_command {
+            doc(w, c.docs, &[]);
+        } else {
+            doc(w, c.docs, &[throws_doc(err.as_deref(), c.is_async)]);
+        }
         let asyncw = if c.is_async { " async" } else { "" };
-        // Async methods without a typed error use plain `throws`, so task
-        // cancellation and transport failures propagate.
-        let throws = match &err {
-            Some(err) => self.throws_clause(Some(err)),
-            None if c.is_async => " throws".to_owned(),
-            None => String::new(),
-        };
+        let throws = if is_command { "" } else { " throws" };
         let returns = match ok {
             Some(ty) if !is_unit => format!(" -> {}", t.ty(ty)),
             _ => String::new(),
@@ -1105,34 +1087,13 @@ impl SwiftGen<'_> {
                 format!("method: {mid}"),
                 format!("args: {args}"),
             ];
-            let guarded = err.is_some() || !c.is_async;
             let bind = if is_unit {
                 "_ = ".to_owned()
             } else {
                 format!("let {body} = ")
             };
-            if guarded {
-                w.line("do {");
-                w.indented(|w| {
-                    w.call(
-                        format!("{bind}try {awaited}{core}.{method}"),
-                        &call_args,
-                        "",
-                        false,
-                    );
-                    if let (Some(ty), false) = (ok, is_unit) {
-                        w.line(format!("return try {}", t.decode_all(ty, &body)));
-                    }
-                });
-                match &err {
-                    Some(err) => self.catch_typed(w, err),
-                    None => {
-                        w.line("} catch {");
-                        w.indented(|w| w.line("undraUnexpected(error)"));
-                        w.line("}");
-                    }
-                }
-            } else {
+            w.line("do {");
+            w.indented(|w| {
                 w.call(
                     format!("{bind}try {awaited}{core}.{method}"),
                     &call_args,
@@ -1142,6 +1103,11 @@ impl SwiftGen<'_> {
                 if let (Some(ty), false) = (ok, is_unit) {
                     w.line(format!("return try {}", t.decode_all(ty, &body)));
                 }
+            });
+            if is_command {
+                self.catch_report(w, &core, &operation);
+            } else {
+                self.catch_mapped(w, err.as_deref());
             }
         });
     }
@@ -1204,15 +1170,18 @@ impl SwiftGen<'_> {
                 });
                 w.line("} catch is PatchError {");
                 w.indented(|w| {
-                    w.line("// The mirror diverged from the core: re-observe to receive a full value.");
+                    w.line(
+                        "// The mirror diverged from the core: re-observe to receive a full value.",
+                    );
                     w.line("self.core.observe(self.handle, signal: signal, on: false)");
                     w.line("self.core.observe(self.handle, signal: signal, on: true)");
                 });
                 w.line("} catch {");
                 w.indented(|w| {
+                    // An undecodable change is skipped and reported, as Kotlin and TypeScript do.
                     w.line(format!(
-                        "assertionFailure(\"Undra: undecodable change for signal \\(signal) of {}: \\(error)\")",
-                        o.name
+                        "self.core.report(error, operation: \"{}.apply(signal: \\(signal))\")",
+                        swift_template_text(&o.name)
                     ));
                 });
                 w.line("}");
@@ -1251,7 +1220,7 @@ impl SwiftGen<'_> {
                     doc(w, &m.docs, &extra);
                     let params = self.param_decls(&m.params);
                     let asyncw = if m.is_async { " async" } else { "" };
-                    let throws = self.throws_clause(ret.error());
+                    let throws = self.port_throws_clause(ret.error());
                     let returns = match &ret {
                         Ret::Plain(ty) | Ret::Result { ok: ty, .. }
                             if !matches!(ty, TypeRef::Unit) =>
@@ -1485,6 +1454,28 @@ impl SwiftGen<'_> {
     }
 }
 
+/// The `- Throws:` line of a call that throws (ADR-032): the method's own error
+/// when it has one, `CancellationError` for an asynchronous call, and always
+/// `UndraCallError`.
+fn throws_doc(err: Option<&str>, is_async: bool) -> String {
+    match (err, is_async) {
+        (None, false) => {
+            "- Throws: ``UndraCallError`` if the call fails in the core or cannot reach it."
+                .to_owned()
+        }
+        (Some(err), false) => format!(
+            "- Throws: ``{err}``, or ``UndraCallError`` if the call fails in the core or cannot reach it."
+        ),
+        (None, true) => {
+            "- Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``."
+                .to_owned()
+        }
+        (Some(err), true) => format!(
+            "- Throws: ``{err}``, `CancellationError` if the task is cancelled, or ``UndraCallError``."
+        ),
+    }
+}
+
 /// `switch subject { .. }` with the `case` labels at the level of the `switch`,
 /// as Swift style has it.
 fn switch_block(w: &mut CodeWriter, subject: &str, body: impl FnOnce(&mut CodeWriter)) {
@@ -1526,9 +1517,9 @@ impl<'a> Callable<'a> {
 
 /// Where a call is made from.
 enum Site {
-    /// A method of the generated class; `id` is the Swift expression of its
-    /// method id.
-    Method { id: String },
+    /// A method of the generated class `owner`; `id` is the Swift expression of
+    /// its method id.
+    Method { id: String, owner: String },
     /// A top-level function.
     Function { id: String },
 }

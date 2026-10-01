@@ -24,12 +24,18 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.LatestResponseQueryHandle.typeId,
-            method: UndraIds.Objects.LatestResponseQueryHandle.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.LatestResponseQueryHandle.typeId,
+                method: UndraIds.Objects.LatestResponseQueryHandle.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
@@ -42,7 +48,7 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "LatestResponseQueryHandle.refetch")
         }
     }
 
@@ -55,7 +61,7 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "LatestResponseQueryHandle.invalidate")
         }
     }
 
@@ -120,17 +126,14 @@ public final class LatestResponseQueryHandle: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of LatestResponseQueryHandle: \(error)")
+            self.core.report(error, operation: "LatestResponseQueryHandle.apply(signal: \(signal))")
         }
     }
 }
 
 /// Runs the `retry` mutation.
-/// - Throws: ``HttpError``.
-public func retry(
-    _ request: HttpRequest,
-    ctx: UndraCore = .shared
-) async throws(HttpError) -> HttpResponse {
+/// - Throws: ``HttpError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func retry(_ request: HttpRequest, ctx: UndraCore = .shared) async throws -> HttpResponse {
     var w = UndraWriter()
     request.undraEncode(&w)
     do {
@@ -141,7 +144,6 @@ public func retry(
         )
         return try HttpResponse.undraDecoded(from: body)
     } catch {
-        guard let typed = HttpError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: HttpError.self)
     }
 }

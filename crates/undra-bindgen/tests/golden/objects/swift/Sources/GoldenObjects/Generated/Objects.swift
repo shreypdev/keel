@@ -9,20 +9,23 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         super.init(core: core, handle: handle)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Calculator.typeId,
-            method: UndraIds.Objects.Calculator.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Calculator.typeId,
+                method: UndraIds.Objects.Calculator.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
-    /// - Throws: ``CalcError``.
-    public static func withPrecision(
-        digits: UInt8,
-        ctx: UndraCore = .shared
-    ) throws(CalcError) -> Calculator {
+    /// - Throws: ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public static func withPrecision(digits: UInt8, ctx: UndraCore = .shared) throws -> Calculator {
         var w = UndraWriter()
         digits.undraEncode(&w)
         let handle: UndraHandle
@@ -33,18 +36,17 @@ public final class Calculator: UndraObject, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            guard let typed = CalcError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: CalcError.self)
         }
         return Calculator(adopting: handle, core: ctx)
     }
 
-    /// - Throws: ``CalcError``.
+    /// - Throws: ``CalcError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public static func `open`(
         path: String,
         mode: Mode,
         ctx: UndraCore = .shared
-    ) async throws(CalcError) -> Calculator {
+    ) async throws -> Calculator {
         var w = UndraWriter()
         path.undraEncode(&w)
         mode.undraEncode(&w)
@@ -57,14 +59,14 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             )
             handle = try UndraHandle.undraDecoded(from: body)
         } catch {
-            guard let typed = CalcError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: CalcError.self)
         }
         return Calculator(adopting: handle, core: ctx)
     }
 
     /// Adds two numbers.
-    public func add(a: Int32, b: Int32) -> Int32 {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func add(a: Int32, b: Int32) throws -> Int32 {
         var w = UndraWriter()
         a.undraEncode(&w)
         b.undraEncode(&w)
@@ -76,7 +78,7 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             )
             return try Int32.undraDecoded(from: body)
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
@@ -88,13 +90,13 @@ public final class Calculator: UndraObject, @unchecked Sendable {
                 args: []
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Calculator.reset")
         }
     }
 
     /// Divides, failing on zero.
-    /// - Throws: ``CalcError``.
-    public func divide(a: Int64, b: Int64) throws(CalcError) -> Int64 {
+    /// - Throws: ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func divide(a: Int64, b: Int64) throws -> Int64 {
         var w = UndraWriter()
         a.undraEncode(&w)
         b.undraEncode(&w)
@@ -106,13 +108,12 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             )
             return try Int64.undraDecoded(from: body)
         } catch {
-            guard let typed = CalcError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: CalcError.self)
         }
     }
 
-    /// - Throws: ``CalcError``.
-    public func check() throws(CalcError) {
+    /// - Throws: ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func check() throws {
         do {
             _ = try self.core.callSync(
                 .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.check),
@@ -120,14 +121,13 @@ public final class Calculator: UndraObject, @unchecked Sendable {
                 args: []
             )
         } catch {
-            guard let typed = CalcError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: CalcError.self)
         }
     }
 
     /// Fetches a todo.
-    /// - Throws: ``CalcError``.
-    public func lookup(id: UUID) async throws(CalcError) -> Todo {
+    /// - Throws: ``CalcError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func lookup(id: UUID) async throws -> Todo {
         var w = UndraWriter()
         id.undraEncode(&w)
         do {
@@ -138,29 +138,38 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             )
             return try Todo.undraDecoded(from: body)
         } catch {
-            guard let typed = CalcError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: CalcError.self)
         }
     }
 
     /// An async method without an error type.
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func compute(input: Double?) async throws -> Double {
         var w = UndraWriter()
         input.undraEncode(&w)
-        let body = try await self.core.call(
-            .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.compute),
-            method: UndraIds.Objects.Calculator.compute,
-            args: w.finish()
-        )
-        return try Double.undraDecoded(from: body)
+        do {
+            let body = try await self.core.call(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.compute),
+                method: UndraIds.Objects.Calculator.compute,
+                args: w.finish()
+            )
+            return try Double.undraDecoded(from: body)
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
     }
 
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func warmUp() async throws {
-        _ = try await self.core.call(
-            .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.warmUp),
-            method: UndraIds.Objects.Calculator.warmUp,
-            args: []
-        )
+        do {
+            _ = try await self.core.call(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.warmUp),
+                method: UndraIds.Objects.Calculator.warmUp,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
     }
 
     /// Counts up.
@@ -171,12 +180,12 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.ticks),
             method: UndraIds.Objects.Calculator.ticks,
             args: w.finish(),
-            decode: { try UInt32.undraDecoded(from: $0) }
+            decode: { try UInt32.undraDecoded(from: $0) },
+            mapError: { UndraCallError.mapped(streamFailure: $0) }
         )
     }
 
     /// Streams todos, failing to open with a typed error.
-    /// - Throws: ``CalcError``.
     public func watch(_ mode: Mode) -> AsyncThrowingStream<Todo, Error> {
         var w = UndraWriter()
         mode.undraEncode(&w)
@@ -185,11 +194,12 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             method: UndraIds.Objects.Calculator.watch,
             args: w.finish(),
             decode: { try Todo.undraDecoded(from: $0) },
-            mapError: { CalcError.undraFromReply($0) ?? $0 }
+            mapError: { UndraCallError.mapped(streamFailure: $0, domain: CalcError.self) }
         )
     }
 
-    public func stats() -> Stats {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func stats() throws -> Stats {
         do {
             let body = try self.core.callSync(
                 .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.stats),
@@ -198,11 +208,12 @@ public final class Calculator: UndraObject, @unchecked Sendable {
             )
             return try Stats.undraDecoded(from: body)
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
     /// A method named like a keyword.
+    /// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``.
     public func delete(
         w: Int32,
         body: Int32,
@@ -216,17 +227,22 @@ public final class Calculator: UndraObject, @unchecked Sendable {
         core.undraEncode(&w_)
         `default`.undraEncode(&w_)
         signal.undraEncode(&w_)
-        let body_ = try await self.core.call(
-            .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.delete),
-            method: UndraIds.Objects.Calculator.delete,
-            args: w_.finish()
-        )
-        return try Int32.undraDecoded(from: body_)
+        do {
+            let body_ = try await self.core.call(
+                .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Calculator.delete),
+                method: UndraIds.Objects.Calculator.delete,
+                args: w_.finish()
+            )
+            return try Int32.undraDecoded(from: body_)
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
     }
 }
 
 /// Says hello.
-public func greet(name: String, ctx: UndraCore = .shared) -> String {
+/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+public func greet(name: String, ctx: UndraCore = .shared) throws -> String {
     var w = UndraWriter()
     name.undraEncode(&w)
     do {
@@ -237,7 +253,7 @@ public func greet(name: String, ctx: UndraCore = .shared) -> String {
         )
         return try String.undraDecoded(from: body)
     } catch {
-        undraUnexpected(error)
+        throw UndraCallError.mapped(error)
     }
 }
 
@@ -248,12 +264,13 @@ public func numbers(upto: UInt32, ctx: UndraCore = .shared) -> AsyncThrowingStre
         .freeFunction(methodId: UndraIds.Functions.numbers),
         method: UndraIds.Functions.numbers,
         args: w.finish(),
-        decode: { try UInt32.undraDecoded(from: $0) }
+        decode: { try UInt32.undraDecoded(from: $0) },
+        mapError: { UndraCallError.mapped(streamFailure: $0) }
     )
 }
 
-/// - Throws: ``CalcError``.
-public func ping(ctx: UndraCore = .shared) async throws(CalcError) {
+/// - Throws: ``CalcError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+public func ping(ctx: UndraCore = .shared) async throws {
     do {
         _ = try await ctx.call(
             .freeFunction(methodId: UndraIds.Functions.ping),
@@ -261,7 +278,6 @@ public func ping(ctx: UndraCore = .shared) async throws(CalcError) {
             args: []
         )
     } catch {
-        guard let typed = CalcError.undraFromReply(error) else { undraUnexpected(error) }
-        throw typed
+        throw UndraCallError.mapped(error, domain: CalcError.self)
     }
 }

@@ -14,14 +14,20 @@ public final class Clock: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(zone: String, ctx: UndraCore = .shared) throws {
         var w = UndraWriter()
         zone.undraEncode(&w)
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Clock.typeId,
-            method: UndraIds.Objects.Clock.new,
-            args: w.finish()
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Clock.typeId,
+                method: UndraIds.Objects.Clock.new,
+                args: w.finish()
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
@@ -46,7 +52,7 @@ public final class Clock: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Clock: \(error)")
+            self.core.report(error, operation: "Clock.apply(signal: \(signal))")
         }
     }
 }
@@ -77,20 +83,23 @@ public final class Todos: UndraStore, @unchecked Sendable {
         core.observe(handle, signal: Observe.allSignals, on: true)
     }
 
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
     public convenience init(ctx: UndraCore = .shared) throws {
-        let handle = try ctx.construct(
-            type: UndraIds.Objects.Todos.typeId,
-            method: UndraIds.Objects.Todos.new,
-            args: []
-        )
+        let handle: UndraHandle
+        do {
+            handle = try ctx.construct(
+                type: UndraIds.Objects.Todos.typeId,
+                method: UndraIds.Objects.Todos.new,
+                args: []
+            )
+        } catch {
+            throw UndraCallError.mapped(error)
+        }
         self.init(adopting: handle, core: ctx)
     }
 
-    /// - Throws: ``TodoError``.
-    public static func `open`(
-        path: String,
-        ctx: UndraCore = .shared
-    ) async throws(TodoError) -> Todos {
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public static func `open`(path: String, ctx: UndraCore = .shared) async throws -> Todos {
         var w = UndraWriter()
         path.undraEncode(&w)
         let handle: UndraHandle
@@ -102,15 +111,14 @@ public final class Todos: UndraStore, @unchecked Sendable {
             )
             handle = try UndraHandle.undraDecoded(from: body)
         } catch {
-            guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
         return Todos(adopting: handle, core: ctx)
     }
 
     /// Adds a todo.
-    /// - Throws: ``TodoError``.
-    public func add(title: String) async throws(TodoError) -> Todo {
+    /// - Throws: ``TodoError``, `CancellationError` if the task is cancelled, or ``UndraCallError``.
+    public func add(title: String) async throws -> Todo {
         var w = UndraWriter()
         title.undraEncode(&w)
         do {
@@ -121,8 +129,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
             )
             return try Todo.undraDecoded(from: body)
         } catch {
-            guard let typed = TodoError.undraFromReply(error) else { undraUnexpected(error) }
-            throw typed
+            throw UndraCallError.mapped(error, domain: TodoError.self)
         }
     }
 
@@ -131,11 +138,13 @@ public final class Todos: UndraStore, @unchecked Sendable {
             .objectMethod(handle: self.handle, methodId: UndraIds.Objects.Todos.changes),
             method: UndraIds.Objects.Todos.changes,
             args: [],
-            decode: { try Todo.undraDecoded(from: $0) }
+            decode: { try Todo.undraDecoded(from: $0) },
+            mapError: { UndraCallError.mapped(streamFailure: $0) }
         )
     }
 
-    public func remainingAfter(id: UUID) -> UInt32 {
+    /// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it.
+    public func remainingAfter(id: UUID) throws -> UInt32 {
         var w = UndraWriter()
         id.undraEncode(&w)
         do {
@@ -146,7 +155,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
             )
             return try UInt32.undraDecoded(from: body)
         } catch {
-            undraUnexpected(error)
+            throw UndraCallError.mapped(error)
         }
     }
 
@@ -161,7 +170,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
                 args: w.finish()
             )
         } catch {
-            undraUnexpected(error)
+            self.core.report(error, operation: "Todos.setFilter")
         }
     }
 
@@ -330,7 +339,7 @@ public final class Todos: UndraStore, @unchecked Sendable {
             self.core.observe(self.handle, signal: signal, on: false)
             self.core.observe(self.handle, signal: signal, on: true)
         } catch {
-            assertionFailure("Undra: undecodable change for signal \(signal) of Todos: \(error)")
+            self.core.report(error, operation: "Todos.apply(signal: \(signal))")
         }
     }
 }

@@ -110,19 +110,27 @@ fn the_configuration_names_the_output() {
 // ----- options -------------------------------------------------------------------------
 
 #[test]
-fn typed_throws_can_be_turned_off() {
+fn swift_typed_throws_only_changes_port_requirements() {
+    // ADR-032: calls never use typed throws; only the requirements of a port, which the host
+    // implements, do.
+    let typed = all_files("ports", |_| {});
+    let untyped = all_files("ports", |g| g.swift_typed_throws = false);
+    let typed_ports = file(&typed[0].1, "Ports.swift");
+    let untyped_ports = file(&untyped[0].1, "Ports.swift");
+    assert!(typed_ports.contains("throws(HttpError)"));
+    assert!(!untyped_ports.contains("throws("));
+    assert!(untyped_ports.contains("async throws -> HttpResponse"));
+
     let typed = all_files("objects", |_| {});
     let untyped = all_files("objects", |g| g.swift_typed_throws = false);
-    let typed = file(&typed[0].1, "Objects.swift");
-    let untyped = file(&untyped[0].1, "Objects.swift");
-    assert!(typed.contains("throws(CalcError)"));
-    assert!(typed.contains("undraUnexpected(error)"));
-    assert!(!untyped.contains("throws(CalcError)"));
-    assert!(!untyped.contains("guard let typed"));
-    assert!(untyped.contains("throw CalcError.undraFromReply(error) ?? error"));
-    // Plain `throws` on the same methods.
-    assert!(untyped.contains("public func divide(a: Int64, b: Int64) throws -> Int64"));
-    assert!(untyped.contains("public func lookup(id: UUID) async throws -> Todo"));
+    for name in ["Objects.swift", "Stores.swift", "Queries.swift"] {
+        let (a, b) = (file(&typed[0].1, name), file(&untyped[0].1, name));
+        assert_eq!(a, b, "{name} must not depend on swift_typed_throws");
+        assert!(
+            !a.contains("throws("),
+            "{name}: a call must not use typed throws"
+        );
+    }
 }
 
 #[test]
@@ -155,8 +163,11 @@ fn swift_streams_are_decoded_by_the_runtime_so_credit_follows_the_consumer() {
     let swift = file(&out[0].1, "Objects.swift");
     assert!(swift.contains("return self.core.stream("));
     assert!(swift.contains("decode: { try UInt32.undraDecoded(from: $0) }"));
-    // A typed error maps the failure; an untyped stream leaves the runtime's default.
-    assert!(swift.contains("mapError: { CalcError.undraFromReply($0) ?? $0 }"));
+    // Every stream maps its failure in the runtime (ADR-032); a typed error is the domain.
+    assert!(swift.contains(
+        "mapError: { UndraCallError.mapped(streamFailure: $0, domain: CalcError.self) }"
+    ));
+    assert!(swift.contains("mapError: { UndraCallError.mapped(streamFailure: $0) }"));
     assert!(!swift.contains("mapError: { $0 }"));
 }
 
@@ -189,9 +200,160 @@ fn asynchronous_methods_without_a_result_can_throw_in_both_modes() {
         let swift = file(&out[0].1, "Objects.swift");
         assert!(swift.contains("public func compute(input: Double?) async throws -> Double"));
         assert!(swift.contains("public func warmUp() async throws {"));
-        // Synchronous methods without a `Result` keep the shape of SPEC section 10.1.
-        assert!(swift.contains("public func add(a: Int32, b: Int32) -> Int32 {"));
+        // A synchronous method that returns a value throws too (ADR-032); only a command, which
+        // returns nothing, stays non-throwing.
+        assert!(swift.contains("public func add(a: Int32, b: Int32) throws -> Int32 {"));
     }
+}
+
+#[test]
+fn swift_generated_code_never_stops_the_process() {
+    // ADR-032, decision 1: no outcome of a call reaches a trap, in any case or configuration.
+    const TRAPS: [&str; 8] = [
+        "fatalError",
+        "undraUnexpected",
+        "preconditionFailure",
+        "precondition(",
+        "assertionFailure",
+        "assert(",
+        "try!",
+        "as!",
+    ];
+    for case in common::CASES {
+        for typed in [true, false] {
+            let out = all_files(case, |g| g.swift_typed_throws = typed);
+            for f in &out[0].1 {
+                for trap in TRAPS {
+                    assert!(
+                        !f.contents.contains(trap),
+                        "{case}/{} (typed throws {typed}) contains `{trap}`",
+                        f.path
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The text of the method that starts at `head` in `swift`, up to the next method.
+fn swift_method<'a>(swift: &'a str, head: &str) -> &'a str {
+    let start = swift
+        .find(head)
+        .unwrap_or_else(|| panic!("no method starts with `{head}`"));
+    let rest = &swift[start + head.len()..];
+    let end = rest.find("\n    public ").unwrap_or(rest.len());
+    &rest[..end]
+}
+
+#[test]
+fn swift_call_shapes_follow_adr_032() {
+    let out = all_files("objects", |_| {});
+    let swift = file(&out[0].1, "Objects.swift");
+    // A call throws plain `throws`, whatever its Rust signature.
+    for shape in [
+        "public func add(a: Int32, b: Int32) throws -> Int32",
+        "public func divide(a: Int64, b: Int64) throws -> Int64",
+        "public func check() throws {",
+        "public func lookup(id: UUID) async throws -> Todo",
+        "public func compute(input: Double?) async throws -> Double",
+        ") throws -> Calculator {",
+        ") async throws -> Calculator {",
+    ] {
+        assert!(swift.contains(shape), "missing `{shape}`");
+    }
+    assert!(
+        !swift.contains("throws("),
+        "calls must not use typed throws"
+    );
+    // The mapping is the runtime's, once: the typed error is its `domain`.
+    assert!(swift.contains("throw UndraCallError.mapped(error, domain: CalcError.self)"));
+    assert!(swift.contains("throw UndraCallError.mapped(error)\n"));
+    // A command (a synchronous method that returns nothing and has no error type) does not throw;
+    // it reports and returns.
+    let reset = swift_method(swift, "public func reset() {");
+    assert!(reset.contains("self.core.report(error, operation: \"Calculator.reset\")"));
+    assert!(!reset.contains("throw "));
+    // The error the call can throw is documented on the method.
+    let divide = swift_method(
+        swift,
+        "public func divide(a: Int64, b: Int64) throws -> Int64",
+    );
+    assert!(divide.contains("UndraCallError.mapped(error, domain: CalcError.self)"));
+    assert!(swift.contains(
+        "/// - Throws: ``CalcError``, or ``UndraCallError`` if the call fails in the core or cannot reach it."
+    ));
+    assert!(swift.contains(
+        "/// - Throws: ``CalcError``, `CancellationError` if the task is cancelled, or ``UndraCallError``."
+    ));
+    assert!(swift.contains(
+        "/// - Throws: `CancellationError` if the task is cancelled, or ``UndraCallError``."
+    ));
+    assert!(swift.contains(
+        "/// - Throws: ``UndraCallError`` if the call fails in the core or cannot reach it."
+    ));
+    // Streams map their failures; they are not `throws`.
+    assert!(swift.contains(
+        "mapError: { UndraCallError.mapped(streamFailure: $0, domain: CalcError.self) }"
+    ));
+    assert!(swift.contains("mapError: { UndraCallError.mapped(streamFailure: $0) }"));
+    // The per-error helpers of the old policy are gone.
+    let errors = file(&out[0].1, "Errors.swift");
+    assert!(!errors.contains("undraFromReply"));
+    assert!(!errors.contains("undraUnexpected"));
+}
+
+#[test]
+fn swift_free_function_commands_report_through_their_context() {
+    // A command on a free function reports through its own `ctx`, by its Swift name without the
+    // backticks that escape a keyword; it is not `throws`.
+    let mut schema = common::case("objects");
+    schema.functions.push(common::function(
+        "fire_and_forget",
+        "",
+        vec![],
+        undra_meta::TypeRef::Unit,
+        false,
+    ));
+    schema.functions.push(common::function(
+        "default",
+        "",
+        vec![],
+        undra_meta::TypeRef::Unit,
+        false,
+    ));
+    let generator = common::generator_for("objects", &schema);
+    let files = generator.swift(&schema).unwrap();
+    let swift = file(&files, "Objects.swift");
+    let command = swift_method_at_top_level(
+        swift,
+        "public func fireAndForget(ctx: UndraCore = .shared) {",
+    );
+    assert!(command.contains("ctx.report(error, operation: \"fireAndForget\")"));
+    assert!(!command.contains("throw "));
+    let keyword =
+        swift_method_at_top_level(swift, "public func `default`(ctx: UndraCore = .shared) {");
+    assert!(keyword.contains("ctx.report(error, operation: \"default\")"));
+}
+
+/// The text of the top-level function that starts at `head`, up to the next top-level item.
+fn swift_method_at_top_level<'a>(swift: &'a str, head: &str) -> &'a str {
+    let start = swift
+        .find(head)
+        .unwrap_or_else(|| panic!("no function starts with `{head}`"));
+    let rest = &swift[start + head.len()..];
+    let end = rest.find("\n}\n").map_or(rest.len(), |i| i + 3);
+    &rest[..end]
+}
+
+#[test]
+fn swift_store_apply_reports_undecodable_changes() {
+    let out = all_files("stores", |_| {});
+    let stores = file(&out[0].1, "Stores.swift");
+    assert!(stores.contains("self.core.report(error, operation: \""));
+    assert!(stores.contains(".apply(signal: \\(signal))\")"));
+    assert!(!stores.contains("assertionFailure"));
+    // A `PatchError` still re-observes the signal.
+    assert!(stores.contains("} catch is PatchError {"));
 }
 
 #[test]
