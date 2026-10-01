@@ -8,6 +8,7 @@ import dev.undra.playground.core.Parity
 import dev.undra.playground.core.Todo
 import dev.undra.playground.core.Todos
 import dev.undra.runtime.wire.Codecs
+import dev.undra.runtime.wire.KeyedPatch
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.Payloads.ChangeOp
 import dev.undra.runtime.wire.decodeAll
@@ -53,10 +54,11 @@ fun s11Computed(w: World) {
     }
 
     // 2 (raw). The same filter change seen entry by entry: filter and visible together, remaining not at all.
+    // Since ADR-039 `visible` is a derived list, so its entry is the keyed patch that leaves [a].
     val raw = RawStore(w.core, UndraIds.Objects.Todos.TYPE_ID, UndraIds.Objects.Todos.NEW)
     raw.observe()
     val doneTodo = Todo.decodeAll(raw.call(UndraIds.Objects.Todos.ADD, UndraWriter().also { it.writeStr("a") }.toByteArray()))
-    raw.call(UndraIds.Objects.Todos.ADD, UndraWriter().also { it.writeStr("b") }.toByteArray())
+    val second = Todo.decodeAll(raw.call(UndraIds.Objects.Todos.ADD, UndraWriter().also { it.writeStr("b") }.toByteArray()))
     raw.callSync(UndraIds.Objects.Todos.TOGGLE, UndraWriter().also { Codecs.uuid.encode(it, doneTodo.id) }.toByteArray())
     flushMainThread()
     val mark = raw.mark()
@@ -64,9 +66,17 @@ fun s11Computed(w: World) {
     flushMainThread()
     val changed = raw.since(mark)
     expectEq("the signals set_filter(Done) delivered", listOf(1u, 2u), changed.map { it.signalId }.sorted())
-    check(changed.all { it.op == ChangeOp.FULL }) { "set_filter delivered an entry that is not a full value: $changed" }
-    expectEq("the delivered filter", Filter.DONE, Filter.decodeAll(changed.single { it.signalId == 1u }.value))
-    expectEq("the delivered visible", listOf(doneTodo.copy(done = true)), Codecs.vec(Todo).decodeAll(changed.single { it.signalId == 2u }.value))
+    val filterEntry = changed.single { it.signalId == 1u }
+    expectEq("the op of the filter entry", ChangeOp.FULL, filterEntry.op)
+    expectEq("the delivered filter", Filter.DONE, Filter.decodeAll(filterEntry.value))
+    val visibleEntry = changed.single { it.signalId == 2u }
+    expectEq("the op of the visible entry", ChangeOp.PATCH, visibleEntry.op)
+    val shownBefore = listOf(doneTodo.copy(done = true), second)
+    expectEq(
+        "the delivered visible",
+        listOf(doneTodo.copy(done = true)),
+        KeyedPatch.applyPatch(shownBefore, KeyedPatch.decodePatch(visibleEntry.value, Todo)),
+    )
     raw.close()
 
     // 5. The parity is the computed of the count, always consistent with it.

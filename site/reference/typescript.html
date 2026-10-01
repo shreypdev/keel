@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>TypeScript reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0x9cd826cc7ca51a21</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in TypeScript for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xfa536b9ac6f06149</code>). <a href="../docs/api-typescript.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="entry">Entry point<a class="anchor" href="#entry" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The package entry: it re-exports every file below.</p>
@@ -420,8 +420,8 @@ export const TodoErrorCodec: Codec&lt;TodoError&gt;;
 </details>
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and an async function for each free Rust function.</p>
-<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>localizedGreeting</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>storageStatus</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>229 lines</span></summary>
+<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>localizedGreeting</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>storageStatus</code> <code>version</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>390 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/objects.ts" rel="noopener">objects.ts</a></span></div><pre><code data-lang="ts">export class Probe extends UndraObject {
   /**
    * A probe with every counter at zero.
@@ -594,10 +594,122 @@ export function failLater(
 ): Promise&lt;number&gt;;
 
 /**
+ * Deletes the file or directory `path` of the `Fs` port.
+ * @throws {FsError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function fileDelete(
+  path: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;void&gt;;
+
+/**
+ * The names in the directory `dir` of the `Fs` port, sorted.
+ * @throws {FsError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function fileList(
+  dir: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;string[]&gt;;
+
+/**
+ * The contents of the file `path` of the `Fs` port.
+ * @throws {FsError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function fileRead(
+  path: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;Uint8Array&gt;;
+
+/**
+ * Writes `data` to the file `path` of the `Fs` port, creating its directories.
+ * @throws {FsError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function fileWrite(
+  path: string,
+  data: Uint8Array,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;void&gt;;
+
+/**
  * A greeting.
  * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
  */
 export function greet(name: string, core: UndraCore = UndraCore.shared): Promise&lt;string&gt;;
+
+/**
+ * `GET url` through the `Http` port, with an optional timeout in milliseconds. Any status is a
+ * response; only a failure to get one is an [`HttpError`].
+ * @throws {HttpError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function httpGet(
+  url: string,
+  timeoutMs: number | null,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;HttpResponse&gt;;
+
+/**
+ * The value the `Kv` port has under `key`, if any.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function kvGet(
+  key: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;Uint8Array | null&gt;;
+
+/**
+ * The keys of the `Kv` port that start with `prefix`, in ascending order.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function kvKeys(
+  prefix: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;string[]&gt;;
+
+/**
+ * Stores `value` under `key` in the `Kv` port.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function kvPut(
+  key: string,
+  value: Uint8Array,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;void&gt;;
+
+/**
+ * Removes `key` from the `Kv` port; a missing key is not an error.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function kvRemove(
+  key: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;void&gt;;
 
 /**
  * Greets `name` in the user's language, through the [`Locale`] port.
@@ -623,6 +735,55 @@ export function parseCount(
  * A failure is logged and passed to `onError`; the returned promise never rejects.
  */
 export function ping(core: UndraCore = UndraCore.shared): Promise&lt;void&gt;;
+
+/**
+ * The value the `SecureStore` port has under `key`, if any.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function secretGet(
+  key: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;Uint8Array | null&gt;;
+
+/**
+ * The keys of the `SecureStore` port that start with `prefix`, in ascending order.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function secretKeys(
+  prefix: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;string[]&gt;;
+
+/**
+ * Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function secretPut(
+  key: string,
+  value: Uint8Array,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;void&gt;;
+
+/**
+ * Removes `key` from the `SecureStore` port; a missing key is not an error.
+ * @throws {StorageError}
+ * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws The `signal`'s reason (an `AbortError` by default) if it aborts the call.
+ */
+export function secretRemove(
+  key: string,
+  core: UndraCore = UndraCore.shared,
+  signal?: AbortSignal,
+): Promise&lt;void&gt;;
 
 /**
  * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
@@ -655,8 +816,8 @@ export function version(core: UndraCore = UndraCore.shared): Promise&lt;string&g
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>Signal</code>, then its methods.</p>
-<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Legacy</code> <code>Profile</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>282 lines</span></summary>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Legacy</code> <code>Profile</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>312 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/stores.ts" rel="noopener">stores.ts</a></span></div><pre><code data-lang="ts">/**
  * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
  * exercise the boundary.
@@ -810,6 +971,27 @@ export class Counter extends UndraStore {
   reset(): Promise&lt;void&gt;;
 }
 
+/**
+ * The `Connectivity` and `Lifecycle` reports as the core received them: the last of each and how
+ * many there were since the core started. Every report moves the signals in one transaction, and
+ * every signal is `no_coalesce`: a platform's mirror applies each report, even several that arrive
+ * in one frame (or while the app is in the background, where React Native on Android pauses the
+ * timers that drain it), so a UI or a check sees `background` even when `active` follows at once.
+ */
+export class Device extends UndraStore {
+  readonly online: Signal&lt;boolean&gt;;
+  readonly netKind: Signal&lt;NetKind&gt;;
+  readonly appState: Signal&lt;AppState&gt;;
+  readonly connectivityReports: Signal&lt;number&gt;;
+  readonly lifecycleReports: Signal&lt;number&gt;;
+
+  /**
+   * The store, showing every report received so far and following the next ones.
+   * @throws {UndraCallError} If the core panics, refuses or cancels the call, or cannot be reached.
+   */
+  static create(core: UndraCore = UndraCore.shared): Promise&lt;Device&gt;;
+}
+
 /** A store whose one signal build B changes incompatibly. */
 export class Legacy extends UndraStore {
   readonly score: Signal&lt;number&gt;;
@@ -896,7 +1078,7 @@ export class Stress extends UndraStore {
 export class Todos extends UndraStore {
   readonly todos: Signal&lt;Todo[]&gt;;
   readonly filter: Signal&lt;Filter&gt;;
-  /** Computed by the core; read-only. */
+  /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
   readonly visible: Signal&lt;Todo[]&gt;;
   /** Computed by the core; read-only. */
   readonly remaining: Signal&lt;number&gt;;
@@ -920,6 +1102,15 @@ export class Todos extends UndraStore {
    * A failure is logged and passed to `onError`; the returned promise never rejects.
    */
   clearDone(): Promise&lt;void&gt;;
+
+  /**
+   * Appends `count` items titled `Item 1`, `Item 2`, .. with every fourth one finished, in one
+   * transaction (a demo and test helper: the big-list screen of the docs, contract scenario S19).
+   * A bulk load is a raw write, so `todos` and `visible` are sent as full values this once; the
+   * writes after it are patches again.
+   * A failure is logged and passed to `onError`; the returned promise never rejects.
+   */
+  fill(count: number): Promise&lt;void&gt;;
 
   /**
    * Removes the item with `id`; unknown ids are ignored.
@@ -1055,13 +1246,13 @@ export function tagNote(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, and the schema hash to hand to <code>UndraCore.load</code>.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>112 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>130 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/ts/src/ids.ts" rel="noopener">ids.ts</a></span></div><pre><code data-lang="ts">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash to pass to `UndraCore.load` as `expectedSchemaHash`.
  */
 export const UndraIds = {
-  schemaHash: 0x9cd826cc7ca51a21n,
+  schemaHash: 0xfa536b9ac6f06149n,
   Objects: {
     Probe: {
       typeId: 0x4fdd3051,
@@ -1100,6 +1291,10 @@ export const UndraIds = {
       increment: 0x0584c6ac,
       reset: 0x0c5ad256,
     },
+    Device: {
+      typeId: 0xbdcbb413,
+      new: 0x3f6646a7,
+    },
     Legacy: {
       typeId: 0x055b887e,
       new: 0x14d6ac0e,
@@ -1123,6 +1318,7 @@ export const UndraIds = {
       new: 0x35935dea,
       add: 0xd13d7ad7,
       clearDone: 0x27ffa842,
+      fill: 0x1ce95af5,
       remove: 0xa977479c,
       setFilter: 0x07781993,
       toggle: 0x1cc45d38,
@@ -1146,10 +1342,23 @@ export const UndraIds = {
     explode: 0x4b8e88d2,
     explodeLater: 0xe5a63d4b,
     failLater: 0x977e4974,
+    fileDelete: 0x3ea41ab3,
+    fileList: 0x97b9c870,
+    fileRead: 0x2103879c,
+    fileWrite: 0x2c0e4e77,
     greet: 0x0594d9ae,
+    httpGet: 0xbce1d1e6,
+    kvGet: 0x05cd83d7,
+    kvKeys: 0x4be5264d,
+    kvPut: 0x1b33766e,
+    kvRemove: 0xe4402f7d,
     localizedGreeting: 0x247f9a6c,
     parseCount: 0x1c438944,
     ping: 0x60e670d5,
+    secretGet: 0x3f96f35a,
+    secretKeys: 0x98a56bd2,
+    secretPut: 0x2c60b7cb,
+    secretRemove: 0x83a7330a,
     setRemoteDone: 0xa1e08a5f,
     storageStatus: 0x79205099,
     version: 0xceb9168b,

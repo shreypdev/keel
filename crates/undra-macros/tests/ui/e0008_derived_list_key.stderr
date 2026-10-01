@@ -1,0 +1,17 @@
+error: error[undra::E0008]: `visible` is a `DerivedList<Todo>` without `#[undra(key = "..")]`
+         = note: a derived list reaches the platforms as keyed patches; the key names the field that identifies a row
+         = help: add `#[undra(key = "id")]` naming a field of `Todo`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0008_derived_list_key.rs:19:14
+   |
+19 |     visible: DerivedList<Todo>,
+   |              ^^^^^^^^^^^^^^^^^
+
+error: error[undra::E0008]: `#[undra(key = "id")]` on `done` needs a `Signal<Vec<T>>` or a `DerivedList<T>`
+         = note: a computed list is sent whole: the core recomputes it and keeps no record of which rows changed
+         = help: to send it as keyed patches, build it as a `DerivedList<T>` (`source.derive().filter(..).build()`) and key that; otherwise remove `key`
+         = docs: https://shreypdev.github.io/undra/docs/errors.html#E0008
+  --> tests/ui/e0008_derived_list_key.rs:20:19
+   |
+20 |     #[undra(key = "id")]
+   |                   ^^^^

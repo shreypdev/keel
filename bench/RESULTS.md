@@ -86,6 +86,7 @@ show it are in the same directory, tagged `commit-control`, `commit-spin` and `c
 | a | **Firehose**: one observed `Signal<u64>`, one transaction per update, a host calling `call_sync` | each transaction is O(1) in the core at 100x any UI rate: one change-set of exactly 37 bytes | **6.2 M transactions/s**; p50 125 ns, p99 211 ns, p999 295 ns per call (commit + delivery + the copy every FFI callback makes); a core-side burst commits at 76 ns each, 13.1 M/s | at least 1.1 M/s, p99 at most 1.1 us, p999 at most 3 us, 37 bytes; layer A: 1,000-burst 400 us, call 630 ns | within, 5x margin |
 | g | **Event firehose**: `Runtime::event` on an event port whose subscriber writes the signal | the path a WebSocket or sensor feed takes into the core | **7.5 M events/s**; p50 125 ns, p99 167 ns, p999 251 ns; 37 bytes | at least 1.4 M/s, p99 840 ns, p999 2.6 us; layer A 580 ns | within |
 | b | **Keyed churn**: 10,000 rows, a fixed cycle (4 update, 2 insert, 2 remove, 2 move) at seeded random positions, one operation per transaction, a host list applying every patch | recorded list operations stay O(change) under sustained churn and the host copy never desynchronises | **182 k operations/s**; p50 3.8 us, p99 16.9 us, p999 22.0 us per operation (commit + delivery + host apply); **61 bytes** each; host list equals core list field for field, every operation applied as exactly one patch | at least 33 k/s, p99 90 us, p999 270 us, 61 bytes; layer A 30 ms per 1,000 | within |
+| b' | **Derived churn** (ADR-039): scenario b's list and cycle with a derived view of it (the rows not done, by title), both observed and mirrored by the host; every update of the cycle moves a row into or out of the view | a view over a churning list costs the change: each source op is at most two view ops, the host's view never desynchronises and nothing is ever re-sent whole | **122 k operations/s** (169 k for b in the same run, load 10); p50 5.8 us, p99 24.6 us, p999 100 us per operation (both commits, delivery, two host applies); 93.0 bytes each; the host's view equals filter + stable sort of the core's rows field for field, 896,219 view patches applied of 896,219, one rebuild (the observe) | at least 22 k/s, p99 170 us, p999 890 us, at most 103 bytes (a ceiling: the view's bytes depend on which ops fall inside it); layer A 39 ms per 1,000 (`bench/results/2026-10-01-derived-lists-*.json`, 2026-10-01) | within |
 | c | **Fan-out**: 1,000 of 100,000 observed signals written per transaction, then the same 1,000 over 10,000 observed (signal-table layer, no runtime) | commit time and bytes follow the dirty count, not the observed count | **27.9 k transactions/s**; p50 35 us, p99 59 us; one change-set of **21,012 bytes** either way; the 10,000-observed run has p50 25.6 us (ratio 1.4, gated at 4) | at least 4.6 k/s, p99 410 us, p999 1.3 ms, 21,012 bytes; layer A 190 us and 130 us | within |
 | c' | **Fan-out across stores**: 1,000 stores of 100 signals, one written in each, one transaction | the per-store overhead when one transaction touches many stores: 1,000 change-sets sharing a transaction | **9.9 k transactions/s** (9.9 M change-sets/s); p50 98 us, p99 147 us; 33,000 bytes | at least 1.6 k/s, p99 1.3 ms, 33,000 bytes; layer A 580 us | within |
 | d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Undra buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **30.6 M items/s** with credit; produced minus delivered never above **1** in 8.0 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
@@ -438,6 +439,67 @@ the encode (3.30 µs and 2.48 µs): maps encode their entries sorted by the enco
 into a scratch buffer and sorts. `Vec<u32>` of 1,000 is 1.12 µs (0.63 ns per element to decode): it goes element by element rather than as one copy. None is
 near a section 14 row; they are the first places to look if a large-collection command ever shows up in a profile.
 
+### 5. A computed list over a keyed list cost the list again; a derived list costs the change (ADR-039)
+
+ADR-027 made a keyed list cost the change, but the first `Computed<Vec<T>>` over it (the playground's `visible`, the
+shape every app has) cost the list again: recomputed at every commit with a clone of every passing row, sent as a full
+value, decoded whole on every platform. ADR-039's `DerivedList<T>` (`list.derive().filter(..).sort_by_key(..).build()`)
+is kept from the list's recorded operations on an index of two order-statistic trees, O(log n) per changed row, and
+reaches the host as at most two keyed-patch ops per source op. The same change before and after
+(`bench/tests/derived_before_after.rs`, `bench/results/2026-10-01-derived-lists-before-after.json`): one `update_at` of a
+visible row's title, `visible` = the rows not done (75%), `undra-signals` directly with both slots observed and a sink
+that copies each change-set, median per change, best of three; titles of 34 characters, load 6-9:
+
+| Rows | Before: `Computed<Vec<_>>` | Change-set | After: `DerivedList` | Change-set | The keyed list alone |
+|---|---|---|---|---|---|
+| 1,000 | 21.0 µs | 35.4 KB | 292 ns | 158 bytes | 209 ns, 85 bytes |
+| 10,000 | 176.5 µs | 352.6 KB | **333 ns** | **158 bytes** | 250 ns, 85 bytes |
+| 100,000 | 2.24 ms | 3.53 MB | **375 ns** | **158 bytes** | 292 ns, 85 bytes |
+
+The view adds 80 ns and one 73-byte entry to the change it follows, whatever the list's length. On the platforms
+(`bench/results/2026-10-01-derived-lists-platform-apply.json`: each runtime's own reader, generated `Todo` codec and
+`applyPatch`, throwaway probes like ADR-039's, best of three medians), applying `visible`'s entry:
+
+| Rows (visible) | TypeScript, Node 24: full / one op | Kotlin, JVM 17: full / one op | Swift 6 `-O`: full / one op in place / while a view holds the array |
+|---|---|---|---|
+| 1,000 (750) | 104.5 µs / 0.46 µs | 15.2 µs / 0.21 µs | 81.2 µs / 0.38 µs / 4.9 µs |
+| 10,000 (7,500) | 1.07 ms / 1.62 µs | 152.2 µs / 1.13 µs | 832.2 µs / 0.38 µs / 46.3 µs |
+| 100,000 (75,000) | 11.27 ms / 47.3 µs | 1.50 ms / 7.2 µs | 8.97 ms / 0.42 µs / 513 µs |
+
+What a platform still pays at 100,000 rows is its own list copy (TypeScript's and Kotlin's `applyPatch` return a new
+list; Swift copies on write when SwiftUI holds the array), once per drain (ADR-031), not the core.
+
+**The gate rows** (`signals/derived_*`, through the runtime as the keyed rows are; each checks the shape of what it
+ships before it is timed; `bench/results/2026-10-01-derived-lists-layer-a.json`, best of three p50s on a host at load
+6-10) and ADR-039's targets, every one met:
+
+| Row | p50 | ADR-039 target | Budget (CI) |
+|---|---|---|---|
+| `signals/derived_10k/update_visible` (`Update`, `Update`) | 392 ns | ≤ 1 µs | 2 µs |
+| `signals/derived_10k/toggle_membership` (`Remove` / `Insert`) | 379 ns | ≤ 1.5 µs | 1.9 µs |
+| `signals/derived_10k/sort_key_change` (`Move` + `Update`) | 555 ns | ≤ 2 µs | 2.8 µs |
+| `signals/derived_100k/update_visible` | 378 ns | ≤ 2 µs | 1.9 µs |
+| `signals/derived_100k/sort_key_change` | 607 ns | ≤ 4 µs | 3.1 µs |
+| `signals/derived_10k/insert_sorted` | 6.50 µs | ≤ 1.5x `keyed_10k/insert` (6.17 µs): 1.05x | 33 µs |
+| `signals/derived_10k/param_flip` (2,500 rows move: the full value) | 217.6 µs | ≤ 300 µs | 1.1 ms |
+| `signals/derived_10k/rebuild_after_replace` | 174.6 µs | ≤ 1 ms | 880 µs |
+| `signals/derived_10k/count_toggle` (`count()` as a `Computed<u32>`) | 388 ns | ≤ 1 µs | 2 µs |
+
+The ratios: `derived_sort_scaling` (100,000 against 10,000 rows) is 1.04-1.12 (max 4: an O(n) step would be near 10),
+`derived_vs_keyed_update` 1.36-1.65 (max 2.5). The first measurement missed two targets (`param_flip` 1.43 ms,
+`rebuild_after_replace` 1.37 ms, on a loaded host): the parameter walk computed a rank for every row that stayed, every
+full value was materialised (a clone of each row) before it was encoded, and the rebuild row's fixture formatted 10,000
+titles inside the timed call. The walk now skips rows whose membership and key did not change, ranks are computed only
+when an op is kept for the host (an unobserved list and a `count()` never compute one), a full value is encoded straight
+from the source rows, and the fixture swaps in a prebuilt list.
+
+**Sustained** (`derived_churn_10k/sustained`, the keyed churn cycle on a list with a sorted view of it, both mirrored by
+the host; `bench/results/2026-10-01-derived-lists-derived_churn_10k-sustained.json`): **122,000 operations a second**,
+p50 5.8 µs, p99 24.6 µs, p999 100 µs, 93.0 bytes per operation, against 169,300 a second for the keyed churn alone in
+the same run (ADR-039's floor: half of it). Over 1.24 million operations the host's view equalled `filter + stable sort`
+of the core's rows field for field, 896,219 view patches were applied of 896,219 delivered, and the core rebuilt the
+index once (the observe).
+
 ## Full tables
 
 ### Wire: encode, decode and round trip per type
@@ -509,6 +571,15 @@ The patch algorithm and its host-side replay on their own, with a cheap key and 
 | `signals/keyed_10k/raw_update_diff` | 579.7 µs | 547.9 µs .. 630.8 µs |
 | `signals/keyed_1k/insert` | 769.7 ns | 745.8 ns .. 793.2 ns |
 | `signals/keyed_100/insert` | 359.1 ns | 352.6 ns .. 366.0 ns |
+| `signals/derived_10k/update_visible` | 391.9 ns | gate harness p50, best of three (finding 5) |
+| `signals/derived_10k/toggle_membership` | 378.5 ns | gate harness |
+| `signals/derived_10k/sort_key_change` | 554.8 ns | gate harness |
+| `signals/derived_100k/update_visible` | 378.4 ns | gate harness |
+| `signals/derived_100k/sort_key_change` | 606.8 ns | gate harness |
+| `signals/derived_10k/insert_sorted` | 6.50 µs | gate harness |
+| `signals/derived_10k/param_flip` | 217.6 µs | gate harness |
+| `signals/derived_10k/rebuild_after_replace` | 174.6 µs | gate harness |
+| `signals/derived_10k/count_toggle` | 387.9 ns | gate harness |
 | `signals/computed/recompute_1` | 42.1 ns | 41.8 ns .. 42.4 ns |
 | `signals/computed/recompute_chain_10` | 253.1 ns | 251.0 ns .. 256.3 ns |
 

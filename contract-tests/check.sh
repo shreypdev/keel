@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Reads a contract runner's output (stdin or a file) and fails unless every scenario of
-# scenarios.md the platform runs reported PASS: S01 to S18 and S20 everywhere, plus S21 and S22
-# (worker mode and crash recovery, web-only, ADR-049) on ts. S19 belongs to ADR-039 (derived
-# lists), whose piece adds it here. A line looks like:  SCENARIO S07 PASS stream with backpressure
+# scenarios.md the platform runs reported PASS: S01 to S20 everywhere, plus S21 and S22 (worker mode
+# and crash recovery, web-only, ADR-049) on ts. A line looks like:  SCENARIO S07 PASS stream with backpressure
 #
 #   contract-tests/ts/run.sh 2>&1 | tee /tmp/ts.log | contract-tests/check.sh ts
 #   contract-tests/check.sh kotlin < kotlin.log
@@ -12,7 +11,7 @@
 # id counts: a second process (build B of S14/S15) prints only FAIL lines, which override a PASS.
 set -euo pipefail
 platform="${1:-runner}"
-IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S20)
+IDS=(S01 S02 S03 S04 S05 S06 S07 S08 S09 S10 S11 S12 S13 S14 S15 S16 S17 S18 S19 S20)
 # Web-only scenarios (ADR-049): the TypeScript runner runs them.
 case "$platform" in
   ts) IDS+=(S21 S22) ;;

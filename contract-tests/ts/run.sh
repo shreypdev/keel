@@ -12,7 +12,7 @@
 # same command with UNDRA_PLAYGROUND_V2=1; its wasm is copied to build/b/undra_core.wasm (not committed) before
 # build A is built again, so the default wasm stays build A. UNDRA_PLAYGROUND_WASM_B overrides its path.
 # Prints `SCENARIO Sxx PASS|FAIL|SKIP <title>` lines (src/reporter.ts) and pipes them through
-# contract-tests/check.sh, so the exit status is non-zero unless all twenty-one pass.
+# contract-tests/check.sh, so the exit status is non-zero unless all twenty-two pass.
 # UNDRA_CLI overrides the path of the undra binary (default target/debug/undra, built if missing).
 set -euo pipefail
 
@@ -60,6 +60,10 @@ if cmp -s "$wasm_a" "$wasm_b"; then
   exit 1
 fi
 export UNDRA_PLAYGROUND_WASM_B="$wasm_b"
+
+# 1b. The derived-list recording S19 replays (crates/undra-signals/examples/derived_vectors.rs), written
+#     when it is missing or older than the signals crate it records.
+"$root/contract-tests/derived-vectors.sh" >&2
 
 # 2. The dependencies (vitest, typescript), from the lockfile.
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then

@@ -7,6 +7,9 @@ dist
 /runtimes/kotlin/**/build
 /runtimes/kotlin/.gradle
 /runtimes/swift/.build
+# The Android library of @undra/react-native, as an app's Gradle build (the playground's) writes it.
+/runtimes/rn/@undra/react-native/android/build
+/runtimes/rn/@undra/react-native/android/.cxx
 /examples/playground/ios/**/xcuserdata
 /examples/playground/android/**/build
 /examples/playground/android/.gradle

@@ -1,0 +1,14 @@
+{
+  "scenario": "keyed_churn_10k/sustained",
+  "kind": "sustained",
+  "date": "2026-10-01",
+  "tag": "derived-lists",
+  "command": "UNDRA_BENCH_RESULTS_TAG=derived-lists UNDRA_STRESS_SECONDS=10 UNDRA_BENCH_FILTER=churn cargo test -p undra-bench --test stress --release -- --nocapture",
+  "machine": {"cpu": "Apple M5 Pro", "cores": 18, "os": "macOS 26.5", "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)", "git": "482f5fcf7d10-dirty"},
+  "load_average": {"before": 9.98, "after": 7.85},
+  "run": {"seconds": 10, "warmup_ms": 200, "elapsed_s": 10.000047542, "attempt": 1, "attempts": 3, "scale": 1, "baseline": null},
+  "result": {"ops": 1692690, "per_sec": 169268.19526514606, "p50_ns": 4223, "p99_ns": 17919, "p999_ns": 25087, "max_ns": 1322250, "bytes_per_op": 61, "rss_growth_pct": null, "rss_baseline_bytes": null, "rss_final_bytes": null},
+  "gate": {"budget": "CI: at least 33 k ops/s, p99 at most 90.00 us", "passed": true, "failures": []},
+  "invariants": [{"what": "the host list equals the core list, field for field (10000 and 10000 rows)", "holds": true, "timing": false}, {"what": "every operation was applied on the host as one keyed patch (1726940 patches for 1726940 operations, warm-up included; 1 full values, 1 expected)", "holds": true, "timing": false}, {"what": "61 bytes per operation, exactly (103254090 for 1692690)", "holds": true, "timing": false}, {"what": "the list is back at 10000 rows after 1726940 operations (10000)", "holds": true, "timing": false}, {"what": "every patch applied on the host (0 failed)", "holds": true, "timing": false}, {"what": "one change-set per operation (1692690 for 1692690)", "holds": true, "timing": false}, {"what": "no warnings were logged (0)", "holds": true, "timing": false}],
+  "notes": []
+}

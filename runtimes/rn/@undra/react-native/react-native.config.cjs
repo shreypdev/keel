@@ -2,9 +2,10 @@
 //
 // iOS: `UndraReactNative.podspec`, found by the React Native CLI; the module is registered through
 // `codegenConfig.ios.modules` in package.json (`UndraModuleProvider`).
-// Android: a pure C++ dependency. There is no Gradle project: React Native's Gradle plugin runs this
-// package's codegen for the app and adds `android/CMakeLists.txt` (target `undra_react_native`) to
-// the app's `libappmodules.so`, whose autolinking instantiates `UndraTurboModule` (the header name).
+// Android: a Java library (`android/build.gradle`, the default ports' Java half, ADR-038 amendment B,
+// B8) and the C++ TurboModule: React Native's Gradle plugin adds `android/CMakeLists.txt` (target
+// `undra_react_native`) to the app's `libappmodules.so`, whose autolinking instantiates
+// `UndraTurboModule` (the header name), as it does for a pure C++ dependency.
 module.exports = {
   dependency: {
     platforms: {

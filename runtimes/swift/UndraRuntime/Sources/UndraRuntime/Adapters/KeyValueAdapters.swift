@@ -12,10 +12,10 @@
 //
 //   out of space (NSFileWriteOutOfSpaceError, ENOSPC, EDQUOT, errSecDiskFull)        .full
 //   protected data before the first unlock (errSecInteractionNotAllowed,
-//     errSecAuthFailed, NSFile{Read,Write}NoPermissionError from data protection)     .locked
-//   a stored entry that does not decode, a Keychain item that is not data           .corrupt
+//     errSecAuthFailed, EPERM, NSFile{Read,Write}NoPermissionError over EPERM)        .locked
+//   a stored entry whose header does not decode, a Keychain item that is not data   .corrupt
 //   no Keychain in this process (errSecNotAvailable, errSecMissingEntitlement)      .unavailable
-//   anything else                                                                    .io(message)
+//   anything else (EACCES included)                                                  .io(message)
 //
 // Undecodable arguments (a core bug, not a storage failure) still throw the `WireError`, which the
 // bridge answers with status 2 and an ERROR log.
@@ -115,34 +115,58 @@ enum KeyValuePort {
 
 /// Maps a platform failure of a storage backend onto ``StorageError`` (ADR-049's table).
 enum StorageFailure {
-    /// The `StorageError` for a Foundation (or POSIX, or wire) error a file operation threw.
-    static func classify(_ error: any Error) -> StorageError {
+    /// The `StorageError` for a Foundation, POSIX (`PosixError`, `POSIXError`) or wire error a file
+    /// operation threw. `context` (what was being done) prefixes the message of `.io` and `.corrupt`.
+    static func classify(_ error: any Error, context: String? = nil) -> StorageError {
         if let storage = error as? StorageError {
             return storage
         }
+        func message(_ text: String) -> String {
+            return context.map { "\($0): \(text)" } ?? text
+        }
         if let wire = error as? WireError {
-            return .corrupt("the stored entry does not decode: \(wire)")
+            return .corrupt(message("the stored entry does not decode: \(wire)"))
         }
         if isOutOfSpace(error) {
             return .full
         }
+        if let posix = error as? PosixError {
+            return classify(errno: posix.code, message: message(posix.description))
+        }
         let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain {
+            return classify(errno: Int32(truncatingIfNeeded: ns.code), message: message(error.localizedDescription))
+        }
         if ns.domain == NSCocoaErrorDomain {
             switch ns.code {
             case NSFileReadNoPermissionError, NSFileWriteNoPermissionError:
                 // Data protection refuses a protected file before the first unlock with EPERM
                 // (or no detail); a permission bit that forbids it is EACCES, a real failure.
                 if posixCode(of: error) == EACCES {
-                    return .io(error.localizedDescription)
+                    return .io(message(error.localizedDescription))
                 }
                 return .locked
             case NSFileReadCorruptFileError:
-                return .corrupt(error.localizedDescription)
+                return .corrupt(message(error.localizedDescription))
             default:
                 break
             }
         }
-        return .io(error.localizedDescription)
+        return .io(message(error.localizedDescription))
+    }
+
+    /// The `StorageError` of an `errno` a POSIX call left: `ENOSPC` and `EDQUOT` are `.full`,
+    /// `EPERM` (what data protection answers before the first unlock) is `.locked`, anything else
+    /// (`EACCES` included: a permission bit, not a lock) is `.io(message)`.
+    static func classify(errno code: Int32, message: String) -> StorageError {
+        switch code {
+        case ENOSPC, EDQUOT:
+            return .full
+        case EPERM:
+            return .locked
+        default:
+            return .io(message)
+        }
     }
 
     /// Whether `error` (or the error under it) says the disk or the quota is exhausted:
@@ -158,8 +182,12 @@ enum StorageFailure {
         return code == ENOSPC || code == EDQUOT
     }
 
-    /// The POSIX code of `error`, or of the error under it (`NSUnderlyingErrorKey`), if any.
+    /// The POSIX code of `error` (a `PosixError`, or an `NSError` in `NSPOSIXErrorDomain`), or of the
+    /// error under it (`NSUnderlyingErrorKey`), if any.
     static func posixCode(of error: any Error) -> Int32? {
+        if let posix = error as? PosixError {
+            return posix.code
+        }
         var current: NSError? = error as NSError
         var depth = 0
         while let ns = current, depth < 8 {
@@ -172,12 +200,12 @@ enum StorageFailure {
         return nil
     }
 
-    /// Runs a file operation, mapping whatever it throws with ``classify(_:)``.
-    static func run<T>(_ body: () throws -> T) throws(StorageError) -> T {
+    /// Runs a file operation, mapping whatever it throws with ``classify(_:context:)``.
+    static func run<T>(context: String? = nil, _ body: () throws -> T) throws(StorageError) -> T {
         do {
             return try body()
         } catch {
-            throw classify(error)
+            throw classify(error, context: context)
         }
     }
 }
@@ -191,9 +219,9 @@ enum StorageFailure {
 /// value. Writes are atomic.
 ///
 /// Failures are typed (``StorageError``, ADR-049): a full disk is `.full`, a file that data
-/// protection keeps unreadable until the first unlock is `.locked`, an entry file that does not
-/// decode is `.corrupt` (its key keeps it until it is overwritten or deleted), anything else is
-/// `.io` with the platform's message.
+/// protection keeps unreadable until the first unlock is `.locked`, an entry file whose header
+/// does not decode is `.corrupt` (its key keeps it until it is overwritten or deleted), anything
+/// else is `.io` with the platform's message.
 public struct KvAdapter: UndraAdapter {
     private let backend: any KeyValueBackend
 
@@ -235,6 +263,26 @@ public struct KvAdapter: UndraAdapter {
 }
 
 /// One file per key: `u32 key length, key UTF-8, value bytes`, named `<fnv1a64>-<fnv1a32>`.
+///
+/// The directory is shared with the React Native module's C++ store (same names, same layout), and
+/// a process killed mid-write leaves a temporary file in it. Three rules keep those out of sight:
+///
+/// * `set` writes `<name>.<16 hex digits>.tmp`, flushes it and renames it to `<name>` (the name
+///   `temporaryName(for:)` defines, and the C++ store uses), so an entry file is whole or absent;
+/// * `list` considers only a *sealed entry*: a file named like `fileName(for:)` writes it, whose
+///   header holds the key that name belongs to. Temporary files, dot files, files of any other
+///   name and files with a damaged header are skipped (the entry format ends the value at the end
+///   of the file, so a value cut short cannot be told from a shorter one; the sealing above is
+///   what rules it out), and so is a file that vanished or cannot be read meanwhile, as the C++
+///   store does; a store data protection keeps locked is `.locked`, not empty;
+/// * `get` of a file with a damaged header is `StorageError.corrupt` (ADR-049): since entries are
+///   sealed, such a file is damage, not a write cut short, and "no value" would let the query
+///   client take a stored queue for an empty one and overwrite it. The client handles `.corrupt`
+///   (a cache entry is dropped and refetched, a queue is moved to the dead letters), and `set` or
+///   `delete` of the key replaces or removes the file. The key is not listed.
+///
+/// Every failure is a ``StorageError`` (``StorageFailure``): a full disk or quota is `.full`,
+/// `EPERM` (data protection before the first unlock) is `.locked`, anything else is `.io`.
 final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
     private let directory: URL
 
@@ -245,6 +293,34 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
     /// The file name of `key`: two FNV-1a hashes in hex, 16 + 1 + 8 characters.
     static func fileName(for key: String) -> String {
         return hex(fnv1a64(key), width: 16) + "-" + hex(UInt64(fnv1a32(key)), width: 8)
+    }
+
+    /// The end of the name of a file `set` is still writing.
+    static let temporarySuffix = ".tmp"
+
+    /// The name of the temporary file for the entry file `name`: `<name>.<16 hex digits>.tmp`.
+    static func temporaryName(for name: String) -> String {
+        return name + "." + PosixFiles.randomHex() + temporarySuffix
+    }
+
+    /// Whether `name` has the shape of an entry file name (`fileName(for:)`): 16 lowercase hex
+    /// digits, `-`, 8 more.
+    static func isEntryName(_ name: String) -> Bool {
+        let bytes = Array(name.utf8)
+        guard bytes.count == 16 + 1 + 8 else {
+            return false
+        }
+        for (index, byte) in bytes.enumerated() {
+            if index == 16 {
+                if byte != UInt8(ascii: "-") {
+                    return false
+                }
+            } else if !(UInt8(ascii: "0") ... UInt8(ascii: "9")).contains(byte)
+                        && !(UInt8(ascii: "a") ... UInt8(ascii: "f")).contains(byte) {
+                return false
+            }
+        }
+        return true
     }
 
     private static func hex(_ value: UInt64, width: Int) -> String {
@@ -276,32 +352,40 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             if FileKeyValueBackend.isMissing(error) {
                 return nil
             }
-            throw StorageFailure.classify(error)
+            throw StorageFailure.classify(error, context: "cannot read the entry of '\(key)'")
         }
-        var reader = UndraReader([UInt8](data))
-        let storedKey: String
-        do {
-            storedKey = try reader.readString()
-        } catch {
-            throw .corrupt("the Kv entry for key \"\(key)\" does not decode: \(error)")
+        guard let header = FileKeyValueBackend.header(of: data) else {
+            throw .corrupt("the Kv entry for key \"\(key)\" is damaged: its header does not decode")
         }
-        if storedKey != key {
+        if header.key != key {
             // A hash collision with another key: this key has no value.
             return nil
         }
-        return Array(reader.readRemaining())
+        return [UInt8](data[(data.startIndex + header.end)...])
     }
 
     func set(_ key: String, _ value: [UInt8]) throws(StorageError) {
+        let directory = self.directory
+        try StorageFailure.run(context: "cannot create \(directory.path)") {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
         var writer = UndraWriter(capacity: 4 + key.utf8.count + value.count)
         writer.writeString(key)
         writer.writeRaw(value)
+        let raw = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        if raw < 0 {
+            throw StorageFailure.classify(PosixError(code: errno), context: "cannot open \(directory.path)")
+        }
+        let name = FileKeyValueBackend.fileName(for: key)
         let bytes = writer.finish()
-        let directory = self.directory
-        let url = fileURL(for: key)
-        try StorageFailure.run {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Data(bytes).write(to: url, options: .atomic)
+        try StorageFailure.run(context: "cannot write the entry of '\(key)'") {
+            try PosixFiles.writeAtomically(
+                bytes,
+                named: name,
+                via: FileKeyValueBackend.temporaryName(for: name),
+                in: OwnedDescriptor(raw),
+                mode: 0o600
+            )
         }
     }
 
@@ -310,8 +394,8 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return
         }
-        // Deleting the file of a colliding key would lose someone else's value. A file that is
-        // not an entry at all (no key to compare) is this key's, damaged: deleting it is right.
+        // Deleting the file of a colliding key would lose someone else's value. A file whose
+        // header is damaged names no key: it is this key's, and deleting it is right.
         if let stored = try readKey(at: url), stored != key {
             return
         }
@@ -321,7 +405,7 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             if FileKeyValueBackend.isMissing(error) {
                 return
             }
-            throw StorageFailure.classify(error)
+            throw StorageFailure.classify(error, context: "cannot delete the entry of '\(key)'")
         }
     }
 
@@ -330,23 +414,39 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             return []
         }
         let directory = self.directory
-        let entries = try StorageFailure.run {
-            try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let names = try StorageFailure.run(context: "cannot list \(directory.path)") {
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
         }
         var keys: [String] = []
-        for url in entries {
-            // A file that is not an entry (too short, a bad length, a key that is not UTF-8) is
-            // skipped: it names no key.
-            if let key = try readKey(at: url), key.hasPrefix(prefix) {
-                keys.append(key)
+        for name in names {
+            guard FileKeyValueBackend.isEntryName(name) else {
+                continue
             }
+            // A file that vanished or cannot be read meanwhile is skipped, as the React Native
+            // module's store does; a locked store is not taken for an empty one.
+            let stored: String?
+            do {
+                stored = try readKey(at: directory.appendingPathComponent(name))
+            } catch {
+                if error == .locked {
+                    throw error
+                }
+                continue
+            }
+            guard let key = stored,
+                  FileKeyValueBackend.fileName(for: key) == name,
+                  key.hasPrefix(prefix)
+            else {
+                continue
+            }
+            keys.append(key)
         }
         keys.sort()
         return keys
     }
 
-    /// Reads only the key of an entry file, without loading the value; `nil` for a file that is
-    /// not an entry or has gone.
+    /// Reads only the key of an entry file, without loading the value; `nil` for a file that has
+    /// gone or whose header is damaged.
     private func readKey(at url: URL) throws(StorageError) -> String? {
         let data: Data
         do {
@@ -355,8 +455,15 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             if FileKeyValueBackend.isMissing(error) {
                 return nil
             }
-            throw StorageFailure.classify(error)
+            throw StorageFailure.classify(error, context: "cannot read \(url.lastPathComponent)")
         }
+        return FileKeyValueBackend.header(of: data)?.key
+    }
+
+    /// The key at the start of an entry file's `data` and where the value begins, or nil when the
+    /// header is not whole: fewer than four bytes, a key longer than the file, or a key that is
+    /// not UTF-8.
+    private static func header(of data: Data) -> (key: String, end: Int)? {
         guard data.count >= 4 else {
             return nil
         }
@@ -373,7 +480,10 @@ final class FileKeyValueBackend: KeyValueBackend, @unchecked Sendable {
             return nil
         }
         let keyBytes = data.subdata(in: (start + 4) ..< (start + 4 + length))
-        return String(data: keyBytes, encoding: .utf8)
+        guard let key = String(data: keyBytes, encoding: .utf8) else {
+            return nil
+        }
+        return (key, 4 + length)
     }
 }
 

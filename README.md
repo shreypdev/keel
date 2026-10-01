@@ -61,12 +61,13 @@ channel; the next piece aims for 16 KB).
 
 ## Why you can trust it
 
-* **4,000+ tests across five languages** — Rust 2,168 · TypeScript 931 · Kotlin 500 ·
-  Swift 425 · wasm/C-ABI acceptance suites — all green in one pass.
-* **18 wire-level contract scenarios, run on all three platforms** (54/54): sync/async
+* **4,900+ tests across five languages** — Rust 2,700 · TypeScript 1,132 · Kotlin 617 ·
+  Swift 512 · wasm/C-ABI acceptance suites — all green in one pass.
+* **19 wire-level contract scenarios, run on all three platforms** (57/57): sync/async
   calls, typed errors, cancellation, stream backpressure, keyed patches, optimistic
   rollback, offline queue replay, snapshot/restore, schema-mismatch rejection, panic
-  containment, and a coalesced 1,000-transaction burst applied in one drain. See
+  containment, a coalesced 1,000-transaction burst applied in one drain, and a derived
+  keyed list whose 60,000 recorded operations replay to the core's views. See
   [`contract-tests/`](contract-tests/scenarios.md).
 * **Four adversarial reviews** of the core crates (signals, runtime, macros, ffi), every
   High/Medium finding fixed and independently re-verified — the unsafe boundary under
@@ -197,7 +198,7 @@ hosted services, shared UI of any kind.
 | `crates/` | the 12 Rust crates: schema (`undra-meta`), wire codec, macros, signals, runtime, ports, query, ffi (the only `unsafe`), transport, bindgen, cli, facade |
 | `runtimes/` | the Swift, Kotlin and TypeScript runtime packages the generated code sits on |
 | `examples/playground` | the reference app: one core, three platforms, proof screenshots |
-| `contract-tests/` | the 18 scenarios + a runner per platform |
+| `contract-tests/` | the 19 scenarios + a runner per platform |
 | `bench/` | criterion benches + the budget gate; `RESULTS.md` has the numbers |
 | `docs/SPEC.md` | the binding specification (wire, ABI, runtime model, generated shapes) |
 | `.10x/` | the project's decision record: ADRs, reviews, status ledger |

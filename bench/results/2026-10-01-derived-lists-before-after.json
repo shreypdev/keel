@@ -1,0 +1,12 @@
+{
+  "kind": "derived-before-after",
+  "date": "2026-10-01",
+  "command": "cargo test -p undra-bench --release --test derived_before_after -- --ignored --nocapture",
+  "what": "one update_at of a visible row's title; visible = rows not done (75%); undra-signals directly, both slots observed, a sink that copies each change-set; median per change, best of three",
+  "load_average": {"before": 8.57, "after": 8.57},
+  "rows": [
+    {"rows": 1000, "before_ns": 21042, "before_bytes": 35356, "after_ns": 292, "after_bytes": 158, "source_ns": 209, "source_bytes": 85},
+    {"rows": 10000, "before_ns": 176542, "before_bytes": 352606, "after_ns": 333, "after_bytes": 158, "source_ns": 250, "source_bytes": 85},
+    {"rows": 100000, "before_ns": 2243042, "before_bytes": 3525106, "after_ns": 375, "after_bytes": 158, "source_ns": 292, "source_bytes": 85}
+  ]
+}

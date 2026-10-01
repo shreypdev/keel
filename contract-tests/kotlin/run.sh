@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Kotlin column of the contract tests: runs S01..S20 of contract-tests/scenarios.md on the JVM over
-# JNI against the real libundra_core of the playground core, then checks all nineteen passed.
+# JNI against the real libundra_core of the playground core, then checks all twenty passed.
 #
 #   contract-tests/kotlin/run.sh
 #
@@ -87,6 +87,9 @@ if [ ! -f "$STAMP" ] || [ "$OUT/runtime/main.stamp" -nt "$STAMP" ] \
 fi
 
 # --- 4. run build A, then 5. build B's steps in a second JVM, then 6. check the verdicts ------------------
+# S19 step 9 replays the derived-list recording (written when missing or stale).
+"$REPO/contract-tests/derived-vectors.sh"
+export UNDRA_DERIVED_VECTORS="${UNDRA_DERIVED_VECTORS:-$PLAYGROUND/build/derived-vectors.bin}"
 HANDOVER="$OUT/migration"
 rm -rf "$HANDOVER"
 export UNDRA_CONTRACT_HANDOVER="$HANDOVER"

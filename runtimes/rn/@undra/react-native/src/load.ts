@@ -1,8 +1,8 @@
-import { type AttachOptions, UndraCore, UndraTransportError } from "@undra/runtime";
+import { type AdapterOverrides, type AttachOptions, UndraCore, UndraTransportError } from "@undra/runtime";
 import { AppState, Platform, TurboModuleRegistry } from "react-native";
-import { reactNativeAdapters } from "./adapters.js";
+import { nativeAdapterNames, nativeDefaultPorts, reactNativeAdapters } from "./adapters.js";
 import { nativeFrameScheduler } from "./frame.js";
-import type { UndraNativeModule } from "./native.js";
+import type { NativePlatformDefaults, UndraNativeModule } from "./native.js";
 import type { Spec } from "./specs/NativeUndra.js";
 import { NativeTransport } from "./transport.js";
 
@@ -41,6 +41,24 @@ export function installNative(): UndraNativeModule {
 }
 
 /**
+ * The standard ports the module answers natively on this device, and where they keep their data
+ * (ADR-038 amendment B): `{ ports, kv, fs, secureStore }`, or `{ ports: [], error }` when the platform
+ * has none (on Android: the package's Java library or its context is missing). Installs the module
+ * on first use, like {@link loadNative}.
+ */
+export function nativePlatformDefaults(): NativePlatformDefaults {
+  return platformDefaultsOf(installNative());
+}
+
+function platformDefaultsOf(native: UndraNativeModule): NativePlatformDefaults {
+  try {
+    return typeof native.platformDefaults === "function" ? native.platformDefaults() : { ports: [] };
+  } catch (error) {
+    return { ports: [], error: messageOf(error) };
+  }
+}
+
+/**
  * Loads the app's native core, linked into the app by `@undra/react-native` (ADR-038), and
  * resolves with the running {@link UndraCore}: the first one becomes `UndraCore.shared`, so the
  * generated bindings and `@undra/runtime/react` (`useUndra`, `useSignal`) use it as on the web.
@@ -49,9 +67,17 @@ export function installNative(): UndraNativeModule {
  * import { loadNative } from "@undra/react-native";   // first: it installs what Hermes lacks
  * import { Todos, UndraIds } from "@acme/core";      // the generated bindings
  *
- * await loadNative({ expectedSchemaHash: UndraIds.schemaHash, adapters: { kv: myKv } });
+ * await loadNative({ expectedSchemaHash: UndraIds.schemaHash });
  * const todos = await Todos.create();
  * ```
+ *
+ * Every standard port has a default (ADR-038 amendment B): `Kv`, `SecureStore`, `Fs` and the
+ * `Connectivity` source are the module's, native and off the JS thread (files in the app's private
+ * storage, the Keychain or the Android Keystore, `NWPathMonitor` or `ConnectivityManager`); `Http` is
+ * React Native's `fetch` and `Lifecycle` its `AppState`; `Clock`, `Rng`, `Log` and `Timer` are native.
+ * A value in `adapters` (or an implementation in `ports`) replaces a default, and `null` removes it.
+ * Replace a native default here: `core.registerPort` after the load does not reach a port the module
+ * answers itself.
  *
  * Rejects with `UndraSchemaMismatchError` when the core was built from another schema (checked
  * before the core starts) and with `UndraTransportError` when the module is not linked or the core
@@ -96,8 +122,19 @@ function start(options: NativeLoadOptions): Promise<UndraCore> {
         adapters.log?.log(4, "undra::react-native", `${operation} failed before the core was up: ${messageOf(error)}`);
       }
     };
+  const offered = platformDefaultsOf(native);
+  if (offered.error !== undefined && offered.error !== "") {
+    adapters.log?.log(3, "undra::react-native", `the native default ports are off on this device: ${offered.error}`);
+  }
+  const nativePorts = nativeDefaultPorts(offered, options);
+  // A port the module answers natively has no JavaScript adapter: `UndraCore.attach` would otherwise fill it from
+  // the web's defaults where an app polyfills what they look for (`navigator.onLine` and a global
+  // `addEventListener` give a second Connectivity source, reporting next to the native one).
+  const attachAdapters: AdapterOverrides = { ...adapters };
+  for (const name of nativeAdapterNames(nativePorts)) Object.assign(attachAdapters, { [name]: null });
   const transport = new NativeTransport({
     native,
+    nativePorts,
     expectedSchemaHash: options.expectedSchemaHash,
     platform: options.platform ?? `react-native-${Platform.OS}`,
     ...(options.devtools !== undefined && { devtools: options.devtools }),
@@ -110,7 +147,7 @@ function start(options: NativeLoadOptions): Promise<UndraCore> {
   });
   const attach: AttachOptions = {
     ...options,
-    adapters,
+    adapters: attachAdapters,
     mirror: { schedule, ...options.mirror },
   };
   const loading = UndraCore.attach(transport, attach).then((attached) => {

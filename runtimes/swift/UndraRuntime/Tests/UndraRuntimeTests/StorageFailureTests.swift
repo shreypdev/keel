@@ -315,13 +315,15 @@ final class StorageFailureTests: XCTestCase {
         addTeardownBlock {
             try? FileManager.default.removeItem(at: root)
         }
+        // The errno the atomic write leaves on a full disk or quota, and the Foundation spellings of it.
         let failures: [any Error] = [
+            PosixError(code: ENOSPC),
+            PosixError(code: EDQUOT),
             CocoaError(.fileWriteOutOfSpace),
-            POSIXError(.ENOSPC),
             NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError, userInfo: [NSUnderlyingErrorKey: POSIXError(.EDQUOT)]),
         ]
         for failure in failures {
-            let adapter = FsAdapter(root: root) { (_: [UInt8], _: URL) throws -> Void in
+            let adapter = FsAdapter(root: root) { (_: [UInt8], _: String, _: String, _: OwnedDescriptor, _: mode_t) throws -> Void in
                 throw failure
             }
             let transport = FakeTransport()
@@ -447,6 +449,17 @@ final class StorageFailureTests: XCTestCase {
         XCTAssertEqual(StorageFailure.classify(CocoaError(.fileWriteUnknown)), .io(CocoaError(.fileWriteUnknown).localizedDescription))
         XCTAssertEqual(StorageFailure.classify(TestFailure(description: "x")), .io(TestFailure(description: "x").localizedDescription))
         XCTAssertEqual(StorageFailure.classify(StorageError.locked), .locked)
+        // The errno of a POSIX call (`PosixError`, what the atomic write and `open` leave).
+        XCTAssertEqual(StorageFailure.classify(PosixError(code: ENOSPC)), .full)
+        XCTAssertEqual(StorageFailure.classify(PosixError(code: EDQUOT)), .full)
+        XCTAssertEqual(StorageFailure.classify(PosixError(code: EPERM)), .locked, "data protection before the first unlock")
+        XCTAssertEqual(StorageFailure.classify(POSIXError(.EPERM)), .locked)
+        XCTAssertEqual(StorageFailure.classify(PosixError(code: EACCES)), .io(PosixError(code: EACCES).description))
+        XCTAssertEqual(
+            StorageFailure.classify(PosixError(code: EIO), context: "cannot write the entry of 'k'"),
+            .io("cannot write the entry of 'k': \(PosixError(code: EIO).description)")
+        )
+        XCTAssertEqual(StorageFailure.posixCode(of: PosixError(code: EDQUOT)), EDQUOT)
     }
 
     func testKeychainStatusesMapToStorageErrors() {
@@ -548,6 +561,8 @@ final class StorageFailureTests: XCTestCase {
         XCTAssertNil(try backend.get("queue"))
     }
 
+    /// `get` answers `.io`; `list` skips the file it cannot read, as the React Native module's store
+    /// does (only a locked store fails the listing).
     func testAKvFileThePermissionBitsForbidIsAnIoError() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("undra-kv-eacces-" + UUID().uuidString, isDirectory: true)
@@ -567,11 +582,8 @@ final class StorageFailureTests: XCTestCase {
                 return XCTFail("EACCES is an Io error, got \(error)")
             }
         }
-        XCTAssertThrowsError(try backend.list(prefix: "")) { error in
-            guard case .io? = error as? StorageError else {
-                return XCTFail("EACCES is an Io error, got \(error)")
-            }
-        }
+        try backend.set("other", [2])
+        XCTAssertEqual(try backend.list(prefix: ""), ["other"], "the unreadable entry is skipped")
     }
 
     func testAKvEntryDeletedBetweenTheCheckAndTheReadIsMissing() throws {

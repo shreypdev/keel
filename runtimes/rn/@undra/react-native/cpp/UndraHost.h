@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <unordered_set>
 #include <vector>
@@ -127,6 +128,19 @@ struct PortSpec {
   std::vector<uint32_t> syncMethods;
 };
 
+class NativeDefaults;
+class Platform;
+
+/// What `Host::start` is given besides the configuration and the schema's ports.
+struct StartOptions {
+  /// The standard ports the module answers natively (ADR-038 amendment B): ids of `Kv`,
+  /// `SecureStore`, `Fs` and `Connectivity` that `platform` supports. The others stay JavaScript's.
+  std::vector<uint32_t> nativePorts;
+  /// The phone's platform; null for none (every port is then JavaScript's, as before). Shared: the
+  /// native defaults keep it until they are destroyed.
+  std::shared_ptr<Platform> platform;
+};
+
 /// Counters for `stats()` and the tests.
 struct HostCounters {
   uint64_t records = 0;
@@ -150,11 +164,14 @@ class Host {
   Host(const Host &) = delete;
   Host &operator=(const Host &) = delete;
 
-  /// Registers `ports` (and the native Clock, Rng and Log), then `undra_init`s the core with the
-  /// encoded `RuntimeConfig` in `config`. Returns 0, an `undra_init` code or a `start_code`.
-  uint32_t start(const uint8_t *config, uint32_t len, const std::vector<PortSpec> &ports);
+  /// Registers `ports` (and the native Clock, Rng and Log, and the native defaults `options` asks
+  /// for), then `undra_init`s the core with the encoded `RuntimeConfig` in `config`, then starts the
+  /// native `Connectivity` source if asked. Returns 0, an `undra_init` code or a `start_code`.
+  uint32_t start(const uint8_t *config, uint32_t len, const std::vector<PortSpec> &ports, const StartOptions &options = {});
   /// `undra_shutdown`, once: in-flight calls are answered by the core (and dropped here, nobody
-  /// waits any more), then no callback runs again. Must not be called from a callback.
+  /// waits any more), then no callback runs again; then the native defaults stop (their event source
+  /// and their worker threads, joined), and only then is the process's core slot released, so nothing
+  /// this core asked for reaches the next one. Must not be called from a callback.
   void shutdown() noexcept;
   /// Whether `start` succeeded and `shutdown` has not run.
   bool running() const noexcept { return running_.load(std::memory_order_acquire); }
@@ -182,6 +199,14 @@ class Host {
   static void changeSetTrampoline(void *user, const uint8_t *ptr, uint32_t len) noexcept;
   static void streamTrampoline(void *user, uint32_t callId, const uint8_t *ptr, uint32_t len) noexcept;
   static uint8_t nativePortTrampoline(
+      void *user,
+      uint32_t portId,
+      uint32_t methodId,
+      uint32_t portCallId,
+      const uint8_t *ptr,
+      uint32_t len,
+      UndraBuf *outReply) noexcept;
+  static uint8_t defaultPortTrampoline(
       void *user,
       uint32_t portId,
       uint32_t methodId,
@@ -226,6 +251,10 @@ class Host {
 
   std::mutex warnedMutex_;
   std::unordered_set<uint32_t> warned_;
+
+  /// The native default ports, when `start` was asked for any (written in `start` before the first
+  /// registration, read-only afterwards).
+  std::unique_ptr<NativeDefaults> defaults_;
 };
 
 /// Writes `value` little-endian into `out[0..4)`.
