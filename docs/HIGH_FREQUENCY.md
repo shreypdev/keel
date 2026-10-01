@@ -137,6 +137,61 @@ val counters = core.stats().mirror
 zero means the main thread fell behind the bound; `resyncs` above zero means a list was re-observed
 instead of patched.
 
+## See it yourself: the playground stress screen
+
+The playground's **Stress** tab (web: `playground/?screen=stress`) lets you watch all of the above on your own
+machine. The core generates the updates **itself**, the way a socket or a sensor would: `Stress.start(mode,
+perSecond)` spawns a task that sleeps 10 ms on the `Timer` port, reads the `Clock` port each tick and commits
+`rate x elapsed` updates, **each its own transaction**, carrying the remainder, so the achieved rate tracks the
+target even when the host's timer fires late (a tick never commits more than 100 ms of work: a hidden tab does
+not burst when it comes back). The updates go to `value` (firehose) or to the `no_coalesce` `progress` (progress),
+and the `generated` signal reports how many the generator really committed. A host loop calling a method would
+measure the read-your-writes path instead, which is never delayed; only what the core produces on its own is.
+
+The screen shows, from the runtime's own numbers (`mirror.stats()`, `mirror.addDrainListener`), refreshed every
+500 ms over a rolling two seconds:
+
+| Tile | Where it comes from |
+|---|---|
+| Generated / s | the core's `generated` counter |
+| Received / s | `changeSetsReceived`: one per update |
+| Applied / s | `entriesApplied`, after the mirror merged what arrived between two frames, and the **merge ratio** (applied over received) |
+| Drains / s, drain p50 / p99 | the drain listener's `durationMs`: how long the mirror held the main thread each time it ran |
+| Per change-set | all drain time over all change-sets: the average that survives the clock rounding below |
+| Dropped frames | a `requestAnimationFrame` loop: a gap over 1.5 frame intervals drops `round(gap / interval) - 1` frames |
+| JS heap | `performance.memory`, Chrome only, and only the JS heap (the core's wasm memory is not in it) |
+
+Two limits are on the screen too. Browsers round `performance.now()` (Chrome to 0.1 ms, Firefox and Safari to
+1 ms, unless the page is cross-origin isolated), so one drain shorter than the step reads "under 0.1 ms"; the
+per-change-set average is exact. And everything is measured in **your** browser, on the page's main thread:
+nothing on the page is a recording. The `value` and `progress` tiles show the difference coalescing makes: after a
+second of 10,000 updates a second, `value` has been applied about 60 times (once per frame) and `progress`
+10,000 times (every update), the cost of the opt-out.
+
+**Run it.** Choose firehose or progress, 1k to 100k updates a second, Start, and "Burst 1,000" for a thousand
+transactions at once. The page takes `?screen=stress&rate=100000&mode=firehose&autostart=1` (`rate` is a number
+or a count of thousands, `100k`), which is what the landing page's "Push it" button opens in its iframe. Embedded
+(`embed=1`) it posts what it shows to the parent as the `undra-stats` message, the base fields of the list demo
+plus `generatedPerSec`, `entriesReceivedPerSec`, `entriesAppliedPerSec`, `mergeRatio`, `drainsPerSec`,
+`applyNsPerChangeSet`, `droppedFrames`, `longestFrameMs` and a few more (`examples/playground/web/src/embed-stats.ts`).
+
+On the reference machine (Apple M5 Pro, headless Chromium, `wasm-main`, the numbers the embedded page posts: the
+median of the last eight messages, four seconds, of a ten-second run; the drain p99 is quantised by the 0.1 ms clock):
+
+| Updates a second | Generated | Received | Applied | Drain p99 | Per change-set | Dropped frames |
+|---|---|---|---|---|---|---|
+| 10,000, firehose | 10,002 | 10,086 | 120 | 0.1 ms | 55 ns | 0 |
+| 50,000, firehose | 49,992 | 50,100 | 119 | 1.2 ms | 123 ns | 0 |
+| 100,000, firehose | 100,055 | 100,112 | 120 | 1.0 ms | 50 ns | 0 |
+| 100,000, progress (`no_coalesce`) | 100,025 | 100,089 | 100,085 | 3.3 ms | 1,052 ns | 0 |
+
+The merge is what the firehose rows show: ten times the updates, the same 60 drains and about 120 applies a
+second (the merged signal and the generator's own counter, once per frame each). A 60-second run at 100,000 a
+second (6 million updates) logged no error, dropped no frame and held 99,400 to 100,500 generated a second. The
+last row is the `no_coalesce` cost from "When to opt out": 100,000 applies a second, 3.3 ms in the worst drain, and
+still no dropped frame. These are one browser on one machine, not a guarantee; the numbers you see are the ones
+that count.
+
 ## Tuning
 
 The defaults suit an app; change them only with a measurement in hand.
