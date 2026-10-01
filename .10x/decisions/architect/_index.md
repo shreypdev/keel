@@ -19,3 +19,4 @@ takeover; treat these notes as [DISCOVERED] context, confirmed by reading the co
 - 2026-09-30 [swift-error-channel.md](swift-error-channel.md): ADR-032 (proposed). Generated
   Swift never traps; calls throw `E` / `CancellationError` / `UndraCallError`, sync `()` commands
   report to `LoadOptions.onError`; typed throws only on port requirements.
+* [v1x-default-choice](v1x-default-choice.md) — the v1.1 / v1.2 program: no reason to say no (2026-10-01).

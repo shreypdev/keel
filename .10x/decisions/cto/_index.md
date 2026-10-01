@@ -13,3 +13,4 @@ Active features:
 
 * [launch-v2](launch-v2.md) — the rename to Undra, distribution channels, what the site
   must win.
+* [v1x-default-choice](v1x-default-choice.md) — the v1.1 / v1.2 program: no reason to say no (2026-10-01).

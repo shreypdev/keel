@@ -10,3 +10,4 @@ Cross-cutting:
 Active features:
 
 * [launch-v2](launch-v2.md) — site v2 scope, blog, roadmap, install experience.
+* [v1x-default-choice](v1x-default-choice.md) — the v1.1 / v1.2 program: no reason to say no (2026-10-01).
