@@ -6,6 +6,8 @@ import {
   Kind,
   PortStatus,
   ReplyStatus,
+  StreamFlag,
+  UndraCallError,
   UndraCore,
   UndraReader,
   UndraReplyError,
@@ -15,6 +17,7 @@ import {
   UndraWriter,
   codecs,
   decodeValue,
+  encodeStreamFailure,
   encodeValue,
 } from "@undra/runtime";
 import { NativeStartCode, RecordKind, portPlan } from "../src/native.js";
@@ -243,6 +246,72 @@ describe("calls", () => {
     core.event(10, 11, new Uint8Array([1, 2, 3]));
     core.timerFired(4);
     expect(native.log).toEqual(["start", `cancel ${id}`, "release 2:1", "event 10 11 3", "timer 4"]);
+  });
+});
+
+describe("streams (ADR-036)", () => {
+  /** A `StreamItem` payload: call id, flag, body. */
+  function streamItem(callId: number, flag: number, body: Uint8Array = new Uint8Array(0)): Uint8Array {
+    return new Uint8Array([...le([callId, "u32"], [flag, "u8"]), ...body]);
+  }
+
+  /** Opens a stream whose core sends one item and then `last`; returns what the loop read and how it ended. */
+  async function run(last: (callId: number) => Uint8Array): Promise<{ items: number[]; error: unknown }> {
+    const { core, native } = await attach();
+    native.onCall = (payload) => {
+      const id = callIdOf(payload);
+      native.queue(RecordKind.Reply, reply(id, ReplyStatus.StreamOpened), "core");
+      native.queue(RecordKind.StreamItem, streamItem(id, StreamFlag.Item, le([1, "u32"])), "core");
+      native.queue(RecordKind.StreamItem, last(id), "core");
+      return 0;
+    };
+    const items: number[] = [];
+    try {
+      for await (const body of core.stream(CallTarget.FreeFunction, 1, new Uint8Array(0))) items.push(decodeValue(codecs.u32, body));
+    } catch (error) {
+      return { items, error };
+    }
+    return { items, error: undefined };
+  }
+
+  test("an end item finishes the loop", async () => {
+    expect(await run((id) => streamItem(id, StreamFlag.End))).toEqual({ items: [1], error: undefined });
+  });
+
+  test("flag 2 carries the stream's own E, untouched", async () => {
+    const e = new Uint8Array([9, 8, 7]);
+    const { items, error } = await run((id) => streamItem(id, StreamFlag.Error, e));
+    expect(items).toEqual([1]);
+    expect(error).toBeInstanceOf(UndraReplyError);
+    expect((error as UndraReplyError).status).toBe(ReplyStatus.Error);
+    expect((error as UndraReplyError).body).toEqual(e);
+  });
+
+  test("flag 3 ends the loop as the failed reply of its status, mapped to the same UndraCallError as a call", async () => {
+    const failed = (status: ReplyStatus.Panic | ReplyStatus.Cancelled | ReplyStatus.BadRequest, message: string, detail = ""): ((id: number) => Uint8Array) =>
+      (id) => streamItem(id, StreamFlag.Failed, encodeStreamFailure({ status, message, detail }));
+    const cancelled = await run(failed(ReplyStatus.Cancelled, "the runtime shut down"));
+    expect((cancelled.error as UndraReplyError).status).toBe(ReplyStatus.Cancelled);
+    expect(UndraCallError.mappedStream(cancelled.error)).toBeInstanceOf(UndraCallError.CancelledByCore);
+
+    const panicked = await run(failed(ReplyStatus.Panic, "boom", "at core.rs:1"));
+    const panic = UndraCallError.mappedStream(panicked.error) as UndraCallError.Panicked;
+    expect(panic).toBeInstanceOf(UndraCallError.Panicked);
+    expect([panic.panicMessage, panic.backtrace]).toEqual(["boom", "at core.rs:1"]);
+
+    const refused = await run(failed(ReplyStatus.BadRequest, "stale handle"));
+    expect((refused.error as UndraReplyError).status).toBe(ReplyStatus.BadRequest);
+    const refusal = UndraCallError.mappedStream(refused.error) as UndraCallError.Refused;
+    expect(refusal).toBeInstanceOf(UndraCallError.Refused);
+    expect(refusal.reason).toBe("stale handle");
+    expect(refused.items).toEqual([1]);
+  });
+
+  test("a flag-3 body that does not decode is a protocol error, mapped to Malformed", async () => {
+    const { error } = await run((id) => streamItem(id, StreamFlag.Failed, new Uint8Array([1])));
+    expect(error).toBeInstanceOf(UndraTransportError);
+    expect((error as UndraTransportError).reason).toBe("protocol");
+    expect(UndraCallError.mappedStream(error)).toBeInstanceOf(UndraCallError.Malformed);
   });
 });
 
