@@ -1,3 +1,4 @@
+import { UndraCallError } from "@undra/runtime";
 import { useSignal } from "@undra/runtime/react";
 import { type Filter, TodoError, type Todos } from "@playground/core";
 import { useState } from "react";
@@ -22,8 +23,9 @@ export function TodosView({ todos }: { readonly todos: Todos }) {
       setDraft("");
       setProblem(null);
     } catch (error) {
-      // A refused add is a typed error, not a string to parse: `TodoError.EmptyTitle`.
-      setProblem(error instanceof TodoError ? error.message : String(error));
+      // A refused add is a typed error, not a string to parse: `TodoError.EmptyTitle`. Anything else that goes wrong
+      // with the call (the core panicked, was closed, ...) is an `UndraCallError`. Both read well as they are.
+      setProblem(error instanceof TodoError || error instanceof UndraCallError ? error.message : String(error));
     }
   };
 

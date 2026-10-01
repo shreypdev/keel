@@ -3,14 +3,11 @@
 package dev.undra.playground.core
 
 import dev.undra.runtime.UndraException
-import dev.undra.runtime.UndraReplyException
 import dev.undra.runtime.adapters.HttpError
-import dev.undra.runtime.wire.Payloads.ReplyStatus
 import dev.undra.runtime.wire.UndraCodec
 import dev.undra.runtime.wire.UndraReader
 import dev.undra.runtime.wire.UndraWriter
 import dev.undra.runtime.wire.WireException
-import dev.undra.runtime.wire.decodeAll
 
 /** Why a lab call failed. */
 sealed class LabError(message: String) : UndraException(message) {
@@ -53,11 +50,6 @@ sealed class LabError(message: String) : UndraException(message) {
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "LabError")
             }
         }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
-        }
     }
 }
 
@@ -83,11 +75,6 @@ sealed class ListError(message: String) : UndraException(message) {
                 0 -> OutOfRange(index = r.readU32(), len = r.readU32())
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "ListError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }
@@ -132,11 +119,6 @@ sealed class RemoteError(message: String) : UndraException(message) {
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "RemoteError")
             }
         }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
-        }
     }
 }
 
@@ -163,11 +145,6 @@ sealed class StressError(message: String) : UndraException(message) {
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "StressError")
             }
         }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
-        }
     }
 }
 
@@ -189,11 +166,6 @@ sealed class TodoError(message: String) : UndraException(message) {
                 0 -> EmptyTitle
                 else -> throw WireException.InvalidTag(tag.toUInt(), at, "TodoError")
             }
-        }
-
-        /** The typed error a failed call carries; any other failure is returned unchanged. */
-        fun fromReply(error: UndraReplyException): Throwable {
-            return if (error.status == ReplyStatus.ERROR) decodeAll(error.body) else error
         }
     }
 }

@@ -43,6 +43,7 @@ import dev.undra.playground.core.Filter
 import dev.undra.playground.core.Todo
 import dev.undra.playground.core.TodoError
 import dev.undra.playground.core.Todos
+import dev.undra.runtime.UndraCallError
 import kotlinx.coroutines.launch
 
 /**
@@ -61,7 +62,10 @@ class TodosViewModel : ViewModel() {
     var problem by mutableStateOf<String?>(null)
         private set
 
-    /** Adds the draft. The core refuses a blank title with a typed error, which this turns into words. */
+    /**
+     * Adds the draft. The core refuses a blank title with a typed error, which this turns into words; anything else
+     * that goes wrong with the call (the core panicked, was closed, ...) is an `UndraCallError` that reads well as is.
+     */
     fun add() {
         viewModelScope.launch {
             try {
@@ -72,6 +76,8 @@ class TodosViewModel : ViewModel() {
                 problem = when (e) {
                     TodoError.EmptyTitle -> "Give it a title first."
                 }
+            } catch (e: UndraCallError) {
+                problem = e.message
             }
         }
     }

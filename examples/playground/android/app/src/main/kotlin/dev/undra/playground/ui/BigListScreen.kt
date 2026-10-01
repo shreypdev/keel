@@ -34,6 +34,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.undra.playground.core.BigList
 import dev.undra.playground.core.Item
 import dev.undra.playground.core.ListError
+import dev.undra.runtime.UndraException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -48,12 +49,16 @@ class BigListViewModel : ViewModel() {
     /** Why the last operation was refused, if it was. */
     var problem by mutableStateOf<String?>(null)
 
-    /** Runs a list operation; the core answers a position outside the list with a typed error. */
+    /**
+     * Runs a list operation. The core answers a position outside the list with a typed [ListError]; anything else
+     * that goes wrong with the call is an `UndraCallError`. Both are an `UndraException` whose message reads well,
+     * so one `catch` shows either to the user.
+     */
     fun operate(operation: () -> Unit) {
         problem = try {
             operation()
             null
-        } catch (e: ListError) {
+        } catch (e: UndraException) {
             e.message
         }
     }

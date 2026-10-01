@@ -1,4 +1,4 @@
-import { UndraCore, emitConnectivity } from "@undra/runtime";
+import { UndraCore, type UndraUnhandledError, emitConnectivity } from "@undra/runtime";
 import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/undra_core.wasm?url";
@@ -21,6 +21,15 @@ export interface Playground {
 }
 
 /**
+ * What a command that failed (`todos.toggle(id)`, `inbox.refetch()`) and a change the page could not apply are handed
+ * to (ADR-032): a command never rejects into a click handler, so this is where an app would send the failure to its
+ * error reporter. The runtime has already logged it at error level.
+ */
+function onError(unhandled: UndraUnhandledError): void {
+  console.warn(`${unhandled.operation} failed: ${unhandled.error.message}`);
+}
+
+/**
  * Attaches the page to its Rust core and creates the three long-lived stores.
  *
  * By default the core runs in the browser (wasm, on this thread). With `?undra=ws://127.0.0.1:7443`
@@ -36,13 +45,14 @@ export async function startUndra(): Promise<Playground> {
   const adapters = { http: server, kv: memoryKv() };
   const devUrl = new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"];
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    await UndraCore.load({ mode: "remote", url: devUrl, expectedSchemaHash: UndraIds.schemaHash, adapters });
+    await UndraCore.load({ mode: "remote", url: devUrl, expectedSchemaHash: UndraIds.schemaHash, adapters, onError });
   } else {
     await UndraCore.load({
       mode: "wasm-main",
       wasm: new URL(wasmUrl, location.href),
       expectedSchemaHash: UndraIds.schemaHash,
       adapters,
+      onError,
     });
   }
   // Tell the core where the server is before anything observes the query.

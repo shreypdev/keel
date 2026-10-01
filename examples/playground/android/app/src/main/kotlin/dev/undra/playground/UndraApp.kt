@@ -1,6 +1,7 @@
 package dev.undra.playground
 
 import android.app.Application
+import android.util.Log
 import dev.undra.android.ChoreographerFramePacer
 import dev.undra.playground.core.UndraIds
 import dev.undra.playground.core.RemoteConfig
@@ -28,6 +29,9 @@ import dev.undra.runtime.adapters.StandardPorts
  *
  * The mirror applies what the core produces on its own (the 10k list's streamed updates) once per display
  * frame, through the [ChoreographerFramePacer] of `android-adapters` (ADR-031).
+ *
+ * A *command* (`store.toggle(...)`, `query.refetch()`) never throws into a click handler (ADR-032): the runtime logs a
+ * failure at error level and hands it to `onError`, which is where an app would send it to its crash reporter.
  */
 class UndraApp : Application() {
     /** The server behind the `Http` port; the Remote tab switches it offline. */
@@ -46,6 +50,7 @@ class UndraApp : Application() {
                     StandardPorts.Kv.PORT_ID to InMemoryKv().portImpl(),
                 ),
                 mirror = MirrorOptions(framePacer = ChoreographerFramePacer()),
+                onError = { unhandled -> Log.w("Playground", "${unhandled.operation} failed: ${unhandled.error.message}") },
             ),
         )
         // Where the remote lists live: every request of the core goes to this address through the Http port.
