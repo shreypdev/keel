@@ -100,6 +100,23 @@ Model runs: `tests/derived.rs` 1,500 cases by default; **100,000 cases once in d
    change (a panicking `Clone` leaves the item in the list and the taps stale; documented on `push`,
    `insert`, `update_at`).
 
+## Verification (after merging `main` at `e119d4c`)
+
+`cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `cargo doc --workspace --no-deps`
+with `-D warnings`: clean. `cargo test --workspace`: 2,683 passed, 0 failed (`UNDRA_REQUIRE_TOOLCHAINS=1`).
+`undra-signals` 382 in debug and in release; Track A's release regressions (`weak_ctx`, `computed_isolation`,
+`write_context`) pass; `sync_alloc`, `commit_alloc`, `derived_alloc` pass in release. TypeScript runtime
+1,128; Kotlin runtime 612 under kotlinc 2.4.20 and under CI's 2.0.21 (and the contract runner, S19
+included, compiles and passes under 2.0.21); Swift runtime 480. `bash contract-tests/run-all.sh`: 57/57.
+`undra bindgen -C examples/playground --check --docs`: up to date at `0x933d362fb48d39ac`.
+`cargo test -p undra-cli --test schema_docs -- --ignored`: pass. Budgets and stress gates (release) pass,
+both ratios hold. Playground web `npm test` 112, `npm run build` OK; the live demo (dev server, browser pane):
+Todos add / toggle / filter on the derived `visible`, the 10k list's insert, the stress screen at ~10,500
+updates a second with 0 dropped frames, no console errors. Android `undra build --platform android
+--release` + `assembleDebug`: the APK carries the new core. `node site/scripts/build-all.mjs` and
+`check-links.mjs --words`: 23 pages OK, 342 words. `cargo build -p undra-signals --target
+wasm32-unknown-unknown`: OK.
+
 ## Size
 
 The playground core grows with this piece (both built here, `undra build`, release): wasm 592.3 KB to 625.7
