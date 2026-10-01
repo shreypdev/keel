@@ -1,0 +1,194 @@
+//! The one sort the schema code uses: stable, by a key, and small in a shipped core.
+//!
+//! [`collect_schema`](crate::collect_schema) and the canonical form (SPEC 2.3) sort a dozen lists
+//! of definitions by name, and both run inside every core: the runtime collects its schema and
+//! hashes it at start-up, and `undra_schema_json` serializes it. `slice::sort_by` emits a full
+//! driftsort (quicksort, merge and small-sort paths, about 3.5 KB of wasm) for every element type
+//! *and every closure*: sixteen of them came to 58 KB of the 353 KB hello-world web core, its
+//! largest item after the query layer (ADR-052).
+//!
+//! Here the sorting is done once per key type, on indices: [`stable_order`] is a bottom-up merge
+//! sort (O(n log n), stable) over the keys, and [`permute`] moves the items into that order with
+//! swaps. Only the key extraction and the swap loop are generic over the item type, and both are
+//! a few instructions. A list already in order (the canonical form re-sorts what
+//! `collect_schema` sorted) costs one pass over its keys.
+//!
+//! The result is exactly what `slice::sort_by` / `sort_by_key` would produce with the same key
+//! (tests compare them), so the canonical form and the schema hash cannot move. Hashing a schema
+//! whose 2,000 records arrive in reverse order takes 239 µs on an Apple M5 Pro (205 µs with
+//! `sort_by`); an insertion sort, 3 KB smaller still, took 9 ms there and was not kept.
+
+/// Sorts `items` by the name `name` returns, stably (equal names keep their order).
+pub(crate) fn by_name<T>(items: &mut [T], name: fn(&T) -> &str) {
+    let keys: Vec<&str> = items.iter().map(name).collect();
+    if keys.is_sorted() {
+        return;
+    }
+    let order = stable_order(&keys);
+    drop(keys);
+    permute(items, order);
+}
+
+/// Sorts `items` by the `u16` key `key` returns, stably (enum variants by wire index).
+pub(crate) fn by_index<T>(items: &mut [T], key: fn(&T) -> u16) {
+    let keys: Vec<u16> = items.iter().map(key).collect();
+    if keys.is_sorted() {
+        return;
+    }
+    permute(items, stable_order(&keys));
+}
+
+/// The indices of `keys` in stable sorted order: `order[i]` is the index of the `i`-th smallest
+/// key, equal keys in their original order. A bottom-up merge sort over indices.
+fn stable_order<K: Ord>(keys: &[K]) -> Vec<usize> {
+    let len = keys.len();
+    let mut order: Vec<usize> = (0..len).collect();
+    let mut merged = vec![0; len];
+    let mut width = 1;
+    while width < len {
+        let mut start = 0;
+        while start < len {
+            let mid = (start + width).min(len);
+            let end = (start + 2 * width).min(len);
+            let (mut left, mut right) = (start, mid);
+            for slot in &mut merged[start..end] {
+                // The left run wins ties, which is what makes the sort stable.
+                if right >= end || (left < mid && keys[order[left]] <= keys[order[right]]) {
+                    *slot = order[left];
+                    left += 1;
+                } else {
+                    *slot = order[right];
+                    right += 1;
+                }
+            }
+            start = end;
+        }
+        core::mem::swap(&mut order, &mut merged);
+        width *= 2;
+    }
+    order
+}
+
+/// Rearranges `items` so that the item at `order[i]` ends up at `i`, following each cycle of
+/// the permutation with swaps. `order` must be a permutation of `0..items.len()`.
+fn permute<T>(items: &mut [T], mut order: Vec<usize>) {
+    for first in 0..items.len() {
+        let mut at = first;
+        while order[at] != first {
+            let from = order[at];
+            items.swap(at, from);
+            order[at] = at;
+            at = from;
+        }
+        order[at] = at;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A name and where it was before sorting, so stability is visible.
+    type Item = (&'static str, usize);
+
+    fn name(item: &Item) -> &str {
+        item.0
+    }
+
+    /// Every arrangement of `items` (Heap's algorithm).
+    fn permutations(items: &mut Vec<Item>, k: usize, out: &mut Vec<Vec<Item>>) {
+        if k <= 1 {
+            out.push(items.clone());
+            return;
+        }
+        for i in 0..k {
+            permutations(items, k - 1, out);
+            let j = if k % 2 == 0 { i } else { 0 };
+            items.swap(j, k - 1);
+        }
+    }
+
+    #[test]
+    fn equals_the_standard_stable_sort_on_every_arrangement() {
+        // Duplicates included: a stable sort keeps them in their input order.
+        let names = ["b", "a", "c", "a", "b", "", "aa"];
+        let mut base: Vec<Item> = names.iter().copied().zip(0..).collect();
+        let mut all = Vec::new();
+        let len = base.len();
+        permutations(&mut base, len, &mut all);
+        assert_eq!(all.len(), 5040);
+        for input in all {
+            let mut ours = input.clone();
+            by_name(&mut ours, name);
+            let mut std = input;
+            std.sort_by(|a, b| a.0.cmp(b.0));
+            assert_eq!(ours, std);
+        }
+    }
+
+    #[test]
+    fn equals_the_standard_stable_sort_on_long_inputs() {
+        // A deterministic pseudo-random sequence (an LCG), with many repeated keys.
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let words = [
+            "Todo", "Todos", "Filter", "add", "remove", "z", "ü", "A", "a", "_",
+        ];
+        for len in [0, 1, 2, 3, 31, 64, 65, 200, 1000] {
+            let input: Vec<Item> = (0..len)
+                .map(|i| {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    (words[(state >> 33) as usize % words.len()], i)
+                })
+                .collect();
+            let mut ours = input.clone();
+            by_name(&mut ours, name);
+            let mut std = input;
+            std.sort_by(|a, b| a.0.cmp(b.0));
+            assert_eq!(ours, std, "length {len}");
+        }
+    }
+
+    #[test]
+    fn by_index_equals_sort_by_key() {
+        let input = [
+            (3_u16, 'a'),
+            (1, 'b'),
+            (3, 'c'),
+            (0, 'd'),
+            (1, 'e'),
+            (u16::MAX, 'f'),
+        ];
+        let mut ours = input;
+        by_index(&mut ours, |i| i.0);
+        let mut std = input;
+        std.sort_by_key(|i| i.0);
+        assert_eq!(ours, std);
+        assert_eq!(ours[..3], [(0, 'd'), (1, 'b'), (1, 'e')]);
+    }
+
+    #[test]
+    fn sorted_and_reversed_inputs() {
+        let sorted: Vec<Item> = (0..100)
+            .map(|i| (["a", "b", "c", "d"][i / 25], i))
+            .collect();
+        let mut items = sorted.clone();
+        by_name(&mut items, name);
+        assert_eq!(items, sorted);
+        let mut reversed: Vec<Item> = sorted.iter().rev().copied().collect();
+        by_name(&mut reversed, name);
+        let mut std: Vec<Item> = sorted.iter().rev().copied().collect();
+        std.sort_by(|a, b| a.0.cmp(b.0));
+        assert_eq!(reversed, std);
+    }
+
+    #[test]
+    fn permute_applies_the_order() {
+        let mut items = ['a', 'b', 'c', 'd', 'e'];
+        permute(&mut items, vec![2, 0, 1, 4, 3]);
+        assert_eq!(items, ['c', 'a', 'b', 'e', 'd']);
+        let mut empty: [char; 0] = [];
+        permute(&mut empty, Vec::new());
+    }
+}

@@ -244,22 +244,22 @@ impl Schema {
         let mut s = self.without_docs();
 
         for en in &mut s.enums {
-            en.variants.sort_by_key(|v| v.index);
+            crate::sort::by_index(&mut en.variants, |v| v.index);
         }
         for object in &mut s.objects {
-            object.constructors.sort_by(|a, b| a.name.cmp(&b.name));
-            object.methods.sort_by(|a, b| a.name.cmp(&b.name));
+            crate::sort::by_name(&mut object.constructors, |m| &m.name);
+            crate::sort::by_name(&mut object.methods, |m| &m.name);
         }
         for port in &mut s.ports {
-            port.methods.sort_by(|a, b| a.name.cmp(&b.name));
+            crate::sort::by_name(&mut port.methods, |m| &m.name);
         }
 
-        s.records.sort_by(|a, b| a.name.cmp(&b.name));
-        s.enums.sort_by(|a, b| a.name.cmp(&b.name));
-        s.objects.sort_by(|a, b| a.name.cmp(&b.name));
-        s.functions.sort_by(|a, b| a.name.cmp(&b.name));
-        s.ports.sort_by(|a, b| a.name.cmp(&b.name));
-        s.queries.sort_by(|a, b| a.name.cmp(&b.name));
+        crate::sort::by_name(&mut s.records, |d| &d.name);
+        crate::sort::by_name(&mut s.enums, |d| &d.name);
+        crate::sort::by_name(&mut s.objects, |d| &d.name);
+        crate::sort::by_name(&mut s.functions, |d| &d.name);
+        crate::sort::by_name(&mut s.ports, |d| &d.name);
+        crate::sort::by_name(&mut s.queries, |d| &d.name);
         s
     }
 }
