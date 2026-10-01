@@ -69,8 +69,8 @@ ADR: `.10x/adrs/ADR-052-web-bundle-size.md` (Proposed; the founder accepts it by
 2. `--remap-path-prefix` for web builds: removes the builder's home directory from shipped binaries (privacy)
    and makes the size identical across machines; worth about 1-2 KB raw. Needs RUSTFLAGS for every crate of
    the web build, which `Build.rustc_args` (shim only) cannot do.
-3. Merge notes for the integrator. (a) `git merge-tree` of this branch with `main` (7f1080c) conflicts only
-   in the generated `site/llms-full.txt`: take either side and run `node site/scripts/build-all.mjs`.
+3. Merge notes for the integrator. (a) `git merge-tree` of this branch with `main` (7f1080c) is clean, and
+   `node site/scripts/build-all.mjs` on the merged tree changes nothing.
    (b) Then move the roadmap item to shipped (or reword it in place), for example: "The web bundle under its
    budget (ADR-052): the hello-world wasm is down from 136 KB to 96 KB gzipped against its 120 KB budget,
    and CI measures it on every change so it stays there." (c) `wt/runtime-lifecycle` edits the body of
