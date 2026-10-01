@@ -151,7 +151,13 @@ ios() {
     build_core
     install_js
     echo "== pod install"
+    # CocoaPods stops on a non-UTF-8 locale (an agent's or a cron job's shell often has none).
+    case "${LC_ALL:-${LANG:-}}" in *UTF-8*|*utf8*) ;; *) export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ;; esac
     (cd "$APP/ios" && pod install)
+    # The pod links the core with -force_load, which Xcode does not track as an input of the link step: a rebuilt
+    # core would leave an up-to-date-looking app that still carries the old one. Dropping the app and its own
+    # intermediates (not the Pods') makes the linker run again; the compile of a few app files is all it costs.
+    rm -rf "$app" "$derived/Build/Intermediates.noindex/UndraPlayground.build"
     echo "== app: Release, for the simulator ($udid), active architecture only"
     # ONLY_ACTIVE_ARCH: the core's simulator slice has [ios] simulator_archs only (arm64 by default); a Release
     # configuration would otherwise build x86_64 too and fail to link it (docs/REACT_NATIVE.md, troubleshooting).
