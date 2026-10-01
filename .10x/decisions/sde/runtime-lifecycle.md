@@ -198,3 +198,24 @@ Verified on the merged tree (`UNDRA_REQUIRE_TOOLCHAINS=1`, `tsc` on `PATH`; see 
 (with and without the JNI library), TypeScript tests and typecheck, Swift, the wasm, C and JNI harnesses, the contract
 grid, both interop runs, the Android `assembleDebug`, the playground web tests and build, the budgets, stress and
 allocation gates, the site link check.
+
+### Later merges of `main` (2026-10-01): dev-loop/parity checkpoint, React Native, Android adapters
+
+`main` moved three more times while the first merge was verified (`18cf0b8`: site pages and a Kotlin test-lambda fix for
+CI's kotlinc 2.0.21; `e518653`: the React Native runtime; `429fb9f`: the Android adapters). All three merged without a
+textual conflict, and none needed a decision beyond these:
+
+* **React Native (`runtimes/rn/@undra/react-native`).** `NativeTransport` decodes no stream item: it forwards the
+  `StreamItem` record to `UndraCore` verbatim, so flag 2 and flag 3 are handled by the TypeScript runtime's decoding
+  already, and nothing needed bringing in line. Four tests in the package's `npm test` now pin the pass-through (an end
+  item, flag 2 as the stream's `E` untouched, flag 3 as the failed reply of its status mapping to `CancelledByCore` /
+  `Panicked` / `Refused`, an undecodable flag-3 body as a protocol error mapping to `Malformed`): 45 tests, typecheck
+  clean, `test:contract` 17 passed, S17 skipped (app-tested), as on `main`.
+* **Android adapters.** The playground `UndraApp.kt` keeps their `AndroidPlatformDefaults.install` right after
+  `UndraCore.load`; the branch changed nothing there. `docs/ERRORS.md` has the adapter-failure rows and the stream table
+  side by side; the decision index, site pages and indexes regenerate to nothing.
+
+Final counts on the tip (`UNDRA_REQUIRE_TOOLCHAINS=1`): `cargo test --workspace` 2,400 passed, 0 failed, 11 ignored
+(128 suites); TypeScript runtime 1,102 (32 files) and typecheck clean; Kotlin 612 cases, 0 failed, 2 skipped under
+brew's kotlinc 2.4.20 and under CI's 2.0.21; Swift 480; wasm 19 + 24; JNI E2E 14; the contract grid 18 x 3 = 54/54;
+both interop runs; the playground web 112 and build; the Android `assembleDebug`.
