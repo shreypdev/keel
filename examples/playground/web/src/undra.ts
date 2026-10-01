@@ -1,7 +1,8 @@
-import { UndraCore, emitConnectivity } from "@undra/runtime";
+import { UndraCore, UndraSessionLostError, emitConnectivity } from "@undra/runtime";
 import { BigList, UndraIds, RemoteTodosQueryHandle, Todos, configureRemote } from "@playground/core";
 // The core, compiled to wasm by `undra build -C examples/playground --platform web`.
 import wasmUrl from "../../build/web/undra_core.wasm?url";
+import { showDevConnection } from "./dev-banner";
 import { memoryKv } from "./memory-kv";
 import { INBOX, PlaygroundServer, REMOTE_BASE_URL } from "./playground-server";
 
@@ -25,7 +26,8 @@ export interface Playground {
  *
  * By default the core runs in the browser (wasm, on this thread). With `?undra=ws://127.0.0.1:7443`
  * in the page URL (or `VITE_UNDRA_DEV_URL` in the environment) it is the core that `undra dev`
- * serves instead: edit the Rust, save, reload the page, no rebuild of the page.
+ * serves instead: edit the Rust, save, and the page reloads onto the rebuilt core, no rebuild of the page. A
+ * dropped connection is reconnected by the runtime; a bar at the top of the page shows what it is doing.
  *
  * The app supplies its own `Http` port (an in-memory server, so the playground needs no backend)
  * and `Kv` port (in memory, so a reload starts from the server's seed again); the other ports are
@@ -36,7 +38,18 @@ export async function startUndra(): Promise<Playground> {
   const adapters = { http: server, kv: memoryKv() };
   const devUrl = new URLSearchParams(location.search).get("undra") ?? import.meta.env["VITE_UNDRA_DEV_URL"];
   if (typeof devUrl === "string" && devUrl.length > 0) {
-    await UndraCore.load({ mode: "remote", url: devUrl, expectedSchemaHash: UndraIds.schemaHash, adapters });
+    const core = await UndraCore.load({
+      mode: "remote",
+      url: devUrl,
+      expectedSchemaHash: UndraIds.schemaHash,
+      adapters,
+      // A rebuild restarts the core, and the stores of this page belong to the old one: the runtime reconnects,
+      // finds a new core and says so. Reload the page onto it.
+      onClose: (error) => {
+        if (error instanceof UndraSessionLostError) location.reload();
+      },
+    });
+    showDevConnection(core, devUrl);
   } else {
     await UndraCore.load({
       mode: "wasm-main",

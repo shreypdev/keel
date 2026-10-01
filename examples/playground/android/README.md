@@ -30,10 +30,35 @@ line and says so if the app would not package what it just built.
 The Gradle project includes the Kotlin runtime from this checkout (`includeBuild`) and the generated bindings
 as the `:core-bindings` module, so a change to either shows up in the next build.
 
+## Against `undra dev`
+
+Debug builds can run against the core `undra dev` serves instead of the one in the APK: a Rust change needs no
+rebuild of the app, and the native build (`undra build --platform android`) is not needed at all.
+
+```sh
+undra dev -C .. --android                                              # prints the addresses, runs adb reverse for attached devices
+./gradlew :app:installDebug
+adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://10.0.2.2:7443    # emulator
+adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://127.0.0.1:7443   # USB device, after adb reverse
+./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug           # or bake the URL into the debug build
+```
+
+The launch extra wins over the build property; neither does anything in a release build. `10.0.2.2` is the
+emulator's name for your computer; a USB device uses `adb reverse` and `127.0.0.1`. The debug build type has what
+the connection needs and release does not: `app/src/debug/AndroidManifest.xml` (the `INTERNET` permission and
+`usesCleartextTraffic`) and the `UNDRA_DEV_URL` `BuildConfig` field. A bar above the screens shows the connection
+(`core.connectionState`, a `StateFlow`): green, amber while the runtime reconnects, red when it is over. If the dev
+server cannot be reached at launch, the app says so with a Retry button.
+
+Save a Rust change and the app is on the rebuilt core within a second: the runtime reconnects, finds a new core
+with none of its objects (`Closed(SESSION_LOST)`), and `UndraApp` loads it and restarts the activity on it. A
+dropped connection alone (the emulator slept, adb restarted) is resumed with the same objects.
+
 ## How the app is wired
 
-* `UndraApp` loads the core once (`UndraCore.load`, which checks the schema hash of the bindings against the
-  library's), supplies the two ports Android does not default (`Http`, `Kv`), and calls `configureRemote`.
+* `UndraApp` loads the core once per process (`UndraCore.load`, which checks the schema hash of the bindings against the
+  library's; `MainActivity` starts it, with the URL of `DevServer`, if any), supplies the two ports Android does not
+  default (`Http`, `Kv`), and calls `configureRemote`.
 * `remote/DemoServer.kt` is the server of the Remote tab: in memory, three seeded items, 300 ms of latency,
   JSON by hand with `org.json`. With the Offline switch on it fails every request with `HttpError.Network` and the
   screen tells the core through `ConnectivityEvents`; switching back sends "online", which replays the queue.

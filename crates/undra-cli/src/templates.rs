@@ -38,6 +38,7 @@ pub const IOS: &[TemplateFile] = &[
     template!("ios/App.swift" => "ios/@@APP@@/MainApp.swift"),
     template!("ios/UndraBootstrap.swift" => "ios/@@APP@@/UndraBootstrap.swift"),
     template!("ios/ContentView.swift" => "ios/@@APP@@/ContentView.swift"),
+    template!("ios/DevStatusBar.swift" => "ios/@@APP@@/DevStatusBar.swift"),
 ];
 
 /// The Android app: a Gradle project with a Compose screen.
@@ -48,9 +49,12 @@ pub const ANDROID: &[TemplateFile] = &[
     template!("android/app/build.gradle.kts" => "android/app/build.gradle.kts"),
     template!("android/app/proguard-rules.pro" => "android/app/proguard-rules.pro"),
     template!("android/app/src/main/AndroidManifest.xml" => "android/app/src/main/AndroidManifest.xml"),
+    template!("android/app/src/debug/AndroidManifest.xml" => "android/app/src/debug/AndroidManifest.xml"),
     template!("android/app/src/main/res/values/strings.xml" => "android/app/src/main/res/values/strings.xml"),
     template!("android/UndraApp.kt" => "android/app/src/main/kotlin/@@APP_ID_PATH@@/UndraApp.kt"),
     template!("android/MainActivity.kt" => "android/app/src/main/kotlin/@@APP_ID_PATH@@/MainActivity.kt"),
+    template!("android/DevServer.kt" => "android/app/src/main/kotlin/@@APP_ID_PATH@@/DevServer.kt"),
+    template!("android/DevStatus.kt" => "android/app/src/main/kotlin/@@APP_ID_PATH@@/DevStatus.kt"),
 ];
 
 /// The web app: Vite, React and TypeScript.
@@ -60,6 +64,7 @@ pub const WEB: &[TemplateFile] = &[
     template!("web/vite.config.ts" => "web/vite.config.ts"),
     template!("web/tsconfig.json" => "web/tsconfig.json"),
     template!("web/src/undra.ts" => "web/src/undra.ts"),
+    template!("web/src/dev-banner.ts" => "web/src/dev-banner.ts"),
     template!("web/src/useSignal.ts" => "web/src/useSignal.ts"),
     template!("web/src/main.tsx" => "web/src/main.tsx"),
     template!("web/src/App.tsx" => "web/src/App.tsx"),

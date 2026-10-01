@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only: what talking to `undra dev` needs. The dev server is a plain ws:// socket on this machine
+  (the emulator's 10.0.2.2, or a USB device through `adb reverse`), so the debug app may use the network and
+  cleartext traffic. Release builds get neither: this file is not part of them.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>

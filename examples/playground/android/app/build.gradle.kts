@@ -21,7 +21,17 @@ android {
     }
 
     buildTypes {
+        debug {
+            // The `undra dev` server a debug build runs against instead of the in-process core, chosen when the app is
+            // built: `./gradlew -PundraDevUrl=ws://10.0.2.2:7443 :app:installDebug` (10.0.2.2 is the emulator's name for
+            // this machine; a USB device uses `adb reverse tcp:7443 tcp:7443` and ws://127.0.0.1:7443). Empty, the
+            // default, keeps the in-process core. A launch extra (`--es undra_dev_url ...`) overrides it at run time.
+            buildConfigField("String", "UNDRA_DEV_URL", "\"${providers.gradleProperty("undraDevUrl").getOrElse("")}\"")
+        }
         release {
+            // Release builds never talk to a dev server: no URL, no cleartext traffic, no INTERNET permission
+            // (those live in src/debug/AndroidManifest.xml).
+            buildConfigField("String", "UNDRA_DEV_URL", "\"\"")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -34,6 +44,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     sourceSets {
