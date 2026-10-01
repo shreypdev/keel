@@ -2185,14 +2185,32 @@ impl Runtime {
     /// [`port_call`](Runtime::port_call) reaches it through the [`PortDispatcher`] registered
     /// for the port id.
     pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>) {
-        self.ports.bind(port_id, PortBinding::Rust(imp));
+        self.ports.bind(port_id, PortBinding::Rust(imp, None));
     }
 
     /// Binds an implementation as the trait object `P`
     /// (`rt.bind_dyn_port::<dyn Clock>(port_id, Arc::new(FakeClock::new()))`), following the
     /// [`bind_port`](Runtime::bind_port) convention.
     pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>) {
-        self.ports.bind(port_id, PortBinding::Rust(Arc::new(imp)));
+        self.ports
+            .bind(port_id, PortBinding::Rust(Arc::new(imp), None));
+    }
+
+    /// Binds an implementation as the trait object `P`, like
+    /// [`bind_dyn_port`](Runtime::bind_dyn_port), together with the dispatcher a raw
+    /// [`port_call`](Runtime::port_call) on it goes through. That is how a Rust implementation of a
+    /// standard port is bound so that the generated proxies reach it too
+    /// (`rt.bind_dyn_port_with::<dyn Kv>(port_id, kv, &undra_ports::KV_DISPATCHER)`): the standard
+    /// ports' dispatchers are linked only where they are used, not registered for every core
+    /// (ADR-052). The typed accessors (`undra_ports::kv(&ctx)`) reach the binding either way.
+    pub fn bind_dyn_port_with<P: ?Sized + Send + Sync + 'static>(
+        &self,
+        port_id: u32,
+        imp: Arc<P>,
+        dispatcher: &'static PortDispatcher,
+    ) {
+        self.ports
+            .bind(port_id, PortBinding::Rust(Arc::new(imp), Some(dispatcher)));
     }
 
     /// Routes a port id to the platform again (through [`Host::port_call`]), replacing any
@@ -2211,21 +2229,22 @@ impl Runtime {
     /// `None` for a foreign port or a binding of another type.
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>> {
         match self.ports.binding(port_id) {
-            PortBinding::Rust(imp) => imp.downcast::<Arc<P>>().ok().map(|arc| Arc::clone(&*arc)),
+            PortBinding::Rust(imp, _) => imp.downcast::<Arc<P>>().ok().map(|arc| Arc::clone(&*arc)),
             PortBinding::Foreign => None,
         }
     }
 
-    /// Runs an encoded call on a Rust-bound port through its registered [`PortDispatcher`].
-    /// `Unavailable` if the port has no dispatcher.
+    /// Runs an encoded call on a Rust-bound port through the dispatcher it was bound with, else
+    /// the one registered for the port id. `Unavailable` if there is neither.
     fn dispatch_to_rust(
         &self,
         imp: &Arc<dyn Any + Send + Sync>,
+        own: Option<&'static PortDispatcher>,
         port_id: u32,
         method_id: u32,
         args: &[u8],
     ) -> PortDispatch {
-        match self.port_dispatchers.get(&port_id) {
+        match own.or_else(|| self.port_dispatchers.get(&port_id).copied()) {
             Some(dispatcher) => (dispatcher.dispatch)(&**imp, method_id, args),
             None => PortDispatch::Sync(vec![2]),
         }
@@ -2243,8 +2262,8 @@ impl Runtime {
             return PortFuture::ready(self.ports.clone(), Err(PortError::Cancelled));
         }
         Stats::inc(&self.stats.port_calls);
-        if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
-            return match self.dispatch_to_rust(&imp, port_id, method_id, &args) {
+        if let PortBinding::Rust(imp, own) = self.ports.binding(port_id) {
+            return match self.dispatch_to_rust(&imp, own, port_id, method_id, &args) {
                 PortDispatch::Sync(bytes) => {
                     PortFuture::ready(self.ports.clone(), decode_dispatch_reply(&bytes))
                 }
@@ -2288,8 +2307,8 @@ impl Runtime {
             return Err(PortError::Cancelled);
         }
         Stats::inc(&self.stats.port_calls);
-        if let PortBinding::Rust(imp) = self.ports.binding(port_id) {
-            return match self.dispatch_to_rust(&imp, port_id, method_id, args) {
+        if let PortBinding::Rust(imp, own) = self.ports.binding(port_id) {
+            return match self.dispatch_to_rust(&imp, own, port_id, method_id, args) {
                 PortDispatch::Sync(bytes) => decode_dispatch_reply(&bytes),
                 // A sync call cannot wait for an implementation that answers later.
                 PortDispatch::Async(future) => {

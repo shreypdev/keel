@@ -261,8 +261,8 @@ pub(crate) fn expand_migrate(attr: TokenStream, item: TokenStream) -> TokenStrea
 pub(crate) fn expand_port(attr: TokenStream, item: TokenStream) -> TokenStream {
     run(item, &[], |item| match item {
         syn::Item::Trait(item) => {
-            let (root, requested) = port::parse_port_args(attr)?;
-            port::expand_trait(root, requested, item)
+            let (root, requested, dispatcher_by_use) = port::parse_port_args(attr)?;
+            port::expand_trait(root, requested, dispatcher_by_use, item)
         }
         syn::Item::Impl(item) => {
             parse_args(

@@ -209,6 +209,17 @@ impl Ctx {
         self.0.bind_dyn_port::<P>(port_id, imp);
     }
 
+    /// Binds an implementation as the trait object `P` with the dispatcher raw port calls on it go
+    /// through; see [`Runtime::bind_dyn_port_with`].
+    pub fn bind_dyn_port_with<P: ?Sized + Send + Sync + 'static>(
+        &self,
+        port_id: u32,
+        imp: Arc<P>,
+        dispatcher: &'static crate::PortDispatcher,
+    ) {
+        self.0.bind_dyn_port_with::<P>(port_id, imp, dispatcher);
+    }
+
     /// The Rust binding of `port_id` as a `P` (`ctx.rust_port::<dyn Http>(port_id)`), if there is
     /// one: fakes and built-ins. What a generated port accessor tries before falling back to its
     /// proxy.

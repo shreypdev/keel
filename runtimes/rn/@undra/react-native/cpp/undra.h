@@ -164,7 +164,7 @@ typedef struct UndraApi {
     void     (*event)(uint32_t port_id, uint32_t method_id, const uint8_t *ptr, uint32_t len);
     void     (*timer_fired)(uint32_t timer_id);
     UndraBuf (*snapshot)(void);                          /* also with no runtime: an empty snapshot carrying the process-wide generation floor (SPEC 5.9) */
-    uint32_t (*restore)(const uint8_t *ptr, uint32_t len);
+    uint32_t (*restore)(const uint8_t *ptr, uint32_t len); /* 0 ok; restore_code: 2 panicked, 5 bad snapshot, 6 unavailable, 7 incompatible (ADR-037); a refusal changes nothing */
     UndraBuf (*stats_json)(void);                        /* live handles, tasks, txn count, crossings */
     void     (*buf_free)(UndraBuf buf);
 } UndraApi;

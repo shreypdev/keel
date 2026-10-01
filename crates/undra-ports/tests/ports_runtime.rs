@@ -29,6 +29,66 @@ fn rig() -> (TestRuntime, Fakes) {
     (t, fakes)
 }
 
+// ---- Dispatchers by use (ADR-052) ---------------------------------------------------------------
+
+/// Every core links the standard ports; their dispatchers are not registered, so a core that binds
+/// no Rust implementation of one does not link them. A fake bound without its dispatcher is still
+/// what the accessor returns, and a raw call on it is unavailable; `fakes::install` binds with it.
+#[test]
+fn the_standard_ports_register_no_dispatcher_and_a_binding_carries_it() {
+    let standard = [
+        <dyn Clock as Port>::PORT_ID,
+        <dyn Rng as Port>::PORT_ID,
+        <dyn Log as Port>::PORT_ID,
+        <dyn Http as Port>::PORT_ID,
+        <dyn Kv as Port>::PORT_ID,
+        <dyn SecureStore as Port>::PORT_ID,
+        <dyn Fs as Port>::PORT_ID,
+        <dyn Timer as Port>::PORT_ID,
+    ];
+    for dispatcher in undra_meta::inventory::iter::<undra_runtime::PortDispatcher> {
+        assert!(
+            !standard.contains(&dispatcher.port_id),
+            "a standard port's dispatcher is registered: {:#x}",
+            dispatcher.port_id
+        );
+    }
+    assert_eq!(
+        undra_ports::KV_DISPATCHER.port_id,
+        <dyn Kv as Port>::PORT_ID
+    );
+    assert_eq!(
+        undra_ports::SECURE_STORE_DISPATCHER.port_id,
+        <dyn SecureStore as Port>::PORT_ID
+    );
+
+    let t = TestRuntime::new();
+    let clock = Arc::new(FakeClock::new());
+    t.ctx()
+        .bind_dyn_port::<dyn Clock>(<dyn Clock as Port>::PORT_ID, clock.clone());
+    assert_eq!(
+        undra_ports::clock(&t.ctx()).now_ms(),
+        FakeClock::DEFAULT_NOW_MS
+    );
+    let now_ms = undra_meta::ids::port_method_id("Clock", "now_ms");
+    assert_eq!(
+        t.runtime()
+            .port_call_sync(<dyn Clock as Port>::PORT_ID, now_ms, &[]),
+        Err(undra_runtime::PortError::Unavailable),
+        "bound without a dispatcher, a raw call has nothing to run it"
+    );
+    t.ctx().bind_dyn_port_with::<dyn Clock>(
+        <dyn Clock as Port>::PORT_ID,
+        clock,
+        &undra_ports::CLOCK_DISPATCHER,
+    );
+    assert_eq!(
+        t.runtime()
+            .port_call_sync(<dyn Clock as Port>::PORT_ID, now_ms, &[]),
+        Ok(FakeClock::DEFAULT_NOW_MS.to_le_bytes().to_vec())
+    );
+}
+
 // ---- Clock, Rng, Log ---------------------------------------------------------------------------
 
 #[test]

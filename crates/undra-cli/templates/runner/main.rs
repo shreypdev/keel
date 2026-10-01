@@ -113,12 +113,22 @@ impl undra_ports::Log for NativeLog {
 
 fn bind_native_ports(runtime: &Arc<Runtime>) {
     use undra_runtime::Port;
-    runtime.bind_dyn_port::<dyn undra_ports::Clock>(
+    // With their dispatchers, so a raw port call (a generated proxy) reaches them too (ADR-052).
+    runtime.bind_dyn_port_with::<dyn undra_ports::Clock>(
         <dyn undra_ports::Clock as Port>::PORT_ID,
         Arc::new(NativeClock(std::time::Instant::now())),
+        &undra_ports::CLOCK_DISPATCHER,
     );
-    runtime.bind_dyn_port::<dyn undra_ports::Rng>(<dyn undra_ports::Rng as Port>::PORT_ID, Arc::new(NativeRng));
-    runtime.bind_dyn_port::<dyn undra_ports::Log>(<dyn undra_ports::Log as Port>::PORT_ID, Arc::new(NativeLog));
+    runtime.bind_dyn_port_with::<dyn undra_ports::Rng>(
+        <dyn undra_ports::Rng as Port>::PORT_ID,
+        Arc::new(NativeRng),
+        &undra_ports::RNG_DISPATCHER,
+    );
+    runtime.bind_dyn_port_with::<dyn undra_ports::Log>(
+        <dyn undra_ports::Log as Port>::PORT_ID,
+        Arc::new(NativeLog),
+        &undra_ports::LOG_DISPATCHER,
+    );
 }
 // @ports:end
 

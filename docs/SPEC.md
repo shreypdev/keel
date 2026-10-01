@@ -1178,6 +1178,7 @@ impl Runtime {
     pub fn insert_store<T: StoreObject>(&self, object: Arc<T>) -> Handle;
     pub fn bind_port<P: ?Sized + 'static>(&self, port_id: u32, imp: Arc<dyn Any + Send + Sync>);   // imp is an Arc<Arc<P>> behind Any
     pub fn bind_dyn_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>);      // does the wrapping
+    pub fn bind_dyn_port_with<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32, imp: Arc<P>, dispatcher: &'static PortDispatcher);   // and raw port calls on it run through `dispatcher` (a standard port's, ADR-052)
     pub fn bind_foreign_port(&self, port_id: u32);  pub fn unbind_port(&self, port_id: u32) -> bool;
     pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;
     pub fn extension<T: Default + Send + Sync + 'static>(&self) -> &T;      // per-runtime state of layered crates (undra-query)
@@ -1194,7 +1195,7 @@ impl Ctx {
     pub fn events(&self) -> &Events;                                        // subscribe(port_id, method_id, Box<dyn Fn(&Ctx, &[u8]) + Send + Sync>) -> Subscription; the subscriber gets the runtime's Ctx as an argument so it never captures one (ADR-034)
     pub fn port_call(&self, port_id: u32, method_id: u32, args: Vec<u8>) -> PortFuture;
     pub fn port_call_sync(&self, port_id: u32, method_id: u32, args: &[u8]) -> Result<Vec<u8>, PortError>;
-    pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;   pub fn bind_port / bind_dyn_port;
+    pub fn rust_port<P: ?Sized + Send + Sync + 'static>(&self, port_id: u32) -> Option<Arc<P>>;   pub fn bind_port / bind_dyn_port / bind_dyn_port_with;
     pub fn enter(&self) -> CtxScope;  pub fn runtime(&self) -> &Runtime;
     pub fn with_core<R>(&self, f: impl FnOnce() -> R) -> Result<R, Reentrant>;   // ADR-035: takes the core lock on the calling thread, runs f in one transaction; the sanctioned synchronous write from a host thread; Err(Reentrant) from a host callback or the core
 }
@@ -1220,7 +1221,7 @@ pub struct StoreRestorer {                           // submitted with `inventor
     pub cell: fn(&(dyn Any + Send + Sync)) -> Option<&Arc<StoreCell>>,   // how the runtime recognises a store inside `dyn Any`
 }
 pub trait Port: Send + Sync + 'static { const PORT_ID: u32; const NAME: &'static str; const KIND: undra_meta::PortKind; }   // implemented for `dyn Trait`
-pub struct PortDispatcher {                          // submitted by #[undra::port], one per port trait: how a Rust binding answers an encoded call
+pub struct PortDispatcher {                          // submitted by #[undra::port], one per port trait: how a Rust binding answers an encoded call. The standard request/reply ports' are not submitted but are statics (`undra_ports::KV_DISPATCHER`, ...) that a binding passes to `bind_dyn_port_with` (`fakes::install` does), so a core that binds no Rust implementation of one does not link them (ADR-052)
     pub port_id: u32,
     pub dispatch: fn(imp: &(dyn Any + Send + Sync), method_id: u32, args: &[u8]) -> PortDispatch,   // imp is the Arc<Arc<dyn Trait>> given to bind_port
 }

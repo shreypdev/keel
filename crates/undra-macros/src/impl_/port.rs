@@ -30,7 +30,11 @@
 //!   (fakes, built-ins), else the proxy;
 //! * `pub fn __undra_port_dispatch_<Trait>(imp: &Arc<dyn Trait>, method_id, args) -> PortDispatch`
 //!   for Rust-side bindings called with encoded arguments, and its registration as a
-//!   `PortDispatcher`;
+//!   `PortDispatcher`. With the hidden flag `dispatcher_by_use` (the standard ports of
+//!   `undra-ports`, which every core links) the dispatcher is not registered: it is
+//!   `pub static <TRAIT_SNAKE>_DISPATCHER: PortDispatcher`, which a binding passes to
+//!   `Runtime::bind_dyn_port_with`, so a core that binds no Rust implementation does not link it
+//!   (ADR-052);
 //! * `PortMeta` and its registration.
 //!
 //! # Generated for event ports (`#[undra::port(event)]`)
@@ -327,6 +331,7 @@ fn analyze_method(
 pub(crate) fn expand_trait(
     args_root: Option<Root>,
     requested: Requested,
+    dispatcher_by_use: bool,
     mut item: ItemTrait,
 ) -> syn::Result<TokenStream> {
     let mut errors = Errors::new();
@@ -463,7 +468,15 @@ pub(crate) fn expand_trait(
     let extras = if requested == Requested::Event {
         event_helpers(&root, &vis, &name, &name_str, &snake, &methods)
     } else {
-        call_helpers(&root, &vis, &name, &name_str, &snake, &methods)
+        call_helpers(
+            &root,
+            &vis,
+            &name,
+            &name_str,
+            &snake,
+            &methods,
+            dispatcher_by_use,
+        )
     };
     let checks = checks.emit(&root);
     Ok(quote! {
@@ -483,6 +496,7 @@ fn call_helpers(
     name_str: &str,
     snake: &str,
     methods: &[PortMethod],
+    dispatcher_by_use: bool,
 ) -> TokenStream {
     let meta = root.meta();
     let runtime = root.runtime();
@@ -799,6 +813,27 @@ fn call_helpers(
         }
     });
 
+    let dispatcher_value = quote! {
+        #runtime::PortDispatcher {
+            port_id: #meta::ids::port_id(#name_str),
+            dispatch: #erased_fn,
+        }
+    };
+    let dispatcher = if dispatcher_by_use {
+        let name = format_ident!("{}_DISPATCHER", snake.to_uppercase());
+        let doc = format!(
+            "The Rust-side dispatcher of the `{name_str}` port, for `Runtime::bind_dyn_port_with`: a raw port call (the generated proxy) on a Rust implementation bound with it runs here. Not registered, so a core that binds no Rust implementation of the port does not link it."
+        );
+        quote! {
+            #[doc = #doc]
+            #vis static #name: #runtime::PortDispatcher = #dispatcher_value;
+        }
+    } else {
+        quote! {
+            #meta::inventory::submit! { #dispatcher_value }
+        }
+    };
+
     quote! {
         #error_trait
         #failure
@@ -854,12 +889,7 @@ fn call_helpers(
                 ::core::option::Option::None => #unavailable,
             }
         }
-        #meta::inventory::submit! {
-            #runtime::PortDispatcher {
-                port_id: #meta::ids::port_id(#name_str),
-                dispatch: #erased_fn,
-            }
-        }
+        #dispatcher
     }
 }
 
@@ -1044,9 +1074,10 @@ pub(crate) fn expand_impl(mut item: ItemImpl) -> syn::Result<TokenStream> {
 }
 
 /// Parses the arguments of `#[undra::port(..)]`.
-pub(crate) fn parse_port_args(attr: TokenStream) -> syn::Result<(Option<Root>, Requested)> {
+pub(crate) fn parse_port_args(attr: TokenStream) -> syn::Result<(Option<Root>, Requested, bool)> {
     let mut root = None;
     let mut requested = Requested::Inferred;
+    let mut dispatcher_by_use = false;
     let mut conflict: Option<syn::Error> = None;
     parse_args(
         attr,
@@ -1055,6 +1086,11 @@ pub(crate) fn parse_port_args(attr: TokenStream) -> syn::Result<(Option<Root>, R
         |meta| {
             if meta.path.is_ident("crate") {
                 root = Some(root_arg(meta)?);
+                Ok(true)
+            } else if meta.path.is_ident("dispatcher_by_use") {
+                // Hidden: the standard ports of `undra-ports` (see the module docs).
+                flag(meta, code::E0008, "dispatcher_by_use")?;
+                dispatcher_by_use = true;
                 Ok(true)
             } else if meta.path.is_ident("sync") || meta.path.is_ident("event") {
                 flag(
@@ -1092,7 +1128,7 @@ pub(crate) fn parse_port_args(attr: TokenStream) -> syn::Result<(Option<Root>, R
     if let Some(error) = conflict {
         return Err(error);
     }
-    Ok((root, requested))
+    Ok((root, requested, dispatcher_by_use))
 }
 
 #[cfg(test)]
@@ -1102,7 +1138,7 @@ mod tests {
 
     fn trait_result(src: &str, requested: Requested) -> Result<String, String> {
         let item: ItemTrait = syn::parse_str(src).unwrap();
-        expand_trait(None, requested, item)
+        expand_trait(None, requested, false, item)
             .map(|t| t.to_string())
             .map_err(|e| e.to_string())
     }
@@ -1129,6 +1165,38 @@ mod tests {
         ] {
             assert!(has(&out, needle), "missing `{needle}` in {out}");
         }
+    }
+
+    #[test]
+    fn a_dispatcher_by_use_is_a_static_and_not_registered() {
+        let item: ItemTrait = syn::parse_str(
+            "pub trait SecureStore { async fn get(&self, key: String) -> Option<Bytes>; }",
+        )
+        .unwrap();
+        let out = expand_trait(None, Requested::Inferred, true, item)
+            .unwrap()
+            .to_string();
+        assert!(
+            has(
+                &out,
+                "pub static SECURE_STORE_DISPATCHER: ::undra::runtime::PortDispatcher = ::undra::runtime::PortDispatcher"
+            ),
+            "{out}"
+        );
+        assert!(
+            has(&out, "dispatch: __undra_port_dispatch_erased_SecureStore"),
+            "{out}"
+        );
+        assert!(
+            !has(
+                &out,
+                "inventory::submit! { ::undra::runtime::PortDispatcher"
+            ),
+            "a dispatcher by use is never submitted: {out}"
+        );
+        let (_, requested, by_use) = parse_port_args(quote!(sync, dispatcher_by_use)).unwrap();
+        assert_eq!((requested, by_use), (Requested::Sync, true));
+        assert!(parse_port_args(quote!(dispatcher_by_use = 1)).is_err());
     }
 
     #[test]

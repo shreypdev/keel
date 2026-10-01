@@ -7,7 +7,9 @@
 //! * The ten port traits ([`Clock`], [`Rng`], [`Log`], [`Http`], [`Kv`], [`SecureStore`],
 //!   [`Fs`], [`Timer`], [`Connectivity`], [`Lifecycle`]) and their records are re-exported at the
 //!   crate root, together with what `#[undra::port]` generates for them: proxies
-//!   (`HttpProxy`, ...), accessors ([`http`], [`kv`], [`clock`], ...), Rust-side dispatchers and,
+//!   (`HttpProxy`, ...), accessors ([`http`], [`kv`], [`clock`], ...), Rust-side dispatchers
+//!   ([`KV_DISPATCHER`], ...: not registered, so a core links them only where a Rust
+//!   implementation is bound with one through `Runtime::bind_dyn_port_with`, ADR-052) and,
 //!   for the event ports, [`on_connectivity_changed`] / [`encode_connectivity_changed_event`] and
 //!   [`on_lifecycle_changed`] / [`encode_lifecycle_changed_event`].
 //! * [`CtxPorts`] adds `ctx.http()`, `ctx.kv()`, ... to [`Ctx`](undra_runtime::Ctx).

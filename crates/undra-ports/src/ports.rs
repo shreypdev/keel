@@ -20,7 +20,9 @@
 //!
 //! For each request/reply port the macro also generates a proxy (`ClockProxy`, ...), an accessor
 //! function (`clock(&Ctx) -> Arc<dyn Clock>`, ...: the Rust binding if one is bound, else the
-//! platform's) and a Rust-side dispatcher. For the two event ports it generates
+//! platform's) and a Rust-side dispatcher (`CLOCK_DISPATCHER`, ...), which is not registered:
+//! every core links these ports, few bind a Rust implementation of one, so the dispatcher is
+//! linked only where a binding passes it to `Runtime::bind_dyn_port_with` (ADR-052). For the two event ports it generates
 //! `on_connectivity_changed(ctx, f)` / `encode_connectivity_changed_event(..)` and the
 //! `Lifecycle` equivalents.
 
@@ -31,7 +33,7 @@ use crate::records::{
 };
 
 /// Wall-clock and monotonic time. The core asks this port instead of reading the system clock.
-#[undra_macros::port(sync)]
+#[undra_macros::port(sync, dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Clock {
     /// Milliseconds since the Unix epoch.
@@ -41,7 +43,7 @@ pub trait Clock {
 }
 
 /// A source of random bytes. Answer from a cryptographically secure generator.
-#[undra_macros::port(sync)]
+#[undra_macros::port(sync, dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Rng {
     /// Returns `len` random bytes.
@@ -49,7 +51,7 @@ pub trait Rng {
 }
 
 /// Where the core's log records go.
-#[undra_macros::port(sync)]
+#[undra_macros::port(sync, dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Log {
     /// Records one line. `level` is 0 trace, 1 debug, 2 info, 3 warn, 4 error, 5 fatal.
@@ -61,7 +63,7 @@ pub trait Log {
 /// A platform that did not register the port answers "unavailable"; `request` reports that (and a
 /// cancelled call, and a reply that does not decode) as an `HttpError`, through
 /// `impl From<PortError> for HttpError`, instead of panicking.
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Http {
     /// Performs `req`. Any status is a response; only failures before a response exists are an
@@ -74,7 +76,7 @@ pub trait Http {
 // cannot be read back, or no adapter at all (`Unavailable`, through `impl From<PortError> for
 // StorageError`, instead of a panic that would trap a wasm core). Kept out of the doc comment:
 // a core embeds its schema's docs (ADR-050), and every core has this port.
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Kv {
     /// The value stored under `key`, if any.
@@ -89,7 +91,7 @@ pub trait Kv {
 
 /// A key-value store for secrets. Same methods as `Kv`, under its own port id, and the same
 /// [`StorageError`] channel (ADR-049).
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait SecureStore {
     /// The value stored under `key`, if any.
@@ -106,7 +108,7 @@ pub trait SecureStore {
 ///
 /// A platform without a file system answers "unavailable"; every method reports that as an
 /// `FsError::Unavailable` through `impl From<PortError> for FsError` instead of panicking.
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Fs {
     /// The contents of the file at `path`.
@@ -122,7 +124,7 @@ pub trait Fs {
 /// Arms timers. Fire-and-forget: the platform later reports `TimerFired(timer_id)` to the
 /// runtime, which completes the matching sleep. Timer ids are allocated by the runtime; a
 /// platform never invents one.
-#[undra_macros::port]
+#[undra_macros::port(dispatcher_by_use)]
 #[undra(crate = "crate::root")]
 pub trait Timer {
     /// Arms timer `timer_id` to fire after `delay_ms` milliseconds.
