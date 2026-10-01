@@ -131,15 +131,15 @@ its throughput halved too). I did not widen anything for that run.
 
 ## Crossing the rename
 
-`main` had merged the Keel to Undra rename. `git merge main` conflicted in the files this branch
+`main` had merged the rename to Undra (ADR-030). `git merge main` conflicted in the files this branch
 owns (`bench/budgets.toml`, `bench/common/fixtures.rs`, `bench/common/host.rs`,
 `.github/workflows/bench.yml`; kept this side) and in the sde index (took main's, re-added this
 note's line); `commit_alloc.rs` landed in `crates/undra-ffi/tests/` with the directory. Then
 `scripts/rename-keel-to-undra.sh bench crates/undra-ffi/tests .github/workflows/bench.yml
 .10x/specs/2026-09-30-stress-bench-design.md .10x/adrs/ADR-031-frame-coalesced-delivery.md
 .10x/decisions` (21 files; it also rewrote the three `launch-v2.md` records of other roles because
-naming `.10x/decisions` lifts their exclusion, so those were reverted). Names in this note above are
-the old ones where they describe what was built before the merge. After it: fmt, clippy
+naming `.10x/decisions` lifts their exclusion, so those were reverted); it rewrote this note's names
+too. After it: fmt, clippy
 `--workspace --all-targets -D warnings`, `cargo doc`, the workspace tests (2,143 passed, 0 failed,
 10 ignored), the budgets gate (`undra-bench`), the stress gate, the 10 s soak and two 60 s soaks
 ran on the renamed tree; env vars are now `UNDRA_STRESS_SECONDS`, `UNDRA_BENCH_SCALE`,
