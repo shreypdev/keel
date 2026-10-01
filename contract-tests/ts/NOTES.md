@@ -92,6 +92,12 @@ measurements (S03: ns per sync call; S07: how far the producer ran).
   the core is a client that leaves (the server sees it within the second).
 * S25 step 2: "a keyed patch each" is not asserted (the first `add` onto an empty list arrives as a full value, SPEC
   3.8); the step checks that the mirror holds both notes, then the toggle.
+* S25's steps also run once on the browser's adapter, `waSqliteDb()` (wa-sqlite behind its worker protocol), with the
+  worker served in process over a `MessageChannel` by `startDbWorker(port, { storage: "memory" })` from
+  `@undra/runtime/db-worker`: wa-sqlite's in-memory VFS, because OPFS exists only in a browser's dedicated workers (the
+  web playground's smoke test covers OPFS in Chromium). That test is not named after the scenario: `node:sqlite` is the
+  column's S25 adapter. wa-sqlite's `bind_text` cuts text at U+0000 and its `bind_blob` stores an empty array as NULL,
+  so the engine binds text and blobs itself with their length (the runtime's Db suite asserts both).
 * `node:sqlite` binds a JavaScript `number` as REAL, so `Integer` cells bind as `bigint` and read back as `bigint`
   (`setReadBigInts`); S25.3's `-9007199254740993` crosses exactly. Node's SQLite is built without double-quoted string
   literals (`SQLITE_DQS=0`): `"x"` is an identifier, never a string.

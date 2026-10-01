@@ -10,7 +10,7 @@
   },
   "type": "module",
   "sideEffects": false,
-  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.', ./realtime and ./db), and no export may point at a stub. ./realtime (WebSocket and Sse) and ./db (Db) are the opt-in ports of ADR-047 and ADR-048, out of the main entry so a hello-world bundle stays under ADR-052's gate. ./vite is the Vite plugin that runs `undra build --platform web` (Node only, no dependencies, compiled by tsconfig.vite.json because it needs Node's types and the other modules must not). The framework packages are optional peer dependencies: @undra/runtime itself imports none of them, each adapter imports only its own.",
+  "//": "SPEC section 13 lists the subpath exports ., ./react, ./vue, ./svelte, ./solid, ./worker, ./vite and ./node. All exist except ./node: the runtime has no node-specific module yet (the Node adapters are the ones in '.', ./realtime and ./db), and no export may point at a stub. ./realtime (WebSocket and Sse) and ./db (Db) are the opt-in ports of ADR-047 and ADR-048, out of the main entry so a hello-world bundle stays under ADR-052's gate; ./db-worker is the dedicated worker of the browser's Db adapter (waSqliteDb), the only module that imports the optional peer wa-sqlite (MIT), which a bundled web app that imports ./db installs because the bundler builds that worker. ./vite is the Vite plugin that runs `undra build --platform web` (Node only, no dependencies, compiled by tsconfig.vite.json because it needs Node's types and the other modules must not). The framework packages and wa-sqlite are optional peer dependencies: @undra/runtime itself imports none of them, each adapter imports only its own.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -48,6 +48,10 @@
       "types": "./dist/db.d.ts",
       "default": "./dist/db.js"
     },
+    "./db-worker": {
+      "types": "./dist/db-worker.d.ts",
+      "default": "./dist/db-worker.js"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "default": "./dist/vite.js"
@@ -67,7 +71,8 @@
     "react": ">=18",
     "solid-js": ">=1.6",
     "svelte": ">=4",
-    "vue": ">=3.3"
+    "vue": ">=3.3",
+    "wa-sqlite": "^1.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
@@ -80,6 +85,9 @@
       "optional": true
     },
     "vue": {
+      "optional": true
+    },
+    "wa-sqlite": {
       "optional": true
     }
   },

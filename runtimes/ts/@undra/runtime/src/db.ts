@@ -18,6 +18,9 @@
  * });
  * ```
  *
+ * In the browser, `dbPort(waSqliteDb(), { wal: false })`: SQLite in a dedicated worker over OPFS
+ * (`@undra/runtime/db-worker`, which needs the optional peer dependency wa-sqlite).
+ *
  * In `wasm-worker` mode the port runs here, on the main thread, like every asynchronous port
  * (ADR-049 §2).
  */
@@ -30,5 +33,14 @@ export {
   type DbConnection,
   type DbPortOptions,
 } from "./db/binding.js";
-export { nodeSqliteDb, sqliteError, type NodeSqliteDbOptions } from "./db/node-sqlite.js";
-export { waSqliteDb, WA_SQLITE_PENDING, type WaSqliteDbOptions } from "./db/wa-sqlite.js";
+export { nodeSqliteDb, type NodeSqliteDbOptions } from "./db/node-sqlite.js";
+export { sqliteError } from "./db/errors.js";
+export { waSqliteDb, type WaSqliteDbOptions } from "./db/wa-sqlite.js";
+export {
+  serveDb,
+  workerDbAdapter,
+  type DbWorkerLike,
+  type DbWorkerReply,
+  type DbWorkerRequest,
+  type DbWorkerScope,
+} from "./db/protocol.js";

@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { DbError, PortIds, type PortImpl } from "@undra/runtime";
-import { dbPort, nodeSqliteDb } from "@undra/runtime/db";
+import { DbError, PortIds, type PortImpl, type UndraCore } from "@undra/runtime";
+import { type DbWorkerLike, type DbWorkerScope, dbPort, nodeSqliteDb, waSqliteDb } from "@undra/runtime/db";
+import { startDbWorker } from "@undra/runtime/db-worker";
 import { Notes, dbCells, dbMigrate, dbRun } from "@playground/core";
 import { boot, bootWorker } from "../src/harness.js";
 import { step, waitFor } from "../src/wait.js";
@@ -12,6 +13,11 @@ import { step, waitFor } from "../src/wait.js";
 // over `node:sqlite`), rooted in a fresh temporary directory: migrations at open, typed cells, typed
 // constraint and SQL errors, a transaction that rolls back, a failed migration that leaves nothing,
 // persistence across a reopen, an invalid name.
+//
+// The same steps also run once on the browser's adapter, `waSqliteDb` (wa-sqlite behind its worker
+// protocol), with the worker served in this process over a `MessageChannel` and wa-sqlite's in-memory
+// VFS (OPFS exists only in a browser's dedicated workers). That run is not named after the scenario:
+// `node:sqlite` is the TypeScript column's adapter for S25.
 
 let directory: string;
 
@@ -34,8 +40,8 @@ async function failure(run: () => Promise<unknown>): Promise<unknown> {
   throw new Error("expected the call to fail, but it succeeded");
 }
 
-test("S25 Db", async () => {
-  const { core } = await boot({ ports: ports() });
+/** The eight steps of S25 on `core`, whose Db port is the adapter under test. */
+async function s25(core: UndraCore): Promise<void> {
   const notes = await Notes.create(core);
 
   await step("1. open runs the two migrations; the list is empty", async () => {
@@ -109,6 +115,26 @@ test("S25 Db", async () => {
     const third = await Notes.create(core);
     expect(await failure(() => third.open("../escape"))).toBeInstanceOf(DbError.Unavailable);
   });
+}
+
+test("S25 Db", async () => {
+  const { core } = await boot({ ports: ports() });
+  await s25(core);
+});
+
+test("wa-sqlite (the browser's adapter, in-memory VFS, through its worker protocol): the S25 steps", async () => {
+  const { port1, port2 } = new MessageChannel();
+  port1.start();
+  port2.start();
+  const stop = startDbWorker(port1 as unknown as DbWorkerScope, { storage: "memory" });
+  try {
+    const { core } = await boot({ ports: { [PortIds.Db.portId]: dbPort(waSqliteDb({ worker: port2 as unknown as DbWorkerLike }), { wal: false }) } });
+    await s25(core);
+  } finally {
+    stop();
+    port1.close();
+    port2.close();
+  }
 });
 
 test("wasm-worker mode: the Db port is served on the main thread (ADR-049 §2)", async () => {

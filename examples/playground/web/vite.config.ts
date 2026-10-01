@@ -23,4 +23,8 @@ export default defineConfig({
     // The wasm core (`undra build --platform web`) and the runtime live outside this directory.
     fs: { allow: [here("../../..")] },
   },
+  // The Db port's worker (`@undra/runtime/db-worker`, wa-sqlite over OPFS) is an ES module worker, and
+  // wa-sqlite finds its wasm next to its own glue, which pre-bundling would move.
+  worker: { format: "es" },
+  optimizeDeps: { exclude: ["wa-sqlite"] },
 });

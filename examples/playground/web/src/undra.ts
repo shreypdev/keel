@@ -100,8 +100,8 @@ export async function startUndra(): Promise<Playground> {
  * * `WebSocket`: the browser's `WebSocket` (the Live view). A browser cannot send headers with the
  *   upgrade, so a connect with headers is refused rather than sent without them.
  * * `Sse`: `fetch` with a streamed body.
- * * `Db`: wa-sqlite in a worker over OPFS once its dependency is approved; until then
- *   `waSqliteDb()` answers every open with a typed `DbError.Unavailable`, which the Notes view shows.
+ * * `Db`: SQLite (wa-sqlite) in a dedicated worker over the origin private file system (the Notes
+ *   view); the web has no WAL.
  */
 function optInPorts(): Record<number, PortImpl> {
   return {

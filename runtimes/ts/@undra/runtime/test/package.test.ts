@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /*
@@ -16,7 +16,7 @@ const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as {
 
 describe("package exports", () => {
   it("lists the subpaths of SPEC section 13 that exist", () => {
-    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
+    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./db", "./db-worker", "./package.json", "./react", "./realtime", "./solid", "./svelte", "./vite", "./vue", "./wire", "./worker"]);
   });
 
   it("points every subpath at the compiled form of a source file that exists", () => {
@@ -29,8 +29,8 @@ describe("package exports", () => {
     }
   });
 
-  it("declares the UI frameworks as optional peers and has no runtime dependency", () => {
-    expect(Object.keys(pkg.peerDependencies).sort()).toEqual(["react", "solid-js", "svelte", "vue"]);
+  it("declares the UI frameworks and wa-sqlite as optional peers and has no runtime dependency", () => {
+    expect(Object.keys(pkg.peerDependencies).sort()).toEqual(["react", "solid-js", "svelte", "vue", "wa-sqlite"]);
     for (const name of Object.keys(pkg.peerDependencies)) expect(pkg.peerDependenciesMeta[name]?.optional, name).toBe(true);
     expect(pkg.dependencies).toBeUndefined();
   });
@@ -50,6 +50,12 @@ describe("package exports", () => {
     expect(readFileSync(new URL("src/svelte.ts", root), "utf8")).toMatch(/^import type \{ Readable \} from "svelte\/store";$/m);
   });
 
+  it("keeps wa-sqlite in the db worker alone: no other module imports it", () => {
+    const files = readdirSync(new URL("src/", root), { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts"));
+    const importers = files.filter((f) => /from ["']wa-sqlite/.test(readFileSync(new URL(`src/${f}`, root), "utf8")));
+    expect(importers).toEqual(["db-worker.ts"]);
+  });
+
   it("keeps the opt-in ports out of the main entry: nothing in it imports ./realtime or ./db (ADR-052)", () => {
     const main = ["src/index.ts", "src/core.ts", "src/adapters/index.ts", "src/adapters/browser.ts", "src/adapters/ports.ts"];
     for (const file of main) {
@@ -66,7 +72,7 @@ describe("package exports", () => {
   });
 
   it("reaches Node's modules without a module request, so Metro, Vite and webpack bundle ./realtime and ./db unchanged", async () => {
-    for (const file of ["src/realtime/node-websocket.ts", "src/db/node-sqlite.ts", "src/node-builtin.ts"]) {
+    for (const file of ["src/realtime/node-websocket.ts", "src/db/node-sqlite.ts", "src/node-builtin.ts", "src/db-worker.ts"]) {
       const code = readFileSync(new URL(file, root), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
       expect(code, file).not.toMatch(/\bimport\s*\(/);
       expect(code, file).not.toMatch(/\brequire\s*\(/);

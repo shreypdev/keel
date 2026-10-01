@@ -1,29 +1,38 @@
-import { DbError } from "../adapters/types.js";
 import type { DbAdapter } from "./binding.js";
+import { type DbWorkerLike, workerDbAdapter } from "./protocol.js";
 
-/** Why {@link waSqliteDb} cannot open anything yet. */
-export const WA_SQLITE_PENDING =
-  "the wa-sqlite adapter is not built yet: its wa-sqlite dependency awaits approval (ADR-048); use nodeSqliteDb on Node, or pass your own DbAdapter";
-
-/** Options of {@link waSqliteDb} (reserved; nothing is read yet). */
+/** Options of {@link waSqliteDb}. */
 export interface WaSqliteDbOptions {
-  /** The OPFS directory the databases will live in. Default `undra/db`. */
-  readonly directory?: string;
+  /**
+   * The worker that serves the databases (`@undra/runtime/db-worker`, or a script that calls its
+   * `startDbWorker` with options), or a function that makes it; made on the first `open`. Default:
+   * a module worker on `@undra/runtime/db-worker`.
+   */
+  readonly worker?: DbWorkerLike | (() => DbWorkerLike);
 }
 
 /**
- * The browser's Db adapter of ADR-048 §7: wa-sqlite (MIT) in a dedicated worker over OPFS
- * `AccessHandlePoolVFS`, one file per database under `undra/db/<name>`, no WAL (register it with
- * `dbPort(waSqliteDb(), { wal: false })`).
+ * The browser's Db adapter (ADR-048 §7): SQLite (wa-sqlite, MIT, an optional peer dependency) in a
+ * dedicated worker over the origin private file system (`AccessHandlePoolVFS`, `undra/db/`), no
+ * COOP/COEP needed. Every call crosses to the worker by `postMessage`; integers stay `bigint`, errors
+ * stay typed by SQLite's result code. The web has no WAL: register it as
+ * `dbPort(waSqliteDb(), { wal: false })`.
  *
- * **Not built yet.** The wa-sqlite package is a new dependency that awaits the founder's approval,
- * so today every `open` rejects with `DbError.Unavailable` (the text says so) and a core that uses
- * `Db` on the web sees a typed error instead of a missing port. The shape is final: an app can
- * register it now and get the real adapter by upgrading.
+ * ```ts
+ * import { PortIds, UndraCore } from "@undra/runtime";
+ * import { dbPort, waSqliteDb } from "@undra/runtime/db";
+ *
+ * await UndraCore.load({ ..., ports: { [PortIds.Db.portId]: dbPort(waSqliteDb(), { wal: false }) } });
+ * ```
+ *
+ * The worker starts on the first `open`. Where it cannot (no `Worker`, its script failed, no OPFS
+ * in it) every call is `DbError.Unavailable` saying why.
  */
 export function waSqliteDb(options: WaSqliteDbOptions = {}): DbAdapter {
-  void options;
-  return {
-    open: () => Promise.reject(new DbError.Unavailable(WA_SQLITE_PENDING)),
-  };
+  return workerDbAdapter(() => {
+    const given = options.worker;
+    if (given !== undefined) return typeof given === "function" ? given() : given;
+    if (typeof Worker !== "function") throw new Error("this platform has no Worker: pass `worker`");
+    return new Worker(new URL("../db-worker.js", import.meta.url), { type: "module" }) as DbWorkerLike;
+  });
 }
