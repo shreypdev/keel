@@ -36,8 +36,9 @@ pub fn is_release(configuration: &str) -> bool {
 /// Where the input list of the Run Script phase is, relative to the project root.
 pub const INPUTS_LIST: &str = "ios/Config/undra-core-inputs.xcfilelist";
 
-/// Everything the core is built from, as absolute paths, sorted: the project's `undra.toml` and
-/// workspace `Cargo.toml`, and for each directory of `core_dirs` its `Cargo.toml`, `build.rs`,
+/// Everything the core is built from, as absolute paths, sorted: the project's `undra.toml`,
+/// workspace `Cargo.toml` and `Cargo.lock` (the shim follows it: `cargo update` rebuilds the core,
+/// as it does in Gradle), and for each directory of `core_dirs` its `Cargo.toml`, `build.rs`,
 /// every file below `src/` and every directory of `src/`. Only what exists is listed (Xcode fails
 /// the build on a listed input that is missing).
 #[must_use]
@@ -60,7 +61,7 @@ pub fn input_paths(project_root: &Path, core_dirs: &[PathBuf]) -> Vec<PathBuf> {
         }
     }
     let mut out = Vec::new();
-    for file in ["undra.toml", "Cargo.toml"] {
+    for file in ["undra.toml", "Cargo.toml", "Cargo.lock"] {
         out.push(project_root.join(file));
     }
     for dir in core_dirs {
@@ -262,6 +263,7 @@ mod tests {
         assert_eq!(
             shown,
             [
+                "Cargo.lock",
                 "Cargo.toml",
                 "core/Cargo.toml",
                 "core/src",
@@ -274,11 +276,13 @@ mod tests {
                 "shared/src/lib.rs",
                 "undra.toml",
             ],
-            "the lock file, hidden files and target/ are not inputs; a file that does not exist is not listed"
+            "hidden files and target/ are not inputs; a file that does not exist is not listed"
         );
         let text = render_inputs(&root.join("ios"), &paths);
         assert!(
-            text.starts_with("$(SRCROOT)/../Cargo.toml\n$(SRCROOT)/../core/Cargo.toml\n"),
+            text.starts_with(
+                "$(SRCROOT)/../Cargo.lock\n$(SRCROOT)/../Cargo.toml\n$(SRCROOT)/../core/Cargo.toml\n"
+            ),
             "{text}"
         );
         assert!(text.ends_with("$(SRCROOT)/../undra.toml\n"), "{text}");

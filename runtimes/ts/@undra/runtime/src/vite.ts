@@ -15,8 +15,10 @@ import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
  * - `vite build` and `vite dev` both build the core first (`buildStart`), so there is no manual step.
  *   A failing build stops `vite build` and is reported (not fatal) under `vite dev`, where the next
  *   save is the retry.
- * - Under `vite dev` the plugin watches the core's `src/**` and `Cargo.toml`, rebuilds on a change
- *   (one build at a time, a burst of saves counted once) and reloads the page onto the new core.
+ * - Under `vite dev` the plugin watches the core's `src/**`, its manifests and `Cargo.lock`, rebuilds on
+ *   a change (one build at a time, the first one included; a burst of saves counted once) and reloads the
+ *   page onto the new core. A failed build keeps the old core and shows the error in Vite's overlay.
+ * - Under Vitest (mode `test`) it builds nothing unless `inTests` is set.
  * - `undra` is looked up as `UNDRA_BIN`, then on `PATH`, then where the installers put it. When it is
  *   not found the error says how to install it, in the shape of the CLI's own errors (C0003).
  */
@@ -32,6 +34,8 @@ export interface ViteLoggerLike {
 export interface ViteConfigLike {
   readonly root: string;
   readonly command: "build" | "serve";
+  /** Vite's mode; Vitest runs Vite in mode `test`. */
+  readonly mode?: string;
   readonly logger: ViteLoggerLike;
 }
 
@@ -71,6 +75,11 @@ export interface UndraPluginOptions {
   readonly watch?: readonly string[];
   /** Do not build (the core was built in an earlier step). Default: true when `UNDRA_SKIP_BUILD` is `1`. */
   readonly skip?: boolean;
+  /**
+   * Build under Vitest too. Default false: Vitest runs Vite in mode `test`, and a test run uses the core
+   * that is already built rather than compiling it (which needs the Rust toolchain) on every run.
+   */
+  readonly inTests?: boolean;
   /** How long a burst of saves is allowed to settle before the core is rebuilt, in milliseconds. Default 150. */
   readonly debounceMs?: number;
 }
@@ -177,7 +186,12 @@ export function findCoreLayout(start: string): CoreLayout | null {
 /** What a change to `file` has to be under to rebuild the core: the core's sources and the manifests. */
 export function watchTargets(layout: CoreLayout, extra: readonly string[], base: string): { dirs: string[]; files: string[] } {
   const dirs = [join(layout.coreDir, "src")];
-  const files = [join(layout.coreDir, "Cargo.toml"), join(layout.projectRoot, "Cargo.toml"), join(layout.projectRoot, "undra.toml")];
+  const files = [
+    join(layout.coreDir, "Cargo.toml"),
+    join(layout.projectRoot, "Cargo.toml"),
+    join(layout.projectRoot, "Cargo.lock"),
+    join(layout.projectRoot, "undra.toml"),
+  ];
   for (const entry of extra) {
     const path = isAbsolute(entry) ? entry : resolve(base, entry);
     // A path that is not there yet is taken for a directory when it has no extension.
@@ -226,8 +240,14 @@ function runCommand(command: string, args: readonly string[], cwd: string): Prom
  */
 export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
   let config: ViteConfigLike | undefined;
+  // One `undra build` at a time, the first build included: a change that arrives during a build is
+  // remembered (the latest one) and built once after it.
+  let running = false;
+  let again: string | undefined;
+  let rebuild: ((file: string) => Promise<void>) | undefined;
 
-  const skip = (): boolean => options.skip ?? process.env["UNDRA_SKIP_BUILD"] === "1";
+  const skip = (): boolean =>
+    (options.skip ?? process.env["UNDRA_SKIP_BUILD"] === "1") || (options.inTests !== true && config?.mode === "test");
   const projectDir = (): string => resolve(options.projectDir ?? config?.root ?? process.cwd());
 
   /** Runs `undra -C <project> build --platform web`; throws an {@link UndraBuildError}. */
@@ -274,6 +294,7 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
 
     async buildStart() {
       if (skip()) return;
+      running = true;
       try {
         await build();
       } catch (e) {
@@ -283,6 +304,10 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
           return;
         }
         throw e;
+      } finally {
+        running = false;
+        const changed = again;
+        if (changed !== undefined && rebuild !== undefined) void rebuild(changed);
       }
     },
 
@@ -299,10 +324,8 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
 
       const debounce = options.debounceMs ?? 150;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      let running = false;
-      let again: string | undefined;
 
-      const rebuild = async (file: string): Promise<void> => {
+      rebuild = async (file: string): Promise<void> => {
         if (running) {
           again = file;
           return;
@@ -334,7 +357,7 @@ export function undra(options: UndraPluginOptions = {}): UndraVitePlugin {
         if (timer !== undefined) clearTimeout(timer);
         timer = setTimeout(() => {
           timer = undefined;
-          void rebuild(file);
+          void rebuild?.(file);
         }, debounce);
       };
       for (const event of ["change", "add", "unlink"]) server.watcher.on(event, onChange);

@@ -116,8 +116,13 @@ function fakeServer(): { server: ViteDevServerLike; watcher: EventEmitter; added
   return { server, watcher, added, sent };
 }
 
-function config(root: string, command: "build" | "serve", logger = new Logger()): ViteConfigLike & { logger: Logger } {
-  return { root, command, logger };
+function config(
+  root: string,
+  command: "build" | "serve",
+  logger = new Logger(),
+  mode?: string,
+): ViteConfigLike & { logger: Logger } {
+  return mode === undefined ? { root, command, logger } : { root, command, logger, mode };
 }
 
 async function until(condition: () => boolean, what: string): Promise<void> {
@@ -196,6 +201,8 @@ describe("the project", () => {
     expect(targets.files).toContain(join(root, "core", "Cargo.toml"));
     expect(targets.files).toContain(join(root, "Cargo.toml"));
     expect(targets.files).toContain(join(root, "undra.toml"));
+    // `cargo update` changes what the core is built from (the shim follows the lock file).
+    expect(targets.files).toContain(join(root, "Cargo.lock"));
     expect(targets.files).toContain(join(root, "web", "extra.toml"));
     expect(isWatched(join(root, "core", "src", "todo", "list.rs"), targets)).toBe(true);
     expect(isWatched(join(root, "core", "Cargo.toml"), targets)).toBe(true);
@@ -297,6 +304,25 @@ describe("the plugin", () => {
     expect(calls()).toHaveLength(1);
   });
 
+  it("builds nothing under Vitest (mode test) unless asked to", async () => {
+    // A test run uses the core that is already built; compiling it on every `vitest` would make a
+    // web developer's tests need the Rust toolchain and take a release build's time.
+    const { root, bin, web } = makeProject();
+    const plugin = undra({ command: bin, debounceMs: 5 });
+    plugin.configResolved(config(web, "serve", new Logger(), "test"));
+    await plugin.buildStart();
+    const fake = fakeServer();
+    plugin.configureServer(fake.server);
+    fake.watcher.emit("change", join(root, "core", "src", "lib.rs"));
+    await new Promise((r) => setTimeout(r, 40));
+    expect(calls()).toEqual([]);
+    expect(fake.added).toEqual([]);
+    const asked = undra({ command: bin, inTests: true });
+    asked.configResolved(config(web, "serve", new Logger(), "test"));
+    await asked.buildStart();
+    expect(calls()).toHaveLength(1);
+  });
+
   it("reports a failed build under `vite dev` instead of ending the server", async () => {
     const { bin, web } = makeProject();
     setEnv("FAKE_UNDRA_EXIT", "1");
@@ -364,6 +390,21 @@ describe("under vite dev", () => {
     await until(() => calls().length === 1, "the first build to start");
     fake.watcher.emit("change", join(root, "core", "src", "lib.rs"));
     await until(() => fake.sent.length === 2, "two reloads");
+    expect(calls()).toEqual(["start", "end", "start", "end"]);
+  });
+
+  it("never runs a rebuild next to the first build: a save while Vite starts waits for it", async () => {
+    const { root, web } = makeProject();
+    const plugin = undra({ command: slowBin, debounceMs: 5, skip: false });
+    plugin.configResolved(config(web, "serve"));
+    const fake = fakeServer();
+    // Vite calls configureServer while it creates the server, and buildStart when it listens.
+    plugin.configureServer(fake.server);
+    const first = plugin.buildStart();
+    await until(() => calls().length === 1, "the first build to start");
+    fake.watcher.emit("change", join(root, "core", "src", "lib.rs"));
+    await first;
+    await until(() => fake.sent.length === 1, "the reload after the second build");
     expect(calls()).toEqual(["start", "end", "start", "end"]);
   });
 

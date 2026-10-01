@@ -171,11 +171,17 @@ The dev loop above is `undra dev`. The other half, the build of what you ship, n
 
 | App | What runs `undra build` | When | Skipped by |
 |---|---|---|---|
-| Android | the `undraBuild` Gradle task, `preBuild` depends on it | every Gradle build; `assembleRelease` and `bundleRelease` build a release core, anything else a debug one (`-PundraRelease=true\|false` overrides) | Gradle's up-to-date check over `core/src/**`, the Cargo manifests and `build/android/jniLibs`; `-PundraSkipBuild=true`, `UNDRA_SKIP_BUILD=1` |
-| iOS | the **Build the Undra core** Run Script phase, before Compile Sources, with `undra build --platform ios --configuration $CONFIGURATION` | every Xcode build | Xcode's input/output analysis over `ios/Config/undra-core-inputs.xcfilelist` (kept in step with the core's sources by `undra build`) and `undra-core-outputs.xcfilelist` (the XCFramework and a stamp per configuration) |
-| Web | the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) | `vite build` and `vite dev`; under `vite dev` also on every change of `core/src` (one build at a time), followed by a full reload | `UNDRA_SKIP_BUILD=1`, the `skip` option |
+| Android | the `undraBuild` Gradle task, `preBuild` depends on it | every Gradle build; `assembleRelease` and `bundleRelease` build a release core, anything else a debug one (`-PundraRelease=true\|false` overrides; a build that asks for both variants at once, `./gradlew build`, gets a release core in both) | Gradle's up-to-date check over `core/src/**`, the Cargo manifests, `Cargo.lock` and `build/android/jniLibs` (a path dependency outside `core/` is an input only once added with `undraBuild { sources.from(...) }`); `-PundraSkipBuild=true`, `UNDRA_SKIP_BUILD=1` |
+| iOS | the **Build the Undra core** Run Script phase, before Compile Sources, with `undra build --platform ios --configuration $CONFIGURATION` | every Xcode build | Xcode's input/output analysis over `ios/Config/undra-core-inputs.xcfilelist` (every file of the core and of its path dependencies, the Cargo manifests and `Cargo.lock`, kept in step by `undra build`) and `undra-core-outputs.xcfilelist` (the XCFramework and a stamp per configuration) |
+| Web | the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) | `vite build` and `vite dev`; under `vite dev` also on every change of the core's `src/**`, its manifests or `Cargo.lock` (one build at a time, the first included), followed by a full reload; never under Vitest (mode `test`) unless `inTests: true` | `UNDRA_SKIP_BUILD=1`, the `skip` option |
 
-All three find `undra` on `PATH` (`UNDRA_BIN` names one), and the Xcode phase and the Gradle task also look in `~/.undra/bin`,
-`~/.cargo/bin` and Homebrew's directories, because an app launched from the Dock or an IDE has a short `PATH`. When it is
+All three find `undra` on `PATH` and in `~/.undra/bin`, `~/.cargo/bin` and Homebrew's directories, because an app launched
+from the Dock or an IDE has a short `PATH`; the Gradle task and the Vite plugin take `UNDRA_BIN` first (the Xcode phase
+does not: Xcode's environment is the project's build settings, not your shell's). When it is
 missing they say how to install it, in the shape of the CLI's own errors (`error[undra::C0003]`). A build that fails keeps
-its own output (`C0004`); under `vite dev` it shows in the page's error overlay and the next save retries.
+its own output (`C0004`); under `vite dev` it shows in the page's error overlay, the page keeps the core it had, and the
+next save retries.
+
+What none of the three sees: `.cargo/config.toml`, `rust-toolchain.toml`, a new Rust compiler and a new `undra`. After
+changing one of those, build once with `undra build` (or `./gradlew :app:undraBuild --rerun`, or Xcode's Clean Build
+Folder).
