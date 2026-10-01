@@ -93,6 +93,18 @@ public open class UndraCore protected constructor() : AutoCloseable {
         }
 
         /**
+         * Puts a core of your own under an [UndraCore]: connects over [transport], registers the ports of [options] (give
+         * `defaultAdapters = false` to keep the platform's out), checks the schema hash the transport reports against
+         * [LoadOptions.expectedSchemaHash] and returns the core. The testing kit's recorded core is made this way.
+         * The first core also becomes [shared] unless [makeShared] is `false`.
+         *
+         * @throws UndraSchemaMismatchException if the transport reports another schema hash.
+         */
+        @UndraEmbeddingApi
+        public fun attachTransport(transport: Transport, options: LoadOptions, makeShared: Boolean = true): UndraCore =
+            attach(transport, options, makeShared)
+
+        /**
          * Connects a core over [transport] and runs the handshake: registers the ports of [options]
          * (explicit adapters first, then the defaults for the rest), asks the transport for the core's
          * schema hash and compares it with [LoadOptions.expectedSchemaHash].
