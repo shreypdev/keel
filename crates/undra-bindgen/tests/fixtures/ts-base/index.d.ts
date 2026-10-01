@@ -11,8 +11,12 @@ export * from "./wire/index.js";
 // The real standard types of SPEC section 8 (`HttpRequest`, `HttpError`, ..., and their codecs).
 export * from "./adapters/types.js";
 export * from "./adapters/codecs.js";
+// The real errors: the base class, the reply and transport errors, and the closed set generated calls map onto
+// (ADR-032, amendment A).
+export * from "./errors.js";
+export * from "./call-error.js";
 
-import type { CallTarget, ChangeOp, Handle, ReplyStatus } from "./wire/index.js";
+import type { CallTarget, ChangeOp, Handle } from "./wire/index.js";
 
 export type LoadMode = "wasm-main" | "wasm-worker" | "remote";
 
@@ -59,6 +63,8 @@ export interface StoreOptions {
 export declare class UndraCore {
   static load(options: LoadOptions): Promise<UndraCore>;
   static get shared(): UndraCore;
+  /** Addition (ADR-032, amendment A): the loaded shared core, or `null`. */
+  static get current(): UndraCore | null;
   callSync(target: CallTargetRef, methodId: number, args: Uint8Array): Uint8Array;
   call(target: CallTargetRef, methodId: number, args: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>;
   stream(target: CallTargetRef, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array>;
@@ -71,6 +77,8 @@ export declare class UndraCore {
   release(handle: Handle): void;
   /** Addition: sends a host-to-core event of an event port (`undra_event`). */
   event(portId: number, methodId: number, payload: Uint8Array): void;
+  /** Addition (ADR-032, amendment A): reports a failure no caller can see (a command, a store's `_apply`). */
+  report(error: unknown, operation: string): void;
   readonly mirror: Mirror;
   registerPort(portId: number, impl: PortImpl): void;
   stats(): Promise<UndraStats>;
@@ -87,6 +95,8 @@ export declare abstract class UndraStore extends UndraObject {
   protected constructor(core: UndraCore, handle: Handle, options?: StoreOptions);
   protected _signals: Signal<unknown>[];
   protected abstract _apply(signalId: number, op: ChangeOp, value: Uint8Array): void;
+  /** Addition (ADR-032, amendment A): observes every signal; on failure closes the store and throws an `UndraCallError`. */
+  protected _observeAll(): Promise<void>;
 }
 
 export declare class Signal<T> {
@@ -96,27 +106,6 @@ export declare class Signal<T> {
   peek(): T;
   subscribe(fn: (value: T) => void): () => void;
   _set(value: T): void;
-}
-
-export declare class UndraError extends Error {
-  readonly kind: string;
-  /** Addition: the constructor, taking the discriminant and the usual `Error` arguments. */
-  constructor(kind: string, message?: string, options?: ErrorOptions);
-}
-
-export declare class UndraReplyError extends UndraError {
-  readonly status: ReplyStatus;
-  readonly body: Uint8Array;
-  constructor(status: ReplyStatus, body: Uint8Array);
-}
-
-/**
- * Addition: thrown by a generated port adapter when the implementation fails with the port's typed
- * error; `body` is the encoded error and becomes a `PortReply` with status 1.
- */
-export declare class UndraPortError extends UndraError {
-  readonly body: Uint8Array;
-  constructor(body: Uint8Array);
 }
 
 export interface UndraPort {}

@@ -74,12 +74,18 @@ assert.equal(decodedWrapped.cause.value, 404);
 assert.equal(hex(encodeValue(errors.TodoErrorCodec, new errors.TodoError.Storage("disk"))), "0300" + "04000000" + "6469736b");
 
 const replyError = (codec, value) => new rt.UndraReplyError(ReplyStatus.Error, encodeValue(codec, value));
-const typed = errors.TodoError.fromReply(replyError(errors.TodoErrorCodec, new errors.TodoError.EmptyTitle()));
+const strings = (...text) => {
+  const w = new UndraWriter();
+  for (const t of text) w.writeStr(t);
+  return w.finish();
+};
+const panicBody = (message, backtrace) => strings(message, backtrace);
+const typed = rt.UndraCallError.mapped(replyError(errors.TodoErrorCodec, new errors.TodoError.EmptyTitle()), errors.TodoErrorCodec);
 assert.ok(typed instanceof errors.TodoError.EmptyTitle);
-const panic = new rt.UndraReplyError(ReplyStatus.Panic, new Uint8Array(0));
-assert.equal(errors.TodoError.fromReply(panic), panic);
+const panic = new rt.UndraReplyError(ReplyStatus.Panic, panicBody("boom", "frame"));
+assert.ok(rt.UndraCallError.mapped(panic, errors.TodoErrorCodec) instanceof rt.UndraCallError.Panicked, "other replies map onto the closed set");
 const plain = new RangeError("plain");
-assert.equal(errors.TodoError.fromReply(plain), plain);
+assert.equal(rt.UndraCallError.mapped(plain, errors.TodoErrorCodec), plain, "a failure that is not Undra's stays itself");
 
 // ----- objects ----------------------------------------------------------------------------
 
@@ -107,10 +113,24 @@ assert.equal(errors.TodoError.fromReply(plain), plain);
   assert.equal(core.calls[1].args, "13000000" + Buffer.from("https://example.com").toString("hex"));
   core.replies.push(encodeValue(codecs.string, "ok"));
   assert.equal(await calc.fetch("u"), "ok");
-  // Anything but an error reply passes through untouched.
-  const panicReply = new rt.UndraReplyError(ReplyStatus.Panic, new Uint8Array(0));
-  core.replies.push(panicReply);
-  await assert.rejects(calc.fetch("u"), (e) => e === panicReply);
+  // Anything but an error reply maps onto the closed set (ADR-032, amendment A).
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.Panic, panicBody("kaboom", "frame")));
+  await assert.rejects(calc.fetch("u"), (e) => e instanceof rt.UndraCallError.Panicked && e.panicMessage === "kaboom" && e.backtrace === "frame");
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.Cancelled, new Uint8Array(0)));
+  await assert.rejects(calc.fetch("u"), (e) => e instanceof rt.UndraCallError.CancelledByCore);
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.BadRequest, strings("stale handle")));
+  await assert.rejects(calc.fetch("u"), (e) => e instanceof rt.UndraCallError.Refused && e.reason === "stale handle");
+  core.replies.push(new rt.UndraTransportError("closed", "the core is closed"));
+  await assert.rejects(calc.fetch("u"), (e) => e instanceof rt.UndraCallError.Unavailable && e.transport.reason === "closed");
+  core.replies.push(encodeValue(codecs.u32, 1));
+  await assert.rejects(calc.fetch("u"), (e) => e instanceof rt.UndraCallError.Malformed, "a result that does not decode");
+  // The caller's own cancellation is not an UndraCallError.
+  const abort = new DOMException("The operation was aborted", "AbortError");
+  core.replies.push(abort);
+  await assert.rejects(calc.fetch("u"), (e) => e === abort);
+  // A call without an error type maps the same way.
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.Panic, panicBody("sync boom", "")));
+  await assert.rejects(calc.add(1, 2), (e) => e instanceof rt.UndraCallError.Panicked && e.panicMessage === "sync boom");
 
   const controller = new AbortController();
   core.replies.push(encodeValue(codecs.string, "ok"));
@@ -134,12 +154,42 @@ assert.equal(errors.TodoError.fromReply(plain), plain);
   assert.deepEqual(seen, [todo]);
   assert.equal(core.calls.at(-1).args, "0200");
 
+  // The core ending a stream itself: the String of SPEC 5.9, read as cancelled by the core or as a panic.
+  const failing = async (iterate) => {
+    try {
+      for await (const _ of iterate()) void _;
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+  const stringItem = (text) => new rt.UndraReplyError(ReplyStatus.Error, strings(text));
+  core.streams.push([stringItem("cancelled: a restore replaced the receiver")]);
+  assert.ok((await failing(() => calc.watch("high"))) instanceof rt.UndraCallError.CancelledByCore, "a stream ended by a restore");
+  core.streams.push([stringItem("cancelled: the runtime shut down")]);
+  assert.ok((await failing(() => calc.ticks())) instanceof rt.UndraCallError.CancelledByCore, "a stream without an error type ended by shutdown");
+  core.streams.push([stringItem("the stream panicked: boom")]);
+  const panicked = await failing(() => calc.ticks());
+  assert.ok(panicked instanceof rt.UndraCallError.Panicked && panicked.panicMessage === "the stream panicked: boom");
+  core.streams.push([new rt.UndraTransportError("closed", "closed")]);
+  assert.ok((await failing(() => calc.ticks())) instanceof rt.UndraCallError.Unavailable, "a stream on a closed core");
+  core.streams.push([bytes("01")]);
+  assert.ok((await failing(() => calc.ticks())) instanceof rt.UndraCallError.Malformed, "a stream item that does not decode");
+
   core.replies.push(encodeValue(codecs.string, "hello, undra"));
   assert.equal(await objects.greet("undra", core), "hello, undra");
   assert.deepEqual(core.calls.at(-1).target, { target: CallTarget.FreeFunction });
   assert.equal(core.calls.at(-1).methodId, UndraIds.Functions.greet);
   core.replies.push(replyError(errors.TodoErrorCodec, new errors.TodoError.EmptyTitle()));
   await assert.rejects(objects.ping(core), (e) => e instanceof errors.TodoError.EmptyTitle);
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.Panic, panicBody("later", "")));
+  await assert.rejects(objects.ping(core), (e) => e instanceof rt.UndraCallError.Panicked, "a failure that is not the function's own error");
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.Panic, panicBody("sync fn", "")));
+  await assert.rejects(objects.greet("undra", core), (e) => e instanceof rt.UndraCallError.Panicked);
+
+  // Constructors are calls: a refused one is an UndraCallError, a typed one is the error.
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.BadRequest, strings("undecodable arguments")));
+  await assert.rejects(objects.Calculator.create(core), (e) => e instanceof rt.UndraCallError.Refused);
 }
 
 // ----- stores -----------------------------------------------------------------------------
@@ -208,6 +258,31 @@ assert.equal(errors.TodoError.fromReply(plain), plain);
     args: "0000",
     signal: undefined,
   });
+  assert.equal(core.reports.length, 0, "a command that succeeds reports nothing");
+
+  // A command never rejects: a failure is reported with the operation as TypeScript spells it, and the promise resolves.
+  core.replies.push(new rt.UndraReplyError(ReplyStatus.BadRequest, strings("stale handle")));
+  await store.setFilter("done");
+  core.replies.push(new rt.UndraTransportError("closed", "the core is closed"));
+  await store.toggle("00112233-4455-6677-8899-aabbccddeeff");
+  assert.deepEqual(core.reports.map((r) => r.operation), ["TodoStore.setFilter", "TodoStore.toggle"]);
+  assert.ok(core.reports[0].error instanceof rt.UndraReplyError, "the raw failure is handed to report, which maps it");
+  core.reports.length = 0;
+
+  // A change that does not decode is reported and skipped, never half applied.
+  core.deliver(9n, 3, ChangeOp.FullValue, new Uint8Array([1]));
+  assert.equal(store.remaining.get(), 4, "an undecodable value is skipped");
+  core.deliver(9n, 3, ChangeOp.FullValue, new Uint8Array([...encodeValue(codecs.u32, 7), 0]));
+  assert.equal(store.remaining.get(), 4, "a value with trailing bytes is skipped whole");
+  assert.deepEqual(core.reports.map((r) => r.operation), ["TodoStore.apply(signal: 3)", "TodoStore.apply(signal: 3)"]);
+  core.reports.length = 0;
+
+  // A store whose observe fails is closed and the failure is an UndraCallError.
+  const gone = new FakeCore();
+  gone.observe = async () => {
+    throw new rt.UndraTransportError("closed", "the core is closed");
+  };
+  await assert.rejects(stores.TodoStore.create(gone), (e) => e instanceof rt.UndraCallError.Unavailable);
 
   // A fallible async constructor maps a typed failure.
   core.replies.push(replyError(errors.TodoErrorCodec, new errors.TodoError.NotFound("db")));

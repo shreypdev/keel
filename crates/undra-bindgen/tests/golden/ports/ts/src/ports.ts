@@ -56,29 +56,37 @@ export function clockPortImpl(impl: Clock): PortImpl {
 
 /**
  * Connectivity changes, sent by the platform.
- * Sends the events of this port from the host to the core.
+ * Sends the events of this port from the host to the core. A failure (a closed core) is logged and passed to `onError`; the methods do not throw.
  */
 export class ConnectivityEvents {
   constructor(private readonly core: UndraCore = UndraCore.shared) {}
 
   /** The network changed. */
   changed(online: boolean, kind: NetKind): void {
-    const w = new UndraWriter();
-    w.writeBool(online);
-    NetKindCodec.encode(w, kind);
-    this.core.event(
-      UndraIds.Ports.Connectivity.portId,
-      UndraIds.Ports.Connectivity.changed,
-      w.finish(),
-    );
+    try {
+      const w = new UndraWriter();
+      w.writeBool(online);
+      NetKindCodec.encode(w, kind);
+      this.core.event(
+        UndraIds.Ports.Connectivity.portId,
+        UndraIds.Ports.Connectivity.changed,
+        w.finish(),
+      );
+    } catch (error) {
+      this.core.report(error, "ConnectivityEvents.changed");
+    }
   }
 
   reset(): void {
-    this.core.event(
-      UndraIds.Ports.Connectivity.portId,
-      UndraIds.Ports.Connectivity.reset,
-      new Uint8Array(0),
-    );
+    try {
+      this.core.event(
+        UndraIds.Ports.Connectivity.portId,
+        UndraIds.Ports.Connectivity.reset,
+        new Uint8Array(0),
+      );
+    } catch (error) {
+      this.core.report(error, "ConnectivityEvents.reset");
+    }
   }
 }
 
