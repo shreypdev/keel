@@ -140,7 +140,10 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
   that is trusted and names the host.
 * The playground and the template show the state in a thin bar (green, amber while reconnecting, red when it is
   over) and a screen with the reason and a Retry button when the dev server cannot be reached at launch.
-* No native library is needed in remote mode: you can skip `undra build --platform android`.
+* No native library is needed in remote mode. The generated Gradle app builds the core itself (its `undraBuild` task runs
+  `undra build --platform android` before every build, and is skipped while the core is unchanged); a build that will
+  only run against `undra dev` can skip it with `./gradlew -PundraSkipBuild=true -PundraDevUrl=... :app:installDebug`
+  (or `UNDRA_SKIP_BUILD=1`).
 
 ## Troubleshooting
 
@@ -156,5 +159,21 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
 | A web page does not reconnect | The page must be allowed to reach the address (`undra dev` accepts pages on this machine and private networks); try `127.0.0.1`, not `localhost`, and a plain `ws://` URL from an `http://` page. |
 | The app's screen resets after every save | That is the current behaviour: state is not carried across a rebuild yet (see above). A change to state-shaping code shows at once from the first screen. |
 
-`undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode); `undra dev --help` has
-the command reference.
+`undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode, `adb` and whether a device is
+attached, `undra` on `PATH`), with the fix command for each gap; `undra dev --help` has the command reference.
+
+## Production builds are not a separate step
+
+The dev loop above is `undra dev`. The other half, the build of what you ship, needs no command either: a project made by
+`undra init` builds its core from the app's own build system, each time only when the core changed.
+
+| App | What runs `undra build` | When | Skipped by |
+|---|---|---|---|
+| Android | the `undraBuild` Gradle task, `preBuild` depends on it | every Gradle build; `assembleRelease` and `bundleRelease` build a release core, anything else a debug one (`-PundraRelease=true\|false` overrides) | Gradle's up-to-date check over `core/src/**`, the Cargo manifests and `build/android/jniLibs`; `-PundraSkipBuild=true`, `UNDRA_SKIP_BUILD=1` |
+| iOS | the **Build the Undra core** Run Script phase, before Compile Sources, with `undra build --platform ios --configuration $CONFIGURATION` | every Xcode build | Xcode's input/output analysis over `ios/Config/undra-core-inputs.xcfilelist` (kept in step with the core's sources by `undra build`) and `undra-core-outputs.xcfilelist` (the XCFramework and a stamp per configuration) |
+| Web | the `undra()` plugin of `web/vite.config.ts` (`@undra/runtime/vite`) | `vite build` and `vite dev`; under `vite dev` also on every change of `core/src` (one build at a time), followed by a full reload | `UNDRA_SKIP_BUILD=1`, the `skip` option |
+
+All three find `undra` on `PATH` (`UNDRA_BIN` names one), and the Xcode phase and the Gradle task also look in `~/.undra/bin`,
+`~/.cargo/bin` and Homebrew's directories, because an app launched from the Dock or an IDE has a short `PATH`. When it is
+missing they say how to install it, in the shape of the CLI's own errors (`error[undra::C0003]`). A build that fails keeps
+its own output (`C0004`); under `vite dev` it shows in the page's error overlay and the next save retries.

@@ -1064,7 +1064,7 @@ mod tests {
             "@get:InputFiles",
             "@get:OutputDirectory",
             "layout.projectDirectory.dir(\"../../core\")",
-            "include(\"src/**\", \"Cargo.toml\", \"build.rs\")",
+            "include(\"src/**\", \"Cargo.toml\", \"Cargo.lock\", \"build.rs\")",
             "layout.projectDirectory.dir(\"../..\").file(\"undra.toml\")",
             "libraries.set(layout.projectDirectory.dir(\"../../build/android/jniLibs\"))",
             // The command, the variant and the escape hatches.

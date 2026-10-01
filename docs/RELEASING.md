@@ -86,6 +86,12 @@ git tag v1.0.0 && git push origin v1.0.0
 gh run watch
 ```
 
+Add the release's notes to `crates/undra-cli/src/migrations.rs` in the same pull request: `undra upgrade` prints the notes of
+every release a project crosses (what an app author must do, what behaves differently, what is new), and a release with
+no entry prints nothing, which tells the author nothing changed. The projects `undra init` writes pin this version
+(`core/Cargo.toml`'s git tag, the runtimes, `UNDRA_VERSION` of `.github/workflows/undra.yml`), so the release has to exist
+for their first CI run and `cargo build` to succeed.
+
 The tag has to be `v` plus the workspace version, on the merged commit, which has to be on
 `main`. The workflow's first job refuses anything else (`scripts/bump-version.sh --check` also
 fails when any version file was missed). It then:

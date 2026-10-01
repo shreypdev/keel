@@ -140,7 +140,7 @@ val undraBuild = tasks.register<UndraBuild>("undraBuild") {
     projectRoot.set(layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@"))
     sources.from(
         fileTree(layout.projectDirectory.dir("@@CORE_FROM_APP@@")) {
-            include("src/**", "Cargo.toml", "build.rs")
+            include("src/**", "Cargo.toml", "Cargo.lock", "build.rs")
         },
         layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@").file("undra.toml"),
         layout.projectDirectory.dir("@@PROJECT_ROOT_FROM_APP@@").file("Cargo.toml"),
