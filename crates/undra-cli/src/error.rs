@@ -44,8 +44,10 @@ pub enum Code {
     Unsupported,
     /// `C0013`: the dev server failed to start or crashed.
     Dev,
-    /// `C0014`: the core and the project disagree about where Undra comes from, or the project is
-    /// on a newer Undra than this `undra`.
+    /// `C0014`: the project's Undra does not match: the core's comes from elsewhere, or it is newer.
+    ///
+    /// The core and the project disagree about where Undra comes from, or the project is on a newer
+    /// Undra than this `undra` (`undra upgrade` moves a project forward only).
     UndraMismatch,
 }
 
