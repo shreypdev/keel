@@ -10,7 +10,7 @@ project(undra_react_native CXX)
 set(UNDRA_RN_CPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../cpp)
 
 add_library(undra_react_native STATIC
-  ${UNDRA_RN_CPP_DIR}/UndraApi.cpp
+  ${UNDRA_RN_CPP_DIR}/UndraApiAndroid.cpp
   ${UNDRA_RN_CPP_DIR}/UndraFrameSource.cpp
   ${UNDRA_RN_CPP_DIR}/UndraHost.cpp
   ${UNDRA_RN_CPP_DIR}/UndraJsi.cpp

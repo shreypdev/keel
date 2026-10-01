@@ -551,7 +551,7 @@ int main() {
   if (api == nullptr) {
     fail("load the core: " + error);
   }
-  check(api->abi_version() == UNDRA_ABI_VERSION, "the core speaks C ABI 1");
+  check(api->abi_version == kAbiVersion, "the core speaks C ABI 1");
   testsWithOneCore(api);
   testsWithSyncPorts(api);
   std::printf("# %d checks passed\n", g_checks);

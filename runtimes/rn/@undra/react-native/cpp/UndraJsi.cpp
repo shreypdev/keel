@@ -411,10 +411,10 @@ void Binding::install(jsi::Runtime &rt) {
   };
 
   define("abiVersion", 0, [self](jsi::Runtime &, const jsi::Value &, const jsi::Value *, size_t) {
-    return jsi::Value(static_cast<double>(self->api.abi_version()));
+    return jsi::Value(static_cast<double>(self->api.abi_version));
   });
   define("schemaHash", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
-    return jsi::Value(rt, jsi::BigInt::fromUint64(rt, self->api.schema_hash()));
+    return jsi::Value(rt, jsi::BigInt::fromUint64(rt, self->api.schema_hash));
   });
   define("schemaJson", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
     return jsi::Value(rt, jsi::String::createFromUtf8(rt, takeString(self->api, self->api.schema_json())));

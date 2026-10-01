@@ -124,7 +124,7 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
     started_.store(false);
     return start_code::kBusy;
   }
-  if (api_.abi_version() != UNDRA_ABI_VERSION) {
+  if (api_.abi_version != kAbiVersion) {
     g_running.store(nullptr);
     started_.store(false);
     return start_code::kAbiMismatch;

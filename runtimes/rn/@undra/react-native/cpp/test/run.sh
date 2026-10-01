@@ -26,10 +26,21 @@ fi
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 libdir="$(dirname "$core")"
-"${CXX:-clang++}" -std=c++20 -g -O1 -Wall -Wextra -Werror \
-  -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined \
-  -I "$pkg/cpp" \
-  "$pkg/cpp/UndraApi.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp" \
+flags=(-std=c++20 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
+  -fno-sanitize-recover=undefined -I "$pkg/cpp")
+
+# 1. The linked shim (UndraApiLinked.cpp, what iOS builds): the core linked into the test.
+echo "# linked core (the iOS shim)"
+"${CXX:-clang++}" "${flags[@]}" \
+  "$pkg/cpp/UndraApiLinked.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp" \
   -L "$libdir" -lundra_core -Wl,-rpath,"$libdir" \
-  -o "$out/host_test"
-"$out/host_test"
+  -o "$out/host_test_linked"
+"$out/host_test_linked"
+
+# 2. The dlopen shim (UndraApiAndroid.cpp, what Android builds): the same test, the core opened at
+#    run time by path, nothing linked.
+echo "# dlopen'ed core (the Android shim)"
+"${CXX:-clang++}" "${flags[@]}" -DUNDRA_RN_DLOPEN "-DUNDRA_RN_CORE_LIBRARY=\"$core\"" \
+  "$pkg/cpp/UndraApiAndroid.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp" \
+  -o "$out/host_test_dlopen"
+"$out/host_test_dlopen"
