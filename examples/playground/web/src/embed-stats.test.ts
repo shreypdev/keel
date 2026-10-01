@@ -276,10 +276,12 @@ describe("instrumentMirror, on the runtime's real Mirror", () => {
     t.mirror.enqueue(changeSet(2));
     t.mirror.enqueue(changeSet(3));
     t.runScheduled();
-    expect(t.entries()).toBe(3);
+    // The flush merges them per signal (ADR-031): the store applies the last value once, and the
+    // flush still counts the three change-sets it consumed.
+    expect(t.entries()).toBe(1);
     expect(t.applied).toHaveLength(1);
     expect(t.applied[0]?.changeSets).toBe(3);
-    expect(t.applied[0]?.us).toBeCloseTo(300, 6);
+    expect(t.applied[0]?.us).toBeCloseTo(100, 6);
   });
 
   test("a direct flush() (what observe does) is measured like a scheduled one", () => {

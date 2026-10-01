@@ -15,7 +15,9 @@
  * starts, so the wasm call that produced the change-set and the microtask wait before the flush
  * are not in it, and it ends when the flush returns, so the React re-render the subscribers
  * schedule is not in it either. A flush that applies several change-sets counts each of them once,
- * with the flush's time divided evenly between them. Change-sets of every store in the core are
+ * with the flush's time divided evenly between them; since ADR-031 the mirror merges them per
+ * signal first (a signal written by many change-sets is applied once per flush), so the time per
+ * change-set falls as the rate rises. Change-sets of every store in the core are
  * measured, not only the ones the visible screen draws, and the loading of the stores (before the
  * first message) is not.
  *
