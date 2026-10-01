@@ -1,9 +1,9 @@
 # Kotlin column of the contract tests
 
-`run.sh` runs the seventeen scenarios of `../scenarios.md` on the JVM, through `dev.undra.runtime.UndraCore`
+`run.sh` runs the eighteen scenarios of `../scenarios.md` on the JVM, through `dev.undra.runtime.UndraCore`
 over the real JNI shim and the real `libundra_core` of `examples/playground/core`, and pipes the verdicts
 through `../check.sh kotlin`. Sources are in `src/dev/undra/contract/`: one file per scenario
-(`S01Primitives.kt` ... `S17Panic.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`) and
+(`S01Primitives.kt` ... `S18CoalescedBurst.kt`), the harness (`Check.kt`, `Scenarios.kt`, `Main.kt`, `World.kt`) and
 the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `MemoryKv`, `CapturingLog`).
 
 ## How it is arranged
@@ -20,10 +20,15 @@ the fakes of scenarios.md's harness section (`ManualClock`, `FakeServer`, `Memor
   the runtime's JVM defaults, and so are `SecureStore` and `Fs` (kept in a throwaway `undra.data.dir`).
   The adapters are `PortImpl`s built on `StandardPorts` and `StandardRecords`; no transport is reimplemented.
 * **Waiting** is a poll every 10 ms with a 5 s limit (`awaitUntil`, `awaitEq`), "for 200 ms nothing happens" is
-  `holdsFor`. A scenario that runs longer than 120 s is reported as failed.
+  `holdsFor`. Each look first drains the mirror on the main thread (`drainLoadedMirror`): since ADR-031 a store
+  shows what the core did on its own at the next frame (the runtime's 16.67 ms grid on the JVM), so without the
+  drain a poll can see a value a frame old — S12 once read `fetching == false` before the change-set that set it
+  to `true` had been applied, and refetched into a fetch still in flight. A scenario that runs longer than 120 s is reported as failed.
 * **The main thread.** `UndraDispatchers.main` is the single `undra-main` thread of a JVM. The mirror applies
-  change-sets there, so a test that takes a mark in the list of raw entries first waits for that thread
-  (`RawStore.mark` -> `flushMainThread`); without it a change-set of the previous step can arrive after the mark.
+  change-sets there, at the next frame for what the core sends on its own (ADR-031), so a test that takes a
+  mark in the list of raw entries first drains the mirror on that thread (`RawStore.mark` -> `flushMainThread`,
+  which calls `mirror.flush()` there); without it a change-set of the previous step can arrive after the mark.
+  S18 makes its calls on the main thread itself, where a synchronous call drains before it returns.
 
 ## Reading the scenarios on the JVM
 

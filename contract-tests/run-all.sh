@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the contract scenarios on every platform and prints the 17-scenario grid.
+# Runs the contract scenarios on every platform and prints the 18-scenario grid.
 #
 #   contract-tests/run-all.sh                 # ts, kotlin and swift (swift only on macOS)
 #   contract-tests/run-all.sh ts kotlin       # a subset
@@ -30,7 +30,7 @@ done
 
 echo
 printf '%-5s' ""; for p in "${platforms[@]}"; do printf '%-9s' "$p"; done; echo
-for n in $(seq -w 1 17); do
+for n in $(seq -w 1 18); do
   id="S$n"
   printf '%-5s' "$id"
   for p in "${platforms[@]}"; do
