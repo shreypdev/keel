@@ -230,13 +230,19 @@ the C++ module drives.)
   `core.registerPort` afterwards ("Ports").
 * `Http` runs on the JS thread's `fetch`: while the JS thread is busy the core's requests wait for it, and bodies
   are base64 across React Native's networking module. A native `Http` is a follow-up if a measurement asks for one.
+* In the background the mirror waits: React Native on Android pauses the JavaScript timers of a backgrounded app,
+  and the mirror's drain runs on one, so what the core produced meanwhile (a `Lifecycle` or `Connectivity` report,
+  a query that refetched) reaches your signals when the app is back, folded to the last value of each signal unless
+  the signal is `#[undra(no_coalesce)]`. The core's own threads run on as long as the system lets the app run. If
+  your app needs every transition, keep them in the core (a counter, or a bounded history in a signal) rather than
+  relying on the mirror to replay them: React and the other UI frameworks render the last value of a frame anyway.
 
 ## What is tested where
 
 | Layer | How | Command | In CI |
 |---|---|---|---|
 | The C++ host (inbox, ports, ownership, shutdown), both shims; the native default ports through the real core (the playground core's `platform` module, a test platform); the JSI layer compiled against React Native 0.87's headers with `-Werror`; the Apple platform against the iOS SDK (macOS) | against the real core, ASan + UBSan | `runtimes/rn/@undra/react-native/cpp/test/run.sh` | `ci.yml`, job "React Native (host + model)", every push and pull request (Linux, clang 18) |
-| The portable `Kv` and `Fs` (layouts against the Swift runtime's own vectors and SHA-256's, `..`, symbolic links, atomic writes, deep deletes) | this machine's file system, ASan + UBSan | the same `run.sh` (step 0) | the same job |
+| The portable `Kv` and `Fs` (layouts against the Swift runtime's own vectors and SHA-256's, `..`, symbolic links, a directory swapped for a link while a read or write walks through it, atomic writes and a writer killed mid-write, deep deletes) | this machine's file system, ASan + UBSan | the same `run.sh` (step 0) | the same job |
 | The Android library's pure Java (the seal against an AES-GCM vector from Node, which `android-adapters` opens too; the network classification) | `javac` and the JDK | `runtimes/rn/@undra/react-native/android/test/run.sh` | the same job |
 | `NativeTransport`, the frame scheduler, the polyfills, `loadNative`, which ports are native for which options, `reactNativeHttp()` | a fake module and a scripted `fetch`, on Node | `npm test` in `runtimes/rn/@undra/react-native` | the same job |
 | Types of the package and its build config | `tsc`, against `@undra/runtime`'s sources and its emitted declarations (`npm run build` in `runtimes/ts/@undra/runtime` first) | `npm run typecheck` | the same job |
@@ -262,7 +268,7 @@ bench, diagnostics, dev loop and parity pieces: the typed failure model, `snapsh
 | JavaScript reload, iOS | debug build on Metro, `POST /reload`: three reloads, one in the middle of the benchmarks (review, before the merge) | four runtimes in one process, 10/10 each |
 | JavaScript reload, Android, with the review's fixes | debug build on Metro, `POST /reload`, one process throughout: an idle reload, two in the middle of the benchmarks and two more in quick succession (6 runtimes); three reloads timed to land inside the self-checks (5 runtimes); then 20 in a row (21 runtimes) | every run that reached its end passed 10/10 (6, 2 and 21 runs; the interrupted ones print no verdict), no `CHECK ... FAIL`, no native crash in `logcat` |
 | Android frame source, per reload | the same reloads with a counter on the choreographer callbacks (not committed) | 0 callbacks pending when the source was destroyed in 66 reloads (26 plain, 40 with the 10k list's Stream running), `posted == ran` every time; the native heap read from `dumpsys meminfo` is flat within the noise (see below) |
-| The default ports (ADR-038 amendment B), on `wt/rn-adapters` | the C++ under ASan + UBSan on macOS: the stores test, then the host test through the real core with each shim; the Java on the JDK; `npm test` | 13 + 20 + 20 checks, the Apple platform compiles against the iOS SDK; 4 Java checks; 59 tests, typecheck clean; the contract column unchanged (17, S17 app-tested) |
+| The default ports (ADR-038 amendment B), on `wt/rn-adapters`, after its review | the C++ under ASan + UBSan on macOS: the stores test, then the host test through the real core with each shim (a reload's start while an old port worker is mid-job included); the Java on the JDK; `npm test` | 15 + 22 + 22 checks, the Apple platform compiles against the iOS SDK; 4 Java checks; 60 tests, typecheck clean; the contract column unchanged (17, S17 app-tested) |
 | The default ports on the devices | iPhone 17 Pro simulator (iOS 26.5) and the `undra-rn` emulator (arm64, API 35), release core, Release app, `scripts/rn-device-checks.sh ios` / `android` | `UNDRA-RN CHECKS 19/19 passed` (iOS: RN01..RN19) and `UNDRA-RN CHECKS 20/20 passed` (Android: RN01..RN20, airplane mode included) |
 | `rn-devices.yml` and the CI job on a GitHub runner | not yet: a runner has not run them | the job's steps were run in a clean clone on the Mac (Linux-only parts, `apt` and `clang++-18`, were not) |
 
