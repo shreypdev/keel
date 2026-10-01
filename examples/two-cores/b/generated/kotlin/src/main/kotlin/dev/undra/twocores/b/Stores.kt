@@ -1893,7 +1893,7 @@ class Todos private constructor(core: UndraCore, handle: Long) : UndraStore(core
     private val _filter: MutableStateFlow<Filter> = signal(Filter.ALL)
     val filter: StateFlow<Filter> = _filter.asStateFlow()
     private val _visible: MutableStateFlow<List<Todo>> = signal(emptyList())
-    /** Computed by the core; read-only. */
+    /** Derived by the core from another list; read-only. Changes arrive as keyed patches. */
     val visible: StateFlow<List<Todo>> = _visible.asStateFlow()
     private val _remaining: MutableStateFlow<UInt> = signal(0u)
     /** Computed by the core; read-only. */
