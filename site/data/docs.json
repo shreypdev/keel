@@ -1,0 +1,22 @@
+{
+  "note": "The docs sidebar and the previous/next pager, written into every docs page by site/scripts/sync-docs-nav.mjs. Also the order of the docs in the search index and llms-full.txt.",
+  "overview": { "file": "index.html", "title": "Overview" },
+  "groups": [
+    { "title": "Start", "pages": [{ "file": "getting-started.html", "title": "Getting started" }] },
+    { "title": "Guides", "pages": [
+      { "file": "concepts.html", "title": "Core concepts" },
+      { "file": "queries.html", "title": "Queries & mutations" },
+      { "file": "ports.html", "title": "Ports & adapters" }
+    ] },
+    { "title": "Reference", "pages": [
+      { "file": "cli.html", "title": "The CLI" },
+      { "file": "architecture.html", "title": "Architecture" },
+      { "file": "errors.html", "title": "Error codes" }
+    ] },
+    { "title": "API overview", "pages": [
+      { "file": "api-swift.html", "title": "Swift", "pager": "API overview, Swift" },
+      { "file": "api-kotlin.html", "title": "Kotlin", "pager": "API overview, Kotlin" },
+      { "file": "api-typescript.html", "title": "TypeScript", "pager": "API overview, TypeScript" }
+    ] }
+  ]
+}

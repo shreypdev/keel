@@ -33,7 +33,7 @@ describe("Kind", () => {
 describe("encodeEnvelope", () => {
   it("lays out magic, version, schema, kind, seq, len, payload (contract vector)", () => {
     const bytes = encodeEnvelope(Kind.Call, 7, SCHEMA, fromHex("aabbcc"));
-    expect(toHex(bytes)).toBe("4b45454c01000807060504030201010700000003000000aabbcc");
+    expect(toHex(bytes)).toBe("554e445201000807060504030201010700000003000000aabbcc");
   });
 
   it("uses a 23-byte header", () => {
@@ -43,9 +43,9 @@ describe("encodeEnvelope", () => {
     expect(encodeEnvelope(Kind.Hello, 0, 0n, new Uint8Array(10)).length).toBe(33);
   });
 
-  it("starts with the magic bytes 4b 45 45 4c", () => {
+  it("starts with the magic bytes 55 4e 44 52", () => {
     const bytes = encodeEnvelope(Kind.Log, 0, 0n, new Uint8Array(0));
-    expect(toHex(bytes.subarray(0, 4))).toBe("4b45454c");
+    expect(toHex(bytes.subarray(0, 4))).toBe("554e4452");
   });
 
   it("returns a tight array (its buffer is exactly as long as the message)", () => {
@@ -78,7 +78,7 @@ describe("encodeEnvelope", () => {
 
 describe("decodeEnvelope", () => {
   it("decodes the contract vector", () => {
-    const env = decodeEnvelope(fromHex("4b45454c01000807060504030201010700000003000000aabbcc"));
+    const env = decodeEnvelope(fromHex("554e445201000807060504030201010700000003000000aabbcc"));
     expect(env.kind).toBe(Kind.Call);
     expect(env.seq).toBe(7);
     expect(env.schemaHash).toBe(72623859790382856n);
@@ -150,7 +150,7 @@ describe("decodeEnvelope", () => {
   it("rejects a wrong magic", () => {
     const valid = encodeEnvelope(Kind.Call, 7, SCHEMA, new Uint8Array(0));
     // Near misses: one byte off, the right letters in lower case, all zero, truncated by a NUL.
-    for (const magic of ["KEEK", "\u006b\u0065\u0065\u006c", "\u0000\u0000\u0000\u0000", "LEEK", "KEE\u0000"]) {
+    for (const magic of ["UNDQ", "\u0075\u006e\u0064\u0072", "\u0000\u0000\u0000\u0000", "VNDR", "UND\u0000"]) {
       const bytes = valid.slice();
       bytes.set(new TextEncoder().encode(magic), 0);
       expectWireError(() => decodeEnvelope(bytes), "bad_magic");

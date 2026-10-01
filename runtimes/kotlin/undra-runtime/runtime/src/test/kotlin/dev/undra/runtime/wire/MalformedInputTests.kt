@@ -168,7 +168,7 @@ class MalformedInputTests : Suite() {
 
         case("BadMagic: reports the four bytes found") {
             assertEq("00000000", assertWire<WireException.BadMagic> { Envelope.decode(ByteArray(23)) }.found)
-            assertEq("4b454558", assertWire<WireException.BadMagic> { Envelope.decode(validEnvelope.copyOf().also { it[3] = 'X'.code.toByte() }) }.found)
+            assertEq("554e4458", assertWire<WireException.BadMagic> { Envelope.decode(validEnvelope.copyOf().also { it[3] = 'X'.code.toByte() }) }.found)
             assertEq("deadbeef", assertWire<WireException.BadMagic> { Envelope.decode(bytesOf(0xDE, 0xAD, 0xBE, 0xEF) + ByteArray(30)) }.found)
         }
 

@@ -232,14 +232,14 @@ final class MalformedInputTests: XCTestCase {
     // MARK: badMagic, unsupportedVersion, schemaMismatch
 
     func testBadMagic() {
-        let bytes = hexToBytes("4b45455801000807060504030201010700000000000000")
+        let bytes = hexToBytes("554e445801000807060504030201010700000000000000")
         expectWireError(.badMagic) {
             _ = try decodeEnvelope(bytes)
         }
     }
 
     func testUnsupportedVersion() {
-        let bytes = hexToBytes("4b45454c02000807060504030201010700000000000000")
+        let bytes = hexToBytes("554e445202000807060504030201010700000000000000")
         expectWireError(.unsupportedVersion(2)) {
             _ = try decodeEnvelope(bytes)
         }
@@ -325,7 +325,7 @@ final class MalformedInputTests: XCTestCase {
             "length 100 at offset 4 exceeds the remaining input"
         )
         XCTAssertEqual(WireError.trailingBytes(count: 3).description, "3 trailing byte(s) after the end of the value")
-        XCTAssertEqual(WireError.badMagic.description, "bad envelope magic (expected 4b45454c)")
+        XCTAssertEqual(WireError.badMagic.description, "bad envelope magic (expected 554e4452)")
         XCTAssertEqual(
             WireError.unsupportedVersion(2).description,
             "unsupported envelope version 2 (this runtime speaks version 1)"

@@ -3,89 +3,87 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keel — One Rust core. Native everywhere.</title>
-<meta name="description" content="Keel is a Rust framework that owns everything under the pixels of native iOS, Android and web apps: domain logic, reactive state, the data layer, persistence and the dev loop. The UI stays SwiftUI, Compose and React.">
+<title>Undra — the Rust core for native apps</title>
+<meta name="description" content="Undra is a Rust framework for sharing business logic across iOS, Android and web. It generates Swift, Kotlin and TypeScript; your UI stays native.">
+<link rel="canonical" href="https://shreypdev.github.io/undra/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Undra">
+<meta property="og:title" content="Undra — the Rust core for native apps">
+<meta property="og:description" content="Write your domain once in Rust. Undra generates native Swift, Kotlin and TypeScript; your UI stays SwiftUI, Compose and React.">
+<meta property="og:url" content="https://shreypdev.github.io/undra/">
+<meta property="og:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Undra — the Rust core for native apps">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Undra — the Rust core for native apps">
+<meta name="twitter:description" content="Write your domain once in Rust. Undra generates native Swift, Kotlin and TypeScript; your UI stays SwiftUI, Compose and React.">
+<meta name="twitter:image" content="https://shreypdev.github.io/undra/assets/og.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"WebSite","@id":"https://shreypdev.github.io/undra/#website","name":"Undra","alternateName":"Undra framework","url":"https://shreypdev.github.io/undra/","description":"Undra is a Rust framework for sharing business logic across iOS, Android and web, with generated native Swift, Kotlin and TypeScript.","inLanguage":"en","publisher":{"@id":"https://shreypdev.github.io/undra/#org"}},
+{"@type":"Organization","@id":"https://shreypdev.github.io/undra/#org","name":"Undra","url":"https://shreypdev.github.io/undra/","logo":"https://shreypdev.github.io/undra/favicon.svg","sameAs":["https://github.com/shreypdev/undra"]},
+{"@type":"SoftwareSourceCode","name":"Undra","codeRepository":"https://github.com/shreypdev/undra","programmingLanguage":"Rust","runtimePlatform":"iOS, Android, Web","license":"https://github.com/shreypdev/undra/blob/main/LICENSE-MIT","dateModified":"2026-09-30"},
+{"@type":"SoftwareApplication","name":"Undra","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","description":"Rust framework and CLI that owns domain logic, reactive state, the data layer and persistence for native iOS, Android and web apps.","url":"https://shreypdev.github.io/undra/","downloadUrl":"https://github.com/shreypdev/undra","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://github.com/shreypdev/undra/blob/main/LICENSE-MIT"}
+]}
+</script>
+<!-- chrome:head -->
 <meta name="theme-color" content="#0a0a0a">
 <meta name="color-scheme" content="dark light">
-<link rel="canonical" href="https://shreypdev.github.io/keel/">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Keel — One Rust core. Native everywhere.">
-<meta property="og:description" content="Domain logic, reactive state, the data layer and persistence in one Rust core. The UI stays SwiftUI, Compose and React.">
-<meta property="og:url" content="https://shreypdev.github.io/keel/">
-<meta name="twitter:card" content="summary">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<script>(function(d){var t;try{t=localStorage.getItem('keel-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
+<link rel="alternate" type="application/rss+xml" title="Undra blog" href="feed.xml">
+<script>(function(d){var t,m=/[?&]theme=(light|dark)/.exec(location.search);try{t=m?m[1]:localStorage.getItem('undra-theme')}catch(e){}if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}d.dataset.theme=t;d.classList.add('js')})(document.documentElement)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..600&amp;family=Instrument+Serif:ital@0;1&amp;display=swap"></noscript>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&amp;family=Geist+Mono:wght@400..500&amp;display=swap"></noscript>
+<!-- /chrome:head -->
 <link rel="stylesheet" href="assets/base.css">
 <link rel="stylesheet" href="assets/home.css">
 </head>
-<body>
+<body data-page="home">
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="./" aria-label="Keel, home">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Keel</span>
-    </a>
-    <nav class="nav" aria-label="Primary">
-      <a class="hide-sm" href="#how">How it works</a>
-      <a class="hide-sm" href="#numbers">Numbers</a>
-      <a class="hide-sm" href="#code">Code</a>
-      <a class="hide-sm" href="#trust">Trust</a>
+    <a class="brand" href="./" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+    <nav class="nav" id="site-nav" aria-label="Primary">
       <a href="docs/">Docs</a>
-      <a class="nav-gh" href="https://github.com/shreypdev/keel" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
-      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme">
-        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
-        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
-      </button>
+      <a href="blog/">Blog</a>
+      <a href="roadmap/">Roadmap</a>
+      <a href="playground/">Playground</a>
+      <span class="sp"></span>
+      <a class="nav-gh" href="https://github.com/shreypdev/undra" rel="noopener">GitHub <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5"/></svg></a>
     </nav>
+    <button class="search-btn" type="button" data-search-open aria-label="Search the docs" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+    <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false" aria-controls="site-nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
 </header>
 
 <main id="main">
 
-<!-- ===================== HERO ===================== -->
+<!-- 1. HERO -->
 <section class="hero">
   <div class="wrap">
-    <a class="eyebrow" href="https://github.com/shreypdev/keel/blob/main/.10x/status.md" rel="noopener"><i></i> v1 complete · MIT OR Apache-2.0</a>
+    <a class="eyebrow" href="roadmap/"><i></i> v1 shipped</a>
     <h1 class="display"><span>One Rust core.</span> <em>Native everywhere.</em></h1>
 
     <div class="hero-grid">
       <div>
-        <p class="hero-sub">Keel owns everything <strong>under the pixels</strong> of your iOS, Android and web apps: domain logic, reactive state, the data layer, persistence and the dev loop. The UI stays 100% native: SwiftUI, Jetpack Compose and React, written by hand.</p>
-        <p class="hero-sub">It is the opposite of a cross-platform UI framework. Your screens never leave the platform. Your <em>logic</em> stops being written three times.</p>
+        <p class="hero-sub">Logic in Rust. UI in SwiftUI, Compose and React.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="docs/getting-started.html">Get started <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
-          <a class="btn btn-ghost" href="https://github.com/shreypdev/keel" rel="noopener">View on GitHub</a>
+          <a class="btn btn-ghost" href="#live">See it live</a>
         </div>
       </div>
-      <div>
-        <div class="install" data-tabs data-label="Install Keel">
-          <div class="tabs-head"></div>
-          <section class="tab-panel" data-label="Install">
-            <p class="tab-label">Install</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">git clone https://github.com/shreypdev/keel.git &amp;&amp; cd keel
-cargo install --path crates/keel-cli    # the `keel` command</code></pre></div>
-          </section>
-          <section class="tab-panel" data-label="New app">
-            <p class="tab-label">New app</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel init myapp    # core + SwiftUI + Compose + React shells
-cd myapp</code></pre></div>
-          </section>
-          <section class="tab-panel" data-label="Dev loop">
-            <p class="tab-label">Dev loop</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel dev    # live core over WebSocket, rebuild on save</code></pre></div>
-          </section>
-          <section class="tab-panel" data-label="Doctor">
-            <p class="tab-label">Doctor</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel doctor    # what your machine is missing, with the fix</code></pre></div>
-          </section>
-        </div>
-        <p class="install-note">Builds an XCFramework, 16&nbsp;KB-aligned <code>.so</code>s and a <code>wasm-opt</code>'d module. <a href="docs/getting-started.html">Full walkthrough</a>.</p>
+      <div class="install" data-tabs data-label="Install Undra">
+        <div class="tabs-head"></div>
+        <div class="tab-panel" data-label="brew"><p class="tab-label">brew</p><div class="cmd"><code>brew install shreypdev/undra/undra</code><button class="copy" type="button" data-copy="brew install shreypdev/undra/undra" aria-label="Copy the brew command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @undra/cli</code><button class="copy" type="button" data-copy="npm install -g @undra/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/undra/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/undra undra-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/undra undra-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <p class="install-note">brew, npm and curl ship with the v1.0.0 release; until it is tagged, use cargo.</p>
       </div>
     </div>
 
@@ -96,7 +94,7 @@ cd myapp</code></pre></div>
           <button class="dg-toggle" type="button" data-dg-toggle aria-pressed="false"><svg class="i-pause" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="1.5" width="3" height="9" rx="1"/><rect x="7" y="1.5" width="3" height="9" rx="1"/></svg><svg class="i-play" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5v9l8-4.5z"/></svg><span>Pause</span></button>
         </div>
 <svg class="dg dg-wide is-static" viewBox="0 0 1200 608" role="img" aria-labelledby="dgw-t dgw-d" data-by="268" focusable="false">
-    <title id="dgw-t">How Keel works</title>
+    <title id="dgw-t">How Undra works</title>
     <desc id="dgw-d">Three native UIs (SwiftUI, Compose, React) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
     <defs>
       <radialGradient id="dgw-halo" cx="50%" cy="50%" r="50%"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.34"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></radialGradient>
@@ -177,7 +175,7 @@ cd myapp</code></pre></div>
     <g data-role="core">
       <rect data-role="core-glow" x="80" y="340" width="1040" height="140" fill="url(#dgw-core)" opacity=".5"/>
       <rect class="core" x="80" y="360" width="1040" height="232" rx="22"/>
-      <text class="t-core serif" x="112" y="432">Rust core</text>
+      <text class="t-core" x="112" y="432">Rust core</text>
       <text class="t-dim mono" x="1088" y="430" text-anchor="end">stores · queries · mutations · persistence · offline queue</text>
       <line class="core-line" x1="112" x2="1088" y1="448" y2="448"/>
       <text class="h-lbl mono" x="112" y="474">store · Todos</text>
@@ -198,7 +196,7 @@ cd myapp</code></pre></div>
     <g class="pulses" data-role="pulses"></g>
   </svg>
 <svg class="dg dg-narrow is-static" viewBox="0 0 360 474" role="img" aria-labelledby="dgn-t dgn-d" data-by="186" focusable="false">
-    <title id="dgn-t">How Keel works</title>
+    <title id="dgn-t">How Undra works</title>
     <desc id="dgn-d">Three native UIs (SwiftUI, Compose, React) sit above the Rust core. A write from any UI crosses the boundary once per transaction. The core commits one binary change-set, which fans out to every UI's local mirror. Reads never cross the boundary.</desc>
     <defs>
       <radialGradient id="dgn-halo" cx="50%" cy="50%" r="50%"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.34"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></radialGradient>
@@ -269,7 +267,7 @@ cd myapp</code></pre></div>
     <g data-role="core">
       <rect data-role="core-glow" x="8" y="220" width="344" height="110" fill="url(#dgn-core)" opacity=".5"/>
       <rect class="core" x="8" y="236" width="344" height="226" rx="18"/>
-      <text class="t-core serif" x="22" y="296" style="font-size:22px">Rust core</text>
+      <text class="t-core" x="22" y="296" style="font-size:22px">Rust core</text>
       <text class="h-lbl mono" x="22" y="322" style="font-size:9.5px">store · Todos</text>
       <g data-chip="todos"><rect class="chip" x="22" y="328" width="54" height="24" rx="7"/><rect class="chip-on dirty" data-role="on" x="22" y="328" width="54" height="24" rx="7"/><text class="chip-t mono" x="49" y="344" text-anchor="middle" style="font-size:10.5px">todos</text></g>
       <g data-chip="filter"><rect class="chip" x="82" y="328" width="54" height="24" rx="7"/><rect class="chip-on" data-role="on" x="82" y="328" width="54" height="24" rx="7"/><text class="chip-t mono" x="109" y="344" text-anchor="middle" style="font-size:10.5px">filter</text></g>
@@ -288,159 +286,100 @@ cd myapp</code></pre></div>
     <g class="pulses" data-role="pulses"></g>
   </svg>
         <ul class="legend" aria-label="Diagram legend">
-          <li><i>1</i> <span>reads never cross: each UI reads its local mirror</span></li>
-          <li><i>2</i> <span>one crossing per transaction</span></li>
-          <li><i>3</i> <span>binary change-sets, fanned out to every mirror</span></li>
+          <li><i></i> <span>reads stay local</span></li>
+          <li><i></i> <span>one crossing</span></li>
+          <li><i></i> <span>change-sets</span></li>
         </ul>
         <ol class="steps" aria-label="What the animation shows">
-          <li><b>Write</b><span>One call crosses the boundary, once per transaction.</span></li>
-          <li><b>Commit</b><span>The core commits and builds one binary change-set.</span></li>
-          <li><b>Apply</b><span>Every mirror patches itself. Every read stays local.</span></li>
+          <li><b>Write</b><span>Once per transaction.</span></li>
+          <li><b>Commit</b><span>One change-set.</span></li>
+          <li><b>Apply</b><span>Every mirror.</span></li>
         </ol>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ===================== THESIS ===================== -->
+<!-- 2. THESIS -->
 <section class="thesis">
-  <div class="wrap thesis-grid">
-    <p class="big reveal">Write the domain once. Keep every screen <em>exactly as native</em> as the platform wants it.</p>
-    <div class="reveal" data-d="1">
-      <div class="plat" aria-label="Platforms"><span><b>iOS</b>SwiftUI</span><span><b>Android</b>Jetpack Compose</span><span><b>Web</b>React</span><span><b>Core</b>Rust</span></div>
-      <p class="lede" style="margin-top:16px">Stores, queries, mutations, persistence and offline behaviour live in the core. Each platform gets generated code a native reviewer would sign off on: <code>@Observable</code> stores, <code>StateFlow</code>s, hooks and signals.</p>
+  <div class="wrap">
+    <p class="big reveal">Write the domain once. Keep every screen <em>exactly as native</em> as the platform wants.</p>
+  </div>
+</section>
+
+<!-- 3. LIVE DEMO -->
+<section class="section" id="live">
+  <div class="wrap">
+    <span class="kicker reveal">Live demo</span>
+    <h2 class="h2 reveal">See it <em>live.</em></h2>
+    <p class="lede reveal" data-d="1">The real Rust core, running in this tab as WebAssembly.</p>
+    <div class="live reveal" data-live>
+      <div class="live-frame">
+        <div class="frame-bar"><span>playground · 10k list</span></div>
+        <div class="frame-body" data-live-mount data-src="playground/?screen=list&amp;stream=1&amp;embed=1">
+          <p class="live-fallback" data-live-note><span>The demo loads as you scroll.</span><noscript>The live demo needs JavaScript.</noscript></p>
+        </div>
+      </div>
+      <div class="live-side">
+        <dl class="counters" aria-label="Live measurements from the demo">
+          <div><dt>Applied</dt><dd><span class="num" data-stat="rate">–</span><small>/ s</small></dd></div>
+          <div><dt>Apply p50</dt><dd><span class="num" data-stat="p50">–</span></dd></div>
+          <div><dt>Apply p99</dt><dd><span class="num" data-stat="p99">–</span></dd></div>
+        </dl>
+        <details class="measured"><summary>Measured in your browser</summary><p>The time the mirror spends applying one change-set to the local signals and notifying subscribers, over the last two seconds, taken with <code>performance.now()</code>. Browsers round that clock (Chrome to 0.1&nbsp;ms), so the smallest values read as &ldquo;under&rdquo; the step. Nothing here is a recording.</p></details>
+        <div class="cta-row left">
+          <a class="btn btn-ghost" href="playground/">Open the playground</a>
+          <!-- pushit:start -->
+          <button class="btn btn-primary" type="button" data-push-it hidden>Push it</button>
+          <!-- pushit:end -->
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ===================== NUMBERS ===================== -->
+<!-- 4. NUMBERS -->
 <section class="section" id="numbers">
   <div class="wrap">
     <span class="kicker reveal">Numbers</span>
-    <h2 class="h2 display reveal">The boundary is cheap. <em>Measured,</em> not promised.</h2>
-    <p class="lede reveal" data-d="1">Reads never cross the language boundary, and lists cross as O(change) patches. The timings come from the benchmark suite in <a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">bench/RESULTS.md</a>, measured on an Apple M5 Pro and guarded by budgets in CI. The two sizes are what <code>keel build</code> reports.</p>
-
-    <div class="stats">
-      <article class="stat w4 reveal" data-bar>
-        <div class="lbl">Synchronous core call, through the C ABI, end to end</div>
-        <div class="val"><span data-count="49.8" data-dec="1" data-final="49.8">49.8</span><small>ns</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:83%"></span></div><div class="meter-cap"><span><b>83%</b> of target</span><span>target ≤ 60 ns</span></div></div>
-        <div class="gate"><b>CI gate</b> dispatch path ≤ 250 ns<br>allocations per call pinned by a test</div>
-      </article>
-      <article class="stat w4 reveal" data-bar data-d="1">
-        <div class="lbl">1&nbsp;KB record, encode and decode round trip</div>
-        <div class="val"><span data-count="228" data-dec="0" data-final="228">228</span><small>ns</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:7.6%"></span></div><div class="meter-cap"><span><b>7.6%</b> of target</span><span>target ≤ 3 µs</span></div></div>
-        <div class="gate"><b>CI gate</b> wire/record1k ≤ 990 ns</div>
-      </article>
-      <article class="stat w4 reveal" data-bar data-d="2">
-        <div class="lbl">One insert into an observed, keyed 10,000-row list</div>
-        <div class="val"><span data-count="6.3" data-dec="1" data-final="6.3">6.3</span><small>µs</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:31.5%"></span></div><div class="meter-cap"><span><b>32%</b> of target</span><span>target ≤ 20 µs</span></div></div>
-        <div class="gate"><b>CI gate</b> keyed_10k/insert ≤ 31 µs</div>
-      </article>
-      <article class="stat reveal" data-bar>
-        <div class="lbl">Change-set for 100 dirty signals, core side</div>
-        <div class="val"><span data-count="2.3" data-dec="1" data-final="2.3">2.3</span><small>µs</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:2.3%"></span></div><div class="meter-cap"><span><b>2.3%</b> of target</span><span>target ≤ 100 µs</span></div></div>
-        <div class="gate"><b>CI gate</b> changeset_100 ≤ 11 µs</div>
-      </article>
-      <article class="stat reveal" data-bar data-d="1">
-        <div class="lbl">Cold start restoring 100&nbsp;KB of state</div>
-        <div class="val"><span data-count="71" data-dec="0" data-final="71">71</span><small>µs</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:2.4%"></span></div><div class="meter-cap"><span><b>2.4%</b> of target</span><span>target ≤ 3 ms</span></div></div>
-        <div class="gate"><b>CI gate</b> cold_start_restore_100kb ≤ 340 µs</div>
-      </article>
-      <article class="stat reveal" data-bar data-d="2">
-        <div class="lbl">Web runtime plus a hello-world core, gzipped wasm</div>
-        <div class="val"><span data-count="85" data-dec="0" data-final="85">85</span><small>KB</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:71%"></span></div><div class="meter-cap"><span><b>71%</b> of budget</span><span>budget ≤ 120 KB</span></div></div>
-        <div class="gate"><b>size</b> printed by <code>keel build</code> against the design budget</div>
-      </article>
-      <article class="stat reveal" data-bar data-d="3">
-        <div class="lbl">Android core, one <code>.so</code> per ABI, release</div>
-        <div class="val"><span data-count="831" data-dec="0" data-final="831">831</span><small>KB</small></div>
-        <div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:69%"></span></div><div class="meter-cap"><span><b>69%</b> of budget</span><span>budget ≤ 1.2 MB</span></div></div>
-        <div class="gate"><b>size</b> printed by <code>keel build</code> against the design budget</div>
-      </article>
+    <h2 class="h2 reveal">The boundary is cheap. <em>Measured,</em> not promised.</h2>
+    <p class="lede reveal" data-d="1">Every number links to its source.</p>
+    <!-- numbers:start -->
+    <div class="stats" role="group" aria-label="Benchmark results, measured on Apple M5 Pro, 18 cores, macOS 26.5">
+    <article class="stat w4 reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">Synchronous core call (C ABI, core side)</a><div class="val"><span data-count="49.8" data-dec="1" data-final="49.8">49.8</span><small>ns</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:83.0%"></span></div><div class="meter-cap"><span><b>83%</b> of budget</span><span>budget ≤ 60 ns</span></div></div></article>
+    <article class="stat w4 reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">1 KB record round trip</a><div class="val"><span data-count="228" data-dec="0" data-final="228">228</span><small>ns</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:7.6%"></span></div><div class="meter-cap"><span><b>7.6%</b> of budget</span><span>budget ≤ 3 µs</span></div></div></article>
+    <article class="stat w4 reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#1-a-keyed-patch-was-olist-not-ochange-with-recorded-list-operations-it-is-ochange-resolved-adr-027" rel="noopener">Insert into a 10,000-row list</a><div class="val"><span data-count="6.3" data-dec="1" data-final="6.3">6.3</span><small>µs</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:31.5%"></span></div><div class="meter-cap"><span><b>32%</b> of budget</span><span>budget ≤ 20 µs</span></div></div></article>
+    <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">Change-set, 100 dirty signals</a><div class="val"><span data-count="2.3" data-dec="1" data-final="2.3">2.3</span><small>µs</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:2.3%"></span></div><div class="meter-cap"><span><b>2.3%</b> of budget</span><span>budget ≤ 100 µs</span></div></div></article>
+    <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md#section-14-rows-measured-on-the-host" rel="noopener">Cold start, 100 KB of state</a><div class="val"><span data-count="71" data-dec="0" data-final="71">71</span><small>µs</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:2.4%"></span></div><div class="meter-cap"><span><b>2.4%</b> of budget</span><span>budget ≤ 3 ms</span></div></div></article>
+    <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/README.md#why-its-fast" rel="noopener">Web core, gzipped wasm</a><div class="val"><span data-count="85" data-dec="0" data-final="85">85</span><small>KB</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:70.8%"></span></div><div class="meter-cap"><span><b>71%</b> of budget</span><span>budget ≤ 120 KB</span></div></div></article>
+    <article class="stat reveal" data-bar><a class="lbl" href="https://github.com/shreypdev/undra/blob/main/README.md#why-its-fast" rel="noopener">Android core, per ABI</a><div class="val"><span data-count="831" data-dec="0" data-final="831">831</span><small>KB</small></div><div class="meter"><div class="meter-track"><span class="meter-fill" style="--w:69.3%"></span></div><div class="meter-cap"><span><b>69%</b> of budget</span><span>budget ≤ 1.2 MB</span></div></div></article>
     </div>
-
-    <div class="story reveal" data-bar>
-      <div>
-        <h3>A list write costs the change, not the list.</h3>
-        <p>Recording the list operation instead of rediscovering it took a one-row insert into a 10,000-row observed list from 536&nbsp;µs to 6.3&nbsp;µs. A keyed patch is now O(change). <a href="https://github.com/shreypdev/keel/blob/main/.10x/adrs/ADR-027-keyed-list-ops-are-recorded-not-diffed.md" rel="noopener">ADR-027</a> has the before and after.</p>
-      </div>
-      <div class="cmp" aria-label="Insert into a 10,000-row list, before and after ADR-027">
-        <div class="cmp-row"><span>diffed</span><span class="track"><span class="fill" style="--w:100%"></span></span><b>536 µs</b></div>
-        <div class="cmp-row new"><span>recorded op</span><span class="track"><span class="fill" style="--w:1.2%"></span></span><b>6.3 µs</b></div>
-        <div class="cmp-row new"><span>update one row</span><span class="track"><span class="fill" style="--w:0.05%"></span></span><b>272 ns</b></div>
-      </div>
-    </div>
-
-    <p class="fine"><strong>How to read this.</strong> Medians from <code>cargo bench</code> (criterion, release, LTO) on an Apple M5 Pro. "Target" is the design's per-device budget; a phone core is slower than this host, so a pass here is necessary, not sufficient. "CI gate" is the regression guard in <code>bench/budgets.toml</code>, about 5x the host median; it fails the build. The two size rows are recorded when the core is built. <strong>Device-measured numbers</strong> (iPhone, mid-range Android, Chromium) are tracked in RESULTS.md and are not claimed here.</p>
+    <details class="measured"><summary>How these are measured</summary><p>Medians from cargo bench (criterion, release, LTO). Budgets are the design's per-device targets; CI gates are regression guards about 5x the host median. Measured on Apple M5 Pro, 18 cores, macOS 26.5. Device-measured rows are not claimed here; they are on the <a href="roadmap/">roadmap</a>.</p></details>
+    <!-- numbers:end -->
   </div>
 </section>
 
-<!-- ===================== HOW IT WORKS ===================== -->
+<!-- 5. HOW IT WORKS -->
 <section class="section" id="how">
   <div class="wrap">
     <span class="kicker reveal">How it works</span>
-    <h2 class="h2 display reveal">Describe once. Generate native. <em>Write once per change.</em></h2>
+    <h2 class="h2 reveal">Describe once. Generate native. <em>Write once per change.</em></h2>
     <div class="how">
-      <article class="how-card reveal">
-        <span class="n">1</span>
-        <h3>Describe it in Rust</h3>
-        <p>Mark your types and functions. The macros emit a schema, and the schema is the only source of truth: nothing public exists that it cannot describe.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">#[keel::api]
-pub struct Todo {
-    pub id: Uuid,
-    pub title: String,
-    pub done: bool,
-}</code></pre></div>
-      </article>
-      <article class="how-card reveal" data-d="1">
-        <span class="n">2</span>
-        <h3>Generate native code</h3>
-        <p><code>keel bindgen</code> reads the schema and writes Swift, Kotlin and TypeScript. No wrappers, no reflection, no <code>Any</code>. Golden files lock the output.</p>
-        <ul class="tree" aria-label="Generated files">
-          <li><span class="tok-dim">$</span> <b>keel bindgen</b></li>
-          <li><span class="tok-acc">+</span> generated/swift/…/<b>Stores.swift</b></li>
-          <li><span class="tok-acc">+</span> generated/kotlin/…/<b>Stores.kt</b></li>
-          <li><span class="tok-acc">+</span> generated/ts/src/<b>stores.ts</b></li>
-        </ul>
-      </article>
-      <article class="how-card reveal" data-d="2">
-        <span class="n">3</span>
-        <h3>Read locally, write once</h3>
-        <p>Each platform holds a mirror of your state. A write crosses once; the change-set updates every signal it touched in a single main-thread apply.</p>
-        <div class="flow" aria-label="One write">
-          <div><b>store.add("milk")</b> crosses once</div>
-          <div class="arrow">↓</div>
-          <div>change-set <b>todos</b> · <b>visible</b> · <b>remaining</b></div>
-          <div class="arrow">↓</div>
-          <div>mirrors patched, reads stay local</div>
-        </div>
-      </article>
+      <article class="how-card reveal"><span class="n" aria-hidden="true"></span><h3>Describe it</h3><p>Rust is the source of truth.</p></article>
+      <article class="how-card reveal" data-d="1"><span class="n" aria-hidden="true"></span><h3>Generate it</h3><p>Swift, Kotlin, TypeScript.</p></article>
+      <article class="how-card reveal" data-d="2"><span class="n" aria-hidden="true"></span><h3>Write once</h3><p>Reads stay local.</p></article>
     </div>
-  </div>
-</section>
-
-<!-- ===================== CODE ===================== -->
-<section class="section codesec" id="code">
-  <div class="wrap">
-    <span class="kicker reveal">What it looks like</span>
-    <h2 class="h2 display reveal">Write it once in Rust. <em>Read it natively.</em></h2>
-    <p class="lede reveal" data-d="1">The shapes below come from the README and from <a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">examples/playground</a>, which runs one core on Chrome, an iPhone simulator and an Android emulator.</p>
-
-    <div class="panel reveal" data-tabs data-label="Code samples">
+    <details class="reveal-code">
+      <summary>Show the generated Swift, Kotlin and TypeScript</summary>
+<div class="panel" data-tabs data-label="Code samples">
       <div class="tabs-head"></div>
 
       <section class="tab-panel" data-label="Rust core">
         <p class="tab-label">Rust core</p>
-<div class="code"><div class="code-bar"><span>core/src/todos.rs</span></div><pre><code data-lang="rust">use keel::prelude::*;
+<div class="code"><div class="code-bar"><span>core/src/todos.rs</span></div><pre><code data-lang="rust">use undra::prelude::*;
 
 /// One item of the to-do list.
-#[keel::api]
+#[undra::api]
 pub struct Todo {
     pub id: Uuid,
     pub title: String,
@@ -448,28 +387,27 @@ pub struct Todo {
 }
 
 /// Why an item could not be added.
-#[keel::error]
+#[undra::error]
 pub enum TodoError {
     #[error("the title cannot be empty")]
     EmptyTitle,
 }
 
 /// The to-do list: what every UI observes and calls.
-#[keel::store]
+#[undra::store]
 pub struct Todos {
-    #[keel(key = "id")]
+    #[undra(key = "id")]
     todos: Signal&lt;Vec&lt;Todo&gt;&gt;,
     filter: Signal&lt;Filter&gt;,
     visible: Computed&lt;Vec&lt;Todo&gt;&gt;,
     remaining: Computed&lt;u32&gt;,
 }
 
-#[keel::api(store)]
+#[undra::api(store)]
 impl Todos {
     pub async fn add(&amp;self, title: String) -&gt; Result&lt;Todo, TodoError&gt; { /* … */ }
     pub fn set_filter(&amp;self, filter: Filter) { /* … */ }
 }</code></pre></div>
-        <p><strong>One definition.</strong> <code>visible</code> and <code>remaining</code> are computed in the core and arrive in the same change-set as the write that caused them.</p>
       </section>
 
       <section class="tab-panel" data-label="SwiftUI">
@@ -500,7 +438,6 @@ struct TodosScreen: View {
         }
     }
 }</code></pre></div>
-        <p><strong>No wrappers.</strong> <code>add(title:)</code> is <code>async throws(TodoError)</code>; the store is <code>@MainActor @Observable</code>.</p>
       </section>
 
       <section class="tab-panel" data-label="Compose">
@@ -528,17 +465,16 @@ viewModelScope.launch {
     try { store.add(draft) }
     catch (e: TodoError) { /* TodoError.EmptyTitle */ }
 }</code></pre></div>
-        <p><strong>No extra module.</strong> <code>collectAsState()</code> on the store's <code>StateFlow</code>s; <code>add</code> is a <code>suspend fun</code> that throws the typed error.</p>
       </section>
 
       <section class="tab-panel" data-label="React">
         <p class="tab-label">React</p>
-<div class="code"><div class="code-bar"><span>TodosView.tsx</span></div><pre><code data-lang="tsx">// React: hooks from @keel/runtime/react (vue, svelte and solid adapters ship too).
-import { useKeel, useSignal } from "@keel/runtime/react";
+<div class="code"><div class="code-bar"><span>TodosView.tsx</span></div><pre><code data-lang="tsx">// React: hooks from @undra/runtime/react (vue, svelte and solid adapters ship too).
+import { useUndra, useSignal } from "@undra/runtime/react";
 import { Todos, TodoError } from "@playground/core";
 
 export function TodosView() {
-  const store = useKeel(Todos);            // undefined until it exists
+  const store = useUndra(Todos);            // undefined until it exists
   const todos = useSignal(store?.visible);
   const remaining = useSignal(store?.remaining);
 
@@ -551,20 +487,19 @@ export function TodosView() {
   }
   /* … render todos, `${remaining} left` … */
 }</code></pre></div>
-        <p><strong>Hooks, not glue.</strong> <code>useSignal</code> is <code>useSyncExternalStore</code> over the mirror; <code>useKeel</code> creates the store on mount and closes it on unmount.</p>
       </section>
 
       <section class="tab-panel" data-label="Queries">
         <p class="tab-label">Queries</p>
 <div class="code"><div class="code-bar"><span>core/src/remote.rs</span></div><pre><code data-lang="rust">/// The items of a server list, cached per list, fresh for 30 s, persisted.
-#[keel::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
+#[undra::query(key = "remote-todos:{list}", stale = "30s", persist, retry = 1)]
 pub async fn remote_todos(ctx: &amp;Ctx, list: String) -&gt; Result&lt;Vec&lt;RemoteTodo&gt;, RemoteError&gt; {
     let url = endpoint(ctx, &amp;format!("/lists/{list}/todos"))?;
     parse(&amp;send(ctx, HttpRequest::get(url)).await?)
 }
 
 /// Shows the item at once; takes it back if the server refuses.
-#[keel::api]
+#[undra::api]
 pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt; Result&lt;RemoteTodo, RemoteError&gt; {
     // …build `placeholder`…
     ctx.mutate::&lt;PostRemoteTodoMutation&gt;((list, title))
@@ -573,191 +508,135 @@ pub async fn create_remote_todo(ctx: &amp;Ctx, list: String, title: String) -&gt
         })
         .await
 }</code></pre></div>
-        <p><strong>The data layer is in the core.</strong> Staleness, dedup, retry with jitter, optimistic updates with surgical rollback and an offline queue replayed on reconnect.</p>
       </section>
     </div>
+    </details>
   </div>
 </section>
 
-<!-- ===================== FEATURES ===================== -->
+<!-- 6. FEATURES -->
 <section class="section" id="features">
   <div class="wrap">
     <span class="kicker reveal">What's in v1</span>
-    <h2 class="h2 display reveal">Everything under the pixels, <em>in one place.</em></h2>
-    <div class="bento">
-
-      <article class="feat wide reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg></span>
-        <h3>Stores, signals and computeds</h3>
-        <p>A store is an object with reactive fields. Signals hold state, computeds derive from it, and a transaction batches writes into <strong>one</strong> change-set. Only signals a platform observes are sent.</p>
-<div class="code"><div class="code-bar"><span>counter.rs</span></div><pre><code data-lang="rust">pub fn add(&amp;self, amount: i32) {
-    self.ctx.txn(|| {
-        self.count.update(|c| *c = c.saturating_add(amount));
-        self.changes.update(|n| *n = n.saturating_add(1));
-    });   // one transaction, one change-set, `parity` included
-}</code></pre></div>
-        <div class="more"><a href="docs/concepts.html">Core concepts →</a></div>
-      </article>
-
-      <article class="feat wide reveal" data-d="1">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></span>
-        <h3>Queries, mutations and offline</h3>
-        <p><code>#[keel::query]</code> and <code>#[keel::mutation]</code> give you a cache with staleness, dedup, retry, persistence and an offline queue. Optimistic updates roll back precisely: only what the failed mutation wrote is restored.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">rust</span></span></div><pre><code data-lang="rust">ctx.mutate::&lt;PostRemoteTodoMutation&gt;((list, title))
-    .optimistic(|cache| { /* show it now */ })
-    .await   // refused? the optimistic write is undone</code></pre></div>
-        <div class="more"><a href="docs/queries.html">Queries &amp; mutations →</a></div>
-      </article>
-
-      <article class="feat reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></svg></span>
-        <h3>Ports and adapters</h3>
-        <p>The core touches the world through ten ports. Each platform ships default adapters; tests get deterministic fakes.</p>
-        <div class="ports" aria-label="The ten ports"><span>Http</span><span>Kv</span><span>SecureStore</span><span>Fs</span><span>Clock</span><span>Rng</span><span>Log</span><span>Timer</span><span>Connectivity</span><span>Lifecycle</span></div>
-        <div class="more"><a href="docs/ports.html">Ports &amp; adapters →</a></div>
-      </article>
-
-      <article class="feat reveal" data-d="1">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span>
-        <h3><code>keel dev</code></h3>
-        <p>Serve the core over a WebSocket, rebuild on save, and point a simulator or browser tab at it. Edit Rust, reload the app, no rebuild of the UI.</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">keel dev                        # 127.0.0.1:7443
-keel dev --addr 0.0.0.0:7443   # reachable from a phone</code></pre></div>
-        <div class="more"><a href="docs/cli.html">The CLI →</a></div>
-      </article>
-
-      <article class="feat reveal" data-d="2">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8 7.5 9.5 4.4-1.5 7.5-5.1 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span>
-        <h3>Contract-tested on all three</h3>
-        <p>Seventeen wire-level scenarios run against the real core on Swift, Kotlin and TypeScript. 51 of 51 pass.</p>
-        <div class="ports"><span>keyed patch</span><span>optimistic rollback</span><span>offline replay</span><span>snapshot/restore</span><span>schema mismatch</span><span>panic containment</span></div>
-      </article>
-
-      <article class="feat reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
-        <h3>Diagnostics that teach</h3>
-        <p>Every macro mistake says what happened, why, and how to fix it.</p>
-<pre class="diag"><span class="e">error[keel::E0012]</span>: `Vec&lt;Box&lt;dyn Any&gt;&gt;` cannot cross the boundary
-  = <span class="d">note:</span> trait objects have no wire representation
-  = <span class="h">help:</span> make `items` a concrete `#[keel::api]`
-          type, or an enum listing the cases you need
-  = <span class="d">docs:</span> https://keel.dev/errors/E0012</pre>
-      </article>
-
-      <article class="feat reveal" data-d="1">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
-        <h3>Keyed lists, O(change)</h3>
-        <p>Insert, remove, update and move cross as one-operation patches, however long the list is. On a 10,000-row list: <strong>6.3&nbsp;µs</strong> to insert, <strong>272&nbsp;ns</strong> to update, <strong>9.7&nbsp;µs</strong> to move.</p>
-        <div class="more"><a href="docs/concepts.html#keyed-lists">Keyed lists →</a></div>
-      </article>
-
-      <article class="feat reveal" data-d="2">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a8 3 0 0 0 16 0 8 3 0 0 0-16 0z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
-        <h3>Snapshots and a schema gate</h3>
-        <p>Stores snapshot and restore for crash recovery. Every core carries a schema hash, checked at load and at build; a mismatched UI and core refuse to talk.</p>
-        <div class="more"><a href="docs/architecture.html">Architecture →</a></div>
-      </article>
-
-      <article class="feat reveal">
-        <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4c-2 0-3 1-3 3v2c0 1.5-.8 2.6-2 3 1.2.4 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5.8 2.6 2 3-1.2.4-2 1.5-2 3v2c0 2-1 3-3 3"/></svg></span>
-        <h3>Typed, idiomatic output</h3>
-        <p>Records, enums and errors become what each language expects: Swift <code>async throws(TodoError)</code>, Kotlin <code>suspend</code> plus sealed classes, TypeScript promises and <code>instanceof</code>.</p>
-        <div class="more"><a href="docs/api-swift.html">API overviews →</a></div>
-      </article>
+    <h2 class="h2 reveal">Everything under the pixels, <em>in one place.</em></h2>
+    <div class="feats">
+      <a class="feat reveal" href="docs/concepts.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5"/></svg></span><b>Stores and signals</b><span>One change-set</span></a>
+      <a class="feat reveal" data-d="1" href="docs/queries.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></span><b>Queries and mutations</b><span>Optimistic updates</span></a>
+      <a class="feat reveal" data-d="2" href="docs/queries.html#the-offline-queue"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span><b>Offline queue</b><span>Replays on reconnect</span></a>
+      <a class="feat reveal" data-d="3" href="docs/ports.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></svg></span><b>Ports and adapters</b><span>Ten, with fakes</span></a>
+      <a class="feat reveal" href="https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md" rel="noopener"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 8 7.5 9.5 4.4-1.5 7.5-5.1 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg></span><b>Contract-tested</b><span>51 of 51 pass</span></a>
+      <a class="feat reveal" data-d="1" href="docs/cli.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span><b>The dev loop</b><span>Edit Rust, reload</span></a>
+      <a class="feat reveal" data-d="2" href="docs/errors.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5M12 16.5v.01"/><path d="M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span><b>Teaching diagnostics</b><span>What, why, fix</span></a>
+      <a class="feat reveal" data-d="3" href="docs/architecture.html"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7a8 3 0 0 0 16 0 8 3 0 0 0-16 0z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span><b>Snapshot and restore</b><span>Crash recovery</span></a>
     </div>
   </div>
 </section>
 
-<!-- ===================== TRUST ===================== -->
+<!-- 7. TRUST -->
 <section class="section" id="trust">
   <div class="wrap">
     <span class="kicker reveal">Receipts</span>
-    <h2 class="h2 display reveal">Trust it because you can <em>check it.</em></h2>
+    <h2 class="h2 reveal">Trust it because you can <em>check it.</em></h2>
     <div class="trust">
       <article class="tcard t-tests reveal" data-bar>
-        <h3>Tests across five languages</h3>
-        <div class="big"><span data-count="3800" data-dec="0" data-final="3,800">3,800</span>+<small>all green in one pass</small></div>
+        <h3><a href="https://github.com/shreypdev/undra#why-you-can-trust-it" rel="noopener">Tests across five languages</a></h3>
+        <div class="big"><span data-count="3800" data-dec="0" data-final="3,800">3,800</span>+</div>
         <div class="seg" role="img" aria-label="Rust 2,109, TypeScript 897, Kotlin 454, Swift 328, plus wasm and C ABI suites"><i style="--w:55.7%"></i><i style="--w:23.7%"></i><i style="--w:12%"></i><i style="--w:8.6%"></i></div>
-        <ul class="seg-key"><li>Rust<b>2,109</b></li><li>TypeScript<b>897</b></li><li>Kotlin<b>454</b></li><li>Swift<b>328</b></li><li>wasm / C ABI acceptance suites</li></ul>
-        <p>Property tests and a byte-fuzz harness on the wire decoders. The unsafe boundary runs under ASan and Miri in review.</p>
+        <ul class="seg-key" role="list"><li>Rust<b>2,109</b></li><li>TypeScript<b>897</b></li><li>Kotlin<b>454</b></li><li>Swift<b>328</b></li></ul>
       </article>
-
       <article class="tcard t-cells reveal" data-bar data-d="1">
-        <h3>Contract scenarios on every platform</h3>
-        <div class="big">51<small>/ 51 cells</small></div>
+        <h3><a href="https://github.com/shreypdev/undra/blob/main/contract-tests/scenarios.md" rel="noopener">17 scenarios on 3 platforms</a></h3>
+        <div class="big">51<small>/ 51 pass</small></div>
         <div class="grid51" role="img" aria-label="17 scenarios by 3 platforms, all passing">
           <span class="r">Swift</span><i style="--i:0" title="S01 primitives round-trip (Swift): pass"></i><i style="--i:1" title="S02 records, enums and errors (Swift): pass"></i><i style="--i:2" title="S03 sync call (Swift): pass"></i><i style="--i:3" title="S04 async call (Swift): pass"></i><i style="--i:4" title="S05 error propagation (Swift): pass"></i><i style="--i:5" title="S06 cancellation (Swift): pass"></i><i style="--i:6" title="S07 stream with backpressure (Swift): pass"></i><i style="--i:7" title="S08 store observe: initial change-set (Swift): pass"></i><i style="--i:8" title="S09 transaction: a single change-set (Swift): pass"></i><i style="--i:9" title="S10 keyed patch (Swift): pass"></i><i style="--i:10" title="S11 computed (Swift): pass"></i><i style="--i:11" title="S12 query: fetch, stale, refetch (Swift): pass"></i><i style="--i:12" title="S13 optimistic mutation and rollback (Swift): pass"></i><i style="--i:13" title="S14 offline queue replay (Swift): pass"></i><i style="--i:14" title="S15 snapshot and restore (Swift): pass"></i><i style="--i:15" title="S16 schema mismatch rejection (Swift): pass"></i><i style="--i:16" title="S17 panic containment (Swift): pass"></i>
           <span class="r">Kotlin</span><i style="--i:0" title="S01 primitives round-trip (Kotlin): pass"></i><i style="--i:1" title="S02 records, enums and errors (Kotlin): pass"></i><i style="--i:2" title="S03 sync call (Kotlin): pass"></i><i style="--i:3" title="S04 async call (Kotlin): pass"></i><i style="--i:4" title="S05 error propagation (Kotlin): pass"></i><i style="--i:5" title="S06 cancellation (Kotlin): pass"></i><i style="--i:6" title="S07 stream with backpressure (Kotlin): pass"></i><i style="--i:7" title="S08 store observe: initial change-set (Kotlin): pass"></i><i style="--i:8" title="S09 transaction: a single change-set (Kotlin): pass"></i><i style="--i:9" title="S10 keyed patch (Kotlin): pass"></i><i style="--i:10" title="S11 computed (Kotlin): pass"></i><i style="--i:11" title="S12 query: fetch, stale, refetch (Kotlin): pass"></i><i style="--i:12" title="S13 optimistic mutation and rollback (Kotlin): pass"></i><i style="--i:13" title="S14 offline queue replay (Kotlin): pass"></i><i style="--i:14" title="S15 snapshot and restore (Kotlin): pass"></i><i style="--i:15" title="S16 schema mismatch rejection (Kotlin): pass"></i><i style="--i:16" title="S17 panic containment (Kotlin): pass"></i>
           <span class="r">TS</span><i style="--i:0" title="S01 primitives round-trip (TS): pass"></i><i style="--i:1" title="S02 records, enums and errors (TS): pass"></i><i style="--i:2" title="S03 sync call (TS): pass"></i><i style="--i:3" title="S04 async call (TS): pass"></i><i style="--i:4" title="S05 error propagation (TS): pass"></i><i style="--i:5" title="S06 cancellation (TS): pass"></i><i style="--i:6" title="S07 stream with backpressure (TS): pass"></i><i style="--i:7" title="S08 store observe: initial change-set (TS): pass"></i><i style="--i:8" title="S09 transaction: a single change-set (TS): pass"></i><i style="--i:9" title="S10 keyed patch (TS): pass"></i><i style="--i:10" title="S11 computed (TS): pass"></i><i style="--i:11" title="S12 query: fetch, stale, refetch (TS): pass"></i><i style="--i:12" title="S13 optimistic mutation and rollback (TS): pass"></i><i style="--i:13" title="S14 offline queue replay (TS): pass"></i><i style="--i:14" title="S15 snapshot and restore (TS): pass"></i><i style="--i:15" title="S16 schema mismatch rejection (TS): pass"></i><i style="--i:16" title="S17 panic containment (TS): pass"></i>
         </div>
-        <p class="grid51-cap">S01 primitives … S17 panic containment</p>
-        <a class="tlink" href="https://github.com/shreypdev/keel/blob/main/contract-tests/scenarios.md" rel="noopener">Read the scenarios →</a>
       </article>
-
       <article class="tcard t-rev reveal">
-        <h3>Four adversarial review cycles</h3>
-        <p>Signals, runtime, macros and ffi were each attacked by a reviewer who did not write them. Every High and Medium finding was fixed and independently re-verified; the ffi fixes were re-verified under ASan and Miri.</p>
+        <h3><a href="https://github.com/shreypdev/undra/tree/main/.10x/reviews" rel="noopener">Four adversarial reviews</a></h3>
         <ul class="rev-list">
-          <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-signals-review.md" rel="noopener">keel-signals review</a><span>closed</span></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-runtime-review.md" rel="noopener">keel-runtime review</a><span>closed</span></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-macros-review.md" rel="noopener">keel-macros review</a><span>closed</span></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/.10x/reviews/2026-09-30-keel-ffi-review.md" rel="noopener">keel-ffi review</a><span>closed · ASan + Miri</span></li>
+          <li>signals</li>
+          <li>runtime</li>
+          <li>macros</li>
+          <li>ffi<span>ASan + Miri</span></li>
         </ul>
       </article>
-
       <article class="tcard t-app reveal" data-d="1">
-        <h3>The reference app is real</h3>
-        <p><a href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">examples/playground</a> uses only public APIs and runs one Rust core on Chrome, an iPhone simulator and an Android emulator: todos, a counter, a 10,000-row keyed list, and remote queries with an offline switch. Proof screenshots are committed.</p>
-        <a class="tlink" href="https://github.com/shreypdev/keel/tree/main/examples/playground/.proof" rel="noopener">See the proof →</a>
+        <h3><a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">The reference app is real</a></h3>
+        <a class="tlink" href="https://github.com/shreypdev/undra/tree/main/examples/playground/.proof" rel="noopener">See the proof →</a>
       </article>
     </div>
   </div>
 </section>
 
-<!-- ===================== PRINCIPLES ===================== -->
+<!-- 8. PRINCIPLES -->
 <section class="section" id="principles">
   <div class="wrap">
     <span class="kicker reveal">Principles</span>
-    <h2 class="h2 display reveal">Twelve rules, <em>enforced in review.</em></h2>
-    <p class="lede reveal" data-d="1">The constitution every change is held to, human or agent. <a href="docs/architecture.html#constitution">Read the digest</a> or the source, <a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">CLAUDE.md</a>.</p>
+    <h2 class="h2 reveal">Twelve rules, <em>enforced.</em></h2>
     <div class="rules reveal">
-      <div class="rule"><span class="r">R1</span><div><b>The schema is the only truth</b><span>A public type exists only if the schema can describe it. Every language's output derives from it.</span></div></div>
-      <div class="rule"><span class="r">R2</span><div><b>unsafe has one home</b><span>Only keel-ffi (plus one schema loader in the CLI). Every block carries a SAFETY comment; every other crate forbids it.</span></div></div>
-      <div class="rule"><span class="r">R3</span><div><b>Generated code passes native review</b><span>A Swift, Kotlin or TypeScript engineer who never saw Rust would write it that way. Golden files lock it.</span></div></div>
-      <div class="rule"><span class="r">R4</span><div><b>Every feature lands whole</b><span>Unit tests, contract scenarios, a benchmark if the boundary moves, docs on every pub item.</span></div></div>
-      <div class="rule"><span class="r">R5</span><div><b>Reads never cross the boundary</b><span>Writes cross once per transaction. No generated getter calls into the core.</span></div></div>
-      <div class="rule"><span class="r">R6</span><div><b>Nothing escapes as a panic</b><span>Every boundary entry is guarded and every error is a typed value.</span></div></div>
-      <div class="rule"><span class="r">R7</span><div><b>Compatibility is checked</b><span>Schema hash at load and at build. Breaking the wire is a major version and an ADR.</span></div></div>
-      <div class="rule"><span class="r">R8</span><div><b>Macro errors teach</b><span>Code, what, why, fix, docs link.</span></div></div>
-      <div class="rule"><span class="r">R9</span><div><b>Budgets are tests</b><span>Benchmarks live in bench/; a regression fails CI.</span></div></div>
-      <div class="rule"><span class="r">R10</span><div><b>We ship on it first</b><span>examples/playground uses only public APIs.</span></div></div>
-      <div class="rule"><span class="r">R11</span><div><b>Boundary changes need an ADR</b><span>Wire, runtime model, threading or a generated shape: decision record before code.</span></div></div>
-      <div class="rule"><span class="r">R12</span><div><b>The core is deterministic</b><span>No wall clock, randomness or threads outside the Clock, Rng and Timer ports and the runtime.</span></div></div>
+      <a class="rule" href="docs/architecture.html#constitution" title="The schema is the only truth. A public type exists only if the schema can describe it. Every language's output derives from it."><b>One source of truth</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="unsafe has one home. Only undra-ffi (plus one schema loader in the CLI). Every block carries a SAFETY comment; every other crate forbids it."><b>unsafe has one home</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Generated code passes native review. A Swift, Kotlin or TypeScript engineer who never saw Rust would write it that way. Golden files lock it."><b>Native-reviewable</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Every feature lands whole. Unit tests, contract scenarios, a benchmark if the boundary moves, docs on every pub item."><b>Features land whole</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Reads never cross the boundary. Writes cross once per transaction. No generated getter calls into the core."><b>Reads never cross</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Nothing escapes as a panic. Every boundary entry is guarded and every error is a typed value."><b>No panics escape</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Compatibility is checked. Schema hash at load and at build. Breaking the wire is a major version and an ADR."><b>Compatibility checked</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Macro errors teach. Code, what, why, fix, docs link."><b>Macro errors teach</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Budgets are tests. Benchmarks live in bench/; a regression fails CI."><b>Budgets are tests</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="We ship on it first. examples/playground uses only public APIs."><b>Dogfooded</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="Boundary changes need an ADR. Wire, runtime model, threading or a generated shape: decision record before code."><b>ADR first</b></a>
+      <a class="rule" href="docs/architecture.html#constitution" title="The core is deterministic. No wall clock, randomness or threads outside the Clock, Rng and Timer ports and the runtime."><b>Deterministic core</b></a>
+    </div>
+    <p class="more-row"><a class="tlink" href="docs/architecture.html#constitution">Read the digest →</a></p>
+  </div>
+</section>
+
+<!-- 9. COMPARED -->
+<section class="section" id="compared">
+  <div class="wrap">
+    <span class="kicker reveal">Compared</span>
+    <h2 class="h2 reveal">Honest <em>comparisons.</em></h2>
+    <div class="cards4">
+      <a class="card reveal" href="blog/undra-vs-kotlin-multiplatform/"><h3>Undra vs Kotlin Multiplatform</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
+      <a class="card reveal" href="blog/undra-vs-uniffi-and-crux/" data-d="1"><h3>Undra vs UniFFI and Crux</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
+      <a class="card reveal" href="blog/why-undra-keeps-your-ui-native/" data-d="2"><h3>Why Undra keeps your UI native</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
+      <a class="card reveal" href="blog/reads-never-cross-the-boundary/" data-d="3"><h3>Reads never cross the boundary</h3><span class="go" aria-hidden="true"><i>→</i></span></a>
     </div>
   </div>
 </section>
 
-<!-- ===================== FINAL CTA ===================== -->
+<!-- 10. ROADMAP TEASER -->
+<section class="section" id="roadmap-teaser">
+  <div class="wrap">
+    <span class="kicker reveal">Roadmap</span>
+    <h2 class="h2 reveal">v1.0 is out. <em>In flight now.</em></h2>
+    <ul class="now3 reveal">
+      <li><span class="st">Now</span>Distribution: brew, npm, curl, cargo</li>
+      <li><span class="st">Now</span>Harsh-conditions benchmarks</li>
+      <li><span class="st">Now</span>Device-measured numbers</li>
+    </ul>
+    <p class="more-row"><a class="tlink" href="roadmap/">See the full roadmap →</a></p>
+  </div>
+</section>
+
+<!-- 11. FINAL CTA -->
 <section class="final">
   <div class="wrap">
     <div class="final-card reveal">
-      <div>
-        <h2 class="display">Build the part <em>under the pixels</em> once.</h2>
-        <p>Clone it, run <code>keel init</code>, and open the shells. Or start with the playground, which is the same thing fully built.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="docs/getting-started.html">Read the docs</a>
-          <a class="btn btn-ghost" href="https://github.com/shreypdev/keel/tree/main/examples/playground" rel="noopener">Open the playground</a>
-        </div>
-      </div>
-      <div class="install" data-tabs data-label="Quick start">
+      <h2 class="h2">Build the part <em>under the pixels</em> once.</h2>
+      <div class="install" data-tabs data-label="Install Undra, again">
         <div class="tabs-head"></div>
-        <section class="tab-panel" data-label="Quick start">
-          <p class="tab-label">Quick start</p>
-<div class="code"><div class="code-bar"><span><span class="lang">bash</span></span></div><pre><code data-lang="bash">git clone https://github.com/shreypdev/keel.git &amp;&amp; cd keel
-cargo install --path crates/keel-cli
-keel init myapp &amp;&amp; cd myapp
-keel dev</code></pre></div>
-        </section>
+        <div class="tab-panel" data-label="brew"><p class="tab-label">brew</p><div class="cmd"><code>brew install shreypdev/undra/undra</code><button class="copy" type="button" data-copy="brew install shreypdev/undra/undra" aria-label="Copy the brew command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="npm"><p class="tab-label">npm</p><div class="cmd"><code>npm install -g @undra/cli</code><button class="copy" type="button" data-copy="npm install -g @undra/cli" aria-label="Copy the npm command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="curl"><p class="tab-label">curl</p><div class="cmd"><code>curl -fsSL https://shreypdev.github.io/undra/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://shreypdev.github.io/undra/install.sh | sh" aria-label="Copy the curl command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <div class="tab-panel" data-label="cargo"><p class="tab-label">cargo</p><div class="cmd"><code>cargo install --git https://github.com/shreypdev/undra undra-cli</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/shreypdev/undra undra-cli" aria-label="Copy the cargo command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8A1.8 1.8 0 0 0 2 3.3v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg><span>Copy</span></button></div></div>
+        <p class="install-note">brew, npm and curl ship with the v1.0.0 release; until it is tagged, use cargo.</p>
+      </div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="docs/getting-started.html">Read the docs</a>
+        <a class="btn btn-ghost" href="playground/">Open the playground</a>
       </div>
     </div>
   </div>
@@ -769,8 +648,8 @@ keel dev</code></pre></div>
   <div class="wrap">
     <div class="footer-grid">
       <div>
-        <a class="brand" href="./" aria-label="Keel, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M11 6.5v19M11 17.5 22 7.5M11 14.5l11 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Keel</span></a>
-        <p class="footer-note">One Rust core. Native everywhere. Keel owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
+        <a class="brand" href="./" aria-label="Undra, home"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M10.5 7v11a5.5 5.5 0 0 0 11 0V7" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Undra</span></a>
+        <p class="footer-note">The Rust core for native apps. Undra owns everything under the pixels; the UI stays SwiftUI, Compose and React.</p>
       </div>
       <div>
         <h3>Docs</h3>
@@ -784,19 +663,28 @@ keel dev</code></pre></div>
         </ul>
       </div>
       <div>
+        <h3>Undra</h3>
+        <ul>
+          <li><a href="blog/">Blog</a></li>
+          <li><a href="roadmap/">Roadmap</a></li>
+          <li><a href="playground/">Playground</a></li>
+          <li><a href="feed.xml">RSS feed</a></li>
+          <li><a href="llms.txt">llms.txt</a></li>
+        </ul>
+      </div>
+      <div>
         <h3>Project</h3>
         <ul>
-          <li><a href="https://github.com/shreypdev/keel" rel="noopener">GitHub</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
-          <li><a href="https://github.com/shreypdev/keel/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
-          <li><a href="https://github.com/shreypdev/keel/blob/main/docs/ONBOARDING.md" rel="noopener">Contributing</a></li>
+          <li><a href="https://github.com/shreypdev/undra" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/docs/SPEC.md" rel="noopener">The specification</a></li>
+          <li><a href="https://github.com/shreypdev/undra/tree/main/.10x/adrs" rel="noopener">Decision records</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/bench/RESULTS.md" rel="noopener">Benchmark results</a></li>
+          <li><a href="https://github.com/shreypdev/undra/blob/main/CLAUDE.md" rel="noopener">The constitution</a></li>
         </ul>
       </div>
     </div>
     <div class="footer-base">
-      <span>Dual-licensed under <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/keel/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
+      <span>Dual-licensed under <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-MIT" rel="noopener">MIT</a> or <a href="https://github.com/shreypdev/undra/blob/main/LICENSE-APACHE" rel="noopener">Apache-2.0</a>, at your option.</span>
       <span>Timings are host-measured and guarded by CI budgets; device numbers are tracked separately.</span>
     </div>
   </div>
@@ -804,5 +692,6 @@ keel dev</code></pre></div>
 
 <script src="assets/site.js" defer></script>
 <script src="assets/hero.js" defer></script>
+<script src="assets/home.js" defer></script>
 </body>
 </html>

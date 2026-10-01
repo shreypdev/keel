@@ -20,13 +20,13 @@ class EnvelopeTests : Suite() {
     init {
         case("the header is 23 bytes laid out as magic, version, schema, kind, seq, len") {
             assertEq(23, Envelope.HEADER_LEN)
-            assertBytes("4b45454c" + "0100" + "0807060504030201" + "01" + "07000000" + "03000000" + "aabbcc", sample)
+            assertBytes("554e4452" + "0100" + "0807060504030201" + "01" + "07000000" + "03000000" + "aabbcc", sample)
             assertEq(Envelope.HEADER_LEN + 3, sample.size)
             assertEq(23, Envelope.encode(Envelope.Kind.CANCEL, 0u, 0uL, ByteArray(0)).size, "an empty payload is just the header")
         }
 
-        case("magic is the four bytes 4b 45 45 4c") {
-            assertBytes("4b45454c", sample.copyOfRange(0, 4))
+        case("magic is the four bytes 55 4e 44 52") {
+            assertBytes("554e4452", sample.copyOfRange(0, 4))
         }
 
         case("Kind has the 16 values of the spec table, in order, with their wire codes") {
@@ -92,9 +92,9 @@ class EnvelopeTests : Suite() {
 
         case("a wrong magic is BadMagic and names what was found") {
             val e = assertWire<WireException.BadMagic> { Envelope.decode(patched(3, 'X'.code)) }
-            assertEq("4b454558", e.found)
+            assertEq("554e4458", e.found)
             assertEq("00000000", assertWire<WireException.BadMagic> { Envelope.decode(ByteArray(30)) }.found)
-            assertEq("6b65656c", assertWire<WireException.BadMagic> { Envelope.decode(sample.copyOf().also { byteArrayOf(0x6B, 0x65, 0x65, 0x6C).copyInto(it) }) }.found)
+            assertEq("756e6472", assertWire<WireException.BadMagic> { Envelope.decode(sample.copyOf().also { byteArrayOf(0x75, 0x6E, 0x64, 0x72).copyInto(it) }) }.found)
             assertWire<WireException.BadMagic>("magic is checked before the version") { Envelope.decode(ByteArray(30) { 0xFF.toByte() }) }
         }
 
@@ -170,7 +170,7 @@ class EnvelopeTests : Suite() {
         }
 
         case("decoding the shared vector frame gives the documented fields") {
-            val e = Envelope.decode(unhex("4b45454c01000807060504030201010700000003000000aabbcc"))
+            val e = Envelope.decode(unhex("554e445201000807060504030201010700000003000000aabbcc"))
             assertEq(Envelope.Kind.CALL, e.kind)
             assertEq(7u, e.seq)
             assertEq(72623859790382856uL, e.schemaHash)
