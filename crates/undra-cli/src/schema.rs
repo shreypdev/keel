@@ -37,16 +37,110 @@ struct UndraBuf {
 
 /// The head of the `UndraApi` table of `undra.h` (version 2), as far as the loader reads it: the
 /// two constants, the namespace and the first entry, then the rest of the 17 entries, whose
-/// layout is pinned by `undra-ffi`'s tests. Only `schema_json` and `buf_free` are called.
+/// layout is pinned by `undra-ffi`'s tests. Only `schema_json` and `buf_free` are called. The two
+/// are `Option`s (a null function pointer is `None`, the layout is the C one), so a damaged table
+/// is refused instead of being an invalid Rust value.
 #[repr(C)]
 struct UndraApi {
     abi_version: u32,
     size: u32,
     schema_hash: u64,
     name_space: *const c_char,
-    schema_json: unsafe extern "C" fn() -> UndraBuf,
+    schema_json: Option<unsafe extern "C" fn() -> UndraBuf>,
     /// `init` .. `stats_json`: never called here.
     _entries: [*const (); 15],
+    buf_free: Option<unsafe extern "C" fn(UndraBuf)>,
+}
+
+/// The table `api` that `symbol` of `library` returned, checked the way `undra.h` asks a host to:
+/// not null, `abi_version` first (nothing else of a table of another version is read), then a
+/// `size` of at least this loader's view, then a namespace equal to `namespace` and the two entries
+/// the loader calls.
+///
+/// # Safety
+///
+/// `api` is null or points to at least 8 readable bytes, and to `size` readable bytes when they
+/// start with `abi_version == 2`, valid for the call (a core's static table, in a library that is
+/// never unloaded); a non-null `name_space` of such a table points to a NUL-terminated string.
+unsafe fn checked_table(
+    api: *const UndraApi,
+    namespace: &str,
+    symbol: &str,
+    library: &Path,
+) -> Result<Table> {
+    let fail = |what: String, why: &str, fix: &str| CliError::new(Code::Schema, what, why, fix);
+    let rebuild = "rebuild the core with `undra build --platform host`";
+    if api.is_null() {
+        return Err(fail(
+            format!("`{symbol}` of {} returned no table", library.display()),
+            "a core's entry returns its C ABI table, never null",
+            rebuild,
+        ));
+    }
+    // SAFETY: `abi_version` is the first field of every version of the table, and the caller
+    // promises those bytes; read it before trusting any other field.
+    let abi = unsafe { (*api).abi_version };
+    if abi != ABI_VERSION {
+        return Err(fail(
+            format!(
+                "the core library speaks C ABI version {abi}; this undra-cli speaks {ABI_VERSION}"
+            ),
+            "the two were built from different Undra releases and cannot talk to each other",
+            "use the undra-cli that matches the `undra` version of the core (`cargo install undra-cli --version <undra version>`)",
+        ));
+    }
+    // SAFETY: a version 2 table: `size` is its second field, within the first 8 bytes.
+    let size = unsafe { (*api).size } as usize;
+    if size < std::mem::size_of::<UndraApi>() {
+        return Err(fail(
+            format!(
+                "the C ABI table of {} is {size} bytes, too small for version 2",
+                library.display()
+            ),
+            "the library's table does not have the layout undra.h version 2 declares",
+            "rebuild the core with the `undra` version of this undra-cli",
+        ));
+    }
+    // SAFETY: the table has at least the bytes of `UndraApi` (checked above) and outlives this
+    // call; every bit pattern of its fields is a valid value (integers, raw pointers, `Option<fn>`).
+    let api = unsafe { &*api };
+    if api.name_space.is_null() {
+        return Err(fail(
+            format!("`{symbol}` of {} has no namespace", library.display()),
+            "a core's table names its namespace (undra.h)",
+            rebuild,
+        ));
+    }
+    // SAFETY: a non-null `name_space` is a static NUL-terminated string (undra.h; the caller).
+    let own = unsafe { CStr::from_ptr(api.name_space) }.to_string_lossy();
+    if own != namespace {
+        return Err(fail(
+            format!(
+                "`{symbol}` of {} says its namespace is `{own}`",
+                library.display()
+            ),
+            "the exported entry and the table must name the same core",
+            rebuild,
+        ));
+    }
+    let missing = |name: &str| {
+        fail(
+            format!("the table of {} has no `{name}` entry", library.display()),
+            "every entry of a version 2 table is a function (undra.h)",
+            rebuild,
+        )
+    };
+    Ok(Table {
+        schema_hash: api.schema_hash,
+        schema_json: api.schema_json.ok_or_else(|| missing("schema_json"))?,
+        buf_free: api.buf_free.ok_or_else(|| missing("buf_free"))?,
+    })
+}
+
+/// What the loader takes from a checked table.
+struct Table {
+    schema_hash: u64,
+    schema_json: unsafe extern "C" fn() -> UndraBuf,
     buf_free: unsafe extern "C" fn(UndraBuf),
 }
 
@@ -112,57 +206,17 @@ pub fn load_from_library(
     // SAFETY: the entry takes no arguments and returns a pointer to the core's immutable table,
     // valid for the life of the library (which is never unloaded).
     let api = unsafe { entry() };
-    if api.is_null() {
-        return Err(fail(
-            format!("`{symbol}` of {} returned no table", library.display()),
-            "a core's entry returns its C ABI table, never null",
-            "rebuild the core with `undra build --platform host`",
-        ));
-    }
-    // SAFETY: `abi_version` is the first field of every version of the table; read it before
-    // trusting any other field.
-    let abi = unsafe { (*api).abi_version };
-    if abi != ABI_VERSION {
-        return Err(fail(
-            format!(
-                "the core library speaks C ABI version {abi}; this undra-cli speaks {ABI_VERSION}"
-            ),
-            "the two were built from different Undra releases and cannot talk to each other",
-            "use the undra-cli that matches the `undra` version of the core (`cargo install undra-cli --version <undra version>`)",
-        ));
-    }
-    // SAFETY: a version 2 table: `size` is its second field.
-    let size = unsafe { (*api).size } as usize;
-    if size < std::mem::size_of::<UndraApi>() {
-        return Err(fail(
-            format!(
-                "the C ABI table of {} is {size} bytes, too small for version 2",
-                library.display()
-            ),
-            "the library's table does not have the layout undra.h version 2 declares",
-            "rebuild the core with the `undra` version of this undra-cli",
-        ));
-    }
-    // SAFETY: the table has at least the fields of `UndraApi` (checked above); it is immutable and
-    // lives as long as the library.
-    let api = unsafe { &*api };
-    // SAFETY: `name_space` is a static NUL-terminated string (undra.h).
-    let own = unsafe { CStr::from_ptr(api.name_space) }.to_string_lossy();
-    if own != namespace {
-        return Err(fail(
-            format!(
-                "`{symbol}` of {} says its namespace is `{own}`",
-                library.display()
-            ),
-            "the exported entry and the table must name the same core",
-            "rebuild the core with `undra build --platform host`",
-        ));
-    }
+    // SAFETY: the pointer is what a core's entry returns (or null): its static table, read as
+    // `checked_table` requires, in a library this process never unloads.
+    let Table {
+        schema_hash: hash,
+        schema_json,
+        buf_free,
+    } = unsafe { checked_table(api, namespace, &symbol, library) }?;
 
-    let hash = api.schema_hash;
     // SAFETY: `schema_json` takes no arguments and returns an owned `UndraBuf`; its bytes are
     // valid for `len` bytes until `buf_free`, which is called below on the same buffer.
-    let buf = unsafe { (api.schema_json)() };
+    let buf = unsafe { schema_json() };
     // Copied out (strictly decoded: the docs are not covered by the hash, so a damaged byte in one
     // would pass the check below) before the buffer goes back to the core.
     let text = if buf.ptr.is_null() {
@@ -173,7 +227,7 @@ pub fn load_from_library(
         std::str::from_utf8(bytes).map(str::to_owned)
     };
     // SAFETY: `buf` came from `schema_json` of this table and is freed exactly once.
-    unsafe { (api.buf_free)(buf) };
+    unsafe { buf_free(buf) };
 
     // A Rust cdylib that has started threads or thread-locals does not always survive `dlclose`;
     // the process is short-lived, so keep the library mapped instead.
@@ -372,6 +426,74 @@ mod tests {
             docs: "An item.".into(),
         });
         schema
+    }
+
+    /// A table as a library could hand it over, for [`checked_table`].
+    fn table(abi_version: u32, size: usize, name_space: *const c_char) -> UndraApi {
+        unsafe extern "C" fn schema_json() -> UndraBuf {
+            UndraBuf {
+                ptr: std::ptr::null_mut(),
+                len: 0,
+                cap: 0,
+            }
+        }
+        unsafe extern "C" fn buf_free(_: UndraBuf) {}
+        UndraApi {
+            abi_version,
+            size: u32::try_from(size).unwrap(),
+            schema_hash: 7,
+            name_space,
+            schema_json: Some(schema_json),
+            _entries: [std::ptr::null(); 15],
+            buf_free: Some(buf_free),
+        }
+    }
+
+    /// Review (abi-table): the loader reads `abi_version` first, then the size, and refuses a null
+    /// namespace or a null entry it calls instead of dereferencing it.
+    #[test]
+    fn the_loader_checks_a_table_before_it_trusts_a_pointer_in_it() {
+        let lib = Path::new("libx.dylib");
+        let full = std::mem::size_of::<UndraApi>();
+        let check = |api: &UndraApi| {
+            // SAFETY: `api` is a live table of this test, valid for the call.
+            unsafe { checked_table(std::ptr::from_ref(api), "acme", "acme_undra_api", lib) }
+                .map(|api| api.schema_hash)
+        };
+        assert_eq!(check(&table(2, full, c"acme".as_ptr())).ok(), Some(7));
+        let larger = check(&table(2, full + 64, c"acme".as_ptr()));
+        assert_eq!(
+            larger.ok(),
+            Some(7),
+            "fields are appended: a larger table is fine"
+        );
+        for (api, says) in [
+            (table(3, full, c"acme".as_ptr()), "C ABI version 3"),
+            (table(1, 8, std::ptr::null()), "C ABI version 1"),
+            (table(2, full - 8, c"acme".as_ptr()), "too small"),
+            (table(2, full, std::ptr::null()), "no namespace"),
+            (table(2, full, c"other".as_ptr()), "`other`"),
+            (
+                UndraApi {
+                    schema_json: None,
+                    ..table(2, full, c"acme".as_ptr())
+                },
+                "`schema_json`",
+            ),
+            (
+                UndraApi {
+                    buf_free: None,
+                    ..table(2, full, c"acme".as_ptr())
+                },
+                "`buf_free`",
+            ),
+        ] {
+            let error = check(&api).expect_err(says);
+            assert!(error.what.contains(says), "{says}: {}", error.what);
+        }
+        // SAFETY: a null pointer is checked before anything is read.
+        let null = unsafe { checked_table(std::ptr::null(), "acme", "acme_undra_api", lib) };
+        assert!(null.is_err());
     }
 
     #[test]

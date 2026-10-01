@@ -97,10 +97,11 @@ pub struct UndraApi {
 }
 
 #[cfg(not(target_family = "wasm"))]
-// SAFETY: every field is immutable once the table is built: integers, function pointers to this
-// crate's entry points (which are themselves safe to call from any thread, SPEC 6), and
-// `name_space`, which points at a `'static` NUL-terminated string that nothing writes. Sharing or
-// sending the table between threads therefore cannot race.
+// SAFETY: the table owns nothing and holds no thread-affine state: integers, function pointers
+// (the entry points of SPEC 6 may be called from any thread) and `name_space`, a raw pointer that
+// no safe code dereferences. In a table from `UndraApi::new` (the one `export_core!` exports) it
+// points at a `'static` NUL-terminated string nothing writes, so a host reading it from any
+// thread cannot race either. Sharing or sending the table between threads is therefore sound.
 unsafe impl Sync for UndraApi {}
 #[cfg(not(target_family = "wasm"))]
 // SAFETY: as for `Sync`: the table owns nothing and holds no thread-affine state.
