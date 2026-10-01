@@ -62,6 +62,9 @@ internal object UndraCoreNative : NativeApi {
     override external fun shutdown()
 }
 
+/** A port method as `PortImpl` takes it; spelled out so that Kotlin 2.0 (CI's) infers the lambdas as `suspend`. */
+private typealias PortMethod = suspend (ByteArray) -> ByteArray
+
 private var failures = 0
 private var passed = 0
 
@@ -118,16 +121,16 @@ fun main() {
     val logs = CopyOnWriteArrayList<Triple<Int, String, String>>()
     val sumPort = PortImpl(
         true,
-        mapOf(portMethod("Sum", "add") to { args: ByteArray -> u32(le32(args, 0) + le32(args, 4)) }),
+        mapOf<UInt, PortMethod>(portMethod("Sum", "add") to { args -> u32(le32(args, 0) + le32(args, 4)) }),
     )
     val echoPort = PortImpl(
         false,
-        mapOf(portMethod("Echo", "ping") to { args: ByteArray -> kotlinx.coroutines.delay(5); u32(le32(args, 0) + 1000u) }),
+        mapOf<UInt, PortMethod>(portMethod("Echo", "ping") to { args -> kotlinx.coroutines.delay(5); u32(le32(args, 0) + 1000u) }),
     )
     val logPort = PortImpl(
         true,
-        mapOf(
-            StandardPorts.Log.LOG to { args: ByteArray ->
+        mapOf<UInt, PortMethod>(
+            StandardPorts.Log.LOG to { args ->
                 val r = dev.undra.runtime.wire.UndraReader(java.nio.ByteBuffer.wrap(args))
                 logs.add(Triple(r.readU8().toInt(), r.readStr(), r.readStr()))
                 ByteArray(0)
