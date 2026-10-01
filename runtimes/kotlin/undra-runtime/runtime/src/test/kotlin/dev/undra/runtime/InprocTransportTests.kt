@@ -6,6 +6,8 @@ import dev.undra.runtime.support.NO_BYTES
 import dev.undra.runtime.support.changeSet
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.support.full
+import dev.undra.runtime.support.handledBy
+import dev.undra.runtime.support.portMethods
 import dev.undra.runtime.support.replyPayload
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.testing.assertEq
@@ -32,6 +34,7 @@ import org.junit.jupiter.api.Test
 
 private val METHOD = 0x31u
 private val TARGET = CallTarget.ObjectMethod(Handle(0x100000002L), METHOD)
+private val PORT_FOR_CLOSE = 0x77u
 
 /** Everything a core cares about, recorded, with hooks a test can set. */
 private class RecordingEvents : TransportEvents {
@@ -43,6 +46,7 @@ private class RecordingEvents : TransportEvents {
     @Volatile var closed: Boolean = false
     @Volatile var portAnswer: PortOutcome = PortOutcome.Unavailable
     @Volatile var failWith: RuntimeException? = null
+    @Volatile var onPort: () -> Unit = {}
 
     override fun onReply(callId: UInt, status: ReplyStatus, body: ByteArray) {
         failWith?.let { throw it }
@@ -62,6 +66,7 @@ private class RecordingEvents : TransportEvents {
     override fun onPortCall(portId: UInt, methodId: UInt, portCallId: UInt, args: ByteArray): PortOutcome {
         failWith?.let { throw it }
         portCalls.add(listOf(portId, methodId, portCallId, args.toList()))
+        onPort()
         return portAnswer
     }
 
@@ -294,6 +299,55 @@ class InprocTransportTests : Suite() {
                 assertEq(2, native.portCall(1, 1, 1, NO_BYTES), "a failing port call is answered as unavailable")
                 assertEq(4, log.records.size)
             }
+        }
+
+        case("close shuts the native core down once and gives the claim back, so a new load starts fresh (ADR-034)") {
+            val native = FakeNative()
+            val first = InprocTransport(native)
+            first.connect(RecordingEvents(), HASH)
+            first.close()
+            first.close()
+            assertEq(1, native.shutdowns.get(), "close ends the native core's work, once")
+            // The claim went with it: the same process loads a new core.
+            val second = InprocTransport(native)
+            second.connect(RecordingEvents(), HASH)
+            assertEq(2, native.inits.get())
+            second.close()
+            assertEq(2, native.shutdowns.get())
+            assertTrue(native.violations.isEmpty(), native.violations.toString())
+        }
+
+        case("close from inside a core callback is refused and leaves the core open (ADR-034)") {
+            val native = FakeNative()
+            val transport = InprocTransport(native)
+            val events = RecordingEvents()
+            transport.connect(events, HASH)
+            var refused: Throwable? = null
+            events.onPort = { refused = runCatching { transport.close() }.exceptionOrNull() }
+            native.portCall(1, 1, 1, NO_BYTES)
+            assertTrue(refused is UndraException, "close from a callback must throw: $refused")
+            assertTrue(refused!!.message!!.contains("inside a core callback"), refused!!.message!!)
+            assertEq(0, native.shutdowns.get(), "a refused close does not shut the core down")
+            transport.close()
+            assertEq(1, native.shutdowns.get())
+            assertTrue(native.violations.isEmpty(), native.violations.toString())
+        }
+
+        case("an UndraCore closed from a core callback stays open; closed normally it shuts the native core down") {
+            val native = FakeNative()
+            val core = UndraCore.attach(InprocTransport(native), LoadOptions(expectedSchemaHash = HASH, defaultAdapters = false), makeShared = false)
+            var refused: Throwable? = null
+            core.registerPort(
+                PORT_FOR_CLOSE,
+                PortImpl(true, portMethods(1u handledBy { _: ByteArray -> refused = runCatching { core.close() }.exceptionOrNull(); NO_BYTES })),
+            )
+            native.portCall(PORT_FOR_CLOSE.toInt(), 1, 1, NO_BYTES)
+            assertTrue(refused is UndraException, "close from a sync port must throw: $refused")
+            assertEq(0, native.shutdowns.get())
+            native.onCallSync = { call -> replyPayload(call.callId, ReplyStatus.OK, Codecs.u32.encodeToByteArray(5u)) }
+            assertEq(5u, Codecs.u32.decodeAll(core.callSync(TARGET, METHOD, NO_BYTES)), "the core is still open")
+            core.close()
+            assertEq(1, native.shutdowns.get())
         }
 
         case("callbacks after close are ignored") {

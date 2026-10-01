@@ -80,7 +80,16 @@ internal interface Transport : AutoCloseable {
     /** The core's statistics JSON, or `null` when this transport cannot ask for it. */
     fun statsJson(): String?
 
-    /** Detaches from the core. Idempotent. Pending calls are failed by [UndraCore], not here. */
+    /**
+     * Throws if [close] may not run on this thread right now (an in-process core refuses it from inside a
+     * core callback). Checked before [UndraCore] starts closing, so a refused close changes nothing.
+     */
+    fun checkClose() {}
+
+    /**
+     * Detaches from the core and, for an in-process core, ends its work (ADR-034). Idempotent. Pending
+     * calls are failed by [UndraCore], not here.
+     */
     override fun close()
 }
 

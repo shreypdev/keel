@@ -52,6 +52,7 @@ class NativeShapeTests : Suite() {
                 "snapshot" to "()[B",
                 "restore" to "([B)I",
                 "statsJson" to "()Ljava/lang/String;",
+                "shutdown" to "()V",
             )
             val natives = UndraNative::class.java.declaredMethods.filter { Modifier.isNative(it.modifiers) }
             assertEq(expected.keys.sorted(), natives.map { it.name }.sorted())
@@ -140,8 +141,15 @@ class NativeSmokeTests : Suite() {
             } finally {
                 core.close()
             }
-            // A second in-process core in the same process is refused, by design.
-            assertThrows<UndraException> { UndraCore.load(LoadOptions(expectedSchemaHash = UndraNative.schemaHash().toULong())) }
+            // Closing ended the core's work (ADR-034): a new load in the same process starts a fresh core, and a
+            // second one while it is loaded is refused.
+            val again = UndraCore.load(LoadOptions(expectedSchemaHash = UndraNative.schemaHash().toULong()))
+            try {
+                assertEq(0, again.stats().liveHandles, "a fresh core has no handles")
+                assertThrows<UndraException> { UndraCore.load(LoadOptions(expectedSchemaHash = UndraNative.schemaHash().toULong())) }
+            } finally {
+                again.close()
+            }
         }
     }
 

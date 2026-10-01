@@ -219,9 +219,13 @@ public open class UndraCore protected constructor() : AutoCloseable {
     public open fun restore(snapshot: ByteArray): Unit = throw unsupported("restore")
 
     /**
-     * Detaches this host from the core: pending calls fail with [UndraException], streams end with it,
-     * port work is cancelled and the link is closed. An in-process core keeps running (the native library
-     * cannot be unloaded) and cannot be loaded again in this process. Idempotent.
+     * Closes this core: pending calls fail with [UndraException], streams end with it, port work is
+     * cancelled and the link is closed. **Closing ends the core's work** (ADR-034): an in-process core is
+     * shut down (its tasks, timers and port calls stop), and a later [load] in the same process starts a
+     * fresh one with fresh handles. Idempotent.
+     *
+     * @throws UndraException when called from inside a core callback (a synchronous port implementation),
+     *   where the shutdown would wait for the very thread it runs on; the core is left open.
      */
     override fun close() {}
 

@@ -25,6 +25,7 @@ import java.nio.ByteBuffer
  * static native byte[] snapshot();                                         // ()[B
  * static native int    restore(byte[] snapshot);                           // ([B)I
  * static native String statsJson();                                        // ()Ljava/lang/String;
+ * static native void   shutdown();                                         // ()V
  * ```
  *
  * `Callbacks` is `dev.undra.runtime.UndraNative$Callbacks` with the methods `onReply(ILjava/nio/ByteBuffer;)V`,
@@ -170,6 +171,15 @@ public object UndraNative {
     /** Runtime statistics as a JSON document. */
     @JvmStatic
     public external fun statsJson(): String
+
+    /**
+     * Ends the core's work, as `undra_shutdown` does (ADR-034): every call in flight is answered as
+     * cancelled and every open stream ends, the core's threads stop, the port registrations go and the
+     * [Callbacks] object is released. A later [init] starts a new core. Idempotent. Must not be called from
+     * inside a callback (it would wait for the thread it runs on).
+     */
+    @JvmStatic
+    public external fun shutdown()
 
     private fun tryLoad(): Throwable? =
         try {

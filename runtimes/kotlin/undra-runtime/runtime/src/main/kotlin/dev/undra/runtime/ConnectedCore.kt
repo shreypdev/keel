@@ -323,6 +323,8 @@ internal class ConnectedCore(
     }
 
     override fun close() {
+        // A close the transport refuses (from inside a core callback) must leave the core as it was.
+        if (!closed.get()) transport.checkClose()
         shutDown(null)
     }
 

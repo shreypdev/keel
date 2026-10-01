@@ -75,8 +75,9 @@ waiting (up to 5 s) for the main thread from anywhere else.
 
 * `INPROC` (production): the core is loaded through JNI. `System.loadLibrary` uses the name in the system property
   `undra.native.name` (default `undra_core`); `undra.native.path` is an absolute path that wins over the name. If the library
-  cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global and
-  cannot be shut down over JNI, so there is one `INPROC` core per process and `close()` only detaches the host.
+  cannot be loaded, `UndraNative.isAvailable` is `false` and `load` says how to fix it. The native runtime is process-global,
+  so there is one `INPROC` core at a time per process. `close()` ends its work (ADR-034: `UndraNative.shutdown()` stops its
+  tasks, timers and port calls; in-flight calls fail as closed), and a later `load` starts a fresh core.
 * `REMOTE` (**development only**): `java.net.http.WebSocket` to `undra dev`, envelope framing of SPEC §3.2, `Hello` handshake
   with the schema check. `callSync` and `construct` block the calling thread for a network round trip (up to
   `remoteTimeout`). No snapshots, no statistics. Not available on Android (no `java.net.http`).
@@ -91,6 +92,7 @@ abiVersion ()I      schemaHash ()J        schemaJson ()[B        init ([BLdev/un
 call ([B)I          callSync ([B)[B       cancel (I)V            streamCredit (II)V
 observe (JIZ)V      release (J)V          portReply ([B)V        event (II[B)V
 timerFired (I)V     snapshot ()[B         restore ([B)I          statsJson ()Ljava/lang/String;
+shutdown ()V        (UndraCore.close() of an in-process core ends its work through it, ADR-034)
 
 UndraNative$Callbacks:  onReply (ILjava/nio/ByteBuffer;)V     onChangeSet (Ljava/nio/ByteBuffer;)V
                        onStream (ILjava/nio/ByteBuffer;)V     onPortCall (IIILjava/nio/ByteBuffer;)I     portSyncReply ()[B
