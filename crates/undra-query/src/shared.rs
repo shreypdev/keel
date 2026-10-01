@@ -756,9 +756,7 @@ impl Shared {
             return;
         }
         if !hydrate_hook_linked() {
-            // Weak, like the hook's (ADR-034): hydration must not keep a dropped runtime alive.
-            let (shared, weak) = (self.clone(), ctx.downgrade());
-            ctx.spawn(async move { shared.hydrate(&weak).await });
+            self.spawn_hydration(ctx);
         }
         // The subscribers use the `Ctx` they are given (ADR-034): the runtime owns them, so one
         // they captured would keep it alive. (`Shared` holds no `Ctx`.)
@@ -774,6 +772,14 @@ impl Shared {
             }
         })
         .detach();
+    }
+
+    /// Starts [`Shared::hydrate`] on the core. The task holds the runtime weakly (ADR-034), so
+    /// an idle runtime whose owner lets go is freed even while hydration still waits for a late
+    /// `Kv` adapter. The start-up hook and [`Shared::start`] share it (one task type, one copy).
+    pub(crate) fn spawn_hydration(self: &Arc<Self>, ctx: &Ctx) {
+        let (shared, weak) = (self.clone(), ctx.downgrade());
+        ctx.spawn(async move { shared.hydrate(&weak).await });
     }
 
     // ----- garbage collection --------------------------------------------------------------

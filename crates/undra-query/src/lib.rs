@@ -146,8 +146,7 @@ use undra_runtime::Ctx;
 pub(crate) fn init(ctx: &Ctx) {
     let shared = shared::shared_of(ctx.runtime());
     shared.start(ctx);
-    let weak = ctx.downgrade();
-    ctx.spawn(async move { shared.hydrate(&weak).await });
+    shared.spawn_hydration(ctx);
 }
 
 /// What `#[undra::query]` and `#[undra::mutation]` submit next to their registration, so the
