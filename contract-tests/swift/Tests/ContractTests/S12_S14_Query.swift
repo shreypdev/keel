@@ -159,6 +159,11 @@ extension ContractScenarios {
             let server = Fixture.shared.server
             let kv = Fixture.shared.kv
             let path = "/lists/s14/todos"
+            Handover.discard("s14")
+
+            // The harness failed the first read of the queue (S19.4); the client reads it again after a backoff.
+            try await waitUntil("the offline queue to be readable") { try storageStatus(ctx: core).queueReadable }
+
             server.respond("GET", path, body: "[]")
             let handle = try RemoteTodosQueryHandle(list: "s14", ctx: core)
             defer { handle.close() }
@@ -212,40 +217,109 @@ extension ContractScenarios {
                 handle.data == [RemoteTodo(id: 9, title: "Offline item", done: false)] && !handle.fetching
             }
 
-            // 6. The queue was persisted while offline and is gone after the replay.
-            let queueKey = "undra.query.queue"
-            try check(queuedWhileOffline.contains { $0.key == queueKey && $0.isSet }, "no write of \(queueKey) while offline: \(queuedWhileOffline)")
+            // 6. The queue was persisted while offline (format 2, after the description of `create`'s input)
+            // and is gone after the replay.
+            let queueKey = Persisted.queueKey
+            let firstWrite = try require(
+                queuedWhileOffline.firstIndex { (operation: MemoryKv.Operation) -> Bool in
+                    guard operation.key == queueKey, case .set(_, let value, nil) = operation else {
+                        return false
+                    }
+                    return (Persisted.queueCount(value) ?? 0) > 0
+                },
+                "a write of \(queueKey) while offline: \(queuedWhileOffline.map(\.summary))"
+            )
+            guard case .set(_, let queued, _) = queuedWhileOffline[firstWrite] else {
+                throw ScenarioFailure(description: "the write of \(queueKey) is not a set")
+            }
+            try checkEqual(Persisted.queueCount(queued), 1, "the count of the queue written while offline (format 2)")
+            // The item: `mutation_id u32, fingerprint u64, ..` after `format u16, schema_hash u64, count u32`.
+            let fingerprint = try require(Persisted.fingerprint(queued, at: 18), "the fingerprint of the queued item")
+            let typesKey = Persisted.typesKey(fingerprint)
+            try check(queuedWhileOffline[..<firstWrite].contains { $0.key == typesKey && $0.isSet },
+                      "\(typesKey) was not written before the queue that needs it")
             try await waitUntil("the queue to be emptied") {
-                guard let last = kv.operations.last(where: { $0.key == queueKey }) else {
+                guard let last = kv.operations.last(where: { $0.key == queueKey && $0.failure == nil && $0.kind != .get }) else {
                     return false
                 }
                 return last.isEmptyQueue
             }
+
+            // 7. Build A queues what build B changes: two notes wait offline, and what they left in the Kv is
+            // handed over to the build-B process (MigrationBuildB), with the failed POST's idempotency key.
+            let notes = "/lists/s14m/notes"
+            core.emitConnectivity(online: false, kind: .disconnected)
+            try await quietFor(milliseconds: 50)
+            server.failNetwork("POST", notes)
+            let saved = Locked<Result<Bool, any Error>?>(nil)
+            let tagged = Locked<Result<Bool, any Error>?>(nil)
+            Task {
+                let result: Result<Bool, any Error>
+                do {
+                    result = .success(try await saveNote(list: "s14m", text: "a", ctx: core))
+                } catch {
+                    result = .failure(error)
+                }
+                saved.withLock { (current: inout Result<Bool, any Error>?) -> Void in current = result }
+            }
+            Task {
+                let result: Result<Bool, any Error>
+                do {
+                    result = .success(try await tagNote(list: "s14m", id: 7, ctx: core))
+                } catch {
+                    result = .failure(error)
+                }
+                tagged.withLock { (current: inout Result<Bool, any Error>?) -> Void in current = result }
+            }
+            try await waitUntil("both notes to wait in the queue") { try storageStatus(ctx: core).pending == 2 }
+            try await waitUntil("the queue of two to be persisted") {
+                kv.value(for: queueKey).flatMap(Persisted.queueCount) == 2
+            }
+            try check(saved.snapshot == nil && tagged.snapshot == nil, "a queued note finished while offline")
+            let attempt = try require(server.requests("POST", notes).first { $0.bodyText == "save:a" }, "the failed POST of save_note")
+            let idempotencyKey = try require(attempt.header("Idempotency-Key"), "the Idempotency-Key of save_note's POST")
+            try Handover.write("s14", Handover.Queue(
+                kv: kv.entries.mapValues(Handover.hex),
+                idempotencyKey: idempotencyKey
+            ))
+
+            // Build A's own process is left clean: the notes replay here too, so later scenarios (and the
+            // reloads of S16 to S18) find an empty queue. Build B starts from the contents kept above.
+            server.respond("POST", notes, status: 201, body: "{}")
+            core.emitConnectivity(online: true, kind: .wifi)
+            try await waitUntil("build A's notes to replay") { saved.snapshot != nil && tagged.snapshot != nil }
+            try checkEqual(try success(try require(saved.snapshot, "save_note"), "save_note after the replay"), true, "save_note")
+            try checkEqual(try success(try require(tagged.snapshot, "tag_note"), "tag_note after the replay"), true, "tag_note")
+            try await waitUntil("build A's queue to be empty") { try storageStatus(ctx: core).pending == 0 }
         }
     }
 }
 
 extension MemoryKv.Operation {
-    /// Whether this is a write (not a delete).
+    /// Whether this is a write that succeeded.
     var isSet: Bool {
-        if case .set = self {
+        if case .set(_, _, nil) = self {
             return true
         }
         return false
     }
 
-    /// Whether this operation leaves the offline queue empty: a delete, or a write whose encoding
-    /// (`schema_hash u64, count u32, ..`) has no entries. The core deletes the key.
+    /// Whether this operation leaves the offline queue empty: a delete, or a write of a format-2
+    /// queue whose count (the `u32` at offset 10) is 0.
     var isEmptyQueue: Bool {
         switch self {
-        case .delete:
+        case .delete(_, nil):
             return true
-        case .set(_, let value):
-            guard value.count >= 12 else {
-                return false
-            }
-            var reader = UndraReader(Array(value[8...]))
-            return (try? reader.readU32()) == 0
+        case .set(_, let value, nil):
+            return Persisted.queueCount(value) == 0
+        default:
+            return false
         }
+    }
+
+    /// The operation in a few words, for failure messages (values are not printed).
+    var summary: String {
+        let outcome = failure.map { " failed \($0)" } ?? ""
+        return "\(kind.rawValue) \(key)\(outcome)"
     }
 }
