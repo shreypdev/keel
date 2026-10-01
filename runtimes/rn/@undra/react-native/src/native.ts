@@ -19,11 +19,25 @@ export interface UndraNativeModule {
   /**
    * Registers the ports, then `undra_init`s the core with an encoded `RuntimeConfig`. `ports` are
    * the schema's non-event port ids; `syncMethods` holds `(portId, methodId)` pairs of its
-   * synchronous methods. Returns 0, an `undra_init` code (1 to 5) or a host code (`0x100` this
-   * core is running for another JavaScript runtime of this process, `0x101` ABI mismatch, `0x102`
-   * already started).
+   * synchronous methods; `nativePorts` are the standard ports the module answers itself (ADR-038
+   * amendment B: ids of `Kv`, `SecureStore`, `Fs` and `Connectivity` from {@link platformDefaults};
+   * the module keeps those this platform has, and starts the `Connectivity` source after `undra_init`).
+   * Returns 0, an `undra_init` code (1 to 5) or a host code (`0x100` this core is running for another
+   * JavaScript runtime of this process, `0x101` ABI mismatch, `0x102` already started).
    */
-  start(config: ArrayBuffer, byteOffset: number, byteLength: number, ports: readonly number[], syncMethods: readonly number[]): number;
+  start(
+    config: ArrayBuffer,
+    byteOffset: number,
+    byteLength: number,
+    ports: readonly number[],
+    syncMethods: readonly number[],
+    nativePorts?: readonly number[],
+  ): number;
+  /**
+   * The standard ports this platform answers natively, and where they keep their data (ADR-038
+   * amendment B). Works before `start`.
+   */
+  platformDefaults(): NativePlatformDefaults;
   /** `undra_shutdown()`; throws when called from inside a JavaScript sync port. */
   shutdown(): void;
   /**
@@ -70,6 +84,20 @@ export interface UndraNativeModule {
   frame?: (() => void) | undefined;
 }
 
+/** What {@link UndraNativeModule.platformDefaults} reports. */
+export interface NativePlatformDefaults {
+  /** Ids of the standard ports the module can answer natively on this platform (`Kv`, `SecureStore`, `Fs`, `Connectivity`). */
+  readonly ports: readonly number[];
+  /** The `Kv` directory. */
+  readonly kv?: string;
+  /** The `Fs` root. */
+  readonly fs?: string;
+  /** Where `SecureStore` keeps its values (a Keychain service, a Keystore key and a directory). */
+  readonly secureStore?: string;
+  /** Why the platform has no native defaults (Android: the package's Java library or its context is missing). */
+  readonly error?: string;
+}
+
 /** What the native host counted (`hostCounters()`). */
 export interface NativeHostCounters {
   /** Inbox records queued. */
@@ -80,7 +108,7 @@ export interface NativeHostCounters {
   readonly wakes: number;
   /** Records lost to memory exhaustion. */
   readonly dropped: number;
-  /** Clock, Rng and Log calls answered natively. */
+  /** Clock, Rng and Log calls answered natively, and calls of the native default ports (Kv, SecureStore, Fs). */
   readonly nativePortCalls: number;
   /** JavaScript sync port calls answered on the JS thread. */
   readonly jsSyncPortCalls: number;

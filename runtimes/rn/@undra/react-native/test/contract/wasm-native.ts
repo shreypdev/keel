@@ -1,5 +1,5 @@
 import type { ClockAdapter } from "@undra/runtime";
-import { type NativeHostCounters, RecordKind, type UndraNativeModule } from "../../src/native.js";
+import { type NativeHostCounters, type NativePlatformDefaults, RecordKind, type UndraNativeModule } from "../../src/native.js";
 
 /*
  * A stand-in for the native module on Node, over the playground core's WebAssembly build, for the
@@ -330,6 +330,10 @@ export class WasmNative implements UndraNativeModule {
   }
   statsJson(): string {
     return new TextDecoder().decode(this.#takeBuf(this.#e.undra_stats_json()));
+  }
+  /** The stand-in has no platform: every standard port is JavaScript's, as the contract runner registers them. */
+  platformDefaults(): NativePlatformDefaults {
+    return { ports: [] };
   }
   hostCounters(): NativeHostCounters {
     return {

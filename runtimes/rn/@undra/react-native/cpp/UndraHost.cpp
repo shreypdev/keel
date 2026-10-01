@@ -1,5 +1,7 @@
 #include "UndraHost.h"
 
+#include "UndraDefaults.h"
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -148,7 +150,7 @@ Host *Host::runningHost(const std::string &name_space) noexcept {
   return slot != g_slots.end() ? slot->second.host : nullptr;
 }
 
-uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<PortSpec> &specs) {
+uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<PortSpec> &specs, const StartOptions &options) {
   if (started_.exchange(true)) {
     return start_code::kAlreadyStarted;
   }
@@ -181,6 +183,15 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
       syncMethods_.insert(key(spec.portId, method));
     }
   }
+  if (options.platform != nullptr && !options.nativePorts.empty()) {
+    try {
+      defaults_ = std::make_unique<NativeDefaults>(api_, options.platform, options.nativePorts, [this](uint8_t level, const std::string &message) {
+        log(level, message.c_str());
+      });
+    } catch (...) {
+      defaults_.reset(); // out of memory: every port stays JavaScript's
+    }
+  }
   // Registered before `undra_init`, so the start-up hooks (query hydration reads Kv) never race a
   // late registration (docs/SPEC.md section 6). Clock, Rng and Log are answered here, on whatever
   // thread asks; Timer keeps the core's own timer thread.
@@ -193,7 +204,8 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
     if (id == ports::kClock || id == ports::kRng || id == ports::kLog || id == ports::kTimer) {
       continue;
     }
-    api_.port_register(id, &Host::jsPortTrampoline, this);
+    const bool native = defaults_ != nullptr && defaults_->answers(id);
+    api_.port_register(id, native ? &Host::defaultPortTrampoline : &Host::jsPortTrampoline, this);
     registered_.push_back(id);
   }
   // Accept records from here on: the core may call back from inside `undra_init`.
@@ -207,8 +219,19 @@ uint32_t Host::start(const uint8_t *config, uint32_t len, const std::vector<Port
     }
     registered_.clear();
     syncMethods_.clear();
+    if (defaults_ != nullptr) {
+      // A start-up hook may have queued a native call before `undra_init` failed: the worker is joined
+      // here, its reply reaching no core, before the slot is released.
+      defaults_->stop();
+      defaults_.reset();
+    }
     releaseSlot(this);
     started_.store(false);
+    return code;
+  }
+  // After `undra_init`: an event before it would reach no runtime. The first report follows at once.
+  if (defaults_ != nullptr && defaults_->reportsConnectivity()) {
+    defaults_->startConnectivity();
   }
   return code;
 }
@@ -230,6 +253,10 @@ void Host::shutdown() noexcept {
   // read by the core again. What the core says meanwhile (status 3 for calls in flight) is
   // dropped: whoever closed the core has failed those calls already.
   api_.shutdown();
+  // B3 of ADR-038 amendment B: the event source and the workers end before another core may start.
+  if (defaults_ != nullptr) {
+    defaults_->stop();
+  }
   registered_.clear();
   releaseSlot(this);
 }
@@ -368,6 +395,26 @@ uint8_t Host::nativePortTrampoline(
     return 2;
   }
   return host->answerNative(portId, methodId, portCallId, ptr, len, outReply);
+}
+
+uint8_t Host::defaultPortTrampoline(
+    void *user,
+    uint32_t portId,
+    uint32_t methodId,
+    uint32_t portCallId,
+    const uint8_t *ptr,
+    uint32_t len,
+    UndraBuf * /*outReply*/) noexcept {
+  auto *host = static_cast<Host *>(user);
+  if (host == nullptr || host->defaults_ == nullptr || !host->running()) {
+    return 2;
+  }
+  {
+    std::lock_guard<std::mutex> lock(host->inboxMutex_);
+    host->counters_.nativePortCalls++;
+  }
+  // Queued on the port's worker; the answer comes later through `undra_port_reply` (1).
+  return host->defaults_->post(portId, methodId, portCallId, ptr, len);
 }
 
 uint8_t Host::jsPortTrampoline(

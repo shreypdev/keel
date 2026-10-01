@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Merged into the app's manifest (ADR-038 amendment B, B8):
+   * INTERNET for the Http port (React Native apps declare it already);
+   * ACCESS_NETWORK_STATE for the Connectivity port (ConnectivityManager); without it the module logs
+     a warning and reports nothing, and the core assumes the network is up;
+   * the provider that hands the application context to UndraPlatform before Application.onCreate
+     (the start-up hook AndroidX Startup uses). An app that removes it with tools:node="remove" calls
+     UndraPlatform.install(context) itself.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+  <application>
+    <provider
+      android:name="dev.undra.reactnative.UndraContextProvider"
+      android:authorities="${applicationId}.undra-context"
+      android:exported="false"
+      android:initOrder="1000" />
+  </application>
+</manifest>

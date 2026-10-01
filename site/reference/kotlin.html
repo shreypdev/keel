@@ -61,7 +61,7 @@
 <!-- reference:start -->
 <p class="crumb">API reference</p>
 <h1>Kotlin reference</h1>
-<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xddcdea47fa95a8d4</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
+<p class="lede">Every declaration <code>undra bindgen</code> generates in Kotlin for the <a href="https://github.com/shreypdev/undra/tree/main/examples/playground" rel="noopener">playground</a> (schema hash <code class="cw">0xefd907be3070520a</code>). <a href="../docs/api-kotlin.html">The API overview</a> explains how it is shaped.</p>
 <p class="ref-note">Bodies, initializers, private and override members are left out, and a run of declarations that differ only by a number is folded to its ends. Each file name links to its complete source.</p>
 <h2 id="core">The core<a class="anchor" href="#core" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The core's entry, named after its namespace: <code>load</code> starts the core and checks its schema hash, and <code>core</code> is the one every generated call uses unless it is given another. The internal <code>UndraCoreNative</code> holds the natives the core's library registers over JNI.</p>
@@ -343,8 +343,8 @@ sealed class TodoError(message: String) : UndraException(message) {
 </details>
 <h2 id="objects">Objects<a class="anchor" href="#objects" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each object, and a function for each free Rust function.</p>
-<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>greet</code> <code>parseCount</code> <code>ping</code> <code>setRemoteDone</code> <code>version</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>193 lines</span></summary>
+<p class="ref-names"><code>Probe</code> <code>add</code> <code>addLater</code> <code>area</code> <code>configureRemote</code> <code>createRemoteTodo</code> <code>echoComposite</code> <code>echoFigure</code> <code>echoPrimitives</code> <code>explode</code> <code>explodeLater</code> <code>failLater</code> <code>fileDelete</code> <code>fileList</code> <code>fileRead</code> <code>fileWrite</code> <code>greet</code> <code>httpGet</code> <code>kvGet</code> <code>kvKeys</code> <code>kvPut</code> <code>kvRemove</code> <code>parseCount</code> <code>ping</code> <code>secretGet</code> <code>secretKeys</code> <code>secretPut</code> <code>secretRemove</code> <code>setRemoteDone</code> <code>version</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>294 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Objects.kt" rel="noopener">Objects.kt</a></span></div><pre><code data-lang="kotlin">class Probe private constructor(core: UndraCore, handle: Long) : UndraObject(core, handle) {
     /**
      * A probe with every counter at zero.
@@ -501,10 +501,83 @@ suspend fun explodeLater(
 suspend fun failLater(delayMs: UInt, code: Int, ctx: UndraCore = UndraPlaygroundCore.core): UInt
 
 /**
+ * Deletes the file or directory `path` of the `Fs` port.
+ * @throws FsError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun fileDelete(path: String, ctx: UndraCore = UndraPlaygroundCore.core)
+
+/**
+ * The names in the directory `dir` of the `Fs` port, sorted.
+ * @throws FsError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun fileList(dir: String, ctx: UndraCore = UndraPlaygroundCore.core): List&lt;String&gt;
+
+/**
+ * The contents of the file `path` of the `Fs` port.
+ * @throws FsError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun fileRead(path: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray
+
+/**
+ * Writes `data` to the file `path` of the `Fs` port, creating its directories.
+ * @throws FsError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun fileWrite(path: String, data: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core)
+
+/**
  * A greeting.
  * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
  */
 fun greet(name: String, ctx: UndraCore = UndraPlaygroundCore.core): String
+
+/**
+ * `GET url` through the `Http` port, with an optional timeout in milliseconds. Any status is a
+ * response; only a failure to get one is an [`HttpError`].
+ * @throws HttpError
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun httpGet(
+    url: String,
+    timeoutMs: UInt?,
+    ctx: UndraCore = UndraPlaygroundCore.core,
+): HttpResponse
+
+/**
+ * The value the `Kv` port has under `key`, if any.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun kvGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray?
+
+/**
+ * The keys of the `Kv` port that start with `prefix`, in ascending order.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun kvKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): List&lt;String&gt;
+
+/**
+ * Stores `value` under `key` in the `Kv` port.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun kvPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core)
+
+/**
+ * Removes `key` from the `Kv` port; a missing key is not an error.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun kvRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Reads an unsigned number of at most nine digits.
@@ -518,6 +591,34 @@ fun parseCount(text: String, ctx: UndraCore = UndraPlaygroundCore.core): UInt
  * A failure is logged and passed to `LoadOptions.onError`; the method does not throw.
  */
 fun ping(ctx: UndraCore = UndraPlaygroundCore.core)
+
+/**
+ * The value the `SecureStore` port has under `key`, if any.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun secretGet(key: String, ctx: UndraCore = UndraPlaygroundCore.core): ByteArray?
+
+/**
+ * The keys of the `SecureStore` port that start with `prefix`, in ascending order.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun secretKeys(prefix: String, ctx: UndraCore = UndraPlaygroundCore.core): List&lt;String&gt;
+
+/**
+ * Stores `value` under `key` in the `SecureStore` port (the Keychain, the Android Keystore).
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun secretPut(key: String, value: ByteArray, ctx: UndraCore = UndraPlaygroundCore.core)
+
+/**
+ * Removes `key` from the `SecureStore` port; a missing key is not an error.
+ * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+ * @throws CancellationException if the calling coroutine is cancelled.
+ */
+suspend fun secretRemove(key: String, ctx: UndraCore = UndraPlaygroundCore.core)
 
 /**
  * Marks an item of `list` finished or not, showing the change at once and taking it back if the server
@@ -542,8 +643,8 @@ fun version(ctx: UndraCore = UndraPlaygroundCore.core): String
 </details>
 <h2 id="stores">Stores<a class="anchor" href="#stores" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">A class for each <code>#[undra::store]</code>: its signals as <code>StateFlow</code>, then its methods.</p>
-<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Stress</code> <code>Todos</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>281 lines</span></summary>
+<p class="ref-names"><code>Bench</code> <code>BigList</code> <code>Counter</code> <code>Device</code> <code>Stress</code> <code>Todos</code></p>
+<details class="reveal-code ref"><summary>Show the declarations <span>310 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Stores.kt" rel="noopener">Stores.kt</a></span></div><pre><code data-lang="kotlin">/**
  * The benchmark store: 128 counters, a 10,000-row keyed list and three methods that
  * exercise the boundary.
@@ -718,6 +819,35 @@ class Counter private constructor(core: UndraCore, handle: Long) : UndraStore(co
          * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
          */
         fun create(ctx: UndraCore = UndraPlaygroundCore.core): Counter
+    }
+}
+
+/**
+ * The `Connectivity` and `Lifecycle` reports as the core received them: the last of each and how
+ * many there were since the core started. Every report moves the signals in one transaction, and
+ * every signal is `no_coalesce`: a platform's mirror applies each report, even several that arrive
+ * in one frame (or while the app is in the background, where React Native on Android pauses the
+ * timers that drain it), so a UI or a check sees `background` even when `active` follows at once.
+ */
+class Device private constructor(core: UndraCore, handle: Long) : UndraStore(core, handle, noCoalesce = setOf(0u, 1u, 2u, 3u, 4u)) {
+    val online: StateFlow&lt;Boolean&gt;
+    val netKind: StateFlow&lt;NetKind&gt;
+    val appState: StateFlow&lt;AppState&gt;
+    val connectivityReports: StateFlow&lt;UInt&gt;
+    val lifecycleReports: StateFlow&lt;UInt&gt;
+
+    /**
+     * The store, showing every report received so far and following the next ones.
+     * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+     */
+    constructor(ctx: UndraCore = UndraPlaygroundCore.core)
+
+    companion object {
+        /**
+         * The store, showing every report received so far and following the next ones.
+         * @throws UndraCallError if the core panics, refuses or cancels the call, or cannot be reached.
+         */
+        fun create(ctx: UndraCore = UndraPlaygroundCore.core): Device
     }
 }
 
@@ -899,13 +1029,13 @@ suspend fun postRemoteTodo(
 <h2 id="ids">Wire ids<a class="anchor" href="#ids" aria-label="Link to this section">#</a></h2>
 <p class="ref-blurb">The stable identifiers of every call, the core's namespace and the schema hash its entry checks at load.</p>
 <p class="ref-names"><code>UndraIds</code></p>
-<details class="reveal-code ref"><summary>Show the declarations <span>97 lines</span></summary>
+<details class="reveal-code ref"><summary>Show the declarations <span>114 lines</span></summary>
 <div class="code"><div class="code-bar"><span><a href="https://github.com/shreypdev/undra/blob/main/examples/playground/generated/kotlin/src/main/kotlin/dev/undra/playground/core/Ids.kt" rel="noopener">Ids.kt</a></span></div><pre><code data-lang="kotlin">/**
  * Stable wire identifiers (SPEC section 1.1), for logs and debugging, plus the schema
  * hash and the namespace of the core these bindings belong to.
  */
 object UndraIds {
-    const val SCHEMA_HASH: ULong = 0xddcdea47fa95a8d4uL
+    const val SCHEMA_HASH: ULong = 0xefd907be3070520auL
     const val NAMESPACE: String = "playground_core"
 
     object Objects {
@@ -946,6 +1076,10 @@ object UndraIds {
             const val INCREMENT: UInt = 0x0584c6acu
             const val RESET: UInt = 0x0c5ad256u
         }
+        object Device {
+            const val TYPE_ID: UInt = 0xbdcbb413u
+            const val NEW: UInt = 0x3f6646a7u
+        }
         object Stress {
             const val TYPE_ID: UInt = 0xafa58985u
             const val NEW: UInt = 0x6799185du
@@ -982,9 +1116,22 @@ object UndraIds {
         const val EXPLODE: UInt = 0x4b8e88d2u
         const val EXPLODE_LATER: UInt = 0xe5a63d4bu
         const val FAIL_LATER: UInt = 0x977e4974u
+        const val FILE_DELETE: UInt = 0x3ea41ab3u
+        const val FILE_LIST: UInt = 0x97b9c870u
+        const val FILE_READ: UInt = 0x2103879cu
+        const val FILE_WRITE: UInt = 0x2c0e4e77u
         const val GREET: UInt = 0x0594d9aeu
+        const val HTTP_GET: UInt = 0xbce1d1e6u
+        const val KV_GET: UInt = 0x05cd83d7u
+        const val KV_KEYS: UInt = 0x4be5264du
+        const val KV_PUT: UInt = 0x1b33766eu
+        const val KV_REMOVE: UInt = 0xe4402f7du
         const val PARSE_COUNT: UInt = 0x1c438944u
         const val PING: UInt = 0x60e670d5u
+        const val SECRET_GET: UInt = 0x3f96f35au
+        const val SECRET_KEYS: UInt = 0x98a56bd2u
+        const val SECRET_PUT: UInt = 0x2c60b7cbu
+        const val SECRET_REMOVE: UInt = 0x83a7330au
         const val SET_REMOTE_DONE: UInt = 0xa1e08a5fu
         const val VERSION: UInt = 0xceb9168bu
     }

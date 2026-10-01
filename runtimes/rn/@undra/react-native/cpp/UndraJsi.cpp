@@ -1,5 +1,6 @@
 #include "UndraJsi.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -347,6 +348,19 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
   if (syncPairs.size() % 2 != 0) {
     raise(rt, "syncMethods must hold (portId, methodId) pairs");
   }
+  // The standard ports JavaScript asks the module to answer natively (ADR-038 amendment B, B7): kept
+  // only when this platform has them.
+  const std::vector<uint32_t> asked = u32Array(rt, count > 5 ? args[5] : none, "nativePorts");
+  StartOptions options;
+  if (!asked.empty()) {
+    if (std::shared_ptr<Platform> platform = this->platform()) {
+      const std::vector<uint32_t> offered = nativePortsOf(*platform);
+      for (uint32_t id : asked) {
+        if (std::find(offered.begin(), offered.end(), id) != offered.end()) options.nativePorts.push_back(id);
+      }
+      options.platform = std::move(platform);
+    }
+  }
   std::vector<PortSpec> specs;
   specs.reserve(portIds.size());
   for (uint32_t id : portIds) {
@@ -387,7 +401,7 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
   {
     JsAnswerer answerer(rt, native);
     CallScope scope(*host, &answerer);
-    code = host->start(config.ptr, config.len, specs);
+    code = host->start(config.ptr, config.len, specs, options);
   }
   if (code != 0) {
     return jsi::Value(static_cast<double>(code));
@@ -405,6 +419,20 @@ jsi::Value Binding::start(jsi::Runtime &rt, const jsi::Object &native, const jsi
   }
   drain(rt, native);
   return jsi::Value(0);
+}
+
+std::shared_ptr<Platform> Binding::platform() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!platformTried_) {
+    platformTried_ = true;
+    try {
+      std::unique_ptr<Platform> made = makePlatform(platformError_);
+      platform_ = std::shared_ptr<Platform>(std::move(made));
+    } catch (...) {
+      platformError_ = "the platform could not be reached";
+    }
+  }
+  return platform_;
 }
 
 void Binding::shutdownHost(jsi::Runtime &rt) {
@@ -474,7 +502,7 @@ void Binding::install(jsi::Runtime &rt) {
   define("schemaJson", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
     return jsi::Value(rt, jsi::String::createFromUtf8(rt, takeString(self->api, self->api.schema_json())));
   });
-  define("start", 5, [self](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
+  define("start", 6, [self](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) {
     return self->start(rt, nativeOf(rt, thisVal, self->api.name_space), args, count);
   });
   define("shutdown", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
@@ -611,6 +639,28 @@ void Binding::install(jsi::Runtime &rt) {
     out.setProperty(rt, "nativePortCalls", static_cast<double>(c.nativePortCalls));
     out.setProperty(rt, "jsSyncPortCalls", static_cast<double>(c.jsSyncPortCalls));
     out.setProperty(rt, "unavailableSyncPortCalls", static_cast<double>(c.unavailableSyncPortCalls));
+    return jsi::Value(rt, out);
+  });
+  // The default ports this platform answers natively, and where they keep their data
+  // (ADR-038 amendment B): `{ ports, kv, fs, secureStore }`, or `{ ports: [], error }`.
+  define("platformDefaults", 0, [self](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *, size_t) {
+    jsi::Object out(rt);
+    std::shared_ptr<Platform> platform = self->platform();
+    std::vector<uint32_t> ids;
+    if (platform) {
+      ids = nativePortsOf(*platform);
+      out.setProperty(rt, "kv", jsi::String::createFromUtf8(rt, platform->kvDirectory()));
+      out.setProperty(rt, "fs", jsi::String::createFromUtf8(rt, platform->fsRoot()));
+      if (std::unique_ptr<SecretStore> secrets = platform->makeSecretStore()) {
+        out.setProperty(rt, "secureStore", jsi::String::createFromUtf8(rt, secrets->describe()));
+      }
+    } else {
+      std::lock_guard<std::mutex> lock(self->mutex_);
+      out.setProperty(rt, "error", jsi::String::createFromUtf8(rt, self->platformError_));
+    }
+    jsi::Array ports(rt, ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) ports.setValueAtIndex(rt, i, jsi::Value(static_cast<double>(ids[i])));
+    out.setProperty(rt, "ports", ports);
     return jsi::Value(rt, out);
   });
   define("requestFrame", 0, [self](jsi::Runtime &, const jsi::Value &, const jsi::Value *, size_t) {

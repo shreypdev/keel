@@ -18,6 +18,7 @@
 #include <ReactCommon/CallInvoker.h>
 
 #include "UndraApi.h"
+#include "UndraDefaults.h"
 #include "UndraFrameSource.h"
 #include "UndraHost.h"
 
@@ -62,6 +63,9 @@ class Binding : public std::enable_shared_from_this<Binding> {
 
  private:
   facebook::jsi::Value start(facebook::jsi::Runtime &rt, const facebook::jsi::Object &native, const facebook::jsi::Value *args, size_t count);
+  /// The phone's platform of the default ports, made on first use on the JS thread (Android resolves
+  /// its Java class there); null with `platformError_` set when there is none.
+  std::shared_ptr<Platform> platform();
   void shutdownHost(facebook::jsi::Runtime &rt);
 
   std::shared_ptr<facebook::react::CallInvoker> invoker_;
@@ -70,6 +74,9 @@ class Binding : public std::enable_shared_from_this<Binding> {
   mutable std::mutex mutex_;
   std::shared_ptr<Host> host_;
   std::unique_ptr<FrameSource> frames_;
+  bool platformTried_ = false;
+  std::shared_ptr<Platform> platform_;
+  std::string platformError_;
 };
 
 } // namespace undra::rn

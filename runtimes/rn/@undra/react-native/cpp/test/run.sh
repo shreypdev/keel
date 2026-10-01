@@ -4,20 +4,23 @@
 #
 #   runtimes/rn/@undra/react-native/cpp/test/run.sh
 #
-# Needs two cores for this machine, built here when missing: the playground core
+# Needs two cores for this machine, built here when missing or older than the playground core's
+# sources (the native-defaults checks call its `platform` module): the playground core
 # (`undra build -C examples/playground --platform host`, namespace playground_core) and the same crate
 # under a second namespace (`undra build -C examples/two-cores/a --platform host`, playground_a), so
 # the module is tested with two cores in one process (ADR-044). UNDRA_CORE_DYLIB and
 # UNDRA_SECOND_CORE_DYLIB point at other builds of those two (the file names must stay
 # lib<namespace>.<ext>). CXX and CC pick the compilers (clang++, and clang, or CXX's clang).
 #
+#   0. the portable Kv and Fs stores of the default ports (UndraStores.cpp), no core needed;
 #   1. the linked shim (UndraApiLinked.cpp, what iOS builds; macOS only, it needs the Objective-C
 #      runtime): the cores linked into the test, found through their `UndraCoreTable_<namespace>`
 #      classes, the CLI's `PlaygroundCoreTable.m` when `undra build --platform rn` wrote one;
-#   2. the dlopen shim (UndraApiAndroid.cpp, what Android builds): the same test, every core opened
-#      at run time by its namespace, nothing linked;
+#   2. the dlopen shim (UndraApiAndroid.cpp, what Android builds): the same test, every core opened at
+#      run time by its namespace, nothing linked;
 #   3. the JSI layer compiled against React Native's headers, skipped when the playground app's
-#      dependencies are not installed; UNDRA_RN_REQUIRE_JSI=1 (CI) makes that a failure instead.
+#      dependencies are not installed; UNDRA_RN_REQUIRE_JSI=1 (CI) makes that a failure instead;
+#   4. the Apple platform of the default ports compiled against the iOS SDK (macOS with Xcode).
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,15 +33,19 @@ esac
 core="${UNDRA_CORE_DYLIB:-$root/examples/playground/build/host/libplayground_core.$ext}"
 second="${UNDRA_SECOND_CORE_DYLIB:-$root/examples/two-cores/a/build/host/libplayground_a.$ext}"
 
-build_core() { # build_core <file> <project>
-  [ -f "$1" ] && return 0
+build_core() { # build_core <file> <project> <overridden>
+  if [ -f "$1" ]; then
+    # A core of ours older than the playground core's sources is rebuilt; one given by path is used as is.
+    [ -n "$3" ] && return 0
+    [ -z "$(find "$root/examples/playground/core/src" -newer "$1" -name '*.rs' 2>/dev/null | head -n 1)" ] && return 0
+  fi
   echo "==> building $(basename "$1") for this machine" >&2
   local undra="${UNDRA_CLI:-$root/target/debug/undra}"
   [ -x "$undra" ] || (cd "$root" && cargo build -p undra-cli >&2)
   "$undra" build -C "$2" --platform host >&2
 }
-build_core "$core" "$root/examples/playground"
-build_core "$second" "$root/examples/two-cores/a"
+build_core "$core" "$root/examples/playground" "${UNDRA_CORE_DYLIB:-}"
+build_core "$second" "$root/examples/two-cores/a" "${UNDRA_SECOND_CORE_DYLIB:-}"
 
 namespace_of() { # lib<namespace>.<ext> -> <namespace>
   local name
@@ -56,7 +63,12 @@ trap 'rm -rf "$out"' EXIT
 flags=(-std=c++20 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
   -fno-sanitize-recover=undefined -I "$pkg/cpp" "-DUNDRA_TEST_NAMESPACE=\"$ns1\"" "-DUNDRA_TEST_SECOND_NAMESPACE=\"$ns2\"")
 cflags=(-std=c11 -g -O1 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I "$pkg/cpp")
-sources=("$pkg/cpp/UndraApi.cpp" "$pkg/cpp/UndraHost.cpp" "$here/host_test.cpp")
+sources=("$pkg/cpp/UndraApi.cpp" "$pkg/cpp/UndraHost.cpp" "$pkg/cpp/UndraDefaults.cpp" "$pkg/cpp/UndraStores.cpp" "$here/host_test.cpp")
+
+# 0. The portable Kv and Fs (UndraStores.cpp), on this machine's file system: no core needed.
+echo "# the portable Kv and Fs stores"
+"${CXX:-clang++}" "${flags[@]}" "$pkg/cpp/UndraStores.cpp" "$here/stores_test.cpp" -o "$out/stores_test"
+"$out/stores_test"
 
 # The fake cores (fake_cores.c): one object for the linked test, one library that the dlopen test
 # opens under each fake namespace.
@@ -137,4 +149,15 @@ elif [ "${UNDRA_RN_REQUIRE_JSI:-}" = 1 ]; then
   exit 1
 else
   echo "# skipped the JSI compile check: npm install in examples/playground/rn first"
+fi
+
+# 4. The Apple platform of the default ports (ios/UndraPlatformApple.mm: the Keychain, nw_path_monitor)
+#    runs only on a device, but it must compile against the iOS SDK: checked on macOS with Xcode.
+if [ "$(uname -s)" = Darwin ] && xcrun --sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
+  echo "# the Apple platform against the iOS SDK"
+  xcrun --sdk iphonesimulator clang++ -std=c++20 -fobjc-arc -x objective-c++ -fsyntax-only -Wall -Wextra -Werror \
+    -target arm64-apple-ios17.0-simulator -I "$pkg/cpp" "$pkg/ios/UndraPlatformApple.mm"
+  echo "ok - UndraPlatformApple.mm compiles"
+else
+  echo "# skipped the Apple platform compile check: no iOS SDK on this machine"
 fi

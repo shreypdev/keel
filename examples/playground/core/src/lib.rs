@@ -18,6 +18,7 @@
 //! | [`todos`](mod@todos) | a store with a keyed list, a filter and two computed values |
 //! | [`counter`](mod@counter) | a store whose commands are transactions: one change-set for many signals |
 //! | [`biglist`](mod@biglist) | 10,000 keyed rows; every one-row operation is a one-operation patch |
+//! | [`platform`](mod@platform) | the standard ports seen from the core: one function per `Kv`, `SecureStore`, `Fs` and `Http` method, and a store of the `Connectivity` and `Lifecycle` reports, for proving a platform's adapters |
 //! | [`remote`](mod@remote) | a query, mutations and optimistic commands over the `Http` port |
 //! | [`lab`](mod@lab) | every wire type, sync and async calls, typed errors, panics, cancellation, streams |
 //! | [`bench`](mod@bench) | the budget-row methods: a primitive call, 1 KB echo, 100 dirty signals, one insert |
@@ -34,6 +35,7 @@ pub mod bench;
 pub mod biglist;
 pub mod counter;
 pub mod lab;
+pub mod platform;
 pub mod remote;
 pub mod stress;
 pub mod todos;
