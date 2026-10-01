@@ -79,6 +79,18 @@ fn valid_token(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
+/// A client's session as the server holds it for its return: the token it announced and the
+/// objects its constructors made (ADR-051). `undra dev` hands one from a core that is being
+/// replaced to the one that replaces it (ADR-053): see [`Server::suspend`](crate::Server::suspend)
+/// and [`ServerConfig::inherited_session`](crate::ServerConfig::inherited_session).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeptSession {
+    /// The client's token: 1 to 64 characters of `A-Z a-z 0-9 . _ -`.
+    pub token: String,
+    /// The handles of the objects the session made and did not release.
+    pub handles: Vec<u64>,
+}
+
 /// What a dropped client left behind.
 #[derive(Debug)]
 pub(crate) struct Retained {
@@ -89,6 +101,19 @@ pub(crate) struct Retained {
 }
 
 impl Retained {
+    /// The session in its public form.
+    pub(crate) fn into_kept(self) -> KeptSession {
+        KeptSession {
+            token: self.token,
+            handles: self.handles,
+        }
+    }
+
+    /// Whether the grace has not passed yet.
+    pub(crate) fn is_live(&self) -> bool {
+        Instant::now() < self.expires
+    }
+
     /// How long the client has been gone.
     pub(crate) fn away(&self) -> Duration {
         self.since.elapsed()
@@ -141,6 +166,17 @@ impl Resume {
         });
         self.wake.notify_all();
         replaced.map(|r| r.handles).unwrap_or_default()
+    }
+
+    /// Starts with `session` retained, as if its client had just dropped (a core that was
+    /// restored from another core's state, ADR-053). `false`, and nothing retained, when
+    /// resuming is off or the token is not one a client can announce.
+    pub(crate) fn seed(&self, session: &KeptSession) -> bool {
+        if !self.enabled() || !valid_token(&session.token) {
+            return false;
+        }
+        self.retain(&session.token, session.handles.clone());
+        true
     }
 
     /// Hands over the retained session when it is `token`'s and has not expired.

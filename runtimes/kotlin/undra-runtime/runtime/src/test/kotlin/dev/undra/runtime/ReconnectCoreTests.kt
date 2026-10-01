@@ -66,6 +66,75 @@ private fun u32(n: UInt): ByteArray = Codecs.u32.encodeToByteArray(n)
 /** What a transport that reconnects makes of the core: state, what fails, what is observed again. */
 class ReconnectCoreTests : Suite() {
     init {
+        case("a dev notice from `undra dev` reaches onDevNotice of a remote core, once per record, on a thread of the runtime's") {
+            val notices = CopyOnWriteArrayList<Pair<String, String>>()
+            val t = FakeTransport(isSynchronous = false)
+            val core = UndraCore.attach(
+                t,
+                LoadOptions(
+                    mode = Mode.REMOTE,
+                    remoteUrl = "ws://fake",
+                    expectedSchemaHash = HASH,
+                    defaultAdapters = false,
+                    onDevNotice = { notices.add(Thread.currentThread().name to it) },
+                ),
+                makeShared = false,
+            )
+            core.use {
+                t.events.onLog(2u, "undra::dev", "Reloaded, state kept")
+                t.events.onLog(2u, "app", "something else")
+                t.events.onLog(2u, "undra::dev", "Reloaded, state reset: schema changed")
+                eventually("both notices arrive") { notices.size == 2 }
+                assertEq(listOf("Reloaded, state kept", "Reloaded, state reset: schema changed"), notices.map { it.second })
+                assertTrue(notices.none { it.first == Thread.currentThread().name }, "not on the transport's thread: ${notices.map { it.first }}")
+            }
+        }
+
+        case("an in-process core never fires onDevNotice, whatever its log says") {
+            val notices = CopyOnWriteArrayList<String>()
+            val t = FakeTransport(isSynchronous = true)
+            val core = UndraCore.attach(
+                t,
+                LoadOptions(
+                    mode = Mode.INPROC,
+                    expectedSchemaHash = HASH,
+                    defaultAdapters = false,
+                    onDevNotice = { notices.add(it) },
+                ),
+                makeShared = false,
+            )
+            core.use {
+                t.events.onLog(2u, "undra::dev", "Reloaded, state kept")
+                Thread.sleep(200)
+                assertEq(emptyList(), notices.toList())
+            }
+        }
+
+        case("an onDevNotice that throws is logged and does not end the core or the next notice") {
+            val notices = CopyOnWriteArrayList<String>()
+            val t = FakeTransport(isSynchronous = false)
+            val core = UndraCore.attach(
+                t,
+                LoadOptions(
+                    mode = Mode.REMOTE,
+                    remoteUrl = "ws://fake",
+                    expectedSchemaHash = HASH,
+                    defaultAdapters = false,
+                    onDevNotice = { message ->
+                        notices.add(message)
+                        if (message == "boom") throw IllegalStateException("the bar broke")
+                    },
+                ),
+                makeShared = false,
+            )
+            core.use {
+                t.events.onLog(2u, "undra::dev", "boom")
+                t.events.onLog(2u, "undra::dev", "after")
+                eventually("the notice after the failing one arrives") { notices.size == 2 }
+                assertEq(ConnectionState.Connected, core.connectionState.value)
+            }
+        }
+
         case("a core reports connecting, then connected; a drop is reconnecting, and the way back is connected") {
             Rig().use { rig ->
                 assertEq(listOf("connecting", "connected"), rig.log())

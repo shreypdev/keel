@@ -1,6 +1,8 @@
 //! Helpers shared by the integration tests: they drive the real `undra` binary.
 #![allow(dead_code)]
 
+pub mod devserver;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -121,6 +123,51 @@ impl Project {
         cmd.arg("-C").arg(&self.root);
         cmd
     }
+}
+
+/// A copy of the playground (its core and `undra.toml`) in a scratch directory, with the core
+/// depending on this repository's crates by path, so a test can edit the core's sources and run
+/// `undra dev` on it without touching the checkout.
+pub fn playground_copy(tag: &str) -> Project {
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_dir(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    let repo = repo_root();
+    let dir = TempDir::new(tag);
+    let root = dir.path().join("playground");
+    copy_dir(
+        &repo.join("examples/playground/core/src"),
+        &root.join("core/src"),
+    );
+    std::fs::write(
+        root.join("core/Cargo.toml"),
+        format!(
+            "[package]\nname = \"playground-core\"\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.85\"\npublish = false\n\n\
+[dependencies]\nundra = {{ path = \"{}\" }}\nserde = {{ version = \"1\", features = [\"derive\"] }}\nserde_json = \"1\"\n",
+            repo.join("crates/undra").display()
+        ),
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(repo.join("examples/playground/undra.toml")).unwrap();
+    std::fs::write(
+        root.join("undra.toml"),
+        manifest.replace(
+            "path = \"../..\"",
+            &format!("path = \"{}\"", repo.display()),
+        ),
+    )
+    .unwrap();
+    let _ = std::fs::copy(repo.join("Cargo.lock"), root.join("Cargo.lock"));
+    Project { dir, root }
 }
 
 /// Whether the Rust standard library for `triple` is installed.

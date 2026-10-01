@@ -60,6 +60,14 @@ public struct LoadOptions: Sendable {
     /// the thread that changed it (a thread of the runtime's own for a reconnect). It must return
     /// quickly and must not call into the core.
     public var onConnectionChange: (@Sendable (UndraConnectionState) -> Void)?
+    /// **Development only, and inert unless the core is a `remote` one served by `undra dev`.** Called
+    /// with a one-line message the dev server says about itself, such as `Reloaded, state kept` after
+    /// it rebuilt the core (ADR-053): show it in a status bar for a few seconds. `undra dev` tells every
+    /// client that attaches soon after a rebuild, once; an in-process or production core never produces
+    /// one, so the closure never runs there. The message is also written to the log. It runs on a queue
+    /// of the runtime's own, never on the transport's: keep it short, and hop to the main actor before
+    /// touching UI.
+    public var onDevNotice: (@Sendable (String) -> Void)?
 
     /// Creates options with every setting spelled out; prefer `inproc(...)` and `remote(...)`.
     public init(
@@ -73,7 +81,8 @@ public struct LoadOptions: Sendable {
         maxPendingBytes: Int = 16 * 1024 * 1024,
         onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
         reconnect: UndraReconnectPolicy? = .default,
-        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil
+        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
+        onDevNotice: (@Sendable (String) -> Void)? = nil
     ) {
         self.mode = mode
         self.adapters = adapters
@@ -86,6 +95,7 @@ public struct LoadOptions: Sendable {
         self.onError = onError
         self.reconnect = reconnect
         self.onConnectionChange = onConnectionChange
+        self.onDevNotice = onDevNotice
     }
 
     /// A core linked into this process.
@@ -109,7 +119,8 @@ public struct LoadOptions: Sendable {
         expectedSchemaHash: UInt64,
         onError: (@Sendable (UndraUnhandledError) -> Void)? = nil,
         reconnect: UndraReconnectPolicy? = .default,
-        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil
+        onConnectionChange: (@Sendable (UndraConnectionState) -> Void)? = nil,
+        onDevNotice: (@Sendable (String) -> Void)? = nil
     ) -> LoadOptions {
         return LoadOptions(
             mode: .remote(url: url),
@@ -117,7 +128,8 @@ public struct LoadOptions: Sendable {
             expectedSchemaHash: expectedSchemaHash,
             onError: onError,
             reconnect: reconnect,
-            onConnectionChange: onConnectionChange
+            onConnectionChange: onConnectionChange,
+            onDevNotice: onDevNotice
         )
     }
 }

@@ -77,11 +77,14 @@ real port):
 | Android emulator | `adb shell am start -n dev.undra.playground/.MainActivity --es undra_dev_url ws://10.0.2.2:7443` |
 | Android USB device | `undra dev --android` (it runs `adb reverse tcp:7443 tcp:7443`), then `--es undra_dev_url ws://127.0.0.1:7443` |
 
-Edit a Rust function, save, and each app reconnects by itself and starts over on the rebuilt core (the web page
-reloads; the native apps load the new core and rebuild their screens). A thin bar at the top shows what the
-connection is doing: green connected, amber reconnecting, red over. A dropped connection (the laptop slept, adb
-restarted) resumes the same objects with their state; `.proof/dev-loop/` has screenshots of the Android app doing
-both. State is not kept across a *rebuild* yet.
+Edit a Rust function, save, and each app reconnects by itself and is on the rebuilt core with the state it had (ADR-053:
+`undra dev` snapshots the old core and restores it into the new one, so the counter keeps its value and the 10,000-row
+list its rows). A thin bar at the top shows what the connection is doing, green connected, amber reconnecting, red over,
+and for four seconds what the dev server says about a reload: "Reloaded, state kept". A dropped connection (the laptop
+slept, adb restarted) resumes the same objects with their state too; `.proof/dev-loop/` has screenshots of the Android
+app doing both. When the state cannot be carried (a schema change, a snapshot over 16 MiB, `--no-keep-state`) the apps
+load the new core and start over, and the bar says why. The Remote tab's query handle is not a store, so it is not
+carried: its screen keeps the last values it had and refetching needs the query run again (docs/DEV_LOOP.md).
 
 ## The stress screen
 
