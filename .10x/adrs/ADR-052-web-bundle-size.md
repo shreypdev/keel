@@ -102,19 +102,24 @@ Measured on the hello world, each on top of the previous one, `wasm-opt -Oz`, gz
 | total | −126,180 (−35.7%) | −40,405 (−29.7%) | | |
 
 The playground (which declares queries, so lever B does not apply to it) goes from 573,795 / 218,487 to
-522,954 / 212,106 (−6.4 KB gzipped, lever A).
+522,954 / 212,106 (−6.4 KB gzipped, lever A); 524,488 / 212,003 with the short-list insertion sort.
 
-The record `scripts/wasm-size.sh` wrote from the same tree is 227,227 / **95,768**: the template sits at
+The record `scripts/wasm-size.sh` wrote from the same tree was 227,227 / 95,768: the template sits at
 another path there, and panic locations embed the build directory, so the number moves by tens of bytes
-with where the checkout lives (the `--remap-path-prefix` follow-up below would end that).
+with where the checkout lives (the `--remap-path-prefix` follow-up below would end that). After the
+small-list insertion sort (below) the record is 228,812 / **95,712**.
 
 **A. Sorting.** `slice::sort_by` instantiates a full driftsort per element type *and per closure*. The schema
-code now sorts through `undra_meta::sort`: the keys are collected, one bottom-up merge sort per key type
-(`&str`, `u16`) orders their indices stably, and a swap loop applies the permutation; a list already in order
-costs one pass. Only the key collection and the swap loop are generic over the item type. Its result equals
+code now sorts through `undra_meta::sort`: a list of up to 16 items (most of them) takes a stable in-place
+insertion sort; a longer one has its keys collected, one bottom-up merge sort per key type (`&str`, `u16`)
+orders their indices stably, and a swap loop applies the permutation; a long list already in order costs one
+pass. Only the insertion loop, the key collection and the swap loop are generic over the item type. The
+insertion path came second: with the merge path alone, the budgets test's cold start (which collects and
+hashes the schema) measured about 4 µs slower than `main` on the same machine, from three allocations per
+short list; with it, 75.8 / 76.4 µs against `main`'s 75.3 / 75.7 µs in alternating runs. Its result equals
 `sort_by` on every input (an exhaustive test over all 5,040 arrangements of a list with duplicates, and long
 pseudo-random ones), so the canonical JSON and every schema hash are unchanged
-(`undra bindgen -C examples/playground --check --docs` passes, hash `0xabdf844b53e0bc10`). Time stays
+(`undra bindgen -C examples/playground --check --docs` passes against the committed bindings, hash `0x04d2adf769c58b9f`). Time stays
 O(n log n): hashing a schema whose 2,000 records arrive in reverse order takes 239 µs (`sort_by`: 205 µs);
 100 records 12 µs (10 µs). A plain insertion sort saved 3 KB more and was rejected for being quadratic
 (9 ms at 2,000).
@@ -185,7 +190,7 @@ Nothing in this ADR changes that path; both tests pass on the optimised build as
   `"gated": false`), measured when the TypeScript runtime's `node_modules` are installed.
 * `bench/budgets.toml` gets a `[size."web/hello-wasm"]` table: `budget_gzip_bytes = 120000`,
   `measured_gzip_bytes` (the record) and `tolerance = 0.05`. The gate fails when the gzipped size is over the
-  budget **or** more than 5% over the record: `min(120,000, floor(record × 1.05))`, 100,556 bytes today. The
+  budget **or** more than 5% over the record: `min(120,000, floor(record × 1.05))`, 100,497 bytes today. The
   tolerance absorbs a toolchain update (rustc stable on the runner, a different zlib) and makes any real
   growth a decision: the change that adds 5 KB re-records the number in the same commit, where a reviewer
   sees it. The budgets parser (`bench/src/budget.rs`) reads the table strictly like the others, and rejects
@@ -231,7 +236,7 @@ script, not twiggy's shallow bytes (gzip is not additive).
 
 ## Consequences
 
-* The hello-world web core is 95.8 KB gzipped (227 KB raw), 80% of its budget. A core without queries also
+* The hello-world web core is 95.7 KB gzipped (229 KB raw), 80% of its budget. A core without queries also
   starts faster and makes no `Kv` call at start-up.
 * `InitHook` and `DispatchLayer` names are identities now: two different hooks under one name would run only
   one. The two names in the tree (`undra-query.hydrate`, `undra-query`) are unique.
@@ -261,7 +266,7 @@ script, not twiggy's shallow bytes (gzip is not additive).
    statically imports the `wasm-worker` transport, which defeats the dynamic import in `core.ts` (Vite reports
    `INEFFECTIVE_DYNAMIC_IMPORT`), the `remote` transport is always bundled because the mode is a runtime
    string, and `core.ts` + `mirror.ts` are 47.7 KB of the bundle before minification; (b) restate it (24 KB);
-   (c) one first-load budget of 128 KB for both (120 + 8), 118.3 KB today. Recommended: (a), with the JS line
+   (c) one first-load budget of 128 KB for both (120 + 8), 118.2 KB today. Recommended: (a), with the JS line
    gated as a ratchet once E5b has set its own number.
 2. **The tolerance.** 5% of the record (4.8 KB today), or a budget-only gate (catches nothing until 120 KB).
    Recommended: 5%.
