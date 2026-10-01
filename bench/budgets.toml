@@ -296,6 +296,14 @@ measured_ns = 13839.8
 budget_ns = 140000
 measured_ns = 26530.6
 
+# ADR-037: the same 100 KB written by an older build (every store's fingerprint differs): each
+# store is migrated by name before it is rebuilt (streamed, a widening of every row's id). The ADR
+# sets the budget at 10x the fast path (`snapshot/restore_100kb`, 27 us here), not the usual 5x of
+# its own number; the ratio `migrated_vs_fast_restore` below holds the same bound in one run.
+[bench."snapshot/restore_100kb_migrated"]
+budget_ns = 280000
+measured_ns = 85208.4
+
 [bench."snapshot/restore_1mb"]
 budget_ns = 1400000
 measured_ns = 260625.0
@@ -538,3 +546,12 @@ num_div = 1000
 den = "stress/firehose/call_set"
 max = 54
 measured = 39.5
+
+# ADR-037: restoring a snapshot an older build wrote (every store migrated structurally) costs at
+# most 10x restoring one of this build (the fast path: one fingerprint comparison per store type).
+# The bound is the ADR's, not 1.15x a sample; measured 3.1 on the reference host.
+[ratio."migrated_vs_fast_restore"]
+num = "snapshot/restore_100kb_migrated"
+den = "snapshot/restore_100kb"
+max = 10
+measured = 3.12

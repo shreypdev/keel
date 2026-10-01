@@ -734,13 +734,17 @@ fn migrate_value(data: &[u8], old: &TypeClosure, new: &TypeClosure) -> Result<Ve
     let (Some(old_ty), Some(new_ty)) = (root_type(old), root_type(new)) else {
         return Err("the stored description is not a query's".to_owned());
     };
-    let value = persist::decode_dyn(data, old_ty, old).map_err(|e| e.to_string())?;
-    match persist::migrate_value(&value, old_ty, old, new_ty, new, &RegisteredHooks) {
-        Ok(bytes) => Ok(bytes),
-        Err(error) => match persist::root_type_hook(new_ty, old.fingerprint()) {
-            Some(hook) => persist::run_value_hook(hook, Some(&value)).map_err(|e| e.to_string()),
-            None => Err(format!("{old_ty} cannot become {new_ty}: {error}")),
-        },
+    // Streamed first; the value is decoded only for the root type's hook.
+    let error = match persist::migrate(data, old_ty, old, new_ty, new, &RegisteredHooks) {
+        Ok(bytes) => return Ok(bytes),
+        Err(error) => error,
+    };
+    match persist::root_type_hook(new_ty, old.fingerprint()) {
+        Some(hook) => {
+            let value = persist::decode_dyn(data, old_ty, old).map_err(|e| e.to_string())?;
+            persist::run_value_hook(hook, Some(&value)).map_err(|e| e.to_string())
+        }
+        None => Err(format!("{old_ty} cannot become {new_ty}: {error}")),
     }
 }
 

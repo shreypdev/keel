@@ -919,3 +919,73 @@ fn dyn_record_editing() {
         "a[2]: x"
     );
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// The streamed conversion (`migrate`) and the tree one (`migrate_value`) agree, on the
+    /// identity and on wrapping into an `Option`.
+    #[test]
+    fn the_streamed_and_the_tree_conversion_agree((ty, bytes) in arb_type(3).prop_flat_map(|ty| { let b = arb_bytes(&ty); (Just(ty), b) })) {
+        let schema = base_schema();
+        let closure = schema.closure(&ty);
+        let value = decode_dyn(&bytes, &ty, &closure).unwrap();
+        let tree = migrate_value(&value, &ty, &closure, &ty, &closure, &NoHooks).unwrap();
+        let streamed = migrate(&bytes, &ty, &closure, &ty, &closure, &NoHooks).unwrap();
+        prop_assert_eq!(&tree, &streamed);
+        if !matches!(ty, TypeRef::Option(_)) {
+            let opt = TypeRef::option(ty.clone());
+            let opt_closure = schema.closure(&opt);
+            prop_assert_eq!(
+                migrate_value(&value, &ty, &closure, &opt, &opt_closure, &NoHooks).unwrap(),
+                migrate(&bytes, &ty, &closure, &opt, &opt_closure, &NoHooks).unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn the_streamed_and_the_tree_conversion_agree_on_every_structural_rule() {
+    let old = renamed_schema_for_streaming();
+    let new = base_schema();
+    let ty = named("Todo");
+    // `Todo { id, title, done, tags }` written as `Todo { tags, done, extra: u8, title, id }`.
+    // Tuples encode up to four fields: concatenate.
+    let bytes = [
+        (vec!["t".to_owned()], true, 7_u8).encode_to_vec(),
+        ("milk".to_owned(), Uuid([1; 16])).encode_to_vec(),
+    ]
+    .concat();
+    let value = decode_dyn(&bytes, &ty, &old.closure(&ty)).unwrap();
+    let tree = migrate_value(
+        &value,
+        &ty,
+        &old.closure(&ty),
+        &ty,
+        &new.closure(&ty),
+        &NoHooks,
+    );
+    let streamed = migrate(
+        &bytes,
+        &ty,
+        &old.closure(&ty),
+        &ty,
+        &new.closure(&ty),
+        &NoHooks,
+    );
+    assert_eq!(tree, streamed);
+    assert_eq!(streamed.unwrap(), todo_bytes([1; 16], "milk", true, &["t"]));
+}
+
+/// `Todo` with its fields reversed and an extra one.
+fn renamed_schema_for_streaming() -> Schema {
+    let mut old = base_schema();
+    old.records[0].fields = vec![
+        field("tags", TypeRef::vec(TypeRef::String)),
+        field("done", TypeRef::Bool),
+        field("extra", TypeRef::U8),
+        field("title", TypeRef::String),
+        field("id", TypeRef::Uuid),
+    ];
+    old
+}

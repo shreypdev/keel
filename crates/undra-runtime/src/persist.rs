@@ -865,8 +865,14 @@ pub fn migrate(
     new_closure: &TypeClosure,
     hooks: &dyn HookSource,
 ) -> Result<Vec<u8>, MigrateError> {
-    let value = decode_dyn(old, old_ty, old_closure)?;
-    migrate_value(&value, old_ty, old_closure, new_ty, new_closure, hooks)
+    // Streamed: the same rules as `migrate_value`, without building the value tree (a named
+    // value is decoded only to be offered to a hook).
+    let mut r = Reader::new(old);
+    let mut w = Writer::with_capacity(old.len() + old.len() / 8);
+    stream::Streamer::new(old_closure, new_closure, hooks)
+        .convert(&mut r, &mut w, old_ty, new_ty, 0, false)?;
+    r.finish()?;
+    Ok(w.into_vec())
 }
 
 /// [`migrate`] for a value already decoded with [`decode_dyn`].
@@ -1386,6 +1392,8 @@ fn e0066(hook: &str, what: &str) -> String {
 // ---------------------------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------------------------
+
+mod stream;
 
 #[cfg(test)]
 mod tests;

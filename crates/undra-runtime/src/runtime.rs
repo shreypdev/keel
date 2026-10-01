@@ -409,8 +409,9 @@ pub struct Runtime {
     blocking: Blocking,
     table: DispatchTable,
     restorers: HashMap<u32, &'static StoreRestorer>,
-    /// The fingerprint of every store type's signals (ADR-037), computed on first use.
-    store_fingerprints: std::sync::OnceLock<HashMap<u32, u64>>,
+    /// The fingerprint of a store type's signals (ADR-037), computed when a snapshot or a restore
+    /// first needs it (only for the types it holds).
+    store_fingerprints: Mutex<HashMap<u32, u64>>,
     /// The last snapshot description: for which store types, and its bytes (a snapshot of the
     /// same set of types reuses it).
     description: Mutex<Option<(Vec<u32>, Arc<str>)>>,
@@ -478,6 +479,9 @@ fn stream_payload(call_id: u32, flag: StreamFlag, body: &[u8]) -> Vec<u8> {
 struct Migration<'a> {
     snapshot: &'a Snapshot,
     description: Option<Result<StoresClosure, String>>,
+    /// Per store type: the snapshot's closure (checked against its fingerprint) and today's, or
+    /// why there are none. Many stores share a type; this is worked out once.
+    closures: HashMap<u32, Result<Arc<(TypeClosure, TypeClosure)>, String>>,
 }
 
 impl<'a> Migration<'a> {
@@ -485,7 +489,39 @@ impl<'a> Migration<'a> {
         Migration {
             snapshot,
             description: None,
+            closures: HashMap::new(),
         }
+    }
+
+    /// The old and the new closure of `type_id`'s signals.
+    fn closures(
+        &mut self,
+        rt: &Runtime,
+        type_id: u32,
+    ) -> Result<Arc<(TypeClosure, TypeClosure)>, String> {
+        if let Some(found) = self.closures.get(&type_id) {
+            return found.clone();
+        }
+        let recorded = self.snapshot.fingerprint(type_id).unwrap_or(0);
+        let found = (|| {
+            let description = self.description(rt)?;
+            let old = description
+                .closure_of(type_id)
+                .ok_or_else(|| "the snapshot does not describe this store type".to_owned())?;
+            if old.fingerprint() != recorded {
+                return Err(
+                    "the snapshot's description does not match its fingerprint (the snapshot is damaged)"
+                        .to_owned(),
+                );
+            }
+            let new = rt
+                .schema
+                .store_closure(type_id)
+                .ok_or_else(|| "this build has no such store".to_owned())?;
+            Ok(Arc::new((old, new)))
+        })();
+        self.closures.insert(type_id, found.clone());
+        found
     }
 
     /// The parsed description, or why it does not parse.
@@ -517,25 +553,10 @@ impl<'a> Migration<'a> {
             reason,
         };
         let recorded = self.snapshot.fingerprint(type_id).unwrap_or(0);
-        let old = {
-            let description = self.description(rt).map_err(|why| incompatible("", why))?;
-            description.closure_of(type_id).ok_or_else(|| {
-                incompatible(
-                    "",
-                    "the snapshot does not describe this store type".to_owned(),
-                )
-            })?
-        };
-        if old.fingerprint() != recorded {
-            return Err(incompatible(
-                "",
-                "the snapshot's description does not match its fingerprint (the snapshot is damaged)"
-                    .to_owned(),
-            ));
-        }
-        let Some(new) = rt.schema.store_closure(type_id) else {
-            return Err(incompatible("", "this build has no such store".to_owned()));
-        };
+        let pair = self
+            .closures(rt, type_id)
+            .map_err(|why| incompatible("", why))?;
+        let (old, new) = (&pair.0, &pair.1);
         let (
             ClosureRoot::Signals {
                 signals: old_signals,
@@ -564,7 +585,7 @@ impl<'a> Migration<'a> {
                 });
             let converted = match stored {
                 Some((old_signal, bytes)) => {
-                    convert_signal(&store, recorded, old_signal, bytes, &old, signal, &new)
+                    convert_signal(&store, recorded, old_signal, bytes, old, signal, new)
                 }
                 None => missing_signal(&store, recorded, signal),
             };
@@ -595,20 +616,21 @@ fn convert_signal(
     signal: &ClosureSignal,
     new: &TypeClosure,
 ) -> Result<Option<Vec<u8>>, String> {
-    let value: DynValue =
-        persist::decode_dyn(bytes, &old_signal.ty, old).map_err(|e| e.to_string())?;
-    let structural = persist::migrate_value(
-        &value,
+    // Streamed, by name: the common case of an update allocates no value tree.
+    let error = match persist::migrate(
+        bytes,
         &old_signal.ty,
         old,
         &signal.ty,
         new,
         &RegisteredHooks,
-    );
-    let error = match structural {
+    ) {
         Ok(bytes) => return Ok(Some(bytes)),
         Err(error) => error,
     };
+    // Not structural: the hooks get the old value, decoded.
+    let value: DynValue =
+        persist::decode_dyn(bytes, &old_signal.ty, old).map_err(|e| e.to_string())?;
     if let Some(hook) = persist::signal_hook(store, &signal.name, fingerprint) {
         return persist::run_value_hook(hook, Some(&value))
             .map(Some)
@@ -747,7 +769,7 @@ impl Runtime {
             events: Events::default(),
             table,
             restorers,
-            store_fingerprints: std::sync::OnceLock::new(),
+            store_fingerprints: Mutex::new(HashMap::new()),
             description: Mutex::new(None),
             port_dispatchers,
             calls: Mutex::new(HashMap::new()),
@@ -2365,20 +2387,15 @@ impl Runtime {
 
     // ----- snapshot and restore ----------------------------------------------------------
 
-    /// The fingerprint of each store type's plain signals (ADR-037), by type id.
-    fn store_fingerprints(&self) -> &HashMap<u32, u64> {
-        self.store_fingerprints.get_or_init(|| {
-            self.schema
-                .objects
-                .iter()
-                .filter(|o| o.store.is_some())
-                .filter_map(|o| {
-                    self.schema
-                        .store_fingerprint(o.type_id)
-                        .map(|fingerprint| (o.type_id, fingerprint))
-                })
-                .collect()
-        })
+    /// The fingerprint of the store type `type_id`'s plain signals (ADR-037); `0` for a type the
+    /// schema does not describe as a store (a hand-written restorer), as `snapshot` writes it.
+    fn store_fingerprint(&self, type_id: u32) -> u64 {
+        if let Some(found) = self.store_fingerprints.lock().get(&type_id) {
+            return *found;
+        }
+        let fingerprint = self.schema.store_fingerprint(type_id).unwrap_or(0);
+        self.store_fingerprints.lock().insert(type_id, fingerprint);
+        fingerprint
     }
 
     /// The description of the store types `type_ids` (in snapshot order), reused while the set
@@ -2455,14 +2472,11 @@ impl Runtime {
                 ),
             }
         }
-        let fingerprints = self.store_fingerprints();
         let types: Vec<SnapshotType> = type_ids
             .iter()
             .map(|&type_id| SnapshotType {
                 type_id,
-                // A store type always has a fingerprint (it is in the schema); `0` would only
-                // mark one that is not, which then migrates on restore instead of misdecoding.
-                fingerprint: fingerprints.get(&type_id).copied().unwrap_or(0),
+                fingerprint: self.store_fingerprint(type_id),
             })
             .collect();
         let description = self.snapshot_description(&type_ids);
@@ -2599,11 +2613,7 @@ impl Runtime {
             };
             // A store type the schema does not describe (a hand-written restorer) has no
             // fingerprint: `0`, as `snapshot` writes it.
-            let current = self
-                .store_fingerprints()
-                .get(&type_id)
-                .copied()
-                .unwrap_or(0);
+            let current = self.store_fingerprint(type_id);
             let bytes = if snapshot.fingerprint(type_id) == Some(current) {
                 // The fast path: the values were written with today's types.
                 let mut body = Writer::new();

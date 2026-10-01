@@ -121,10 +121,39 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// The bytes consumed since offset `start` (crate-internal, for zero-copy payloads).
+    /// The bytes consumed since offset `start` (empty if `start` is past the position): the
+    /// encoding of what was read, for copying it without decoding (zero-copy payloads, migration).
+    ///
+    /// ```
+    /// use undra_wire::Reader;
+    ///
+    /// let mut r = Reader::new(&[1, 0, 0, 0, b'x', 7]);
+    /// let start = r.position();
+    /// r.read_str().unwrap();
+    /// assert_eq!(r.consumed_since(start), [1, 0, 0, 0, b'x']);
+    /// ```
     #[inline]
-    pub(crate) fn consumed_since(&self, start: usize) -> &'a [u8] {
+    pub fn consumed_since(&self, start: usize) -> &'a [u8] {
         self.buf.get(start..self.pos).unwrap_or(&[])
+    }
+
+    /// A reader over the same input, positioned at `pos` (clamped to the end): reads a span again,
+    /// or out of order.
+    ///
+    /// ```
+    /// use undra_wire::Reader;
+    ///
+    /// let mut r = Reader::new(&[7, 8]);
+    /// r.read_u8().unwrap();
+    /// assert_eq!(r.at(0).read_u8(), Ok(7));
+    /// ```
+    #[inline]
+    pub fn at(&self, pos: usize) -> Reader<'a> {
+        Reader {
+            buf: self.buf,
+            pos: pos.min(self.buf.len()),
+            depth: self.depth,
+        }
     }
 
     read_prim! {
