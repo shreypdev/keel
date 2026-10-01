@@ -386,7 +386,8 @@ Button(todo.title) { todos.toggle(id: todo.id) }          // unchanged, still no
   error item carries `E`, while restore and shutdown end it with a String (SPEC 5.9). The stream
   mapping tries `E`, then the String; an `E` whose encoding happens to read as a String could be
   misclassified. Recorded as a v2 wire item (distinct flags for "cancelled" and "panicked"); not
-  fixed here (R7).
+  fixed here (R7). *(2026-10-01: resolved before publication by ADR-036: flag 2 carries only `E`, a
+  flag 3 "failed" item carries a reply status, and the Swift mapping no longer reads any String.)*
 * **`onError` re-entrancy.** A handler that calls Undra from inside a refused re-entrant call would
   recurse; the runtime only logs nested reports on the same thread (task-local flag).
 * **Behaviour change for untyped async methods.** Code that matched `UndraReplyError(.panic)` from

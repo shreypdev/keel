@@ -1,8 +1,10 @@
 //! The counter: the smallest store, and the one that shows transactions.
 //!
 //! `add` changes two signals (`count`, `changes`) and, through the computed `parity`, a third.
-//! It does so inside one [`Ctx::txn`], so every platform receives exactly one change-set however
-//! many signals move (R5: writes cross once per transaction).
+//! It does so inside one [`txn`], so every platform receives exactly one change-set however many
+//! signals move (R5: writes cross once per transaction). The store keeps no `Ctx`: a method runs
+//! on the core, and the change-set goes to the runtime that owns the store (ADR-035); anything that
+//! must outlive a call keeps a `WeakCtx` instead (ADR-034, see `stress.rs`).
 
 use undra::prelude::*;
 
@@ -19,7 +21,6 @@ pub enum Parity {
 /// A counter with a change tally and a computed parity.
 #[undra::store(restore = "Self::assemble")]
 pub struct Counter {
-    ctx: Ctx,
     count: Signal<i32>,
     changes: Signal<u32>,
     parity: Computed<Parity>,
@@ -33,7 +34,7 @@ impl Counter {
     }
 
     // Used by `new` and, through `restore = ".."`, to rebuild the store from a snapshot.
-    fn assemble(ctx: Ctx, count: Signal<i32>, changes: Signal<u32>) -> Self {
+    fn assemble(_ctx: Ctx, count: Signal<i32>, changes: Signal<u32>) -> Self {
         let parity = Computed::new(&count, |count| {
             if count % 2 == 0 {
                 Parity::Even
@@ -42,7 +43,6 @@ impl Counter {
             }
         });
         Self {
-            ctx,
             count,
             changes,
             parity,
@@ -63,7 +63,7 @@ impl Counter {
     /// change-set for `count`, `changes` and `parity` together. The count saturates instead of
     /// overflowing.
     pub fn add(&self, amount: i32) {
-        self.ctx.txn(|| {
+        txn(|| {
             self.count
                 .update(|count| *count = count.saturating_add(amount));
             self.changes
@@ -73,7 +73,7 @@ impl Counter {
 
     /// Sets the count back to zero and forgets the changes, in one transaction.
     pub fn reset(&self) {
-        self.ctx.txn(|| {
+        txn(|| {
             self.count.set(0);
             self.changes.set(0);
         });

@@ -150,7 +150,7 @@ fn __undra_cell_erased_Counter(
 #[doc(hidden)]
 #[allow(non_camel_case_types, dead_code)]
 #[diagnostic::on_unimplemented(
-    message = "error[undra::E0013]: store `Counter` cannot be restored automatically: its field of type `{Self}` has no `Default`\n  = note: restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument)\n  = help: implement `Default` for the type, or add `#[undra::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0013",
+    message = "error[undra::E0013]: store `Counter` cannot be restored automatically: its field of type `{Self}` has no `Default`\n  = note: restoring a snapshot rebuilds the store from its plain signals and fills every other field with `Default::default()` (a `Ctx` is cloned from the argument, a `WeakCtx` downgraded from it)\n  = help: implement `Default` for the type, or add `#[undra::store(restore = \"Self::rebuild\")]` with `fn rebuild(ctx: Ctx, <one Signal<T> per plain signal, in order>) -> Self`, the same code `new` uses to build the store\n  = docs: https://shreypdev.github.io/undra/docs/errors.html#E0013",
     label = "this field type has no `Default`"
 )]
 trait __UndraRestoreDefault_Counter: ::core::marker::Sized {

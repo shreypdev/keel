@@ -183,3 +183,28 @@ impl Encode for Probe {
 pub fn count(c: &Arc<AtomicUsize>) -> usize {
     c.load(Ordering::SeqCst)
 }
+
+/// A value whose **encoding** panics while `armed`: a plain slot holding one makes its store's
+/// commit (or observe) abandon the whole change-set, the ADR-019 (H1) path. (A computed that
+/// panics no longer does: since the ADR-019 amendment it is held back on its own.)
+#[derive(Clone, Debug)]
+pub struct EncodeBomb {
+    pub armed: Arc<std::sync::atomic::AtomicBool>,
+    pub value: u32,
+}
+
+impl EncodeBomb {
+    pub fn new(armed: &Arc<std::sync::atomic::AtomicBool>, value: u32) -> EncodeBomb {
+        EncodeBomb {
+            armed: Arc::clone(armed),
+            value,
+        }
+    }
+}
+
+impl Encode for EncodeBomb {
+    fn encode(&self, w: &mut Writer) {
+        assert!(!self.armed.load(Ordering::SeqCst), "encoder failure");
+        self.value.encode(w);
+    }
+}

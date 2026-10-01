@@ -28,8 +28,9 @@
 //! }
 //!
 //! fn watch_network(ctx: &Ctx) {
-//!     // Event ports are subscribed to; keep the subscription for the life of the runtime.
-//!     on_connectivity_changed(ctx, |online: bool, kind: NetKind| {
+//!     // Event ports are subscribed to; keep the subscription for the life of the runtime. The
+//!     // subscriber is given the runtime's `Ctx`: use it rather than capture one (ADR-034).
+//!     on_connectivity_changed(ctx, |_ctx: &Ctx, online: bool, kind: NetKind| {
 //!         let _ = (online, kind); // e.g. refetch when back online
 //!     })
 //!     .detach();

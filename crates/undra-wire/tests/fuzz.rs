@@ -17,7 +17,7 @@ use common::{Rng, hex};
 use undra_wire::payload::{
     Call, CallOwned, CallTarget, Cancel, ChangeEntry, ChangeOp, ChangeSet, ChangeSetBuilder,
     ChangeSetRef, Event, Hello, Log, Observe, PortCall, PortReply, Release, Reply, ReplyStatus,
-    Restore, Snapshot, StoreSnapshot, StreamCredit, StreamItem, TimerFired,
+    Restore, Snapshot, StoreSnapshot, StreamCredit, StreamFailure, StreamItem, TimerFired,
 };
 use undra_wire::{
     Bytes, Decode, Encode, Envelope, Handle, KeyedPatch, Kind, PatchOp, Reader, Timestamp, Uuid,
@@ -134,6 +134,7 @@ const DECODERS: &[Decoder] = decoders! {
     "Cancel" => |b| accepted(Cancel::decode(&mut Reader::new(b))),
     "StreamCredit" => |b| accepted(StreamCredit::decode(&mut Reader::new(b))),
     "StreamItem" => |b| accepted(StreamItem::decode(&mut Reader::new(b))),
+    "StreamFailure" => |b| accepted(StreamFailure::decode(&mut Reader::new(b))),
     "Observe" => |b| accepted(Observe::decode(&mut Reader::new(b))),
     "Release" => |b| accepted(Release::decode(&mut Reader::new(b))),
     "Event" => |b| accepted(Event::decode(&mut Reader::new(b))),

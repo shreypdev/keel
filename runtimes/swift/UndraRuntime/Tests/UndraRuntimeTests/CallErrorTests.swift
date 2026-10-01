@@ -9,9 +9,10 @@ import XCTest
 
 // MARK: - Fixtures
 
-/// A hand-written stand-in for a generated error enum. The layout is chosen so that the ambiguity
-/// of a stream's error item (ADR-032, Risks) can be pinned: `.code(UInt16)` is variant 0, so the
-/// four bytes of an empty `String` read as `.code(0)`, and `.note(String)` carries a `String`.
+/// A hand-written stand-in for a generated error enum. `.code(UInt16)` is variant 0, so the four
+/// bytes of an empty `String` read as `.code(0)`: the ambiguity a stream's error item had before
+/// ADR-036 gave it a flag of its own, which the stream tests pin as gone. `.note(String)` carries a
+/// `String`.
 enum WireTestError: UndraError {
     case code(UInt16)
     case note(String)
@@ -46,8 +47,7 @@ enum WireTestError: UndraError {
     }
 }
 
-/// The encoding of one `String`, which is what the core writes in a stream's error item when it ends
-/// the stream itself.
+/// The encoding of one `String`: the body of a refused reply.
 private func stringBody(_ text: String) -> [UInt8] {
     var writer = UndraWriter()
     writer.writeString(text)
@@ -259,62 +259,153 @@ final class CallErrorMappingTests: XCTestCase {
         )
     }
 
-    // MARK: Streams
+    // MARK: Streams (ADR-036)
 
-    private func streamError(_ body: [UInt8]) -> UndraReplyError {
+    /// A stream's own typed error item (flag 2), as `UndraCore` ends the stream with it.
+    private func errorItem(_ body: [UInt8]) -> UndraReplyError {
         return UndraReplyError(status: .error, body: body)
     }
 
-    func testAStreamErrorItemWithADomainReadsAsTheDomainError() {
-        let result = UndraCallError.mapped(
-            streamFailure: streamError(WireTestError.code(7).undraEncoded()),
-            domain: WireTestError.self
-        )
-        XCTAssertEqual(result as? WireTestError, .code(7))
+    /// A failed stream item (flag 3), as `UndraCore` ends the stream with it.
+    private func failedItem(_ failure: Wire.StreamFailure) -> any Error {
+        return UndraCore.streamFailureError(ArraySlice(failure.encode()))
     }
 
-    func testACancelledStringIsCancelledByTheCoreWithAndWithoutADomain() {
-        let body = stringBody("cancelled: the runtime shut down")
-        XCTAssertEqual(UndraCallError.mapped(streamFailure: streamError(body)) as? UndraCallError, .cancelledByCore)
-        XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(body), domain: WireTestError.self) as? UndraCallError,
-            .cancelledByCore
-        )
+    func testAnErrorItemWithADomainReadsAsTheDomainError() {
+        for value in [WireTestError.code(7), .note("no good"), .empty] {
+            let result = UndraCallError.mapped(streamFailure: errorItem(value.undraEncoded()), domain: WireTestError.self)
+            XCTAssertEqual(result as? WireTestError, value)
+        }
     }
 
-    func testAnyOtherStringIsAPanicWithoutABacktrace() {
-        let body = stringBody("index out of bounds")
-        let expected = UndraCallError.panicked(message: "index out of bounds", backtrace: "")
-        XCTAssertEqual(UndraCallError.mapped(streamFailure: streamError(body)) as? UndraCallError, expected)
-        XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(body), domain: WireTestError.self) as? UndraCallError,
-            expected
-        )
-    }
-
-    func testAGarbageStreamErrorItemIsMalformed() {
+    func testAnErrorItemThatIsNotTheDomainErrorIsMalformed() {
         let garbage: [UInt8] = [0xFF, 0xFF, 0xFF]
-        let expected = UndraCallError.malformed("a stream error item that does not decode (3 bytes)")
-        XCTAssertEqual(UndraCallError.mapped(streamFailure: streamError(garbage)) as? UndraCallError, expected)
         XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(garbage), domain: WireTestError.self) as? UndraCallError,
-            expected
+            UndraCallError.mapped(streamFailure: errorItem(garbage), domain: WireTestError.self) as? UndraCallError,
+            .malformed("a WireTestError that does not decode (3 bytes)")
         )
-        // A String followed by more bytes is not "exactly one String".
-        let trailing = stringBody("cancelled: x") + [0]
+        // A String body is not read as the core's text any more: the prefix "cancelled: " means
+        // nothing, the bytes are just not a `WireTestError`.
+        let text = stringBody("cancelled: the runtime shut down")
         XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(trailing)) as? UndraCallError,
-            .malformed("a stream error item that does not decode (17 bytes)")
+            UndraCallError.mapped(streamFailure: errorItem(text), domain: WireTestError.self) as? UndraCallError,
+            .malformed("a WireTestError that does not decode (\(text.count) bytes)")
         )
+        // Trailing bytes after a valid value do not decode either.
+        let trailing = WireTestError.empty.undraEncoded() + [0]
+        XCTAssertEqual(
+            UndraCallError.mapped(streamFailure: errorItem(trailing), domain: WireTestError.self) as? UndraCallError,
+            .malformed("a WireTestError that does not decode (3 bytes)")
+        )
+    }
+
+    func testAnErrorItemOnAStreamWithoutAnErrorTypeIsMalformed() {
+        let bodies: [[UInt8]] = [
+            WireTestError.code(7).undraEncoded(),
+            stringBody("cancelled: the runtime shut down"),
+            stringBody("index out of bounds"),
+            [],
+        ]
+        for body in bodies {
+            XCTAssertEqual(
+                UndraCallError.mapped(streamFailure: errorItem(body)) as? UndraCallError,
+                .malformed("a stream without an error type ended with a typed error item (\(body.count) bytes)")
+            )
+        }
+    }
+
+    func testAnErrorItemIsAlwaysTheDomainErrorNeverAString() {
+        // Before ADR-036 an empty message (four zero bytes) also read as `WireTestError.code(0)`, and
+        // the runtime had to guess. Flag 2 now only ever carries `E`.
+        let body = stringBody("")
+        XCTAssertEqual(body, [0, 0, 0, 0])
+        XCTAssertEqual(
+            UndraCallError.mapped(streamFailure: errorItem(body), domain: WireTestError.self) as? WireTestError,
+            .code(0)
+        )
+        let note = WireTestError.note("cancelled: the runtime shut down").undraEncoded()
+        XCTAssertEqual(
+            UndraCallError.mapped(streamFailure: errorItem(note), domain: WireTestError.self) as? WireTestError,
+            .note("cancelled: the runtime shut down")
+        )
+    }
+
+    func testAFailedItemMapsExactlyAsAFailedReplyWithItsStatus() {
+        let cases: [(Wire.StreamFailure, UndraReplyError, UndraCallError)] = [
+            (
+                Wire.StreamFailure(status: .cancelled, message: "the runtime shut down"),
+                replyError(status: .cancelled, body: []),
+                .cancelledByCore
+            ),
+            (
+                Wire.StreamFailure(status: .cancelled, message: "a restore replaced the receiver"),
+                replyError(status: .cancelled, body: []),
+                .cancelledByCore
+            ),
+            (
+                Wire.StreamFailure(status: .panic, message: "boom", detail: "frame 0\nframe 1"),
+                replyError(status: .panic, body: panicBody("boom", "frame 0\nframe 1")),
+                .panicked(message: "boom", backtrace: "frame 0\nframe 1")
+            ),
+            (
+                Wire.StreamFailure(status: .panic, message: "", detail: ""),
+                replyError(status: .panic, body: panicBody("", "")),
+                .panicked(message: "", backtrace: "")
+            ),
+            (
+                Wire.StreamFailure(status: .badRequest, message: "the object was closed"),
+                replyError(status: .badRequest, body: stringBody("the object was closed")),
+                .refused(reason: "the object was closed")
+            ),
+        ]
+        for (failure, reply, expected) in cases {
+            let error = failedItem(failure)
+            XCTAssertEqual(error as? UndraReplyError, reply, "\(failure)")
+            XCTAssertEqual(UndraCallError.mapped(streamFailure: error) as? UndraCallError, expected, "\(failure)")
+            XCTAssertEqual(
+                UndraCallError.mapped(streamFailure: error, domain: WireTestError.self) as? UndraCallError,
+                expected,
+                "\(failure), with a domain"
+            )
+            XCTAssertEqual(mappedCall(reply), expected, "\(failure): the same as the reply")
+        }
+    }
+
+    func testACancellationByTheCoreIsNeverACancellationError() {
+        let error = failedItem(Wire.StreamFailure(status: .cancelled, message: "the runtime shut down"))
+        XCTAssertFalse(UndraCallError.mapped(streamFailure: error) is CancellationError)
+        XCTAssertFalse(UndraCallError.mapped(streamFailure: error, domain: WireTestError.self) is CancellationError)
+    }
+
+    func testAFailedItemThatDoesNotDecodeIsMalformed() {
+        let cases: [([UInt8], WireError)] = [
+            ([1, 0, 0, 0, 0, 0, 0, 0, 0], .invalidTag(tag: 1, at: 0, type: "StreamFailure.status")),
+            ([4, 0, 0, 0, 0, 0, 0, 0, 0], .invalidTag(tag: 4, at: 0, type: "StreamFailure.status")),
+            ([2, 4, 0, 0, 0, 0x62], .lengthTooLarge(len: 4, at: 1)),
+            ([], .unexpectedEOF(needed: 1, at: 0)),
+            ([3, 0, 0, 0, 0, 0, 0, 0, 0, 7], .trailingBytes(count: 1)),
+        ]
+        for (body, wire) in cases {
+            let error = UndraCore.streamFailureError(ArraySlice(body))
+            let expected = UndraProtocolError.malformedMessage(context: "stream failure", error: wire)
+            XCTAssertEqual(error as? UndraProtocolError, expected)
+            XCTAssertEqual(UndraCallError.mapped(streamFailure: error) as? UndraCallError, .malformed(expected.description))
+            XCTAssertEqual(
+                UndraCallError.mapped(streamFailure: error, domain: WireTestError.self) as? UndraCallError,
+                .malformed(expected.description)
+            )
+        }
     }
 
     func testAStreamFailureThatIsNotAnErrorItemUsesTheOrdinaryMapping() {
         XCTAssertTrue(UndraCallError.mapped(streamFailure: CancellationError()) is CancellationError)
+        XCTAssertTrue(UndraCallError.mapped(streamFailure: CancellationError(), domain: WireTestError.self) is CancellationError)
         XCTAssertEqual(
             UndraCallError.mapped(streamFailure: UndraTransportError.closed, domain: WireTestError.self)
                 as? UndraCallError,
             .unavailable(.closed)
         )
+        // A stream whose opening reply failed: the reply statuses map as for a call.
         XCTAssertEqual(
             UndraCallError.mapped(streamFailure: replyError(status: .panic, body: panicBody("p", "b"))) as? UndraCallError,
             .panicked(message: "p", backtrace: "b")
@@ -324,37 +415,9 @@ final class CallErrorMappingTests: XCTestCase {
                 as? UndraCallError,
             .refused(reason: "stale")
         )
-    }
-
-    /// ADR-032, Risks: a stream's error item is either the encoded `E` or the core's `String`, and
-    /// nothing on the wire says which. With a domain, `E` is tried first. These two tests pin that.
-    func testAnEncodedErrorWithAStringPayloadResolvesAsTheErrorNotAsAString() {
-        // `.note("cancelled: x")` encodes to u16 1, then the String; it does not read as one String
-        // (its first u32 is huge), but even a payload that spells the core's prefix is the error.
-        let body = WireTestError.note("cancelled: the runtime shut down").undraEncoded()
         XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(body), domain: WireTestError.self) as? WireTestError,
-            .note("cancelled: the runtime shut down")
-        )
-        // Without a domain the same bytes are not a String, so they are malformed, not a panic.
-        guard case .malformed? = UndraCallError.mapped(streamFailure: streamError(body)) as? UndraCallError else {
-            return XCTFail("expected .malformed")
-        }
-    }
-
-    func testAStringThatAlsoDecodesAsTheErrorResolvesAsTheError() {
-        // An empty message is four zero bytes, which is also `WireTestError.code(0)` (variant 0 and a
-        // zero `UInt16`). The documented tie-break: the domain error wins.
-        let body = stringBody("")
-        XCTAssertEqual(body, [0, 0, 0, 0])
-        XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(body), domain: WireTestError.self) as? WireTestError,
-            .code(0)
-        )
-        // A stream without an error type has no `E` to prefer: it is a panic with no message.
-        XCTAssertEqual(
-            UndraCallError.mapped(streamFailure: streamError(body)) as? UndraCallError,
-            .panicked(message: "", backtrace: "")
+            UndraCallError.mapped(streamFailure: UndraProtocolError.notAStream(callId: 4)) as? UndraCallError,
+            .malformed(UndraProtocolError.notAStream(callId: 4).description)
         )
     }
 
@@ -610,16 +673,36 @@ final class CallErrorCoreTests: XCTestCase {
     }
 
     func testStreamsEndWithTheMappedErrorForEveryKindOfFailure() async throws {
-        let bodies: [(String, [UInt8], Bool, (any Error) -> Bool)] = [
-            ("typed", WireTestError.code(9).undraEncoded(), true, { ($0 as? WireTestError) == .code(9) }),
-            ("restore", stringBody("cancelled: restore replaced the stores"), true, { ($0 as? UndraCallError) == .cancelledByCore }),
-            ("shutdown", stringBody("cancelled: the runtime shut down"), false, { ($0 as? UndraCallError) == .cancelledByCore }),
-            ("panic", stringBody("stream blew up"), false, { ($0 as? UndraCallError) == .panicked(message: "stream blew up", backtrace: "") }),
+        let restore = Wire.StreamFailure(status: .cancelled, message: "a restore replaced the receiver")
+        let shutdown = Wire.StreamFailure(status: .cancelled, message: "the runtime shut down")
+        let panic = Wire.StreamFailure(status: .panic, message: "stream blew up", detail: "frame 0")
+        let refused = Wire.StreamFailure(status: .badRequest, message: "stale handle")
+        let cancelledText = stringBody("cancelled: the runtime shut down")
+        let endings: [(String, FakeTransport.Ending, Bool, (any Error) -> Bool)] = [
+            ("typed", .error(WireTestError.code(9).undraEncoded()), true, { ($0 as? WireTestError) == .code(9) }),
+            (
+                "typed, without a domain",
+                .error(WireTestError.code(9).undraEncoded()),
+                false,
+                { ($0 as? UndraCallError) == .malformed("a stream without an error type ended with a typed error item (4 bytes)") }
+            ),
+            (
+                "a String error item is not a cancellation",
+                .error(cancelledText),
+                true,
+                { ($0 as? UndraCallError) == .malformed("a WireTestError that does not decode (\(cancelledText.count) bytes)") }
+            ),
+            ("restore", .failure(restore), true, { ($0 as? UndraCallError) == .cancelledByCore }),
+            ("restore, without a domain", .failure(restore), false, { ($0 as? UndraCallError) == .cancelledByCore }),
+            ("shutdown", .failure(shutdown), false, { ($0 as? UndraCallError) == .cancelledByCore }),
+            ("panic", .failure(panic), false, { ($0 as? UndraCallError) == .panicked(message: "stream blew up", backtrace: "frame 0") }),
+            ("panic, with a domain", .failure(panic), true, { ($0 as? UndraCallError) == .panicked(message: "stream blew up", backtrace: "frame 0") }),
+            ("refused", .failure(refused), true, { ($0 as? UndraCallError) == .refused(reason: "stale handle") }),
         ]
-        for (name, body, domain, check) in bodies {
+        for (name, ending, domain, check) in endings {
             let transport = FakeTransport()
             transport.onCall = { call, fake in
-                fake.openStream(call.callId, items: [[1]], failureBody: body)
+                fake.openStream(call.callId, items: [[1]], ending: ending)
                 return true
             }
             let core = try makeCore(transport)

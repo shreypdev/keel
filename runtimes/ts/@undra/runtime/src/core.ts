@@ -33,7 +33,9 @@ import {
   ReplyStatus,
   StreamFlag,
   type PortCallPayload,
+  type StreamFailure,
   codecs,
+  decodeStreamFailure,
   decodeValue,
   encodeCall,
   encodeCancel,
@@ -43,6 +45,7 @@ import {
   encodeRelease,
   encodeStreamCredit,
   encodeTimerFired,
+  streamFailureReplyBody,
 } from "./wire/index.js";
 
 /** How the core is reached (SPEC 17.1). */
@@ -488,8 +491,10 @@ export class UndraCore {
    * call: `for await` opens it, grants the core 16 items of credit, tops the
    * credit up as items are consumed, and closes the stream with `Cancel` when
    * the loop is left early. Item bodies are undecoded; a failure of the
-   * stream rejects with {@link UndraReplyError} (status 1 with the encoded
-   * error, like a failed call).
+   * stream rejects with {@link UndraReplyError} exactly like a failed call:
+   * status 1 with the encoded `E` when the stream ends with its own typed
+   * error, status 2, 3 or 5 with the section 3.4 body when the core reports
+   * that it panicked, cancelled the stream or refused it (ADR-036).
    */
   stream(target: CallTargetArg, methodId: number, args: Uint8Array): AsyncIterable<Uint8Array> {
     return { [Symbol.asyncIterator]: () => this.#openStream(target, methodId, args) };
@@ -688,7 +693,7 @@ export class UndraCore {
    * after the restored values reached the stores (the core re-delivers the observed signals, and
    * the mirror is flushed, so code after `await core.restore(..)` reads the restored values). A
    * call or stream in flight on a store the restore replaced ends as cancelled by the core
-   * (reply status 3, stream error `"cancelled: ..."`); an object that is not a store becomes a
+   * (reply status 3; a stream ends with a flag-3 failure of status 3); an object that is not a store becomes a
    * stale handle. Rejects with `UndraRestoreError` when the core refuses the bytes, in which case
    * it is unchanged and still usable, with {@link UndraTransportError} when the core is closed, and
    * with {@link UndraModeError} over a transport that cannot restore (`remote`).
@@ -1038,9 +1043,27 @@ export class UndraCore {
         entry.stream.end();
         return;
       case StreamFlag.Error:
+        // The stream's own `E`; generated code decodes it.
         this.#pending.delete(callId);
         entry.stream.fail(new UndraReplyError(ReplyStatus.Error, body));
         return;
+      case StreamFlag.Failed: {
+        // Panicked, cancelled by the core or refused: exactly the failed reply with that status (ADR-036).
+        this.#pending.delete(callId);
+        let failure: StreamFailure;
+        try {
+          failure = decodeStreamFailure(body);
+        } catch (error) {
+          entry.stream.fail(
+            new UndraTransportError("protocol", `the core sent a malformed stream failure: ${errorMessage(error)}`, {
+              cause: error,
+            }),
+          );
+          return;
+        }
+        entry.stream.fail(new UndraReplyError(failure.status, streamFailureReplyBody(failure)));
+        return;
+      }
       default:
         this.#pending.delete(callId);
         entry.stream.fail(new UndraTransportError("protocol", `the core sent stream flag ${flag}`));

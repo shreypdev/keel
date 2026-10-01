@@ -78,8 +78,9 @@ public open class UndraCore protected constructor() : AutoCloseable {
          * the bindings ([LoadOptions.expectedSchemaHash]). The first successful call also becomes [shared].
          *
          * In [Mode.INPROC] this loads the native library (see [UndraNative]), initializes the core and
-         * registers the ports; only one in-process core can exist per process, and it cannot be
-         * unloaded, so a second `load(INPROC)` fails. In [Mode.REMOTE] it connects to `undra dev` and
+         * registers the ports; only one in-process core can exist per process at a time, so a second
+         * `load(INPROC)` fails until the first one is [close]d (which ends its work, ADR-034) and then starts a fresh
+         * core. In [Mode.REMOTE] it connects to `undra dev` and
          * performs the `Hello` handshake; see [Mode.REMOTE] for its limits.
          *
          * @throws UndraSchemaMismatchException if the core's schema hash differs.
@@ -210,9 +211,12 @@ public open class UndraCore protected constructor() : AutoCloseable {
      * Opens a stream and returns its items as a cold [Flow]: every collection starts a new call. Items
      * are delivered with back-pressure: the collector grants the core 16 items when the stream opens
      * and 8 more each time fewer than 8 remain granted, so a slow collector slows the core down.
-     * Cancelling the collection cancels the stream in the core. A stream that fails ends the flow with
-     * [UndraReplyException] (`status == ERROR`, body the encoded error, or the core's `String` when the core ended
-     * the stream itself), or with [UndraTransportException] when the core goes away.
+     * Cancelling the collection cancels the stream in the core. A stream that fails ends the flow in the vocabulary of a
+     * failed reply (ADR-036): with [UndraReplyException] of status `ERROR` and the encoded error as its body when the
+     * stream ends with its own typed error (flag 2), or with the failure's own status and SPEC 3.4 body when the core
+     * ended the stream itself (flag 3: `PANIC`, `CANCELLED` by a restore or a shutdown, `BAD_REQUEST` when it refused
+     * it); with [UndraProtocolException] for an item or a failure body the runtime cannot read; and with
+     * [UndraTransportException] when the core goes away. Generated code maps them with [UndraCallError.mappedStream].
      */
     public open fun stream(target: CallTarget, methodId: UInt, args: ByteArray): Flow<ByteArray> =
         throw unsupported("stream")
@@ -314,9 +318,21 @@ public open class UndraCore protected constructor() : AutoCloseable {
     public open fun restore(snapshot: ByteArray): Unit = throw unsupported("restore")
 
     /**
-     * Detaches this host from the core: pending calls fail with [UndraTransportException], streams end with it,
-     * port work is cancelled and the link is closed. An in-process core keeps running (the native library
-     * cannot be unloaded) and cannot be loaded again in this process. Idempotent.
+     * Closes this core: pending calls fail with [UndraTransportException] (reason `CLOSED`), streams end with it, port work is
+     * cancelled and the link is closed. **Closing ends the core's work** (ADR-034): an in-process core is
+     * shut down (its tasks, timers and port calls stop), and a later [load] in the same process starts a
+     * fresh one with fresh handles. Idempotent.
+     *
+     * **For an in-process core, `close()` waits for the native shutdown**: it returns only after the core's
+     * own thread, its timer thread and its blocking pool have been joined and every port callback running
+     * on another thread has returned. So do not call it while holding a lock (or waiting on a latch, or
+     * inside a `runBlocking`) that a synchronous port implementation needs: the close would wait for the
+     * callback and the callback for the close, and a port callback that never returns keeps `close()` from
+     * returning. Over a remote transport `close()` only closes the connection.
+     *
+     * @throws UndraReplyException (status `BAD_REQUEST`, reason `E_REENTRANT`) when called from inside a core
+     *   callback (a synchronous port implementation), where the shutdown would wait for the very thread it runs
+     *   on; the core is left open.
      */
     override fun close() {}
 

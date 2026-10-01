@@ -264,17 +264,22 @@ private fun objects() {
         expectEq(seen, listOf(todo), "items before the failure")
         expectEq(core.calls.last().args, "0200", "stream arguments")
 
-        // The core ending a stream itself: the String of SPEC 5.9, read as `cancelled by the core` or `panicked`.
-        core.streams.add(listOf(replyError(stringBody("cancelled: a restore replaced the receiver"))))
+        // The core ending a stream itself (ADR-036, SPEC 3.7): a flag-3 failure arrives as the failed reply with its status.
+        core.streams.add(listOf(UndraReplyException(ReplyStatus.CANCELLED, ByteArray(0))))
         expectThrows<UndraCallError.CancelledByCore>("a stream ended by a restore") { runBlocking { calc.watch(Priority.HIGH).collect {} } }
-        core.streams.add(listOf(replyError(stringBody("cancelled: the runtime shut down"))))
+        core.streams.add(listOf(UndraReplyException(ReplyStatus.CANCELLED, ByteArray(0))))
         expectThrows<UndraCallError.CancelledByCore>("a stream without an error type ended by shutdown") { runBlocking { calc.ticks().collect {} } }
+        core.streams.add(listOf(UndraReplyException(ReplyStatus.PANIC, panicBody("the stream panicked: boom", "at core.rs:1"))))
+        val streamPanic = expectThrows<UndraCallError.Panicked>("a stream panic") { runBlocking { calc.ticks().collect {} } }
+        expectEq(streamPanic.panicMessage, "the stream panicked: boom", "the panic text")
+        expectEq(streamPanic.backtrace, "at core.rs:1", "the backtrace")
+        core.streams.add(listOf(UndraReplyException(ReplyStatus.BAD_REQUEST, stringBody("stale handle"))))
+        expectEq(expectThrows<UndraCallError.Refused>("a refused stream") { runBlocking { calc.ticks().collect {} } }.reason, "stale handle", "the reason")
+        core.streams.add(listOf(UndraReplyException(ReplyStatus.BAD_REQUEST, stringBody("stale handle"))))
+        expectThrows<UndraCallError.Refused>("a refused stream with an error type") { runBlocking { calc.watch(Priority.HIGH).collect {} } }
+        // A typed error item on a stream that has no error type is not the core's text: Malformed.
         core.streams.add(listOf(replyError(stringBody("the stream panicked: boom"))))
-        expectEq(
-            expectThrows<UndraCallError.Panicked>("a stream panic") { runBlocking { calc.ticks().collect {} } }.panicMessage,
-            "the stream panicked: boom",
-            "the panic text",
-        )
+        expectThrows<UndraCallError.Malformed>("a typed error item on a stream without an error type") { runBlocking { calc.ticks().collect {} } }
         core.streams.add(listOf(UndraTransportException(UndraTransportException.Reason.CLOSED, "closed")))
         expectThrows<UndraCallError.Unavailable>("a stream on a closed core") { runBlocking { calc.ticks().collect {} } }
         core.streams.add(listOf(bytes("01")))

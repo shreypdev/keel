@@ -329,7 +329,7 @@ async fn run<M: MutationDef>(builder: MutationBuilder<M>) -> Result<M::Output, M
     let input_bytes = input.encode_to_vec();
     let key = M::IDEMPOTENT.then(|| new_uuid(&ctx));
     let result = with_retries(
-        &ctx,
+        &ctx.downgrade(),
         M::RETRY,
         |_: &M::Error| true,
         || scoped(key, M::execute(ctx.clone(), input.clone())),

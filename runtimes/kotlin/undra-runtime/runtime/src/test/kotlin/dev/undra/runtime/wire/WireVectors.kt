@@ -1,5 +1,5 @@
 // GENERATED FILE, DO NOT EDIT. Regenerate with scripts/gen-vectors.py.
-// Source: contract-tests/wire-vectors.json (sha256 229ee37b41c1eac3e7ac2a2eb2e123f1c897b8f5af6c832b7c660a959c41d242)
+// Source: contract-tests/wire-vectors.json (sha256 66ad28b1ed6d1986e68aec32002d4bf86a59713e5f93bcaf574a24fd605e201b)
 package dev.undra.runtime.wire
 
 import dev.undra.runtime.testing.JV
@@ -43,5 +43,9 @@ internal object WireVectors {
         WireVector("changeset_one", "changeset payload", JV.Obj(listOf("txn_id" to JV.Str("42"), "entries" to JV.Arr(listOf(JV.Obj(listOf("handle" to JV.Str("4294967297"), "signal_id" to JV.Num("0"), "op" to JV.Num("0"), "value" to JV.Arr(listOf(JV.Num("1"), JV.Num("2"))))))))), "2a0000000000000001000000010000000100000000000000000c000000020000000100000002000000", ""),
         WireVector("keyed_patch", "keyed patch (item i32)", JV.Obj(listOf("ops" to JV.Arr(listOf(JV.Obj(listOf("op" to JV.Str("insert"), "index" to JV.Num("0"), "item" to JV.Num("5"))), JV.Obj(listOf("op" to JV.Str("remove"), "index" to JV.Num("1"))), JV.Obj(listOf("op" to JV.Str("move"), "from" to JV.Num("0"), "to" to JV.Num("1"))), JV.Obj(listOf("op" to JV.Str("clear"))))))), "04000000000000000005000000010100000003000000000100000004", ""),
         WireVector("map_key_order_by_encoded_bytes", "map<string,i32>", JV.Obj(listOf("aa" to JV.Num("1"), "b" to JV.Num("2"))), "0200000001000000620200000002000000616101000000", "sorted by encoded key bytes, so the u32 length prefix dominates: \"b\" (len 1) precedes \"aa\" (len 2)"),
+        WireVector("stream_item_error_typed", "stream item payload", JV.Obj(listOf("call_id" to JV.Num("7"), "flag" to JV.Num("2"), "body_hex" to JV.Str("0200"))), "07000000020200", "flag 2 carries only the stream's own E (here enum Filter, variant Done) and ends the stream; ADR-036"),
+        WireVector("stream_item_failed_cancelled", "stream item payload", JV.Obj(listOf("call_id" to JV.Num("7"), "flag" to JV.Num("3"), "status" to JV.Num("3"), "message" to JV.Str("the runtime shut down"), "detail" to JV.Str(""))), "070000000303150000007468652072756e74696d65207368757420646f776e00000000", "flag 3: the call failed (status u8, message String, detail String); 3 = cancelled by the core, mapped like a reply with status 3; ADR-036"),
+        WireVector("stream_item_failed_panic", "stream item payload", JV.Obj(listOf("call_id" to JV.Num("9"), "flag" to JV.Num("3"), "status" to JV.Num("2"), "message" to JV.Str("boom"), "detail" to JV.Str("at core.rs:1"))), "09000000030204000000626f6f6d0c000000617420636f72652e72733a31", "flag 3, status 2 = panicked: message and detail are exactly the String message + String backtrace body of a status 2 reply; ADR-036"),
+        WireVector("stream_item_failed_refused", "stream item payload", JV.Obj(listOf("call_id" to JV.Num("9"), "flag" to JV.Num("3"), "status" to JV.Num("5"), "message" to JV.Str("stale handle"), "detail" to JV.Str(""))), "0900000003050c0000007374616c652068616e646c6500000000", "flag 3, status 5 = refused: message is the reason, as in a status 5 reply; statuses other than 2, 3 and 5 are invalid; ADR-036"),
     )
 }

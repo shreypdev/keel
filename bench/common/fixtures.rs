@@ -566,7 +566,7 @@ impl TickSink {
 
     fn rebuild(ctx: Ctx, value: Signal<u64>) -> Self {
         let target = value.clone();
-        let subscription = on_ticks_tick(&ctx, move |tick| target.update(|v| *v = tick));
+        let subscription = on_ticks_tick(&ctx, move |_ctx, tick| target.update(|v| *v = tick));
         TickSink {
             value,
             subscription,

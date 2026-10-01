@@ -5,8 +5,8 @@ use core::time::Duration;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use undra_ports::CtxPorts;
-use undra_runtime::Ctx;
 use undra_runtime::log::WARN;
+use undra_runtime::{Ctx, Gone, WeakCtx};
 use undra_wire::Uuid;
 
 use crate::defs::BoxFuture;
@@ -80,16 +80,21 @@ pub(crate) fn jitter(ctx: &Ctx) -> u64 {
     })
 }
 
-/// Sleeps for the backoff of retry number `attempt`.
-pub(crate) async fn backoff_sleep(ctx: &Ctx, attempt: u32) {
-    let delay = backoff_ms(attempt, jitter(ctx));
-    ctx.sleep(Duration::from_millis(delay)).await;
+/// Sleeps for the backoff of retry number `attempt`, holding only a [`WeakCtx`] while it waits
+/// (ADR-034): `Err(Gone)` as soon as the runtime starts shutting down or is dropped.
+pub(crate) async fn backoff_sleep(weak: &WeakCtx, attempt: u32) -> Result<(), Gone> {
+    let delay = {
+        let ctx = weak.upgrade()?;
+        backoff_ms(attempt, jitter(&ctx))
+    };
+    weak.sleep(Duration::from_millis(delay)).await
 }
 
 /// Runs `attempt` until it succeeds, it fails with an error that is not `retryable`, or
-/// `retries` retries have been spent, sleeping the [backoff](backoff_ms) between attempts.
+/// `retries` retries have been spent, sleeping the [backoff](backoff_ms) between attempts. The
+/// backoff holds only `weak`; when the runtime goes during one, the last error is returned.
 pub(crate) async fn with_retries<T, E>(
-    ctx: &Ctx,
+    weak: &WeakCtx,
     retries: u32,
     retryable: fn(&E) -> bool,
     mut attempt: impl FnMut() -> BoxFuture<Result<T, E>>,
@@ -102,7 +107,9 @@ pub(crate) async fn with_retries<T, E>(
                 if retried >= retries || !retryable(&error) {
                     return Err(error);
                 }
-                backoff_sleep(ctx, retried).await;
+                if backoff_sleep(weak, retried).await.is_err() {
+                    return Err(error);
+                }
                 retried += 1;
             }
         }

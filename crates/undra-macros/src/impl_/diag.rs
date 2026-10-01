@@ -68,6 +68,7 @@ pub(crate) const MESSAGE_PREFIX: &str = "error";
 /// | E0062 | a port call could not be answered and its method has no error channel: a runtime message (addition) |
 /// | E0063 | nested `Option<Option<T>>` (addition) |
 /// | E0064 | an object (`#[undra::api] impl`) used where a value is expected (addition) |
+/// | E0065 | a signal of a store written off its owning runtime's core (ADR-035): a runtime message |
 pub(crate) mod code {
     pub(crate) const E0001: &str = "E0001";
     pub(crate) const E0002: &str = "E0002";

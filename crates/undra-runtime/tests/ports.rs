@@ -542,7 +542,7 @@ fn events_fan_out_to_subscribers_in_order_on_the_core() {
     let sub1 = t.ctx().events().subscribe(
         CONNECTIVITY,
         CHANGED,
-        Box::new(move |payload| {
+        Box::new(move |_ctx, payload| {
             // Runs on the core loop: the runtime is current.
             assert!(undra_runtime::Ctx::try_current().is_some());
             s1.lock().push(("first", payload.to_vec()));
@@ -551,7 +551,7 @@ fn events_fan_out_to_subscribers_in_order_on_the_core() {
     let sub2 = t.ctx().events().subscribe(
         CONNECTIVITY,
         CHANGED,
-        Box::new(move |payload| s2.lock().push(("second", payload.to_vec()))),
+        Box::new(move |_ctx, payload| s2.lock().push(("second", payload.to_vec()))),
     );
     t.runtime().event(CONNECTIVITY, CHANGED, &[1, 4]);
     assert_eq!(
@@ -582,12 +582,12 @@ fn a_panicking_subscriber_is_logged_and_the_others_still_run() {
     let _bad = t.ctx().events().subscribe(
         CONNECTIVITY,
         CHANGED,
-        Box::new(|_| panic!("subscriber kaboom")),
+        Box::new(|_, _| panic!("subscriber kaboom")),
     );
     let _good = t.ctx().events().subscribe(
         CONNECTIVITY,
         CHANGED,
-        Box::new(move |_| {
+        Box::new(move |_, _| {
             r.fetch_add(1, Ordering::SeqCst);
         }),
     );
@@ -615,7 +615,7 @@ fn subscribers_can_write_signals_and_spawn_tasks() {
     let sub = t.ctx().events().subscribe(
         CONNECTIVITY,
         CHANGED,
-        Box::new(move |payload| {
+        Box::new(move |_ctx, payload| {
             counter.count.set(i32::from(payload[0]));
             let counter = counter.clone();
             ctx.spawn(async move { counter.count.update(|c| *c += 1000) });
@@ -641,7 +641,7 @@ fn events_from_inside_the_core_are_refused_not_deadlocked() {
     let _sub = t.ctx().events().subscribe(
         CONNECTIVITY,
         CHANGED,
-        Box::new(move |_| rt.event(CONNECTIVITY, CHANGED, &[])),
+        Box::new(move |_, _| rt.event(CONNECTIVITY, CHANGED, &[])),
     );
     t.runtime().event(CONNECTIVITY, CHANGED, &[]);
     let logs = t.host().take_logs();

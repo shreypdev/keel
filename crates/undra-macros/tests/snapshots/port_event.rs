@@ -37,10 +37,11 @@ static __UNDRA_META_port_Connectivity: ::undra::meta::PortMeta = ::undra::meta::
 ::undra::meta::inventory::submit! {
     ::undra::meta::Registration::Port(& __UNDRA_META_port_Connectivity)
 }
-///Calls `f` with the decoded arguments of every `Connectivity.changed` event.
+///Calls `f` with the runtime's `Ctx` and the decoded arguments of every `Connectivity.changed` event. Use the `Ctx` it is given: a captured one would keep the runtime alive (ADR-034).
 pub fn on_connectivity_changed(
     ctx: &::undra::runtime::Ctx,
     f: impl ::core::ops::Fn(
+        &::undra::runtime::Ctx,
         bool,
         NetKind,
     ) + ::core::marker::Send + ::core::marker::Sync + 'static,
@@ -49,7 +50,10 @@ pub fn on_connectivity_changed(
         .subscribe(
             <dyn Connectivity as ::undra::runtime::Port>::PORT_ID,
             ::undra::meta::ids::port_method_id("Connectivity", "changed"),
-            ::std::boxed::Box::new(move |__payload: &[u8]| {
+            ::std::boxed::Box::new(move |
+                __ctx: &::undra::runtime::Ctx,
+                __payload: &[u8]|
+            {
                 let mut __r = ::undra::wire::Reader::new(__payload);
                 let __a0: bool = match <bool as ::undra::wire::Decode>::decode(
                     &mut __r,
@@ -66,7 +70,7 @@ pub fn on_connectivity_changed(
                 if __r.finish().is_err() {
                     return;
                 }
-                f(__a0, __a1)
+                f(__ctx, __a0, __a1)
             }),
         )
 }

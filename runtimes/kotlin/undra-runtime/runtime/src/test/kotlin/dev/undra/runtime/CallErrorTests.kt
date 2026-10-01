@@ -170,31 +170,39 @@ class CallErrorTests : Suite() {
             assertTrue(UndraCallError.mapped(cancelled, LabError) === cancelled)
         }
 
-        case("a stream error item is the core's String: cancelled, or a panic message") {
-            val restore = reply(ReplyStatus.ERROR, strings("cancelled: a restore replaced the receiver"))
-            assertTrue(UndraCallError.mappedStream(restore) is UndraCallError.CancelledByCore)
-            val panic = UndraCallError.mappedStream(reply(ReplyStatus.ERROR, strings("the stream panicked: boom"))) as UndraCallError.Panicked
-            assertEq("the stream panicked: boom", panic.panicMessage)
-            assertEq("", panic.backtrace)
-            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, byteArrayOf(1))) is UndraCallError.Malformed, "garbage")
-            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, strings("a") + byteArrayOf(1))) is UndraCallError.Malformed, "trailing bytes")
+        case("a stream the core ended with a failure maps by the failure's status, as a failed call does (ADR-036)") {
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.CANCELLED)) is UndraCallError.CancelledByCore)
+            val panic = UndraCallError.mappedStream(reply(ReplyStatus.PANIC, strings("boom", "at core.rs:1"))) as UndraCallError.Panicked
+            assertEq("boom", panic.panicMessage)
+            assertEq("at core.rs:1", panic.backtrace)
+            val refused = UndraCallError.mappedStream(reply(ReplyStatus.BAD_REQUEST, strings("stale handle"))) as UndraCallError.Refused
+            assertEq("stale handle", refused.reason, "status 5 is Refused, the case a failed call maps it to")
+            assertTrue(UndraCallError.mappedStream(UndraTransportException(UndraTransportException.Reason.CLOSED, "c")) is UndraCallError.Unavailable)
         }
 
-        case("a stream with an error type tries E first, then the core's String; other failures map as usual") {
+        case("a typed error item on a stream without an error type is Malformed, not a guess at the core's text") {
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, strings("cancelled: a restore replaced the receiver"))) is UndraCallError.Malformed)
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, strings("the stream panicked: boom"))) is UndraCallError.Malformed)
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, byteArrayOf(1))) is UndraCallError.Malformed, "garbage")
+        }
+
+        case("a stream with an error type decodes its typed item as E; failures map as for a stream without one") {
             assertEq<Throwable>(LabError.Rejected(3u), UndraCallError.mappedStream(reply(ReplyStatus.ERROR, typed(LabError.Rejected(3u))), LabError))
-            val restore = reply(ReplyStatus.ERROR, strings("cancelled: the runtime shut down"))
-            assertTrue(UndraCallError.mappedStream(restore, LabError) is UndraCallError.CancelledByCore, "the string is not misread as an E")
-            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, strings("the stream panicked: x")), LabError) is UndraCallError.Panicked)
+            // flag 2 carries only the stream's E now (ADR-036): text the core wrote for a cancellation is not read as one.
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, strings("cancelled: the runtime shut down")), LabError) is UndraCallError.Malformed)
             assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.ERROR, byteArrayOf(9, 9, 9)), LabError) is UndraCallError.Malformed)
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.CANCELLED), LabError) is UndraCallError.CancelledByCore)
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.PANIC, strings("x", "")), LabError) is UndraCallError.Panicked)
+            assertTrue(UndraCallError.mappedStream(reply(ReplyStatus.BAD_REQUEST, strings("r")), LabError) is UndraCallError.Refused)
             assertTrue(UndraCallError.mappedStream(UndraTransportException(UndraTransportException.Reason.CLOSED, "c"), LabError) is UndraCallError.Unavailable)
         }
 
-        case("a body that reads as an E wins over the String reading (the Swift tie-break; ADR-036 removes it)") {
-            // `LabError.Empty` is the two bytes `00 00`, which cannot be a String (its length prefix is four bytes), so E.
+        case("an E is never mistaken for the core's String, and the reverse (the tie-break is gone with ADR-036)") {
+            // `LabError.Empty` is the two bytes `00 00`: an E.
             assertEq<Throwable>(LabError.Empty, UndraCallError.mappedStream(reply(ReplyStatus.ERROR, byteArrayOf(0, 0)), LabError))
-            // Four zero bytes are the empty String; read as an E they would leave two bytes over, so the String reading wins.
+            // Four zero bytes were the empty String that used to win; as an item of the stream's E they leave two bytes over: Malformed.
             val read = UndraCallError.mappedStream(reply(ReplyStatus.ERROR, byteArrayOf(0, 0, 0, 0)), LabError)
-            assertTrue(read is UndraCallError.Panicked, "the empty String: $read")
+            assertTrue(read is UndraCallError.Malformed, "$read")
         }
 
         // ---- reporting -----------------------------------------------------------------------------------

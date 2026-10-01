@@ -6,6 +6,8 @@ import dev.undra.runtime.support.NO_BYTES
 import dev.undra.runtime.support.changeSet
 import dev.undra.runtime.support.eventually
 import dev.undra.runtime.support.full
+import dev.undra.runtime.support.handledBy
+import dev.undra.runtime.support.portMethods
 import dev.undra.runtime.support.replyPayload
 import dev.undra.runtime.testing.Suite
 import dev.undra.runtime.testing.assertEq
@@ -32,6 +34,7 @@ import org.junit.jupiter.api.Test
 
 private val METHOD = 0x31u
 private val TARGET = CallTarget.ObjectMethod(Handle(0x100000002L), METHOD)
+private val PORT_FOR_CLOSE = 0x77u
 
 /** Everything a core cares about, recorded, with hooks a test can set. */
 private class RecordingEvents : TransportEvents {
@@ -43,6 +46,7 @@ private class RecordingEvents : TransportEvents {
     @Volatile var closed: Boolean = false
     @Volatile var portAnswer: PortOutcome = PortOutcome.Unavailable
     @Volatile var failWith: RuntimeException? = null
+    @Volatile var onPort: () -> Unit = {}
 
     override fun onReply(callId: UInt, status: ReplyStatus, body: ByteArray) {
         failWith?.let { throw it }
@@ -69,6 +73,7 @@ private class RecordingEvents : TransportEvents {
     override fun onPortCall(portId: UInt, methodId: UInt, portCallId: UInt, args: ByteArray): PortOutcome {
         failWith?.let { throw it }
         portCalls.add(listOf(portId, methodId, portCallId, args.toList()))
+        onPort()
         return portAnswer
     }
 
@@ -217,20 +222,28 @@ class InprocTransportTests : Suite() {
             assertTrue(events.changeSets.single().contentEquals(payload), "the copy differs from what the core sent")
         }
 
-        case("stream items are decoded and copied; a malformed one fails the stream") {
+        case("stream items are decoded and copied; one that cannot be read is reported as malformed, not as the stream's E") {
             val native = FakeNative()
             val events = RecordingEvents()
             InprocTransport(native).connect(events, HASH)
             native.emitStream(4, Payloads.StreamItem(4u, StreamFlag.ITEM, byteArrayOf(8, 9)).toByteArray())
             native.emitStream(4, Payloads.StreamItem(4u, StreamFlag.END, NO_BYTES).toByteArray())
-            native.emitStream(5, byteArrayOf(1))
+            native.emitStream(5, byteArrayOf(1)) // shorter than call_id + flag
+            native.emitStream(6, byteArrayOf(6, 0, 0, 0, 4)) // flag 4 does not exist
+            val cancelled = Payloads.StreamFailure(ReplyStatus.CANCELLED, "the runtime shut down", "").toByteArray()
+            native.emitStream(7, Payloads.StreamItem(7u, StreamFlag.FAILED, cancelled).toByteArray())
             assertEq(Triple(4u, StreamFlag.ITEM, listOf<Byte>(8, 9)), events.items[0])
             assertEq(Triple(4u, StreamFlag.END, emptyList<Byte>()), events.items[1])
-            assertEq(2, events.items.size)
-            assertEq(5u, events.malformed.single().first)
-            assertTrue(events.malformed.single().second.message!!.contains("malformed stream item"), "${events.malformed}")
-            // Not the core's own String (which reads as a panic): Malformed, for a stream with or without an E.
-            assertTrue(UndraCallError.mappedStream(events.malformed.single().second) is UndraCallError.Malformed, "maps to Malformed")
+            assertEq(3, events.items.size, "the two unreadable items are not items")
+            // A well-formed flag-3 item passes through as it came; UndraCore decodes the failure.
+            assertEq(Triple(7u, StreamFlag.FAILED, cancelled.toList()), events.items[2])
+            assertEq(listOf(5u, 6u), events.malformed.map { it.first }, "the call id JNI passes alongside the item")
+            for ((_, error) in events.malformed) {
+                assertTrue(error.message!!.contains("malformed stream item"), "$error")
+                // Not flag 2 (the stream's own typed error, ADR-036) and not the core's own String (which reads as a panic): Malformed.
+                assertTrue(UndraCallError.mappedStream(error) is UndraCallError.Malformed, "maps to Malformed")
+            }
+            assertEq(emptyList<Int>(), native.cancels.toList(), "the transport only reports; UndraCore decides what to cancel")
         }
 
         case("a sync port answer is handed back through portSyncReply on the same thread") {
@@ -306,6 +319,55 @@ class InprocTransportTests : Suite() {
             }
         }
 
+        case("close shuts the native core down once and gives the claim back, so a new load starts fresh (ADR-034)") {
+            val native = FakeNative()
+            val first = InprocTransport(native)
+            first.connect(RecordingEvents(), HASH)
+            first.close()
+            first.close()
+            assertEq(1, native.shutdowns.get(), "close ends the native core's work, once")
+            // The claim went with it: the same process loads a new core.
+            val second = InprocTransport(native)
+            second.connect(RecordingEvents(), HASH)
+            assertEq(2, native.inits.get())
+            second.close()
+            assertEq(2, native.shutdowns.get())
+            assertTrue(native.violations.isEmpty(), native.violations.toString())
+        }
+
+        case("close from inside a core callback is refused and leaves the core open (ADR-034)") {
+            val native = FakeNative()
+            val transport = InprocTransport(native)
+            val events = RecordingEvents()
+            transport.connect(events, HASH)
+            var refused: Throwable? = null
+            events.onPort = { refused = runCatching { transport.close() }.exceptionOrNull() }
+            native.portCall(1, 1, 1, NO_BYTES)
+            assertTrue(refused is UndraException, "close from a callback must throw: $refused")
+            assertTrue(refused!!.message!!.contains("inside a core callback"), refused!!.message!!)
+            assertEq(0, native.shutdowns.get(), "a refused close does not shut the core down")
+            transport.close()
+            assertEq(1, native.shutdowns.get())
+            assertTrue(native.violations.isEmpty(), native.violations.toString())
+        }
+
+        case("an UndraCore closed from a core callback stays open; closed normally it shuts the native core down") {
+            val native = FakeNative()
+            val core = UndraCore.attach(InprocTransport(native), LoadOptions(expectedSchemaHash = HASH, defaultAdapters = false), makeShared = false)
+            var refused: Throwable? = null
+            core.registerPort(
+                PORT_FOR_CLOSE,
+                PortImpl(true, portMethods(1u handledBy { _: ByteArray -> refused = runCatching { core.close() }.exceptionOrNull(); NO_BYTES })),
+            )
+            native.portCall(PORT_FOR_CLOSE.toInt(), 1, 1, NO_BYTES)
+            assertTrue(refused is UndraException, "close from a sync port must throw: $refused")
+            assertEq(0, native.shutdowns.get())
+            native.onCallSync = { call -> replyPayload(call.callId, ReplyStatus.OK, Codecs.u32.encodeToByteArray(5u)) }
+            assertEq(5u, Codecs.u32.decodeAll(core.callSync(TARGET, METHOD, NO_BYTES)), "the core is still open")
+            core.close()
+            assertEq(1, native.shutdowns.get())
+        }
+
         case("callbacks after close are ignored") {
             val native = FakeNative()
             val events = RecordingEvents()
@@ -349,6 +411,63 @@ class InprocTransportTests : Suite() {
                 val items = runBlocking { core.stream(TARGET, METHOD, NO_BYTES).toList() }.map { Codecs.u32.decodeAll(it) }
                 assertEq(listOf(0u, 1u, 2u), items)
                 assertEq(16, native.credits.single().second)
+                assertEq(emptyList<String>(), native.violations.toList())
+            }
+        }
+
+        case("through an UndraCore: a stream the native core fails (flag 3) or garbles ends inside the UndraException hierarchy, and an unreadable item cancels the core's stream") {
+            val native = FakeNative()
+            val core = UndraCore.attach(InprocTransport(native), LoadOptions(expectedSchemaHash = HASH, defaultAdapters = false), makeShared = false)
+            core.use {
+                val garbledCallId = java.util.concurrent.atomic.AtomicReference<UInt>()
+                fun endWith(item: (callId: UInt) -> ByteArray): UndraException {
+                    native.onCall = { call ->
+                        Thread {
+                            native.emitReply(replyPayload(call.callId, ReplyStatus.STREAM_OPENED))
+                            native.emitStream(call.callId.toInt(), Payloads.StreamItem(call.callId, StreamFlag.ITEM, Codecs.u32.encodeToByteArray(1u)).toByteArray())
+                            native.emitStream(call.callId.toInt(), item(call.callId))
+                        }.start()
+                    }
+                    val seen = CopyOnWriteArrayList<UInt>()
+                    val e = assertThrows<UndraException> {
+                        runBlocking { core.stream(TARGET, METHOD, NO_BYTES).collect { seen.add(Codecs.u32.decodeAll(it)) } }
+                    }
+                    assertEq(listOf(1u), seen.toList(), "the item before the end was delivered")
+                    return e
+                }
+                // Shutdown or a restore that replaced the receiver: cancelled by the core.
+                val cancelled = endWith { id ->
+                    Payloads.StreamItem(id, StreamFlag.FAILED, Payloads.StreamFailure(ReplyStatus.CANCELLED, "the runtime shut down", "").toByteArray()).toByteArray()
+                }
+                assertEq(ReplyStatus.CANCELLED, (cancelled as UndraReplyException).status)
+                // A stream that panicked.
+                val panicked = endWith { id ->
+                    Payloads.StreamItem(id, StreamFlag.FAILED, Payloads.StreamFailure(ReplyStatus.PANIC, "boom", "at core.rs:1").toByteArray()).toByteArray()
+                }
+                assertEq(Payloads.PanicInfo("boom", "at core.rs:1"), (panicked as UndraReplyException).panicInfo)
+                // A stream the core refused.
+                val refused = endWith { id ->
+                    Payloads.StreamItem(id, StreamFlag.FAILED, Payloads.StreamFailure(ReplyStatus.BAD_REQUEST, "stale handle", "").toByteArray()).toByteArray()
+                }
+                assertEq(ReplyStatus.BAD_REQUEST, (refused as UndraReplyException).status)
+                assertEq("stale handle", refused.badRequestReason)
+                assertEq(UndraCallError.Refused("stale handle").message, UndraCallError.mappedStream(refused).message, "status 5 maps to Refused, as a failed call does")
+                // An item the transport cannot read at all.
+                assertEq(emptyList<Int>(), native.cancels.toList(), "the core's own failures need no cancel")
+                val garbled = endWith { id -> garbledCallId.set(id); Codecs.u32.encodeToByteArray(id) + byteArrayOf(9) }
+                assertTrue(garbled is UndraProtocolException, "$garbled")
+                assertTrue(garbled.message!!.startsWith("the core sent a malformed stream item: "), garbled.message!!)
+                assertTrue(UndraCallError.mappedStream(garbled) is UndraCallError.Malformed, "maps to Malformed")
+                // A flag-3 item whose failure body cannot be read.
+                val badFailure = endWith { id -> Payloads.StreamItem(id, StreamFlag.FAILED, byteArrayOf(1)).toByteArray() }
+                assertTrue(badFailure is UndraProtocolException, "$badFailure")
+                assertTrue(badFailure.message!!.startsWith("the core sent a malformed stream failure: "), badFailure.message!!)
+                assertTrue(UndraCallError.mappedStream(badFailure) is UndraCallError.Malformed, "maps to Malformed")
+                eventually("no stream is left pending") { core.stats().hostPendingCalls == 0 }
+                // Only the unreadable item leaves the core's stream open (L6): one cancel, for that call. A flag-3
+                // item the core sent itself (cancelled, panic, an unreadable failure body) ended the core's side.
+                eventually("the unreadable item's stream is cancelled once") { native.cancels.size == 1 }
+                assertEq(garbledCallId.get(), native.cancels.single().toUInt())
                 assertEq(emptyList<String>(), native.violations.toList())
             }
         }

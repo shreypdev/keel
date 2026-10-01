@@ -216,34 +216,45 @@ describe("UndraCallError.mapped with a domain", () => {
 });
 
 describe("UndraCallError.mappedStream", () => {
-  it("reads a stream error item as the core's String: cancelled, or a panic message", () => {
-    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, strings("cancelled: a restore replaced the receiver")))).toBeInstanceOf(
-      UndraCallError.CancelledByCore,
-    );
-    const panic = UndraCallError.mappedStream(reply(ReplyStatus.Error, strings("the stream panicked: boom"))) as UndraCallError.Panicked;
+  it("maps a stream the core ended with a failure by the failure's status, as a failed call is (ADR-036)", () => {
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Cancelled))).toBeInstanceOf(UndraCallError.CancelledByCore);
+    const panic = UndraCallError.mappedStream(reply(ReplyStatus.Panic, strings("boom", "at core.rs:1"))) as UndraCallError.Panicked;
     expect(panic).toBeInstanceOf(UndraCallError.Panicked);
-    expect(panic.panicMessage).toBe("the stream panicked: boom");
-    expect(panic.backtrace).toBe("");
-    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([1])))).toBeInstanceOf(UndraCallError.Malformed);
-    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([...strings("a"), 1])))).toBeInstanceOf(UndraCallError.Malformed);
+    expect(panic.panicMessage).toBe("boom");
+    expect(panic.backtrace).toBe("at core.rs:1");
+    const refused = UndraCallError.mappedStream(reply(ReplyStatus.BadRequest, strings("stale handle"))) as UndraCallError.Refused;
+    expect(refused).toBeInstanceOf(UndraCallError.Refused);
+    expect(refused.reason).toBe("stale handle");
+    expect(UndraCallError.mappedStream(new UndraTransportError("closed", "c"))).toBeInstanceOf(UndraCallError.Unavailable);
   });
 
-  it("with an error type tries E first, then the String; other failures map as usual", () => {
+  it("a typed error item on a stream without an error type is Malformed, not a guess at the core's text", () => {
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, strings("cancelled: a restore replaced the receiver")))).toBeInstanceOf(
+      UndraCallError.Malformed,
+    );
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, strings("the stream panicked: boom")))).toBeInstanceOf(UndraCallError.Malformed);
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([1])))).toBeInstanceOf(UndraCallError.Malformed);
+  });
+
+  it("with an error type decodes the typed item as E; failures map as for a stream without one", () => {
     const rejected = UndraCallError.mappedStream(reply(ReplyStatus.Error, typed(new LabError("rejected", 3))), LabErrorCodec);
     expect((rejected as LabError).code).toBe(3);
+    // Flag 2 carries only the stream's E now: text the core wrote for a cancellation is not read as one.
     expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, strings("cancelled: the runtime shut down")), LabErrorCodec)).toBeInstanceOf(
-      UndraCallError.CancelledByCore,
+      UndraCallError.Malformed,
     );
-    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, strings("the stream panicked: x")), LabErrorCodec)).toBeInstanceOf(UndraCallError.Panicked);
     expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([9, 9, 9])), LabErrorCodec)).toBeInstanceOf(UndraCallError.Malformed);
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Cancelled), LabErrorCodec)).toBeInstanceOf(UndraCallError.CancelledByCore);
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Panic, strings("x", "")), LabErrorCodec)).toBeInstanceOf(UndraCallError.Panicked);
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.BadRequest, strings("r")), LabErrorCodec)).toBeInstanceOf(UndraCallError.Refused);
     expect(UndraCallError.mappedStream(new UndraTransportError("closed", "c"), LabErrorCodec)).toBeInstanceOf(UndraCallError.Unavailable);
   });
 
-  it("a body that reads as an E wins over the String reading (the Swift tie-break; ADR-036 removes it)", () => {
-    // `empty` is the two bytes 00 00, which cannot be a String (a four-byte length prefix).
+  it("an E is never mistaken for the core's String (the tie-break is gone with ADR-036)", () => {
+    // `empty` is the two bytes 00 00: an E.
     expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([0, 0])), LabErrorCodec)).toBeInstanceOf(LabError);
-    // Four zero bytes are the empty String; as an E they would leave two bytes over, so the String reading wins.
-    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([0, 0, 0, 0])), LabErrorCodec)).toBeInstanceOf(UndraCallError.Panicked);
+    // Four zero bytes were the empty String that used to win; as an item of the stream's E they leave two bytes over: Malformed.
+    expect(UndraCallError.mappedStream(reply(ReplyStatus.Error, new Uint8Array([0, 0, 0, 0])), LabErrorCodec)).toBeInstanceOf(UndraCallError.Malformed);
   });
 });
 

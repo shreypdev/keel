@@ -92,6 +92,24 @@ In Kotlin both `TodoError` and `UndraCallError` are `UndraException`s, and in Ty
 
 Each method names what it can fail with in its documentation (`- Throws:`, `@throws`, `@throws {...}`).
 
+## How a stream ends
+
+A stream's loop ends quietly when the stream is finished, and otherwise fails with one of the same three
+(`docs/SPEC.md` 3.7, ADR-036), on every platform:
+
+| The core ends the stream with | The loop fails with |
+|---|---|
+| the stream's own error, from a method whose Rust signature returns `Result<impl Stream<Item = T>, E>` (a failed opening) or `impl Stream<Item = Result<T, E>>` (an `Err(e)` item) | `E`, for example `catch FeedError.unauthorised` |
+| a failure, because a restore replaced the stream's object, the core shut down, or its owner let go of it | `UndraCallError.cancelledByCore` |
+| a failure, because the stream panicked | `UndraCallError.panicked(message, backtrace)` |
+| a failure, because the core refused the call (a stale handle, `E_REENTRANT`) | `UndraCallError.refused(reason)`, the case a failed call with status 5 maps to |
+| nothing it can read: an item or a failure body that does not decode, or a typed-error item on a stream without an error type (or one that does not decode as `E`) | `UndraCallError.malformed` |
+| the core is unreachable: shut down, a lost connection | `UndraCallError.unavailable` |
+
+The core says which one it is on the wire: a typed error and a failure are different stream items, and a failure carries
+the same status as a failed call. Nothing is read from the text of a message. Cancelling the task that consumes the stream
+still ends the loop quietly.
+
 ## Commands report instead of failing
 
 A synchronous method that returns nothing and has no error type, such as `todos.toggle(id:)` or `counter.increment()`,
@@ -132,6 +150,12 @@ await UndraCore.load({ mode: "wasm-main", wasm, expectedSchemaHash: UndraIds.sch
 What reaches `onError`, on every platform: a failed command, and a change from the core that a store cannot decode
 (operation `"Todos.apply(signal: 2)"`; the change is skipped, never half applied). Kotlin and TypeScript also report a
 malformed change-set (dropped whole) and a port implementation that failed (operation `"port 0x... method 0x..."`).
+A port that has an error type answers its failures with it (`HttpError` and `FsError`: the Android adapters answer a lost network
+with `HttpError.Network`, and a refused permission or a path outside the root with `FsError.Denied`): the core gets a typed reply
+and the failure never reaches `onError`. An
+exception that is not that type (a Keystore failure, a full disk under `Kv`) answers the core `unavailable` and arrives here as
+`Malformed`, whose message names the exception. `Unavailable` is not used for a device that is offline: it means the *core* cannot
+be reached.
 
 The handler runs synchronously on the thread (Swift: the task) that made the call: the main actor for a store, the main
 thread for a Compose click. Keep it short, and do not call into Undra from it: a failure reported while a handler runs
@@ -186,9 +210,10 @@ Generated code maps them with one function per runtime and nothing else:
 | Kotlin | `UndraCallError.mapped(e)` | `mapped(e, E)` (the error's companion codec) | `mappedStream(error)` | `mappedStream(error, E)` |
 | TypeScript | `UndraCallError.mapped(error)` | `mapped(error, ECodec)` | `mappedStream(error)` | `mappedStream(error, ECodec)` |
 
-A stream's error item carries the stream's own `E` or, when the core ended the stream itself (a restore or shutdown:
-`"cancelled: ..."`, or a panic), a `String`; the stream mappings read `E` first, then the `String`. (ADR-036 replaces the
-guess with a distinct wire flag; the mapping function is where it will land, on all three.)
+A stream ends in the vocabulary of a failed reply (ADR-036): the stream mappings read the failure's status
+(`CANCELLED`, `PANIC`, `BAD_REQUEST` become `cancelledByCore`, `panicked`, `refused`, exactly as for a call), a typed-error
+item as the stream's own `E` (`malformed` when it does not decode, or when the stream has no error type), and guess
+nothing from the text of a message.
 
 ## Differences that remain
 

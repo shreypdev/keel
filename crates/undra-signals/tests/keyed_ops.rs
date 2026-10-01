@@ -329,33 +329,30 @@ fn an_unobserved_no_coalesce_list_is_sent_in_full_and_records_nothing() {
     assert_eq!(value_of::<Vec<Todo>>(entry(&set, 0)), list.get());
 }
 
-/// A list at 0 and a computed at 1 that panics while armed.
-fn bombed(initial: Vec<Todo>) -> (Rig, Signal<Vec<Todo>>, Arc<AtomicBool>) {
+/// A list at 0 and, at 1, a plain slot whose encoder panics while armed (an abandoned
+/// change-set, ADR-019 H1), with a closure that dirties it.
+fn bombed(initial: Vec<Todo>) -> (Rig, Signal<Vec<Todo>>, Arc<AtomicBool>, impl Fn()) {
     let rig = Rig::new();
     let list = Signal::new(initial);
     let armed = Arc::new(AtomicBool::new(false));
-    let bomb = {
-        let armed = Arc::clone(&armed);
-        Computed::new(&list, move |_: &Vec<Todo>| {
-            assert!(!armed.load(Ordering::SeqCst), "computed failure");
-            7_u32
-        })
-    };
+    let bomb = Signal::new(EncodeBomb::new(&armed, 7));
     rig.cell.attach_keyed(&list, 0, todo_key).unwrap();
-    rig.cell.attach_computed(&bomb, 1).unwrap();
+    rig.cell.attach(&bomb, 1).unwrap();
     rig.observe_all();
-    (rig, list, armed)
+    let touch = move || bomb.update(|b| b.value = 7);
+    (rig, list, armed, touch)
 }
 
 #[test]
 fn an_abandoned_commit_drops_the_log_and_the_next_delivery_is_the_full_value() {
-    let (rig, list, armed) = bombed(todos(3));
+    let (rig, list, armed, touch) = bombed(todos(3));
     armed.store(true, Ordering::SeqCst);
     let aborted = catch_unwind(AssertUnwindSafe(|| {
         rig.run(|| {
             txn(|| {
                 list.push(todo(4, "a", false));
                 list.remove(0);
+                touch();
             });
         });
     }));
@@ -382,12 +379,13 @@ fn an_abandoned_commit_drops_the_log_and_the_next_delivery_is_the_full_value() {
 
 #[test]
 fn writes_made_between_an_abandoned_commit_and_the_next_are_part_of_the_full_value() {
-    let (rig, list, armed) = bombed(todos(2));
+    let (rig, list, armed, touch) = bombed(todos(2));
     armed.store(true, Ordering::SeqCst);
     assert!(
-        catch_unwind(AssertUnwindSafe(
-            || rig.run(|| list.push(todo(3, "a", false)))
-        ))
+        catch_unwind(AssertUnwindSafe(|| rig.run(|| txn(|| {
+            list.push(todo(3, "a", false));
+            touch();
+        }))))
         .is_err()
     );
     armed.store(false, Ordering::SeqCst);

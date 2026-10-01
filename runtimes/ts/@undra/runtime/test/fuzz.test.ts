@@ -22,6 +22,7 @@ import {
   decodeReply,
   decodeSnapshot,
   decodeStreamCredit,
+  decodeStreamFailure,
   decodeStreamItem,
   decodeTimerFired,
   encodeCall,
@@ -38,10 +39,12 @@ import {
   encodeReply,
   encodeSnapshot,
   encodeStreamCredit,
+  encodeStreamFailure,
   encodeStreamItem,
   encodeTimerFired,
   iterateChangeSet,
   readChangeSetHeader,
+  type StreamFailure,
 } from "../src/wire/payloads.js";
 import { UndraReader } from "../src/wire/reader.js";
 import { UndraWriter } from "../src/wire/writer.js";
@@ -273,7 +276,19 @@ const targets: Target[] = [
       encodeStreamItem({ callId: 1, flag: StreamFlag.Item, body: fromHex("07000000") }),
       encodeStreamItem({ callId: 1, flag: StreamFlag.End }),
       encodeStreamItem({ callId: 1, flag: StreamFlag.Error, body: fromHex("00") }),
+      encodeStreamItem({ callId: 1, flag: StreamFlag.Failed, failure: { status: ReplyStatus.Cancelled, message: "the runtime shut down", detail: "" } }),
+      encodeStreamItem({ callId: 1, flag: StreamFlag.Failed, failure: { status: ReplyStatus.Panic, message: "boom", detail: "at x" } }),
     ],
+  },
+  {
+    name: "stream failure",
+    decode: decodeStreamFailure,
+    valid: [
+      encodeStreamFailure({ status: ReplyStatus.Panic, message: "boom \u{1f30a}", detail: "at core.rs:1" }),
+      encodeStreamFailure({ status: ReplyStatus.Cancelled, message: "", detail: "" }),
+      encodeStreamFailure({ status: ReplyStatus.BadRequest, message: "stale handle", detail: "" }),
+    ],
+    reencode: ((v: StreamFailure) => encodeStreamFailure(v)) as (value: never) => Uint8Array,
   },
   {
     name: "observe",

@@ -19,7 +19,10 @@ public open class UndraException(message: String, cause: Throwable? = null) : Ru
 
 /**
  * A call, constructor or stream finished with something other than a success: the core answered with
- * a non-`OK` [ReplyStatus] (SPEC section 3.4), or a stream ended with the error flag (section 3.7).
+ * a non-`OK` [ReplyStatus] (SPEC section 3.4), or a stream ended (section 3.7, ADR-036) with flag 2, its
+ * own typed error (status [ReplyStatus.ERROR]), or with flag 3, a failure (the failure's own status,
+ * [ReplyStatus.PANIC], [ReplyStatus.CANCELLED] or [ReplyStatus.BAD_REQUEST], with the section 3.4 body of
+ * that status, exactly as a failed reply would carry it).
  *
  * This is the *raw* failure of [UndraCore.callSync], [UndraCore.call], [UndraCore.stream] and
  * [UndraCore.construct], for what bindings do not expose. Generated code never lets it through: it throws the

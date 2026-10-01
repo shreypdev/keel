@@ -12,18 +12,18 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once, Weak};
 use std::time::Duration;
 
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use undra_meta::{DispatchCall, DispatchFn, DispatchOutcome, Schema};
 use undra_signals::ChangeSink;
 use undra_wire::payload::{
     Call, CallTarget, PortReply, PortStatus, Reply, ReplyStatus, Snapshot, StoreSnapshot,
-    StreamFlag, StreamItem,
+    StreamFailure, StreamFlag, StreamItem,
 };
 use undra_wire::{Handle, Reader, Writer};
 
 use crate::blocking::{Blocking, BlockingTask, default_pool_size};
 use crate::config::{InitError, MODE_DEV, MODE_INPROC, RestoreError, RuntimeConfig};
-use crate::ctx::{Ctx, CtxScope, current_runtime};
+use crate::ctx::{Ctx, CtxScope, Gone, Lifeline, current_runtime};
 use crate::dispatch::{DispatchBytes, DispatchResult, DispatchTable, E_REENTRANT, needs_async};
 #[cfg(not(target_family = "wasm"))]
 use crate::executor::Shared;
@@ -47,6 +47,29 @@ use crate::timer::{Sleep, Timers, delay_ms};
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
 static GLOBAL: Mutex<Option<Arc<Runtime>>> = Mutex::new(None);
+
+/// Every live runtime of the process by id (ADR-035): how a change-set finds the runtime that
+/// owns its store, whichever thread committed it. Registered when a runtime is built, removed in
+/// its `Drop`; weak, so the registry never keeps one alive.
+static RUNTIMES: RwLock<Option<HashMap<u64, Weak<Runtime>>>> = RwLock::new(None);
+
+fn register_runtime(id: u64, runtime: Weak<Runtime>) {
+    RUNTIMES
+        .write()
+        .get_or_insert_with(HashMap::new)
+        .insert(id, runtime);
+}
+
+fn unregister_runtime(id: u64) {
+    if let Some(map) = RUNTIMES.write().as_mut() {
+        map.remove(&id);
+    }
+}
+
+/// The live runtime with id `id`, if any.
+fn runtime_by_id(id: u64) -> Option<Arc<Runtime>> {
+    RUNTIMES.read().as_ref()?.get(&id)?.upgrade()
+}
 
 thread_local! {
     /// Ids of the runtimes whose core lock this thread currently holds.
@@ -132,14 +155,54 @@ pub(crate) fn log_fatal_current(target: &str, message: &str) {
     }
 }
 
-/// Routes every change-set committed by `undra-signals` to the runtime executing on the
-/// committing thread (else the global one), whose host receives it.
+/// Routes every change-set committed by `undra-signals` to the runtime that **owns the store**
+/// (ADR-035), whose host receives it: never to whichever runtime the committing thread happens to
+/// be inside, and never to the global one by default. A store no runtime published (owner `0`)
+/// delivers nothing.
 struct RuntimeSink;
 
 impl ChangeSink for RuntimeSink {
-    fn deliver(&self, change_set: &[u8]) {
-        if let Some(rt) = current_or_global() {
+    /// Every commit names its owner ([`deliver_from`](ChangeSink::deliver_from)); a change-set
+    /// without one has no runtime to go to.
+    fn deliver(&self, _change_set: &[u8]) {}
+
+    fn deliver_from(&self, owner: u64, change_set: &[u8]) {
+        if owner == 0 {
+            return;
+        }
+        if let Some(rt) = runtime_by_id(owner) {
             rt.deliver_change_set(change_set);
+        }
+    }
+
+    /// A write the checker refused: logged at error level through the owning runtime (else the
+    /// one the thread is in, else the global one) before the writer panics, so the host hears of
+    /// it even when the panicking thread is not one the runtime watches.
+    fn off_core_write(&self, owner: u64, message: &str) {
+        let rt = if owner == 0 {
+            current_or_global()
+        } else {
+            runtime_by_id(owner)
+        };
+        if let Some(rt) = rt {
+            Stats::inc(&rt.stats.off_core_writes);
+            rt.log(ERROR, "undra::signals", message);
+        }
+    }
+
+    /// A computed panicked on its current inputs (ADR-019 amendment): it is held back while the
+    /// rest of its store is delivered. Logged once at error level through the owning runtime,
+    /// which marks the store poisoned and lists the signal in `stats_json`.
+    fn computed_failed(&self, owner: u64, handle: u64, signal_id: u32, message: &str) {
+        if let Some(rt) = runtime_by_id(owner) {
+            rt.note_computed_failed(Handle(handle), signal_id, message);
+        }
+    }
+
+    /// A computed that had failed evaluated again and its value was delivered.
+    fn computed_recovered(&self, owner: u64, handle: u64, signal_id: u32) {
+        if let Some(rt) = runtime_by_id(owner) {
+            rt.note_computed_recovered(Handle(handle), signal_id);
         }
     }
 
@@ -159,24 +222,32 @@ impl ChangeSink for RuntimeSink {
     }
 }
 
-/// The write-context check installed into `undra-signals`: may the calling thread write signals?
+/// The write-context check installed into `undra-signals`: may the calling thread write a signal
+/// of a store owned by runtime `owner` (`0`: a signal of no published store)?
 ///
-/// An allowlist (ADR-023): yes on a thread that holds a runtime's core lock (a dispatched call,
-/// a task poll, an event subscriber, `observe`, `restore`: everything entered through the
-/// runtime's entry points), on a `TestRuntime`'s driver thread (the test's own direct writes) and
-/// inside `testing::unchecked_writes`. No on every other thread: a blocking-pool worker, a host
-/// or embedder thread, a thread inside no runtime at all. Such a write would be delivered
-/// without the core lock, unordered against the core's transactions (and, with no runtime
-/// scope, dropped or misrouted). Signal writes belong on the core: send the result back to a
-/// task or a dispatched call instead. Debug builds assert this on every write that has
-/// consequences (`undra_signals::set_write_checker`); release builds never evaluate it, so the
-/// lock-level guarantees (the store's delivery lock) are what protects them.
-fn write_allowed() -> bool {
+/// An allowlist (ADR-023, ADR-035), evaluated **in every build**: yes on a thread that holds
+/// **that** runtime's core lock (a dispatched call, a task poll, an event subscriber, `observe`,
+/// `restore`, `Ctx::with_core`: everything entered through the runtime's entry points), on a
+/// thread that holds any core lock when `owner` is `0`, on a `TestRuntime`'s driver thread (the
+/// test's own direct writes) and inside `testing::unchecked_writes`. No on every other thread: a
+/// blocking-pool worker, a host or embedder thread, a thread inside no runtime at all, the core of
+/// another runtime. Such a write would be delivered without the core lock, unordered against the
+/// core's transactions, to the wrong host, or not at all; it is refused before the value changes
+/// (E0065). Signal writes belong on the core: send the result back to a task or a dispatched call,
+/// or use `Ctx::with_core` on a host thread.
+fn write_allowed(owner: u64) -> bool {
     UNCHECKED_WRITES
         .try_with(|depth| depth.get() > 0)
         .unwrap_or(false)
         || HELD
-            .try_with(|held| !held.borrow().is_empty())
+            .try_with(|held| {
+                let held = held.borrow();
+                if owner == 0 {
+                    !held.is_empty()
+                } else {
+                    held.contains(&owner)
+                }
+            })
             .unwrap_or(false)
         || TEST_DRIVER.try_with(Cell::get).unwrap_or(false)
 }
@@ -199,9 +270,20 @@ pub(crate) struct CoreState {
     turns: u64,
 }
 
-/// Marker error: the calling thread already holds this runtime's core lock.
-#[derive(Debug)]
-pub(crate) struct Reentrant;
+/// The calling thread may not enter the runtime: it already holds this runtime's core lock, or it
+/// is inside one of this runtime's host callbacks (`E_REENTRANT`, SPEC 5.1). Waiting for the lock
+/// there would deadlock, so the entry is refused instead. Returned by
+/// [`Ctx::with_core`](crate::Ctx::with_core).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reentrant;
+
+impl core::fmt::Display for Reentrant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(E_REENTRANT)
+    }
+}
+
+impl std::error::Error for Reentrant {}
 
 /// Holds the core lock and makes the runtime current on this thread. Whoever holds one *is*
 /// the core loop.
@@ -278,7 +360,7 @@ impl StreamState {
 
 /// How the runtime is assembled; `Runtime::init` and `Runtime::new` use the defaults.
 pub(crate) struct BuildOptions {
-    /// No core thread, a manual clock and inline blocking: the test runtime.
+    /// No core thread and a manual clock (the blocking pool is real): the test runtime.
     pub manual: bool,
     /// Run the [`InitHook`]s.
     pub run_hooks: bool,
@@ -333,6 +415,12 @@ pub struct Runtime {
     /// lock; dropped at the start of the next core turn.
     deferred_drops: Mutex<Vec<BoxFuture>>,
     core_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Closed at the top of `shutdown` and in `Drop`: what `Ctx::closed`, `WeakCtx::closed` and
+    /// `WeakCtx::sleep` wait on without holding the runtime (ADR-034).
+    lifeline: Arc<Lifeline>,
+    /// The computed signals currently held back because they panicked, as `(store handle,
+    /// signal id)` (ADR-019 amendment): what `stats_json` reports as `poisoned_signals`.
+    poisoned_signals: Mutex<HashSet<(u64, u32)>>,
 }
 
 /// Where an object lives: equal addresses are the same object.
@@ -482,8 +570,12 @@ impl Runtime {
             late_uses: AtomicU32::new(0),
             deferred_drops: Mutex::new(Vec::new()),
             core_thread: Mutex::new(None),
+            lifeline: Arc::new(Lifeline::default()),
+            poisoned_signals: Mutex::new(HashSet::new()),
         });
 
+        register_runtime(rt.id, Arc::downgrade(&rt));
+        rt.objects.set_owner(rt.id);
         for (id, first, second) in &rt.table.collisions {
             rt.log(
                 ERROR,
@@ -518,7 +610,10 @@ impl Runtime {
         let shared = self.exec.shared();
         let handle = std::thread::Builder::new()
             .name("undra-core".to_owned())
-            .spawn(move || core_loop(&weak, &shared))
+            .spawn(move || {
+                let _alive = crate::testing::ThreadMark::enter();
+                core_loop(&weak, &shared);
+            })
             .map_err(|e| InitError::Spawn(e.to_string()))?;
         *self.core_thread.lock() = Some(handle);
         Ok(())
@@ -551,8 +646,9 @@ impl Runtime {
     /// Stops the runtime and releases everything it holds (ADR-023, findings L1 and L5):
     ///
     /// 1. every call still in flight is answered with status 3 and every open stream ends with
-    ///    an error item (`"cancelled: the runtime shut down"`), each exactly once, before
-    ///    anything slow is waited for, so a host that is waiting on a reply is released at once;
+    ///    a failed item (flag 3, status 3, `"the runtime shut down"`; ADR-036), each exactly once,
+    ///    before anything slow is waited for, so a host that is waiting on a reply is released at
+    ///    once;
     /// 2. the `undra-core`, timer and blocking threads are stopped and joined;
     /// 3. pending port calls fail with [`PortError::Cancelled`], event subscribers and
     ///    Rust port bindings are cleared (closures that hold a [`Ctx`] would keep the runtime
@@ -583,6 +679,8 @@ impl Runtime {
         if self.shut_down.swap(true, Ordering::AcqRel) {
             return;
         }
+        // Long-lived work waiting on `closed()` (or a `WeakCtx::sleep`) learns first.
+        self.lifeline.close(Gone::ShutDown);
         // Refuses every task spawned from now on; the core thread leaves its loop.
         self.exec.shutdown();
         // Answer and cancel what is in flight, under the core lock (so no poll is running and
@@ -668,6 +766,11 @@ impl Runtime {
     /// A [`Ctx`] for this runtime.
     pub fn ctx(&self) -> Ctx {
         Ctx(self.me())
+    }
+
+    /// The runtime's "it is over" signal (ADR-034).
+    pub(crate) fn lifeline(&self) -> &Arc<Lifeline> {
+        &self.lifeline
     }
 
     /// A process-unique id for this runtime instance.
@@ -803,6 +906,16 @@ impl Runtime {
         })
     }
 
+    /// Runs `f` as the core on the calling thread: takes the core lock, makes the runtime
+    /// current, runs `f` in one transaction and releases the lock. See [`Ctx::with_core`].
+    pub(crate) fn with_core<R>(&self, f: impl FnOnce() -> R) -> Result<R, Reentrant> {
+        let guard = self.enter_core()?;
+        let out = undra_signals::txn(f);
+        // The transaction committed (and delivered) inside the lock: in order with the core's.
+        drop(guard);
+        Ok(out)
+    }
+
     /// Like [`enter_core`](Runtime::enter_core) but never waits: `None` if the thread may not
     /// enter or the lock is taken.
     fn try_enter_core(&self) -> Option<CoreGuard<'_>> {
@@ -841,6 +954,21 @@ impl Runtime {
         self.guard_host("Host::stream_item", || {
             self.host.stream_item(call_id, &payload);
         });
+    }
+
+    /// Ends stream `call_id` with a [`StreamFlag::Failed`] item (ADR-036): the call failed with
+    /// `status` (2 panicked, 3 cancelled by the core), in the reply-failure vocabulary, so the
+    /// host maps it exactly as a failed reply. Never a flag-2 item, which carries only the
+    /// stream's own `E`.
+    fn send_stream_failure(&self, call_id: u32, status: ReplyStatus, message: &str, detail: &str) {
+        let mut body = Writer::with_capacity(9 + message.len() + detail.len());
+        StreamFailure {
+            status,
+            message,
+            detail,
+        }
+        .encode(&mut body);
+        self.send_stream_item(call_id, StreamFlag::Failed, body.as_slice());
     }
 
     pub(crate) fn deliver_change_set(&self, payload: &[u8]) {
@@ -1249,6 +1377,39 @@ impl Runtime {
         self.send_reply(call_id, ReplyStatus::BadRequest, &string_body(reason));
     }
 
+    /// A computed of the store at `handle` panicked and is held back (ADR-019 amendment): an
+    /// error log naming the store and the signal, the store marked poisoned, the signal listed.
+    pub(crate) fn note_computed_failed(&self, handle: Handle, signal_id: u32, message: &str) {
+        Stats::inc(&self.stats.panics);
+        self.objects.mark_poisoned(handle);
+        self.poisoned_signals.lock().insert((handle.0, signal_id));
+        let store = self
+            .objects
+            .type_of(handle)
+            .map_or("a store", |(_, name)| name);
+        self.log(
+            ERROR,
+            "undra::signals",
+            &format!(
+                "computed signal {signal_id} of `{store}` ({handle:?}) panicked: {message}; it is held back \
+                 (the host keeps the last value it received, every other signal of the store is still \
+                 delivered) and evaluated again when its inputs change"
+            ),
+        );
+    }
+
+    /// A held-back computed evaluated again and was delivered.
+    pub(crate) fn note_computed_recovered(&self, handle: Handle, signal_id: u32) {
+        self.poisoned_signals.lock().remove(&(handle.0, signal_id));
+        self.log(
+            crate::log::INFO,
+            "undra::signals",
+            &format!(
+                "computed signal {signal_id} of {handle:?} evaluates again; its value was delivered"
+            ),
+        );
+    }
+
     /// Accounts for a caught panic: log level 5, counters, store poisoning.
     fn note_panic(&self, what: &str, handle: Handle, report: &PanicReport) {
         self.log_panic(&format!("{what} panicked"), report);
@@ -1268,11 +1429,17 @@ impl Runtime {
         handle: Handle,
         future: Pin<Box<dyn Future<Output = DispatchBytes> + Send>>,
     ) {
-        let rt = self.me();
+        // The task holds the runtime weakly (ADR-034): the executor owns the task, so a strong
+        // reference here would be a cycle that keeps a dropped runtime alive while the call is
+        // in flight. It upgrades only to reply; a runtime that is gone has answered the call
+        // already (shutdown and `Drop` answer every call in flight).
+        let rt = self.weak.clone();
         let spawned = self.exec.try_spawn(
             Box::pin(async move {
                 let result = future.await;
-                rt.finish_call(call_id, result);
+                if let Some(rt) = rt.upgrade() {
+                    rt.finish_call(call_id, result);
+                }
             }),
             TaskKind::Call { call_id, handle },
         );
@@ -1314,9 +1481,13 @@ impl Runtime {
         stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     ) {
         let state = Arc::new(StreamState::default());
-        let rt = self.me();
         let spawned = self.exec.try_spawn(
-            Box::pin(drive_stream(rt, call_id, stream, state.clone())),
+            Box::pin(drive_stream(
+                self.weak.clone(),
+                call_id,
+                stream,
+                state.clone(),
+            )),
             TaskKind::Stream { call_id, handle },
         );
         let task = match spawned {
@@ -1409,9 +1580,9 @@ impl Runtime {
 
     /// Ends in-flight call `call_id` from the runtime's side: drops its task and tells the host,
     /// exactly once (a call already answered, or cancelled by the host, is left alone). A plain
-    /// call gets status 3 (cancelled); a stream gets an error item with a `String` body, the
-    /// shape of a stream panic, because the host did not ask for the end and a clean end would
-    /// read as success. The caller holds the core lock.
+    /// call gets status 3 (cancelled); a stream gets a failed item (flag 3) with status 3 and
+    /// `why` as its message (ADR-036), because the host did not ask for the end and a clean end
+    /// would read as success. The caller holds the core lock (or is `Drop`).
     fn abort_call(&self, call_id: u32, why: &str) {
         let Some(entry) = self.calls.lock().remove(&call_id) else {
             return;
@@ -1421,11 +1592,7 @@ impl Runtime {
             self.drop_guarded_logged("a call cancelled by the runtime", future);
         }
         if entry.stream.is_some() {
-            self.send_stream_item(
-                call_id,
-                StreamFlag::Error,
-                &string_body(&format!("cancelled: {why}")),
-            );
+            self.send_stream_failure(call_id, ReplyStatus::Cancelled, why, "");
         } else {
             self.send_reply(call_id, ReplyStatus::Cancelled, &[]);
         }
@@ -1625,7 +1792,9 @@ impl Runtime {
         &self,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> BlockingTask<T> {
-        self.blocking.spawn(self.ctx(), f)
+        // Weak (ADR-034): a closure still waiting in the pool's queue does not keep a dropped
+        // runtime alive; it becomes current for the closure while it runs.
+        self.blocking.spawn(self.ctx().downgrade(), f)
     }
 
     /// Sleeps; see [`Ctx::sleep`]. After [`shutdown`](Runtime::shutdown) it completes at once
@@ -1757,10 +1926,11 @@ impl Runtime {
             TaskKind::Stream { call_id, handle } => {
                 self.note_panic("stream", handle, report);
                 if self.calls.lock().remove(&call_id).is_some() {
-                    self.send_stream_item(
+                    self.send_stream_failure(
                         call_id,
-                        StreamFlag::Error,
-                        &string_body(&format!("the stream panicked: {}", report.message)),
+                        ReplyStatus::Panic,
+                        &report.message,
+                        &report.backtrace,
                     );
                 }
             }
@@ -1971,7 +2141,8 @@ impl Runtime {
     }
 
     /// A host-to-core event (SPEC 5.7): fans out to the [`Events`] subscribers of
-    /// `(port_id, method_id)` on the core loop, with the core lock held.
+    /// `(port_id, method_id)` on the core loop, with the core lock held; each receives this
+    /// runtime's [`Ctx`].
     pub fn event(&self, port_id: u32, method_id: u32, payload: &[u8]) {
         if self.is_shut_down() {
             self.warn_shut_down("event");
@@ -1982,8 +2153,15 @@ impl Runtime {
             return;
         };
         Stats::inc(&self.stats.events);
-        for callback in self.events.callbacks(port_id, method_id) {
-            if let Err(report) = guard::guarded(|| callback(payload)) {
+        let callbacks = self.events.callbacks(port_id, method_id);
+        if callbacks.is_empty() {
+            return;
+        }
+        // Subscribers get the context as an argument (ADR-034): one they captured would be a
+        // reference cycle through the event table.
+        let ctx = self.ctx();
+        for callback in callbacks {
+            if let Err(report) = guard::guarded(|| callback(&ctx, payload)) {
                 self.log_panic("an event subscriber panicked", &report);
             }
         }
@@ -2069,8 +2247,8 @@ impl Runtime {
     /// re-observes what it mirrors. Detached tasks keep the objects they already hold; those
     /// stores are detached and no longer deliver change-sets. **In-flight calls and streams
     /// whose receiver the restore replaced or invalidated are cancelled** (ADR-023): a plain
-    /// call is answered with status 3, exactly once, a stream ends with an error item
-    /// (`"cancelled: ..."`), and their tasks are dropped, so none can report success for a write
+    /// call is answered with status 3, exactly once, a stream ends with a failed item (flag 3,
+    /// status 3; ADR-036), and their tasks are dropped, so none can report success for a write
     /// the restored store never saw. Calls without a receiver (free functions, constructors)
     /// carry on.
     ///
@@ -2229,7 +2407,9 @@ impl Runtime {
     // ----- statistics --------------------------------------------------------------------
 
     /// A JSON document with the live handle count, tasks, calls, crossing counters, poisoned
-    /// stores and panics (SPEC 6 `undra_stats_json`). Never takes the core lock.
+    /// stores and panics (SPEC 6 `undra_stats_json`), and `strong_refs`: the strong references
+    /// to the runtime besides the global slot (the caller's included), which makes a `Ctx` kept
+    /// where a `WeakCtx` belongs visible (ADR-034). Never takes the core lock.
     pub fn stats_json(&self) -> String {
         let s = &self.stats;
         let (started, max) = self.blocking.threads();
@@ -2240,14 +2420,24 @@ impl Runtime {
                 calls.len(),
             )
         };
+        // Strong references held outside the runtime's own bookkeeping (the global slot is the
+        // global runtime's owner): the caller's, plus whatever app code keeps. A number that
+        // grows while nothing is in flight is a `Ctx` kept where a `WeakCtx` belongs (ADR-034).
+        let global = usize::from(
+            GLOBAL
+                .try_lock()
+                .is_some_and(|g| g.as_ref().is_some_and(|g| g.id == self.id)),
+        );
+        let strong_refs = self.weak.strong_count().saturating_sub(global);
         let mut out = String::with_capacity(512);
         out.push_str("{\"platform\":");
         push_json_string(&mut out, &self.config.platform);
         out.push_str(",\"mode\":");
         push_json_string(&mut out, &self.config.mode);
         out.push_str(&format!(
-            ",\"schema_hash\":\"{:#018x}\",\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"transactions\":{},\"panics\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
+            ",\"schema_hash\":\"{:#018x}\",\"strong_refs\":{},\"live_handles\":{},\"live_stores\":{},\"poisoned_stores\":{},\"tasks\":{},\"active_calls\":{},\"open_streams\":{},\"pending_port_calls\":{},\"abandoned_port_calls\":{},\"pending_timers\":{},\"blocking_threads\":{{\"started\":{},\"max\":{}}},\"poisoned_signals\":{},\"transactions\":{},\"panics\":{},\"off_core_writes\":{},\"turns\":{},\"polls\":{},\"crossings\":{{\"calls\":{},\"replies\":{},\"change_sets\":{},\"change_set_bytes\":{},\"port_calls\":{},\"port_replies\":{},\"stream_items\":{},\"events\":{},\"bad_requests\":{},\"cancelled\":{}}}}}",
             self.schema_hash,
+            strong_refs,
             self.objects.live(),
             self.objects.store_count(),
             self.objects.poisoned_stores(),
@@ -2259,8 +2449,10 @@ impl Runtime {
             self.timers.pending(),
             started,
             max,
+            self.poisoned_signals.lock().len(),
             Stats::get(&s.change_sets),
             Stats::get(&s.panics),
+            Stats::get(&s.off_core_writes),
             Stats::get(&s.turns),
             Stats::get(&s.polls),
             Stats::get(&s.calls),
@@ -2312,10 +2504,22 @@ impl core::fmt::Debug for Runtime {
 }
 
 impl Drop for Runtime {
+    /// The last strong reference went without `shutdown` (ADR-034): tears everything down the way
+    /// [`shutdown`](Runtime::shutdown) does, including **answering what is in flight** (status 3
+    /// for calls, the cancelled item for streams, each once): the runtime's own call and stream
+    /// tasks hold it weakly, so a host may still be waiting on them. The `Host` is still owned by
+    /// the runtime here. `Drop` may run on the core thread (the last upgrade released at the end
+    /// of a poll) or a blocking-pool thread; it never joins the thread it runs on.
     fn drop(&mut self) {
-        // The last reference is gone, so nothing else can be running; no lock is needed.
-        self.shut_down.store(true, Ordering::Release);
+        let was_shut_down = self.shut_down.swap(true, Ordering::AcqRel);
+        self.lifeline.close(Gone::Dropped);
         self.exec.shutdown();
+        if !was_shut_down {
+            // Nobody else can hold the core lock (it takes a strong reference to reach it), so
+            // this is the core now; the mark lets user `Drop` code that writes signals do so.
+            let _held = HeldMark::enter(self.id);
+            self.cancel_all_calls("the runtime was dropped");
+        }
         let handle = self.core_thread.lock().take();
         if let Some(handle) = handle {
             if handle.thread().id() != std::thread::current().id() {
@@ -2325,8 +2529,35 @@ impl Drop for Runtime {
         self.timers.shutdown();
         self.blocking.shutdown();
         self.ports.cancel_all();
+        self.release_user_references();
+        let _held = HeldMark::enter(self.id);
         self.teardown();
+        unregister_runtime(self.id);
         // The global slot holds a strong reference, so a registered runtime is never dropped.
+    }
+}
+
+/// Marks the calling thread as holding a runtime's core lock without taking it (`Drop`, where no
+/// other thread can reach the runtime) and without making the runtime current (there is no
+/// strong reference left to make current).
+struct HeldMark(u64);
+
+impl HeldMark {
+    fn enter(id: u64) -> HeldMark {
+        let _ = HELD.try_with(|held| held.borrow_mut().push(id));
+        HeldMark(id)
+    }
+}
+
+impl Drop for HeldMark {
+    fn drop(&mut self) {
+        let id = self.0;
+        let _ = HELD.try_with(|held| {
+            let mut held = held.borrow_mut();
+            if let Some(pos) = held.iter().rposition(|&x| x == id) {
+                held.remove(pos);
+            }
+        });
     }
 }
 
@@ -2354,8 +2585,12 @@ fn core_loop(weak: &Weak<Runtime>, shared: &Shared) {
 /// The stream is polled *before* credit is checked, so it runs at most one item ahead of the
 /// host, and an ended stream reports its end immediately even if the host has spent all its
 /// credit (as gRPC servers send trailers regardless of the flow-control window).
+///
+/// The driver holds the runtime weakly (ADR-034) and upgrades once per item, after the credit
+/// wait and never across an `.await`: an open stream does not keep a dropped runtime alive. A
+/// runtime that is gone has already ended the stream (shutdown and `Drop` do).
 async fn drive_stream(
-    rt: Arc<Runtime>,
+    rt: Weak<Runtime>,
     call_id: u32,
     mut stream: Pin<Box<dyn futures_core::Stream<Item = DispatchBytes> + Send>>,
     state: Arc<StreamState>,
@@ -2367,14 +2602,17 @@ async fn drive_stream(
                 while !state.try_take() {
                     state.notify.notified().await;
                 }
+                let Some(rt) = rt.upgrade() else { return };
                 rt.send_stream_item(call_id, StreamFlag::Item, &item);
             }
             Some(Err(error)) => {
+                let Some(rt) = rt.upgrade() else { return };
                 rt.calls.lock().remove(&call_id);
                 rt.send_stream_item(call_id, StreamFlag::Error, &error);
                 return;
             }
             None => {
+                let Some(rt) = rt.upgrade() else { return };
                 rt.calls.lock().remove(&call_id);
                 rt.send_stream_item(call_id, StreamFlag::End, &[]);
                 return;

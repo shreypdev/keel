@@ -50,9 +50,14 @@ fn l1_shutdown_answers_in_flight_calls_and_ends_open_streams_exactly_once() {
     );
     let items = t.host().take_stream_items();
     assert_eq!(items.len(), 1, "{items:?}");
-    assert_eq!((items[0].call_id, items[0].flag), (41, StreamFlag::Error));
-    let mut r = undra_wire::Reader::new(&items[0].body);
-    assert!(r.read_str().unwrap().contains("the runtime shut down"));
+    // ADR-036: a failed item (flag 3) with status 3, never a String under flag 2.
+    assert_eq!((items[0].call_id, items[0].flag), (41, StreamFlag::Failed));
+    let failure =
+        undra_wire::payload::StreamFailure::decode(&mut undra_wire::Reader::new(&items[0].body))
+            .unwrap();
+    assert_eq!(failure.status, ReplyStatus::Cancelled);
+    assert_eq!(failure.message, "the runtime shut down");
+    assert_eq!(failure.detail, "");
     assert_eq!(stat(t.runtime(), "active_calls"), 0);
     assert_eq!(stat(t.runtime(), "tasks"), 0);
 
@@ -93,7 +98,7 @@ fn l1_shutdown_clears_subscribers_and_bindings_so_the_runtime_can_be_freed() {
         .subscribe(
             1,
             2,
-            Box::new(move |_| {
+            Box::new(move |_, _| {
                 let _ = &ctx;
                 h2.fetch_add(1, Ordering::SeqCst);
             }),
