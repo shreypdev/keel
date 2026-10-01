@@ -20,9 +20,15 @@
 //!   of the run: under this load the allocator and the threads' stacks settle in page-sized steps
 //!   for the first 30 s or so (RSS climbs 1-3% on the reference host, then is flat), and that is
 //!   warm-up, not growth;
-//! * the worst post-warm-up second's p99 is more than 3x the median second's p99 (a spike
-//!   gate: the seconds after the warm-up are compared with each other, so one bad second fails
-//!   it and a slow, steady climb does not);
+//! * the firehose's p99 **drifts**: a straight line through the per-second p99s after the
+//!   warm-up (the Theil-Sen regression of `undra_bench::stats::drift`, which one bad second
+//!   cannot tilt) rises by more than half of the median p99 across those seconds, so a tail that
+//!   climbs steadily fails, and a p99 that doubles over the second half does too (it needs at
+//!   least six seconds after the warm-up: a 10 s run has exactly six). A step that never
+//!   comes back (the host's scheduler moving the firehose thread to a slower core for good)
+//!   reads as a climb, which is what `--attempts` is for: each attempt is a fresh process;
+//! * the worst post-warm-up second's p99 is more than 3x the median second's p99 (the spike
+//!   gate, next to the trend: one bad second fails it);
 //! * an invariant broke: a change-set out of order, a lost completion, the completions' total not
 //!   arriving as an exact count (`0, 1, 2, ..`), the host's copy of the list different from the
 //!   core's (field for field, one applied patch per operation), the stream more than one item
@@ -53,7 +59,7 @@ use undra::signals::ALL_SIGNALS;
 use undra::wire::Encode;
 use undra_bench::budget::Budgets;
 use undra_bench::rss::{RssSeries, resident_bytes};
-use undra_bench::stats::Histogram;
+use undra_bench::stats::{Histogram, drift, median_and_worst};
 
 #[path = "../../common/fixtures.rs"]
 mod fixtures;
@@ -80,6 +86,13 @@ const COMPLETION_WINDOW: u64 = 128;
 const STREAM_RATE: u64 = 1_000_000;
 /// The call id of the stream; completion call ids start above it.
 const STREAM_CALL: u32 = 1;
+/// The most the firehose's p99 trend may rise across the seconds after the warm-up, as a fraction
+/// of the median p99: half.
+const DRIFT_RISE_LIMIT: f64 = 0.5;
+/// The fewest seconds after the warm-up a trend is fitted to (fewer say nothing).
+const DRIFT_MIN_WINDOWS: usize = 6;
+/// The worst second's p99 may be at most this many times the median second's.
+const SPIKE_LIMIT: f64 = 3.0;
 
 /// What the command line asked for.
 struct Args {
@@ -241,10 +254,6 @@ struct Live {
     firehose: AtomicU64,
     churn_calls: AtomicU64,
     stop: AtomicBool,
-}
-
-fn median(sorted: &[u64]) -> u64 {
-    sorted[sorted.len() / 2]
 }
 
 fn budget_limit() -> f64 {
@@ -568,25 +577,54 @@ fn run(args: &Args) -> Result<Outcome, String> {
         ),
     }
 
-    // Drift.
+    // Drift: the firehose's p99 over the seconds after the warm-up must neither spike (one bad
+    // second against the others) nor climb (the trend through all of them).
     let steady: Vec<&Window> = windows
         .iter()
         .filter(|w| w.second as f64 >= warmup * args.seconds as f64 && w.p99_ns > 0)
         .collect();
     if steady.len() >= 2 {
-        let mut p99s: Vec<u64> = steady.iter().map(|w| w.p99_ns).collect();
-        p99s.sort_unstable();
-        let (mid, worst) = (median(&p99s), *p99s.last().unwrap_or(&0));
+        let p99s: Vec<f64> = steady.iter().map(|w| w.p99_ns as f64).collect();
+        let (mid, worst) = median_and_worst(&p99s).unwrap_or((0.0, 0.0));
         let line = format!(
-            "firehose p99 per second: median {mid} ns, worst {worst} ns over {} seconds after warm-up",
+            "firehose p99 per second: median {mid:.0} ns, worst {worst:.0} ns over {} seconds after warm-up",
             steady.len()
         );
-        if worst <= 3 * mid {
-            notes.push(format!("ok   {line}; limit 3x the median"));
+        if worst <= SPIKE_LIMIT * mid {
+            notes.push(format!("ok   {line}; limit {SPIKE_LIMIT}x the median"));
         } else {
             failures.push(format!(
-                "{line}: the worst second is more than 3x the median"
+                "{line}: the worst second is more than {SPIKE_LIMIT}x the median"
             ));
+        }
+        let points: Vec<(f64, f64)> = steady
+            .iter()
+            .map(|w| (w.second as f64, w.p99_ns as f64))
+            .collect();
+        match drift(&points, DRIFT_MIN_WINDOWS) {
+            Some(d) => {
+                let line = format!(
+                    "firehose p99 trend: {:+.0} ns per second, a rise of {:+.0}% of the median across {} seconds after warm-up",
+                    d.slope,
+                    d.rise * 100.0,
+                    d.points
+                );
+                if d.exceeds(DRIFT_RISE_LIMIT) {
+                    failures.push(format!(
+                        "{line}: the p99 is climbing (limit {:+.0}%)",
+                        DRIFT_RISE_LIMIT * 100.0
+                    ));
+                } else {
+                    notes.push(format!(
+                        "ok   {line}; limit {:+.0}%",
+                        DRIFT_RISE_LIMIT * 100.0
+                    ));
+                }
+            }
+            None => notes.push(format!(
+                "skip p99 trend: fewer than {DRIFT_MIN_WINDOWS} seconds after warm-up (run at least {} s at this warm-up)",
+                ((DRIFT_MIN_WINDOWS as f64 / (1.0 - warmup)).ceil() as u64).max(2)
+            )),
         }
     } else {
         notes.push("skip p99 drift: fewer than two seconds after warm-up".to_owned());

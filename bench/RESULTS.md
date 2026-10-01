@@ -87,7 +87,7 @@ that).
 | d | **Stream backpressure**: an always-ready producer, a consumer granting 16 credits a round, then 100,000 | Undra buffers at most one item beyond the consumer's credit, so memory is bounded whatever the producer does | **29 M items/s** with credit; produced minus delivered never above **1** in 7.4 M rounds; RSS **+0.00%** over 10 s | at least 5.7 M/s, RSS at most 1% (or 64 KiB); layer A 180 us per 1,000 items | within |
 | e | **Concurrent completions**: 8 host threads answering async port calls, an `undra-core` thread, a 60 Hz "main thread" drain, 256 calls in flight | port calls completed from 8 threads at once are never lost: each wakes its task, commits once and is delivered once, and the drain sees the store's change-sets in transaction order and its total arriving as an exact count (the commits themselves run on the one `undra-core` thread, so this does not contend the per-store delivery lock: that is e') | **339 k completions/s**; call to reply p50 172 us, p99 803 us, p999 1.15 ms; every call answered, every completion one change-set of 37 bytes, **0 lost, 0 out of order**, final total exact | at least 69 k/s, p99 3.7 ms, p999 9.7 ms | within |
 | e' | **Contended completions**: scenario e plus a host thread writing the **same store** through `call_sync` as fast as it gets the core lock | ordering when two threads commit to one store (the `undra-core` thread running the completions, and the host thread): every completion and every write adds one to one signal, and the main thread must see that total arrive as exactly `0, 1, 2, .. N` in transaction order, so nothing is lost, repeated or reordered whichever thread committed it. The core lock serialises the two committers, so this tests the hand-off between them and the delivery inside it | **352 k writes/s** in the best of three 10 s runs (about 311 k completions and 40 k host writes a second); completion call to reply p50 143 to 160 us, p99 352 to 426 us, p999 655 to 918 us; the host thread's `call_sync` p50 1.3 us, p99 170 us, max 0.6 to 0.8 ms; every call answered, every write one 37-byte change-set, **0 lost, 0 out of order, 0 steps that were not +1**, final total exact | at least 70 k/s, p99 1.8 ms, p999 6.6 ms, 37 bytes | within |
-| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, and no second whose tail is far off the others' | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
+| f | **Soak**: firehose 100 k/s + churn 20 k ops/s + completions 50 k/s + a stream at 1 M items/s + a 60 Hz drain, together | no leak, and no second whose tail is far off the others' | 60 s: all four loads at 100% of target (see below); RSS **+0.00%** over the second half; every invariant held | RSS at most 1% (or 64 KiB), the p99's trend over the second half rising by at most 50% of its median, worst second's p99 at most 3x the median, invariants; CI runs 10 s | within |
 
 Allocations: one observed single-signal commit allocates **exactly 3 times** (the two vectors of
 `group_by_store` and the `claimed` vector), an unobserved one **0**; `crates/undra-ffi/tests/commit_alloc.rs`
@@ -119,8 +119,34 @@ at most one item ahead of its credit at the end (scenario d checks it after ever
 at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s to the end, so +0.00% after the half-run warm-up. The firehose's own
 p99 inside the mix is 59 us (median over the seconds, worst 76 us), not the 211 ns it has alone: it is the
 wait for the core lock behind a 20-operation churn call or a completion burst, which is what mixed load costs;
-the soak's latency gate compares each post-warm-up second with the others, so the number is not itself gated,
-and it catches a bad second, not a slow climb (a p99 that doubles steadily over the run passes it).
+the number itself is not gated: the soak's latency gates compare the post-warm-up seconds with each other (below).
+
+**The drift gate.** Until this commit the soak's latency gate was a spike gate (the worst post-warm-up second's p99 at
+most 3x the median second's), which a steady climb passes: a p99 that doubles over the second half has a worst/median of
+1.33. It now has two parts. The spike gate stays. Next to it, a straight line is fitted through the per-second p99s
+after the warm-up (the second half), and the line may not rise by more than **half of the median p99** across them
+(`undra_bench::stats::drift`). The fit is Theil-Sen, the median of the slopes between every pair of seconds, not least
+squares: one bad second at the end of the window tilts a least-squares line (a flat 40 us series with one 400 us
+second at the end rises by 40% of its median under least squares and by 0 under Theil-Sen), and that second is the spike
+gate's business. A trend is fitted to at least six seconds, which a 10 s run has exactly. Evidence, all in the unit tests
+of `bench/src/stats.rs` and on the real soak:
+
+* a synthetic p99 that climbs steadily, 40 us to 100 us over 30 seconds with 8% jitter, rises by 80% to 140% of its
+  median and **fails**; one that doubles steadily (40 us to 80 us, the review's case) **fails** and passes the old gate;
+  a flat series with 25% jitter, a 20% climb with 10% jitter and a falling series pass; two bad seconds at the end do
+  not tilt it;
+* the second half (30 to 60 s) of a real 60 s soak on this host (31 seconds, 57 to 125 us) fits at -5% and **passes**
+  (the series is `REAL_SOAK_SECOND_HALF` in the tests); the 60 s soak with this gate passed at -5% of the median;
+* a commit made to slow down steadily while the soak runs (a spin of 60 iterations per second of uptime added to every
+  commit, never committed: firehose p50 251 ns at 1 s, 1.15 us at 10 s, 3.39 us at 60 s) leaves the p99 rising from 57 us
+  to 135 us. Every other gate passes it (the spike gate at 1.6x the median, RSS +0.43%, every rate at 100%); the drift
+  gate fails it: "a rise of +56% of the median across 31 seconds after warm-up".
+
+The limit is the host, not the gate: this machine's scheduler moves the firehose thread between fast and slow cores, and
+the p99 flips between a regime around 40 us and one around 110 us, in one 60 s run at 7, 11, 15 and 27 s. A step that
+falls inside the second half and does not return reads as a climb (tested: 40 us then 110 us fails). That is why CI runs
+the soak with `--attempts 2`, each attempt a fresh process that lands in its own regime, and why the gate reads the
+second half only.
 
 RSS on macOS climbs in page-sized steps early under this load (allocator magazines and thread stacks
 settling): 10.39 MB at 1 s, 10.52 MB at 6 s, 10.58 MB from 11 s on in the run above, and in two of the four
