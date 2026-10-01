@@ -14,7 +14,7 @@
 //! `docs/DEV_LOOP.md`. The state travels as hex, in memory only: a pipe private to parent and
 //! child, never a file.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -28,6 +28,15 @@ use crate::shim;
 
 /// The name of the runner binary.
 pub const BIN: &str = "undra-dev-runner";
+
+/// What starts every protocol line the runner prints.
+const MARKER: &str = "UNDRA-DEV ";
+
+/// The longest runner stdout line `undra dev` keeps: a snapshot answer is twice
+/// [`reload::STATE_LIMIT_BYTES`] of hex plus a few fields and the session's handles, so this leaves a
+/// whole limit's worth of room; a longer line (a runner gone wrong, a core printing without end) is
+/// cut instead of growing this process's memory without bound.
+pub const LINE_LIMIT: usize = 3 * reload::STATE_LIMIT_BYTES;
 
 /// What a running runner reports.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,12 +109,122 @@ impl RunnerEvent {
 }
 
 /// Parses a runner stdout line.
+///
+/// A `snapshot` answer that does not parse is a failed snapshot, not a line to print: it is the one
+/// answer that is megabytes long, and `undra dev` must neither show it nor wait for one that will
+/// not come.
 #[must_use]
 pub fn parse_line(id: u64, line: &str) -> RunnerEvent {
-    parse_protocol(id, line).unwrap_or_else(|| RunnerEvent::Line {
-        id,
-        text: line.to_owned(),
+    parse_protocol(id, line).unwrap_or_else(|| {
+        if line.starts_with("UNDRA-DEV snapshot ") {
+            RunnerEvent::Snapshot {
+                id,
+                result: Err("the previous core's answer was damaged".to_owned()),
+            }
+        } else {
+            RunnerEvent::Line {
+                id,
+                text: line.to_owned(),
+            }
+        }
     })
+}
+
+/// Parses what the runner printed as one line: usually one event, two when the core printed
+/// something without a newline (`print!`) right before a protocol line, which then does not start
+/// the line. The core's text is shown; the protocol line is not lost.
+#[must_use]
+pub fn parse_output(id: u64, line: &str) -> Vec<RunnerEvent> {
+    match line.find(MARKER) {
+        Some(at) if at > 0 => vec![
+            RunnerEvent::Line {
+                id,
+                text: line[..at].to_owned(),
+            },
+            parse_line(id, &line[at..]),
+        ],
+        _ => vec![parse_line(id, line)],
+    }
+}
+
+/// A line longer than `cap` (`len` bytes, of which `kept` is the start): a failed snapshot when that
+/// is what it was, otherwise its first characters, marked as cut.
+fn overlong(id: u64, kept: &str, len: usize, cap: usize) -> RunnerEvent {
+    let start = kept.find(MARKER).map_or(kept, |at| &kept[at..]);
+    if start.starts_with("UNDRA-DEV snapshot ") {
+        return RunnerEvent::Snapshot {
+            id,
+            result: Err(format!(
+                "the previous core's answer was {len} bytes, over the {cap} undra dev reads"
+            )),
+        };
+    }
+    let shown: String = kept.chars().take(200).collect();
+    RunnerEvent::Line {
+        id,
+        text: format!("{shown}... (a line of {len} bytes, cut)"),
+    }
+}
+
+/// Reads one line (without its line ending) into `buf`, keeping at most `cap` bytes of it, and
+/// returns how long it really was; `None` at the end of the stream. The part over `cap` is read and
+/// dropped, so a line without end cannot grow the buffer without bound.
+fn read_capped_line(
+    reader: &mut impl BufRead,
+    cap: usize,
+    buf: &mut Vec<u8>,
+) -> std::io::Result<Option<usize>> {
+    buf.clear();
+    let mut total = 0;
+    let mut any = false;
+    loop {
+        let available = match reader.fill_buf() {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if available.is_empty() {
+            return Ok(any.then_some(total));
+        }
+        any = true;
+        let end = available.iter().position(|&b| b == b'\n');
+        let chunk = &available[..end.unwrap_or(available.len())];
+        let room = cap.saturating_sub(buf.len());
+        buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        total += chunk.len();
+        let used = end.map_or(available.len(), |at| at + 1);
+        reader.consume(used);
+        if end.is_some() {
+            // `\r\n` ends a line too; a cut line keeps what it has.
+            if total == buf.len() && buf.last() == Some(&b'\r') {
+                buf.pop();
+                total -= 1;
+            }
+            return Ok(Some(total));
+        }
+    }
+}
+
+/// Turns the runner's stdout into events until it closes (then [`RunnerEvent::Closed`]). Lines are
+/// bounded by `cap` and need not be UTF-8 (a core may print anything): neither ends the reading,
+/// which would read as the runner having exited.
+fn forward_output(id: u64, stdout: impl Read, cap: usize, events: &Sender<RunnerEvent>) {
+    let mut reader = BufReader::new(stdout);
+    let mut buf = Vec::new();
+    while let Ok(Some(len)) = read_capped_line(&mut reader, cap, &mut buf) {
+        let text = String::from_utf8_lossy(&buf);
+        let parsed = if len > cap {
+            vec![overlong(id, &text, len, cap)]
+        } else {
+            parse_output(id, &text)
+        };
+        for event in parsed {
+            if events.send(event).is_err() {
+                return;
+            }
+        }
+    }
+    let _ = events.send(RunnerEvent::Closed { id });
 }
 
 fn parse_protocol(id: u64, line: &str) -> Option<RunnerEvent> {
@@ -152,7 +271,8 @@ fn parse_protocol(id: u64, line: &str) -> Option<RunnerEvent> {
     }
 }
 
-/// `ok <settled> <cancelled> <stores> <bytes> <token|-> <handles|-> <hex>` or `failed <reason>`.
+/// `ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>` or
+/// `failed <reason>`.
 fn parse_snapshot(rest: &str) -> Option<std::result::Result<Snapshot, String>> {
     if let Some(why) = rest.strip_prefix("failed ") {
         return Some(Err(match why.strip_prefix("too-large") {
@@ -161,14 +281,30 @@ fn parse_snapshot(rest: &str) -> Option<std::result::Result<Snapshot, String>> {
         }));
     }
     let ok = rest.strip_prefix("ok ")?;
-    let parts: Vec<&str> = ok.splitn(7, ' ').collect();
-    let [settled, cancelled, stores, bytes_len, token, handles, hex] = parts[..] else {
+    let parts: Vec<&str> = ok.splitn(8, ' ').collect();
+    let [
+        settled,
+        cancelled,
+        dropped,
+        stores,
+        bytes_len,
+        token,
+        handles,
+        hex,
+    ] = parts[..]
+    else {
         return None;
     };
-    let bytes = from_hex(hex.trim())?;
-    if bytes.len() != bytes_len.parse::<usize>().ok()? {
+    let bytes_len = bytes_len.parse::<usize>().ok()?;
+    // The limit holds on this side too, before anything is decoded.
+    if bytes_len > reload::state_limit() {
+        return Some(Err(reload::over_the_limit()));
+    }
+    let hex = hex.trim();
+    if hex.len() != bytes_len * 2 {
         return None;
     }
+    let bytes = from_hex(hex)?;
     Some(Ok(Snapshot {
         bytes,
         stores: stores.parse().ok()?,
@@ -177,6 +313,7 @@ fn parse_snapshot(rest: &str) -> Option<std::result::Result<Snapshot, String>> {
             .flatten(),
         settled: settled == "1",
         cancelled: cancelled.parse().ok()?,
+        dropped: dropped.parse().ok()?,
     }))
 }
 
@@ -190,8 +327,8 @@ fn parse_handles(text: &str) -> Option<Vec<u64>> {
         .collect()
 }
 
-/// The `state ..` command line that hands `snapshot` to a runner whose core had schema hash
-/// `old_hash` (no newline).
+/// The `state <old-hash> <lost calls> <token|-> <handles|-> <hex>` command line that hands `snapshot`
+/// to a runner whose core had schema hash `old_hash` (no newline). The lost calls are for the notice.
 #[must_use]
 pub fn state_command(old_hash: &str, snapshot: &Snapshot) -> String {
     let (token, handles) = match &snapshot.session {
@@ -207,7 +344,8 @@ pub fn state_command(old_hash: &str, snapshot: &Snapshot) -> String {
         None => ("-", "-".to_owned()),
     };
     format!(
-        "state {old_hash} {token} {handles} {}",
+        "state {old_hash} {} {token} {handles} {}",
+        snapshot.lost_calls(),
         to_hex(&snapshot.bytes)
     )
 }
@@ -297,17 +435,7 @@ pub fn spawn(
     let stdin = child.stdin.take();
     thread::Builder::new()
         .name("undra-dev-runner-stdout".to_owned())
-        .spawn(move || {
-            for line in BufReader::new(stdout)
-                .lines()
-                .map_while(std::result::Result::ok)
-            {
-                if events.send(parse_line(id, &line)).is_err() {
-                    return;
-                }
-            }
-            let _ = events.send(RunnerEvent::Closed { id });
-        })
+        .spawn(move || forward_output(id, stdout, LINE_LIMIT, &events))
         .map_err(|e| {
             CliError::new(
                 Code::Dev,
@@ -400,7 +528,7 @@ mod tests {
 
     #[test]
     fn a_snapshot_answer_round_trips_through_the_state_command() {
-        let line = "UNDRA-DEV snapshot ok 1 0 2 4 abcdef12 1a,2b00 00ff10ab";
+        let line = "UNDRA-DEV snapshot ok 1 0 0 2 4 abcdef12 1a,2b00 00ff10ab";
         let RunnerEvent::Snapshot {
             id: 5,
             result: Ok(snapshot),
@@ -419,9 +547,9 @@ mod tests {
         );
         assert_eq!(
             state_command("0xaa", &snapshot),
-            "state 0xaa abcdef12 1a,2b00 00ff10ab"
+            "state 0xaa 0 abcdef12 1a,2b00 00ff10ab"
         );
-        let none = parse_line(5, "UNDRA-DEV snapshot ok 0 2 0 0 - - ");
+        let none = parse_line(5, "UNDRA-DEV snapshot ok 0 2 3 0 0 - - ");
         let RunnerEvent::Snapshot {
             result: Ok(none), ..
         } = none
@@ -429,8 +557,18 @@ mod tests {
             panic!("a snapshot answer")
         };
         assert_eq!(
-            (none.session, none.cancelled, none.settled),
-            (None, 2, false)
+            (
+                none.session.clone(),
+                none.cancelled,
+                none.dropped,
+                none.settled
+            ),
+            (None, 2, 3, false)
+        );
+        assert_eq!(none.lost_calls(), 5);
+        assert!(
+            state_command("0xbb", &none).starts_with("state 0xbb 5 - - "),
+            "the notice learns of the lost calls"
         );
     }
 
@@ -454,18 +592,181 @@ mod tests {
 
     #[test]
     fn a_damaged_snapshot_answer_is_not_trusted() {
-        // The byte count disagrees with the hex.
+        // The byte count disagrees with the hex, the hex is not hex, fields are missing: a failed
+        // snapshot at once (not a megabyte line to print, nor a 15 s wait for an answer).
         for text in [
-            "UNDRA-DEV snapshot ok 1 0 1 5 - - 00ff",
-            "UNDRA-DEV snapshot ok 1 0 1 2 - - 0",
-            "UNDRA-DEV snapshot ok 1 0 1 2 - - zz11",
+            "UNDRA-DEV snapshot ok 1 0 0 1 5 - - 00ff",
+            "UNDRA-DEV snapshot ok 1 0 0 1 2 - - 0",
+            "UNDRA-DEV snapshot ok 1 0 0 1 2 - - zz11",
             "UNDRA-DEV snapshot ok 1 0",
+            "UNDRA-DEV snapshot ok 1 0 1 2 - - 00ff",
         ] {
-            assert!(
-                matches!(parse_line(1, text), RunnerEvent::Line { .. }),
+            assert_eq!(
+                parse_line(1, text),
+                RunnerEvent::Snapshot {
+                    id: 1,
+                    result: Err("the previous core's answer was damaged".into())
+                },
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn a_snapshot_over_the_limit_is_refused_before_it_is_decoded() {
+        let limit = reload::STATE_LIMIT_BYTES;
+        // Exactly the limit is carried: `undra dev` reads it whole and decodes it.
+        let at = format!(
+            "UNDRA-DEV snapshot ok 1 0 0 1 {limit} - - {}",
+            "00".repeat(limit)
+        );
+        assert!(at.len() <= LINE_LIMIT);
+        let RunnerEvent::Snapshot {
+            result: Ok(snapshot),
+            ..
+        } = parse_line(1, &at)
+        else {
+            panic!("the limit itself is carried");
+        };
+        assert_eq!(snapshot.bytes.len(), limit);
+        // One byte over is refused from the count alone, with the reason the terminal shows.
+        let over = format!("UNDRA-DEV snapshot ok 1 0 0 1 {} - - 00", limit + 1);
+        assert_eq!(
+            parse_line(1, &over),
+            RunnerEvent::Snapshot {
+                id: 1,
+                result: Err("snapshot over 16 MiB".into())
+            }
+        );
+    }
+
+    #[test]
+    fn a_line_is_bounded_and_need_not_be_utf8() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut out = b"plain\n".to_vec();
+        out.extend_from_slice(b"\xff\xfe not utf-8\r\n");
+        out.extend_from_slice(&[b'x'; 100]);
+        out.extend_from_slice(b"\nUNDRA-DEV snapshot ok ");
+        out.extend_from_slice(&[b'0'; 100]);
+        out.extend_from_slice(b"\nUNDRA-DEV ready ws://127.0.0.1:1 0x1\n");
+        forward_output(4, &out[..], 64, &tx);
+        let events: Vec<RunnerEvent> = rx.try_iter().collect();
+        assert_eq!(events.len(), 6, "{events:?}");
+        assert_eq!(
+            events[0],
+            RunnerEvent::Line {
+                id: 4,
+                text: "plain".into()
+            }
+        );
+        assert_eq!(
+            events[1],
+            RunnerEvent::Line {
+                id: 4,
+                text: "\u{fffd}\u{fffd} not utf-8".into()
+            },
+            "an invalid line is shown, and reading goes on"
+        );
+        assert!(
+            matches!(&events[2], RunnerEvent::Line { text, .. } if text.ends_with("(a line of 100 bytes, cut)") && text.len() < 300),
+            "{:?}",
+            events[2]
+        );
+        assert!(
+            matches!(&events[3], RunnerEvent::Snapshot { result: Err(why), .. } if why.contains("122 bytes, over the 64")),
+            "{:?}",
+            events[3]
+        );
+        assert!(matches!(events[4], RunnerEvent::Ready { .. }));
+        assert_eq!(events[5], RunnerEvent::Closed { id: 4 });
+    }
+
+    #[test]
+    fn a_protocol_line_glued_to_what_the_core_printed_is_still_heard() {
+        // `print!("loading...")` in the core, then the runner's answer on the same line.
+        assert_eq!(
+            parse_output(2, "loading...UNDRA-DEV ready ws://127.0.0.1:9 0x2"),
+            [
+                RunnerEvent::Line {
+                    id: 2,
+                    text: "loading...".into()
+                },
+                RunnerEvent::Ready {
+                    id: 2,
+                    url: "ws://127.0.0.1:9".into(),
+                    hash: "0x2".into()
+                }
+            ]
+        );
+        assert_eq!(
+            parse_output(2, "hello"),
+            [RunnerEvent::Line {
+                id: 2,
+                text: "hello".into()
+            }]
+        );
+    }
+
+    /// The pipes at the limit, both ways, through real processes: a runner that prints a 16 MiB
+    /// snapshot and one that reads a 16 MiB `state` line and answers with its length. Neither side
+    /// blocks the other (the parent always drains stdout on a thread of its own).
+    #[cfg(unix)]
+    #[test]
+    fn sixteen_mib_of_state_crosses_the_pipes_both_ways() {
+        if std::process::Command::new("perl")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipped: no perl to play the runner");
+            return;
+        }
+        let limit = reload::STATE_LIMIT_BYTES;
+        let dir = std::env::temp_dir().join(format!("undra-runner-pipe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-runner");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nexec perl -e '$| = 1; print \"UNDRA-DEV snapshot ok 1 0 0 1 {limit} - - \", \"ab\" x {limit}, \"\\n\"; while (<STDIN>) {{ chomp; print \"UNDRA-DEV restored 1 0 \", length($_), \" 7\\n\"; }}'\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut running =
+            spawn(&script, "127.0.0.1:0", 1, 9, false, tx).expect("the fake runner starts");
+        let wait = |rx: &std::sync::mpsc::Receiver<RunnerEvent>| {
+            rx.recv_timeout(Duration::from_secs(60))
+                .expect("an answer in time")
+        };
+        let RunnerEvent::Snapshot {
+            result: Ok(snapshot),
+            ..
+        } = wait(&rx)
+        else {
+            panic!("a 16 MiB snapshot answer");
+        };
+        assert_eq!(snapshot.bytes.len(), limit);
+        assert!(snapshot.bytes.iter().all(|&b| b == 0xab));
+        let line = state_command("0x1", &snapshot);
+        running.send(&line).expect("16 MiB of state written");
+        assert_eq!(
+            wait(&rx),
+            RunnerEvent::Restored {
+                id: 9,
+                restored: Restored {
+                    stores: 1,
+                    lost: 0,
+                    bytes: line.len(),
+                    micros: 7
+                }
+            },
+            "the runner read the whole line"
+        );
+        running.stop();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

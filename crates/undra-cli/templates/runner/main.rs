@@ -194,15 +194,20 @@ impl Handover {
     }
 }
 
-/// `state <old-hash> <token|-> <handles|-> <hex>`: restores the snapshot into the new core, before
-/// anything listens. Answers `UNDRA-DEV restored ..` or `UNDRA-DEV reset <reason>`.
+/// `state <old-hash> <lost-calls> <token|-> <handles|-> <hex>`: restores the snapshot into the new
+/// core, before anything listens. `lost-calls` counts the calls the reload cut off (cancelled at the
+/// end of the settle, or sent after the old core stopped running calls): the notice says so, because
+/// their writes are not in the state. Answers `UNDRA-DEV restored ..` or `UNDRA-DEV reset <reason>`.
 fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
     let reset = |handover: &mut Handover, reason: String| {
         handover.reset(&reason);
         say(&format!("reset {reason}"));
     };
-    let parts: Vec<&str> = rest.splitn(4, ' ').collect();
-    let [old_hash, token, handles, hex] = parts[..] else {
+    let parts: Vec<&str> = rest.splitn(5, ' ').collect();
+    let [old_hash, lost_calls, token, handles, hex] = parts[..] else {
+        return reset(handover, "the state handed over was malformed".to_owned());
+    };
+    let Ok(lost_calls) = lost_calls.parse::<usize>() else {
         return reset(handover, "the state handed over was malformed".to_owned());
     };
     let ours = format!("{:#018x}", runtime.schema_hash());
@@ -230,8 +235,15 @@ fn restore_state(runtime: &Runtime, rest: &str, handover: &mut Handover) {
     // are stale and the app re-creates them.
     let (kept, lost): (Vec<u64>, Vec<u64>) = handles.into_iter().partition(|h| stores.contains(h));
     let mut text = "Reloaded, state kept".to_owned();
+    let mut caveats = Vec::new();
     if !lost.is_empty() {
-        text.push_str(&format!(" ({} not carried over)", plural(lost.len(), "object", "objects")));
+        caveats.push(format!("{} not carried over", plural(lost.len(), "object", "objects")));
+    }
+    if lost_calls > 0 {
+        caveats.push(format!("{} lost in the reload", plural(lost_calls, "call", "calls")));
+    }
+    if !caveats.is_empty() {
+        text.push_str(&format!(" ({})", caveats.join("; ")));
     }
     handover.session = (token != "-").then(|| KeptSession {
         token: token.to_owned(),
@@ -269,7 +281,8 @@ fn listen(addr: &str, runtime: &std::sync::Arc<Runtime>, bridge: &std::sync::Arc
 }
 
 /// `snapshot`: suspends the server (no new calls, open calls finish or are cancelled, the client is
-/// closed, its session is kept) and answers with the core's state and that session.
+/// closed, its session is kept) and answers with the core's state and that session:
+/// `snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>`.
 fn take_snapshot(server: &Server, runtime: &Runtime) {
     let suspended = server.suspend(SETTLE);
     let bytes = runtime.snapshot();
@@ -283,9 +296,10 @@ fn take_snapshot(server: &Server, runtime: &Runtime) {
         None => ("-", "-".to_owned()),
     };
     say(&format!(
-        "snapshot ok {} {} {stores} {} {token} {handles} {}",
+        "snapshot ok {} {} {} {stores} {} {token} {handles} {}",
         u8::from(suspended.settled),
         suspended.cancelled_calls,
+        suspended.dropped_calls,
         bytes.len(),
         to_hex(&bytes)
     ));

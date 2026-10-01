@@ -446,3 +446,256 @@ fn a_server_with_no_notices_never_says_one() {
     let mut client = f.client();
     assert!(notices_of(&mut client).is_empty());
 }
+
+// ----- review (2026-10-02): the attacks of the adversarial review ---------------------------------
+
+#[test]
+fn the_core_cannot_say_a_dev_notice_only_the_server_can() {
+    // `undra::dev` is the dev server's own voice (ADR-053, decision 1a): an app's core that logs under
+    // that target (`undra_info!(target: "undra::dev", ..)` reaches `Host::log` exactly like this) must
+    // not make a status bar say "Reloaded". The record still reaches the terminal (the log sink).
+    let f = start_with(quick(), "dev");
+    let mut client = f.session_client("tok-spoof", false);
+    client.new_counter(1); // a round trip: the client is attached
+    f.rt.log(
+        undra::runtime::log::INFO,
+        NOTICE_TARGET,
+        "Reloaded, state kept",
+    );
+    f.rt.log(undra::runtime::log::INFO, "app", "an ordinary record");
+    assert_eq!(notices_of(&mut client), Vec::<String>::new());
+    assert!(
+        client.frames_of(Kind::Log).iter().any(|frame| {
+            Log::decode(&mut Reader::new(&frame.payload)).is_ok_and(|log| log.target == "app")
+        }),
+        "other records still reach the client"
+    );
+    assert!(
+        f.log_lines()
+            .iter()
+            .any(|line| line.contains("undra::dev: Reloaded, state kept")),
+        "the terminal still shows it: {:?}",
+        f.log_lines()
+    );
+}
+
+/// A successor holding `session`, whose resume grace is `grace`.
+fn successor_with_grace(
+    addr: std::net::SocketAddr,
+    snapshot: &[u8],
+    session: Option<KeptSession>,
+    notices: AttachNotices,
+    grace: Duration,
+) -> Server {
+    for _ in 0..50 {
+        let snapshot = snapshot.to_vec();
+        let started = Server::start(
+            addr,
+            ServerConfig {
+                resume_grace: grace,
+                inherited_session: session.clone(),
+                attach_notices: notices.clone(),
+                ..quick()
+            },
+            move |host| {
+                let rt = Runtime::new(
+                    RuntimeConfig {
+                        log_level: 0,
+                        core_threads: 1,
+                        blocking_threads: 1,
+                        ..RuntimeConfig::default()
+                    },
+                    host,
+                )?;
+                rt.restore(&snapshot).expect("the snapshot restores");
+                Ok(rt)
+            },
+        );
+        if let Ok(server) = started {
+            return server;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("the successor could not bind {addr}");
+}
+
+#[test]
+fn a_client_that_comes_back_after_the_notice_window_finds_its_state_and_hears_nothing() {
+    let first = resuming();
+    let addr = first.server.addr();
+    let mut client = first.session_client("tok-late", false);
+    let counter = client.new_counter(5);
+    client.method(counter, ADD, &enc(&4_i32)); // 9
+    let suspended = first.server.suspend(SETTLE);
+    let snapshot = first.rt.snapshot();
+    drop(client);
+    drop(first);
+    let second = successor_with_grace(
+        addr,
+        &snapshot,
+        suspended.session,
+        AttachNotices {
+            resumed: Some("kept".to_owned()),
+            window: Duration::from_millis(50),
+            ..AttachNotices::default()
+        },
+        minutes(10),
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    let mut back =
+        TestClient::connect_session(&second.url(), snapshot_schema(&second), "tok-late", true);
+    let (status, body) = back.method(counter, GET, &[]);
+    assert_eq!(
+        (status, dec::<i32>(&body)),
+        (ReplyStatus::Ok, 9),
+        "the state, late or not"
+    );
+    assert!(
+        notices_of(&mut back).is_empty(),
+        "no notice after the window"
+    );
+    drop(back);
+    second.shutdown();
+    second.runtime().shutdown();
+}
+
+#[test]
+fn an_inherited_session_whose_grace_passes_is_released_and_its_client_told_session_lost() {
+    let first = resuming();
+    let addr = first.server.addr();
+    let mut client = first.session_client("tok-expire", false);
+    client.new_counter(5);
+    let suspended = first.server.suspend(SETTLE);
+    let snapshot = first.rt.snapshot();
+    drop(client);
+    drop(first);
+    let second = successor_with_grace(
+        addr,
+        &snapshot,
+        suspended.session,
+        AttachNotices::default(),
+        Duration::from_millis(200),
+    );
+    assert_eq!(stat(second.runtime(), "live_handles"), 1, "held at first");
+    eventually(
+        "the grace passes and the reaper releases the restored store",
+        || stat(second.runtime(), "live_handles") == 0,
+    );
+    // ADR-051 from here: the objects are gone, so the client is told to load a new core.
+    let mut back = TestClient::connect_raw(
+        &session_url(&second.url(), "tok-expire", true),
+        snapshot_schema(&second),
+    );
+    back.send_hello(snapshot_schema(&second), "test", "dev");
+    back.expect_frame(Kind::Hello);
+    assert_eq!(
+        back.expect_close().map(|(code, _)| code),
+        Some(close::SESSION_LOST)
+    );
+    second.shutdown();
+    second.runtime().shutdown();
+}
+
+fn snapshot_schema(server: &Server) -> u64 {
+    server.runtime().schema_hash()
+}
+
+#[test]
+fn a_call_sent_while_the_server_settles_is_not_run_and_is_counted() {
+    // The write must not land in the state (the snapshot is taken after the suspend) and must not
+    // vanish silently either: `Suspended` counts it, and `undra dev` says so.
+    let f = resuming();
+    let mut client = f.session_client("tok-dropped", false);
+    let counter = client.new_counter(1);
+    let hang = client.next_call_id();
+    client.send_call(
+        undra::wire::payload::CallTarget::Method {
+            handle: undra::wire::Handle(counter),
+            method_id: HANG,
+        },
+        hang,
+        &[],
+    );
+    f.eventually("the hanging call is open in the core", |f| {
+        stat(&f.rt, "active_calls") == 1
+    });
+    let suspending = {
+        std::thread::scope(|scope| {
+            let suspend = scope.spawn(|| f.server.suspend(Duration::from_millis(1500)));
+            // Taps until one is not answered: the first one after the server stopped running calls.
+            let mut landed = 0;
+            loop {
+                std::thread::sleep(Duration::from_millis(20));
+                let id = client.next_call_id();
+                client.send_call(
+                    undra::wire::payload::CallTarget::Method {
+                        handle: undra::wire::Handle(counter),
+                        method_id: ADD,
+                    },
+                    id,
+                    &enc(&10_i32),
+                );
+                // A dev client also hears the server's log records; a tap is answered or the
+                // connection closes (or nothing comes at all).
+                let answered = loop {
+                    match client.recv_within(Duration::from_secs(3)) {
+                        Received::Frame(frame) if frame.kind == Kind::Reply => break true,
+                        Received::Frame(frame) if frame.kind == Kind::Log => {}
+                        Received::Frame(other) => panic!("unexpected {other:?}"),
+                        Received::Closed(_) | Received::Silence => break false,
+                    }
+                };
+                if !answered {
+                    break;
+                }
+                landed += 1;
+            }
+            (suspend.join().unwrap(), landed)
+        })
+    };
+    let (suspended, landed) = suspending;
+    assert_eq!(suspended.cancelled_calls, 1, "{suspended:?}");
+    assert_eq!(suspended.dropped_calls, 1, "{suspended:?}");
+    assert!(!suspended.settled);
+    let revived = start();
+    revived.rt.restore(&f.rt.snapshot()).unwrap();
+    let mut other = revived.client();
+    let (status, body) = other.method(counter, GET, &[]);
+    assert_eq!(
+        (status, dec::<i32>(&body)),
+        (ReplyStatus::Ok, 1 + 10 * landed),
+        "the answered taps are in the state, the one that was not run is not"
+    );
+    assert!(
+        f.log_lines()
+            .iter()
+            .any(|line| line.contains("1 sent meanwhile were not run")),
+        "{:?}",
+        f.log_lines()
+    );
+}
+
+#[test]
+fn with_two_clients_only_the_attached_one_has_a_session_to_hand_over() {
+    // `undra dev` serves one client at a time (ADR-051): a simulator and an emulator take turns on the
+    // slot, and the one that is refused (1013) holds nothing in this core. So the reload hands over
+    // exactly one session, the attached client's; the other client loads afresh when it gets the slot.
+    let f = resuming();
+    let mut first = f.session_client("tok-sim", false);
+    let counter = first.new_counter(3);
+    let mut second = TestClient::connect_raw(&session_url(&f.url(), "tok-emu", false), f.schema());
+    second.send_hello(f.schema(), "test", "dev");
+    second.expect_frame(Kind::Hello);
+    assert_eq!(
+        second.expect_close().map(|(code, _)| code),
+        Some(close::TRY_AGAIN_LATER)
+    );
+    let suspended = f.server.suspend(SETTLE);
+    assert_eq!(
+        suspended.session,
+        Some(KeptSession {
+            token: "tok-sim".to_owned(),
+            handles: vec![counter],
+        })
+    );
+}

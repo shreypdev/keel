@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -116,6 +116,11 @@ pub struct Suspended {
     pub settled: bool,
     /// How many calls were still open, and were cancelled, when the connection was closed.
     pub cancelled_calls: usize,
+    /// How many calls the client sent after the server stopped running calls (step 2 of
+    /// [`Server::suspend`]): never run, never answered (the client fails them as unavailable when
+    /// the socket closes). Their writes are not in a snapshot taken afterwards, so whoever reports
+    /// the reload should say so.
+    pub dropped_calls: usize,
 }
 
 struct Entry {
@@ -370,6 +375,7 @@ impl Server {
         }
         let hooks = Hooks {
             frozen: Arc::new(AtomicBool::new(false)),
+            dropped: Arc::new(AtomicUsize::new(0)),
             notices: Arc::new(Notices::new(config.attach_notices.clone())),
         };
         let shared = Arc::new(Shared {
@@ -443,7 +449,7 @@ impl Server {
     ///
     /// In this order: (1) no new connection is accepted, and the listener is closed, so the
     /// address is free for the next server; (2) calls the attached client sends from now on are
-    /// not run; (3) it waits until the calls open on that connection have been answered, at most
+    /// not run (they are counted in [`Suspended::dropped_calls`]); (3) it waits until the calls open on that connection have been answered, at most
     /// `settle` (streams are not waited for); (4) the client is closed with 1001, which cancels
     /// what is still open, stops its observations and, when it announced a session
     /// ([`ServerConfig::resume_grace`] above zero), **retains the objects it made**; (5) every
@@ -467,6 +473,7 @@ impl Server {
                 session: None,
                 settled: true,
                 cancelled_calls: 0,
+                dropped_calls: 0,
             };
         }
         let shared = &self.shared;
@@ -522,12 +529,14 @@ impl Server {
             }
             None => None,
         };
+        // Read after every connection thread was joined: no frame is processed any more.
+        let dropped = shared.hooks.dropped.load(Ordering::Acquire);
         if suspend.is_some() {
             shared.rt.log(
                 INFO,
                 TARGET,
                 &format!(
-                    "suspended for a reload: {open} call(s) were still open, {}",
+                    "suspended for a reload: {open} call(s) were still open, {dropped} sent meanwhile were not run, {}",
                     session.as_ref().map_or_else(
                         || "no session to hand over".to_owned(),
                         |s| format!(
@@ -547,6 +556,7 @@ impl Server {
             session,
             settled: open == 0,
             cancelled_calls: open,
+            dropped_calls: dropped,
         }
     }
 }

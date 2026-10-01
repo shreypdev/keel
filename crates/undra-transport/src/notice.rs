@@ -12,6 +12,10 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
 /// The `target` of the `Log` record that carries a dev notice; its message is the sentence to show.
+///
+/// Reserved for the server: a record the core itself logs under this target is printed by the
+/// [`LogSink`](crate::LogSink) but never sent to a client, so a core cannot pass itself off as the
+/// dev server.
 pub const NOTICE_TARGET: &str = "undra::dev";
 
 /// What a freshly started server tells the clients that attach to it (ADR-053).

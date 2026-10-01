@@ -39,6 +39,8 @@ struct Client {
     server_schema: u64,
     /// The latest value received for each `(store handle, signal id)`.
     values: std::collections::HashMap<(u64, u32), Vec<u8>>,
+    /// The close [`Client::reply_or_close`] met, if it met one.
+    closed: Option<(u16, String)>,
 }
 
 impl Client {
@@ -60,6 +62,7 @@ impl Client {
             notices: Vec::new(),
             server_schema: 0,
             values: std::collections::HashMap::new(),
+            closed: None,
         };
         let mut hello = Writer::new();
         Hello {
@@ -168,6 +171,41 @@ impl Client {
                 Got::Frame(..) => {}
                 Got::Closed(close) => panic!("closed while waiting for a reply: {close:?}"),
                 Got::Silence => panic!("no reply"),
+            }
+        }
+    }
+
+    /// Sends a call without waiting for its reply; returns its id.
+    fn send_call(&mut self, target: CallTarget, args: &[u8]) -> u32 {
+        self.next_call += 1;
+        let id = self.next_call;
+        let mut call = Writer::new();
+        Call {
+            target,
+            call_id: id,
+            args,
+        }
+        .encode(&mut call);
+        self.send(Kind::Call, call.as_slice());
+        id
+    }
+
+    /// The reply to call `id`, or `None` when the server closes first (the close is consumed).
+    fn reply_or_close(&mut self, id: u32) -> Option<(ReplyStatus, Vec<u8>)> {
+        loop {
+            match self.read() {
+                Got::Frame(Kind::Reply, payload) => {
+                    let reply = Reply::decode(&mut Reader::new(&payload)).unwrap();
+                    if reply.call_id == id {
+                        return Some((reply.status, reply.body.to_vec()));
+                    }
+                }
+                Got::Frame(..) => {}
+                Got::Closed(close) => {
+                    self.closed = close;
+                    return None;
+                }
+                Got::Silence => panic!("neither a reply nor a close"),
             }
         }
     }
@@ -366,6 +404,18 @@ fn a_rebuild_keeps_the_screen_the_client_was_on() {
     // The plain object did not survive: the existing status 5 path.
     let (status, _) = back.method(probe, "Probe", "counters", &[]);
     assert_eq!(status, ReplyStatus::BadRequest, "a stale handle is refused");
+    // The generation floor crossed the process boundary (ADR-022): the new process issues nothing
+    // at or below the old one's generations, so the stale handle can never name a new object.
+    let fresh_probe = back.construct("Probe");
+    assert_ne!(fresh_probe, probe);
+    assert!(
+        Handle(fresh_probe).generation() > Handle(probe).generation(),
+        "a handle made after the reload ({:?}) is above every handle of the old process ({:?})",
+        Handle(fresh_probe),
+        Handle(probe)
+    );
+    let (status, _) = back.method(probe, "Probe", "counters", &[]);
+    assert_eq!(status, ReplyStatus::BadRequest, "still stale");
 
     assert_eq!(
         back.notices_after(Duration::from_millis(500)),
@@ -493,5 +543,222 @@ fn a_state_over_the_limit_falls_back_to_fresh_state_and_says_so() {
         ["Reloaded, state reset: snapshot over 50000 bytes"]
     );
     drop(fresh);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+// ----- review (2026-10-02): the attacks of the adversarial review ---------------------------------
+
+/// The counter's value and change tally as the server last sent them.
+fn count_of(client: &Client, handle: u64) -> Option<(i32, u32)> {
+    Some((
+        i32_of(client.values.get(&(handle, COUNT))?),
+        u32_of(client.values.get(&(handle, CHANGES))?),
+    ))
+}
+
+#[test]
+fn calls_the_reload_cut_off_are_counted_and_the_notice_says_so() {
+    // A write the client made during the reload must not vanish behind "Reloaded, state kept": one
+    // call is still running when the old core is suspended (it never finishes: it is cancelled at the
+    // end of the settle) and one is sent while the server no longer runs calls (it is never run).
+    let project = playground_copy("reload-calls");
+    let dev = Dev::start(&project, &[]);
+    let counter_rs = project.root.join("core/src/counter.rs");
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-calls-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &3_i32.encode_to_vec());
+    let probe = client.construct("Probe");
+    let hang = client.send_call(
+        CallTarget::Method {
+            handle: Handle(probe),
+            method_id: ids::method_id("Probe", "hang"),
+        },
+        &[],
+    );
+
+    append(&counter_rs, "\n// touched\n");
+    // The app keeps tapping "+1" through the rebuild and the swap: every tap that is answered landed;
+    // the first one that is not was made after the server stopped running calls.
+    let mut landed = 0;
+    loop {
+        std::thread::sleep(Duration::from_millis(50));
+        let id = client.send_call(
+            CallTarget::Method {
+                handle: Handle(counter),
+                method_id: ids::method_id("Counter", "add"),
+            },
+            &1_i32.encode_to_vec(),
+        );
+        match client.reply_or_close(id) {
+            Some((ReplyStatus::Ok, _)) => landed += 1,
+            Some(other) => panic!("an add failed: {other:?}"),
+            None => break,
+        }
+    }
+    assert_eq!(
+        client.closed.as_ref().map(|(code, _)| *code),
+        Some(1001),
+        "{:?}",
+        client.closed
+    );
+    let _ = hang;
+
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    eprintln!("{restarted}");
+    assert!(restarted.contains("state kept (1 store,"), "{restarted}");
+    assert!(
+        restarted.contains("1 call still running when the core was replaced was cancelled"),
+        "{restarted}"
+    );
+    assert!(
+        restarted.contains("1 call sent during the reload was not run"),
+        "{restarted}"
+    );
+
+    let mut back = Client::connect(&dev, dev.hash, "reload-calls-token", true);
+    back.observe(counter);
+    assert_eq!(
+        count_of(&back, counter),
+        Some((3 + landed, 1 + landed as u32)),
+        "every answered add is in the state, the unanswered one is not"
+    );
+    assert_eq!(
+        back.notices_after(Duration::from_millis(500)),
+        ["Reloaded, state kept (1 object not carried over; 2 calls lost in the reload)"]
+    );
+    drop(back);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+#[test]
+fn a_rebuilt_core_that_does_not_start_leaves_the_old_one_serving_with_its_state() {
+    // A real core that cannot start (an init hook that exits the process, as an abort in start-up code
+    // would): the old core keeps serving, the client is never disconnected, nothing is lost; the next
+    // good edit swaps with the state.
+    let project = playground_copy("reload-nostart");
+    let dev = Dev::start(&project, &[]);
+    let counter_rs = project.root.join("core/src/counter.rs");
+    let original = std::fs::read_to_string(&counter_rs).unwrap();
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-nostart-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &6_i32.encode_to_vec());
+    client.observe(counter);
+
+    let exits = "\nundra::runtime::inventory::submit! {\n    undra::runtime::InitHook { name: \"review.exits-at-start\", run: |_| std::process::exit(3) }\n}\n";
+    append(&counter_rs, exits);
+    dev.wait_log(
+        "the rebuilt core did not start; still serving the previous build",
+        BUILD,
+    );
+    // Same socket, same core, same state: the client never noticed.
+    let (status, _) = client.method(counter, "Counter", "add", &1_i32.encode_to_vec());
+    assert_eq!(status, ReplyStatus::Ok);
+    client.await_count(counter, 7);
+
+    std::fs::write(&counter_rs, format!("{original}\n// fixed\n")).unwrap();
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    assert!(restarted.contains("state kept"), "{restarted}");
+    assert_eq!(client.expect_close().0, 1001);
+    let mut back = Client::connect(&dev, dev.hash, "reload-nostart-token", true);
+    back.observe(counter);
+    assert_eq!(count_of(&back, counter), Some((7, 2)));
+    drop(back);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+#[test]
+fn a_snapshot_the_new_core_refuses_falls_back_to_fresh_state_and_says_why() {
+    // The rebuilt core has the same schema but its store cannot be restored (its restore hook
+    // panics): `Runtime::restore` is all-or-nothing, the runner starts fresh and says why.
+    let project = playground_copy("reload-refused");
+    let dev = Dev::start(&project, &[]);
+    let counter_rs = project.root.join("core/src/counter.rs");
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-refused-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &5_i32.encode_to_vec());
+    client.observe(counter);
+
+    let original = std::fs::read_to_string(&counter_rs).unwrap();
+    let edited = original.replace(
+        "#[undra::store(restore = \"Self::assemble\")]",
+        "#[undra::store(restore = \"Self::refuse\")]",
+    ) + "\nimpl Counter {\n    fn refuse(_ctx: Ctx, _count: Signal<i32>, _changes: Signal<u32>) -> Self {\n        panic!(\"this build refuses every snapshot\")\n    }\n}\n";
+    assert_ne!(original, edited);
+    std::fs::write(&counter_rs, edited).unwrap();
+    let restarted = dev.wait_line("Restarted: ws://", BUILD);
+    eprintln!("{restarted}");
+    assert!(
+        restarted.contains("state reset: the core refused the snapshot"),
+        "{restarted}"
+    );
+    let new_hash = restarted
+        .split("schema hash ")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .map(|hash| u64::from_str_radix(hash.trim_start_matches("0x"), 16).unwrap())
+        .expect("the new hash is printed");
+    assert_eq!(
+        new_hash, dev.hash,
+        "a restore hook is not part of the schema"
+    );
+    assert_eq!(client.expect_close().0, 1001);
+
+    // Today's fallback: the session is not carried (4001), the app loads afresh and is told why.
+    let mut back = Client::connect(&dev, dev.hash, "reload-refused-token", true);
+    assert_eq!(back.expect_close().0, 4001);
+    let mut fresh = Client::connect(&dev, dev.hash, "reload-refused-fresh", false);
+    let counter = fresh.construct("Counter");
+    fresh.observe(counter);
+    assert_eq!(count_of(&fresh, counter), Some((0, 0)));
+    let notices = fresh.notices_after(Duration::from_millis(500));
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert!(
+        notices[0].starts_with("Reloaded, state reset: the core refused the snapshot"),
+        "{notices:?}"
+    );
+    drop(fresh);
+    dev.kill_and_expect_the_port_to_close();
+}
+
+#[test]
+fn a_change_during_a_reload_is_built_next_and_the_state_survives_both_swaps() {
+    // A second save while the first rebuild and swap run: no double swap, no lost runner; the change
+    // is built after the swap, and the state is carried twice (the second time from a core whose
+    // client has not come back yet: the inherited session is handed on).
+    let project = playground_copy("reload-twice");
+    let dev = Dev::start(&project, &[]);
+    let counter_rs = project.root.join("core/src/counter.rs");
+
+    let mut client = Client::connect(&dev, dev.hash, "reload-twice-token", false);
+    let counter = client.construct("Counter");
+    client.method(counter, "Counter", "add", &4_i32.encode_to_vec());
+    client.observe(counter);
+
+    append(&counter_rs, "\n// first\n");
+    dev.wait_log("Change detected, rebuilding", BUILD);
+    append(&counter_rs, "\n// second\n");
+    let first = dev.wait_line("Restarted: ws://", BUILD);
+    let second = dev.wait_line("Restarted: ws://", BUILD);
+    eprintln!("{first}\n{second}");
+    assert!(first.contains("state kept (1 store,"), "{first}");
+    assert!(second.contains("state kept (1 store,"), "{second}");
+    assert_eq!(client.expect_close().0, 1001);
+    assert_eq!(
+        dev.log
+            .lock()
+            .unwrap()
+            .matches("Change detected, rebuilding")
+            .count(),
+        2,
+        "two rebuilds, one per change that was not yet built"
+    );
+
+    let mut back = Client::connect(&dev, dev.hash, "reload-twice-token", true);
+    back.observe(counter);
+    assert_eq!(count_of(&back, counter), Some((4, 1)));
+    drop(back);
     dev.kill_and_expect_the_port_to_close();
 }

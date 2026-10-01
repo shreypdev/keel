@@ -86,7 +86,7 @@ Restarted: ws://127.0.0.1:7443  (schema hash 0x...); state kept (3 stores, 205 K
 ```
 
 and each app's dev bar says the same for four seconds: **`Reloaded, state kept`**, with `(N objects not carried over)` when
-that applies. Whatever stops the state from being carried falls back to the loop as it was before: the old core stops, the
+that applies and `(N calls lost in the reload)` when a call was cut off (below). Whatever stops the state from being carried falls back to the loop as it was before: the old core stops, the
 new one starts fresh, and the line says why (`state reset: ...`):
 
 | The line says | Why | What the app does |
@@ -111,6 +111,11 @@ new one starts fresh, and the line says why (`state reset: ...`):
   up to two seconds to finish (so an `async` command in the middle of a port call completes); one that does not is cancelled
   and fails as `Unavailable`, and a store it half-wrote keeps that value (a `loading = true` nobody clears: tap again). A store
   that must keep a background task alive across a reload starts it from its `restore = ".."` hook, which receives the `Ctx`.
+* **Calls made during the swap** are not run: from the moment the old core is suspended it runs no new call (a tap in those
+  milliseconds, or in the up to two seconds an open call is given), and the client fails it as `Unavailable` when the socket
+  closes. A command that fails that way is only logged (the connection state already says the core is reconnecting), so
+  the `Restarted:` line and the dev bar count such calls together with the cancelled ones: `1 call sent during the reload
+  was not run`, `(2 calls lost in the reload)`. The state is the state before them: tap again.
 * **The query cache and the offline queue** are not store state: queries refetch when observed again.
 * **State reached by old logic** is restored into new logic; that is what a reload is. If it confuses you, relaunch the app
   (a new session replaces the carried one and builds fresh stores on the new code), or run `undra dev --no-keep-state`.
@@ -122,15 +127,20 @@ lines, and nothing else: no port, no file. It is internal, and documented here b
 
 ```
 undra dev -> runner  (stdin)                     runner -> undra dev  (stdout)
-  snapshot                                         UNDRA-DEV snapshot ok <settled> <open calls> <stores> <bytes> <token|-> <handles|-> <hex>
+  snapshot                                         UNDRA-DEV snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|-> <handles|-> <hex>
                                                    UNDRA-DEV snapshot failed <reason>
-  state <old-hash> <token|-> <handles|-> <hex>     UNDRA-DEV restored <stores> <lost objects> <bytes> <microseconds>
+  state <old-hash> <lost calls> <token|-> <handles|-> <hex>
+                                                   UNDRA-DEV restored <stores> <lost objects> <bytes> <microseconds>
                                                    UNDRA-DEV reset <reason>
   reset <reason>                                   (nothing)
   listen                                           UNDRA-DEV ready <ws-url> <schema-hash>
   (a runner started with --standby)                UNDRA-DEV standby <schema-hash>
   (stdin closes: stop)
 ```
+
+`undra dev` reads at most 48 MiB of one stdout line (a snapshot at the 16 MiB limit is 32 MiB of hex) and does not
+require UTF-8: the core's own `print!` output shares the pipe and is shown as it comes; a protocol line that follows
+`print!` output without a newline is still recognised.
 
 ## Reconnecting
 
@@ -150,7 +160,8 @@ reason is `requested` (you closed the core), `schemaMismatch`, `sessionLost` or 
 reset: schema changed`): a `Log` record with the target `undra::dev`, sent once to every client that attaches within 30
 seconds of a rebuild. It is for a status bar; the playground's and the generated apps' bars show it for four seconds. It is
 **development only and inert otherwise**: an in-process or production core never produces such a record, and each runtime
-dispatches it from its `remote` transport only.
+dispatches it from its `remote` transport only. The target is the dev server's: a record your core logs under
+`undra::dev` is printed in the terminal but never sent to a client, so the bar only ever shows what `undra dev` said.
 
 * **Backoff.** Attempt `n` waits `min(5 s, 250 ms * 2^(n-1))`, less up to half of it at random, so many clients
   do not retry in step: 250, 500, 1000, 2000, 4000, 5000, 5000 ms, jittered. Each attempt gets at most 5 s.
@@ -189,7 +200,7 @@ The server prints every step:
 client connected: platform=android mode=dev undra=0.1.0
 client disconnected (0 calls cancelled, 1 object(s) kept for 600 s so it can reconnect)
 client reconnected: platform=android mode=dev undra=0.1.0 (session 356b33fa, away 6.0 s, 1 object(s) kept)
-suspended for a reload: 0 call(s) were still open, session 356b33fa (1 object(s)) handed over
+suspended for a reload: 0 call(s) were still open, 0 sent meanwhile were not run, session 356b33fa (1 object(s)) handed over
 holding session 356b33fa (1 object(s)) for its client
 a client (ios) asked to resume session 319c2156, which this core does not hold (it was restarted, ...)
 ```
@@ -228,6 +239,7 @@ a client (ios) asked to resume session 319c2156, which this core does not hold (
 | The app's screen resets after every save | Read the `Restarted:` line: it says whether the state was carried and, if not, why (a schema change, a state over 16 MiB, `--no-keep-state`). The app's dev bar says it too. |
 | `1 object not carried over`, and `refetch` is refused with a stale handle | A query handle (or another object that is not a store) does not survive a reload. Run the query again: construct the query handle again, for example by re-mounting its screen. |
 | A spinner or a `loading` flag stays on after a save | A call that was still running when the core was replaced was cancelled and left its store at the value it had written; trigger the action again. |
+| A tap right as you saved did nothing; the bar said `(1 call lost in the reload)` | Calls made while the old core was being swapped out are not run (their writes are not in the carried state); tap again. |
 
 `undra doctor` checks the toolchains the loop needs (the Android SDK, NDK, JDK, Xcode, `adb` and whether a device is
 attached, `undra` on `PATH`), with the fix command for each gap; `undra dev --help` has the command reference.

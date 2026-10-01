@@ -64,6 +64,18 @@ pub struct Snapshot {
     pub settled: bool,
     /// How many were still open, and were cancelled.
     pub cancelled: usize,
+    /// How many calls the client sent after the old core stopped running calls: never run, so their
+    /// writes are not in [`bytes`](Snapshot::bytes).
+    pub dropped: usize,
+}
+
+impl Snapshot {
+    /// The calls the reload cut off, whose writes are not in the state (or only in part): the
+    /// cancelled ones and the ones never run. The notice to the app counts them.
+    #[must_use]
+    pub fn lost_calls(&self) -> usize {
+        self.cancelled + self.dropped
+    }
 }
 
 /// What the new core said about the state it was handed.
@@ -86,8 +98,10 @@ pub enum Outcome {
     Kept {
         /// What was restored.
         restored: Restored,
-        /// Whether the open calls had settled before the swap, and how many were cancelled.
+        /// How many calls were still running when the old core was replaced, and were cancelled.
         cancelled: usize,
+        /// How many calls were sent after the old core stopped running calls, and were not run.
+        dropped: usize,
     },
     /// The old core had no stores: there was nothing to carry.
     NothingToKeep,
@@ -103,6 +117,7 @@ impl Outcome {
             Outcome::Kept {
                 restored,
                 cancelled,
+                dropped,
             } => {
                 let mut text = format!(
                     "state kept ({}, {}, restored in {})",
@@ -121,6 +136,13 @@ impl Outcome {
                         "; {} still running when the core was replaced {} cancelled",
                         plural(*cancelled, "call", "calls"),
                         if *cancelled == 1 { "was" } else { "were" }
+                    ));
+                }
+                if *dropped > 0 {
+                    text.push_str(&format!(
+                        "; {} sent during the reload {} not run",
+                        plural(*dropped, "call", "calls"),
+                        if *dropped == 1 { "was" } else { "were" }
                     ));
                 }
                 text
@@ -264,6 +286,7 @@ pub fn swap<O: Ops>(
             Ok(restored) => Outcome::Kept {
                 restored,
                 cancelled: snapshot.cancelled,
+                dropped: snapshot.dropped,
             },
             Err(reason) => Outcome::Reset(reason),
         },
@@ -301,6 +324,7 @@ mod tests {
             session: Some(("tok".into(), vec![1])),
             settled: true,
             cancelled: 0,
+            dropped: 0,
         }
     }
 
@@ -509,10 +533,11 @@ mod tests {
                 micros: 189,
             },
             cancelled: 1,
+            dropped: 2,
         };
         assert_eq!(
             kept.describe(),
-            "state kept (3 stores, 205 KiB, restored in 189 \u{b5}s); 2 objects not carried over: their handles are stale, the app creates them again; 1 call still running when the core was replaced was cancelled"
+            "state kept (3 stores, 205 KiB, restored in 189 \u{b5}s); 2 objects not carried over: their handles are stale, the app creates them again; 1 call still running when the core was replaced was cancelled; 2 calls sent during the reload were not run"
         );
         assert_eq!(
             Outcome::Reset("schema changed (was 0x1, now 0x2)".into()).describe(),

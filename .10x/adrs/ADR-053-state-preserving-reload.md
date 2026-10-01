@@ -374,3 +374,34 @@ What differs from the text above, and what was measured.
   CLI integration tests speak the envelope with a raw client.
 * **`Server::suspend` hands a session over only when `resume_grace` is above zero** (as `undra dev` has it); with zero nothing
   is retained and the client's objects are released at the close.
+
+## Review amendments (2026-10-02, the adversarial review)
+
+The review (`.10x/reviews/2026-10-02-dev-reload-review.md`) changed four things; none touches the envelope, a payload,
+the ABI, the schema, the generated code or `undra-runtime`.
+
+* **A call the reload cut off is counted, and the notice says so.** Section 1.3.2 stops running calls during the settle;
+  such a call was neither answered nor counted, and a *command* that fails as `Unavailable` while the connection is down is
+  only logged (ADR-051), so a tap made during the swap vanished behind `Reloaded, state kept`. `Suspended` gains
+  `dropped_calls` (calls the client sent after the server stopped running calls, including those that arrived after the
+  Close was queued); the runner's answer is `snapshot ok <settled> <cancelled> <not run> <stores> <bytes> <token|->
+  <handles|-> <hex>` and the hand-over is `state <old-hash> <lost calls> <token|-> <handles|-> <hex>`; the terminal line
+  adds `N calls sent during the reload were not run` and the resumed notice reads `Reloaded, state kept (N calls lost in
+  the reload)` (with the objects not carried over, `(1 object not carried over; 2 calls lost in the reload)`). The
+  semantics are unchanged: those calls are not run and the client fails them as `Unavailable` at the close; the state is
+  the state before them.
+* **`undra::dev` is reserved for the server.** A core that logged under that target (`undra_info!(target: "undra::dev",
+  ..)`) reached `Host::log` and so every client, and the runtimes fired `onDevNotice` for it: the core could make the dev
+  bar say anything, contrary to decision 1(a). The bridge no longer forwards such a record to a client (the log sink, the
+  terminal, still prints it); the notices are sent by `Session::tell`, which does not go through `Host::log`.
+* **The runner's stdout is read in bounded lines** (48 MiB, three times the state limit) and need not be UTF-8: before,
+  one line was read without bound, and a non-UTF-8 byte from the core's own `print!` ended the reading, which `undra dev`
+  took for the runner exiting ("the dev server stopped"). A `snapshot` answer that does not parse, or is over the bound, is
+  a failed snapshot at once (fresh state, with the reason) instead of a megabyte line printed to the terminal and a 15 s
+  wait; a protocol line glued to the core's `print!` output without a newline is still recognised; and `undra dev` checks
+  the 16 MiB limit itself before it decodes the hex.
+* **Tests added for the failure matrix with real cores**: a rebuilt core that exits at start (an init hook that calls
+  `exit`), a restore the new core refuses (a restore hook that panics, the same schema hash), a second save during a
+  reload (two swaps, the state carried twice, the second time from a core whose client had not come back), the generation
+  floor across the process boundary, an inherited session whose grace passes, a client back after the notice window, two
+  clients, and 16 MiB of state through real pipes both ways.

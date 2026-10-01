@@ -25,7 +25,7 @@ use std::io::{self, Read};
 use std::net::TcpStream;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -104,12 +104,16 @@ fn decode<'a, T>(
 }
 
 /// What the server shares with every session beyond the runtime: the flag that stops calls
-/// from being run while the server is being suspended (ADR-053), and what it tells a client that
-/// attaches.
+/// from being run while the server is being suspended (ADR-053), the count of the calls that were
+/// not run because of it, and what it tells a client that attaches.
 #[derive(Clone)]
 pub(crate) struct Hooks {
     /// Set by [`Server::suspend`](crate::Server::suspend): calls are no longer run.
     pub(crate) frozen: Arc<AtomicBool>,
+    /// Calls a client sent while [`frozen`](Hooks::frozen) was set: not run, not answered (the
+    /// client fails them as unavailable when the socket closes). `undra dev` says how many, so a
+    /// write made during the reload does not vanish behind "state kept".
+    pub(crate) dropped: Arc<AtomicUsize>,
     /// The dev notices of this server.
     pub(crate) notices: Arc<Notices>,
 }
@@ -118,6 +122,7 @@ impl Default for Hooks {
     fn default() -> Self {
         Hooks {
             frozen: Arc::new(AtomicBool::new(false)),
+            dropped: Arc::new(AtomicUsize::new(0)),
             notices: Arc::new(Notices::new(notice::AttachNotices::default())),
         }
     }
@@ -164,6 +169,16 @@ impl Session {
 
     fn note(&self, level: u8, message: &str) {
         self.rt.log(level, TARGET, message);
+    }
+
+    /// A frame that arrived after the connection began to close, which is not processed: when the
+    /// server is being suspended and it is a `Call`, it is one more call the reload did not run.
+    fn ignored_while_closing(&self, data: &[u8]) {
+        if self.hooks.frozen.load(Ordering::Acquire)
+            && Envelope::parse(data).is_ok_and(|env| env.kind == Kind::Call)
+        {
+            self.hooks.dropped.fetch_add(1, Ordering::AcqRel);
+        }
     }
 
     /// The server's own `Hello`: its version, schema hash, platform and mode.
@@ -378,7 +393,9 @@ impl Session {
         if self.hooks.frozen.load(Ordering::Acquire) {
             // The server is being suspended (ADR-053): the core is about to be replaced, so a
             // call that starts now would run on state the snapshot may already have missed. It
-            // is not answered; the client fails it as unavailable when the socket closes.
+            // is not answered; the client fails it as unavailable when the socket closes, and it
+            // is counted, so that `undra dev` can say its write was lost.
+            self.hooks.dropped.fetch_add(1, Ordering::AcqRel);
             self.note(
                 DEBUG,
                 &format!("not running call {}: the core is being reloaded", call.call_id),
@@ -619,6 +636,7 @@ fn session_loop(
         match socket.read() {
             Ok(Message::Binary(data)) => {
                 if conn.is_closing() {
+                    session.ignored_while_closing(&data);
                     continue;
                 }
                 if attached {
