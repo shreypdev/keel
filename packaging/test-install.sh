@@ -39,6 +39,10 @@ while [ $# -gt 0 ]; do
 done
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+if [ -n "$release_dir" ]; then
+  [ -d "$release_dir" ] || { echo "test-install.sh: no such directory: $release_dir" >&2; exit 2; }
+  release_dir=$(cd "$release_dir" && pwd)
+fi
 script=$root/site/install.sh
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/undra-install-test.XXXXXX")
 server_pid=""

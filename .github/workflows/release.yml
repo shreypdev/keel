@@ -1,0 +1,397 @@
+name: Release
+
+# One workflow behind four install channels (the runbook is docs/RELEASING.md):
+#
+#   * push a tag v<version>                     -> build, package, then publish
+#   * run it by hand with `publish` off         -> the same build and packaging, nothing published:
+#                                                  a dry run whose results are workflow artifacts
+#   * run it by hand on a v* tag with `publish` -> publish again (every publish step is idempotent,
+#                                                  so this is also how a half-finished release is
+#                                                  completed)
+#
+# Publishing is a GitHub Release (tarballs + checksums.txt), the npm packages (@undra/runtime,
+# four @undra/cli-<platform> packages, @undra/cli and the unscoped undra) and an update of the
+# formula in shreypdev/homebrew-undra. The build and package jobs run on every trigger and hold
+# no secret; the publish job is the only one with write access and secrets.
+#
+# Third-party actions are pinned to commit SHAs (the comment names the version).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish for real (GitHub Release, npm, Homebrew). Off is a dry run. Needs a v* tag as the ref."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Verify the version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tag, the workspace, the runtime and the npm packages agree
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          # Cargo.toml, the TypeScript runtime and packaging/npm/templates all say one version.
+          bash scripts/bump-version.sh --check
+          version=$(awk '/^\[/ { section = $0 } section == "[workspace.package]" && /^version = "/ { gsub(/^version = "|"$/, ""); print; exit }' Cargo.toml)
+
+          # A tag push publishes; a manual run publishes only when asked to.
+          publish=false
+          if [ "$EVENT" = push ] || [ "$PUBLISH_INPUT" = true ]; then
+            publish=true
+          fi
+
+          if [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "v$version" ]; then
+              echo "::error::The tag $REF_NAME does not match the workspace version $version (expected v$version). Fix the tag or run scripts/bump-version.sh."
+              exit 1
+            fi
+          elif [ "$publish" = true ]; then
+            echo "::error::Publishing needs the workflow to run on a version tag (v$version); this ref is $REF_NAME. Pick the tag under 'Use workflow from', or leave publish off for a dry run."
+            exit 1
+          fi
+
+          case "$version" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } >>"$GITHUB_OUTPUT"
+          if [ "$publish" = true ]; then
+            echo "Releasing **$version** (prerelease: $prerelease) from \`$REF_NAME\`." >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "Dry run of **$version** from \`$REF_NAME\`: everything is built and packaged, nothing is published." >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-15 is an Apple-silicon runner: the x86_64 build is a cross-compile with the
+          # platform linker, which needs nothing beyond the rustup target.
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          # A native arm64 runner; no cross toolchain involved.
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      # `undra --version` prints this (first seven characters).
+      UNDRA_BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No build cache on purpose: a release binary is built from the sources and the lock file
+      # alone, never from artifacts a cache might hold.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-03
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Build (release profile, LTO, stripped)
+        run: cargo build --release --locked -p undra-cli --target "$TARGET"
+      - name: Check the binary
+        run: |
+          set -euo pipefail
+          bin="target/$TARGET/release/undra"
+          ls -l "$bin"
+          file "$bin"
+          if [ "$TARGET" = x86_64-apple-darwin ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::notice::Rosetta is not available on this runner: the x86_64 binary is built but not run."
+            lipo -archs "$bin" | grep -qx x86_64
+            exit 0
+          fi
+          run=("$bin")
+          if [ "$TARGET" = x86_64-apple-darwin ]; then run=(arch -x86_64 "$bin"); fi
+          out=$("${run[@]}" --version)
+          expected="undra $VERSION (${GITHUB_SHA::7})"
+          if [ "$out" != "$expected" ]; then
+            echo "::error::'$bin --version' printed '$out', expected '$expected'"
+            exit 1
+          fi
+          echo "$out"
+          if [ "$RUNNER_OS" = Linux ]; then
+            # The oldest glibc a machine needs to run this binary: the runner's, unless the build
+            # avoids newer symbols.
+            floor=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1 || true)
+            echo "$TARGET needs ${floor:-no versioned glibc symbols}" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Pack undra-v${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz
+        run: sh packaging/pack-release.sh --version "$VERSION" --target "$TARGET" --binary "target/$TARGET/release/undra" --out dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: undra-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  package:
+    name: Package (checksums, npm, Homebrew)
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: undra-*
+          path: built
+          merge-multiple: true
+      - name: checksums.txt
+        run: |
+          set -euo pipefail
+          mkdir release
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            asset="undra-v$VERSION-$target.tar.gz"
+            test -f "built/$asset" || { echo "::error::the build job produced no $asset"; exit 1; }
+            cp "built/$asset" release/
+            cat "built/$asset.sha256" >>release/checksums.txt
+          done
+          (cd release && sha256sum --check --strict checksums.txt)
+          {
+            echo '### Release assets'
+            echo '```'
+            cat release/checksums.txt
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Build the npm packages
+        run: |
+          set -euo pipefail
+          # The binaries come out of the tarballs the release ships, so the packages and the
+          # tarballs cannot disagree.
+          node packaging/npm/build.mjs --artifacts release --out npm/packages --version "$VERSION"
+          mkdir npm/tarballs
+          for dir in npm/packages/*/; do
+            (cd "$dir" && npm pack --pack-destination "$GITHUB_WORKSPACE/npm/tarballs" --silent)
+          done
+      - name: Build the @undra/runtime package
+        working-directory: runtimes/ts/@undra/runtime
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npm pack --pack-destination "$GITHUB_WORKSPACE/npm/tarballs" --silent
+      - name: The seven npm tarballs exist at this version
+        run: |
+          set -euo pipefail
+          for name in undra-runtime undra-cli undra undra-cli-darwin-arm64 undra-cli-darwin-x64 undra-cli-linux-x64 undra-cli-linux-arm64; do
+            test -f "npm/tarballs/$name-$VERSION.tgz" || { echo "::error::npm/tarballs/$name-$VERSION.tgz is missing"; exit 1; }
+          done
+          ls -l npm/tarballs
+      # What this proves, on the real artifacts and before anything is published: the launcher
+      # package installs with `npm install -g` and runs the Linux x64 binary; the curl installer
+      # downloads, verifies and installs the same tarball from a local server.
+      - name: Install the npm packages (Linux x64) and run undra
+        run: bash packaging/npm/test.sh --tarballs npm/tarballs
+      - name: Run the curl installer against the release assets
+        run: bash packaging/test-install.sh --release-dir release
+      - name: Generate the Homebrew formula
+        run: |
+          set -euo pipefail
+          mkdir homebrew
+          sh packaging/homebrew/generate.sh --version "$VERSION" --checksums release/checksums.txt --out homebrew/undra.rb
+          ruby -c homebrew/undra.rb
+          cat homebrew/undra.rb
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-tarballs
+          path: npm/tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: homebrew-formula
+          path: homebrew/undra.rb
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish (GitHub Release, npm, Homebrew)
+    needs: [verify, package]
+    # Tag pushes, and manual runs with publish on; verify has already refused anything that is not
+    # on a v<workspace version> tag. A dry run skips this whole job.
+    if: needs.verify.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # the GitHub Release
+      id-token: write # npm provenance (an OIDC token for the attestation)
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+      TAG: v${{ needs.verify.outputs.version }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-tarballs
+          path: npm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: homebrew-formula
+          path: homebrew
+
+      - name: Preflight (the secrets exist and work, before anything is published)
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::The NPM_TOKEN secret is not set (docs/RELEASING.md, prerequisites)."
+            exit 1
+          fi
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::The HOMEBREW_TAP_TOKEN secret is not set (docs/RELEASING.md, prerequisites)."
+            exit 1
+          fi
+          echo "npm user: $(npm whoami)"
+          push=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api repos/shreypdev/homebrew-undra --jq '.permissions.push // false')
+          if [ "$push" != true ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN does not report push access to shreypdev/homebrew-undra; the formula update at the end may fail."
+          fi
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd release
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Releases are immutable: an existing one must hold exactly these assets.
+            mkdir ../existing
+            gh release download "$TAG" --pattern checksums.txt --dir ../existing
+            if ! cmp -s ../existing/checksums.txt checksums.txt; then
+              echo "::error::Release $TAG already exists with different assets. Releases are not overwritten: cut a patch version (docs/RELEASING.md, rollback)."
+              exit 1
+            fi
+            echo "Release $TAG exists with these checksums; uploading whatever it lacks."
+            have=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+            for file in undra-v*.tar.gz checksums.txt; do
+              if ! printf '%s\n' "$have" | grep -qx "$file"; then
+                gh release upload "$TAG" "$file"
+              fi
+            done
+          else
+            flags=(--title "Undra $TAG" --generate-notes --verify-tag)
+            if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+            gh release create "$TAG" undra-v*.tar.gz checksums.txt "${flags[@]}"
+          fi
+
+      - name: npm (provenance, public)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag_flags=()
+          if [ "$PRERELEASE" = true ]; then tag_flags=(--tag next); fi
+          publish() { # <package name> <tarball>
+            if npm view "$1@$VERSION" version >/dev/null 2>&1; then
+              echo "$1@$VERSION is already on npm; skipping"
+              return 0
+            fi
+            # ./ keeps npm from reading a path with a slash as a GitHub user/repo shorthand
+            npm publish "./npm/$2" --provenance --access public "${tag_flags[@]}"
+          }
+          # Dependencies first: the launchers name the platform packages, which name nothing.
+          publish @undra/runtime "undra-runtime-$VERSION.tgz"
+          publish @undra/cli-darwin-arm64 "undra-cli-darwin-arm64-$VERSION.tgz"
+          publish @undra/cli-darwin-x64 "undra-cli-darwin-x64-$VERSION.tgz"
+          publish @undra/cli-linux-x64 "undra-cli-linux-x64-$VERSION.tgz"
+          publish @undra/cli-linux-arm64 "undra-cli-linux-arm64-$VERSION.tgz"
+          publish @undra/cli "undra-cli-$VERSION.tgz"
+          publish undra "undra-$VERSION.tgz"
+
+      - name: Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$PRERELEASE" = true ]; then
+            echo "$VERSION is a prerelease: the tap keeps pointing at the last stable release."
+            exit 0
+          fi
+          # The token travels as an HTTP header for these commands only: it is not in a URL or
+          # in .git/config, and the encoded form is masked in the log.
+          auth=$(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$auth"
+          tap() { git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" "$@"; }
+          tap clone --quiet https://github.com/shreypdev/homebrew-undra.git tap
+          cd tap
+          branch=$(git symbolic-ref --short HEAD)
+          mkdir -p Formula
+          cp ../homebrew/undra.rb Formula/undra.rb
+          git add Formula/undra.rb
+          if git diff --cached --quiet; then
+            echo "Formula/undra.rb already says $VERSION."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -m "undra $VERSION"
+          tap push --quiet origin "HEAD:refs/heads/$branch"
+          echo "Updated Formula/undra.rb to $VERSION on $branch."

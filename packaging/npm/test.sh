@@ -38,6 +38,10 @@ while [ $# -gt 0 ]; do
 done
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
+if [ -n "$tarballs" ]; then
+  [ -d "$tarballs" ] || { echo "test.sh: no such directory: $tarballs" >&2; exit 2; }
+  tarballs=$(cd "$tarballs" && pwd)  # the installs below run from another directory
+fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/undra-npm-test.XXXXXX")
 cleanup() { if [ "${KEEP_TMP:-0}" = 1 ]; then echo "kept $tmp"; else rm -rf "$tmp"; fi; }
 trap cleanup EXIT
