@@ -21,7 +21,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use undra_runtime::PortCallOutcome;
-use undra_wire::payload::{Log, PortCall, Reply, ReplyStatus, StreamItem};
+use undra_wire::payload::{ChangeSetBuilder, ChangeSetRef, Log, PortCall, Reply, ReplyStatus, StreamItem};
 use undra_wire::{Envelope, Kind, Reader, Writer};
 use parking_lot::Mutex;
 
@@ -265,7 +265,11 @@ impl Conn {
         state.next_seq = state.next_seq.wrapping_add(1);
         let mut w = Writer::with_capacity(Envelope::HEADER_LEN + hint);
         Envelope::write_with(&mut w, kind, seq, self.schema, payload);
-        let frame = w.into_vec();
+        self.enqueue_locked(state, w.into_vec())
+    }
+
+    /// Queues one complete WebSocket message and applies the backlog bound.
+    fn enqueue_locked(&self, state: &mut State, frame: Vec<u8>) -> bool {
         let len = frame.len();
         let before = self.queued.fetch_add(len, Ordering::Relaxed);
         if state.tx.send(Item::Frame(frame)).is_err() {
@@ -285,6 +289,26 @@ impl Conn {
             return false;
         }
         true
+    }
+
+    /// Queues one message that is not an envelope: a devtools connection's (ADR-054). Returns
+    /// `false` (and drops it) once the connection is closing.
+    pub(crate) fn send_plain(&self, message: Vec<u8>) -> bool {
+        let mut state = self.state.lock();
+        if state.closing {
+            return false;
+        }
+        self.enqueue_locked(&mut state, message)
+    }
+
+    /// Bytes queued for the client that the writer has not written yet: the backlog.
+    pub(crate) fn queued_bytes(&self) -> usize {
+        self.queued.load(Ordering::Relaxed)
+    }
+
+    /// The signals of `handle` this client observes (`u32::MAX` stands for all of them).
+    pub(crate) fn observed_signals(&self, handle: u64) -> Vec<u32> {
+        self.state.lock().tracker.signals_of(handle)
     }
 
     /// Stops accepting frames and asks the writer to send a Close frame after everything
@@ -400,6 +424,37 @@ impl Conn {
         self.send(Kind::ChangeSet, payload);
     }
 
+    /// `Host::change_set` while a devtools hub observes every store: the runtime's observed set
+    /// is then larger than this client's, so only the entries it observed are sent (ADR-054). The
+    /// bytes go out unchanged when it observed all of them, which is the usual case.
+    pub(crate) fn on_change_set_observed(&self, payload: &[u8]) {
+        let mut state = self.state.lock();
+        // What to send: the bytes as they are, a re-encoding with only the observed entries, or
+        // nothing.
+        let kept: Option<Vec<u8>> = match ChangeSetRef::decode(&mut Reader::new(payload)) {
+            // Not ours to judge: the runtime built it.
+            Err(_) => None,
+            Ok(set) => {
+                let tracker = &state.tracker;
+                if set.iter().all(|e| tracker.covers(e.handle.0, e.signal_id)) {
+                    None
+                } else {
+                    let mut w = Writer::with_capacity(payload.len());
+                    let mut builder = ChangeSetBuilder::new(&mut w, set.txn_id);
+                    for e in set.iter().filter(|e| tracker.covers(e.handle.0, e.signal_id)) {
+                        builder.push(e.handle, e.signal_id, e.op, e.value);
+                    }
+                    if builder.finish() == 0 {
+                        return;
+                    }
+                    Some(w.into_vec())
+                }
+            }
+        };
+        let bytes = kept.as_deref().unwrap_or(payload);
+        self.send_locked(&mut state, Kind::ChangeSet, bytes.len(), |w| w.write_raw(bytes));
+    }
+
     /// `Host::stream_item`.
     pub(crate) fn on_stream_item(&self, payload: &[u8]) {
         let mut state = self.state.lock();
@@ -491,6 +546,69 @@ mod tests {
     use undra_wire::Envelope;
 
     use super::*;
+
+    /// A change-set of `txn` with one `Full` entry per `(handle, signal)`.
+    fn change_set(txn: u64, entries: &[(u64, u32)]) -> Vec<u8> {
+        let mut w = Writer::new();
+        let mut b = undra_wire::payload::ChangeSetBuilder::new(&mut w, txn);
+        for (handle, signal) in entries {
+            b.push(
+                undra_wire::Handle(*handle),
+                *signal,
+                undra_wire::payload::ChangeOp::Full,
+                &signal.to_le_bytes(),
+            );
+        }
+        b.finish();
+        w.into_vec()
+    }
+
+    fn sent_change_sets(rx: &Receiver<Item>) -> Vec<Vec<u8>> {
+        frames(rx)
+            .iter()
+            .map(|f| Envelope::parse(f).unwrap())
+            .filter(|e| e.kind == Kind::ChangeSet)
+            .map(|e| e.payload.to_vec())
+            .collect()
+    }
+
+    #[test]
+    fn a_client_is_sent_only_the_entries_it_observed() {
+        let (conn, rx) = Conn::new(1, 7, 1 << 20, None);
+        conn.observe(10, 0, true);
+        conn.observe(20, u32::MAX, true);
+
+        // Everything observed: the bytes go out as they are.
+        let all = change_set(5, &[(10, 0), (20, 4)]);
+        conn.on_change_set_observed(&all);
+        // A mixed one: re-encoded with the same transaction id and the entries it observed.
+        conn.on_change_set_observed(&change_set(6, &[(10, 0), (10, 1), (20, 2), (30, 0)]));
+        // Nothing observed: nothing is sent.
+        conn.on_change_set_observed(&change_set(7, &[(10, 1), (30, 0)]));
+        // A payload the runtime built wrongly is not ours to judge: it goes out untouched.
+        conn.on_change_set_observed(&[1, 2, 3]);
+
+        let sent = sent_change_sets(&rx);
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[0], all, "the original bytes");
+        let mixed = undra_wire::payload::ChangeSet::decode(&mut Reader::new(&sent[1])).unwrap();
+        assert_eq!(mixed.txn_id, 6);
+        let kept: Vec<(u64, u32)> = mixed.entries.iter().map(|e| (e.handle.0, e.signal_id)).collect();
+        assert_eq!(kept, [(10, 0), (20, 2)]);
+        assert_eq!(sent[2], [1, 2, 3]);
+    }
+
+    #[test]
+    fn messages_that_are_not_envelopes_are_queued_in_order_and_counted() {
+        let (conn, rx) = Conn::new(1, 7, 1 << 20, None);
+        assert!(conn.send_plain(vec![1, 2, 3]));
+        assert!(conn.send_plain(vec![4]));
+        assert_eq!(conn.queued_bytes(), 4);
+        assert_eq!(frames(&rx), [vec![1, 2, 3], vec![4]]);
+        conn.dequeued(4);
+        conn.close(1000, "done");
+        assert!(!conn.send_plain(vec![9]), "nothing is accepted once the connection is closing");
+    }
 
     fn frames(rx: &Receiver<Item>) -> Vec<Vec<u8>> {
         let mut out = Vec::new();

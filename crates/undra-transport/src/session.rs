@@ -43,6 +43,9 @@ use tungstenite::http::StatusCode;
 
 use crate::bridge::{Bridge, ClientInfo};
 use crate::conn::{Begin, Conn, Item};
+use crate::devtools;
+use crate::devtools::hub::{Route, RouteGuard};
+use crate::devtools::proto::Cause;
 use crate::notice::{self, NOTICE_TARGET, Notices};
 use crate::resume::{self, Resume, short_token};
 use crate::server::{Shared, ServerConfig};
@@ -84,7 +87,7 @@ impl Violation {
 
 /// Text a client sent, made safe to print in a terminal or a log: control characters (ANSI
 /// escapes among them) replaced, length capped.
-fn printable(text: &str) -> String {
+pub(crate) fn printable(text: &str) -> String {
     text.chars()
         .take(64)
         .map(|c| if c.is_control() { '?' } else { c })
@@ -278,6 +281,7 @@ impl Session {
                         ),
                     );
                     self.tell(notice::Kind::Resumed);
+                    self.app_attached();
                     Ok(())
                 }
                 None => {
@@ -321,7 +325,15 @@ impl Session {
             ),
         );
         self.tell(notice::Kind::Fresh);
+        self.app_attached();
         Ok(())
+    }
+
+    /// Tells the devtools pages that an app client holds the slot.
+    fn app_attached(&self) {
+        if let Some(hub) = self.bridge.active_hub() {
+            hub.app_changed();
+        }
     }
 
     /// One envelope from an attached client.
@@ -348,8 +360,7 @@ impl Session {
                 let observe = decode(payload, "Observe", Observe::decode)?;
                 self.conn
                     .observe(observe.handle.0, observe.signal_id, observe.on);
-                self.rt
-                    .observe(observe.handle.0, observe.signal_id, observe.on);
+                self.observe(observe.handle.0, observe.signal_id, observe.on);
             }
             Kind::Release => {
                 let release = decode(payload, "Release", Release::decode)?;
@@ -359,6 +370,9 @@ impl Session {
             Kind::PortReply => {
                 let reply = decode(payload, "PortReply", PortReply::decode)?;
                 self.conn.port_call_answered(reply.port_call_id);
+                if let Some(hub) = self.bridge.active_hub() {
+                    hub.port_end(reply.port_call_id, reply.status.as_u8(), reply.body);
+                }
                 self.rt.port_reply(payload);
             }
             Kind::Event => {
@@ -386,6 +400,18 @@ impl Session {
             ),
         }
         Ok(())
+    }
+
+    /// Starts or stops the runtime's observation on the client's behalf. While a devtools hub holds
+    /// a store it keeps observing all of it: the client's `observe(off)` is only recorded (the
+    /// bridge sends the client what it observed, ADR-054), and the values the runtime answers an
+    /// `observe(on)` with are the client's alone.
+    fn observe(&self, handle: u64, signal_id: u32, on: bool) {
+        if !on && self.bridge.active_hub().is_some_and(|hub| hub.holds(handle)) {
+            return;
+        }
+        let _route = on.then(|| RouteGuard::set(Route::AppObserve));
+        self.rt.observe(handle, signal_id, on);
     }
 
     fn on_call(&self, payload: &[u8]) -> Result<(), Violation> {
@@ -419,7 +445,19 @@ impl Session {
                 return Ok(());
             }
         }
-        if self.rt.call(payload) != 0 {
+        // What this call commits is labelled with it in the devtools timeline (a synchronous
+        // method commits on this thread; an asynchronous one commits later, on the core).
+        let method_id = match call.target {
+            CallTarget::Function { method_id }
+            | CallTarget::Method { method_id, .. }
+            | CallTarget::Constructor { method_id, .. } => method_id,
+            CallTarget::LazyPage { .. } => 0,
+        };
+        let refused = {
+            let _route = RouteGuard::set(Route::Commit(Cause::Call(method_id)));
+            self.rt.call(payload) != 0
+        };
+        if refused {
             // Refused without a reply (call id 0, a runtime shutting down): answer for it, or
             // the client would wait for ever.
             self.conn.end_call(call.call_id);
@@ -460,8 +498,10 @@ impl Session {
         };
         // Observations stop for everything that outlives the connection: the client observes
         // again when it comes back, and the core answers with the current values.
+        let hub = self.bridge.active_hub();
         for (handle, signal) in &left.observed {
-            if !owned.contains(handle) {
+            // A store the devtools hub holds stays observed: the hub undoes it when the last page leaves.
+            if !owned.contains(handle) && !hub.as_ref().is_some_and(|hub| hub.holds(*handle)) {
                 self.rt.observe(*handle, *signal, false);
             }
         }
@@ -479,11 +519,17 @@ impl Session {
                 body: &[],
             }
             .encode(&mut w);
+            if let Some(hub) = &hub {
+                hub.port_end(*id, PortStatus::Unavailable.as_u8(), &[]);
+            }
             self.rt.port_reply(w.as_slice());
         }
         // Vacated after the retention above: a client waiting in `claim` for this slot (the
         // same session, back on a new socket) must find the objects when it gets it.
         self.bridge.vacate(self.conn.id);
+        if let Some(hub) = self.bridge.active_hub() {
+            hub.app_changed();
+        }
         if attached && had_client && !self.conn.is_refused() {
             let objects = if keep_for.is_some() {
                 format!(
@@ -536,6 +582,20 @@ fn serve(shared: &Arc<Shared>, id: u64, tcp: TcpStream) {
             return;
         }
     };
+    // The first line of the request says whether this is the page of the devtools (or its socket)
+    // or an app client. Peeking leaves it in the socket for the WebSocket upgrade.
+    let deadline = Instant::now() + config.handshake_timeout;
+    match devtools::http::peek_request_line(&tcp, deadline) {
+        Ok(Some(line)) if devtools::http::is_devtools_path(&line.path) => {
+            devtools::serve::run(shared, id, tcp, line, control, abort, write_tcp);
+            return;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            shared.rt.log(DEBUG, TARGET, &format!("a connection sent no request: {e}"));
+            return;
+        }
+    }
     let (conn, queue) = Conn::new(id, shared.rt.schema_hash(), config.max_queued_bytes, Some(abort));
     let conn = Arc::new(conn);
     if !shared.attach(id, &conn) {
@@ -729,7 +789,7 @@ fn violation_for(error: &Error, attached: bool, handshake_timeout: Duration) -> 
 
 /// Reads and discards until the peer closes its side or `limit` passes, so that closing our
 /// socket does not reset the connection while the peer is still reading our Close frame.
-fn drain(tcp: &TcpStream, limit: Duration) {
+pub(crate) fn drain(tcp: &TcpStream, limit: Duration) {
     let deadline = Instant::now() + limit;
     let mut sink = [0_u8; 4096];
     let mut tcp = tcp;

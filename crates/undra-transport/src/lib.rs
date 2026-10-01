@@ -55,6 +55,15 @@
 //! that connection's *inbound* messages while it runs (they wait in the socket); outbound
 //! messages are never blocked by it, because they only enqueue.
 //!
+//! # Devtools (ADR-054)
+//!
+//! With [`ServerConfig::devtools`] set (the dev runner `undra dev` generates does; nothing else
+//! does) the listener also serves a page at `/devtools` and a *devtools connection* at
+//! `/devtools/ws`, both behind a per-run token. A devtools connection is not an envelope stream: its
+//! messages are those of [`devtools::proto`]. While a page is attached the server observes every
+//! store (the app client still receives only what it observed), records port calls, keeps a ring of
+//! snapshots and restores one on request. See [`devtools`].
+//!
 //! # Deviations from the spec, and decisions it leaves open
 //!
 //! * **The entry point is `Server::start`, not `serve(runtime, addr)`.** A `Runtime`'s host is
@@ -86,6 +95,7 @@ macro_rules! native_server {
 native_server! {
     mod bridge;
     mod conn;
+    pub mod devtools;
     mod error;
     mod notice;
     mod origin;
@@ -97,6 +107,7 @@ native_server! {
     mod ws;
 
     pub use bridge::{Bridge, ClientInfo, LogSink};
+    pub use devtools::{Asset, DevtoolsConfig};
     pub use error::ServeError;
     pub use notice::{AttachNotices, NOTICE_TARGET};
     pub use origin::OriginPolicy;

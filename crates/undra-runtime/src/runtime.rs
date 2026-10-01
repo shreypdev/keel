@@ -30,7 +30,7 @@ use crate::executor::Shared;
 use crate::executor::{
     BATCH, BoxFuture, CancelOutcome, EndPoll, Executor, Notify, TaskId, TaskKind,
 };
-use crate::ext::{Extensions, InitHook};
+use crate::ext::{Extensions, InitHook, InspectFn, Inspectors};
 use crate::guard::{self, PanicReport, drop_guarded, encode_panic_body};
 use crate::host::{Host, PortCallOutcome};
 use crate::lazy::LazyList;
@@ -407,6 +407,7 @@ pub struct Runtime {
     calls: Mutex<HashMap<u32, CallEntry>>,
     stats: Stats,
     extensions: Extensions,
+    inspectors: Inspectors,
     shut_down: AtomicBool,
     /// How many times user code used this runtime after `shutdown` (only the first few are
     /// logged).
@@ -566,6 +567,7 @@ impl Runtime {
             calls: Mutex::new(HashMap::new()),
             stats: Stats::default(),
             extensions: Extensions::default(),
+            inspectors: Inspectors::default(),
             shut_down: AtomicBool::new(false),
             late_uses: AtomicU32::new(0),
             deferred_drops: Mutex::new(Vec::new()),
@@ -818,6 +820,40 @@ impl Runtime {
     /// more than once if threads race; only one result is kept).
     pub fn extension_with<T: Send + Sync + 'static>(&self, init: impl FnOnce() -> T) -> &T {
         self.extensions.get_or_init(init)
+    }
+
+    /// Registers an inspector: a function that describes part of the runtime's state as one JSON
+    /// document, for dev tooling (the devtools page of `undra dev`, ADR-054). `undra-query`
+    /// registers `"queries"` (its cache) the first time a cache exists. A later registration under
+    /// the same name replaces the earlier. The core never reads inspectors; they hold the state
+    /// they describe weakly, or the runtime they live in would never be freed (ADR-034).
+    pub fn register_inspector(&self, name: &'static str, inspect: InspectFn) {
+        self.inspectors.register(name, inspect);
+    }
+
+    /// The document inspector `name` produces now, or `None` when there is none or it panicked.
+    ///
+    /// The inspector runs on the calling thread, with no lock of the runtime held by this call
+    /// (so it may take its own). A panic is contained (R6): it is logged once at level 5 with its
+    /// backtrace and counted in `panics`, and the inspector is then skipped (this returns `None`)
+    /// until a new one is registered under its name.
+    pub fn inspect(&self, name: &str) -> Option<String> {
+        match self.inspectors.inspect(name) {
+            crate::ext::Answer::Document(document) => Some(document),
+            crate::ext::Answer::Panicked(report) => {
+                self.log_panic(
+                    &format!("inspector `{name}` panicked and is skipped from now on"),
+                    &report,
+                );
+                None
+            }
+            crate::ext::Answer::None => None,
+        }
+    }
+
+    /// The names of the registered inspectors.
+    pub fn inspectors(&self) -> Vec<&'static str> {
+        self.inspectors.names()
     }
 
     // ----- logging -----------------------------------------------------------------------

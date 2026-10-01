@@ -15,7 +15,7 @@ use std::io::Read;
 use undra::meta::ids;
 use undra::prelude::*;
 use undra::runtime::{Runtime, RuntimeConfig};
-use undra_transport::{Server, ServerConfig};
+use undra_transport::{DevtoolsConfig, Server, ServerConfig};
 
 /// The platform's counter adapter, called from the core.
 #[undra::port]
@@ -60,8 +60,14 @@ fn main() {
         .unwrap_or_else(|| "127.0.0.1:0".to_owned());
     // Keeps a dropped client's objects for ten minutes, so a client that reconnects (the platform runtimes do)
     // finds its counter again (ADR-051).
+    // With `UNDRA_SERVE_DEVTOOLS=<token>` (16 or more letters and digits) the devtools socket is
+    // served too, behind that token, with no page: the interop script drives it as a page would.
+    let devtools = std::env::var("UNDRA_SERVE_DEVTOOLS")
+        .ok()
+        .map(|token| DevtoolsConfig::new(token, &[]));
     let config = ServerConfig {
         resume_grace: std::time::Duration::from_secs(600),
+        devtools,
         ..ServerConfig::default()
     };
     let server = Server::start(addr, config, |host| {
