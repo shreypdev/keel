@@ -534,14 +534,19 @@ impl Runtime {
         GLOBAL.lock().clone()
     }
 
-    /// Runs the registered [`InitHook`]s (done automatically by `init` and `new`; the test
-    /// runtime leaves it to the test, after it has bound its fakes).
+    /// Runs the registered [`InitHook`]s, one per name (done automatically by `init` and `new`;
+    /// the test runtime leaves it to the test, after it has bound its fakes).
     pub fn run_init_hooks(&self) {
         let ctx = self.ctx();
         let Ok(_guard) = self.enter_core() else {
             return;
         };
+        let mut ran: Vec<&'static str> = Vec::new();
         for hook in inventory::iter::<InitHook> {
+            if ran.contains(&hook.name) {
+                continue;
+            }
+            ran.push(hook.name);
             if let Err(report) = guard::guarded(|| (hook.run)(&ctx)) {
                 self.log_panic(&format!("init hook `{}` panicked", hook.name), &report);
             }

@@ -69,10 +69,16 @@
 //!   have the same method ids on every handle ([`REFETCH_METHOD_ID`], [`INVALIDATE_METHOD_ID`]),
 //!   the five signals travel in ordinary change-sets, and releasing the object handle removes the
 //!   observer. For each mutation an async function whose method id is the mutation id. None of
-//!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the crate
-//!   registers an `undra_runtime::DispatchLayer` and the macros submit a [`QueryRegistration`] /
-//!   [`MutationRegistration`] per definition. Query handles are transient: a snapshot leaves them
-//!   out and the platform re-creates them after a restore.
+//!   this is in the runtime's static dispatch table (see `ADR-018` in `.10x/adrs`): the macros
+//!   submit a [`QueryRegistration`] / [`MutationRegistration`] per definition, and with it this
+//!   crate's `undra_runtime::DispatchLayer` and its start-up `undra_runtime::InitHook` (the runtime
+//!   keeps one of each per name). Query handles are transient: a snapshot leaves them out and the
+//!   platform re-creates them after a restore.
+//! * **Linked by use.** Because the layer and the hook are submitted by `#[undra::query]` and
+//!   `#[undra::mutation]`, not by this crate, a core that declares neither does not link the
+//!   query runtime at all, and its start-up reads nothing from `Kv` (ADR-052: the layer was
+//!   34 KB of the 136 KB gzipped hello-world web core). A query or mutation written without the
+//!   macros submits [`__private::HYDRATE`] and [`__private::LAYER`] itself.
 //!
 //! # Deviations from SPEC 9 and 5.3
 //!
@@ -124,7 +130,7 @@ pub use retry::{BACKOFF_BASE_MS, BACKOFF_MAX_MS, JITTER_PERCENT, backoff_ms};
 pub use shared::{DEFAULT_GC_MS, PERSIST_DEBOUNCE_MS};
 pub use status::QueryStatus;
 
-use undra_runtime::{Ctx, InitHook, inventory};
+use undra_runtime::Ctx;
 
 /// Reads the persisted cache and queue when a runtime starts.
 pub(crate) fn init(ctx: &Ctx) {
@@ -132,6 +138,26 @@ pub(crate) fn init(ctx: &Ctx) {
     ctx.spawn(async move { client.hydrate().await });
 }
 
-inventory::submit! {
-    InitHook { name: "undra-query.hydrate", run: init }
+/// What `#[undra::query]` and `#[undra::mutation]` submit next to their registration, so the
+/// query runtime is linked into a core only when the core declares a query or a mutation
+/// (ADR-052). Not a stable API: generated code names it through `::undra::query::__private`.
+///
+/// Every definition submits both, so a core with several queries registers them several times;
+/// the runtime runs an [`InitHook`](undra_runtime::InitHook) and consults a
+/// [`DispatchLayer`](undra_runtime::DispatchLayer) once per name.
+#[doc(hidden)]
+pub mod __private {
+    use undra_runtime::{DispatchLayer, InitHook};
+
+    /// Hydrates the cache and the offline queue from the `Kv` port when a runtime starts.
+    pub const HYDRATE: InitHook = InitHook {
+        name: "undra-query.hydrate",
+        run: crate::init,
+    };
+
+    /// Serves query handles (constructor, `refetch`, `invalidate`) and mutations by id.
+    pub const LAYER: DispatchLayer = DispatchLayer {
+        name: "undra-query",
+        dispatch: crate::dispatch::dispatch,
+    };
 }

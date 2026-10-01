@@ -4,9 +4,9 @@
 //!   stores its own state (the query cache, say) on the runtime and gets `&T` back with the
 //!   lifetime of the runtime, from any thread, without unsafe code.
 //! * [`InitHook`]s run when a runtime is created ([`Runtime::init`](crate::Runtime::init),
-//!   [`Runtime::new`](crate::Runtime::new)); `undra-query` submits one that hydrates its cache
-//!   from the `Kv` port. A hook receives the [`Ctx`] with the core lock held and may spawn
-//!   tasks (hydration is async).
+//!   [`Runtime::new`](crate::Runtime::new)); `undra-query` has one that hydrates its cache from
+//!   the `Kv` port, submitted by every `#[undra::query]` and `#[undra::mutation]` (ADR-052). A
+//!   hook receives the [`Ctx`] with the core lock held and may spawn tasks (hydration is async).
 
 use core::any::{Any, TypeId};
 use std::sync::OnceLock;
@@ -15,13 +15,19 @@ use crate::ctx::Ctx;
 
 /// Something to run once for every new runtime. Submit with `inventory::submit!`.
 ///
+/// The name identifies the hook: a hook submitted more than once under one name runs once per
+/// runtime (the first submission linked). That lets the code that needs a hook submit it, rather
+/// than the crate that implements it, so the hook and everything it reaches are linked only into
+/// cores that use them (ADR-052: every `#[undra::query]` and `#[undra::mutation]` submits
+/// `undra-query`'s hydration hook).
+///
 /// ```ignore
 /// inventory::submit! {
 ///     undra_runtime::InitHook { name: "undra-query.hydrate", run: |ctx| { ctx.spawn(hydrate(ctx.clone())); } }
 /// }
 /// ```
 pub struct InitHook {
-    /// Shown in the log if the hook panics.
+    /// Shown in the log if the hook panics, and the hook's identity: one hook per name runs.
     pub name: &'static str,
     /// The hook. Runs under the core lock; must not block.
     pub run: fn(&Ctx),
